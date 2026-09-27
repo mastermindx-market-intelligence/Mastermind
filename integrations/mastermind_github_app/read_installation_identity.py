@@ -4,7 +4,8 @@ Custody supplies the signer and current service binding. No credential file,
 environment, user login, registration, listener, renewal daemon or persistent
 store is discovered or created. Token issuance is a credential effect: any
 uncertain issuance seals this instance and must return to the existing owner.
-A process restart is NOT reconciliation; deployment must preserve that fence.
+A process restart is NOT reconciliation. Armed use requires the existing Runtime
+Event-owner fence; deployment still supplies current admitted authority.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ READ_PERMISSIONS = (("administration", "read"), ("contents", "read"), ("metadata
 _CODES = frozenset({"PRODUCTION_DISARMED", "BINDING_REFUSED", "AUTHORITY_EXPIRED",
     "AUTHORITY_CHANGED", "CLOCK_REFUSED", "SIGNING_REFUSED", "INSTALLATION_REFUSED",
     "CREDENTIAL_HTTP_REFUSED", "TOKEN_EVIDENCE_REFUSED", "TOKEN_ISSUANCE_UNKNOWN",
-    "ISSUANCE_RECONCILIATION_REQUIRED"})
+    "ISSUANCE_RECONCILIATION_REQUIRED", "DURABLE_ISSUANCE_UNAVAILABLE"})
 _REPO = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,99}$")
 _GENERATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,95}$")
 
@@ -85,6 +86,22 @@ def _nonfinite(_value):
     raise ValueError("nonfinite value")
 
 
+def validate_read_installation_binding(bound: object, now: int) -> ReadInstallationBinding:
+    """Pure shared boundary for credential-provider and durable-owner input."""
+    if (type(bound) is not ReadInstallationBinding
+            or any(type(v) is not int or not 0 < v < 2**53 for v in (
+                bound.app_id, bound.installation_id, bound.account_id, bound.repository_id))
+            or type(bound.repository) is not str or _REPO.fullmatch(bound.repository) is None
+            or type(bound.account_login) is not str
+            or bound.account_login != bound.repository.split("/", 1)[0]
+            or type(bound.generation) is not str or not _GENERATION.fullmatch(bound.generation)
+            or type(bound.expires_at) is not int):
+        raise InstallationCredentialError("BINDING_REFUSED")
+    if now >= bound.expires_at:
+        raise InstallationCredentialError("AUTHORITY_EXPIRED")
+    return bound
+
+
 class ReadInstallationTokenProvider:
     """One fixed read-service binding, a current credential cache, and no retry.
 
@@ -93,7 +110,8 @@ class ReadInstallationTokenProvider:
     """
     def __init__(self, *, resolve_binding: Callable[[], Awaitable[ReadInstallationBinding]],
                  signer: AppJwtSigner, clock: Callable[[], int],
-                 transport: HttpTransport | None = None, production_armed: bool = False):
+                 transport: HttpTransport | None = None, production_armed: bool = False,
+                 issuance_fence=None):
         if (not callable(resolve_binding) or not callable(clock)
                 or not callable(getattr(signer, "sign_app_jwt", None))
                 or type(production_armed) is not bool):
@@ -111,6 +129,8 @@ class ReadInstallationTokenProvider:
         self._token: str | None = None
         self._expires = 0
         self._sealed = False
+        self._issuance_fence = issuance_fence
+        self._issuance_claim = None
 
     def _now(self) -> int:
         now = self._clock()
@@ -123,17 +143,7 @@ class ReadInstallationTokenProvider:
         try:
             bound = await self._resolve()
             now = self._now()
-            if (type(bound) is not ReadInstallationBinding
-                    or any(type(v) is not int or not 0 < v < 2**53 for v in (
-                        bound.app_id, bound.installation_id, bound.account_id, bound.repository_id))
-                    or type(bound.repository) is not str or _REPO.fullmatch(bound.repository) is None
-                    or type(bound.account_login) is not str
-                    or bound.account_login != bound.repository.split("/", 1)[0]
-                    or type(bound.generation) is not str or not _GENERATION.fullmatch(bound.generation)
-                    or type(bound.expires_at) is not int):
-                raise InstallationCredentialError("BINDING_REFUSED")
-            if now >= bound.expires_at:
-                raise InstallationCredentialError("AUTHORITY_EXPIRED")
+            validate_read_installation_binding(bound, now)
             if self._bound is not None and self._bound != bound:
                 raise InstallationCredentialError("AUTHORITY_CHANGED")
             return bound
@@ -143,16 +153,17 @@ class ReadInstallationTokenProvider:
             raise InstallationCredentialError("BINDING_REFUSED") from None
 
     async def _request(self, *, method: str, endpoint: str, auth: str,
-                       expected_status: int, binding: ReadInstallationBinding, body=None) -> dict:
+                       expected_status: int, binding: ReadInstallationBinding, body=None, deadline: int | None = None) -> dict:
         now = self._now()
-        if now >= binding.expires_at:
+        limit = binding.expires_at if deadline is None else min(binding.expires_at, deadline)
+        if now >= limit:
             raise InstallationCredentialError("AUTHORITY_EXPIRED")
         response = await self._transport.request(method=method, url=REST_ROOT + endpoint,
             headers={"Authorization": "Bearer " + auth, "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": API_VERSION, "User-Agent": "Mastermind-Read-Installation/1",
                 **({"Content-Type": "application/json"} if body is not None else {})},
             body=None if body is None else json.dumps(body, separators=(",", ":"), allow_nan=False).encode(),
-            timeout_seconds=min(20, binding.expires_at - now))
+            timeout_seconds=min(20, limit - now))
         if (type(response) is not HttpResponse or type(response.status) is not int
                 or response.status != expected_status or type(response.body) is not bytes
                 or len(response.body) > 65536 or not isinstance(response.headers, Mapping)
@@ -209,13 +220,22 @@ class ReadInstallationTokenProvider:
         async with self._lock:
             if self._sealed:
                 raise InstallationCredentialError("ISSUANCE_RECONCILIATION_REQUIRED", issuance_possible=True)
+            from .read_issuance_runtime import RuntimeReadIssuanceFence
+            if type(self._issuance_fence) is not RuntimeReadIssuanceFence:
+                raise InstallationCredentialError("DURABLE_ISSUANCE_UNAVAILABLE")
             bound = await self._current()
             if self._token is not None:
                 if self._now() >= self._expires:
                     # Credential renewal requires a new owner-qualified lifecycle,
                     # never an implicit repeat of a previous issuance operation.
                     raise InstallationCredentialError("AUTHORITY_EXPIRED")
+                self._issuance_fence.check_qualified(bound, self._issuance_claim, self._expires * 1000)
                 return self._token
+            try:
+                self._issuance_fence.check_available(bound)
+            except InstallationCredentialError as error:
+                self._sealed = error.issuance_possible
+                raise
             self._bound = bound
             try:
                 now = self._now()
@@ -236,14 +256,24 @@ class ReadInstallationTokenProvider:
                 raise InstallationCredentialError("CREDENTIAL_HTTP_REFUSED") from None
             # The only credential-mutating request. Seal before awaiting it, so
             # cancellation or malformed success cannot leave an open retry path.
+            self._issuance_claim = self._issuance_fence.claim(bound)
             self._sealed = True
             try:
+                await self._current()
+                if self._now() >= now + 300:
+                    raise InstallationCredentialError("AUTHORITY_EXPIRED")
+                admission_deadline = self._issuance_fence.check_pending(bound, self._issuance_claim) // 1000
                 document = await self._request(method="POST",
                     endpoint=f"/app/installations/{bound.installation_id}/access_tokens",
-                    auth=app_jwt, expected_status=201, binding=bound,
+                    auth=app_jwt, expected_status=201, binding=bound, deadline=admission_deadline,
                     body={"repository_ids": [bound.repository_id], "permissions": dict(READ_PERMISSIONS)})
                 token, expiry = self._credential(document, bound)
+                expiry = min(expiry, admission_deadline)
                 await self._current()
+                self._issuance_fence.complete(bound, self._issuance_claim, expiry * 1000)
+                await self._current()
+                if self._now() >= expiry:
+                    raise InstallationCredentialError("AUTHORITY_EXPIRED")
                 self._token, self._expires = token, expiry
                 self._sealed = False
                 return token

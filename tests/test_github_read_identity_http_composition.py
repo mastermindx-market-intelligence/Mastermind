@@ -6,7 +6,7 @@ import asyncio
 import dataclasses
 import json
 import pytest
-from test_github_read_installation_identity import Owner as CredentialOwner, TOKEN
+from test_github_read_installation_identity import Owner as CredentialOwner, TOKEN, durable_fence
 from test_github_writer_gate_http import setup, client_for, rpc, payload
 from integrations.mastermind_github_app.read_installation_identity import ReadInstallationTokenProvider, RsaAppJwtSigner
 
@@ -19,7 +19,7 @@ def composed(setup, variant="normal"):
     identity.variant = variant
     provider = ReadInstallationTokenProvider(resolve_binding=identity.current_binding,
         signer=RsaAppJwtSigner(identity.key), transport=identity, clock=lambda: identity.now,
-        production_armed=True)
+        production_armed=True, issuance_fence=durable_fence(identity))
     def read(method, url, headers, body, timeout_seconds):
         assert headers["Authorization"] == "Bearer " + TOKEN
         # Preserve the existing fact fixture; actual outgoing credential checked above.

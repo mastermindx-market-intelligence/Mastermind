@@ -90,10 +90,39 @@ class Owner:
         return HttpResponse(201, {}, json.dumps(document).encode())
 
 
+def durable_fence(owner, root=None):
+    """Real temporary RuntimeStore; authority and remote service remain synthetic."""
+    import tempfile
+    from control_plane.executive_runtime import RuntimeStore
+    from integrations.mastermind_github_app.read_issuance_runtime import (
+        CredentialIssuanceAdmission, RuntimeReadIssuanceFence, binding_fingerprint,
+    )
+    if root is None and hasattr(owner, "_issuance_fence"):
+        return owner._issuance_fence
+    if root is None:
+        owner._issuance_temp = tempfile.TemporaryDirectory(prefix="mmx-issuance-test-")
+        root = owner._issuance_temp.name
+    bootstrap = RuntimeStore(root=root, clock=lambda: owner.now * 1000)
+    with bootstrap.transaction():
+        pass
+    store = RuntimeStore(root=root, clock=lambda: owner.now * 1000,
+        create=False, existing_writable=True)
+    exact_runtime = store._database_file_identity
+    def authorize(binding):
+        if binding != owner.binding:
+            return None
+        return CredentialIssuanceAdmission(exact_runtime, binding_fingerprint(binding),
+            "a" * 64, "b" * 64, binding.expires_at * 1000)
+    return RuntimeReadIssuanceFence(store=store, authorize=authorize)
+
+
 def provider(owner, *, armed=True):
     from integrations.mastermind_github_app.read_installation_identity import ReadInstallationTokenProvider
+    if not hasattr(owner, "_issuance_fence"):
+        owner._issuance_fence = durable_fence(owner)
     return ReadInstallationTokenProvider(resolve_binding=owner.current_binding, signer=owner,
-        transport=owner, clock=lambda: owner.now, production_armed=armed)
+        transport=owner, clock=lambda: owner.now, production_armed=armed,
+        issuance_fence=owner._issuance_fence)
 
 
 def test_default_disarm_does_not_sign_or_contact_github():
