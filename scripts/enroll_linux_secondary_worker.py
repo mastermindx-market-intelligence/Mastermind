@@ -31,14 +31,14 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
-CONTROL_USER = "_mastermind_exec"
-CONTROL_GROUP = "_mastermind_exec"
-CONTROL_UID = 450
-CONTROL_GID = 450
-WORKER_USER = "_mastermind_worker"
-WORKER_GROUP = "_mastermind_worker"
-WORKER_UID = 451
-WORKER_GID = 451
+_MODE_OWNER_RWX = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+_MODE_ROOT_TRAVERSE = _MODE_OWNER_RWX | stat.S_IXGRP | stat.S_IXOTH
+_MODE_ROOT_DIR = (
+    _MODE_OWNER_RWX
+    | stat.S_IRGRP | stat.S_IXGRP
+    | stat.S_IROTH | stat.S_IXOTH
+)
+_MODE_ROOT_FILE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
 
 CONTROL_HOME = Path("/var/lib/mastermind-executive/control/home")
 WORKER_HOME = Path("/var/lib/mastermind-executive/workers/codex-01/provider-home")
@@ -96,6 +96,18 @@ class Args:
     codex_source_binary: Path
     codex_version: str
     codex_sha256: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ServiceIdentities:
+    control_user: str
+    control_group: str
+    control_uid: int
+    control_gid: int
+    worker_user: str
+    worker_group: str
+    worker_uid: int
+    worker_gid: int
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -220,6 +232,56 @@ def verify_root_source_custody(repo: Path) -> None:
             raise EnrollmentError("source_member_custody_invalid")
 
 
+def load_canonical_identities(
+    repo: Path, *, require_root_owner: bool = True
+) -> ServiceIdentities:
+    source = Path(repo) / "ops/executive_os/bootstrap-host.sh"
+    try:
+        info = source.lstat()
+    except OSError as exc:
+        raise EnrollmentError("canonical_identity_source_unavailable") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or (require_root_owner and info.st_uid != 0)
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) & 0o022
+    ):
+        raise EnrollmentError("canonical_identity_source_unsafe")
+    text = source.read_text(encoding="utf-8")
+    fields = (
+        "CONTROL_USER", "CONTROL_GROUP", "CONTROL_UID", "CONTROL_GID",
+        "WORKER_USER", "WORKER_GROUP", "WORKER_UID", "WORKER_GID",
+    )
+    values: dict[str, str] = {}
+    for key in fields:
+        matches = re.findall(rf"^{key}=\"?([A-Za-z0-9_.-]+)\"?$", text, re.MULTILINE)
+        if len(matches) != 1:
+            raise EnrollmentError(f"canonical_identity_field_invalid:{key}")
+        values[key] = matches[0]
+    name_re = re.compile(r"^_?[A-Za-z][A-Za-z0-9_.-]*$")
+    for key in ("CONTROL_USER", "CONTROL_GROUP", "WORKER_USER", "WORKER_GROUP"):
+        if name_re.fullmatch(values[key]) is None:
+            raise EnrollmentError(f"canonical_identity_name_invalid:{key}")
+    try:
+        control_uid = int(values["CONTROL_UID"])
+        control_gid = int(values["CONTROL_GID"])
+        worker_uid = int(values["WORKER_UID"])
+        worker_gid = int(values["WORKER_GID"])
+    except ValueError as exc:
+        raise EnrollmentError("canonical_identity_numeric_invalid") from exc
+    if min(control_uid, control_gid, worker_uid, worker_gid) <= 0:
+        raise EnrollmentError("canonical_identity_numeric_invalid")
+    if control_uid == worker_uid or control_gid == worker_gid:
+        raise EnrollmentError("canonical_identity_not_separated")
+    return ServiceIdentities(
+        control_user=values["CONTROL_USER"], control_group=values["CONTROL_GROUP"],
+        control_uid=control_uid, control_gid=control_gid,
+        worker_user=values["WORKER_USER"], worker_group=values["WORKER_GROUP"],
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+
+
 def read_identity_state() -> dict[str, dict[str, Any]]:
     users_by_name: dict[str, Any] = {}
     users_by_uid: dict[str, str] = {}
@@ -282,32 +344,26 @@ def _classify_one(
     return "verify"
 
 
-def classify_identity_plan(state: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
+def classify_identity_plan(
+    state: Mapping[str, Mapping[str, Any]], identities: ServiceIdentities
+) -> dict[str, str]:
     return {
         "control": _classify_one(
-            state,
-            name=CONTROL_USER,
-            group=CONTROL_GROUP,
-            uid=CONTROL_UID,
-            gid=CONTROL_GID,
-            home=CONTROL_HOME,
+            state, name=identities.control_user, group=identities.control_group,
+            uid=identities.control_uid, gid=identities.control_gid, home=CONTROL_HOME,
         ),
         "worker": _classify_one(
-            state,
-            name=WORKER_USER,
-            group=WORKER_GROUP,
-            uid=WORKER_UID,
-            gid=WORKER_GID,
-            home=WORKER_HOME,
+            state, name=identities.worker_user, group=identities.worker_group,
+            uid=identities.worker_uid, gid=identities.worker_gid, home=WORKER_HOME,
         ),
     }
 
 
-def ensure_service_identities() -> None:
-    plan = classify_identity_plan(read_identity_state())
+def ensure_service_identities(identities: ServiceIdentities) -> None:
+    plan = classify_identity_plan(read_identity_state(), identities)
     specs = (
-        ("control", CONTROL_GROUP, CONTROL_GID, CONTROL_USER, CONTROL_UID, CONTROL_HOME),
-        ("worker", WORKER_GROUP, WORKER_GID, WORKER_USER, WORKER_UID, WORKER_HOME),
+        ("control", identities.control_group, identities.control_gid, identities.control_user, identities.control_uid, CONTROL_HOME),
+        ("worker", identities.worker_group, identities.worker_gid, identities.worker_user, identities.worker_uid, WORKER_HOME),
     )
     for key, group, gid, user, uid, home in specs:
         if plan[key] != "create":
@@ -329,7 +385,7 @@ def ensure_service_identities() -> None:
                 user,
             ]
         )
-    classify_identity_plan(read_identity_state())
+    classify_identity_plan(read_identity_state(), identities)
 
 
 def assert_central_control_absent() -> None:
@@ -414,23 +470,23 @@ def _mkdir(path: Path, uid: int, gid: int, mode: int) -> None:
         raise EnrollmentError(f"directory_metadata_invalid:{path}")
 
 
-def ensure_directories() -> None:
-    _mkdir(STATE_ROOT, 0, 0, 0o711)
-    _mkdir(STATE_ROOT / "control", 0, 0, 0o711)
-    _mkdir(CONTROL_HOME, CONTROL_UID, CONTROL_GID, 0o700)
-    _mkdir(STATE_ROOT / "workers", 0, 0, 0o711)
-    _mkdir(STATE_ROOT / "workers/codex-01", 0, 0, 0o711)
-    _mkdir(WORKER_HOME, WORKER_UID, WORKER_GID, 0o700)
-    _mkdir(WORKSPACE_ROOT, WORKER_UID, WORKER_GID, 0o700)
-    _mkdir(RUN_ROOT, WORKER_UID, WORKER_GID, 0o700)
-    _mkdir(WORKER_STATE, WORKER_UID, WORKER_GID, 0o700)
-    _mkdir(CONFIG_ROOT, 0, 0, 0o755)
-    _mkdir(INSTALL_ROOT, 0, 0, 0o755)
-    _mkdir(RELEASES_ROOT, 0, 0, 0o755)
-    _mkdir(BIN_ROOT, 0, 0, 0o755)
-    _mkdir(LOG_ROOT, 0, 0, 0o711)
-    _mkdir(WORKER_LOG_ROOT, WORKER_UID, WORKER_GID, 0o700)
-    _mkdir(GATEWAY_LOG_ROOT, CONTROL_UID, CONTROL_GID, 0o700)
+def ensure_directories(identities: ServiceIdentities) -> None:
+    _mkdir(STATE_ROOT, 0, 0, _MODE_ROOT_TRAVERSE)
+    _mkdir(STATE_ROOT / "control", 0, 0, _MODE_ROOT_TRAVERSE)
+    _mkdir(CONTROL_HOME, identities.control_uid, identities.control_gid, _MODE_OWNER_RWX)
+    _mkdir(STATE_ROOT / "workers", 0, 0, _MODE_ROOT_TRAVERSE)
+    _mkdir(STATE_ROOT / "workers/codex-01", 0, 0, _MODE_ROOT_TRAVERSE)
+    _mkdir(WORKER_HOME, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+    _mkdir(WORKSPACE_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+    _mkdir(RUN_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+    _mkdir(WORKER_STATE, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+    _mkdir(CONFIG_ROOT, 0, 0, _MODE_ROOT_DIR)
+    _mkdir(INSTALL_ROOT, 0, 0, _MODE_ROOT_DIR)
+    _mkdir(RELEASES_ROOT, 0, 0, _MODE_ROOT_DIR)
+    _mkdir(BIN_ROOT, 0, 0, _MODE_ROOT_DIR)
+    _mkdir(LOG_ROOT, 0, 0, _MODE_ROOT_TRAVERSE)
+    _mkdir(WORKER_LOG_ROOT, identities.worker_uid, identities.worker_gid, _MODE_OWNER_RWX)
+    _mkdir(GATEWAY_LOG_ROOT, identities.control_uid, identities.control_gid, _MODE_OWNER_RWX)
 
 
 def _write_all(fd: int, data: bytes) -> None:
@@ -609,11 +665,11 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
                 tar.extractall(staging, filter="data")
             for root, dirs, files in os.walk(staging):
                 os.chown(root, 0, 0)
-                os.chmod(root, 0o755)
+                os.chmod(root, _MODE_ROOT_DIR)
                 for name in files:
                     path = Path(root) / name
                     os.chown(path, 0, 0)
-                    os.chmod(path, 0o644)
+                    os.chmod(path, _MODE_ROOT_FILE)
             for executable in (
                 staging / "scripts/executive_os_linux_worker.py",
                 staging / "scripts/executive_os_remote_worker_gateway.py",
@@ -668,16 +724,18 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
     return destination
 
 
-def render_systemd_units(*, release_root: Path, codex_binary: Path) -> dict[str, str]:
+def render_systemd_units(
+    *, release_root: Path, codex_binary: Path, identities: ServiceIdentities
+) -> dict[str, str]:
     template_root = release_root / "ops/executive_os"
     replacements = {
         "__WORKER_ID__": "codex-01",
         "__WORKER_SOCKET_UNIT__": "mastermind-executive-worker-codex-01.socket",
         "__WORKER_SERVICE_UNIT__": "mastermind-executive-worker-codex-01.service",
-        "__WORKER_USER__": WORKER_USER,
-        "__WORKER_GROUP__": WORKER_GROUP,
-        "__CONTROL_USER__": CONTROL_USER,
-        "__CONTROL_GROUP__": CONTROL_GROUP,
+        "__WORKER_USER__": identities.worker_user,
+        "__WORKER_GROUP__": identities.worker_group,
+        "__CONTROL_USER__": identities.control_user,
+        "__CONTROL_GROUP__": identities.control_group,
         "__PROVIDER_HOME__": os.fspath(WORKER_HOME),
         "__PYTHON_BINARY__": "/usr/bin/python3",
         "__WORKER_ENTRYPOINT__": os.fspath(release_root / "scripts/executive_os_linux_worker.py"),
@@ -730,7 +788,7 @@ def _write_root_unit(path: Path, data: bytes) -> None:
             or stat.S_ISLNK(info.st_mode)
             or info.st_uid != 0
             or info.st_gid != 0
-            or stat.S_IMODE(info.st_mode) != 0o644
+            or stat.S_IMODE(info.st_mode) != _MODE_ROOT_FILE
             or path.read_bytes() != data
         ):
             raise EnrollmentError(f"systemd_unit_conflict:{path.name}")
@@ -747,7 +805,7 @@ def _write_root_unit(path: Path, data: bytes) -> None:
     try:
         _write_all(fd, data)
         os.fchown(fd, 0, 0)
-        os.fchmod(fd, 0o644)
+        os.fchmod(fd, _MODE_ROOT_FILE)
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -758,8 +816,12 @@ def _write_root_unit(path: Path, data: bytes) -> None:
         os.close(directory_fd)
 
 
-def install_inert_units(release_root: Path, codex_binary: Path) -> tuple[str, ...]:
-    rendered = render_systemd_units(release_root=release_root, codex_binary=codex_binary)
+def install_inert_units(
+    release_root: Path, codex_binary: Path, identities: ServiceIdentities
+) -> tuple[str, ...]:
+    rendered = render_systemd_units(
+        release_root=release_root, codex_binary=codex_binary, identities=identities
+    )
     with tempfile.TemporaryDirectory(prefix="mastermind-systemd-verify.") as temporary:
         verify_paths: list[str] = []
         for name, text in rendered.items():
@@ -780,16 +842,17 @@ def apply_enrollment(args: Args) -> dict[str, Any]:
     assert_central_control_absent()
     verify_root_source_custody(args.source_repo)
     identity = verify_source_identity(args.source_repo, args.expected_sha, args.expected_tree)
+    identities = load_canonical_identities(args.source_repo)
     source_info = inspect_codex_source(args.codex_source_binary)
     if source_info["sha256"] != args.codex_sha256:
         raise EnrollmentError("codex_source_digest_not_accepted")
-    ensure_service_identities()
-    ensure_directories()
+    ensure_service_identities(identities)
+    ensure_directories(identities)
     release = install_release(args.source_repo, args.expected_sha, args.expected_tree)
     codex_binary = install_codex_binary(
         source_info, args.codex_version, args.codex_sha256
     )
-    units = install_inert_units(release, codex_binary)
+    units = install_inert_units(release, codex_binary, identities)
     assert_central_control_absent()
     return {
         "schema": "mastermind.linux_secondary_worker_enrollment/v1",

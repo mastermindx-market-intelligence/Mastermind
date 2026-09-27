@@ -43,6 +43,17 @@ def _source_repo(tmp_path: Path) -> tuple[Path, str, str]:
     (repo / "ops" / "executive_os" / "release_manifest.py").write_text(
         "print('fixture')\n", encoding="utf-8"
     )
+    (repo / "ops" / "executive_os" / "bootstrap-host.sh").write_text(
+        "CONTROL_USER=\"_mastermind_exec\"\n"
+        "CONTROL_GROUP=\"_mastermind_exec\"\n"
+        "CONTROL_UID=\"450\"\n"
+        "CONTROL_GID=\"450\"\n"
+        "WORKER_USER=\"_mastermind_worker\"\n"
+        "WORKER_GROUP=\"_mastermind_worker\"\n"
+        "WORKER_UID=\"451\"\n"
+        "WORKER_GID=\"451\"\n",
+        encoding="utf-8",
+    )
     (repo / "scripts" / "executive_os_linux_worker.py").write_text(
         "print('worker')\n", encoding="utf-8"
     )
@@ -58,6 +69,15 @@ def _source_repo(tmp_path: Path) -> tuple[Path, str, str]:
     _git("add", ".", cwd=repo)
     _git("commit", "-qm", "fixture", cwd=repo)
     return repo, _git("rev-parse", "HEAD", cwd=repo), _git("rev-parse", "HEAD^{tree}", cwd=repo)
+
+
+def _identities(m):
+    return m.ServiceIdentities(
+        control_user="_mastermind_exec", control_group="_mastermind_exec",
+        control_uid=450, control_gid=450,
+        worker_user="_mastermind_worker", worker_group="_mastermind_worker",
+        worker_uid=451, worker_gid=451,
+    )
 
 
 def test_closed_cli_and_bounded_claim() -> None:
@@ -131,16 +151,18 @@ def test_release_archive_scope_excludes_vendor_and_unneeded_surfaces() -> None:
     assert all("vendor" not in item for item in m.RELEASE_PATHS)
 
 
-def test_fixed_linux_identities_reuse_executive_numbers() -> None:
+def test_linux_identities_are_consumed_from_canonical_bootstrap_source(tmp_path: Path) -> None:
     m = _load()
-    assert m.CONTROL_USER == "_mastermind_exec"
-    assert m.CONTROL_GROUP == "_mastermind_exec"
-    assert m.CONTROL_UID == 450
-    assert m.CONTROL_GID == 450
-    assert m.WORKER_USER == "_mastermind_worker"
-    assert m.WORKER_GROUP == "_mastermind_worker"
-    assert m.WORKER_UID == 451
-    assert m.WORKER_GID == 451
+    repo, _sha, _tree = _source_repo(tmp_path)
+    identities = m.load_canonical_identities(repo, require_root_owner=False)
+    assert identities == _identities(m)
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert '_mastermind_exec' not in source
+    assert '_mastermind_worker' not in source
+    assert 'CONTROL_UID = 450' not in source
+    assert 'WORKER_UID = 451' not in source
+
+
 
 
 def test_identity_plan_refuses_collisions() -> None:
@@ -151,14 +173,15 @@ def test_identity_plan_refuses_collisions() -> None:
         "groups_by_name": {},
         "groups_by_gid": {},
     }
-    plan = m.classify_identity_plan(clean)
+    identities = _identities(m)
+    plan = m.classify_identity_plan(clean, identities)
     assert plan["control"] == "create"
     assert plan["worker"] == "create"
 
     collision = json.loads(json.dumps(clean))
     collision["users_by_uid"]["450"] = "somebody"
     with pytest.raises(m.EnrollmentError, match="UID 450"):
-        m.classify_identity_plan(collision)
+        m.classify_identity_plan(collision, identities)
 
     exact = {
         "users_by_name": {
@@ -169,7 +192,7 @@ def test_identity_plan_refuses_collisions() -> None:
         "groups_by_name": {"_mastermind_exec": 450, "_mastermind_worker": 451},
         "groups_by_gid": {"450": "_mastermind_exec", "451": "_mastermind_worker"},
     }
-    assert m.classify_identity_plan(exact) == {"control": "verify", "worker": "verify"}
+    assert m.classify_identity_plan(exact, identities) == {"control": "verify", "worker": "verify"}
 
 
 def test_central_control_antiduplication_is_observation_only() -> None:
@@ -230,6 +253,7 @@ def test_rendered_units_are_inert_and_use_stacked_runtime(tmp_path: Path) -> Non
     rendered = m.render_systemd_units(
         release_root=release,
         codex_binary=Path("/opt/mastermind-executive/bin/codex-0.157.1"),
+        identities=_identities(m),
     )
     worker = rendered["mastermind-executive-worker-codex-01.service"]
     sock = rendered["mastermind-executive-worker-codex-01.socket"]
