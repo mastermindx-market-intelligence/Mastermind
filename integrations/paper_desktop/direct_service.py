@@ -76,16 +76,21 @@ def _private_dir(path: Path, *, create: bool = False) -> None:
 
 def _read(path: Path, *, limit: int = 2 * 1024 * 1024) -> bytes:
     _path(path)
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd, "rb") as stream:
-        info = os.fstat(stream.fileno())
+    # Inspect the opened descriptor before wrapping or reading it. A FIFO must
+    # not stall setup waiting for a writer before the regular-file check runs.
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
                 or info.st_nlink != 1 or info.st_mode & 0o077):
             raise Refusal("PRIVATE_FILE_REQUIRED")
-        data = stream.read(limit + 1)
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            data = stream.read(limit + 1)
         if len(data) > limit:
             raise Refusal("FILE_TOO_LARGE")
         return data
+    finally:
+        os.close(fd)
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -120,15 +125,18 @@ def _json(path: Path) -> dict:
 
 def _binary(path: Path) -> dict:
     path = _path(path)
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd, "rb") as stream:
-        info = os.fstat(stream.fileno())
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid not in {0, os.getuid()}
                 or info.st_mode & 0o022 or not os.access(path, os.X_OK)):
             raise Refusal("EXECUTABLE_REQUIRED")
         h = hashlib.sha256()
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            h.update(chunk)
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                h.update(chunk)
+    finally:
+        os.close(fd)
     return {"path": str(path), "sha256": h.hexdigest()}
 
 
@@ -169,12 +177,13 @@ def _command(root: Path, receipt: dict, action: str) -> list[str]:
 def _plist(root: Path, receipt: dict) -> bytes:
     return plistlib.dumps({
         "Label": LABEL,
-        "ProgramArguments": _command(root, receipt, "run"),
+        "ProgramArguments": _command(root, receipt, "launch"),
         "WorkingDirectory": str(root),
         "EnvironmentVariables": {"HOME": str(Path.home()), "PATH": PATH_VALUE},
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},
         "ThrottleInterval": 30,
+        "Umask": 0o077,
         "ProcessType": "Background",
         "StandardOutPath": str(root / "logs/tunnel.stdout.log"),
         "StandardErrorPath": str(root / "logs/tunnel.stderr.log"),
@@ -392,8 +401,16 @@ def _sdk() -> None:
         raise Refusal("MCP_SDK_VERSION_CHANGED")
 
 
+def require_running_python(receipt: dict) -> None:
+    # Checking the selected interpreter's inventory is not evidence that this
+    # process is using it. Reject a same-version but different environment.
+    if Path(sys.executable).resolve() != Path(receipt["python"]["path"]):
+        raise Refusal("RUNTIME_INTERPRETER_MISMATCH")
+
+
 def serve(root: Path) -> None:
     receipt = verify(root)
+    require_running_python(receipt)
     verify_sdk(root)
     _sdk()
     environment = clean_env(dict(os.environ))
@@ -407,6 +424,7 @@ def serve(root: Path) -> None:
 async def probe(root: Path) -> dict:
     """Real stdio initialize/tools-list; deliberately no Paper application call."""
     receipt = verify(root)
+    require_running_python(receipt)
     verify_sdk(root)
     _sdk()
     from mcp import ClientSession, StdioServerParameters
@@ -436,7 +454,7 @@ async def probe(root: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["stage", "verify", "bind", "doctor", "run", "serve", "probe"])
+    parser.add_argument("action", choices=["stage", "verify", "bind", "doctor", "run", "launch", "serve", "probe"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--python", type=Path)
     parser.add_argument("--tunnel-client", type=Path)
@@ -461,14 +479,16 @@ def main() -> int:
             return 0
         elif args.action == "probe":
             value = asyncio.run(asyncio.wait_for(probe(root), timeout=30))
-        elif args.action in {"doctor", "run"}:
+        elif args.action in {"doctor", "run", "launch"}:
             receipt = verify(root)
+            require_running_python(receipt)
             verify_binding(root)
             verify_runtime_key(root)
             verify_sdk(root)
             _sdk()
             executable = receipt["tunnel_client"]["path"]
-            command = [executable, args.action, "--profile-file", str(root / "connection/profile.yaml")]
+            command = [executable, "doctor" if args.action == "doctor" else "run",
+                       "--profile-file", str(root / "connection/profile.yaml")]
             if args.action == "doctor":
                 command += ["--json", "--explain"]
                 os.execve(executable, command, clean_env(dict(os.environ)))
@@ -483,14 +503,24 @@ def main() -> int:
         print(json.dumps(value, indent=2, sort_keys=True))
         return 0
     except Refusal as exc:
-        print(json.dumps({"state": str(exc), "retry_allowed": False}), file=sys.stderr)
-        return 2
+        value = {"state": str(exc), "retry_allowed": False}
+        if args.action == "launch":
+            # launchd uses SuccessfulExit=false. A permanent local gate must
+            # stay stopped, not be retried forever. Zero is supervisor control,
+            # NOT tunnel readiness: retain the refusal and explicit non-start.
+            value.update(execution_state="NOT_STARTED", automatic_restart_allowed=False)
+        print(json.dumps(value), file=sys.stderr)
+        return 0 if args.action == "launch" else 2
     except Exception as exc:
         # Neither malformed local input nor an upstream library exception may
         # print credentials, profile bodies, or unrelated account environments.
-        print(json.dumps({"state": "LOCAL_FAILURE", "error_type": type(exc).__name__,
-                          "retry_allowed": False}), file=sys.stderr)
-        return 2
+        value = {"state": "LOCAL_FAILURE", "error_type": type(exc).__name__, "retry_allowed": False}
+        if args.action == "launch":
+            # All returning exceptions are before successful exec; no tunnel
+            # client started. Surface the failure and require operator repair.
+            value.update(execution_state="NOT_STARTED", automatic_restart_allowed=False)
+        print(json.dumps(value), file=sys.stderr)
+        return 0 if args.action == "launch" else 2
 
 
 if __name__ == "__main__":

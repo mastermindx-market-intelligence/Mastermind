@@ -67,9 +67,9 @@ class DirectLaunchTests(unittest.TestCase):
         key.chmod(0o600)
         return root
 
-    def start(self, root, extra_env=None):
+    def start(self, root, extra_env=None, action="run"):
         child = subprocess.Popen([sys.executable, "-I", str(root / "runtime/direct_service.py"),
-                                  "run", "--root", str(root)],
+                                  action, "--root", str(root)],
                                  env=dict(self.env, **(extra_env or {})), stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.children.append(child)
@@ -88,6 +88,28 @@ class DirectLaunchTests(unittest.TestCase):
     def finish(self, child):
         child.communicate("stop\n", timeout=3)
         self.assertEqual(child.returncode, 0)
+
+    def test_supervised_entrypoint_executes_official_run_shape(self):
+        root = self.stage("supervised")
+        child = self.start(root, action="launch")
+        value = self.started(child)
+        self.assertEqual(value["argv"], ["run", "--profile-file", str(root / "connection/profile.yaml")])
+        self.finish(child)
+
+    def test_supervised_duplicate_stays_stopped_without_displacing_first(self):
+        root = self.stage("supervised")
+        first = self.start(root, action="launch")
+        self.started(first)
+        second = self.start(root, action="launch")
+        out, err = second.communicate(timeout=8)
+        self.assertEqual(second.returncode, 0)
+        self.assertEqual(out, "")
+        value = json.loads(err)
+        self.assertEqual(value["state"], "ALREADY_RUNNING")
+        self.assertEqual(value["execution_state"], "NOT_STARTED")
+        self.assertFalse(value["automatic_restart_allowed"])
+        self.assertIsNone(first.poll(), "Existing client was displaced")
+        self.finish(first)
 
     def test_exec_strips_other_account_and_tunnel_environment(self):
         root = self.stage("bundle")

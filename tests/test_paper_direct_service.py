@@ -182,7 +182,7 @@ class DirectServiceTests(unittest.TestCase):
         value = plistlib.loads((self.target / "service/com.mastermind.paper-direct.business.plist").read_bytes())
         self.assertEqual(value["Label"], "com.mastermind.paper-direct.business")
         self.assertEqual(value["KeepAlive"], {"SuccessfulExit": False})
-        self.assertIn("run", value["ProgramArguments"])
+        self.assertIn("launch", value["ProgramArguments"])
         self.assertEqual(set(value["EnvironmentVariables"]), {"HOME", "PATH"})
         self.assertNotIn("OPENAI_ADMIN_KEY", str(value))
         self.assertNotIn("CONTROL_PLANE_API_KEY", str(value))
