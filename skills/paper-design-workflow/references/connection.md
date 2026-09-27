@@ -20,6 +20,14 @@ Retain one carrier per logical modifying operation, no fallback after a denial, 
 reconciliation of EFFECT_UNKNOWN. This carrier fence is not a file-wide ownership lease. Source/config/
 stdio proof is not a working ChatGPT app or accepted cutover.
 
+The ChatGPT app's approved action snapshot may lag an accepted runtime/source revision. When exact
+source/runtime now declares `MULTI_WRITER_PER_FILE_TARGET_SCOPED` but the current app tool
+description still says one designer/exclusive ownership or describes prepare as active-file focus,
+classify **DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Keep the same app/tunnel identity and
+refresh/recreate that app's approved action snapshot through its normal attended admin ceremony
+after the accepted runtime is deployed. Do not create a second Paper plane, infer a file lease from
+stale metadata, or use publication drift to bypass a denial or unresolved effect.
+
 For multi-seat Business rollout, each ChatGPT seat may have its own exact tunnel-client transport,
 seat-specific launchd label and transport singleton. All such transports reuse the same stdio server
 implementation/bridge contract and the same host-global Paper `desktop.lock`; do not create a Paper
