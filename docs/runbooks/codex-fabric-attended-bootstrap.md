@@ -45,3 +45,41 @@ The legacy Auth0 DCR `EFFECT_UNKNOWN` operation must not be retried, cleared, re
 `python3 -m unittest tests.test_codex_fabric_attended_parent -v` uses temporary fake Codex/interpreter executables. It proves composition, refusal, actual helper cwd/quoting, default no-login behavior, project-bound census plus detailed tool-policy checks, endpoint pinning, selected virtual-environment preservation, and one-shot explicit launch mechanics without contacting an account or provider. It is not a real Codex protocol or end-to-end production canary.
 
 Native no-account R2 qualification on Codex 0.154.0: bare and complete-tool-filter fixtures produce a held preparation; a restricted allowlist and a required-tool denylist both refuse preparation. All four cases leave the temporary configuration byte-identical and launch no model or real authentication helper. These results do not establish authenticated tools or an atomic freeze of all concurrently editable host configuration.
+
+## Optional bounded Sol/Astra coordinator bundle
+
+The same attended_parent launcher now consumes the complete bundle from #1013.
+Use only after its source/release and installation gates are accepted. Do not add a
+second launcher, new provider route or new credential home. The default remains
+native-disabled with either #633's legacy profile or #981's named Sol profile.
+
+For preparation only, supply --orchestrator-bundle-digest with the exact digest
+returned by orchestrator_bundle inspection. The launcher reads the actual effective
+CODEX_HOME, or the native user default when unset. Both role files and the profile
+must already match the reviewed source exactly; preflight never installs them.
+
+```sh
+python -m ops.codex_fabric.attended_parent \
+  --url "$MMX_EXECUTIVE_MCP_URL" \
+  --project-dir "$PROJECT_DIR" \
+  --orchestrator-bundle-digest "$BUNDLE_DIGEST"
+```
+
+This composes explicit parent model, read-only sandbox, one-child limit, principal
+instructions, absolute role paths and the incumbent required five-tool connection.
+It reads only local list/get metadata. unsupported and the observed native unknown
+auth states remain PREPARED_AUTH_STATUS_UNRESOLVED / launch_allowed=false. A
+not_logged_in preparation is not proof of successful header-helper authentication.
+No configuration receipt authorizes a coordinator to originate worker Jobs.
+
+Before any separately authorized --launch, source/helper digests, compiled settings
+and effective-home directory identity are checked again. A replaced home is refused
+even with identical role bytes. Changes or missing inputs refuse without retry.
+There is no automatic fallback, enrollment, DCR retry, server registration or install.
+
+Native verification caveat: Codex debug prompt-input initializes enabled MCP servers.
+Never use it with the real header helper for a credentialless configuration probe.
+The test replaces that helper with /usr/bin/false and proves the required server
+refuses; it then disables only the fixture MCP to inspect parent settings. This proves
+configuration consumption and required-connection refusal, not authenticated launch,
+role selection, descendant confinement, served-model identity or worker execution.

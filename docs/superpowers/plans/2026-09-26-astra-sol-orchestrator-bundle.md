@@ -45,7 +45,7 @@ Receipts contain bundle/file digests and `execution_authorized=false`.
 - [x] Run the new tests and all #981 source policy tests; repair only evidenced defects.
 - [x] Probe native Codex against a temporary credentialless home containing the new bundle;
   prove parsing and principal instructions, not model execution or recursive authority.
-- [ ] Inspect the real attended home without writing. Publish exact source/test receipts
+- [x] Inspect the real attended home without writing. Publish exact source/test receipts
   as a stacked Draft child of #981, and persist the remaining R2/R3 frontier.
 
 ## Execution record
@@ -71,3 +71,43 @@ PyJWT dependency is installed only in an isolated test environment. No full-repo
 CI, independent review, live role selection, child permissions or provider execution
 is claimed. The new utility adds no runtime owner. The sole #981 reviewer remains
 undisturbed; this stacked source child requires its own exact-delta review.
+
+## Task 2: existing attended-launch integration (R2A)
+
+Scope: modify the existing ops/codex_fabric/attended_parent.py consumed from
+#1000, add tests/test_codex_fabric_orchestrator_launch.py, extend native parser
+coverage and this same source/evidence/continuation record. Keep dependency source
+branches and #633 auth frozen. Direct rationale: PRINCIPAL_JUDGMENT for the joined
+capability boundary and LOWER_TOTAL_OVERHEAD for its small implementation seam.
+Current Chairman continuation supplies implementation intent; no second procedural
+approval is added. Existing independent-review and deployment gates remain.
+
+Interface: prepare_launch(..., expected_bundle_digest: str | None = None).
+LaunchPlan carries optional exact bundle digest and effective Codex home. The
+existing main adds --orchestrator-bundle-digest and revalidates before os.execv.
+Default native-disabled behavior must survive #981's profile addition. No new
+launch command, identity owner, auth flow or permission service is introduced.
+
+- [x] Prove old and joined profile normalization; reject unknown roles and bool/int drift.
+- [x] Add failing integration tests for exact digest/home, complete installation,
+  five-tool composition, held auth, no preflight effect and pre-exec input drift.
+- [x] Implement only the existing launcher seam using configuration_overrides.
+- [x] Exercise the complete prepared argv with native credentialless Codex; verify
+  two slots and principal instructions under trusted-project configuration.
+- [x] Run the joined regression set, capture exact source proof, publish the same
+  PR and update the existing canonical Agent OS handoff.
+
+Review focus: effective-home mismatch; partial/tampered roles; source drift during
+census and between preparation/exec; inherited sandbox/config precedence; held auth
+must never be promoted by optional coordinator selection.
+
+R2A verification: 170 tests and 25 subtests passed across the joined nine-module
+client suite, including the installed Codex probe. Initial integration exposed 12
+legacy-launcher failures and 19 missing-feature cases; subsequent regressions caught
+same-path home replacement and unhandled native unknown auth. Both were repaired.
+A native test fixture initially replaced only Python's environment mapping; it now
+sets the actual process environment so native children use the isolated home. The
+MCP-initializing diagnostic is explicitly distinguished from parent-only rendering.
+No live bundle installation, credential helper, model turn, RuntimeBinding change or
+worker dispatch is claimed. Old hosted CI was green for both source inputs; new-head
+full CI and independent review remain release gates, never inferred from local tests.

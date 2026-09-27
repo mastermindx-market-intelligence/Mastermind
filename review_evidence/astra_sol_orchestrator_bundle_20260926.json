@@ -49,5 +49,68 @@
   "executive_worker_dispatch_proven": false,
   "mission_complete": false,
   "record_type": "source_verification_receipt",
-  "format_version": 1
+  "format_version": 1,
+  "continuation_r2a": {
+    "source_before": "adfd950f55c9d209197100c0421be7976c6acb02",
+    "dependency_pr": 1000,
+    "dependency_head": "f0ab0bec981a12e58069c98404289d4402face96",
+    "candidate_source_merge": "163746d47900806fb8c4cc1ef1d8985b2e8b96fd",
+    "protected_procedure_pin": "4c6b206d3fb7fbc6d077faf61ae361bedf259925",
+    "test_proof": {
+      "observed_at": "2026-09-27T02:29:29.959375+00:00",
+      "command": [
+        "/private/tmp/mmx-astra-bundle-test-ko_8w550/venv/bin/python",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_codex_orchestrator_bundle.py",
+        "tests/test_codex_orchestrator_native_config.py",
+        "tests/test_astra_delegation_source_policy.py",
+        "tests/test_astra_external_fabric_contract.py",
+        "tests/test_codex_fabric_registration.py",
+        "tests/test_codex_fabric_auth.py",
+        "tests/test_codex_fabric_enrollment.py",
+        "tests/test_codex_fabric_attended_parent.py",
+        "tests/test_codex_fabric_orchestrator_launch.py",
+        "--tb=short"
+      ],
+      "exit_code": 0,
+      "output": "........................................................................ [ 42%]\n..................................................................................................                      [100%]\n170 passed, 25 subtests passed in 20.30s\n",
+      "source_sha256": {
+        "ops/codex_fabric/attended_parent.py": "ef1cb0b54f919e64d920b88551960b295c23a2af5160cea077964361fe4feb8d",
+        "tests/test_codex_fabric_attended_parent.py": "1de73d93450de35849394bebe24fa5d1c352b8d7d25b177b0ec3fe8da169e134",
+        "tests/test_codex_fabric_orchestrator_launch.py": "14775ee3e87491bf70b19b7016d077cd5ad23d47d40ceb6eb335b636e7ad29ad",
+        "tests/test_codex_orchestrator_native_config.py": "c0b303fa827b8c5308a70d2a8077b9fa12bb8798b350a89ceb4e22e0915c69a7"
+      }
+    },
+    "native_version_observed": "codex-cli 0.154.0",
+    "native_auth_observed": "unknown",
+    "native_proof": {
+      "coordinator_slots_including_parent": 2,
+      "legacy_native_agents_disabled": true,
+      "required_mcp_with_inert_helper_refused": true,
+      "parent_render_fixture_mcp_disabled": true,
+      "real_helper_used": false,
+      "model_turn_started": false
+    },
+    "regressions": [
+      "joined #981/#1000 profile incompatibility",
+      "missing coordinator composition",
+      "same-path native-home replacement",
+      "unhandled native unknown auth"
+    ],
+    "live_installation_performed": false,
+    "global_configuration_modified": false,
+    "credentials_or_dcr_modified": false,
+    "worker_dispatch_proven": false,
+    "role_selection_proven": false,
+    "child_enforcement_proven": false,
+    "new_head_full_ci_proven": false,
+    "independent_review_proven": false,
+    "mission_complete": false
+  }
 }

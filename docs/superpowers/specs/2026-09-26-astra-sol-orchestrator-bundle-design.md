@@ -98,3 +98,36 @@ R1 source tests and a credentialless native parser probe are necessary, not prod
 acceptance. Keep the source Draft and production off pending current-base CI/review and
 the separate R2/R3 receipts. Preserve #981's sole reviewer; do not spawn a second reviewer
 for its frozen candidate. This child owns only its new bundle files.
+
+## R2A: compose the existing attended launcher
+
+Consume #1000 exact f0ab0bec981a12e58069c98404289d4402face96 by a source merge
+into this same #1013 carrier; neither dependency branch nor its reviewer is changed.
+This is candidate integration, not release acceptance. No second launcher is created.
+The merged baseline fails 12 bootstrap cases: #981 enables the named Sol role while
+#1000 only understands the older disabled profile. The default bootstrap must remain
+native-disabled; it can consume either reviewed profile shape and explicitly project
+agents.enabled=false. Unknown shapes, integer booleans and extra role entries refuse.
+The optional coordinator mode uses one --orchestrator-bundle-digest argument. Its
+source is the existing bundle compiler, and its destination is the actual effective
+CODEX_HOME (or standard user default), never a separately chosen credential home.
+Require complete installed bytes, exact digest and both role files before census.
+Use explicit compiler settings plus the existing required five-tool MCP settings.
+Unsupported auth remains a prepared-but-held result. Preflight invokes only existing
+local list/get census, never an installer, auth helper or model. It reports role/model,
+child permissions and worker authority as unproven; config is not runtime admission.
+Immediately before any explicit attended exec, revalidate source/helper digests,
+compiled settings and exact effective home. Changed/missing/rebound inputs refuse
+without exec, login or retry. Preserve the existing enrollment and DCR effect gates.
+Two-layer native configuration proof remains credentialless and does not qualify
+role selection, children, permission enforcement or served-model identity.
+
+R2A native findings: current 0.154.0 metadata reports unknown for the credentialless
+fixture, so both unknown and unsupported produce the existing held preparation.
+No new authenticated state or enrollment is inferred. Native prompt rendering also
+initializes enabled MCPs; the real helper must not be used for configuration proof.
+Tests pin required-server refusal with an inert helper, then parent-only rendering
+with the fixture MCP disabled. Exact parent/child execution proof remains held.
+Filesystem identity of the effective native home joins the local launch plan: path
+and identical role bytes alone do not detect replacement of its credential directory.
+These observations are transient launch inputs, not another session/auth registry.

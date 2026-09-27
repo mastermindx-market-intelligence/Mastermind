@@ -64,3 +64,12 @@ Fabric. Native recursion remains disabled in both role files; no new queue, brok
 credential path or parent identity is introduced here. Consume #1000's existing
 attended launch owner rather than create a second launcher. Preserve #633's original
 Auth0 EFFECT_UNKNOWN operation and #981's exact-head independent review request.
+
+## Existing-launcher integration
+
+The optional bundle is now consumed by ops/codex_fabric/attended_parent.py through
+--orchestrator-bundle-digest. See codex-fabric-attended-bootstrap.md for the exact
+preflight and proof boundary. The installer still never launches. The launcher
+uses the current native home, revalidates local inputs before exec, and never
+converts unsupported/unknown authentication into launch readiness. Source remains
+Draft/HOLD pending independent review and the existing parent release gates.

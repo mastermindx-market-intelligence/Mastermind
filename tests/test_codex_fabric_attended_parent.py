@@ -205,7 +205,7 @@ class AttendedParentTests(unittest.TestCase):
 
     def test_missing_or_unsafe_profile_refuses_before_census(self):
         for content in ['not valid TOML =', '[agents]\nenabled=true',
-                        self.profile.read_text().replace('enabled = false', 'enabled = true')]:
+                        self.profile.read_text().replace('enabled = false', 'enabled = 1').replace('enabled = true', 'enabled = 1')]:
             self.profile.write_text(content)
             with self.assertRaises(bootstrap.BootstrapError):
                 self.prepare()
