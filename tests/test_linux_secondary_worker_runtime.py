@@ -209,6 +209,7 @@ def test_systemd_units_preserve_principal_socket_and_inert_install_boundary() ->
     assert "ProtectSystem=strict" in worker
     assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in worker
     assert "HOME=__PROVIDER_HOME__" in worker
+    assert "Environment=PATH=/usr/bin:/bin:/usr/sbin:/sbin" in worker
     assert "sudo" not in worker.lower()
 
     assert "ListenStream=__WORKER_SOCKET__" in sock
@@ -223,6 +224,7 @@ def test_systemd_units_preserve_principal_socket_and_inert_install_boundary() ->
     assert "__GATEWAY_ENTRYPOINT__ --config __GATEWAY_CONFIG__" in gateway
     assert "NoNewPrivileges=true" in gateway
     assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in gateway
+    assert "Environment=PATH=/usr/bin:/bin:/usr/sbin:/sbin" in gateway
 
     # Source package can be installed without silently arming either service.
     for text in (worker, sock, gateway):
