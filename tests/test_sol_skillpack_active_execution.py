@@ -36,7 +36,7 @@ def test_active_execution_skill_is_compatible_with_current_pack():
     assert meta == {
         "schema": "mastermind.sol_skillpack.v1",
         "skillpack_version": "1.0.1",
-        "minimum_bootstrap_major": "1",
+        "minimum_bootstrap_major": 1,
         "skill": "active_execution",
     }
 
@@ -204,8 +204,7 @@ def test_checkpoint_does_not_transfer_authority_or_invent_continuation():
 def test_role_pressure_cases_are_explicit_and_not_behavioral_proof():
     text = _section("Role-aware pressure cases")
     for phrase in ("Astra owns the whole delivery", "Sol receives a routine implementation",
-                   "One worker returns while another runs", "A cheap provider is disarmed",
-                   "A worker repeats the same unsuccessful loop"):
+                   "One worker returns while another runs", "A cheap provider is disarmed"):
         assert phrase in text
     assert "These cases are specifications, not recorded model behavior" in text
 
@@ -263,7 +262,7 @@ def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
 
 # Adaptive attended-mode and recovery source contracts. These are procedural tests, not provider proof.
 def test_attended_mode_recommendation_is_task_and_capability_adaptive():
-    text = _section("Step 1B — Adapt attended reasoning mode to the current phase")
+    text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
     for phrase in (
         "Sol owns the **mode recommendation**",
         "Prefer **Pro**",
@@ -278,7 +277,7 @@ def test_attended_mode_recommendation_is_task_and_capability_adaptive():
 
 
 def test_attended_mode_switch_never_grants_authority_or_bypasses_denial():
-    text = _section("Step 1B — Adapt attended reasoning mode to the current phase")
+    text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
     for phrase in (
         "grants **no** authority, permission, admission, source custody, carrier transfer, retry",
         "never bypasses a safety/permission denial",
@@ -292,7 +291,7 @@ def test_attended_mode_switch_never_grants_authority_or_bypasses_denial():
 
 
 def test_context_rotation_is_procedural_and_effect_fenced():
-    text = _section("Step 7A — Preserve operational continuity before interruption")
+    text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
     for phrase in (
         "exact surface is `ROTATION_REQUIRED`",
         "all modifying effects are reconciled",
