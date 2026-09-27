@@ -46,6 +46,15 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
+def _native_failure(value: Any) -> AdapterFailureClass | None:
+    if value is None:
+        return None
+    return {"authentication_required": AdapterFailureClass.AUTH_FAILURE,
+            "quota_or_rate_limit": AdapterFailureClass.QUOTA_OR_RATE_LIMIT,
+            "native_policy_drift": AdapterFailureClass.CONFIG_DRIFT}.get(
+                value, AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE)
+
+
 class ClaudeOperatorError(RuntimeError):
     def __init__(self, failure_class: AdapterFailureClass, message: str, *, effect_unknown: bool = False):
         super().__init__(message)
@@ -384,7 +393,10 @@ class ClaudeOperatorAdapter:
     def _raw_candidate(self, state: _Generation, turn: TurnRef) -> Mapping[str, Any]:
         page = state.client.request_raw_turn_page(thread_id=state.session_id, native_turn_id=turn.turn_id)
         result = page.consume()
-        if (result.get("terminal") is not True or result.get("success") is not True or result.get("failure") is not None
+        failure = _native_failure(result.get("failure"))
+        if failure is not None:
+            raise ClaudeOperatorError(failure, "native turn failed; Executive reconciliation required", effect_unknown=True)
+        if (result.get("terminal") is not True or result.get("success") is not True
                 or result.get("result_source") != "native-structured-output"
                 or result.get("result_contract") != native_plan_contract()
                 or result.get("session_id") != state.session_id or result.get("turn_id") != turn.turn_id
@@ -454,6 +466,8 @@ class ClaudeOperatorAdapter:
         try:
             result = state.client.request("reconcile", self._fields(state))
             reachable = result.get("session_reachable") is True and result.get("session_id") == state.session_id
+            failure = _native_failure(result.get("failure"))
         except Exception:
             reachable = None
-        return self._observation(state, reachable=reachable)
+            failure = None
+        return self._observation(state, reachable=reachable, failure=failure)

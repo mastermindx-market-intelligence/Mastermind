@@ -868,3 +868,15 @@ def test_native_structured_output_failure_never_uses_plausible_text(fake_sdk,cas
         with pytest.raises(HelperProtocolError,match='reconciliation'):await r.begin_turn('B','do not retry')
         await r.disconnect()
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('status,expected',[(401,'authentication_required'),(403,'authentication_required'),(429,'quota_or_rate_limit')])
+def test_native_auth_or_quota_error_not_hidden_by_absent_structured_result(fake_sdk,status,expected):
+    async def scenario():
+        r=helper.HelperRuntime('gen',{**_good_config(),'result_contract':'executive-plan-v1'});await r.initialize()
+        msg=FakeResultMessage('error',r.session_id,True,1,0,{},None);msg.api_error_status=status
+        r.client.enqueue_turn_events([msg]);await r.begin_turn('A','work');await r._drain_task
+        result=await r.collect()
+        assert result['success'] is False and result['summary'] is None and result['failure']==expected
+        await r.disconnect()
+    asyncio.run(scenario())

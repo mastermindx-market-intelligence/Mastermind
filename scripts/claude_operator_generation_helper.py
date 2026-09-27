@@ -514,7 +514,7 @@ class HelperRuntime:
                     if origin is not None and (not isinstance(origin, Mapping) or origin.get("kind") != "human"):
                         self._failure = "unexpected_terminal_origin"
                         self._success = False
-                    if self._result_contract is not None:
+                    if self._result_contract is not None and self._success and self._failure is None:
                         # This is the actual provider object, never a repaired
                         # result.result string or an inferred success envelope.
                         from jsonschema import Draft7Validator

@@ -187,7 +187,7 @@ def test_uncertain_drain_cannot_supply_candidate_even_if_success_claimed(configu
         value=original(**kwargs).consume();value['failure']='response_effect_unknown'
         return SimpleNamespace(consume=lambda:value)
     c.request_raw_turn_page=uncertain
-    with pytest.raises(ClaudeOperatorError,match='terminal result'):a.collect_candidate_result(t)
+    with pytest.raises(ClaudeOperatorError,match='reconciliation'):a.collect_candidate_result(t)
 
 
 def test_actual_owned_process_credentials_are_observed(configured):
@@ -246,3 +246,18 @@ def test_text_fallback_or_unknown_schema_cannot_supply_candidate(configured,fiel
         return SimpleNamespace(consume=lambda:result)
     c.request_raw_turn_page=wrong
     with pytest.raises(ClaudeOperatorError,match='terminal result'):a.collect_candidate_result(t)
+
+
+@pytest.mark.parametrize('native,expected',[
+    ('authentication_required','AUTH_FAILURE'),('quota_or_rate_limit','QUOTA_OR_RATE_LIMIT'),
+    ('native_policy_drift','CONFIG_DRIFT'),('response_effect_unknown','MODEL_OR_WORK_RESULT_FAILURE')])
+def test_native_failure_condition_survives_collection_and_reconciliation(configured,native,expected):
+    a,c,p,e,g=configured;_,launch=start(configured);t=TurnRef('turn','epoch','generation','attempt')
+    a.begin_turn(operation_id=OperationId('ohf-op:turn'),turn=t,generation=g,launch=launch)
+    c.request_raw_turn_page=lambda **kwargs:SimpleNamespace(consume=lambda:{'failure':native})
+    with pytest.raises(ClaudeOperatorError) as err:a.collect_candidate_result(t)
+    assert err.value.failure_class.value==expected and err.value.effect_unknown
+    request=c.request
+    c.request=lambda method,fields,**kwargs:({'session_reachable':True,'session_id':c.sid,'failure':native}
+        if method=='reconcile' else request(method,fields,**kwargs))
+    assert a.reconcile(g).recommended_failure_class.value==expected
