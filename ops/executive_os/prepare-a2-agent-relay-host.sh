@@ -79,7 +79,14 @@ read_attribute() {
     | /usr/bin/awk -v key="$attribute" '
         NR == 1 {
           prefix=key ":"
-          if (index($0, prefix) != 1) exit 65
+          native_prefix="dsAttrTypeNative:" key ":"
+          if (index($0, prefix) == 1) {
+            # canonical attribute spelling
+          } else if (index($0, native_prefix) == 1) {
+            prefix=native_prefix
+          } else {
+            exit 65
+          }
           value=substr($0, length(prefix) + 1)
           sub(/^[[:space:]]*/, "", value)
           next

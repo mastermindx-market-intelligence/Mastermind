@@ -1,19 +1,28 @@
 """Frozen four-tool Company MCP consultation facet (hermetic producer slice)."""
 from __future__ import annotations
 
+import asyncio
+import copy
+import datetime as dt
 import dataclasses
 import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from types import MappingProxyType
 from typing import Any
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_SCHEMA,
+    GROK_CONSULTATION_SCHEMA,
+)
 from integrations.slack_agent_dialogue.company_consultation_peer_resolver import (
     CompanyConsultationPeerResolver,
     ConsultationPeerRefused,
 )
 
 COMPANY_CONSULTATION_SCHEMA = "mastermind.company_consultation_mcp.v1"
+COMPANY_CONSULT_DISPATCH_SCHEMA = "mastermind.company_consult_dispatch.v1"
 COMPANY_CONSULTATION_CAPABILITY = COMPANY_CONSULTATION_SCHEMA
 COMPANY_CONSULTATION_SERVER_NAME = "mastermind-company-consultation"
 COMPANY_CONSULTATION_SERVER_IDENTITY = "mastermind-company-consultation-mcp"
@@ -34,16 +43,24 @@ COMPANY_CONSULTATION_ERROR_CODES = frozenset(
         "INTERNAL_ERROR",
     }
 )
-_COMPANY_CONSULTATION_INTERNAL = frozenset({"EFFECT_UNKNOWN", "INTERNAL_ERROR"})
 _PEER_REF_RE = re.compile(r"\Apeer-[0-9a-f]{32}\Z")
 _CONSULTATION_REF_RE = re.compile(r"\Aconsult-[0-9a-f]{32}\Z")
+_UTC_SECOND_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+_COMPANY_CONSULT_DISPATCH_BUDGET = MappingProxyType(
+    {
+        "max_answers": 1,
+        "max_evidence_reads": 4,
+        "max_forward_hops": 0,
+        "max_payload_bytes": 32768,
+    }
+)
 _SECRET_RE = re.compile(
     r"(?i)(?:xox[a-z]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}|"
     r"github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
     r"sk-[A-Za-z0-9_-]{20,}|bearer\s+[A-Za-z0-9._~-]{16,})"
 )
 _ARTIFACT_REPOSITORY_RE = re.compile(r"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
-_ARTIFACT_PATH_RE = re.compile(r"\A[A-Za-z0-9_][A-Za-z0-9_./-]{0,254}\Z")
+_ARTIFACT_PATH_RE = re.compile(r"\A[A-Za-z0-9_][A-Za-z0-9_./-]{1,254}\Z")
 _EVIDENCE_RE = re.compile(
     r"\Ahttps://(?:github\.com|linear\.app)/[^\s?#]{1,470}\Z"
 )
@@ -232,29 +249,39 @@ def validate_company_consultation_tool_arguments(
     if tool_name == "company.consult":
         if _PEER_REF_RE.fullmatch(raw["to"] if isinstance(raw.get("to"), str) else "") is None:
             raise CompanyConsultationToolError("INVALID_REQUEST")
-        _validated_text(raw["question"])
-        _validated_evidence_refs(raw["evidence_refs"])
-        _validated_artifact_revisions(raw["artifact_revisions"])
+        question = _validated_text(raw["question"])
+        if len(question) > 16000:
+            raise CompanyConsultationToolError("INVALID_REQUEST")
+        evidence_refs = _validated_evidence_refs(raw["evidence_refs"])
+        artifact_revisions = _validated_artifact_revisions(raw["artifact_revisions"])
         return {
-            "to": raw["to"], "question": raw["question"],
-            "evidence_refs": raw["evidence_refs"], "artifact_revisions": raw["artifact_revisions"],
+            "to": raw["to"], "question": question,
+            "evidence_refs": evidence_refs, "artifact_revisions": artifact_revisions,
         }
     if tool_name == "company.reply":
-        if _CONSULTATION_REF_RE.fullmatch(raw["consultation_ref"]) is None:
+        consultation_ref = raw.get("consultation_ref")
+        if (
+            not isinstance(consultation_ref, str)
+            or _CONSULTATION_REF_RE.fullmatch(consultation_ref) is None
+        ):
             raise CompanyConsultationToolError("INVALID_REQUEST")
         supersedes = raw.get("supersedes_message_key")
         if supersedes is not None and _MESSAGE_KEY_OK(supersedes) is False:
             raise CompanyConsultationToolError("INVALID_REQUEST")
-        _validated_text(raw["answer"])
-        _validated_evidence_refs(raw["evidence_refs"])
+        answer = _validated_text(raw["answer"])
+        evidence_refs = _validated_evidence_refs(raw["evidence_refs"])
         return {
-            "consultation_ref": raw["consultation_ref"], "answer": raw["answer"],
+            "consultation_ref": consultation_ref, "answer": answer,
             "supersedes_message_key": supersedes,
-            "evidence_refs": raw["evidence_refs"],
+            "evidence_refs": evidence_refs,
         }
-    if _CONSULTATION_REF_RE.fullmatch(raw["consultation_ref"]) is None:
+    consultation_ref = raw.get("consultation_ref")
+    if (
+        not isinstance(consultation_ref, str)
+        or _CONSULTATION_REF_RE.fullmatch(consultation_ref) is None
+    ):
         raise CompanyConsultationToolError("INVALID_REQUEST")
-    return {"consultation_ref": raw["consultation_ref"]}
+    return {"consultation_ref": consultation_ref}
 
 
 def _MESSAGE_KEY_OK(value: Any) -> bool:
@@ -302,21 +329,141 @@ def _validated_artifact_revisions(value: Any) -> list[dict[str, str]]:
             "content_sha256": revision["content_sha256"],
         }
         if (
-            not _ARTIFACT_REPOSITORY_RE.fullmatch(normalized["repository"])
-            or not _ARTIFACT_PATH_RE.fullmatch(normalized["path"])
+            not isinstance(normalized["repository"], str)
+            or len(normalized["repository"]) > 200
+            or _ARTIFACT_REPOSITORY_RE.fullmatch(normalized["repository"]) is None
+            or _SECRET_RE.search(normalized["repository"]) is not None
+            or not isinstance(normalized["path"], str)
+            or _ARTIFACT_PATH_RE.fullmatch(normalized["path"]) is None
+            # Immutable artifact identities must not be normalized after admission.
+            or any(part in {"", ".", ".."} for part in normalized["path"].split("/"))
+            or _SECRET_RE.search(normalized["path"]) is not None
+            or not isinstance(normalized["commit"], str)
             or re.fullmatch(r"[0-9a-f]{40}", normalized["commit"]) is None
+            or not isinstance(normalized["content_sha256"], str)
             or re.fullmatch(r"[0-9a-f]{64}", normalized["content_sha256"]) is None
         ):
             raise CompanyConsultationToolError("INVALID_REQUEST")
         revisions.append(normalized)
+    fingerprints = [canonical_company_consultation_json(item) for item in revisions]
+    if len(fingerprints) != len(set(fingerprints)):
+        raise CompanyConsultationToolError("INVALID_REQUEST")
     return revisions
+
+
+def _validated_dispatch_peer(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"peer_ref", "display_name"}:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    peer_ref = value.get("peer_ref")
+    display_name = value.get("display_name")
+    if not isinstance(peer_ref, str) or _PEER_REF_RE.fullmatch(peer_ref) is None:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    if (
+        not isinstance(display_name, str)
+        or not display_name.strip()
+        or display_name.strip() != display_name
+        or len(display_name) > 128
+        or any(ord(character) < 32 or ord(character) == 127 for character in display_name)
+        or _SECRET_RE.search(display_name)
+    ):
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    return {"peer_ref": peer_ref, "display_name": display_name}
+
+
+def _validated_dispatch_budget(value: Any) -> dict[str, int]:
+    if not isinstance(value, Mapping) or set(value) != set(_COMPANY_CONSULT_DISPATCH_BUDGET):
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    for key, expected in _COMPANY_CONSULT_DISPATCH_BUDGET.items():
+        if type(value.get(key)) is not int or value.get(key) != expected:
+            raise CompanyConsultationToolError("INVALID_REQUEST")
+    return dict(_COMPANY_CONSULT_DISPATCH_BUDGET)
+
+
+def validate_company_consult_dispatch_request(value: Any) -> dict[str, Any]:
+    """Validate the closed provider-free request consumed by a future dispatcher.
+
+    ``issued_at`` records the exact trusted-owner observation time. This inert
+    source wave validates representation only and grants no temporal admission.
+    """
+    required = {
+        "schema",
+        "operation",
+        "consultation_schema",
+        "peer",
+        "semantic",
+        "budget",
+        "issued_at",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    if value.get("schema") != COMPANY_CONSULT_DISPATCH_SCHEMA:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    if value.get("operation") != "consult":
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    consultation_schema = value.get("consultation_schema")
+    if (
+        not isinstance(consultation_schema, str)
+        or consultation_schema
+        not in (CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA)
+    ):
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    issued_at = value.get("issued_at")
+    if not isinstance(issued_at, str) or _UTC_SECOND_RE.fullmatch(issued_at) is None:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    try:
+        dt.datetime.strptime(issued_at, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise CompanyConsultationToolError("INVALID_REQUEST") from None
+    request = {
+        "schema": COMPANY_CONSULT_DISPATCH_SCHEMA,
+        "operation": "consult",
+        "consultation_schema": consultation_schema,
+        "peer": _validated_dispatch_peer(value.get("peer")),
+        "semantic": copy.deepcopy(
+            validate_company_consultation_tool_arguments(
+                "company.consult", value.get("semantic")
+            )
+        ),
+        "budget": _validated_dispatch_budget(value.get("budget")),
+        "issued_at": issued_at,
+    }
+    if request["semantic"]["to"] != request["peer"]["peer_ref"]:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    if len(canonical_company_consultation_json(request)) > COMPANY_CONSULTATION_MAX_REQUEST_BYTES:
+        raise CompanyConsultationToolError("INVALID_REQUEST")
+    return request
+
+
+def build_company_consult_dispatch_request(
+    *,
+    peer: Mapping[str, Any],
+    consultation_schema: str,
+    semantic: Mapping[str, Any],
+    issued_at: str,
+) -> dict[str, Any]:
+    """Build one exact internal ``company.consult`` dispatcher request.
+
+    The caller supplies the trusted observation time; this wave invents no
+    expiry or temporal admission and has no live dispatcher consumer.
+    """
+    return validate_company_consult_dispatch_request(
+        {
+            "schema": COMPANY_CONSULT_DISPATCH_SCHEMA,
+            "operation": "consult",
+            "consultation_schema": consultation_schema,
+            "peer": dict(peer),
+            "semantic": dict(semantic),
+            "budget": dict(_COMPANY_CONSULT_DISPATCH_BUDGET),
+            "issued_at": issued_at,
+        }
+    )
 
 
 def company_consultation_tool_schema_snapshot() -> list[dict[str, Any]]:
     return [
         {
             "annotations": dict(spec.annotations),
-            "input_schema": dict(spec.input_schema),
+            "input_schema": copy.deepcopy(spec.input_schema),
             "name": spec.name,
             "output_schema": None,
         }
@@ -330,7 +477,70 @@ def company_consultation_tool_schema_digest() -> str:
     ).hexdigest()
 
 
+def company_consult_dispatch_schema_snapshot() -> dict[str, Any]:
+    """Return a fresh closed schema for the internal ``company.consult`` request."""
+    consult_input = next(
+        spec.input_schema
+        for spec in COMPANY_CONSULTATION_TOOL_SPECS
+        if spec.name == "company.consult"
+    )
+    return _object(
+        {
+            "schema": {
+                "type": "string",
+                "const": COMPANY_CONSULT_DISPATCH_SCHEMA,
+            },
+            "operation": {"type": "string", "const": "consult"},
+            "consultation_schema": {
+                "type": "string",
+                "enum": [CONSULTATION_SCHEMA, GROK_CONSULTATION_SCHEMA],
+            },
+            "peer": _object(
+                {
+                    "peer_ref": _string(
+                        128, pattern=r"^peer-[0-9a-f]{32}$"
+                    ),
+                    "display_name": _string(128),
+                },
+                ("peer_ref", "display_name"),
+            ),
+            "semantic": copy.deepcopy(consult_input),
+            "budget": _object(
+                {
+                    key: {"type": "integer", "const": value}
+                    for key, value in _COMPANY_CONSULT_DISPATCH_BUDGET.items()
+                },
+                tuple(_COMPANY_CONSULT_DISPATCH_BUDGET),
+            ),
+            "issued_at": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 20,
+                "pattern": r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$",
+            },
+        },
+        (
+            "schema",
+            "operation",
+            "consultation_schema",
+            "peer",
+            "semantic",
+            "budget",
+            "issued_at",
+        ),
+    )
+
+
+def company_consult_dispatch_schema_digest() -> str:
+    return hashlib.sha256(
+        canonical_company_consultation_json(
+            company_consult_dispatch_schema_snapshot()
+        )
+    ).hexdigest()
+
+
 COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST = company_consultation_tool_schema_digest()
+COMPANY_CONSULT_DISPATCH_SCHEMA_DIGEST = company_consult_dispatch_schema_digest()
 
 
 def _capped_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
@@ -361,22 +571,64 @@ def _result(tool: str, data: Any) -> dict[str, Any]:
     )
 
 
+def _result_after_dispatch(tool: str, data: Any) -> dict[str, Any]:
+    """Preserve effect uncertainty when an effectful dispatch result cannot fit."""
+    envelope = {
+        "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
+        "tool": tool,
+        "ok": True,
+        "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+        "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+        "data": data,
+        "error": None,
+    }
+    if len(canonical_company_consultation_json(envelope)) <= COMPANY_CONSULTATION_MAX_RESPONSE_BYTES:
+        return envelope
+    if tool in {"company.consult", "company.reply"}:
+        return _error(tool, "EFFECT_UNKNOWN")
+    return _capped_envelope(envelope)
+
+
+def _closed_ambiguous_error_data(data: Any) -> dict[str, list[dict[str, str]]]:
+    empty: dict[str, list[dict[str, str]]] = {"peers": []}
+    try:
+        if (
+            not isinstance(data, Mapping)
+            or set(data) != {"peers"}
+            or not isinstance(data.get("peers"), list)
+        ):
+            return empty
+        peers = [_validated_dispatch_peer(peer) for peer in data["peers"]]
+        peer_refs = [peer["peer_ref"] for peer in peers]
+        if len(peer_refs) != len(set(peer_refs)):
+            return empty
+        return {"peers": peers}
+    except Exception:
+        return empty
+
+
 def _error(tool: str, code: str, data: Any = None) -> dict[str, Any]:
     if code not in COMPANY_CONSULTATION_ERROR_CODES:
         code = "INTERNAL_ERROR"
-    if code == "AMBIGUOUS" and data is None:
-        data = {"peers": []}
-    return _capped_envelope(
-        {
-            "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
-            "tool": tool,
-            "ok": False,
-            "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
-            "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
-            "data": data,
-            "error": {"code": code, "message": code},
-        }
+    closed_data = (
+        _closed_ambiguous_error_data(data) if code == "AMBIGUOUS" else None
     )
+    envelope = {
+        "schema": COMPANY_CONSULTATION_RESULT_SCHEMA,
+        "tool": tool,
+        "ok": False,
+        "server_identity": COMPANY_CONSULTATION_SERVER_IDENTITY,
+        "server_version": COMPANY_CONSULTATION_SERVER_VERSION,
+        "data": closed_data,
+        "error": {"code": code, "message": code},
+    }
+    if (
+        code == "AMBIGUOUS"
+        and len(canonical_company_consultation_json(envelope))
+        > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES
+    ):
+        envelope["data"] = {"peers": []}
+    return _capped_envelope(envelope)
 
 
 class CompanyConsultationGateway:
@@ -404,6 +656,7 @@ class CompanyConsultationGateway:
             normalized = validate_company_consultation_tool_arguments(tool_name, arguments)
         except CompanyConsultationToolError as exc:
             return _error(tool_name, exc.code)
+        dispatch_invoked = False
         try:
             if tool_name == "company.peers":
                 peers = [
@@ -415,33 +668,46 @@ class CompanyConsultationGateway:
                     raise ConsultationPeerRefused("UNAVAILABLE")
                 return _result(tool_name, {"peers": peers})
             if tool_name == "company.consult":
-                peer = self.peer_resolver.resolve(normalized["to"], program_ref=self.program_ref)
-                request = {
-                    "schema": COMPANY_CONSULTATION_SCHEMA,
-                    "operation": "consult",
-                    "peer": peer.public_projection(),
-                    "semantic": normalized,
-                    "budget": {
-                        "max_answers": 1,
-                        "max_evidence_reads": 4,
-                        "max_forward_hops": 0,
-                        "max_payload_bytes": 32768,
-                    },
-                    "valid_until": self.utc_now(),
-                }
+                try:
+                    peer = self.peer_resolver.resolve(
+                        normalized["to"], program_ref=self.program_ref
+                    )
+                    consultation_schema = peer.consultation_schema
+                    issued_at = self.utc_now()
+                    request = build_company_consult_dispatch_request(
+                        peer=peer.public_projection(),
+                        consultation_schema=consultation_schema,
+                        semantic=normalized,
+                        issued_at=issued_at,
+                    )
+                except ConsultationPeerRefused:
+                    raise
+                except Exception:
+                    return _error(tool_name, "INTERNAL_ERROR")
+                dispatch_invoked = True
                 response = await self.dispatcher(tool_name, request)
-                return _result(tool_name, self._service_data(response))
+                return _result_after_dispatch(tool_name, self._service_data(response))
             request = {
                 "schema": COMPANY_CONSULTATION_SCHEMA,
                 "operation": "reply" if tool_name == "company.reply" else "read",
                 "semantic": normalized,
             }
+            dispatch_invoked = True
             response = await self.dispatcher(tool_name, request)
-            return _result(tool_name, self._service_data(response))
+            return _result_after_dispatch(tool_name, self._service_data(response))
         except ConsultationPeerRefused as exc:
+            if dispatch_invoked:
+                return _error(tool_name, "EFFECT_UNKNOWN")
             return _error(tool_name, exc.code, data=exc.data)
+        except asyncio.CancelledError:
+            if dispatch_invoked:
+                return _error(tool_name, "EFFECT_UNKNOWN")
+            raise
         except Exception:
-            return _error(tool_name, "EFFECT_UNKNOWN")
+            return _error(
+                tool_name,
+                "EFFECT_UNKNOWN" if dispatch_invoked else "INTERNAL_ERROR",
+            )
 
     @staticmethod
     def _service_data(response: Any) -> Any:
@@ -452,6 +718,8 @@ class CompanyConsultationGateway:
 
 __all__ = [
     "COMPANY_CONSULTATION_CAPABILITY",
+    "COMPANY_CONSULT_DISPATCH_SCHEMA",
+    "COMPANY_CONSULT_DISPATCH_SCHEMA_DIGEST",
     "COMPANY_CONSULTATION_ERROR_CODES",
     "COMPANY_CONSULTATION_RESULT_SCHEMA",
     "COMPANY_CONSULTATION_SCHEMA",
@@ -463,5 +731,9 @@ __all__ = [
     "CompanyConsultationGateway",
     "CompanyConsultationToolError",
     "CompanyConsultationToolSpec",
+    "build_company_consult_dispatch_request",
+    "company_consult_dispatch_schema_digest",
+    "company_consult_dispatch_schema_snapshot",
+    "validate_company_consult_dispatch_request",
     "validate_company_consultation_tool_arguments",
 ]

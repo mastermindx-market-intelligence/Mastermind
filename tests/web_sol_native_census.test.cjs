@@ -33,13 +33,26 @@ const cap = {schema:'mastermind.web_sol_transport_capabilities.v1',protocol_majo
  'mastermind.web_sol_census_table.v1'].sort()};
 const DIGEST = createHash('sha256').update(JSON.stringify(cap,Object.keys(cap).sort())).digest('hex');
 const tick = () => new Promise(r=>setImmediate(r));
+function delayedCrypto(delayMs) {
+ return {getRandomValues:array=>webcrypto.getRandomValues(array),
+  subtle:{digest(...args){return new Promise((resolve,reject)=>
+   setTimeout(()=>webcrypto.subtle.digest(...args).then(resolve,reject),delayMs));}}};
+}
+async function waitFor(predicate,message,timeoutMs=2000) {
+ const deadline=Date.now()+timeoutMs;
+ while(!predicate()) {
+  const remainingMs=deadline-Date.now();
+  if(remainingMs<=0) assert.fail(message+' after '+timeoutMs+'ms');
+  await new Promise(resolve=>setTimeout(resolve,Math.min(10,remainingMs)));
+ }
+}
 const plain = x => JSON.parse(JSON.stringify(x));
 function request(changes={}) {const now=Date.now();return {schema:'mastermind.web_sol_census_request.v1',
  adapter_instance_id:INSTANCE,operation_key:'c2-fixture',nonce:'census-fixture-nonce-0001',
  issued_at:new Date(now).toISOString(),expires_at:new Date(now+10000).toISOString(),...changes};}
 function emitter() {const listeners=[];return {addListener:f=>listeners.push(f),listeners,
  fire(...args){return listeners.map(f=>f(...args));}};}
-function harness({count=1, queryFailure=false, pending=false, instance=INSTANCE, clock, postNative, mode, configPatch}={}) {
+function harness({count=1, queryFailure=false, pending=false, instance=INSTANCE, clock, postNative, mode, configPatch, cryptoApi=webcrypto}={}) {
  const events=emitter(), ports=[];let queries=0, reads=0;const resolvers=[];
  const rows=Array.from({length:count},(_,i)=>({id:i+1,windowId:1,url:'https://chatgpt.com/c/c2-'+i,
  status:'complete',discarded:!pending&&!mode,frozen:false,incognito:false,active:false}));
@@ -59,7 +72,7 @@ function harness({count=1, queryFailure=false, pending=false, instance=INSTANCE,
  connectNative(){const port={messages:[],onMessage:emitter(),onDisconnect:emitter(),
  postMessage:x=>{port.messages.push(plain(x));if(postNative)postNative(x);},disconnect:()=>port.onDisconnect.fire()};ports.push(port);return port;}};
  const alarms={scheduled:[],create(name){alarms.scheduled.push(name);},clear:async()=>true,getAll:async()=>[],onAlarm:emitter()};
- const context=vm.createContext({console,crypto:webcrypto,TextEncoder,TextDecoder,URL,setTimeout,clearTimeout,
+ const context=vm.createContext({console,crypto:cryptoApi,TextEncoder,TextDecoder,URL,setTimeout,clearTimeout,
  performance:clock||performance,Date,MMX_WEB_SOL_INSTANCE:config,chrome:{runtime,tabs,
  alarms,
  windows:{update:async()=>{throw Error('NO_FOREGROUND');}}}});
@@ -72,7 +85,9 @@ function harness({count=1, queryFailure=false, pending=false, instance=INSTANCE,
   p.onMessage.fire({...hello,schema:'mastermind.web_sol_transport_hello_ack.v1',boot_nonce:'boot-fixture-000000000001'});}return p;}
  async function popup(s=sender,event={kind:'MMX_WEB_SOL_CENSUS_REFRESH'}) {
   let response;const returns=events.fire(event,s,x=>{response=plain(x);});
-  for(let i=0;i<100&&response===undefined;i++)await tick();return {response,returns};}
+  if(returns.some(value=>value===true))
+   await waitFor(()=>response!==undefined,'popup census response');
+  return {response,returns};}
  return {context,ports,events,tabs,sender,ready,popup,resolvers,alarms,get reads(){return reads;},get queries(){return queries;}};
 }
 async function nativeResult(h, req=request()) {
@@ -83,9 +98,9 @@ async function nativeResult(h, req=request()) {
  });
 }
 
-function collectorClock(tabs) {
+function collectorClock(tabs, cryptoApi=webcrypto) {
  let now=0, serial=0;const timers=new Map();
- const context=vm.createContext({crypto:webcrypto,TextEncoder,URL,Date,performance:{now:()=>now},
+ const context=vm.createContext({crypto:cryptoApi,TextEncoder,URL,Date,performance:{now:()=>now},
   setTimeout(fn,ms){const id=++serial;timers.set(id,{fn,at:now+ms});return id;},
   clearTimeout:id=>timers.delete(id)});
  vm.runInContext(source('census_core.js'),context);
@@ -129,7 +144,7 @@ if(process.argv.includes('--native-pipe')) {
    vm.runInContext(source('census_core.js'),context);
    const result=context.MMXWebSolCensus.collect({query:async()=>{queries++;return rows;},
     get:async id=>{gets++;return rows[id-1];},sendMessage:async()=>{sends++;return validObservation();}},INSTANCE);
-   for(let i=0;i<100&&digests<Math.min(count,8);i++)await tick();
+   await waitFor(()=>digests>=Math.min(count,8),'local digest acquisition');
    assert.equal(digests,Math.min(count,8));now=800;
    for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn();}
    const snapshot=await result;
@@ -170,9 +185,9 @@ if(process.argv.includes('--native-pipe')) {
     get:async()=>{calls.push(['get',c.now]);return awake;},
     sendMessage:()=>{calls.push(['probe',c.now]);return stage==='probe'
      ?new Promise(r=>{release=r;}):Promise.resolve(validObservation());}};
-   c=collectorClock(tabs);const p=c.collect(100);
+   c=collectorClock(tabs,stage==='probe'?delayedCrypto(100):webcrypto);const p=c.collect(100);
    if(stage!=='timely') {
-    for(let i=0;i<50&&!release;i++)await tick();assert.ok(release,'actual '+stage+' acquisition');
+    await waitFor(()=>Boolean(release),'actual '+stage+' acquisition');
     c.advance(100);release(stage==='probe'?validObservation():[awake]);
    }
    const r=await p;
@@ -190,7 +205,7 @@ if(process.argv.includes('--native-pipe')) {
     reject?fail(Error('actual Chrome rejection')):resolve(rows[id-1])));},
    sendMessage:async()=>{calls.push(c.now);return validObservation();}};
   c=collectorClock(tabs);const first=c.collect(100);
-  for(let i=0;i<50&&gets<8;i++)await tick();assert.equal(gets,8);
+  await waitFor(()=>gets>=8,'eight unresolved reads acquired');assert.equal(gets,8);
   c.advance(100);await first;const count=calls.length;
   const blocked=await c.collect(200);assert.equal(blocked.initial_tab_count,null);
   assert.equal(calls.length,count,'timeouts never free actual promises');
@@ -213,7 +228,7 @@ if(process.argv.includes('--native-pipe')) {
   const snapshot=context.MMXWebSolCensus.collect({query:async()=>{queries++;return rows;},
    get:id=>{gets++;return id===1?new Promise(r=>{release=()=>r(rows[0]);}):Promise.resolve(rows[id-1]);},
    sendMessage:async()=>validObservation()},INSTANCE);
-  for(let i=0;i<100&&!release;i++)await tick();assert.ok(release);assert.equal(digests,8);
+  await waitFor(()=>Boolean(release),'single unresolved read acquired');assert.equal(digests,8);
   now=800;for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn();}
   const result=await snapshot;
   assert.deepEqual(plain(result.rows.slice(0,8).map(r=>r.status)),Array(8).fill('SWEEP_DEADLINE'),
@@ -231,7 +246,7 @@ if(process.argv.includes('--native-pipe')) {
   h.tabs.sendMessage=async()=>{calls.push(['probe',now]);throw Error('unavailable');};
   const wall=Date.now();p.onMessage.fire(request({issued_at:new Date(wall).toISOString(),
    expires_at:new Date(wall+100).toISOString()}));
-  for(let i=0;i<20&&!release;i++)await tick();assert.ok(release,'initial query actually acquired');
+  await waitFor(()=>Boolean(release),'initial query actually acquired');
   now=150;release([row]);for(let i=0;i<20;i++)await tick();
   assert.deepEqual(calls.filter(([,at])=>at>=100),[], 'no actual Chrome acquisition after outer expiry');
   assert.equal(p.messages.length,2,'expired attempt cannot post a browser receipt');
@@ -269,7 +284,7 @@ if(process.argv.includes('--native-pipe')) {
   const top={};const context={self:top,top,document:{getElementById:id=>nodes[id],createElement:()=>new Element()},
    chrome:{runtime:{sendMessage:async message=>(await h.popup(h.sender,message)).response}}};
   vm.runInNewContext(source('census.js'),context);
-  for(let i=0;i<50&&nodes.refresh.disabled;i++)await tick();
+  await waitFor(()=>!nodes.refresh.disabled,'popup refresh completion');
   assert.equal(nodes.refresh.disabled,false);assert.equal(nodes.summary.children.length,0);
   assert.equal(nodes.rows.children.length,0);assert.equal(nodes.scope.textContent,'');
   assert.match(nodes.status.textContent,/Snapshot unavailable/);
@@ -302,7 +317,7 @@ if(process.argv.includes('--native-pipe')) {
  });
  test('reconnect boot and old port callbacks cannot deliver a stale census',async()=>{
   const h=harness({count:8,pending:true});const old=await h.ready();const req=request();
-  old.onMessage.fire(req);for(let i=0;i<50&&h.reads<8;i++)await tick();assert.equal(h.reads,8);
+  old.onMessage.fire(req);await waitFor(()=>h.reads>=8,'stale-port collection read boundary');assert.equal(h.reads,8);
   old.onDisconnect.fire();const alarm=h.alarms.scheduled.at(-1);
   assert.match(alarm,/reconnect/);h.alarms.onAlarm.fire({name:alarm});await tick();
   assert.equal(h.ports.length,2);const fresh=h.ports[1];
@@ -312,19 +327,20 @@ if(process.argv.includes('--native-pipe')) {
   assert.equal(old.messages.length,2);assert.equal(fresh.messages.length,2);
   h.tabs.query=async()=>[];const next=request({nonce:'new-request-correlation-0001'});
   fresh.onMessage.fire(next);next.nonce='mutated-after-admission-0001';
-  for(let i=0;i<50&&fresh.messages.length<3;i++)await tick();
+  await waitFor(()=>fresh.messages.length>=3,'fresh-port census receipt');
   assert.equal(fresh.messages[2].nonce,'new-request-correlation-0001');
   assert.equal(fresh.messages[2].status,'COLLECTED');
  });
  test('port disconnect during real collection prevents late posts to old port',async()=>{
   const h=harness({count:8,pending:true});const p=await h.ready();p.onMessage.fire(request());
-  for(let i=0;i<30&&h.reads<8;i++)await tick();assert.equal(h.reads,8,'real collection reached read boundary');
+  await waitFor(()=>h.reads>=8,'disconnected-port collection read boundary');
+  assert.equal(h.reads,8,'real collection reached read boundary');
   p.onDisconnect.fire();h.resolvers.forEach(r=>r());await tick();await tick();
   assert.equal(p.messages.length,2,'disconnected port must not receive completion');
  });
  test('popup and native share eight unresolved Chrome slots without wrappers',async()=>{
-  const h=harness({count:8,pending:true});const p=await h.ready();p.onMessage.fire(request());
-  for(let i=0;i<30&&h.reads<8;i++)await tick();assert.equal(h.reads,8);
+  const h=harness({count:8,pending:true,cryptoApi:delayedCrypto(100)});const p=await h.ready();p.onMessage.fire(request());
+  await waitFor(()=>h.reads>=8,'shared-slot collection read boundary');assert.equal(h.reads,8);
   const result=await h.popup();assert.equal(h.reads,8,"shared actual reads stay bounded");assert.ok(result.response);
   assert.equal(result.response.initial_tab_count,null);
   h.resolvers.forEach(r=>r());await tick();

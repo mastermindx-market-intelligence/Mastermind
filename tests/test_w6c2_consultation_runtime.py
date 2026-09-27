@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import os
 import subprocess
@@ -13,6 +14,7 @@ import pytest
 from common.agent_dialogue_consultation_contract import (
     CONSULTATION_SCHEMA,
     CONSULTATION_V2_SCHEMA,
+    GROK_CONSULTATION_SCHEMA,
     RECEIPT_KEYS,
     build_consultation,
     validate_consultation,
@@ -20,6 +22,7 @@ from common.agent_dialogue_consultation_contract import (
 from control_plane.consultation_runtime import (
     ConsultationConflict,
     ConsultationRuntime,
+    _consultation_intent_payload,
     consultation_projection,
 )
 from control_plane.dialogue_source_resolution import ConsultationSourceIdentity
@@ -692,6 +695,7 @@ def test_runtime_binding_id_grammar_accepts_exact_runtime_ids(tmp_path: Path) ->
 
     assert intent.event.event_type == "INTENT"
     assert intent.event.payload["recipient_binding"] == recipient_binding
+    assert intent.event.payload["consultation_schema"] == CONSULTATION_SCHEMA
     assert len(frame["recipient_binding"]["binding_id"]) == 45
 
 
@@ -1695,3 +1699,672 @@ def test_requester_consumption_requires_exact_calling_attempt(tmp_path: Path) ->
         observed_at="2026-09-14T00:05:00Z",
     )
     assert consumed.event.payload["requester_actor_ref"]["attempt_id"] == workers[0][1]
+
+
+def test_intent_payload_requires_explicit_trusted_time_keyword() -> None:
+    parameters = inspect.signature(_consultation_intent_payload).parameters
+
+    assert "trusted_observed_at" in parameters
+    assert "observed_at" not in parameters
+
+
+def test_v3_intent_payload_is_exact_while_runtime_admission_stays_dark(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    grok = copy.deepcopy(frame)
+    grok["schema"] = GROK_CONSULTATION_SCHEMA
+    grok["recipient_binding"]["reasoning_surface"] = "grok-bot"
+    grok["fingerprint"] = ""
+    grok = build_consultation(grok)
+
+    payload = _consultation_intent_payload(
+        grok,
+        requester_binding=workers[0][3],
+        carrier_ref="dialogue://fixture/grok-identity",
+        trusted_observed_at="2026-09-14T00:00:00Z",
+    )
+    assert payload["consultation_schema"] == GROK_CONSULTATION_SCHEMA
+    assert payload["semantic_fingerprint"] == grok["fingerprint"]
+    assert payload["recipient_binding"]["reasoning_surface"] == "grok-bot"
+
+    with pytest.raises(StateConflict, match="current Runtime binding"):
+        consultations.intent(
+            grok,
+            requester_attempt_id=workers[0][1],
+            carrier_ref="dialogue://fixture/grok-identity",
+            observed_at="2026-09-14T00:00:00Z",
+            repository_root=semantic_bundle[1],
+        )
+    assert runtime.events.list_events(
+        aggregate_type="consultation", aggregate_id=grok["consultation_id"]
+    ) == []
+
+
+def test_requester_answer_attention_projects_exact_runtime_binding_without_writes(
+    tmp_path: Path,
+) -> None:
+    from control_plane.wake_events import SourceKind, WakeKind
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "requester-attention", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    before = tuple(
+        runtime.events.list_events(
+            aggregate_type="consultation",
+            aggregate_id=frame["consultation_id"],
+        )
+    )
+
+    projected = consultations.requester_answer_attention(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+
+    after = tuple(
+        runtime.events.list_events(
+            aggregate_type="consultation",
+            aggregate_id=frame["consultation_id"],
+        )
+    )
+    assert after == before
+    assert projected.identity.consultation_id == frame["consultation_id"]
+    assert projected.identity.answer_message_key == answer["message_key"]
+    assert projected.identity.answer_fingerprint == answer["fingerprint"]
+    assert projected.identity.requester_job_id == workers[0][0]
+    assert projected.identity.requester_attempt_id == workers[0][1]
+    assert projected.identity.requester_binding_id == workers[0][3]["binding_id"]
+    assert projected.identity.requester_binding_generation == workers[0][3][
+        "binding_generation"
+    ]
+    assert projected.identity.requester_reasoning_surface == "codex"
+    assert projected.target.session_alias == "CONSULTATION-REQUESTER"
+    assert projected.target.target_seat == "coo"
+    assert projected.target.reasoning_surface == "codex"
+    assert projected.target.wake_transport == "codex-app-server"
+    assert projected.binding.binding_id == workers[0][3]["binding_id"]
+    assert projected.binding.binding_generation == workers[0][3][
+        "binding_generation"
+    ]
+    assert projected.obligation.wake_kind is WakeKind.CONSULTATION_ANSWER_AVAILABLE
+    assert (
+        projected.obligation.source_kind
+        is SourceKind.CONSULTATION_ANSWER_ATTENTION
+    )
+    assert projected.obligation.job_id == workers[0][0]
+    assert projected.obligation.attempt_id == workers[0][1]
+    assert not WakeLedgerRepository(runtime).list_records(
+        projected.obligation.obligation_id
+    )
+
+
+def test_requester_answer_attention_refuses_noncurrent_requester_binding(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "stale-requester", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE process_generations SET executive_writer_held=0 "
+            "WHERE process_generation_id=("
+            "SELECT g.process_generation_id FROM process_generations g "
+            "JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id "
+            "WHERE e.attempt_id=? ORDER BY g.generation_number DESC LIMIT 1)",
+            (workers[0][1],),
+        )
+
+    with pytest.raises(StateConflict, match="current actionable OHF writer"):
+        consultations.requester_answer_attention(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+
+
+def test_requester_answer_attention_refuses_historical_answer(
+    tmp_path: Path,
+) -> None:
+    clock = _ManualClock("2026-09-14T00:00:00Z")
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path, clock=clock)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    clock.value = "2026-09-16T00:00:00Z"
+    answer = _answer_frame(frame, "historical-attention", semantic_bundle[0])
+    available = consultations.answer_available(
+        answer, observed_at="2026-09-16T00:00:00Z"
+    )
+    assert available.event.payload["historical"] is True
+
+    with pytest.raises(ConsultationConflict, match="historical answer"):
+        consultations.requester_answer_attention(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+    with pytest.raises(ConsultationConflict, match="historical answer"):
+        consultations.requester_answer_attention_replay(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+
+
+def _requester_answer_projection(
+    runtime: Runtime,
+    consultations: ConsultationRuntime,
+    tmp_path: Path,
+):
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "extension", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    return consultations.requester_answer_attention(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+
+
+def test_requester_answer_wake_extension_binds_exact_projection_and_request(
+    tmp_path: Path,
+) -> None:
+    from control_plane.wake_ledger import requested_record
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    projection = _requester_answer_projection(
+        runtime, consultations, tmp_path
+    )
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+
+    assert extension.obligation() == projection.obligation
+    repository.append_record(
+        requested_record(extension.obligation()),
+        obligation=extension.obligation(),
+    )
+    assert extension.current_binding_matches()
+    records = repository.list_records(extension.obligation().obligation_id)
+    assert len(records) == 1
+    assert records[0].event.payload["source_ref"] == (
+        projection.obligation.source_ref
+    )
+
+
+def test_requester_answer_wake_extension_refuses_binding_or_route_drift(
+    tmp_path: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    projection = _requester_answer_projection(
+        runtime, consultations, tmp_path
+    )
+    repository = WakeLedgerRepository(runtime)
+
+    with pytest.raises(StateConflict, match="binding identity"):
+        RequesterAnswerWakeExtension(
+            repository=repository,
+            projection=replace(
+                projection,
+                binding=replace(
+                    projection.binding,
+                    binding_generation=projection.binding.binding_generation + 1,
+                ),
+            ),
+        )
+    with pytest.raises(StateConflict, match="target route"):
+        RequesterAnswerWakeExtension(
+            repository=repository,
+            projection=replace(
+                projection,
+                target=replace(
+                    projection.target,
+                    session_alias="CONSULTATION-RECIPIENT",
+                ),
+            ),
+        )
+
+
+def test_intent_freezes_original_requester_binding(tmp_path: Path) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+
+    intent = consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+
+    assert intent.event.payload["schema_version"] == (
+        "mastermind.consultation_intent/v2"
+    )
+    assert intent.event.payload["requester_binding"] == workers[0][3]
+
+
+def test_requester_answer_attention_refuses_generation_change_after_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "rotated-requester", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    original = Runtime.current_harness_binding_source
+
+    def rotated(self, attempt_id, *, connection=None):
+        facts = original(self, attempt_id, connection=connection)
+        return replace(
+            facts,
+            generation_number=facts.generation_number + 1,
+        )
+
+    monkeypatch.setattr(Runtime, "current_harness_binding_source", rotated)
+
+    with pytest.raises(StateConflict, match="original requester binding is stale"):
+        consultations.requester_answer_attention(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+    with pytest.raises(StateConflict, match="original requester binding is stale"):
+        consultations.requester_answer_attention_replay(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+
+
+def test_requester_answer_attention_refuses_already_consumed_answer(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "already-consumed", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+
+    with pytest.raises(ConsultationConflict, match="already consumed"):
+        consultations.requester_answer_attention(
+            answer,
+            requester_attempt_id=workers[0][1],
+        )
+
+
+def test_requester_answer_attention_refuses_unreserved_answer_identity(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    admitted = _answer_frame(frame, "admitted-answer", semantic_bundle[0])
+    consultations.answer_available(
+        admitted, observed_at="2026-09-14T00:04:00Z"
+    )
+    foreign = _answer_frame(frame, "foreign-answer", semantic_bundle[0])
+
+    with pytest.raises(StateConflict, match="one exact admitted answer"):
+        consultations.requester_answer_attention(
+            foreign,
+            requester_attempt_id=workers[0][1],
+        )
+
+
+def test_requester_answer_first_wake_request_refuses_consumed_projection(
+    tmp_path: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "consumed-before-first-request", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    projection = consultations.requester_answer_attention(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+
+    with pytest.raises(ConsultationConflict, match="already consumed"):
+        extension.persist_requested_if_current(consultations)
+    assert not repository.list_records(projection.obligation.obligation_id)
+
+
+def test_requester_answer_first_wake_request_refuses_post_projection_rotation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    projection = _requester_answer_projection(runtime, consultations, tmp_path)
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+    original = Runtime.current_harness_binding_source
+
+    def rotated(self, attempt_id, *, connection=None):
+        facts = original(self, attempt_id, connection=connection)
+        return replace(
+            facts,
+            generation_number=facts.generation_number + 1,
+        )
+
+    monkeypatch.setattr(Runtime, "current_harness_binding_source", rotated)
+
+    with pytest.raises(StateConflict, match="original requester binding is stale"):
+        extension.persist_requested_if_current(consultations)
+    assert not repository.list_records(projection.obligation.obligation_id)
+
+
+def test_requester_answer_first_wake_request_stays_sticky_after_consumption(
+    tmp_path: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "request-before-consumption", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    projection = consultations.requester_answer_attention(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+
+    first = extension.persist_requested_if_current(consultations)
+    assert first.inserted is True
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+    replay = extension.persist_requested_if_current(consultations)
+
+    assert replay.inserted is False
+    assert replay.event.event_id == first.event.event_id
+    records = repository.list_records(projection.obligation.obligation_id)
+    assert len(records) == 1
+
+
+def test_requester_answer_replay_reconstructs_sticky_request_after_consumption(
+    tmp_path: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "sticky-fresh-replay", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    projection = consultations.requester_answer_attention(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+    repository = WakeLedgerRepository(runtime)
+    first_extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+    first = first_extension.persist_requested_if_current(consultations)
+    assert first.inserted is True
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+
+    replay_projection = consultations.requester_answer_attention_replay(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+    assert replay_projection.identity == projection.identity
+    assert replay_projection.target == projection.target
+    assert replay_projection.binding == projection.binding
+    assert (
+        replay_projection.obligation.obligation_id
+        == projection.obligation.obligation_id
+    )
+    assert (
+        replay_projection.obligation.source_ref
+        == projection.obligation.source_ref
+    )
+    replay_extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=replay_projection,
+    )
+    replay = replay_extension.persist_requested_if_current(consultations)
+
+    assert replay.inserted is False
+    assert replay.event.event_id == first.event.event_id
+    assert len(repository.list_records(projection.obligation.obligation_id)) == 1
+
+
+def test_requester_answer_replay_cannot_originate_after_prior_consumption(
+    tmp_path: Path,
+) -> None:
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    workers = _workers(runtime)
+    frame, semantic_bundle = _frame(
+        tmp_path,
+        requester=workers[0],
+        recipient=workers[1],
+    )
+    consultations.intent(
+        frame,
+        requester_attempt_id=workers[0][1],
+        carrier_ref="dialogue://fixture/consultation",
+        observed_at="2026-09-14T00:00:00Z",
+        repository_root=semantic_bundle[1],
+    )
+    _credited_path(runtime, consultations, frame)
+    answer = _answer_frame(frame, "no-late-origination", semantic_bundle[0])
+    consultations.answer_available(answer, observed_at="2026-09-14T00:04:00Z")
+    consultations.consumed_by_requester(
+        answer,
+        requester_attempt_id=workers[0][1],
+        observed_at="2026-09-14T00:05:00Z",
+    )
+
+    replay_projection = consultations.requester_answer_attention_replay(
+        answer,
+        requester_attempt_id=workers[0][1],
+    )
+    repository = WakeLedgerRepository(runtime)
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=replay_projection,
+    )
+
+    with pytest.raises(ConsultationConflict, match="already consumed"):
+        extension.persist_requested_if_current(consultations)
+    assert not repository.list_records(replay_projection.obligation.obligation_id)

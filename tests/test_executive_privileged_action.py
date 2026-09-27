@@ -208,11 +208,34 @@ def test_recover_transaction_has_fixed_argv(tmp_path: Path) -> None:
     )
 
 
-def test_exactly_six_actions_are_accepted() -> None:
+def test_secondary_host_power_policy_has_fixed_no_argument_argv(tmp_path: Path) -> None:
+    request = validate_request(_request("executive.host.prepare_secondary_power_policy"))
+    assert request.effect_class == "HOST_POWER_POLICY"
+    assert build_argv(request, tmp_path) == (
+        "/usr/bin/python3",
+        "-I",
+        "-S",
+        "-B",
+        str(tmp_path / "ops/executive_os/secondary_host_power_policy.py"),
+    )
+
+
+def test_secondary_host_power_policy_rejects_all_arguments() -> None:
+    with pytest.raises(PrivilegedActionError, match="host policy action arguments"):
+        validate_request(
+            _request(
+                "executive.host.prepare_secondary_power_policy",
+                {"host": "admins-Mini-652"},
+            )
+        )
+
+
+def test_exactly_seven_actions_are_accepted() -> None:
     cases = {
         "executive.services.start": {},
         "executive.services.stop": {},
         "executive.services.restart": {},
+        "executive.host.prepare_secondary_power_policy": {},
         "executive.worker_auth.verify_only": {},
         "executive.worker_auth.verify_ready": {
             "slot_id": "codex-pro-01",

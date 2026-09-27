@@ -30,6 +30,7 @@ from control_plane.executive_recovery_readiness import (
     READINESS_SCHEMA,
     REPORT_FIELDS,
     REQUIRED_RUNNING_DAEMON_LABELS,
+    SECONDARY_HOST_PREFLIGHT_PROFILE,
     USER_SESSION_CRITICAL_LABELS,
     RecoveryReadinessContractError,
     canonical_recovery_readiness_json,
@@ -285,6 +286,77 @@ def test_worker_host_is_ready_under_base_profile_without_any_executive_daemon() 
         # Truthful: the service is not installed.  It is deliberately not
         # called "intentionally disarmed", which would imply it belongs here.
         assert predicate["code"] == "DAEMON_NOT_INSTALLED"
+
+
+def test_secondary_host_preflight_is_ready_only_with_central_control_absent() -> None:
+    report = _classify(
+        _m1_worker_observation(), SECONDARY_HOST_PREFLIGHT_PROFILE
+    )
+
+    assert report["profile"] == SECONDARY_HOST_PREFLIGHT_PROFILE
+    assert report["recovery_state"] == "READY"
+    assert _blocking(report) == []
+    assert report["unknown_predicates"] == []
+
+    for label in REQUIRED_RUNNING_DAEMON_LABELS:
+        predicate = report["predicates"][f"system_daemon.{label}"]
+        assert predicate["requirement"] == "REQUIRED_ABSENT"
+        assert predicate["status"] == "OK"
+        assert predicate["code"] == "DAEMON_NOT_INSTALLED"
+    for label in DISARMED_EXPECTED_DAEMON_LABELS:
+        predicate = report["predicates"][f"system_daemon.{label}"]
+        assert predicate["requirement"] == "ADVISORY"
+
+
+@pytest.mark.parametrize("state", ["RUNNING", "LOADED_NOT_RUNNING", "DISABLED"])
+def test_secondary_host_preflight_refuses_installed_central_control(
+    state: str,
+) -> None:
+    daemons = {label: "NOT_INSTALLED" for label in ALL_DAEMON_LABELS}
+    label = REQUIRED_RUNNING_DAEMON_LABELS[0]
+    daemons[label] = state
+
+    report = _classify(
+        _m1_worker_observation(system_daemons=daemons),
+        SECONDARY_HOST_PREFLIGHT_PROFILE,
+    )
+
+    assert report["recovery_state"] == "NOT_READY"
+    assert _blocking(report) == [f"system_daemon.{label}"]
+    predicate = report["predicates"][f"system_daemon.{label}"]
+    assert predicate["requirement"] == "REQUIRED_ABSENT"
+    assert predicate["status"] == "NOT_READY"
+
+
+def test_secondary_host_preflight_fails_closed_on_unknown_central_control() -> None:
+    daemons = {label: "NOT_INSTALLED" for label in ALL_DAEMON_LABELS}
+    label = REQUIRED_RUNNING_DAEMON_LABELS[0]
+    daemons[label] = "UNKNOWN"
+
+    report = _classify(
+        _m1_worker_observation(system_daemons=daemons),
+        SECONDARY_HOST_PREFLIGHT_PROFILE,
+    )
+
+    assert report["recovery_state"] == "UNKNOWN"
+    assert report["unknown_predicates"] == [f"system_daemon.{label}"]
+
+
+def test_secondary_host_preflight_does_not_claim_worker_readiness() -> None:
+    daemons = {label: "NOT_INSTALLED" for label in ALL_DAEMON_LABELS}
+    worker_label = "com.mastermind.executive.worker.codex"
+    daemons[worker_label] = "RUNNING"
+
+    report = _classify(
+        _m1_worker_observation(system_daemons=daemons),
+        SECONDARY_HOST_PREFLIGHT_PROFILE,
+    )
+
+    assert report["recovery_state"] == "READY"
+    predicate = report["predicates"][f"system_daemon.{worker_label}"]
+    assert predicate["requirement"] == "ADVISORY"
+    assert predicate["code"] == "DAEMON_RUNNING"
+    assert predicate["requirement"] not in LOAD_BEARING_REQUIREMENTS
 
 
 def test_same_worker_observation_is_not_ready_under_control_profile() -> None:
@@ -1061,21 +1133,20 @@ def test_forged_daemon_failure_on_a_running_control_daemon_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
-    "profile,requirement,canonical_status",
+    "profile,requirement,canonical_status,forged_status",
     [
-        (BASE_RECOVERY_PROFILE, "ADVISORY", "ADVISORY"),
-        (EXECUTIVE_CONTROL_PROFILE, "REQUIRED_RUNNING", "NOT_READY"),
+        (BASE_RECOVERY_PROFILE, "ADVISORY", "ADVISORY", "OK"),
+        (SECONDARY_HOST_PREFLIGHT_PROFILE, "REQUIRED_ABSENT", "OK", "NOT_READY"),
+        (EXECUTIVE_CONTROL_PROFILE, "REQUIRED_RUNNING", "NOT_READY", "OK"),
     ],
 )
 def test_same_daemon_code_has_profile_specific_canonical_status(
-    profile: str, requirement: str, canonical_status: str
+    profile: str, requirement: str, canonical_status: str, forged_status: str
 ) -> None:
-    """``DAEMON_NOT_INSTALLED`` is advisory under base and a defect under control.
+    """One missing-daemon code has a different lawful meaning in each profile.
 
-    One observed code, two profiles, two different legal statuses — and neither
-    of them is ``OK``.  The status the validator demands therefore has to be
-    derived through the requirement the named profile assigns, not from a
-    profile-independent code table.
+    The validator must derive that status through the requirement the named
+    profile assigns, not from a profile-independent daemon code table.
     """
 
     observation = _m1_worker_observation()
@@ -1087,7 +1158,7 @@ def test_same_daemon_code_has_profile_specific_canonical_status(
     assert predicate["code"] == "DAEMON_NOT_INSTALLED"
     assert predicate["status"] == canonical_status
 
-    forged = _forge_status(report, predicate_id, "OK")
+    forged = _forge_status(report, predicate_id, forged_status)
     assert _refusal(forged) == "PREDICATE_STATUS_CODE_MISMATCH"
 
 
@@ -2074,8 +2145,12 @@ def test_main_requires_one_known_profile_before_observing_anything(
     assert stdout.getvalue() == b""
 
 
-def test_cli_exposes_exactly_two_profiles_and_no_default() -> None:
-    assert READINESS_PROFILES == (BASE_RECOVERY_PROFILE, EXECUTIVE_CONTROL_PROFILE)
+def test_cli_exposes_exactly_three_profiles_and_no_default() -> None:
+    assert READINESS_PROFILES == (
+        BASE_RECOVERY_PROFILE,
+        SECONDARY_HOST_PREFLIGHT_PROFILE,
+        EXECUTIVE_CONTROL_PROFILE,
+    )
 
     action = next(
         action

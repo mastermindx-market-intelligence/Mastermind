@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import threading
@@ -7,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_privileged_action import REQUEST_SCHEMA, STATUS_REQUEST_SCHEMA
+from control_plane.executive_privileged_action import (
+    REQUEST_SCHEMA,
+    STATUS_REQUEST_SCHEMA,
+    canonical_request_bytes,
+    validate_request,
+)
 from scripts import mmx_admin
 from scripts.mmx_admin import build_request, build_status_request, send_request, send_status_request
 
@@ -178,6 +184,84 @@ def test_main_status_terminal_exit_code_is_zero_regardless_of_stored_outcome(mon
     captured = capsys.readouterr()
     assert rc == 0
     assert json.loads(captured.out) == response
+
+
+def _reconciled_status_response(request_id: str = "req-001") -> dict[str, object]:
+    target = validate_request(
+        {
+            "schema": REQUEST_SCHEMA,
+            "request_id": request_id,
+            "action": "executive.worker_auth.verify_ready",
+            "args": {
+                "expected_credential_kind": "device-auth",
+                "workspace_binding_class": "company-workspace-admin-attested",
+                "credential_expires_at": "2026-09-30T02:00:00Z",
+            },
+        }
+    )
+    reconciliation = {
+        "schema": "mastermind.executive_privileged_action_reconciliation.v1",
+        "classification": "NOT_APPLIED",
+        "target_request_id": request_id,
+        "target_request_sha256": hashlib.sha256(canonical_request_bytes(target)).hexdigest(),
+        "target_action": "executive.worker_auth.verify_ready",
+        "target_effect_class": target.effect_class,
+        "target_started_at": "2026-09-23T01:46:34Z",
+        "target_release_sha": "a" * 40,
+        "target_marker_sha256": "1" * 64,
+        "readiness_receipt_sha256": "2" * 64,
+        "readiness_observed_at": "2026-09-21T22:49:00Z",
+        "expected_credential_kind": "device-auth",
+        "workspace_binding_class": "company-workspace-admin-attested",
+        "credential_expires_at": "2026-09-30T02:00:00Z",
+        "readiness_transaction_lock_absent": True,
+        "verify_ready_process_absent": True,
+        "readiness_identity_current": True,
+        "target_deadline_absent": True,
+        "reconciler_release_sha": "b" * 40,
+        "reconciled_at": "2026-09-23T11:00:00Z",
+        "broker_version": "test",
+    }
+    return {
+        "schema": "mastermind.executive_privileged_action_response.v1",
+        "ok": True,
+        "query": True,
+        "status": "RECONCILED_NOT_APPLIED",
+        "request_id": request_id,
+        "installed_release_sha": "b" * 40,
+        "marker_release_sha": "a" * 40,
+        "reconciliation": reconciliation,
+    }
+
+
+def test_main_status_reconciled_not_applied_is_successful_retrieval(monkeypatch, capsys) -> None:
+    response = _reconciled_status_response()
+    monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
+
+    rc = mmx_admin.main(["status", "--request-id", "req-001"])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert json.loads(captured.out) == response
+    assert response["reconciliation"]["classification"] == "NOT_APPLIED"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda response: response.update({"marker_release_sha": "c" * 40}),
+        lambda response: response["reconciliation"].update({"target_request_id": "other-001"}),
+        lambda response: response.update({"unexpected": True}),
+    ],
+)
+def test_main_status_reconciled_not_applied_refuses_malformed_or_uncorrelated(
+    monkeypatch, mutation
+) -> None:
+    response = _reconciled_status_response()
+    mutation(response)
+    monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
+
+    assert mmx_admin.main(["status", "--request-id", "req-001"]) != 0
 
 
 def test_main_status_effect_unknown_exit_code_is_75(monkeypatch) -> None:
