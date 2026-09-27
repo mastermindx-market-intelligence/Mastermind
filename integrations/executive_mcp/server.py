@@ -76,6 +76,7 @@ _E1_ENVELOPE_FIELDS = frozenset(
         "grounding", "data", "degraded", "bounded", "error",
     }
 )
+_MAX_EXECUTIVE_OAUTH_RESOURCES = 17
 
 
 def _e1_generated_at(settings: Any) -> str:
@@ -315,18 +316,34 @@ class _ExecutivePolicyVerifiers:
     full signature, issuer, audience, scope, subject and lifetime checks.
     """
 
-    def __init__(self, *verifiers: MastermindTokenVerifier):
-        if not verifiers or any(
-            not isinstance(item, MastermindTokenVerifier) for item in verifiers
+    def __init__(
+        self,
+        *verifier_pairs: tuple[MastermindTokenVerifier, MastermindTokenVerifier],
+    ):
+        if len(verifier_pairs) > _MAX_EXECUTIVE_OAUTH_RESOURCES:
+            raise TypeError("Executive OAuth resource composition exceeds 17 resources")
+        if not verifier_pairs or any(
+            not isinstance(pair, tuple)
+            or len(pair) != 2
+            or any(not isinstance(item, MastermindTokenVerifier) for item in pair)
+            for pair in verifier_pairs
         ):
-            raise TypeError("Executive verifier set requires MastermindTokenVerifier values")
-        self._verifiers = tuple(verifiers)
+            raise TypeError(
+                "Executive verifier set requires read/submit verifier pairs"
+            )
+        self._verifier_pairs = tuple(verifier_pairs)
 
     async def verify_token(self, token: str) -> Any:
-        for verifier in self._verifiers:
-            access = await verifier.verify_token(token)
+        for read_verifier, submit_verifier in self._verifier_pairs:
+            access, code = await read_verifier.verify_token_with_code(token)
             if access is not None:
                 return access
+            if code == AuthErrorCode.SCOPE_REFUSED:
+                access, code = await submit_verifier.verify_token_with_code(token)
+                if access is not None:
+                    return access
+            if code != AuthErrorCode.RESOURCE_REFUSED:
+                return None
         return None
 
 class _ExecutivePathFence:
@@ -596,6 +613,10 @@ def _build_profile_mcp_app(
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
+    if type(settings.additional_policies) is not tuple or len(
+        settings.additional_policies
+    ) >= _MAX_EXECUTIVE_OAUTH_RESOURCES:
+        raise ValueError("Executive OAuth resource composition must contain 1 to 17 resources")
     configured = dataclasses.replace(settings, allow_submit_authorized_reads=True)
     if configured.jwks_cache is None:
         shared_cache = make_shared_jwks_cache(configured.policies)
@@ -608,17 +629,19 @@ def _build_profile_mcp_app(
         primary_jwks_cache=configured.jwks_cache,
     )
     verifier = _ExecutivePolicyVerifiers(*(
-        MastermindTokenVerifier(
-            authenticator=authenticator,
-            policy=policy,
-            now=configured.clock,
-            audit_sink=audit_sink,
+        tuple(
+            MastermindTokenVerifier(
+                authenticator=authenticator,
+                policy=policy,
+                now=configured.clock,
+                audit_sink=audit_sink,
+            )
+            for authenticator, policy in zip(
+                authenticator_pair, (policy_pair.read, policy_pair.submit)
+            )
         )
         for authenticator_pair, policy_pair in zip(
             authenticator_variants, policy_variants
-        )
-        for authenticator, policy in zip(
-            authenticator_pair, (policy_pair.read, policy_pair.submit)
         )
     ))
     # Reuse the bounded ASGI seam. Its generic failure body is never evidence
