@@ -65,7 +65,7 @@ Replace the incomplete failure-only line with one compact `SESSION RELIABILITY` 
 
 ### `docs/sol_skills/ACTIVE_EXECUTION.md`
 
-Add `CONTEXT_ROTATION` to the final-response gate as a lawful local turn boundary, never as completion or acceptance. It is available only when the exact surface is `ROTATION_REQUIRED`, modifying effects are reconciled, a compact durable continuation exists, and the successor can recover the same mission. The parent mission remains active. `MORE_WORK_EXISTS` still forbids an ordinary final response.
+Keep `CONTEXT_ROTATION` as a procedural succession transition, never a final-response classification, completion, or acceptance. When the exact surface is `ROTATION_REQUIRED`, effects are reconciled, and durable continuation exists, the turn may end through the existing `CHECKPOINTED_CONTINUATION` disposition before the context-rotation owner performs succession. The parent mission remains active.
 
 Step 7A and K5 must state that a verified semantic phase may checkpoint and rotate before another high-context phase. Productive effort is measured by durable capability progress and decision quality, not transcript size, wall-clock duration, or tool-call count.
 
@@ -83,7 +83,7 @@ Narrowly amend the existing law:
 
 ### Existing tests
 
-Extend `tests/test_web_sol_context_rotation_source_law.py` and `tests/test_sol_skillpack_active_execution.py`. Do not create a second chat-rotation test owner. The tests must pin the new skill, INDEX enrollment, compact kernel, thresholds, budgets, capsule, no-duplicate-plane boundary, `CONTEXT_ROTATION` gate, and preservation of the single-failure truth rule.
+Extend `tests/test_web_sol_context_rotation_source_law.py` and `tests/test_sol_skillpack_active_execution.py`. Do not create a second chat-rotation test owner. The tests must pin the new skill, INDEX enrollment, compact kernel, thresholds, budgets, capsule, no-duplicate-plane boundary, the `CONTEXT_ROTATION` transition boundary, and preservation of the single-failure truth rule.
 
 ### Incident research record
 
@@ -93,7 +93,7 @@ Create one sanitized research record containing confirmed observations, explicit
 
 ### Session classifications
 
-`SESSION_HEALTHY` means bounded outputs, no unresolved process/effect, and a safe current surface. `ROTATION_SUSPECTED` follows one terminal generation failure, one tool timeout, pressure approaching budget, a material phase without a checkpoint, or unstable connector/browser behavior. `ROTATION_REQUIRED` follows two consecutive terminal generation failures with no successful intervening turn, one resume failure after unresolved timeout/taint/`EFFECT_UNKNOWN`, an unusable exact surface, or explicit Chairman retirement.
+`SESSION_HEALTHY` means bounded outputs, no unresolved process/effect, and a safe current surface. `ROTATION_SUSPECTED` follows one terminal generation failure, one tool timeout, output pressure combined with a stale durable frontier or inability to keep further output bounded, a material phase without a checkpoint, or unstable connector/browser behavior. Output pressure alone remains a checkpoint/output-selection prompt and does not force recovery or rotation. `ROTATION_REQUIRED` follows two consecutive terminal generation failures with no successful intervening turn, one resume failure after unresolved timeout/taint/`EFFECT_UNKNOWN`, an unusable exact surface, or explicit Chairman retirement.
 
 `ROTATION_SUSPECTED` permits only bounded reconciliation, checkpointing, and at most one clean retry when no effect is uncertain. `ROTATION_REQUIRED` stops tool execution in that conversation and continues from one compact successor capsule.
 

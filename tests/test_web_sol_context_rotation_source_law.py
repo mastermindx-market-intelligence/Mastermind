@@ -446,3 +446,85 @@ def test_stream_attachment_uncertainty_does_not_imply_context_rotation() -> None
         "Do not duplicate `Continue` or any modifying effect",
     ):
         assert phrase in law
+
+
+def _section_text(text: str, heading: str, next_heading: str) -> str:
+    start = text.index(heading)
+    end = text.index(next_heading, start + len(heading))
+    return " ".join(text[start:end].split())
+
+
+def _sr_f0_semantic_guard_errors(*, law: str, skill: str, active: str) -> list[str]:
+    errors: list[str] = []
+    norm_law = " ".join(law.split())
+    norm_skill = " ".join(skill.split())
+    suspected = _section_text(skill, "### `ROTATION_SUSPECTED`", "### `ROTATION_REQUIRED`")
+    phase = _section_text(
+        active,
+        "The reliability invariant is the **recovery gap**, not runtime:",
+        "## Step 8 — Final-response gate",
+    )
+    law_threshold = "two consecutive terminal generation failures in the exact conversation with no successful intervening turn"
+    skill_threshold = "two consecutive terminal generation failures with no successful intervening turn"
+    if law_threshold not in norm_law or skill_threshold not in norm_skill:
+        errors.append("two-failure-threshold")
+    if "cumulative raw output approaching the turn budget;" in suspected:
+        errors.append("budget-alone-rotation")
+    if "output pressure alone does not require a turn boundary" not in phase:
+        errors.append("pressure-only-turn-boundary")
+    if "surface remains healthy, continue in the same turn" not in phase:
+        errors.append("healthy-phase-continuation")
+    return errors
+
+
+def test_output_pressure_alone_does_not_force_recovery_or_rotation() -> None:
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    active = _read("docs/sol_skills/ACTIVE_EXECUTION.md")
+    active_normalized = " ".join(active.split())
+    suspected = _section_text(skill, "### `ROTATION_SUSPECTED`", "### `ROTATION_REQUIRED`")
+    assert "cumulative raw output approaching the turn budget;" not in suspected
+    assert "output pressure plus a stale durable frontier or inability to keep further output bounded" in suspected
+    assert "Output pressure alone does not change `SESSION_HEALTHY`" in skill
+    assert "output pressure alone does not require a turn boundary" in active_normalized
+
+
+def test_persistence_failure_maps_to_existing_truthful_dispositions() -> None:
+    skill = " ".join(_read("docs/sol_skills/SESSION_RELIABILITY.md").split())
+    kernel = " ".join(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md").split())
+    for phrase in (
+        "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write",
+        "`EXACT_HUMAN_GATE` only for a real human/admin ceremony",
+        "proven pre-dispatch persistence/platform outage",
+        "`ALL_SCOPED_LANES_BLOCKED`",
+        "safe independent work remains",
+        "`MORE_WORK_EXISTS`",
+    ):
+        assert phrase in skill
+    assert "Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN" in kernel
+
+
+def test_semantic_mutation_guard_rejects_threshold_and_healthy_phase_reversal() -> None:
+    law = _read(LAW_PATH)
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    active = _read("docs/sol_skills/ACTIVE_EXECUTION.md")
+    assert _sr_f0_semantic_guard_errors(law=law, skill=skill, active=active) == []
+
+    bad_law = law.replace(
+        "two consecutive terminal generation failures in the\nexact conversation with no successful intervening turn",
+        "twenty consecutive terminal generation failures in the\nexact conversation with no successful intervening turn",
+    )
+    bad_skill = skill.replace(
+        "two consecutive terminal generation failures with no successful intervening turn",
+        "twenty consecutive terminal generation failures with no successful intervening turn",
+    )
+    assert "two-failure-threshold" in _sr_f0_semantic_guard_errors(
+        law=bad_law, skill=bad_skill, active=active
+    )
+
+    bad_active = active.replace(
+        "surface remains healthy, continue in the same turn",
+        "surface remains healthy, stop the current turn immediately",
+    )
+    assert "healthy-phase-continuation" in _sr_f0_semantic_guard_errors(
+        law=law, skill=skill, active=bad_active
+    )

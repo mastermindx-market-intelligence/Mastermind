@@ -476,7 +476,9 @@ When `PHASE_DONE_WHEN` is satisfied, perform a **PHASE BARRIER** before material
 
 `MORE_WORK_EXISTS` means the parent mission is incomplete; it does not require the current assistant
 generation to remain open after every verified semantic boundary. Normal same-chat next-turn
-continuation is distinct from hard/fresh-chat rotation.
+continuation is distinct from hard/fresh-chat rotation. Healthy output pressure alone does not require
+a turn boundary; with reconciled effects and a current durable frontier, keep bounded same-phase work
+running while selecting/compressing further output.
 
 At a verified semantic phase boundary, checkpoint accepted deltas and rotate before another
 high-context phase only when the exact surface is `ROTATION_REQUIRED`, all modifying effects are
@@ -506,8 +508,10 @@ Before ending a substantial active-execution turn, classify the state into exact
 `ALL_SCOPED_LANES_BLOCKED` when every useful lane is blocked, or `EXACT_HUMAN_GATE` when a specific
 human/admin ceremony is the only remaining critical action. Likewise `MODE_SWITCH` and `FRESH_CHAT`
 are human-control/recovery reasons, not lifecycle states. A justified durable fresh-chat boundary uses
-`CHECKPOINTED_CONTINUATION`; when persistence is unavailable, use the genuine `EXACT_HUMAN_GATE` or
-`EFFECT_UNKNOWN` disposition instead of fabricating a checkpoint.
+`CHECKPOINTED_CONTINUATION`. When persistence is unavailable, the emergency frontier is not itself a
+disposition: use `EFFECT_UNKNOWN` only for an ambiguous checkpoint write, `EXACT_HUMAN_GATE` only
+for a real human/admin ceremony, `ALL_SCOPED_LANES_BLOCKED` for a proven persistence/platform outage
+only when every useful lane is blocked, and `MORE_WORK_EXISTS` when safe independent work remains.
 
 * `CHECKPOINTED_CONTINUATION` — a procedural turn disposition, not an Executive Job/Attempt status.
   The mission is explicitly incomplete (`MISSION_COMPLETE: false`). This is permitted only when
@@ -541,9 +545,11 @@ exact object/revision before retry. A chat-only or local scratch note is not a d
 If no authorized persistent path is reachable, avoid further effects that enlarge the unrecoverable
 gap; emit one copyable `NOT_CANONICALLY_PERSISTED` frontier containing the last durable ref, unresolved
 uncertainties/effects, DO_NOT_REDO, and exact next action. Do not loop on checkpoint writes. The
-successor must reconcile and persist it before treating it as durable. Classify the stop under the
-genuine `EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN` disposition, never a fabricated
-`CHECKPOINTED_CONTINUATION`. Such a note neither proves persistence nor changes the effect state.
+successor must reconcile and persist it before treating it as durable. Classify from observed cause:
+`EFFECT_UNKNOWN` only for an ambiguous checkpoint write, `EXACT_HUMAN_GATE` only for a real
+human/admin ceremony, a proven persistence/platform outage as `ALL_SCOPED_LANES_BLOCKED` only when
+every useful lane is blocked, and `MORE_WORK_EXISTS` when safe independent work remains. Never
+fabricate `CHECKPOINTED_CONTINUATION`; the emergency note proves neither persistence nor effect state.
 
 If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize** merely to stop work.
 Select the highest-leverage unblocked dependency and continue execution while the active phase and

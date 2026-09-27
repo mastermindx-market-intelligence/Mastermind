@@ -68,7 +68,7 @@ Any one of:
 
 - one terminal generation failure;
 - one tool timeout;
-- cumulative raw output approaching the turn budget;
+- output pressure plus a stale durable frontier or inability to keep further output bounded;
 - a material phase boundary without a recent checkpoint;
 - unstable connector latency, browser behavior, or provider surface.
 
@@ -77,6 +77,10 @@ finish only the bounded read/reconciliation already in flight; reduce output; al
 recovery when no effect is uncertain. That recovery may include a user-visible mode change such as
 Extra High when task fit and current capability evidence justify it. Mode recovery is not context
 rotation, permission, carrier transfer, or proof of failure cause.
+
+Output pressure alone does not change `SESSION_HEALTHY`. With reconciled effects, a current durable
+frontier, and bounded same-phase work, select/compress further output and continue normal execution
+even when cumulative raw output remains above the soft target.
 
 ### `ROTATION_REQUIRED`
 
@@ -186,9 +190,12 @@ A checkpoint never transfers source custody, leases, RuntimeBinding, or a STARTe
 
 If persistence fails, do not loop on checkpoint writes. Emit one copyable
 `NOT_CANONICALLY_PERSISTED` frontier with the last durable ref, unresolved effects/uncertainties,
-DO_NOT_REDO, exact next action, and recommended next mode when material. Classify the boundary under
-`EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN`; never call this a verified checkpoint. A successor must
-reconcile and persist the frontier before using it as durable truth.
+DO_NOT_REDO, exact next action, and recommended next mode when material. Classify from observed cause:
+`EFFECT_UNKNOWN` only for an ambiguous checkpoint write; `EXACT_HUMAN_GATE` only for a real
+human/admin ceremony; a proven pre-dispatch persistence/platform outage maps to
+`ALL_SCOPED_LANES_BLOCKED` only when no safe useful lane remains. If safe independent work remains,
+the truthful state is `MORE_WORK_EXISTS`. Never call the frontier a verified checkpoint. A successor
+must reconcile and persist it before using it as durable truth.
 
 ## Failure-layer classifier
 

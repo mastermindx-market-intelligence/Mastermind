@@ -55,7 +55,7 @@ CONTEXT + RECOVERY
 26. Each active semantic phase gets DONE_WHEN + allowed surfaces. Keep recovery gap small; checkpoint material effects at coherent milestones and before a new risky phase. Never stop solely for time/call count.
 27. Tool failure is not chat corruption. Isolated "Thinking failed" with low context pressure permits one bounded recovery, possibly in Extra High, after effect reconciliation. Cause remains unproven.
 28. HARD_ROTATION after repeated thinking/session failure, or "Thinking failed" in a heavy/unstable chat: stop heavy work; reconcile only if safe; persist frontier; SEAL. Switching is not rotation.
-29. If persistence fails, emit a copyable NOT_CANONICALLY_PERSISTED frontier with last durable ref/uncertainties; successor must reconcile/persist. No checkpoint write loops. Classify EXACT_HUMAN_GATE or EFFECT_UNKNOWN.
+29. If persistence fails, emit NOT_CANONICALLY_PERSISTED + last durable ref/uncertainties; no write loops. Successor reconciles/persists. Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN.
 30. A clean phase boundary may resume next turn in the same healthy chat. HARD_ROTATION = checkpoint + fresh same-mode chat + minimum fresh state; "Continue" does not reopen sealed heavy work. Rotation/switching changes no custody/effect truth.
 31. "Compact context" = reduce frontier and continue while stable. "Hard rotate/compact-wipe" or rule-28 instability = checkpoint -> persist if possible -> seal -> fresh chat.
 

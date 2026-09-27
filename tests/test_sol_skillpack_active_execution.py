@@ -304,13 +304,16 @@ def test_context_rotation_is_procedural_and_effect_fenced():
 
 
 def test_final_gate_projects_platform_and_ui_recovery_without_new_lifecycle_states():
-    text = _section("Step 8 — Final-response gate")
+    text = " ".join(_section("Step 8 — Final-response gate").split())
     assert "`PLATFORM_FAILURE` is a blocker reason, not a finalization classification" in text
     assert "`MODE_SWITCH` and `FRESH_CHAT`" in text
     assert "are human-control/recovery reasons, not lifecycle states" in text
     assert "`CHECKPOINTED_CONTINUATION`" in text
     assert "`NOT_CANONICALLY_PERSISTED`" in text
-    assert "genuine `EXACT_HUMAN_GATE` or `EFFECT_UNKNOWN`" in text
+    assert "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write" in text
+    assert "`EXACT_HUMAN_GATE` only for a real human/admin ceremony" in text
+    assert "`ALL_SCOPED_LANES_BLOCKED`" in text
+    assert "`MORE_WORK_EXISTS`" in text
 
 
 def test_long_run_phase_contract_fences_breadth_without_shortening_productive_turns():
@@ -350,4 +353,25 @@ def test_phase_barrier_separates_mission_incomplete_from_current_turn_lifetime()
         "same healthy chat",
         "A checkpoint may occur mid-turn",
     ):
+        assert phrase in text
+
+
+def test_phase_barrier_pins_healthy_same_turn_continuation_decision():
+    text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
+    assert "surface remains healthy, continue in the same turn" in text
+    assert "output pressure alone does not require a turn boundary" in text
+
+
+def test_persistence_failure_does_not_invent_human_or_effect_state():
+    text = " ".join(_section("Step 8 — Final-response gate").split())
+    required = (
+        "ambiguous checkpoint write",
+        "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write",
+        "`EXACT_HUMAN_GATE` only for a real human/admin ceremony",
+        "proven persistence/platform outage",
+        "`ALL_SCOPED_LANES_BLOCKED`",
+        "safe independent work remains",
+        "`MORE_WORK_EXISTS`",
+    )
+    for phrase in required:
         assert phrase in text

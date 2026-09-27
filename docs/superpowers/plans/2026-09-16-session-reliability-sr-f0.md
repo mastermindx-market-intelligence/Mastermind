@@ -29,14 +29,14 @@
 
 **Interfaces:**
 - Consumes: existing `_read()` and `_normalized()` helpers.
-- Produces: source-law assertions for `SESSION_RELIABILITY.md`, INDEX/kernel enrollment, rotation thresholds, budgets, capsule, and `CONTEXT_ROTATION` finalization.
+- Produces: source-law assertions for `SESSION_RELIABILITY.md`, INDEX/kernel enrollment, rotation thresholds, budgets, capsule, and the `CONTEXT_ROTATION` transition boundary.
 
 - [ ] Add `SESSION_RELIABILITY_PATH = "docs/sol_skills/SESSION_RELIABILITY.md"` to the existing rotation test owner.
 - [ ] Add a test requiring compatible front matter, INDEX registration, and mandatory selection triggers: more than three tool calls, host process, multi-source archaeology, resumed failure, or more than one material phase.
 - [ ] Add a test requiring the 8 KiB/16 KiB/100-match/32 KiB/six-call/15s/30s budgets and the 12 KiB/1500-word capsule.
 - [ ] Add a test requiring the two-failure threshold, resume-after-timeout/taint/effect threshold, single-failure truth rule, tainted-generation refusal, no raw-history manifest, and durable continuation before retirement.
 - [ ] Add a test requiring the compact kernel to load the protected skill and forbid raw tool-history replay.
-- [ ] Extend the active-execution test to require `CONTEXT_ROTATION` as a non-completion boundary with reconciled effects, durable capsule, active parent mission, and no ordinary finalization while `MORE_WORK_EXISTS`.
+- [ ] Extend the active-execution test to keep `CONTEXT_ROTATION` a non-completion transition with reconciled effects and durable continuation, while `CHECKPOINTED_CONTINUATION` remains the local final-response disposition.
 - [ ] Run the two focused test files and confirm RED only on the new assertions.
 
 ### Task 2: Add the protected session-reliability companion
@@ -74,7 +74,7 @@
 - [ ] Define one resume failure after unresolved timeout, tainted connector generation, or `EFFECT_UNKNOWN` as rotation-required.
 - [ ] Preserve `Thinking failed != context exhausted`, one successor, effect fence, and no blind retry.
 - [ ] State that raw tool history is not a continuation manifest and planned retirement requires durable continuation first.
-- [ ] Add `CONTEXT_ROTATION` to ACTIVE_EXECUTION’s final-response classifications with exact gates and explicit non-completion semantics.
+- [ ] Keep `CONTEXT_ROTATION` out of ACTIVE_EXECUTION’s final-response classifications; use `CHECKPOINTED_CONTINUATION` for the durable local boundary and preserve rotation as the subsequent procedural transition.
 - [ ] Update Step 7A and K5 for semantic-phase checkpointing and context rotation before another high-context phase.
 - [ ] Run the focused tests and confirm GREEN.
 
