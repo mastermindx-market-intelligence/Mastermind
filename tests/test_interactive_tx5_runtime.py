@@ -1075,6 +1075,23 @@ def _issue_target(definition, observation):
     )
 
 
+def test_ordinary_exact_target_does_not_require_interactive_broker_uid(tmp_path):
+    from test_executive_os_sqlite import _hf1b_claim_fixture, _hf1b_issue
+
+    runtime, _, work, command_id, definition, observation = _hf1b_claim_fixture(
+        tmp_path
+    )
+    target = _hf1b_issue(definition, observation)
+    claim = runtime.attempts.dispatch_cycle_job(
+        work.job_id,
+        command_id=command_id,
+        exact_target=target,
+    )
+
+    assert claim.claimed_now is True
+    assert claim.attempt.worker_id == "worker-a"
+
+
 def test_exact_target_same_broker_uid_refuses_without_claim(tmp_path):
     (runtime, root, parent, work, definition, observation, command_id) = (
         _uid_join_fixture(tmp_path)

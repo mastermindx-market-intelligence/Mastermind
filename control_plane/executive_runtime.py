@@ -1668,15 +1668,15 @@ def _validate_exact_worker_target_selection(
     if capabilities != d["expected_capabilities"] or capacity["worker_id"] in d["excluded_worker_ids"]:
         raise StateConflict("exact worker target capability or exclusion differs")
 
+    owner = _interactive_live_plan_owner(connection, str(job_row["root_job_id"]))
+    if owner is None:
+        return
     metadata = _strict_canonical_json_loads(
         str(capacity["metadata_json"]), name="exact target quota metadata"
     )
     selected_worker_uid = metadata.get("broker_uid")
     if type(selected_worker_uid) is not int or selected_worker_uid <= 0:
         raise StateConflict("exact target selected broker UID cannot be proven")
-    owner = _interactive_live_plan_owner(connection, str(job_row["root_job_id"]))
-    if owner is None:
-        return
     admissions = connection.execute(
         """
         SELECT payload_json FROM events
