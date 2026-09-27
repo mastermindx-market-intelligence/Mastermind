@@ -1234,46 +1234,49 @@ def test_v2_receipt_rejects_multiple_matching_wake_obligations(tmp_path: Path) -
         )
 
 def test_cli_emits_receipt_and_closed_errors(tmp_path: Path, capsys) -> None:
-    fixture = _offline_delivery_runtime(tmp_path / "runtime")
-    runtime, root_id, *_args, release_sha = fixture
-    runtime_root = tmp_path / "runtime"
-    good = main(
-        [
-            "--runtime-root",
-            str(runtime_root),
-            "--root-job-id",
-            root_id,
-            "--expected-release-sha",
-            release_sha,
-            "--observed-at",
-            "2026-09-14T01:02:03Z",
-        ]
-    )
-    assert good == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert set(payload) == EXPECTED_KEYS
+    import asyncio
+    import tempfile
+    import threading
+    from test_executive_service import _service, _config
 
-    for argv in (
-        ["--runtime-root", str(runtime_root), "--root-job-id", root_id],
-        [
-            "--runtime-root",
-            str(runtime_root),
-            "--root-job-id",
-            root_id,
-            "--expected-release-sha",
-            "not-a-sha",
-        ],
-        [
-            "--runtime-root",
-            str(runtime_root),
-            "--root-job-id",
-            "JOB-999",
-            "--expected-release-sha",
-            release_sha,
-        ],
-    ):
-        capsys.readouterr()
-        assert main(argv) == 2
-        error = json.loads(capsys.readouterr().out)
-        assert set(error) == {"schema", "error", "root_job_id"}
-        assert error["schema"] == "mastermind.web_ceo_offline_delivery_canary.error/v1"
+    runtime, root_id, *_args, release_sha = _offline_delivery_runtime(tmp_path / "runtime")
+    with tempfile.TemporaryDirectory(prefix="canary-control-") as directory:
+        config = _config(tmp_path / "service", socket_root=Path(directory),
+                         runtime_root=runtime.store.root)
+        service, _ = _service(tmp_path / "service", config=config)
+        loop = asyncio.new_event_loop()
+        ready = threading.Event()
+        errors = []
+        def serve():
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(service.start())
+            except BaseException as exc:
+                errors.append(exc)
+                ready.set()
+                return
+            ready.set()
+            loop.run_forever()
+            loop.close()
+        thread = threading.Thread(target=serve)
+        thread.start()
+        assert ready.wait(5)
+        assert not errors
+        argv = ["--runtime-root", str(runtime.store.root),
+                "--control-socket", str(service.socket_path),
+                "--root-job-id", root_id, "--expected-release-sha", release_sha,
+                "--observed-at", "2026-09-14T01:02:03Z"]
+        try:
+            assert main(argv) == 0
+            assert set(json.loads(capsys.readouterr().out)) == EXPECTED_KEYS
+            invalid = list(argv)
+            invalid[invalid.index(release_sha)] = "not-a-sha"
+            assert main(invalid) == 2
+            assert json.loads(capsys.readouterr().out)["error"] == "INPUT_REFUSED"
+            assert main(["--runtime-root", str(runtime.store.root),
+                         "--root-job-id", root_id]) == 2
+            assert json.loads(capsys.readouterr().out)["error"] == "INPUT_REFUSED"
+        finally:
+            asyncio.run_coroutine_threadsafe(service.close(), loop).result(timeout=5)
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join(5)

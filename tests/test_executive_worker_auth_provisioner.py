@@ -363,6 +363,60 @@ def test_post_install_auth_operations_prefer_installed_binary_over_mutable_sourc
     assert '--binary "$INSTALLED_CODEX_BINARY"' in source[ready_branch:]
 
 
+def test_installed_codex_path_uses_install_receipt_without_recopying_or_rehashing() -> None:
+    source = _source()
+    installed = source.split("# BEGIN installed Codex fast path", 1)[1].split(
+        "# END installed Codex fast path", 1
+    )[0]
+
+    assert "load_codex_attestation_receipt" in installed
+    assert 'CODEX_EXECUTABLE="$INSTALLED_CODEX_BINARY"' in installed
+    owner_binding = source.index('CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"')
+    slot_gid_override = source.index('WORKER_GID="$(resolve_slot_field "worker_gid")"')
+    assert owner_binding < slot_gid_override
+    for required in (
+        'CODEX_ATTESTATION_RECEIPT',
+        'CODEX_ATTESTATION_OWNER_GID',
+        '"$CODEX_VERSION"',
+        '"$CODEX_TEAM_ID"',
+        '"$CODEX_SHA256"',
+    ):
+        assert required in installed
+    for forbidden in (
+        "mktemp",
+        "ditto",
+        "codesign",
+        "shasum",
+        "PINNED_CODEX_BINARY",
+        "run_codex_as_worker --version",
+    ):
+        assert forbidden not in installed
+
+    runner = source.split("run_codex_as_worker() {", 1)[1].split("\n}", 1)[0]
+    assert '"$CODEX_EXECUTABLE" "$@"' in runner
+    cleanup = source.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert "INSTALLED_CODEX_BINARY" not in cleanup
+    assert "CODEX_EXECUTABLE" not in cleanup
+
+
+def test_preinstall_codex_path_retains_full_staging_attestation() -> None:
+    source = _source()
+    staged = source.split("# BEGIN pre-install Codex staging path", 1)[1].split(
+        "# END pre-install Codex staging path", 1
+    )[0]
+
+    for required in (
+        'mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX"',
+        '/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY"',
+        '/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY"',
+        'CODEX_EXECUTABLE="$PINNED_CODEX_BINARY"',
+        'run_codex_as_worker --version',
+    ):
+        assert required in staged
+
+
 def test_metadata_pinning_and_login_status_remain_strict_and_non_disclosing() -> None:
     source = _source()
     assert 'CODEX_VERSION="0.147.0"' in source

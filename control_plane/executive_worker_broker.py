@@ -113,6 +113,7 @@ from control_plane.operator_materialization_receipt import (
     validate_materialization_request,
 )
 from control_plane.worker_execution_contract import (
+    _freeze as _freeze_worker_execution_value,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
@@ -173,6 +174,9 @@ _OHF_OPERATIONS = frozenset(
         "ohf-deliver-attention",
         "ohf-collect-turn",
         "ohf-observe-turn",
+        "ohf-observer-enroll",
+        "ohf-observer-status",
+        "ohf-observer-revoke",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -1311,6 +1315,8 @@ class ExecutiveWorkerBroker:
         sweeper: ResidualSweeper,
         *,
         adapter_id: str = "codex-cli",
+        validation_adapter: WorkerExecutionAdapter | None = None,
+        validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
@@ -1331,6 +1337,47 @@ class ExecutiveWorkerBroker:
             ) from exc
         self.adapter = adapter
         self.adapter_id = descriptor.adapter_id
+        if validation_adapter is None:
+            if validation_adapter_id not in (None, self.adapter_id):
+                raise WorkerBrokerError(
+                    "validation adapter identity was supplied without an adapter"
+                )
+            if self.adapter_id == "claude-code":
+                raise WorkerBrokerError(
+                    "Claude broker requires the reviewed common validation adapter"
+                )
+            validation_descriptor = descriptor
+            validation_adapter = adapter
+        else:
+            if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+                raise WorkerBrokerError(
+                    "validation adapter requires one exact reviewed identity"
+                )
+            try:
+                validation_descriptor = bind_reviewed_adapter(
+                    validation_adapter, validation_adapter_id
+                )
+            except AdapterBindingError as exc:
+                raise WorkerBrokerError(str(exc)) from exc
+            except Exception as exc:
+                raise WorkerBrokerError(
+                    f"validation adapter {validation_adapter_id!r} failed to bind"
+                ) from exc
+            if self.adapter_id == "codex-cli" and (
+                validation_adapter is not adapter
+                or validation_descriptor.adapter_id != self.adapter_id
+            ):
+                raise WorkerBrokerError(
+                    "Codex broker validation must remain on its primary reviewed adapter"
+                )
+            if self.adapter_id == "claude-code" and (
+                validation_descriptor.adapter_id != "codex-cli"
+            ):
+                raise WorkerBrokerError(
+                    "Claude broker validation requires the reviewed common Codex sandbox"
+                )
+        self.validation_adapter = validation_adapter
+        self.validation_adapter_id = validation_descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
         self.peer_resolver = peer_resolver
@@ -1362,6 +1409,7 @@ class ExecutiveWorkerBroker:
                 ProcessGenerationRef,
                 ReconcileObservation,
                 BrowserReviewReceipt | None,
+                Any,  # Original bounded observer registry; no adapter/process.
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
@@ -1480,6 +1528,8 @@ class ExecutiveWorkerBroker:
             return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation in {"ohf-observer-enroll", "ohf-observer-status", "ohf-observer-revoke"}:
+            return await self._ohf_observer_lifecycle(operation, payload)
         if operation == "ohf-observe-turn":
             return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
@@ -2125,6 +2175,65 @@ class ExecutiveWorkerBroker:
         finally:
             await self._operator_release_busy(state)
 
+    async def _ohf_observer_lifecycle(self, operation, payload):
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        if any(not isinstance(v, str) or not 1 <= len(v) <= 256 for v in payload.values()):
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        binding = {name: payload[name] for name in binding_fields}
+        identity = (
+            payload["attempt"], payload["epoch"], payload["generation"], payload["turn"],
+        )
+        async with self._state_lock:
+            active = self._operator_run
+            same_active = active is not None and (
+                payload["attempt"] == active.epoch.attempt_id
+                and payload["epoch"] == active.epoch.session_epoch_id
+                and payload["generation"] == active.generation.process_generation_id
+            )
+            if not same_active:
+                if operation == "ohf-observer-enroll":
+                    raise BrokerStateError("UNKNOWN_GENERATION")
+                # Historical reconciliation uses the original registry already
+                # retained by the bounded terminal receipt owner. A different
+                # active run cannot replace or authorize this exact old binding.
+                terminal = self._operator_terminal.get(payload["generation"])
+                projection = terminal[3] if terminal is not None else None
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None,
+                            "turn_key": None, "grant_generation": None}
+                try:
+                    if operation == "ohf-observer-revoke":
+                        return projection.revoke_observer_by_binding(identity, **binding)
+                    return projection.observer_status_by_binding(identity, **binding)
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    raise BrokerStateError(
+                        code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
+                        else "GRANT_INVALIDATED"
+                    ) from None
+            state = active.adapter._generations.get(payload["generation"])
+            native = state.turns.get(payload["turn"]) if state else None
+            if not native:
+                raise BrokerStateError("TURN_NOT_BOUND")
+            key = TurnKey(payload["attempt"], payload["epoch"], payload["generation"],
+                          active.generation.generation_number, active.generation.worker_id,
+                          payload["turn"], native)
+            try:
+                if operation == "ohf-observer-enroll":
+                    turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
+                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    return result
+                projection = getattr(active.adapter, "visible_turn_projection", None)
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None, "turn_key": None, "grant_generation": None}
+                method = projection.revoke_observer if operation == "ohf-observer-revoke" else projection.observer_status
+                return method(key, **binding)
+            except Exception as exc:
+                code = getattr(exc, "code", None)
+                raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
+
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         expected = {
             "attempt",
@@ -2135,7 +2244,9 @@ class ExecutiveWorkerBroker:
             "cursor",
             "max_items",
         }
-        if set(payload) != expected:
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        binding = {name: payload[name] for name in binding_fields if name in payload}
+        if set(payload) not in (expected, expected | binding_fields):
             raise BrokerStateError("ohf-observe-turn payload fields are invalid")
         identity_fields = (
             "attempt",
@@ -2171,6 +2282,9 @@ class ExecutiveWorkerBroker:
         if projection is None:
             self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
             raise BrokerStateError("UNKNOWN_GENERATION")
+        if not projection.check_observer_binding(payload["reader_grant"], binding):
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
         grant_key = projection.check_grant(payload["reader_grant"])
         if grant_key is None:
             self._observer_refusals.append((None, "READER_REVOKED"))
@@ -2483,10 +2597,14 @@ class ExecutiveWorkerBroker:
         artifact_receipt: BrowserReviewReceipt | None = None,
     ) -> None:
         async with self._state_lock:
+            projection = getattr(state.adapter, "visible_turn_projection", None)
+            if projection is not None:
+                projection.retire_generation(state.generation.process_generation_id)
             self._operator_terminal[state.generation.process_generation_id] = (
                 state.generation,
                 observation,
                 artifact_receipt,
+                projection,
             )
             self._operator_terminal.move_to_end(
                 state.generation.process_generation_id
@@ -2667,7 +2785,7 @@ class ExecutiveWorkerBroker:
                 generation.process_generation_id
             )
         if terminal_receipt is not None:
-            terminal_generation, terminal, artifact_receipt = terminal_receipt
+            terminal_generation, terminal, artifact_receipt, _projection = terminal_receipt
             if terminal_generation != generation:
                 raise BrokerProtocolError(
                     "operator terminal generation identity drifted"
@@ -2852,6 +2970,7 @@ class ExecutiveWorkerBroker:
                     self._active_run_id = spec.run_id
                 self._starting = False
         return {
+            "adapter_id": self.adapter_id,
             "process_ref": process_ref,
             "launch_attestation": attestation,
             "startup_sweep": self.startup_sweep,
@@ -2894,6 +3013,7 @@ class ExecutiveWorkerBroker:
                 if status_sweep is not None:
                     self.last_sweep = status_sweep
                 result: dict[str, Any] = {
+                    "adapter_id": self.adapter_id,
                     "broker_pid": os.getpid(),
                     "worker_uid": os.geteuid(),
                     "worker_gid": os.getegid(),
@@ -3069,7 +3189,7 @@ class ExecutiveWorkerBroker:
             adapter_error: Exception | None = None
             receipt: ValidationReceipt | None = None
             try:
-                receipt = await self.adapter.run_validation_argv(
+                receipt = await self.validation_adapter.run_validation_argv(
                     state.spec,
                     command,
                     timeout_seconds=timeout,
@@ -3691,7 +3811,7 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
 
 
 class RemoteCodexWorkerAdapter:
-    """Control-side Codex adapter facade backed by the distinct-UID broker."""
+    """Control-side fixed-identity adapter facade backed by the worker broker."""
 
     adapter_id = "codex-cli"
 
@@ -3721,6 +3841,8 @@ class RemoteCodexWorkerAdapter:
                 "validation_commands": commands,
             },
         )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote broker adapter identity does not match facade")
         process_ref = _process_ref_from_json(result.get("process_ref"))
         if process_ref.run_id != spec.run_id:
             raise BrokerProtocolError("remote process run_id does not match LaunchSpec")
@@ -3899,6 +4021,12 @@ class RemoteCodexWorkerAdapter:
         return _validation_from_json(result.get("validation"))
 
 
+class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
+    """Control-side native Claude facade with immutable broker identity."""
+
+    adapter_id = "claude-code"
+
+
 class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
@@ -4059,6 +4187,369 @@ class RemoteWorkerProcessController:
         )
 
 
+@dataclasses.dataclass(frozen=True)
+class RemoteWorkerBrokerEndpoint:
+    """One fixed transport endpoint for an Executive-selected worker identity."""
+
+    worker_id: str
+    client: WorkerBrokerClient
+    worker_user: str
+    worker_uid: int
+    worker_gid: int
+    secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        worker_id = str(self.worker_id or "").strip()
+        worker_user = str(self.worker_user or "").strip()
+        if not _ID_RE.fullmatch(worker_id):
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_id")
+        if not worker_user or any(character.isspace() for character in worker_user):
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_user")
+        if type(self.worker_uid) is not int or self.worker_uid <= 0:
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_uid")
+        if type(self.worker_gid) is not int or self.worker_gid <= 0:
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_gid")
+        if not isinstance(self.secret_canary_verdict, Mapping):
+            raise WorkerBrokerError("remote worker endpoint canary verdict must be a mapping")
+        object.__setattr__(self, "worker_id", worker_id)
+        object.__setattr__(self, "worker_user", worker_user)
+        object.__setattr__(
+            self,
+            "secret_canary_verdict",
+            _freeze_worker_execution_value(self.secret_canary_verdict),
+        )
+
+    def bind_launch_spec(self, spec: WorkerLaunchSpec) -> WorkerLaunchSpec:
+        if spec.worker_id != self.worker_id:
+            raise BrokerStateError("LaunchSpec worker differs from broker endpoint")
+        return dataclasses.replace(
+            spec,
+            worker_user=self.worker_user,
+            expected_worker_uid=self.worker_uid,
+            expected_worker_gid=self.worker_gid,
+            secret_canary_verdict=self.secret_canary_verdict,
+        )
+
+
+class _RemoteWorkerBrokerFleetProcessController:
+    """Restart-only synchronous routing through durable Attempt.worker_id.
+
+    This facade owns no durable carrier state.  It remembers only the worker
+    identity observed from the current durable Attempt during one control
+    process so the subsequent synchronous unbound-run cleanup cannot switch
+    carriers after restart.
+    """
+
+    def __init__(self, fleet: "RemoteWorkerBrokerFleet") -> None:
+        self._fleet = fleet
+        self._observed_workers: dict[str, str] = {}
+
+    def _bind_attempt(self, attempt: Any) -> tuple[str, str]:
+        run_id = getattr(attempt, "attempt_id", None)
+        worker_id = getattr(attempt, "worker_id", None)
+        if not isinstance(run_id, str) or not _ID_RE.fullmatch(run_id):
+            raise BrokerStateError("restart attempt has invalid run identity")
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            raise BrokerStateError("restart attempt has invalid persisted worker identity")
+        # Resolve the configured carrier before recording the observation.  A
+        # missing worker remains a typed refusal and never creates a binding.
+        self._fleet._controller_for_worker(worker_id)
+        existing = self._observed_workers.get(run_id)
+        if existing is not None and existing != worker_id:
+            raise BrokerStateError(
+                "restart run is already bound to another worker broker carrier"
+            )
+        self._observed_workers[run_id] = worker_id
+        return run_id, worker_id
+
+    def _worker_for_observed_run(self, run_id: str) -> str:
+        if not isinstance(run_id, str) or not _ID_RE.fullmatch(run_id):
+            raise BrokerStateError("restart cleanup has invalid run identity")
+        try:
+            return self._observed_workers[run_id]
+        except KeyError as exc:
+            raise BrokerStateError(
+                "restart cleanup has no persisted worker observation"
+            ) from exc
+
+    def presence(self, attempt: Any):
+        _run_id, worker_id = self._bind_attempt(attempt)
+        return self._fleet._controller_for_worker(worker_id).presence(attempt)
+
+    def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        worker_id = self._worker_for_observed_run(run_id)
+        controller = self._fleet._controller_for_worker(worker_id)
+        cleanup = getattr(controller, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise BrokerStateError(
+                "bound worker process controller cannot reconcile ambiguous start"
+            )
+        value = cleanup(run_id)
+        if not isinstance(value, Mapping):
+            raise BrokerProtocolError(
+                "bound worker process controller returned invalid cleanup receipt"
+            )
+        return value
+
+    def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
+        if isinstance(attempt_or_run_id, str):
+            run_id = attempt_or_run_id
+            worker_id = self._worker_for_observed_run(run_id)
+        else:
+            run_id, worker_id = self._bind_attempt(attempt_or_run_id)
+        controller = self._fleet._controller_for_worker(worker_id)
+        reader = getattr(controller, "uid_sweep_receipt", None)
+        if not callable(reader):
+            raise BrokerStateError(
+                "bound worker process controller has no UID sweep receipt"
+            )
+        value = reader(attempt_or_run_id)
+        if not isinstance(value, Mapping):
+            raise BrokerProtocolError(
+                "bound worker process controller returned invalid UID sweep receipt"
+            )
+        return value
+
+    def absence_verified(self, attempt: Any) -> bool:
+        _run_id, worker_id = self._bind_attempt(attempt)
+        return bool(
+            self._fleet._controller_for_worker(worker_id).absence_verified(attempt)
+        )
+
+    def terminate(self, attempt: Any) -> None:
+        _run_id, worker_id = self._bind_attempt(attempt)
+        self._fleet._controller_for_worker(worker_id).terminate(attempt)
+
+
+class RemoteWorkerBrokerFleet:
+    """Exact worker-id transport binding with no provider selection or failover.
+
+    Executive Runtime selects and persists ``Attempt.worker_id`` before this
+    object is consulted.  The fleet only maps that exact identity to one fixed
+    broker carrier.  It binds ``run_id -> worker_id`` before invoking ``start``
+    and retains the binding after any exception so ambiguous effects can only be
+    reconciled on the same carrier.
+    """
+
+    @property
+    def adapter_id(self) -> str:
+        """Immutable identity of the transport facade, never a provider label."""
+
+        return "remote-worker-broker-fleet"
+
+    def __init__(
+        self,
+        endpoints: Sequence[RemoteWorkerBrokerEndpoint],
+        *,
+        validation_commands_for_spec: (
+            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
+        ) = None,
+        adapter_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
+        controller_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
+    ) -> None:
+        rows = tuple(endpoints)
+        if not rows:
+            raise WorkerBrokerError("remote worker broker fleet requires endpoints")
+        worker_ids = tuple(row.worker_id for row in rows)
+        if len(worker_ids) != len(set(worker_ids)):
+            raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
+        validation_resolver = validation_commands_for_spec or (lambda _spec: ())
+        if adapter_factory is None:
+            adapter_factory = lambda row: RemoteCodexWorkerAdapter(
+                row.client,
+                validation_commands_for_spec=validation_resolver,
+            )
+        if controller_factory is None:
+            controller_factory = lambda row: RemoteWorkerProcessController(row.client)
+        self._endpoints = {row.worker_id: row for row in rows}
+        self._adapters = {row.worker_id: adapter_factory(row) for row in rows}
+        self._controllers = {row.worker_id: controller_factory(row) for row in rows}
+        self._process_controller = _RemoteWorkerBrokerFleetProcessController(self)
+        self._run_workers: dict[str, str] = {}
+        self._source_specs: dict[str, WorkerLaunchSpec] = {}
+        self._bound_specs: dict[str, WorkerLaunchSpec] = {}
+        self.inspector = _UnavailableRemoteInspector()
+
+    @property
+    def process_controller(self) -> _RemoteWorkerBrokerFleetProcessController:
+        """Synchronous restart facade; adapter cleanup remains asynchronous."""
+
+        return self._process_controller
+
+    @property
+    def worker_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._endpoints))
+
+    def _endpoint_for_worker(self, worker_id: str) -> RemoteWorkerBrokerEndpoint:
+        try:
+            return self._endpoints[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
+
+    def _adapter_for_worker(self, worker_id: str) -> Any:
+        try:
+            return self._adapters[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
+
+    def _controller_for_worker(self, worker_id: str) -> Any:
+        try:
+            return self._controllers[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("persisted worker has no configured broker endpoint") from exc
+
+    def _worker_for_run(self, run_id: str) -> str:
+        try:
+            return self._run_workers[str(run_id)]
+        except KeyError as exc:
+            raise BrokerStateError("run has no bound worker broker carrier") from exc
+
+    def _adapter_for_ref(self, ref: WorkerProcessRef) -> Any:
+        return self._adapter_for_worker(self._worker_for_run(ref.run_id))
+
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        if spec.run_id in self._run_workers:
+            raise BrokerStateError("run is already bound to a worker broker carrier")
+        endpoint = self._endpoint_for_worker(spec.worker_id)
+        adapter = self._adapter_for_worker(spec.worker_id)
+        bound_spec = endpoint.bind_launch_spec(spec)
+        self._run_workers[spec.run_id] = spec.worker_id
+        self._source_specs[spec.run_id] = spec
+        self._bound_specs[spec.run_id] = bound_spec
+        return await adapter.start(bound_spec)
+
+    def reattach(
+        self,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+    ) -> WorkerProcessRef:
+        """Recover one exact persisted run on its original worker carrier only."""
+
+        if not isinstance(spec, WorkerLaunchSpec):
+            raise TypeError("spec must be WorkerLaunchSpec")
+        if not isinstance(binding, WorkerRecoveryBinding):
+            raise TypeError("binding must be WorkerRecoveryBinding")
+        if binding.adapter_id != self.adapter_id:
+            raise BrokerStateError("fleet recovery adapter identity changed")
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+        if recovered_spec != spec:
+            raise BrokerStateError("fleet recovery launch specification changed")
+
+        endpoint = self._endpoint_for_worker(spec.worker_id)
+        delegate = self._adapter_for_worker(spec.worker_id)
+        reattach = getattr(delegate, "reattach", None)
+        if not callable(reattach):
+            raise BrokerStateError(
+                "bound worker adapter cannot recover existing execution"
+            )
+        delegate_adapter_id = getattr(delegate, "adapter_id", None)
+        if not isinstance(delegate_adapter_id, str) or not delegate_adapter_id.strip():
+            raise BrokerStateError("bound worker recovery adapter identity is invalid")
+
+        bound_spec = endpoint.bind_launch_spec(spec)
+        prompt_path = binding.launch_spec.get("prompt_path")
+        if not isinstance(prompt_path, str) or not prompt_path:
+            raise BrokerStateError("fleet recovery prompt path is invalid")
+        try:
+            delegate_binding = WorkerRecoveryBinding.bind(
+                adapter_id=delegate_adapter_id,
+                spec=bound_spec,
+                process_ref=binding.process_ref,
+                prompt_path=prompt_path,
+            )
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+
+        existing_worker = self._run_workers.get(spec.run_id)
+        if existing_worker is not None and (
+            existing_worker != spec.worker_id
+            or self._source_specs.get(spec.run_id) != spec
+            or self._bound_specs.get(spec.run_id) != bound_spec
+        ):
+            raise BrokerStateError("run is already bound to another worker broker carrier")
+
+        # Bind before delegate I/O so any ambiguous recovery remains fenced to
+        # the exact persisted worker/carrier.  There is no fallback selection.
+        self._run_workers[spec.run_id] = spec.worker_id
+        self._source_specs[spec.run_id] = spec
+        self._bound_specs[spec.run_id] = bound_spec
+
+        recovered_ref = reattach(bound_spec, delegate_binding)
+        if recovered_ref != binding.process_ref:
+            raise BrokerProtocolError(
+                "bound worker recovery changed immutable process identity"
+            )
+        return recovered_ref
+
+    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
+        adapter = self._adapter_for_ref(ref)
+        reader = getattr(adapter, "launch_attestation", None)
+        if not callable(reader):
+            raise BrokerStateError("bound worker adapter has no launch attestation")
+        return reader(ref)
+
+    def uid_sweep_receipt(self, subject: Any) -> Mapping[str, Any]:
+        if isinstance(subject, WorkerProcessRef):
+            delegate = self._adapter_for_ref(subject)
+        else:
+            worker_id = getattr(subject, "worker_id", None)
+            if not isinstance(worker_id, str):
+                raise BrokerStateError("UID sweep subject has no worker identity")
+            delegate = self._controller_for_worker(worker_id)
+        reader = getattr(delegate, "uid_sweep_receipt", None)
+        if not callable(reader):
+            raise BrokerStateError("bound worker carrier has no UID sweep receipt")
+        return reader(subject)
+
+    async def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        adapter = self._adapter_for_worker(self._worker_for_run(run_id))
+        cleanup = getattr(adapter, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise BrokerStateError("bound worker adapter cannot reconcile ambiguous start")
+        return await cleanup(run_id)
+
+    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
+        return await self._adapter_for_ref(ref).status(ref)
+
+    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
+        return await self._adapter_for_ref(ref).collect_result(ref)
+
+    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
+        return await self._adapter_for_ref(ref).cancel(ref, reason)
+
+    async def run_validation_argv(
+        self,
+        spec: WorkerLaunchSpec,
+        argv: Sequence[str],
+        *,
+        timeout_seconds: float = 300.0,
+    ) -> ValidationReceipt:
+        worker_id = self._worker_for_run(spec.run_id)
+        if worker_id != spec.worker_id:
+            raise BrokerStateError("LaunchSpec worker differs from bound broker carrier")
+        if self._source_specs.get(spec.run_id) != spec:
+            raise BrokerStateError("LaunchSpec differs from the spec bound at start")
+        return await self._adapter_for_worker(worker_id).run_validation_argv(
+            self._bound_specs[spec.run_id],
+            argv,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def presence(self, attempt: Any):
+        return self._controller_for_worker(attempt.worker_id).presence(attempt)
+
+    def absence_verified(self, attempt: Any) -> bool:
+        return bool(
+            self._controller_for_worker(attempt.worker_id).absence_verified(attempt)
+        )
+
+    def terminate(self, attempt: Any) -> None:
+        self._controller_for_worker(attempt.worker_id).terminate(attempt)
+
+
 class _UnavailableRemoteInspector:
     """Fail-closed marker: cross-UID inspection must use the remote controller."""
 
@@ -4092,7 +4583,10 @@ __all__ = [
     "PeerAuthorizationError",
     "PeerCredentials",
     "RemoteBrokerError",
+    "RemoteClaudeWorkerAdapter",
     "RemoteCodexWorkerAdapter",
+    "RemoteWorkerBrokerEndpoint",
+    "RemoteWorkerBrokerFleet",
     "RemoteWorkerProcessController",
     "UIDSweepReceipt",
     "WorkerBrokerClient",

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
 from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_DISCRIMINATOR,
+    CONSULTATION_PACKET_MAX_BYTES,
     _BINDING_ID_RE,
     _PRODUCER_SCHEMA_BY_REASONING_SURFACE,
     CONSULTATION_PURPOSES,
@@ -18,6 +21,8 @@ from common.agent_dialogue_consultation_contract import (
     build_consultation,
     canonical_consultation_json,
     classify_duplicate,
+    parse_consultation_packet,
+    render_consultation_packet,
     consultation_schema_for_reasoning_surface,
     consultation_semantic_fingerprint,
     validate_consultation,
@@ -87,6 +92,149 @@ def raw_consultation(**overrides) -> dict:
     if value["purpose"] == "QUESTION":
         value.pop("question_message_key", None)
     return value
+
+
+def _valid_answer_frame() -> dict:
+    question = build_consultation(raw_consultation())
+    answer = copy.deepcopy(question)
+    answer["schema"] = CONSULTATION_V2_SCHEMA
+    answer["message_key"] = "asd-consultation-answer-0001"
+    answer["purpose"] = "ANSWER"
+    answer["question"] = None
+    answer["answer"] = {"text": "closed answer", "evidence_refs": []}
+    answer["question_message_key"] = question["message_key"]
+    answer["correlation"]["request_message_key"] = question["message_key"]
+    answer["fingerprint"] = ""
+    return build_consultation(answer)
+
+
+def _wire(document: dict) -> str:
+    return (
+        CONSULTATION_PACKET_DISCRIMINATOR
+        + "\n"
+        + json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    )
+
+
+def test_consultation_packet_round_trip_is_canonical_and_bounded() -> None:
+    for frame in (
+        build_consultation(raw_consultation()),
+        _valid_answer_frame(),
+    ):
+        rendered = render_consultation_packet(frame)
+
+        assert rendered.split("\n", 1)[0] == CONSULTATION_PACKET_DISCRIMINATOR
+        assert len(rendered.encode("utf-8")) <= CONSULTATION_PACKET_MAX_BYTES
+        assert parse_consultation_packet(rendered) == validate_consultation(frame)
+        assert render_consultation_packet(parse_consultation_packet(rendered)) == rendered
+
+
+def test_consultation_packet_discriminator_is_disjoint_from_lifecycle_frames() -> None:
+    from common.agent_dialogue_contract_v2 import (
+        MESSAGE_DISCRIMINATOR_V2,
+        PARENT_DISCRIMINATOR_V2,
+    )
+
+    for incumbent in (MESSAGE_DISCRIMINATOR_V2, PARENT_DISCRIMINATOR_V2):
+        assert not CONSULTATION_PACKET_DISCRIMINATOR.startswith(incumbent)
+        assert not incumbent.startswith(CONSULTATION_PACKET_DISCRIMINATOR)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda text: text.replace(":", ": ", 1), id="whitespace"),
+        pytest.param(lambda text: text + "\nextra", id="third-line"),
+        pytest.param(
+            lambda text: text.replace(
+                CONSULTATION_PACKET_DISCRIMINATOR,
+                "MMX/AGENT_DIALOGUE_CONSULTATION_PACKET_V0",
+                1,
+            ),
+            id="wrong-discriminator",
+        ),
+    ],
+)
+def test_consultation_packet_parser_rejects_noncanonical_text(mutate) -> None:
+    rendered = render_consultation_packet(build_consultation(raw_consultation()))
+
+    with pytest.raises(DialogueContractError):
+        parse_consultation_packet(mutate(rendered))
+
+
+def test_consultation_packet_parser_rejects_invalid_utf8_and_nonfinite_json() -> None:
+    with pytest.raises(DialogueContractError):
+        parse_consultation_packet(b"\xff")
+
+    with pytest.raises(DialogueContractError):
+        parse_consultation_packet(
+            CONSULTATION_PACKET_DISCRIMINATOR + "\n{\"value\":NaN}"
+        )
+
+
+def test_consultation_packet_parser_rejects_unknown_key_and_fingerprint_drift() -> None:
+    frame = build_consultation(raw_consultation())
+    unknown = copy.deepcopy(frame)
+    unknown["unknown"] = 1
+    with pytest.raises(DialogueContractError):
+        parse_consultation_packet(_wire(unknown))
+
+    drifted = copy.deepcopy(frame)
+    drifted["fingerprint"] = "0" * 64
+    with pytest.raises(DialogueContractError):
+        parse_consultation_packet(_wire(drifted))
+
+
+@pytest.mark.parametrize("purpose", ["NOTICE", "CORRECTION"])
+def test_consultation_packet_wire_refuses_non_question_answer_purposes(
+    purpose: str,
+) -> None:
+    frame = _valid_answer_frame() if purpose == "CORRECTION" else raw_consultation()
+    frame = copy.deepcopy(frame)
+    frame["purpose"] = purpose
+    if purpose == "NOTICE":
+        frame["schema"] = CONSULTATION_SCHEMA
+        frame.pop("question_message_key", None)
+        frame["question"] = "notice"
+        frame["answer"] = None
+        frame["supersedes_message_key"] = None
+    else:
+        frame["supersedes_message_key"] = "asd-consultation-answer-0000"
+    frame["fingerprint"] = ""
+    valid_non_wire_frame = build_consultation(frame)
+
+    with pytest.raises(DialogueContractError):
+        render_consultation_packet(valid_non_wire_frame)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "token xoxb-not-a-real-token-shaped-value",
+        "notify <@U12345678>",
+    ],
+    ids=["secret", "mention"],
+)
+def test_consultation_packet_wire_delegates_secret_and_mention_refusal(
+    question: str,
+) -> None:
+    with pytest.raises(DialogueContractError):
+        render_consultation_packet(raw_consultation(question=question))
+
+
+def test_consultation_packet_wire_refuses_limit_plus_one_rendered_bytes() -> None:
+    oversized = build_consultation(raw_consultation(question="x" * 8000))
+
+    with pytest.raises(DialogueContractError) as exc_info:
+        render_consultation_packet(oversized)
+
+    assert exc_info.value.code == "FRAME_TOO_LARGE"
 
 
 def test_consultation_contract_freezes_exact_closed_shape_and_semantics() -> None:
