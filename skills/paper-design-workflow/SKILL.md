@@ -23,8 +23,16 @@ surface before making a capability claim.
    nothing about whether the Paper family is available.
 2. **Do not over-block on `paper_prepare`.** Its absence alone does not make Paper unavailable.
    If the intended file is already active, inspect/read/edit may still be usable. If a different file
-   must be focused, use `paper_prepare` when exposed; otherwise use only an independently authorized
-   host carrier or surface the exact missing file-transition action.
+   must be focused, use `paper_prepare` when exposed. If the ChatGPT surface omits that one action
+   but the same-pinned Studio Direct source plus the installed gateway prove that Studio owns and
+   advertises the bounded `paper_prepare` action, treat this first as **Studio tool-publication /
+   session-surface drift**, not as a Chairman/manual-desktop gate. Reconcile and invoke that existing
+   Studio-owned prepare action through the current Studio carrier when its exact installed
+   configuration and bridge pin can be verified, then re-inspect the target file before editing.
+   Do not ask the Chairman to open/focus Paper manually merely because the ChatGPT tool list omitted
+   `paper_prepare`. Manual file focus is a last-resort human gate only after the current Studio-owned
+   transition path is actually unavailable or refused. This rule grants no arbitrary shell/open-file
+   authority and never permits another carrier after a denial or unresolved modifying effect.
 3. **Desktop Commander is a real guarded-bridge alternative, never authority by fallback.**
    Technical absence or unserviceability of the Studio Direct Paper family may justify considering
    RDC **before any Paper mutation**, but does not authorize it. Require
