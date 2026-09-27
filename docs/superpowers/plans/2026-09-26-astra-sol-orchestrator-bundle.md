@@ -111,3 +111,41 @@ MCP-initializing diagnostic is explicitly distinguished from parent-only renderi
 No live bundle installation, credential helper, model turn, RuntimeBinding change or
 worker dispatch is claimed. Old hosted CI was green for both source inputs; new-head
 full CI and independent review remain release gates, never inferred from local tests.
+
+## R2B: native coordinator machinery qualification
+
+The next bounded proof drives the installed Codex binary through the existing OHF
+AppServerClient with scripted loopback Responses events in a temporary, credentialless
+home. It observes real native child creation/model routing/role and tool ceilings,
+without a real model service, Executive Job, installed-user-profile change or DCR
+operation. The fixture is test-only; it is not a provider, supervisor or admission route.
+Use source-owned roles unchanged first. Repair only a reproduced integration defect.
+The source canary must never be reported as real Astra/Sol reasoning, authenticated
+Executive submission or end-to-end acceptance. Preserve all existing reviews/holds.
+
+- [x] Prove deterministic loopback protocol and actual native tool schema.
+- [x] Exercise named Sol/Astra child creation and read exact native metadata.
+- [x] Exercise descendant/permission negatives, preserving any unsupported capability.
+- [ ] Publish exact source/proof and update the same canonical continuation.
+
+R2B result: both native role/model routes and exact-parent return work with scripted
+Responses; the child sandbox denies the test-project write. Role-local native-disable
+and max_depth do not constrain recursive spawning on the observed binary. The
+single-child cap is the actual tested guard. Do not repair the negative test into
+a false positive or broaden live capacity. The fixture also now closes its listener
+when source setup fails; the cleanup regression failed before that repair.
+
+CI R2A run 36288753172 failed in test_cli_receipt_is_deterministic_and_secret_free:
+the two reads returned 0 then 1. The validator deliberately rejects changes to its
+supplied root inventory; deterministic interleaving in a disposable copied package
+reproduced this same failure class. The exact concurrent hosted writer was not logged.
+Repair only that test's input ownership: copy current package inputs to its existing
+pytest tmp_path, retaining the real CLI and all assertions. No validator or pipeline
+policy changes. Open #916 touches only an adjacent numeric-alias count in that file;
+its changes and #535 remain untouched. Full new-head CI is still required.
+
+R2B verification: 178 focused client tests and 25 subtests passed, with all native
+fixtures enabled; 106 plugin-package tests passed separately. Exact commands and
+source/native-entry digests are in continuation_r2b of the existing evidence file.
+Source syntax compilation and input-digest recheck passed. No new-head full CI or
+independent review is claimed.

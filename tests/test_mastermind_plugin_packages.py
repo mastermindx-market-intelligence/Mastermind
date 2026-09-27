@@ -1071,17 +1071,20 @@ def test_invalid_json_error_is_repository_relative(tmp_path: Path) -> None:
     assert all(not error["path"].startswith("/") for error in result["errors"])
 
 
-def test_cli_receipt_is_deterministic_and_secret_free() -> None:
+def test_cli_receipt_is_deterministic_and_secret_free(tmp_path: Path) -> None:
+    # The validator deliberately refuses root-inventory changes during capture.
+    # Other CI shards may create files in ROOT; determinism needs owned input.
+    _copy_package(tmp_path)
     command = [
         sys.executable,
         str(ROOT / "scripts/validate_mastermind_plugins.py"),
         "--root",
-        str(ROOT),
+        str(tmp_path),
         "--json",
     ]
     first = subprocess.run(command, check=False, capture_output=True, text=True)
     second = subprocess.run(command, check=False, capture_output=True, text=True)
-    assert first.returncode == second.returncode == 0
+    assert first.returncode == second.returncode == 0, (first.stdout, second.stdout)
     assert first.stdout == second.stdout
     result = json.loads(first.stdout)
     assert result["ok"] is True and result["errors"] == []

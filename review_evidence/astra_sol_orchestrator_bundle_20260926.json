@@ -112,5 +112,134 @@
     "new_head_full_ci_proven": false,
     "independent_review_proven": false,
     "mission_complete": false
+  },
+  "continuation_r2b": {
+    "observed_at": "2026-09-27T03:05:16.340358+00:00",
+    "input_head": "8f112d7af0e26042614050d9bd374e0043dd5aa6",
+    "protected_procedure_pin": "4c6b206d3fb7fbc6d077faf61ae361bedf259925",
+    "scope": "native harness machinery with scripted loopback Responses; no real model inference or Executive admission",
+    "native_version": "codex-cli 0.154.0",
+    "native_entry_sha256": {
+      "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+      "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex": "4f85982624b3898c8991cb80c0981b2aa71070e3537046c9a95950318a95afcc"
+    },
+    "source_sha256": {
+      "tests/codex_orchestrator_native_fixture.py": "d96cef5a97b1d47349a6c40194f7c26642923449da9f2e32c536a32079947c4d",
+      "tests/test_codex_orchestrator_native_spawn.py": "261724907f1577d194ba9e4a613f2432ddf6c8714634e4f89b95e99d609884f0",
+      "tests/test_mastermind_plugin_packages.py": "2194dfad2c34b97e386a07eeada46ef480ed765184187bb869e6db2b6f6df37a"
+    },
+    "focused_tests": {
+      "command": [
+        "/private/tmp/mmx-astra-bundle-test-ko_8w550/venv/bin/python",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_codex_orchestrator_bundle.py",
+        "tests/test_codex_orchestrator_native_config.py",
+        "tests/test_astra_delegation_source_policy.py",
+        "tests/test_astra_external_fabric_contract.py",
+        "tests/test_codex_fabric_registration.py",
+        "tests/test_codex_fabric_auth.py",
+        "tests/test_codex_fabric_enrollment.py",
+        "tests/test_codex_fabric_attended_parent.py",
+        "tests/test_codex_fabric_orchestrator_launch.py",
+        "tests/test_codex_orchestrator_native_spawn.py",
+        "--tb=short"
+      ],
+      "exit_code": 0,
+      "stdout": "........................................................................ [ 40%]\n..........................................................................................................              [100%]\n178 passed, 25 subtests passed in 29.03s\n",
+      "stderr": "",
+      "source_sha256": {
+        "tests/test_codex_orchestrator_bundle.py": "26284f91a3e136c4f10a967471ce7219c5b101ff6b2f39f118caaaf9c5a8119a",
+        "tests/test_codex_orchestrator_native_config.py": "c0b303fa827b8c5308a70d2a8077b9fa12bb8798b350a89ceb4e22e0915c69a7",
+        "tests/test_astra_delegation_source_policy.py": "fdbb68674626663f9cf7fa3dc0b20f15aa7ebfc7d2766dbcc65328f4a95a871e",
+        "tests/test_astra_external_fabric_contract.py": "48753fb401fc63675c82106e47ea7098c0dce5938d5d6cb749a21c670a247a56",
+        "tests/test_codex_fabric_registration.py": "94a014a53ee76f42f236e789ff9c2db7930461c294f9f3eb0bdbcf638d67a420",
+        "tests/test_codex_fabric_auth.py": "4ab42ad888038fd6f799f95c8cd7593793f2b6698532c022ec7d04665d32d30f",
+        "tests/test_codex_fabric_enrollment.py": "8652203078a8037d004188d07a4c66fa51e33f177aa0b4fc415f5075dca7b7e4",
+        "tests/test_codex_fabric_attended_parent.py": "1de73d93450de35849394bebe24fa5d1c352b8d7d25b177b0ec3fe8da169e134",
+        "tests/test_codex_fabric_orchestrator_launch.py": "14775ee3e87491bf70b19b7016d077cd5ad23d47d40ceb6eb335b636e7ad29ad",
+        "tests/test_codex_orchestrator_native_spawn.py": "261724907f1577d194ba9e4a613f2432ddf6c8714634e4f89b95e99d609884f0",
+        "tests/codex_orchestrator_native_fixture.py": "d96cef5a97b1d47349a6c40194f7c26642923449da9f2e32c536a32079947c4d",
+        "ops/codex_fabric/attended_parent.py": "ef1cb0b54f919e64d920b88551960b295c23a2af5160cea077964361fe4feb8d",
+        "ops/codex_fabric/orchestrator_bundle.py": "10a520281782ede864c2b825fd1d67f4207ee1de10507f60ccb3b2b5ba85ceb4"
+      },
+      "observed_at": "2026-09-27T03:04:35.803159+00:00"
+    },
+    "plugin_tests": {
+      "command": [
+        "/private/tmp/mmx-astra-bundle-test-ko_8w550/venv/bin/python",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "tests/test_mastermind_plugin_packages.py",
+        "--tb=short"
+      ],
+      "exit_code": 0,
+      "result": "106 passed in 60.25s"
+    },
+    "native_results": {
+      "sol_child": {
+        "agentRole": "l2_sol_ceo",
+        "requested_model": "gpt-5.6-sol",
+        "reasoning_effort": "high",
+        "exact_parent_thread_binding": true
+      },
+      "astra_child": {
+        "agentRole": "l2_astra_ceo",
+        "requested_model": "gpt-6-astra",
+        "reasoning_effort": "high",
+        "exact_parent_thread_binding": true
+      },
+      "child_result_in_exact_parent_next_request": true,
+      "parent_sandbox": {
+        "type": "readOnly",
+        "networkAccess": false
+      },
+      "child_project_write": {
+        "exit_code": 1,
+        "refusal": "operation not permitted",
+        "marker_created": false
+      },
+      "role_local_agents_disabled_removes_spawn_tool": false,
+      "one_child_cap_grandchild_refusal": "collab spawn failed: agent thread limit reached",
+      "isolated_two_child_with_max_depth_one": {
+        "grandchild_created": true,
+        "live_configuration_changed": false
+      },
+      "native_process_groups_and_fixture_listeners_settled": true,
+      "source_preflight_failure_listener_cleanup": true,
+      "generic_native_roles_excluded": false
+    },
+    "ci_repair": {
+      "input_run": 36288753172,
+      "input_job": 108534564012,
+      "input_head_result": "FAILURE",
+      "failed_test": "tests/test_mastermind_plugin_packages.py::test_cli_receipt_is_deterministic_and_secret_free",
+      "observed_failure": "first CLI return 0; second CLI return 1",
+      "deterministic_counterexample": "root inventory change during validation produces PACKAGE_FILESYSTEM_INVALID",
+      "original_hosted_concurrent_writer": "UNKNOWN: not exposed in failed assertion",
+      "repair": "give determinism test an owned tmp_path copy of current package inputs; preserve validator and all validity/determinism assertions",
+      "sibling_916_overlap": "adjacent count assertion only, unchanged",
+      "validator_changed": false,
+      "workflow_changed": false,
+      "new_head_ci_proven": false
+    },
+    "real_model_inference_used": false,
+    "served_model_attested": false,
+    "live_installation_performed": false,
+    "global_configuration_modified": false,
+    "credentials_or_dcr_modified": false,
+    "executive_worker_dispatch_proven": false,
+    "independent_review_proven": false,
+    "mission_complete": false
   }
 }

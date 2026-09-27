@@ -24,9 +24,9 @@ The default performs two local metadata reads bound to the target project: `code
 
 For a known `not_logged_in` census, the JSON result is `PREPARED_NOT_AUTHENTICATED`, with explicit `authenticated_tool_discovery_proven=false`, prepared argv, source/project paths, and hashes of the profile/helper inputs. These hashes identify input bytes; they are not a signed release attestation, a whole-dependency-tree digest, or proof that the selected interpreter can authenticate.
 
-Preparation refuses missing/duplicate/disabled/different registrations, existing header or environment credential sources, native OAuth or unknown authentication status, conflicting visible tool restrictions, malformed census, invalid paths, and profiles that enable native agents or widen the one-child ceiling. It does not overwrite or repair those conditions.
+Preparation refuses missing/duplicate/disabled/different registrations, existing header or environment credential sources, native OAuth or unrecognized authentication status, conflicting visible tool restrictions, malformed census, invalid paths, and profiles that enable native agents or widen the one-child ceiling. It does not overwrite or repair those conditions.
 
-Codex may report `unsupported` when authentication-status data is absent. This recognized case returns `PREPARED_AUTH_STATUS_UNRESOLVED` with `launch_allowed=false`: configuration remains inspectable, but `--launch` refuses before executing Codex or the helper. Unrecognized/malformed states still refuse preparation. A true `launch_allowed` is only this attended wrapper's metadata preflight result, never authentication proof or an Executive execution grant.
+Codex may report `unsupported` or `unknown` when authentication-status data is absent. This recognized case returns `PREPARED_AUTH_STATUS_UNRESOLVED` with `launch_allowed=false`: configuration remains inspectable, but `--launch` refuses before executing Codex or the helper. Unrecognized/malformed states still refuse preparation. A true `launch_allowed` is only this attended wrapper's metadata preflight result, never authentication proof or an Executive execution grant.
 
 ## Explicit attended launch after onboarding
 
@@ -83,3 +83,10 @@ The test replaces that helper with /usr/bin/false and proves the required server
 refuses; it then disables only the fixture MCP to inspect parent settings. This proves
 configuration consumption and required-connection refusal, not authenticated launch,
 role selection, descendant confinement, served-model identity or worker execution.
+
+The separate native-spawn fixture now exercises named-role routing, a denied child
+project write, and exact-parent delivery with scripted Responses events. See
+codex-orchestrator-bundle.md for the limitation it exposed: role-local agents.enabled
+and max_depth do not enforce nonrecursive children on 0.154.0. The existing one-child
+invocation cap remains essential. These tests do not call the real auth helper or
+prove the production coordinator-to-Executive-worker journey.

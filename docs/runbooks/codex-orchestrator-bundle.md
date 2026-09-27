@@ -60,7 +60,8 @@ role file does not prove the child's effective parent/MCP permissions.
 The next accepted canary must bind one coordinator to its own admitted responsibility,
 exact native handle, permission ceiling and existing RuntimeBinding. Only then may
 that coordinator lead separately admitted worker Jobs through the existing Executive
-Fabric. Native recursion remains disabled in both role files; no new queue, broker,
+Fabric. The role files request no native recursion, but this is not an enforced role boundary
+on the qualified 0.154.0 binary; see the negative proof below. No new queue, broker,
 credential path or parent identity is introduced here. Consume #1000's existing
 attended launch owner rather than create a second launcher. Preserve #633's original
 Auth0 EFFECT_UNKNOWN operation and #981's exact-head independent review request.
@@ -73,3 +74,32 @@ preflight and proof boundary. The installer still never launches. The launcher
 uses the current native home, revalidates local inputs before exec, and never
 converts unsupported/unknown authentication into launch readiness. Source remains
 Draft/HOLD pending independent review and the existing parent release gates.
+
+## Native machinery qualification, without real model inference
+
+The opt-in tests/test_codex_orchestrator_native_spawn.py drives the installed Codex
+binary using the existing OHF AppServerClient and scripted loopback Responses events.
+Every case uses an empty temporary HOME/CODEX_HOME with file-only credential stores;
+the script is a test fixture, not a production provider or delegation route.
+
+Both named roles create native child threads with the expected parentThreadId,
+agentRole, requested model and high reasoning effort. The child request selects Sol
+or Astra as specified. A child shell write to its test project is denied by the native
+read-only sandbox. A child completion is delivered into the next request for its exact
+parent. Cleanup proves the private native process group and loopback listener stopped.
+None of this proves real Astra/Sol inference, Executive identity, MCP authority,
+worker Job admission, a production RuntimeBinding, or production Wake.
+
+**Do not raise the one-child cap based on role-local configuration.** On Codex
+0.154.0 both children retain the native spawn_agent tool despite agents.enabled=false
+in their role files. The normal one-child limit rejects a grandchild attempt with
+agent thread limit reached. In an isolated test-only two-child configuration, a
+real native grandchild is created even with agents.max_depth=1. Therefore the
+one-child invocation limit is the observed recursion guard; the role flag and depth
+setting are not substitutes. No live limit was changed to perform this test.
+
+Generic worker/explorer/default roles are also advertised. The named-role profiles
+are not a hard allowlist. Keep global installation and broader fanout held until
+current native support and existing Executive capability/admission owners can prove
+the exact required restrictions. Installer receipts intentionally keep broad
+role_selection_proven and child_enforcement_proven false.

@@ -131,3 +131,22 @@ with the fixture MCP disabled. Exact parent/child execution proof remains held.
 Filesystem identity of the effective native home joins the local launch plan: path
 and identical role bytes alone do not detect replacement of its credential directory.
 These observations are transient launch inputs, not another session/auth registry.
+
+## R2B native falsifier and corrected enforcement claim
+
+The declared nonrecursive role setting is a request, not observed enforcement.
+The installed 0.154.0 native runner selects both named coordinator roles and their
+requested models correctly, and its read-only sandbox denies a real attempted child
+project write. However, child spawn_agent remains exposed with role-local
+agents.enabled=false. With one global child slot, the native runner refuses a
+grandchild for capacity; with two isolated test slots, it creates a grandchild even
+when agents.max_depth=1. This supersedes any interpretation above that the role flag
+alone confines recursion. The candidate keeps its single-child limit unchanged.
+
+Use the existing OHF client and a test-only scripted loopback response stream to
+reproduce those observations without accounts or real model inference. Native child
+completion reaches the exact parent's next request. This is harness qualification,
+not a new worker authority or a production served-model receipt. Broader concurrency
+needs an existing-owner capability solution that demonstrably bounds the full tree;
+it cannot be obtained by simply editing these TOML limits. Worker admission and
+child-specific Executive identity remain outstanding.
