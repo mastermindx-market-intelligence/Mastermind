@@ -59,12 +59,14 @@ def _passing_canary() -> dict[str, object]:
     }
 
 
-def _fixture_claude_binary(tmp_path: Path) -> Path:
+def _fixture_claude_binary(
+    tmp_path: Path, *, version: str = _FIXTURE_VERSION
+) -> Path:
     binary = tmp_path / "fixture-claude"
     binary.write_text(
         "#!/bin/sh\n"
         'if [ "$1" = "--version" ]; then\n'
-        f"  printf '{_FIXTURE_VERSION} (Claude Code)\\n'\n"
+        f"  printf '{version} (Claude Code)\\n'\n"
         "  exit 0\n"
         "fi\n"
         'root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
@@ -3003,3 +3005,70 @@ def test_post_spawn_principal_mismatch_refuses_and_retains_cleanup_custody(
     assert isinstance(error, claude_worker.ClaudeProcessIdentityError)
     assert observed_pids, "the process was created, so cleanup custody applies"
     assert cleanups, "the refused launch must retain and perform cleanup custody"
+
+
+@pytest.mark.parametrize("selector", [
+    "fable", "Fable", "FABLE", "best", "Best", "BEST",
+    "default", "Default", "DEFAULT", "opusplan", "OpusPlan", "OPUSPLAN",
+    "opus", "Opus", "OPUS", "sonnet", "Sonnet", "SONNET",
+    "haiku", "Haiku", "HAIKU",
+])
+def test_moving_model_selectors_refuse_before_native_observation(tmp_path, selector):
+    observer = _FakeManagedPolicyObserver(
+        exact_model=selector, binary_sha256="a" * 64,
+        binary_version=_FIXTURE_VERSION, generation=_VALID_GENERATION,
+    )
+    # This path deliberately does not exist. An exact-model refusal must occur
+    # before any binary/auth/provider observation, not accidentally at launch.
+    with pytest.raises(ClaudeWorkerContractError, match="exact configured model id"):
+        ClaudeCodeWorkerAdapter(
+            tmp_path / "unprobed-native-binary",
+            allowed_versions=frozenset({_FIXTURE_VERSION}),
+            exact_model=selector, max_turns=1,
+            managed_policy_observer=observer,
+        )
+    assert observer.calls == 0
+
+
+@pytest.mark.parametrize("model,version", [
+    ("claude-fable-5-1", "2.1.257"), ("claude-fable-5-1", "2.1.280"),
+    ("claude-opus-5-5", "2.1.280"), ("claude-opus-5-5", "2.1.281"),
+    ("claude-opus-5-5", "2.2.0"), ("claude-opus-5-5", "3.0.0"),
+])
+def test_exact_fable_and_opus_model_pins_are_not_rewritten(tmp_path, model, version):
+    # Contract fixture only: this does not assert installed CLI support,
+    # account entitlement, served identity, or production route admission.
+    binary = _fixture_claude_binary(tmp_path, version=version)
+    observer = _observer_for(binary)
+    observer.exact_model = model
+    observer.binary_version = version
+    adapter = ClaudeCodeWorkerAdapter(
+        binary, allowed_versions=frozenset({version}),
+        exact_model=model, max_turns=1, managed_policy_observer=observer,
+    )
+    assert adapter.exact_model == model
+    assert observer.calls == 1
+    assert adapter_descriptor("claude-code").implemented is False
+
+
+@pytest.mark.parametrize("model,version,floor", [
+    ("claude-opus-5-5", "2.1.279", "2.1.280"),
+    ("claude-opus-5-5", "2.1.9", "2.1.280"),
+    ("claude-opus-5-5", "2.0.999", "2.1.280"),
+    ("claude-opus-5-5", "1.99.999", "2.1.280"),
+    ("claude-fable-5-1", "2.1.256", "2.1.257"),
+    ("claude-fable-5-1", "2.1.9", "2.1.257"),
+])
+def test_known_model_runtime_floor_refuses_before_policy_observation(tmp_path, model, version, floor):
+    binary = _fixture_claude_binary(tmp_path, version=version)
+    observer = _observer_for(binary)
+    observer.exact_model = model
+    observer.binary_version = version
+    with pytest.raises(ClaudeWorkerContractError) as caught:
+        ClaudeCodeWorkerAdapter(
+            binary, allowed_versions=frozenset({version}), exact_model=model,
+            max_turns=1, managed_policy_observer=observer,
+        )
+    assert "requires Claude Code" in str(caught.value)
+    assert floor in str(caught.value)
+    assert observer.calls == 0

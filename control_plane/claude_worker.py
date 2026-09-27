@@ -68,7 +68,12 @@ _VERSION_RE = re.compile(r"(?P<version>\d+\.\d+\.\d+)\s+\(Claude Code\)")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_BINARY_BYTES = 1 << 29
 _MAX_TURNS = 64
-_MOVING_MODEL_ALIASES = frozenset({"haiku", "opus", "sonnet"})
+# These selectors can change the served model or even switch model families.
+# In particular, best can consume Fable quota and opusplan switches to Sonnet.
+# Native worker construction requires a reviewed exact model, never a selector.
+_MOVING_MODEL_ALIASES = frozenset(
+    {"best", "default", "fable", "haiku", "opus", "opusplan", "sonnet"}
+)
 _READ_TOOLS = ("Glob", "Grep", "Read")
 _WRITE_TOOLS = ("Edit", "Write")
 _TEST_TOOL = "Bash"
@@ -489,6 +494,23 @@ def _validate_exact_model(exact_model: str) -> str:
     ):
         raise ClaudeWorkerContractError("Claude model must be an exact configured model id")
     return exact_model
+
+
+def _validate_known_model_runtime(exact_model: str, version: str) -> None:
+    """Enforce documented native floors, without granting model admission.
+
+    Source: https://code.claude.com/docs/en/model-config (2026-09-27).
+    The caller must still attest the binary against its reviewed version set.
+    """
+    minimum = {
+        "claude-opus-5-5": (2, 1, 280),
+        "claude-fable-5-1": (2, 1, 257),
+    }.get(exact_model)
+    if minimum is not None and tuple(int(part) for part in version.split(".")) < minimum:
+        required = ".".join(str(part) for part in minimum)
+        raise ClaudeWorkerContractError(
+            f"{exact_model} requires Claude Code {required} or later"
+        )
 
 
 def _canonical_policy_generation(value: object) -> int:
@@ -1085,6 +1107,7 @@ class ClaudeCodeWorkerAdapter:
         binary = attest_claude_code_binary(
             claude_binary, allowed_versions=allowed_versions
         )
+        _validate_known_model_runtime(validated_model, binary.version)
         observation = _require_typed_observation(managed_policy_observer.observe())
         generation = _canonical_policy_generation(observation.generation)
         _validate_managed_observation(
