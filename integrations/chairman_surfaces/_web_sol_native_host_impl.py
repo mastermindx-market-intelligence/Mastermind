@@ -62,6 +62,8 @@ _PROBE_KEYS = frozenset(
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
 _TYPED_REENTRY_NONCES: set[str] = set()
 MAX_TYPED_REENTRY_NONCES = 256
+# One existing process-local submit fence, shared by continuation and cognition.
+# Durable/restart reconciliation remains with the incumbent effect owners.
 _SUBMIT_CONTINUATION_NONCES: set[str] = set()
 _SUBMIT_CONTINUATION_TURNS: set[str] = set()
 MAX_SUBMIT_CONTINUATION_EFFECTS = 256
@@ -487,6 +489,8 @@ def _timeout_code(request: dict[str, Any]) -> str:
         return "typed_reentry_timeout"
     if request.get("action") == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if request.get("action") == "SUBMIT_COGNITION_ASSIGNMENT":
+        return "cognition_submit_effect_unknown"
     if request.get("action") == "OBSERVE_CONTINUATION_ACK":
         return "semantic_ack_timeout"
     return "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
@@ -514,6 +518,8 @@ def _receipt_match_fields(request: dict[str, Any]) -> tuple[str, ...]:
                 "wake_obligation_digest",
             )
         )
+    if request.get("action") == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        fields.extend(wsp._COGNITION_BINDING_PAYLOAD_KEYS)
     return tuple(fields)
 
 
@@ -521,6 +527,13 @@ def _receipt_matches(
     request: dict[str, Any],
     receipt: dict[str, Any],
 ) -> bool:
+    if request.get("action") == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        expected_identity = {
+            field: request["cognition_payload"][field]
+            for field in wsp._COGNITION_IDENTITY_KEYS
+        }
+        if receipt.get("cognition_identity") != expected_identity:
+            return False
     return all(
         receipt.get(field) == request[field]
         for field in _receipt_match_fields(request)
@@ -534,6 +547,8 @@ def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
         return "typed_reentry_effect_unknown"
     if request.get("action") == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if request.get("action") == "SUBMIT_COGNITION_ASSIGNMENT":
+        return "cognition_submit_effect_unknown"
     if request.get("action") == "OBSERVE_CONTINUATION_ACK":
         return "semantic_ack_invalid"
     return default
@@ -558,6 +573,7 @@ def _require_current_runtime_binding(
     if request.get("action") not in {
         wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
         wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+        wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value,
     }:
         return
     if expected_instance_id is None or boot_nonce is None:
@@ -618,31 +634,34 @@ def forward_request(
         )
     if accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
         _TYPED_REENTRY_NONCES.add(accepted["nonce"])
-    if accepted.get("action") == wsp.SurfaceAction.SUBMIT_CONTINUATION.value:
+    is_cognition = accepted.get("action") == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value
+    if accepted.get("action") == wsp.SurfaceAction.SUBMIT_CONTINUATION.value or is_cognition:
+        turn_id = accepted["cognition_payload"]["turn_id"] if is_cognition else accepted["turn_id"]
+        prefix = "cognition" if is_cognition else "continuation"
         if accepted["nonce"] in _SUBMIT_CONTINUATION_NONCES:
-            raise NativeHostError("continuation_nonce_reused")
-        if accepted["turn_id"] in _SUBMIT_CONTINUATION_TURNS:
-            raise NativeHostError("continuation_turn_reused")
+            raise NativeHostError(f"{prefix}_nonce_reused")
+        if turn_id in _SUBMIT_CONTINUATION_TURNS:
+            raise NativeHostError(f"{prefix}_turn_reused")
         if (
             len(_SUBMIT_CONTINUATION_NONCES) >= MAX_SUBMIT_CONTINUATION_EFFECTS
             or len(_SUBMIT_CONTINUATION_TURNS) >= MAX_SUBMIT_CONTINUATION_EFFECTS
         ):
             raise wsp._error(
                 "$.turn_id",
-                "continuation effect ledger full; SUBMIT_CONTINUATION is closed",
+                f"submit effect ledger full; {accepted['action']} is closed",
             )
         _SUBMIT_CONTINUATION_NONCES.add(accepted["nonce"])
-        _SUBMIT_CONTINUATION_TURNS.add(accepted["turn_id"])
+        _SUBMIT_CONTINUATION_TURNS.add(turn_id)
     fields = _receipt_match_fields(accepted)
     exchange_deadline = deadline or Deadline(ends_at=monotonic() + timeout)
     _remaining_or_timeout(
         exchange_deadline,
         monotonic,
-        _timeout_code(accepted),
+        "cognition_not_submitted" if is_cognition else _timeout_code(accepted),
     )
-    write_chrome(accepted)
     ignored = 0
     try:
+        write_chrome(accepted)
         while True:
             remaining = _remaining_or_timeout(
                 exchange_deadline,
@@ -680,7 +699,9 @@ def forward_request(
                 )
             _remaining_or_timeout(exchange_deadline, monotonic, _timeout_code(accepted))
             return receipt
-    except BaseException:
+    except Exception as exc:
+        if is_cognition:
+            raise ChromeChannelError("cognition_submit_effect_unknown") from exc
         raise
 
 

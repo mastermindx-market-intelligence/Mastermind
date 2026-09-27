@@ -122,6 +122,7 @@ def _request(
     runtime_binding_lease: wrb.WebSolRuntimeBindingLease | None = None,
     wake_obligation_ids: Sequence[str] | None = None,
     wake_obligation_digest: str | None = None,
+    cognition_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     accepted = _accepted_binding(binding)
     request = {
@@ -171,6 +172,17 @@ def _request(
                 "wake_obligation_ids": list(obligation_ids),
                 "wake_obligation_digest": canonical_digest,
             }
+        )
+    if action == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        if not isinstance(runtime_binding_lease, wrb.WebSolRuntimeBindingLease):
+            raise WebSolExtensionError("runtime_binding_required")
+        request.update(
+            conversation_fingerprint=runtime_binding_lease.target.conversation_fingerprint,
+            session_alias=runtime_binding_lease.runtime_binding.session_alias,
+            runtime_binding_id=runtime_binding_lease.runtime_binding.binding_id,
+            runtime_binding_generation=runtime_binding_lease.runtime_binding.binding_generation,
+            runtime_binding_fingerprint=runtime_binding_lease.runtime_binding_fingerprint,
+            cognition_payload=cognition_payload,
         )
     return wsp.validate_request(request)
 
@@ -369,6 +381,8 @@ def _transport_failure_code(
         return "typed_reentry_effect_unknown"
     if sent and action == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if sent and action == "SUBMIT_COGNITION_ASSIGNMENT":
+        return "cognition_submit_effect_unknown"
     if action == "OBSERVE_CONTINUATION_ACK":
         return "semantic_ack_unavailable"
     if action == "CENSUS":
@@ -431,6 +445,8 @@ def _exchange_web_sol_socket(
                 )
             except native.NativeHostError:
                 sent = action_writer.effect_possible
+                if request.get("action") == "SUBMIT_COGNITION_ASSIGNMENT":
+                    sent = sent or action_writer.accepted_bytes > 0
                 raise
             sent = True
             if is_census:
@@ -471,6 +487,8 @@ def _untrusted_receipt_code(action: str, default: str) -> str:
         return "typed_reentry_effect_unknown"
     if action == "SUBMIT_CONTINUATION":
         return "continuation_submit_effect_unknown"
+    if action == "SUBMIT_COGNITION_ASSIGNMENT":
+        return "cognition_submit_effect_unknown"
     if action == "OBSERVE_CONTINUATION_ACK":
         return "semantic_ack_invalid"
     return default
@@ -491,6 +509,7 @@ def _invoke(
     runtime_binding_lease: wrb.WebSolRuntimeBindingLease | None = None,
     wake_obligation_ids: Sequence[str] | None = None,
     wake_obligation_digest: str | None = None,
+    cognition_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     request = _request(
         binding,
@@ -506,6 +525,7 @@ def _invoke(
         runtime_binding_lease=runtime_binding_lease,
         wake_obligation_ids=wake_obligation_ids,
         wake_obligation_digest=wake_obligation_digest,
+        cognition_payload=cognition_payload,
     )
     try:
         instance_id = wsi.adapter_instance_id(binding)
@@ -517,6 +537,7 @@ def _invoke(
     if action in {
         wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
         wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+        wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value,
     }:
         assert runtime_binding_lease is not None
         if runtime_binding_lease.target.adapter_instance_id != instance_id:
@@ -586,6 +607,14 @@ def _invoke(
                 "wake_obligation_digest",
             )
         )
+    if action == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        match_fields.extend(wsp._COGNITION_BINDING_PAYLOAD_KEYS)
+        expected_identity = {
+            field: request["cognition_payload"][field]
+            for field in wsp._COGNITION_IDENTITY_KEYS
+        }
+        if accepted["cognition_identity"] != expected_identity:
+            raise WebSolExtensionError("cognition_submit_effect_unknown")
     for field in match_fields:
         if accepted[field] != request[field]:
             raise WebSolExtensionError(
@@ -685,6 +714,33 @@ def submit_continuation_via_extension(
         turn_id=turn_id,
         runtime_binding_lease=runtime_binding_lease,
         wake_obligation_ids=wake_obligation_ids,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        nonce=nonce,
+    )
+
+
+def submit_cognition_assignment_via_extension(
+    binding: dict[str, Any],
+    runtime_binding_lease: wrb.WebSolRuntimeBindingLease,
+    *,
+    operation_key: str,
+    cognition_payload: dict[str, Any],
+    issued_at: str,
+    expires_at: str,
+    nonce: str,
+) -> dict[str, Any]:
+    """Submit one already-admitted closed assignment through the existing seam.
+
+    This transport does not admit Executive work, authenticate a provider,
+    consume a result, or retry an uncertain effect.
+    """
+    return _invoke(
+        binding,
+        action=wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value,
+        operation_key=operation_key,
+        runtime_binding_lease=runtime_binding_lease,
+        cognition_payload=cognition_payload,
         issued_at=issued_at,
         expires_at=expires_at,
         nonce=nonce,
