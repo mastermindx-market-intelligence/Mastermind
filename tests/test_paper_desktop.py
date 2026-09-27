@@ -190,8 +190,12 @@ class CoreTests(unittest.TestCase):
                      "set_comment_thread_status"]:
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
-                     "export_combined_pdf"]:
+                     "export_combined_pdf", "rename_pages"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
+        self.assertEqual(
+            b.SUPPORTED_CATALOG_SHA256,
+            "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+        )
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
