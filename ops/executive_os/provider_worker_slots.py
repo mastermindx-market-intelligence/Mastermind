@@ -1,4 +1,4 @@
-"""Reviewed, secret-free Executive Codex worker realm inventory.
+"""Reviewed, secret-free Executive provider worker realm inventory.
 
 Provider account identifiers and Multilogin profile identifiers are private
 host state and are deliberately absent.  ``oauth_seat_ref`` is only the
@@ -34,7 +34,7 @@ SYSTEM_CONFIG_ROOT = Path("/Library/Application Support/MastermindExecutive/conf
 RUNTIME_WORKER_ROOT = Path("/var/db/mastermind-executive/workers")
 WORKER_GROUP = "_mastermind_worker"
 WORKER_GID = 451
-_SLOT_ID_RE = re.compile(r"^codex(?:-pro)?-[0-9]{2}$")
+_SLOT_ID_RE = re.compile(r"^(?:codex(?:-pro)?-[0-9]{2}|claude8-native-01)$")
 _WORKER_USER_RE = re.compile(r"^_mastermind_[a-z0-9_]+$")
 
 
@@ -54,9 +54,12 @@ class ProviderWorkerSlot:
     workspace_binding_class: str
     allowed_credential_kinds: tuple[str, ...]
     oauth_seat_ref: str | None
+    provider_family: str = "openai"
 
     @property
     def auth_path(self) -> Path:
+        if self.provider_family == "anthropic":
+            return self.provider_home / ".claude" / ".credentials.json"
         return self.provider_home / "auth.json"
 
     @property
@@ -111,6 +114,19 @@ _SLOTS = (
             oauth_seat_ref=f"chatgpt{index}",
         )
         for index in range(1, 4)
+    ),
+    ProviderWorkerSlot(
+        slot_id="claude8-native-01",
+        worker_user="_mastermind_claude_01",
+        worker_group="_mastermind_claude_01",
+        worker_uid=459,
+        worker_gid=459,
+        provider_home=RUNTIME_WORKER_ROOT / "claude8-native-01" / "provider-home",
+        readiness_receipt=SYSTEM_CONFIG_ROOT / "provider-readiness-claude8-native-01.json",
+        workspace_binding_class="native_claude_subscription",
+        allowed_credential_kinds=("claudeai-subscription",),
+        oauth_seat_ref="claude8",
+        provider_family="anthropic",
     ),
 )
 
@@ -182,13 +198,44 @@ def validate_slots(rows: Sequence[ProviderWorkerSlot]) -> tuple[ProviderWorkerSl
 
 
 def all_slots() -> tuple[ProviderWorkerSlot, ...]:
-    return validate_slots(_SLOTS)
+    """Preserve the installed Codex inventory; native admission is explicit."""
+    return validate_slots(tuple(row for row in _SLOTS if row.provider_family == "openai"))
+
+
+def native_slots() -> tuple[ProviderWorkerSlot, ...]:
+    """One shared inventory, including the explicitly provisioned Claude realm.
+
+    Existing Codex installers must not automatically provision a different
+    provider merely because its native identity owner has been implemented.
+    """
+    codex = all_slots()
+    claude = tuple(row for row in _SLOTS if row.provider_family == "anthropic")
+    if len(claude) != 1:
+        raise SlotCatalogError("native_slot_inventory_invalid")
+    row = claude[0]
+    if (
+        row.slot_id != "claude8-native-01"
+        or row.worker_uid != 459 or row.worker_gid != 459
+        or row.worker_user != "_mastermind_claude_01"
+        or row.worker_group != row.worker_user
+        or row.provider_home != RUNTIME_WORKER_ROOT / row.slot_id / "provider-home"
+        or row.readiness_receipt != SYSTEM_CONFIG_ROOT / f"provider-readiness-{row.slot_id}.json"
+        or row.workspace_binding_class != "native_claude_subscription"
+        or row.allowed_credential_kinds != ("claudeai-subscription",)
+        or row.oauth_seat_ref != "claude8"
+    ):
+        raise SlotCatalogError("native_slot_invalid")
+    result = codex + claude
+    for field in ("slot_id", "worker_user", "worker_group", "worker_uid", "worker_gid",
+                  "provider_home", "readiness_receipt"):
+        _unique(result, field)
+    return result
 
 
 def get_slot(slot_id: str) -> ProviderWorkerSlot:
     if not isinstance(slot_id, str) or _SLOT_ID_RE.fullmatch(slot_id) is None:
         raise SlotCatalogError("unknown_slot")
-    for row in all_slots():
+    for row in native_slots():
         if row.slot_id == slot_id:
             return row
     raise SlotCatalogError("unknown_slot")
@@ -246,6 +293,7 @@ __all__ = [
     "all_slots",
     "get_slot",
     "main",
+    "native_slots",
     "resolve_field",
     "validate_slots",
 ]
