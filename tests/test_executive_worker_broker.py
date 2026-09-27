@@ -3018,3 +3018,103 @@ def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
             )
 
     asyncio.run(scenario())
+
+
+def test_capacity_observe_is_requestless_and_requires_configured_observer(tmp_path: Path):
+    broker, adapter, sweeper, peer, _spec = _fixture(tmp_path)
+
+    with pytest.raises(BrokerProtocolError, match="payload must be empty"):
+        asyncio.run(
+            broker.execute(
+                _request("capacity-observe/v1", {"host_ref": "attacker"}, suffix="cap-payload"),
+                peer=peer,
+            )
+        )
+
+    with pytest.raises(BrokerStateError, match="not configured"):
+        asyncio.run(
+            broker.execute(
+                _request("capacity-observe/v1", {}, suffix="cap-missing"),
+                peer=peer,
+            )
+        )
+    assert adapter.spec is None
+    assert sweeper.calls == []
+
+
+def test_capacity_observe_returns_only_trusted_callback_projection(tmp_path: Path):
+    broker, adapter, sweeper, peer, _spec = _fixture(tmp_path)
+    observed = {
+        "schema_version": "mastermind.executive_worker_capacity_observation/v1",
+        "host_ref": "host-" + "a" * 64,
+        "capacity_capability_id": "codex_account",
+        "observation_digest": "b" * 64,
+    }
+    calls = 0
+
+    def observe_capacity():
+        nonlocal calls
+        calls += 1
+        return observed
+
+    broker.capacity_observer = observe_capacity
+    result = asyncio.run(
+        broker.execute(
+            _request("capacity-observe/v1", {}, suffix="cap-ok"),
+            peer=peer,
+        )
+    )
+
+    assert result["result"] == observed
+    assert result["result"] is not observed
+    assert calls == 1
+    assert adapter.spec is None
+    assert sweeper.calls == []
+
+
+@pytest.mark.parametrize(
+    "busy_field,busy_value",
+    [
+        ("_active_run_id", "run-existing"),
+        ("_starting", True),
+        ("_validation_busy", True),
+        ("_status_sweep_busy", True),
+    ],
+)
+def test_capacity_observe_refuses_while_broker_is_busy(
+    tmp_path: Path, busy_field: str, busy_value: object
+):
+    broker, adapter, sweeper, peer, _spec = _fixture(tmp_path)
+    calls = 0
+
+    def observe_capacity():
+        nonlocal calls
+        calls += 1
+        return {"ok": True}
+
+    broker.capacity_observer = observe_capacity
+    setattr(broker, busy_field, busy_value)
+
+    with pytest.raises(BrokerStateError, match="idle broker"):
+        asyncio.run(
+            broker.execute(
+                _request("capacity-observe/v1", {}, suffix=f"cap-busy-{busy_field}"),
+                peer=peer,
+            )
+        )
+    assert calls == 0
+    assert adapter.spec is None
+    assert sweeper.calls == []
+
+
+def test_capacity_observe_refuses_non_mapping_callback_result(tmp_path: Path):
+    broker, _adapter, _sweeper, peer, _spec = _fixture(tmp_path)
+    broker.capacity_observer = lambda: ["not", "a", "mapping"]  # type: ignore[assignment]
+
+    with pytest.raises(BrokerStateError, match="invalid projection"):
+        asyncio.run(
+            broker.execute(
+                _request("capacity-observe/v1", {}, suffix="cap-shape"),
+                peer=peer,
+            )
+        )
