@@ -210,6 +210,9 @@ def test_paper_concurrency_is_target_scoped_not_file_leased():
     assert "file-wide or page-wide lease" in integration
     assert "operation/target-scoped" in skill
     assert "local bridge-call mutex" in connection
+    assert "Multiple admitted designers may modify the same file/page across hosts" in mcp_server
+    assert "board/artboard/node" in mcp_server
+    assert "MULTI_WRITER_PER_FILE_TARGET_SCOPED" in mcp_server
 
     for forbidden in (
         "ONE_WRITER_PER_FILE_ACROSS_HOSTS",
