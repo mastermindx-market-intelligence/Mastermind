@@ -15,7 +15,7 @@ RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|status} | {start-readside|stop-readside}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|start-readside|stop-readside|status}" >&2
   exit 64
 }
 
