@@ -75,8 +75,13 @@ _GIT_ENV = {
     "GIT_CONFIG_NOSYSTEM": "1",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_OPTIONAL_LOCKS": "0",
     "LC_ALL": "C",
 }
+_GIT_SAFE_CONFIG = (
+    "-c", "core.fsmonitor=false",
+    "-c", "core.hooksPath=/dev/null",
+)
 
 
 class EnrollmentError(RuntimeError):
@@ -127,6 +132,43 @@ def _run(
         raise EnrollmentError(f"command_failed:{Path(argv[0]).name}") from exc
 
 
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+    return _run(
+        ["/usr/bin/git", *_GIT_SAFE_CONFIG, "-C", os.fspath(repo), *args],
+        check=check,
+        env=_GIT_ENV,
+    )
+
+
+def verify_git_config_safe(repo: Path) -> None:
+    raw = _git(repo, "config", "--local", "--name-only", "--list").stdout
+    try:
+        keys = [line for line in raw.decode("utf-8", errors="strict").splitlines() if line]
+    except UnicodeDecodeError as exc:
+        raise EnrollmentError("source_git_config_invalid") from exc
+    allowed_exact = {
+        "core.repositoryformatversion",
+        "core.filemode",
+        "core.bare",
+        "core.logallrefupdates",
+        "remote.origin.url",
+        "remote.origin.fetch",
+    }
+    forbidden_prefixes = (
+        "filter.", "include.", "includeif.", "diff.", "merge.",
+        "credential.", "url.", "http.", "ssh.",
+    )
+    for key in keys:
+        lower = key.lower()
+        if lower in allowed_exact:
+            continue
+        if lower.startswith("branch.") and (lower.endswith(".remote") or lower.endswith(".merge")):
+            continue
+        if lower.startswith(forbidden_prefixes) or lower.startswith("core."):
+            raise EnrollmentError(f"source_git_config_unsafe:{key}")
+        raise EnrollmentError(f"source_git_config_unreviewed:{key}")
+
+
 def verify_source_identity(repo: Path, expected_sha: str, expected_tree: str) -> dict[str, str]:
     repo = Path(repo)
     if not repo.is_absolute() or not repo.is_dir() or repo.is_symlink():
@@ -136,20 +178,11 @@ def verify_source_identity(repo: Path, expected_sha: str, expected_tree: str) ->
     if _HEX40.fullmatch(expected_tree) is None:
         raise EnrollmentError("expected_tree_invalid")
 
-    status = _run(
-        ["/usr/bin/git", "-C", os.fspath(repo), "status", "--porcelain=v1", "--untracked-files=all"],
-        env=_GIT_ENV,
-    ).stdout
+    status = _git(repo, "status", "--porcelain=v1", "--untracked-files=all").stdout
     if status.strip():
         raise EnrollmentError("source_repo_dirty")
-    commit = _run(
-        ["/usr/bin/git", "-C", os.fspath(repo), "rev-parse", "HEAD"],
-        env=_GIT_ENV,
-    ).stdout.decode("ascii", errors="strict").strip()
-    tree = _run(
-        ["/usr/bin/git", "-C", os.fspath(repo), "rev-parse", "HEAD^{tree}"],
-        env=_GIT_ENV,
-    ).stdout.decode("ascii", errors="strict").strip()
+    commit = _git(repo, "rev-parse", "HEAD").stdout.decode("ascii", errors="strict").strip()
+    tree = _git(repo, "rev-parse", "HEAD^{tree}").stdout.decode("ascii", errors="strict").strip()
     if commit != expected_sha:
         raise EnrollmentError("source_commit_mismatch")
     if tree != expected_tree:
@@ -170,11 +203,9 @@ def verify_root_source_custody(repo: Path) -> None:
         raise EnrollmentError("source_repo_custody_invalid")
     if not stat.S_ISDIR(git_info.st_mode) or git_info.st_uid != 0:
         raise EnrollmentError("source_git_custody_invalid")
+    verify_git_config_safe(repo)
 
-    listed = _run(
-        ["/usr/bin/git", "-C", os.fspath(repo), "ls-files", "-z"],
-        env=_GIT_ENV,
-    ).stdout.split(b"\0")
+    listed = _git(repo, "ls-files", "-z").stdout.split(b"\0")
     for encoded in listed:
         if not encoded:
             continue
@@ -542,15 +573,27 @@ def _verify_release_tree(root: Path) -> None:
 
 
 def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
+    manifest_tool = repo / "ops/executive_os/release_manifest.py"
+    try:
+        manifest_info = manifest_tool.lstat()
+    except OSError as exc:
+        raise EnrollmentError("release_manifest_source_unavailable") from exc
+    if (
+        not stat.S_ISREG(manifest_info.st_mode)
+        or stat.S_ISLNK(manifest_info.st_mode)
+        or manifest_info.st_uid != 0
+        or manifest_info.st_nlink != 1
+        or stat.S_IMODE(manifest_info.st_mode) & 0o022
+    ):
+        raise EnrollmentError("release_manifest_source_unsafe")
     destination = RELEASES_ROOT / expected_sha
     if destination.exists() or destination.is_symlink():
         if not destination.is_dir() or destination.is_symlink():
             raise EnrollmentError("release_destination_invalid")
         _verify_release_tree(destination)
-        manifest = destination / "ops/executive_os/release_manifest.py"
         _run(
             [
-                "/usr/bin/python3", "-I", "-S", "-B", os.fspath(manifest),
+                "/usr/bin/python3", "-I", "-S", "-B", os.fspath(manifest_tool),
                 "verify", "--root", os.fspath(destination),
                 "--commit-sha", expected_sha, "--tree-sha", expected_tree,
             ]
@@ -559,10 +602,7 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
         staging = Path(tempfile.mkdtemp(prefix=f".release-{expected_sha}.", dir=RELEASES_ROOT))
         archive_path = staging.parent / f".archive-{expected_sha}-{os.getpid()}.tar"
         try:
-            archive = _run(
-                ["/usr/bin/git", "-C", os.fspath(repo), "archive", expected_sha, "--", *RELEASE_PATHS],
-                env=_GIT_ENV,
-            ).stdout
+            archive = _git(repo, "archive", expected_sha, "--", *RELEASE_PATHS).stdout
             archive_path.write_bytes(archive)
             with tarfile.open(archive_path, mode="r:") as tar:
                 _safe_archive_members(tar)
@@ -579,14 +619,13 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
                 staging / "scripts/executive_os_remote_worker_gateway.py",
             ):
                 os.chmod(executable, 0o555)
-            manifest = staging / "ops/executive_os/release_manifest.py"
             _run(
                 [
                     "/usr/bin/python3",
                     "-I",
                     "-S",
                     "-B",
-                    os.fspath(manifest),
+                    os.fspath(manifest_tool),
                     "create",
                     "--root",
                     os.fspath(staging),
@@ -602,7 +641,7 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str) -> Path:
                     "-I",
                     "-S",
                     "-B",
-                    os.fspath(manifest),
+                    os.fspath(manifest_tool),
                     "verify",
                     "--root",
                     os.fspath(staging),

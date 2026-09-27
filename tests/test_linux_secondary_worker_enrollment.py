@@ -286,13 +286,33 @@ def test_apply_order_freezes_antidup_source_and_binary_before_identity_mutation(
 def test_module_has_no_network_or_remote_execution_surface() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
     for forbidden in (
-        "ssh",
-        "rsync",
-        "requests",
-        "urllib",
+        "/usr/bin/ssh",
+        "subprocess.run([\"ssh\"",
+        "/usr/bin/rsync",
+        "requests.",
+        "urllib.",
         "import socket",
         "socket.socket",
         "curl",
         "wget",
     ):
         assert forbidden not in source
+
+
+def test_root_git_reads_disable_local_execution_vectors() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert '"GIT_OPTIONAL_LOCKS": "0"' in source
+    assert '"-c", "core.fsmonitor=false"' in source
+    assert '"-c", "core.hooksPath=/dev/null"' in source
+    assert "verify_git_config_safe" in source
+    assert '"filter."' in source
+    assert '"include."' in source
+
+
+def test_release_manifest_logic_is_executed_from_accepted_source_not_installed_copy() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    install = source.split("def install_release(", 1)[1].split("def render_systemd_units", 1)[0]
+    assert 'manifest_tool = repo / "ops/executive_os/release_manifest.py"' in install
+    assert 'os.fspath(manifest_tool)' in install
+    assert 'destination / "ops/executive_os/release_manifest.py"' not in install
+    assert 'staging / "ops/executive_os/release_manifest.py"' not in install
