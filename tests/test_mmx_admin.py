@@ -11,6 +11,7 @@ import pytest
 from control_plane.executive_privileged_action import (
     REQUEST_SCHEMA,
     STATUS_REQUEST_SCHEMA,
+    PrivilegedActionError,
     canonical_request_bytes,
     validate_request,
 )
@@ -402,3 +403,26 @@ def test_main_effect_refuses_uncorrelated_success_response(monkeypatch, capsys) 
 
     assert rc != 0
     assert "refused or invalid" in captured.err
+
+
+def test_client_builds_closed_readside_service_actions() -> None:
+    for action in (
+        "executive.services.start_readside",
+        "executive.services.stop_readside",
+    ):
+        request = build_request([action, "--request-id", "req-readside-001"])
+        assert request == {
+            "schema": REQUEST_SCHEMA,
+            "request_id": "req-readside-001",
+            "action": action,
+            "args": {},
+        }
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["executive.services.start_readside", "executive.services.stop_readside"],
+)
+def test_readside_service_actions_reject_effect_arguments(action: str) -> None:
+    with pytest.raises(PrivilegedActionError, match="arguments"):
+        build_request([action, "--slot-id", "codex-pro-01"])
