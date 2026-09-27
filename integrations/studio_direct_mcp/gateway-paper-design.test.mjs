@@ -96,6 +96,12 @@ test('gateway advertises and dispatches guarded Paper design tools locally', asy
   const inspectPayload = JSON.parse(inspect.content.find((item) => item.type === 'text').text);
   assert.equal(inspectPayload.state, 'CONNECTED');
   assert.equal(inspectPayload.document.fileId, 'FILE');
+  assert.deepEqual(inspectPayload.gateway_surface.gateway_advertises, [
+    'paper_inspect', 'paper_catalog', 'paper_read', 'paper_prepare', 'paper_edit',
+  ]);
+  assert.equal(inspectPayload.gateway_surface.file_transition_tool, 'paper_prepare');
+  assert.equal(inspectPayload.gateway_surface.file_transition_requires_direct_tool, true);
+  assert.equal(inspectPayload.gateway_surface.generic_process_fallback_allowed, false);
 
   const read = await client.callTool({
     name: 'paper_read',
