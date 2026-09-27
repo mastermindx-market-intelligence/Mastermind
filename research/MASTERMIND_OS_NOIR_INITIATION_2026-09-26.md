@@ -265,6 +265,8 @@ Do **not** mutate the background design-system file. The guarded bridge binds mo
 
 Studio Direct hardening is carried by PR #1012, `sol/paper-studio-prepare-continuity-20260926`. Its current contract makes `paper_inspect` advertise the exact five-tool Paper family and declares missing client-side prepare as `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`, with recovery through the same Studio Direct app's workspace-approved action snapshot. Current OpenAI Business behavior uses a frozen approved MCP tool/input snapshot; a server restart or OAuth reconnect alone is not proof that the action catalog refreshed.
 
+The later Paper 0.5.12 full-catalog drift has now been source-qualified on that same carrier rather than bypassed: prior accepted catalog 34 tools / `ca90a537...`, current live 35 tools / `8cd27488...`, with **only `rename_pages` added**, no removals and no changes to the prior 34 definitions. `rename_pages` remains blocked. #1012 now contains candidate bridge 0.1.1 SHA `d3301a1466d46ae081ded963f438c019fabf39c9bccfc8c669f16562a52bf7f6` and immutable runtime `v5`. Read-only candidate proof against the live desktop returns `accepted_for_write=true`; however **no v5 runtime/service is deployed yet**, so this does not clear the canvas-write gate.
+
 Exact continuation order:
 
 1. Protect/release #1012 through its exact-head CI/review/merge-queue gates.
