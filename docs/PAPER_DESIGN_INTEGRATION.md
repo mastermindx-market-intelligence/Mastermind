@@ -60,6 +60,26 @@ may make an **independently authorized** RDC carrier eligible under the separate
 law; absence itself never supplies permission. After edit dispatch, timeout/lost response
 remains `EFFECT_UNKNOWN` on the original carrier and forbids cross-carrier replay.
 
+### Paper 0.5.12 catalog drift qualification — 2026-09-26
+
+A later Paper 0.5.12 observation changed the full upstream catalog digest from
+`ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570` to
+`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb`.
+The release owner compared the exact current name-keyed tool dictionaries with the
+durable prior raw catalog. Tool count changed **34 -> 35**; `rename_pages` was the
+only added tool; no tool was removed and **no existing tool definition changed**.
+The bridge therefore keeps the same 17 read and 12 edit allowlists and leaves
+`rename_pages` blocked alongside `create_file`, `delete_nodes`, exports and raw
+`open_file`. Exact full-catalog pinning remains fail closed rather than weakening to
+a subset/schema-family check.
+
+The compatible bridge is version `0.1.1`, SHA-256
+`d3301a1466d46ae081ded963f438c019fabf39c9bccfc8c669f16562a52bf7f6`,
+owned by immutable Paper runtime generation `v5`. This source qualification is not a
+deployment or write canary; installed `v4` seats remain valid historical runtimes
+until the normal release owner moves an explicitly selected canary. Evidence:
+`docs/evidence/paper_desktop/20260926_0512_catalog_compatibility.json`.
+
 No MCP tool is disguised as read-only to bypass client write permissions.
 `paper_edit` is explicitly modifying/destructive/non-idempotent; it exists only
 when the local server is started with `--allow-write`.
