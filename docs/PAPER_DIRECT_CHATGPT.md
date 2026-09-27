@@ -6,25 +6,31 @@ Implementation carrier: Mastermind issue **#1011**. Operation:
 ## Build decision and current boundary
 
 Use one existing tunnel and the existing guarded stdio server. Do not create another Paper
-proxy, auth service, effect ledger, account, or public listener. The first direct build exposes
-`paper_inspect`, `paper_catalog`, `paper_read`, and opt-in `paper_edit`; the exact set is verified
-over a real SDK stdio handshake. The bridge remains unchanged and retains its fixed loopback
-endpoint, tool/schema allowlists, desktop mutex, exact file ID and snapshot checks, explicit
-write opt-in, post-read observation, and EFFECT_UNKNOWN/no-replay semantics.
+proxy, auth service, effect ledger, account, or public listener. The direct build exposes
+`paper_inspect`, `paper_catalog`, `paper_read`, plus separately opted-in `paper_prepare` and
+`paper_edit`; the exact set is verified over a real SDK stdio handshake. The same guarded bridge
+remains the Paper safety/effect owner and retains its fixed loopback endpoint, tool/schema
+allowlists, desktop mutex, exact file ID and snapshot checks, explicit write opt-in, post-read
+observation, and EFFECT_UNKNOWN/no-replay semantics.
 
 The raw vendor `paper mcp` route is not selected: convenience is not evidence that it preserves
 our guard contract. Studio Direct remains a legacy client, not a dependency of normal direct
 Paper operations. It is not a fallback after a direct-app permission or safety denial.
 
-**Direct `paper_prepare`: NOT_BUILT in this vertical.** The canary uses an already-open exact
-scratch file. Shared file-transition extraction is a separate capability, not permission to
-expose shell, URLs, process control, or raw `open_file`. Preserve the existing Studio bounded
-prepare owner and reconcile PR #1012 before editing its shared implementation.
+**Direct `paper_prepare`: BUILT_NOT_LIVE.** It is a bounded direct file-focus action, not a
+host-control escape hatch: callers provide one exact bare Paper file ID, a fresh source snapshot,
+and a stable operation ID; URL/path/page overrides, shell/process control, and unrestricted raw
+`open_file` are not exposed. If the exact target is already-open, prepare performs no focus dispatch.
+Otherwise the adapter requires the reviewed Paper catalog before dispatch, sends at most one focus
+request, then observes the actual active file. A lost or ambiguous reply remains
+`EFFECT_UNKNOWN` and is never replayed automatically. Source support and tool discovery do not by
+themselves prove the live focus/write path.
 
-This is **STAGED_NOT_ENROLLED** infrastructure until the final user-attended setup. The source
-receipt describes the staging event, not current service liveness. `LOCAL_STDIO_PROVEN` proves
-only initialization/tool discovery; it calls neither Paper nor OpenAI. No file has been changed
-in Paper merely because these source or transport tests passed.
+A newly staged bundle begins as **STAGED_NOT_ENROLLED** infrastructure until the user-attended setup.
+That staging receipt is not current service liveness. `LOCAL_STDIO_PROVEN` proves only initialization/
+tool discovery; it calls neither Paper nor OpenAI. Current #1011 acceptance still separately requires
+the live direct Business prepare/edit/reconciliation/screenshot/JSX journey before write capability
+can be called live.
 
 ## Implementation
 
@@ -64,7 +70,7 @@ Use a reviewed immutable source commit and a new bundle directory. Example opera
 ```sh
 "$SDK_PYTHON" -I integrations/paper_desktop/direct_service.py stage \
   --root "$BUNDLE" --python "$SDK_PYTHON" --tunnel-client "$TUNNEL_BINARY" \
-  --source-revision "$EXACT_COMMIT" --allow-write
+  --source-revision "$EXACT_COMMIT" --allow-prepare --allow-write
 "$SDK_PYTHON" -I "$BUNDLE/runtime/direct_service.py" verify --root "$BUNDLE"
 "$SDK_PYTHON" -I "$BUNDLE/runtime/direct_service.py" probe --root "$BUNDLE"
 ```
