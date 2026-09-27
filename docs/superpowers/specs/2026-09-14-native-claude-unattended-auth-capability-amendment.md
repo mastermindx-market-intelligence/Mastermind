@@ -5,6 +5,35 @@
 **Status:** `RECORDS ONLY / SPEC_ONLY / PRODUCTION INERT`  
 **Authority correction:** current provider documentation and installed-version observations are evidence for future requalification; they do **not** silently supersede protected PF1/OCR-1 authentication source law.
 
+
+## 2026-09-27 unattended permission-mode requalification
+
+Native Claude Worker autonomy is a property of the canonical worker launch contract,
+not a remembered interactive-user preference or project-local setting. The worker
+adapter must launch noninteractively with Claude Code's unattended bypass flag
+(`-p --dangerously-skip-permissions`) and serialize the matching
+`permissions.defaultMode = "bypassPermissions"` policy. The serialized policy
+must keep `permissions.ask = []`, must not set
+`disableBypassPermissionsMode = "disable"`, and must disable hooks and project
+MCP discovery so an ambient customization cannot reintroduce a permission prompt.
+
+This does **not** widen the Executive grant. Existing authority-to-tool projection,
+protected-path denies, exact-model fencing, no-network sandbox, fail-if-sandbox-is-
+unavailable behavior, no session persistence, and explicit MCP/subagent/Web tool
+denials remain controlling. `AskUserQuestion` and `ExitPlanMode` are explicitly
+denied in the worker tool policy. Deny rules remain the deterministic ceiling even
+when permission prompting is bypassed.
+
+Claude Code documents a small class of actions that no permission mode auto-approves.
+For an Executive worker those are not Chairman-interaction escape hatches: the
+noninteractive process must receive a refusal and return/replan through the existing
+Job/Attempt lifecycle. No new permission broker, approval queue, or retry plane is
+created here.
+
+This source amendment is a durability contract. It is not by itself installed-host
+or production proof; the exact accepted head still requires the normal source
+checks/review and a real worker-path canary before the capability is called live.
+
 ## 2026-09-27 native storage requalification
 
 This delivery amendment supersedes the Keychain-only **storage** requirement in
