@@ -72,9 +72,12 @@ with a safe lowercase `seat_id`, one exact existing Secure MCP Tunnel, one trans
 loopback health endpoint, one log pair, and one launchd label
 `com.mastermind.paper-direct.business.<seat>`. The Paper Desktop process, bridge allowlists, schema
 pin, effect semantics and per-OS-user `~/.local/state/mastermind-paper/desktop.lock` remain shared.
-Consequently, two ChatGPT seats may keep their tunnel clients connected concurrently, but bridge
-calls still serialize at the Paper desktop and a colliding call may fail closed as `DESKTOP_BUSY`;
-this is not a hidden queue or retry plane. The one-writer-per-file rule remains unchanged.
+Consequently, two ChatGPT seats may keep their tunnel clients connected concurrently. Bridge calls
+from the same OS user still serialize through `desktop.lock`, and a colliding local call may fail
+closed as `DESKTOP_BUSY`; this is not a hidden queue, retry plane, or document lease. Multiple
+admitted sessions/hosts may modify the same exact `fileId`, including the same page. Prefer disjoint
+board/artboard/node targets; known same-board overlap is coordinated with disjoint node targets plus
+fresh re-read/re-plan. The advertised contract is `MULTI_WRITER_PER_FILE_TARGET_SCOPED`.
 
 A v3 seat binding records the exact tunnel ID and may record an exact backend workspace ID when it
 is independently known. It must **not invent a workspace ID** merely to start the daemon: OpenAI's
