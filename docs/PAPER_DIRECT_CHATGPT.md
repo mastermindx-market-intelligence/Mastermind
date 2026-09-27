@@ -147,7 +147,11 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    `127.0.0.1:0`; its assigned address is in `state/health.url`.
 5. In the actual Business workspace, the authorized admin enables developer mode and creates
    private **Mastermind Paper**, choosing Connection **Tunnel** and the existing tunnel ID.
-   A plugin name or successful registration is not proof of any Paper operation.
+   A plugin name or successful registration is not proof of any Paper operation. When an accepted
+   source/runtime revision changes tool descriptions or collaboration metadata, review and refresh
+   the **same app's** approved action snapshot. If ChatGPT still shows older file-exclusive wording
+   after the runtime is current, record `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not
+   create a duplicate app/tunnel or treat stale transport metadata as a document lease.
 6. Discover exactly the accepted tools in a fresh ChatGPT session. Use the assigned direct app
    for the approved scratch-file inspect/catalog/read -> one bounded edit -> post-read ->
    screenshot inspection -> JSX journey. Preserve file ID, snapshot and stable operation ID.
