@@ -21,8 +21,8 @@ surface before making a capability claim.
    `paper_prepare` when that action is actually exposed. Call `paper_inspect` before declaring
    connection state. The presence of generic Studio `read_file` / `start_process` actions says
    nothing about whether the Paper family is available.
-2. **Do not over-block on `paper_prepare`, and do not emulate it.** Its absence alone does not
-   make current-file Paper reads/edits unavailable. If another exact file must be focused, first call
+2. **Do not over-block on `paper_prepare`, and do not emulate it.** Its absence alone does not make Paper unavailable;
+   it may block only the exact file-transition step. Current-file Paper reads/edits can remain usable. If another exact file must be focused, first call
    `paper_inspect`. A current gateway may return
    `gateway_surface.gateway_advertises=[paper_inspect,paper_catalog,paper_read,paper_prepare,paper_edit]`.
    When that contract lists `paper_prepare` but the ChatGPT tool surface omits it, classify
