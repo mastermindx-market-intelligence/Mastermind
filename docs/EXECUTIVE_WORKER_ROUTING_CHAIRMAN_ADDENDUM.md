@@ -188,13 +188,16 @@ Use for:
 
 A substantial share of ordinary engineering that would otherwise drift to Fable should route here.
 
-### SONNET — default Claude workhorse
+### CLAUDE — execution surface with explicit model selection
 
-Use for bounded multi-step engineering, research, documentation and general execution when the
-Claude tool/workflow environment is materially useful.
+Claude-compatible engineering is not a default-model instruction. Prefer the least-scarce
+admitted, task-qualified economical model/harness combination. Sonnet remains an option when
+its capability or workflow is justified; neither Sonnet nor a native inherited parent model is
+an automatic engineering default. A cheaper provider is not permission to bypass qualification,
+confidentiality, credentials, current installed-tool restrictions or Fabric admission.
 
-Prefer Sonnet over Opus or Fable unless the mission actually requires deeper judgment or principal
-continuity.
+Read-only portfolio-reasoning profiles in `config/agents.yml` are a separate invocation and remain
+unchanged. Engineering delegation follows the adaptive work-shape and economic rules below.
 
 ### OPUS — premium bounded specialist
 
@@ -276,6 +279,22 @@ Chat-native Sol recovers intent and freezes architecture
 ```
 
 One independently useful capability per commission remains the default.
+
+The stack is adaptive, not a mandatory relay through every named role. Apply
+`docs/sol_skills/WEB_CEO_DELEGATION.md` section 9 for principal / bounded project lead /
+economical worker responsibilities. Qualified economical MiniMax, GLM Flash, Qwen Flash,
+DeepSeek Flash, Luna and other admitted routes may perform bounded labor; examples are not
+live aliases, eligibility or current price claims. Full GLM, Grok, Sol and Opus do not become
+cheap workers merely by comparison with Fable or Astra.
+
+For substantial routine labor retained on stronger compute, record a bounded
+`WHY_STRONG_EXECUTOR` rationale in the existing commission/checkpoint, including task-specific
+capability/coupling or observed accepted-outcome economics and the existing budget authority.
+Do not add a new ingress schema or infer authority from that note. Measure cost per accepted
+outcome with review/repair and failed-attempt costs included; keep cash and native subscription
+consumption distinct. Existing `cost_class` is an admission class, not a measured price.
+Additional management must earn its overhead; nested grants, depth, descendant reservations,
+source custody, independent review and exact-parent returns remain with their existing owners.
 
 A major program may legitimately contain several worker tiers and several bounded Sol
 responsibilities. Routing is per bounded mission, not per program prestige. Scale through durable
