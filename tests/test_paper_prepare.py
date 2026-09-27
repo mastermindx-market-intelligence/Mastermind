@@ -193,6 +193,7 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(result["after"]["identity"]["id"], TARGET)
         self.assertEqual(result["snapshot_sha256"], self.b.digest(self.target_info))
         self.assertEqual(result["operation_id"], "prepare-test-1")
+        self.assertEqual(result["concurrency_rule"], "MULTI_WRITER_PER_FILE_TARGET_SCOPED")
         self.assertFalse(result["retry_allowed"])
         self.assertFalse(result["production_acceptance"])
         self.assertEqual(self.opens(), [])
