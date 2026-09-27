@@ -13,7 +13,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from paper_direct_test_support import PrivatePython
+from paper_direct_test_support import PrivatePython, has_pinned_mcp_sdk
 
 SOURCE = Path(__file__).resolve().parents[1] / "integrations/paper_desktop/direct_service.py"
 

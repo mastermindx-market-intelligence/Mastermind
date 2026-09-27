@@ -13,13 +13,13 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from paper_direct_test_support import PrivatePython
+from paper_direct_test_support import PrivatePython, has_pinned_mcp_sdk
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "integrations/paper_desktop/direct_service.py"
 
 
-@unittest.skipUnless(importlib.util.find_spec("mcp"), "Dedicated MCP SDK required")
+@unittest.skipUnless(has_pinned_mcp_sdk(), "Dedicated mcp==1.30.0 SDK required")
 class DirectStdioTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

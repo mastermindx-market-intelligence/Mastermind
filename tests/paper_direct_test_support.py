@@ -8,10 +8,21 @@ No packages are downloaded: a .pth exposes the already-loaded test environment.
 from __future__ import annotations
 
 from pathlib import Path
+import importlib.metadata
 import subprocess
 import sys
 import tempfile
 import venv
+
+
+
+PINNED_MCP_VERSION = "1.30.0"
+
+def has_pinned_mcp_sdk() -> bool:
+    try:
+        return importlib.metadata.version("mcp") == PINNED_MCP_VERSION
+    except importlib.metadata.PackageNotFoundError:
+        return False
 
 
 class PrivatePython:

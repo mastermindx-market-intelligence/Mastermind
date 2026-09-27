@@ -8,11 +8,12 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from paper_direct_test_support import has_pinned_mcp_sdk
 
 ROOT = Path(__file__).resolve().parents[1] / "integrations/paper_desktop"
 
 
-@unittest.skipUnless(importlib.util.find_spec("mcp"), "Dedicated pinned MCP SDK required")
+@unittest.skipUnless(has_pinned_mcp_sdk(), "Dedicated mcp==1.30.0 SDK required")
 class McpResultTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # The repository also has a top-level `bridge` package. mcp_server.py is
