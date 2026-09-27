@@ -56,6 +56,9 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
             "write_schema": schema, "write_qualified": schema["accepted_for_write"],
             "retry_allowed": False, "production_acceptance": False,
             "concurrency_rule": "MULTI_WRITER_PER_FILE_TARGET_SCOPED",
+            "same_file_multi_writer_allowed": True,
+            "same_page_multi_writer_allowed": True,
+            "coordination_scope": "BOARD_ARTBOARD_NODE",
         }
         if _file_id(before) == file_id:
             return dict(receipt, state="PAPER_READY" if schema["accepted_for_write"] else "PAPER_READY_READ_ONLY",
