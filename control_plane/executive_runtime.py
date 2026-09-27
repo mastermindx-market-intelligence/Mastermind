@@ -47,6 +47,10 @@ from control_plane.executive_authority import (
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
 )
+from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
+    ExecutionCapabilityRegistry,
+)
 from control_plane.executive_coo_policy import (
     CooCyclePolicy,
     CooCyclePolicyError,
@@ -73,6 +77,7 @@ from control_plane.operator_harness_contract import (
     CheckpointObservation,
     EventCursor,
     LaunchDecision,
+    NativeHelperPolicy,
     NormalizedEvent,
     OperationId,
     OperationIntentTarget,
@@ -163,6 +168,8 @@ BOUNDED_ROLE_RESULT_MAX_ROWS = 512
 BOUNDED_ROLE_RESULT_MAX_CELL_BYTES = 8_388_608
 BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES = 33_554_432
 BOUNDED_ROLE_RESULT_MAX_VM_STEPS = 200_000
+INTERACTIVE_TX5_EXECUTION_PROFILE = "operator.appserver.interactive.v1"
+INTERACTIVE_TX5_MAX_TURNS_PER_GENERATION = 8
 _BOUNDED_FETCH_BATCH = 32
 _ROOT = Path(__file__).resolve().parent.parent
 _DB_RELATIVE_PATH = Path("data") / "control_plane" / "executive.sqlite3"
@@ -1660,6 +1667,307 @@ def _validate_exact_worker_target_selection(
     capabilities = sorted(_normalise_capabilities(_json_loads(capacity["capabilities_json"], fallback=[])))
     if capabilities != d["expected_capabilities"] or capacity["worker_id"] in d["excluded_worker_ids"]:
         raise StateConflict("exact worker target capability or exclusion differs")
+
+    metadata = _strict_canonical_json_loads(
+        str(capacity["metadata_json"]), name="exact target quota metadata"
+    )
+    selected_worker_uid = metadata.get("broker_uid")
+    if type(selected_worker_uid) is not int or selected_worker_uid <= 0:
+        raise StateConflict("exact target selected broker UID cannot be proven")
+    owner = _interactive_live_plan_owner(connection, str(job_row["root_job_id"]))
+    if owner is None:
+        return
+    admissions = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+          AND aggregate_type='process_generation'
+          AND attempt_id=?
+        ORDER BY event_id
+        """,
+        (owner["attempt_id"],),
+    ).fetchall()
+    if len(admissions) != 1:
+        raise StateConflict("interactive parent principal cannot be proven")
+    admission = _strict_canonical_json_loads(
+        str(admissions[0]["payload_json"]), name="interactive parent admission"
+    )
+    principal = admission.get("principal_observation")
+    parent_uid = (
+        principal.get("os_principal_uid")
+        if isinstance(principal, dict)
+        else None
+    )
+    if type(parent_uid) is not int or parent_uid <= 0:
+        raise StateConflict("interactive parent admitted UID cannot be proven")
+    if selected_worker_uid == parent_uid:
+        raise StateConflict("exact target selected broker UID conflicts with parent")
+
+
+def _interactive_live_plan_owner(
+    connection: sqlite3.Connection, root_job_id: str
+) -> sqlite3.Row | None:
+    rows = connection.execute(
+        """
+        SELECT a.*,j.job_id,j.parent_job_id,j.root_job_id,j.depth,
+               j.orchestration_provenance_json,j.orchestration_provenance_digest,
+               j.constraints_json,j.orchestration_role
+        FROM attempts a JOIN jobs j ON j.job_id=a.job_id
+        WHERE j.root_job_id=? AND j.orchestration_role='plan'
+          AND j.status IN ('RUNNING','CHECKPOINTED')
+          AND a.status IN ('RUNNING','CHECKPOINTED')
+        ORDER BY a.attempt_id
+        """,
+        (root_job_id,),
+    ).fetchall()
+    if not rows:
+        return None
+    if len(rows) != 1 or not _interactive_tx5_admitted(rows[0]):
+        raise StateConflict("interactive root parent identity is ambiguous")
+    return rows[0]
+
+
+def _validated_interactive_active_plan_seal(
+    connection: sqlite3.Connection,
+    *,
+    attempt_row: sqlite3.Row,
+    job_row: sqlite3.Row,
+) -> dict[str, Any]:
+    seal = _sealed_role_result_payload(
+        connection,
+        attempt_id=str(attempt_row["attempt_id"]),
+        expected_role="plan",
+    )
+    current = _admitted_current_generation_for_interactive_seal(
+        connection,
+        row=attempt_row,
+        generation_id=str(seal["process_generation_id"]),
+    )
+    if (
+        seal["job_id"] != job_row["job_id"]
+        or seal["attempt_id"] != attempt_row["attempt_id"]
+        or seal["worker_id"] != attempt_row["worker_id"]
+        or seal["quota_class"] != attempt_row["quota_class"]
+        or seal["provider_session_id"] != current["provider_session_id"]
+        or seal["session_epoch_id"] != current["session_epoch_id"]
+        or seal["effective_grant_digest"]
+        != attempt_row["effective_grant_digest"]
+        or seal["execution_principal_snapshot_digest"]
+        != attempt_row["execution_principal_snapshot_digest"]
+        or seal["placement_snapshot_digest"]
+        != attempt_row["placement_snapshot_digest"]
+        or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+    ):
+        raise StateConflict(
+            "interactive active plan seal does not match its durable identity"
+        )
+    return seal
+
+
+def _admitted_current_generation_for_interactive_seal(
+    connection: sqlite3.Connection,
+    *,
+    row: sqlite3.Row,
+    generation_id: str,
+) -> sqlite3.Row:
+    admissions = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+          AND aggregate_type='process_generation' AND aggregate_id=?
+        ORDER BY event_id
+        """,
+        (generation_id,),
+    ).fetchall()
+    if len(admissions) != 1:
+        raise StateConflict(
+            "interactive plan seal lacks its orchestration admission"
+        )
+    admission = _strict_canonical_json_loads(
+        str(admissions[0]["payload_json"]),
+        name="interactive plan work admission",
+    )
+    rows = connection.execute(
+        """
+        SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
+               e.provider_session_id AS epoch_provider_session
+        FROM process_generations g
+        JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+        WHERE e.attempt_id=?
+        ORDER BY e.epoch_number DESC,g.generation_number DESC
+        """,
+        (row["attempt_id"],),
+    ).fetchall()
+    if (
+        len(rows) != 1
+        or rows[0]["process_generation_id"] != generation_id
+        or rows[0]["attempt_id"] != row["attempt_id"]
+        or rows[0]["worker_id"] != row["worker_id"]
+        or rows[0]["epoch_worker"] != row["worker_id"]
+        or rows[0]["epoch_state"] != "CURRENT"
+        or not rows[0]["executive_writer_held"]
+        or rows[0]["ended_at_ms"] is not None
+        or rows[0]["provider_session_id"]
+        != rows[0]["epoch_provider_session"]
+    ):
+        raise StateConflict(
+            "interactive plan seal lost its CURRENT writer generation"
+        )
+    if admission["effective_grant_digest"] != row["effective_grant_digest"]:
+        raise StateConflict(
+            "interactive plan seal effective grant differs from its Attempt"
+        )
+    if (
+        admission["observed_attestation_digest"]
+        != rows[0]["observed_attestation_digest"]
+    ):
+        raise StateConflict(
+            "interactive plan seal attestation differs from its CURRENT generation"
+        )
+    return rows[0]
+
+
+def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
+    if row["orchestration_role"] != "plan":
+        return False
+    constraints = _strict_canonical_json_loads(
+        str(row["constraints_json"]), name="interactive parent constraints"
+    )
+    if not isinstance(constraints, dict):
+        raise StateConflict("interactive parent constraints are malformed")
+    if constraints.get("execution_profile_id") != INTERACTIVE_TX5_EXECUTION_PROFILE:
+        return False
+    _role, provenance, _digest = _decode_orchestration_job_fields(row)
+    if (
+        row["parent_job_id"] != row["root_job_id"]
+        or int(row["depth"]) != 1
+        or provenance is None
+        or provenance.get("creator") != "coo_cycle"
+        or provenance.get("command_id")
+        != f"coo-cycle:{row['root_job_id']}:create-interactive:0"
+        or provenance.get("job_id") != row["job_id"]
+        or provenance.get("parent_job_id") != row["parent_job_id"]
+        or provenance.get("root_job_id") != row["root_job_id"]
+        or provenance.get("role") != "plan"
+        or provenance.get("source_id") != row["root_job_id"]
+    ):
+        raise StateConflict("interactive child provenance is not deterministic")
+    identity = {
+        "execution_profile_id": INTERACTIVE_TX5_EXECUTION_PROFILE,
+        "execution_profile_digest": None,
+        "capability_policy_version": None,
+        "capability_policy_digest": None,
+    }
+    if any(
+        type(constraints.get(key)) is not str or not constraints.get(key)
+        for key in identity
+    ):
+        raise StateConflict("interactive stored capability identity is malformed")
+    try:
+        registry = ExecutionCapabilityRegistry.load()
+        profile = registry.resolve(INTERACTIVE_TX5_EXECUTION_PROFILE)
+    except CapabilityPolicyError as exc:
+        raise StateConflict(f"interactive capability policy is invalid: {exc}") from exc
+    closed = (
+        profile.enabled
+        and profile.execution_surface == "codex-app-server"
+        and profile.auth_realm == "dedicated-worker-account"
+        and profile.sandbox_policy == "read-only"
+        and profile.approval_policy == "never"
+        and profile.network_policy == "disabled"
+        and profile.native_helper_policy is NativeHelperPolicy.DISABLED
+        and profile.native_helper is None
+        and not profile.skills
+        and not profile.skill_grants
+        and not profile.mcp_server_grants
+        and not profile.resource_grants
+        and not profile.plugins
+        and not profile.forbidden
+        and not profile.write_capable
+    )
+    expected_identity = {
+        "execution_profile_id": profile.profile_id,
+        "execution_profile_digest": profile.profile_digest,
+        "capability_policy_version": registry.policy_version,
+        "capability_policy_digest": registry.policy_digest,
+    }
+    if any(constraints.get(key) != value for key, value in expected_identity.items()):
+        raise StateConflict("interactive capability identity is stale or malformed")
+    if not closed:
+        raise StateConflict("interactive capability profile is not closed")
+    return True
+
+
+def _interactive_in_flight_turn_id(
+    connection: sqlite3.Connection, generation_id: str
+) -> str | None:
+    rows = connection.execute(
+        """
+        SELECT g.session_epoch_id,e.attempt_id
+        FROM process_generations g
+        JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+        WHERE g.process_generation_id=?
+        """,
+        (generation_id,),
+    ).fetchall()
+    if len(rows) != 1:
+        raise StateConflict("interactive generation identity is ambiguous")
+    session_epoch_id = rows[0]["session_epoch_id"]
+    attempt_id = rows[0]["attempt_id"]
+    receipts: dict[str, set[str]] = {}
+    for event in connection.execute(
+        """
+        SELECT event_type,payload_json
+        FROM events
+        WHERE aggregate_type='operator_operation' AND attempt_id=?
+        """,
+        (attempt_id,),
+    ):
+        payload = _json_loads(event["payload_json"], fallback={})
+        if (
+            payload.get("operation_kind") != OperationKind.BEGIN_TURN.value
+            or payload.get("session_epoch_id") != session_epoch_id
+            or payload.get("process_generation_id") != generation_id
+        ):
+            continue
+        turn_id = str(payload.get("turn_id"))
+        receipts.setdefault(turn_id, set()).add(event["event_type"])
+    for turn_id, states in receipts.items():
+        if states == {OperationReceiptKind.INTENT.value}:
+            return turn_id
+    for turn_id, states in receipts.items():
+        if OperationReceiptKind.EFFECT_UNKNOWN.value in states:
+            return turn_id
+    for turn_id, states in receipts.items():
+        if OperationReceiptKind.APPLIED.value in states:
+            turn_operation_applied = connection.execute(
+                """
+                SELECT 1
+                FROM events
+                WHERE event_type='OPERATOR_OPERATION_APPLIED'
+                  AND aggregate_type='operator_operation'
+                  AND attempt_id=?
+                  AND json_extract(payload_json,'$.operation_kind')='interrupt_turn'
+                  AND json_extract(payload_json,'$.turn_id')=?
+                LIMIT 1
+                """,
+                (attempt_id, turn_id),
+            ).fetchone()
+            if turn_operation_applied is not None:
+                continue
+            candidate = connection.execute(
+                """
+                SELECT 1
+                FROM events
+                WHERE event_type='OHF_CANDIDATE_RESULT_RECORDED'
+                  AND attempt_id=?
+                  AND json_extract(payload_json,'$.turn.turn_id')=?
+                """,
+                (attempt_id, turn_id),
+            ).fetchone()
+            if candidate is None:
+                return turn_id
+    return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -8308,7 +8616,8 @@ def _work_dependency_manifest(
     )
 
 def _validated_plan_admission(
-    connection: sqlite3.Connection, root_row: sqlite3.Row
+    connection: sqlite3.Connection,
+    root_row: sqlite3.Row,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return the immutable reservation and its revalidated typed plan."""
 
@@ -8369,26 +8678,57 @@ def _validated_plan_admission(
         raise StateConflict("COO plan admission identity/digest is invalid")
     plan_attempt = connection.execute(
         """
-        SELECT a.*,j.job_id AS plan_job_id,j.orchestration_role AS plan_role,
-               j.parent_job_id AS plan_parent,j.root_job_id AS plan_root
+        SELECT a.*,j.job_id AS plan_job_id,j.orchestration_role,
+               j.orchestration_provenance_json,j.orchestration_provenance_digest,
+               j.constraints_json,j.job_id,j.parent_job_id,j.root_job_id,
+               j.depth,j.parent_job_id AS plan_parent,j.root_job_id AS plan_root,
+               j.orchestration_role AS plan_role
         FROM attempts a JOIN jobs j ON j.job_id=a.job_id
         WHERE a.attempt_id=?
         """,
         (admission["plan_attempt_id"],),
     ).fetchone()
+    active_interactive = plan_attempt is not None and (
+        plan_attempt["status"]
+        in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+        and _interactive_tx5_admitted(plan_attempt)
+    )
+    completed_history = plan_attempt is not None and (
+        plan_attempt["status"] == AttemptStatus.COMPLETED.value
+        or connection.execute(
+            """
+            SELECT 1 FROM events
+            WHERE event_type='JOB_COMPLETED' AND attempt_id=?
+            LIMIT 1
+            """,
+            (admission["plan_attempt_id"],),
+        ).fetchone()
+        is not None
+    )
     if (
-        plan_attempt is None
-        or plan_attempt["status"] != AttemptStatus.COMPLETED.value
+        not (completed_history or active_interactive)
         or plan_attempt["plan_role"] != "plan"
         or plan_attempt["plan_parent"] != root_row["job_id"]
         or plan_attempt["plan_root"] != root_row["job_id"]
     ):
-        raise StateConflict("COO plan admission lost its completed planner Attempt")
-    seal = _validated_orchestration_role_result_payload(
-        connection,
-        attempt_row=plan_attempt,
-        expected_role="plan",
-    )
+        raise StateConflict(
+            "COO plan admission lost its active interactive or completed planner Attempt"
+        )
+    if active_interactive:
+        seal = _validated_interactive_active_plan_seal(
+            connection,
+            attempt_row=plan_attempt,
+            job_row=connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?",
+                (plan_attempt["job_id"],),
+            ).fetchone(),
+        )
+    else:
+        seal = _validated_orchestration_role_result_payload(
+            connection,
+            attempt_row=plan_attempt,
+            expected_role="plan",
+        )
     if (
         seal["job_id"] != plan_attempt["plan_job_id"]
         or seal["worker_id"] != plan_attempt["worker_id"]
@@ -8400,12 +8740,13 @@ def _validated_plan_admission(
         != plan_attempt["execution_principal_snapshot_digest"]
     ):
         raise StateConflict("sealed planner evidence does not match its Attempt")
-    _orchestration_terminal_receipt(
-        connection,
-        attempt_id=str(admission["plan_attempt_id"]),
-        expected_role="plan",
-        seal=seal,
-    )
+    if not active_interactive:
+        _orchestration_terminal_receipt(
+            connection,
+            attempt_id=str(admission["plan_attempt_id"]),
+            expected_role="plan",
+            seal=seal,
+        )
     try:
         from control_plane.executive_orchestration_result import (
             canonical_digest as result_digest,
@@ -9524,6 +9865,7 @@ def _assert_orchestration_lineage_for_create(
     supersedes_job_id: str | None,
     rejected_review_job_id: str | None = None,
     rejected_review_result_digest: str | None = None,
+    allow_active_interactive_plan: bool = False,
 ) -> None:
     parent_role, parent_provenance, _ = _decode_orchestration_job_fields(parent_row)
     if (
@@ -9546,12 +9888,27 @@ def _assert_orchestration_lineage_for_create(
     ).fetchone()
     if (
         plan_attempt is None
-        or plan_attempt["status"] != AttemptStatus.COMPLETED.value
+        or (
+            plan_attempt["status"] != AttemptStatus.COMPLETED.value
+            and not (
+                allow_active_interactive_plan
+                and plan_attempt["status"]
+                in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+            )
+        )
         or plan_attempt["plan_role"] != "plan"
         or plan_attempt["plan_parent"] != parent_row["job_id"]
         or plan_attempt["plan_root"] != parent_row["root_job_id"]
     ):
         raise StateConflict("plan lineage does not name the completed plan child")
+    if allow_active_interactive_plan:
+        job_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (plan_attempt["job_id"],)
+        ).fetchone()
+        if job_row is None or not _interactive_tx5_admitted(job_row):
+            raise StateConflict(
+                "active interactive plan lineage is not recognized"
+            )
     _, sealed_plan_digest = _sealed_role_result(
         connection, attempt_id=str(plan_attempt_id), expected_role="plan"
     )
@@ -10010,6 +10367,7 @@ def _insert_cycle_child(
     creation_evidence: dict[str, str] | None = None,
     placement: dict[str, Any] | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
+    allow_active_interactive_plan: bool = False,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
@@ -10088,6 +10446,7 @@ def _insert_cycle_child(
         rejected_review_result_digest=(creation_evidence or {}).get(
             "rejected_review_result_digest"
         ),
+        allow_active_interactive_plan=allow_active_interactive_plan,
     )
     numbers = [
         int(match.group(1))
@@ -11125,6 +11484,9 @@ def _finite_charged_reservation(
 
 
 class JobRegistry:
+    def __init__(self, store: RuntimeStore) -> None:
+        self.store = store
+
     def validate_finite_first_issuance(
         self, root_job_id: str, attempt_id: str
     ) -> FiniteReservationDecision:
@@ -11582,6 +11944,39 @@ class JobRegistry:
             raise StateConflict(
                 "planner creation requires a strict v2 aggregation root"
             )
+        constraints = self._operator_child_constraints(root)
+        return self.create_job(
+            f"Produce the bounded execution plan for {root.job_id}: {root.objective}",
+            department=root.department,
+            priority=root.priority,
+            authority_level=root.authority_level,
+            branch=root.branch,
+            worktree=root.worktree,
+            constraints=constraints,
+            attempt_limit=min(
+                root.attempt_limit,
+                CooCyclePolicy.load().max_attempts_per_orchestration_job,
+            ),
+            requested_authorities=["READ"],
+            allowed_write_paths=[],
+            validation_commands=[],
+            command_id=command_id,
+            parent_job_id=root.job_id,
+            owner_seat="coo",
+            escalation_target="coo",
+            business_impact=root.business_impact,
+            review_required=False,
+            orchestration_role="plan",
+            orchestration_provenance={
+                "schema_version": "mastermind.executive_orchestration_provenance_source/v1",
+                "creator": "coo_cycle",
+                "source_id": root.job_id,
+                "source_digest": str(root.orchestration_provenance_digest),
+            },
+            _coo_cycle_planner_capability=_COO_CYCLE_PLANNER_CREATION_CAPABILITY,
+        )
+
+    def _operator_child_constraints(self, root: Job) -> dict[str, Any]:
         root_constraints = dict(root.constraints)
         root_cost = str(root_constraints.get("cost_class") or "default")
         cost_class = (
@@ -11640,8 +12035,51 @@ class JobRegistry:
             ):
                 if root_constraints.get(key):
                     constraints[key] = root_constraints[key]
+        return constraints
+
+    def create_interactive_operator(
+        self,
+        root_job_id: str,
+        *,
+        command_id: str,
+    ) -> Job:
+        """Create or reconcile the sole deterministic interactive parent."""
+
+        root_token = str(root_job_id or "").strip()
+        expected_command = f"coo-cycle:{root_token}:create-interactive:0"
+        if command_id != expected_command:
+            raise StateConflict(
+                "interactive command_id is not exact-root deterministic"
+            )
+        root = self.get_job(root_token)
+        if root is None:
+            raise StateConflict(f"root job {root_token!r} does not exist")
+        if (
+            root.orchestration_role != "aggregation"
+            or root.parent_job_id is not None
+            or root.root_job_id != root.job_id
+            or not isinstance(root.orchestration_provenance, dict)
+            or root.orchestration_provenance.get("creator") != "ceo_intent"
+        ):
+            raise StateConflict(
+                "interactive creation requires a strict v2 aggregation root"
+            )
+        constraints = self._operator_child_constraints(root)
+        constraints["execution_profile_id"] = INTERACTIVE_TX5_EXECUTION_PROFILE
+        profile = ExecutionCapabilityRegistry.load().resolve(
+            INTERACTIVE_TX5_EXECUTION_PROFILE
+        )
+        constraints["execution_profile_digest"] = profile.profile_digest
+        constraints["capability_policy_version"] = (
+            ExecutionCapabilityRegistry.load().policy_version
+        )
+        constraints["capability_policy_digest"] = (
+            ExecutionCapabilityRegistry.load().policy_digest
+        )
+        if not constraints.get("routing_policy_version"):
+            constraints["routing_policy_version"] = "interactive-routing"
         return self.create_job(
-            f"Produce the bounded execution plan for {root.job_id}: {root.objective}",
+            f"Operate the bounded interactive App Server session for {root.job_id}: {root.objective}",
             department=root.department,
             priority=root.priority,
             authority_level=root.authority_level,
@@ -11749,32 +12187,85 @@ class JobRegistry:
                     "plan admission requires exactly one planner and no other child"
                 )
             planner = children[0]
-            plan_attempt = connection.execute(
-                "SELECT * FROM attempts WHERE attempt_id=?",
-                (planner["current_attempt_id"],),
-            ).fetchone()
-            if (
-                planner["status"] != JobStatus.COMPLETED.value
-                or plan_attempt is None
-                or plan_attempt["status"] != AttemptStatus.COMPLETED.value
-            ):
-                raise StateConflict("plan admission requires a completed planner")
-            expected_command = (
-                f"coo-cycle:{root_token}:admit-plan:{plan_attempt['attempt_id']}"
-            )
-            if command_id != expected_command:
-                raise StateConflict("plan-admission command_id is not deterministic")
-            seal = _validated_orchestration_role_result_payload(
-                connection,
-                attempt_row=plan_attempt,
-                expected_role="plan",
-            )
-            _orchestration_terminal_receipt(
-                connection,
-                attempt_id=str(plan_attempt["attempt_id"]),
-                expected_role="plan",
-                seal=seal,
-            )
+            interactive = False
+            if _interactive_tx5_admitted(planner):
+                expected_command = (
+                    f"coo-cycle:{root_token}:admit-plan:"
+                    f"{planner['current_attempt_id']}"
+                )
+                if command_id != expected_command:
+                    raise StateConflict(
+                        "plan-admission command_id is not deterministic"
+                    )
+                if (
+                    planner["status"]
+                    not in (JobStatus.RUNNING.value, JobStatus.CHECKPOINTED.value)
+                    or planner["current_attempt_id"] is None
+                ):
+                    raise StateConflict(
+                        "interactive plan admission requires an active parent"
+                    )
+                plan_attempt = connection.execute(
+                    """
+                    SELECT a.*,j.orchestration_role AS plan_role,
+                           j.parent_job_id AS plan_parent,j.root_job_id AS plan_root,
+                           j.depth AS plan_depth
+                    FROM attempts a JOIN jobs j ON j.job_id=a.job_id
+                    WHERE a.attempt_id=?
+                    """,
+                    (planner["current_attempt_id"],),
+                ).fetchone()
+                if (
+                    plan_attempt is None
+                    or plan_attempt["plan_role"] != "plan"
+                    or plan_attempt["plan_parent"] != root_token
+                    or plan_attempt["plan_root"] != root_token
+                    or plan_attempt["plan_depth"] != 1
+                    or plan_attempt["execution_mode"]
+                    != AttemptExecutionMode.OPERATOR_HARNESS.value
+                    or plan_attempt["status"]
+                    not in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+                    or plan_attempt["worker_id"] is None
+                    or plan_attempt["quota_class"] is None
+                ):
+                    raise StateConflict(
+                        "interactive plan admission parent identity is invalid"
+                    )
+                seal = _validated_interactive_active_plan_seal(
+                    connection,
+                    attempt_row=plan_attempt,
+                    job_row=planner,
+                )
+                interactive = True
+            else:
+                plan_attempt = connection.execute(
+                    "SELECT * FROM attempts WHERE attempt_id=?",
+                    (planner["current_attempt_id"],),
+                ).fetchone()
+                if (
+                    planner["status"] != JobStatus.COMPLETED.value
+                    or plan_attempt is None
+                    or plan_attempt["status"] != AttemptStatus.COMPLETED.value
+                ):
+                    raise StateConflict("plan admission requires a completed planner")
+                expected_command = (
+                    f"coo-cycle:{root_token}:admit-plan:{plan_attempt['attempt_id']}"
+                )
+                if command_id != expected_command:
+                    raise StateConflict(
+                        "plan-admission command_id is not deterministic"
+                    )
+                seal = _validated_orchestration_role_result_payload(
+                    connection,
+                    attempt_row=plan_attempt,
+                    expected_role="plan",
+                )
+                _orchestration_terminal_receipt(
+                    connection,
+                    attempt_id=str(plan_attempt["attempt_id"]),
+                    expected_role="plan",
+                    seal=seal,
+                )
             try:
                 from control_plane.executive_orchestration_result import (
                     canonical_digest as result_digest,
@@ -11879,6 +12370,7 @@ class JobRegistry:
                     plan_step_id=str(step["step_id"]),
                     repair_round=0,
                     placement=step.get("placement"),
+                    allow_active_interactive_plan=interactive,
                 )
                 created_ids.append(str(member["job_id"]))
                 reservation_steps.append(
@@ -11942,6 +12434,7 @@ class JobRegistry:
                         repair_round=0,
                         placement=step.get("placement"),
                         dependency_manifest=manifest,
+                        allow_active_interactive_plan=interactive,
                     )
                     created_ids.append(str(member["job_id"]))
                     reservation_steps[ordinal]["initial_work_job_id"] = str(
@@ -11982,7 +12475,10 @@ class JobRegistry:
             ).fetchone()
             if root is None:
                 raise StateConflict("deferred work root does not exist")
-            admission, plan_body = _validated_plan_admission(connection, root)
+            admission, plan_body = _validated_plan_admission(
+                connection,
+                root
+            )
             step = next(
                 (
                     item
@@ -12036,7 +12532,10 @@ class JobRegistry:
             ).fetchone()
             if root is None:
                 raise StateConflict("deferred work root does not exist")
-            admission, plan_body = _validated_plan_admission(connection, root)
+            admission, plan_body = _validated_plan_admission(
+                connection,
+                root
+            )
             step = next(
                 (
                     item
@@ -12181,7 +12680,10 @@ class JobRegistry:
             ).fetchone()
             if root is None or reviewed is None:
                 raise StateConflict("review root/revision is unavailable")
-            admission, plan_body = _validated_plan_admission(connection, root)
+            admission, plan_body = _validated_plan_admission(
+                connection,
+                root
+            )
             reviewed_attempt, _seal, _terminal, reviewed_result_digest = (
                 _validated_role_completion_material(
                     connection,
@@ -12373,7 +12875,10 @@ class JobRegistry:
                 raise StateConflict(
                     "repair root/revision/rejecting review is unavailable"
                 )
-            admission, plan_body = _validated_plan_admission(connection, root)
+            admission, plan_body = _validated_plan_admission(
+                connection,
+                root
+            )
             rejected_attempt, _work_seal, _work_terminal, rejected_result_digest = (
                 _validated_role_completion_material(
                     connection,
@@ -12564,7 +13069,10 @@ class JobRegistry:
             if prior is not None:
                 raise StateConflict("aggregation root already has a different handoff")
             _assert_cycle_root_open_for_child_mutation(connection, root)
-            admission, plan_body = _validated_plan_admission(connection, root)
+            admission, plan_body = _validated_plan_admission(
+                connection,
+                root
+            )
             revisions, rejected_history = _current_orchestration_tree_material(
                 connection, root, admission, plan_body
             )
@@ -16838,6 +17346,11 @@ class OperatorHarnessRegistry:
                     AttemptStatus.CHECKPOINTED,
                 },
             )
+            job_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+            ).fetchone()
+            if job_row is not None:
+                _interactive_tx5_admitted(job_row)
             seal = connection.execute(
                 """
                 SELECT payload_json FROM events
@@ -17451,7 +17964,7 @@ class OperatorHarnessRegistry:
         """Recompute the additive OHF active-work predicate for direct writes."""
 
         job = connection.execute(
-            "SELECT orchestration_role FROM jobs WHERE job_id=?", (row["job_id"],)
+            "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
         ).fetchone()
         role = (
             str(job["orchestration_role"])
@@ -17488,10 +18001,16 @@ class OperatorHarnessRegistry:
         ).fetchall()
         seals = connection.execute(
             """SELECT 1 FROM events
-               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
+            WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
             (row["attempt_id"],),
         ).fetchall()
-        if current is None or len(admissions) != 1 or len(decisions) != 1 or seals:
+        interactive = _interactive_tx5_admitted(job)
+        if (
+            current is None
+            or len(admissions) != 1
+            or len(decisions) != 1
+            or (seals and not interactive)
+        ):
             raise StateConflict("orchestration generation is not active-work admitted")
         admission_event = admissions[0]
         admission = _strict_canonical_json_loads(
@@ -17637,9 +18156,11 @@ class OperatorHarnessRegistry:
                 row=row,
                 generation_id=generation.process_generation_id,
             )
-            job_role = connection.execute(
-                "SELECT orchestration_role FROM jobs WHERE job_id=?", (row["job_id"],)
+            job_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
             ).fetchone()
+            _interactive_tx5_admitted(job_row)
+            job_role = job_row
             if (
                 job_role is not None
                 and job_role["orchestration_role"] is not None
@@ -17694,7 +18215,62 @@ class OperatorHarnessRegistry:
                     generation.process_generation_id,
                     epoch.attempt_id,
                 )
-            if job_role is not None and job_role["orchestration_role"] is not None:
+            if _interactive_tx5_admitted(job_row):
+                tx5_rows: list[dict[str, Any]] = []
+                for prior in connection.execute(
+                    """SELECT payload_json FROM events
+                       WHERE aggregate_type='operator_operation' AND event_type=?
+                         AND attempt_id=?""",
+                    (OperationReceiptKind.INTENT.value, row["attempt_id"]),
+                ):
+                    prior_payload = _json_loads(prior["payload_json"], fallback={})
+                    if (
+                        prior_payload.get("operation_kind")
+                        == OperationKind.BEGIN_TURN.value
+                    ):
+                        tx5_rows.append(prior_payload)
+                if generation.generation_number == 2:
+                    g2_turns = sum(
+                        item.get("process_generation_id")
+                        == generation.process_generation_id
+                        for item in tx5_rows
+                    )
+                    if g2_turns >= 1:
+                        raise StateConflict(
+                            "interactive TX-5 cardinality is exhausted"
+                        )
+                    g1 = connection.execute(
+                        """SELECT process_generation_id FROM process_generations
+                           WHERE session_epoch_id=? AND generation_number=1""",
+                        (epoch.session_epoch_id,),
+                    ).fetchone()
+                    if g1 is not None and _interactive_in_flight_turn_id(
+                        connection, str(g1["process_generation_id"])
+                    ):
+                        raise StateConflict(
+                            "interactive TX-5 G1 turn is still in flight"
+                        )
+                generation_turns = [
+                    item
+                    for item in tx5_rows
+                    if item.get("process_generation_id")
+                    == generation.process_generation_id
+                ]
+                if (
+                    len(generation_turns)
+                    >= INTERACTIVE_TX5_MAX_TURNS_PER_GENERATION
+                ):
+                    raise StateConflict(
+                        "interactive TX-5 cardinality is exhausted"
+                    )
+                in_flight = _interactive_in_flight_turn_id(
+                    connection, generation.process_generation_id
+                )
+                if in_flight is not None:
+                    raise StateConflict(
+                        "interactive TX-5 already has an in-flight turn"
+                    )
+            elif job_role is not None and job_role["orchestration_role"] is not None:
                 tx5_rows: list[dict[str, Any]] = []
                 for prior in connection.execute(
                     """SELECT payload_json FROM events
@@ -17875,6 +18451,103 @@ class OperatorHarnessRegistry:
             str(row["worker_id"]),
         )
         return epoch, generation
+
+    def _admitted_current_generation(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        row: sqlite3.Row,
+        generation_id: str,
+    ) -> sqlite3.Row:
+        admissions = connection.execute(
+            """
+            SELECT payload_json FROM events
+            WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+              AND aggregate_type='process_generation' AND aggregate_id=?
+            ORDER BY event_id
+            """,
+            (generation_id,),
+        ).fetchall()
+        if len(admissions) != 1:
+            raise StateConflict(
+                "interactive plan seal lacks its orchestration admission"
+            )
+        admission = _strict_canonical_json_loads(
+            str(admissions[0]["payload_json"]),
+            name="interactive plan work admission",
+        )
+        rows = connection.execute(
+            """
+            SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
+                   e.provider_session_id AS epoch_provider_session
+            FROM process_generations g
+            JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+            WHERE e.attempt_id=?
+            ORDER BY e.epoch_number DESC,g.generation_number DESC
+            """,
+            (row["attempt_id"],),
+        ).fetchall()
+        if (
+            len(rows) != 1
+            or rows[0]["process_generation_id"] != generation_id
+            or rows[0]["attempt_id"] != row["attempt_id"]
+            or rows[0]["worker_id"] != row["worker_id"]
+            or rows[0]["epoch_worker"] != row["worker_id"]
+            or rows[0]["epoch_state"] != "CURRENT"
+            or not rows[0]["executive_writer_held"]
+            or rows[0]["ended_at_ms"] is not None
+            or rows[0]["provider_session_id"]
+            != rows[0]["epoch_provider_session"]
+        ):
+            raise StateConflict(
+            "interactive plan seal lost its CURRENT writer generation"
+        )
+        if admission["effective_grant_digest"] != row["effective_grant_digest"]:
+            raise StateConflict(
+                "interactive plan seal effective grant differs from its Attempt"
+            )
+        if admission["observed_attestation_digest"] != rows[0]["observed_attestation_digest"]:
+            raise StateConflict(
+                "interactive plan seal attestation differs from its CURRENT generation"
+            )
+        return rows[0]
+
+    def _validate_interactive_active_plan_seal(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        attempt_row: sqlite3.Row,
+        job_row: sqlite3.Row,
+    ) -> dict[str, Any]:
+        seal = _sealed_role_result_payload(
+            connection,
+            attempt_id=str(attempt_row["attempt_id"]),
+            expected_role="plan",
+        )
+        current = self._admitted_current_generation(
+            connection,
+            row=attempt_row,
+            generation_id=str(seal["process_generation_id"]),
+        )
+        if (
+            seal["job_id"] != job_row["job_id"]
+            or seal["attempt_id"] != attempt_row["attempt_id"]
+            or seal["worker_id"] != attempt_row["worker_id"]
+            or seal["quota_class"] != attempt_row["quota_class"]
+            or seal["provider_session_id"] != current["provider_session_id"]
+            or seal["session_epoch_id"] != current["session_epoch_id"]
+            or seal["effective_grant_digest"]
+            != attempt_row["effective_grant_digest"]
+            or seal["execution_principal_snapshot_digest"]
+            != attempt_row["execution_principal_snapshot_digest"]
+            or seal["placement_snapshot_digest"]
+            != attempt_row["placement_snapshot_digest"]
+            or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        ):
+            raise StateConflict(
+                "interactive active plan seal does not match its durable identity"
+            )
+        return seal
 
     def current_writer_generation(self, epoch: SessionEpochRef) -> ProcessGenerationRef:
         """Return the one durable Executive writer for a CURRENT epoch."""
@@ -18199,6 +18872,16 @@ class OperatorHarnessRegistry:
                    ORDER BY event_id""",
                 (turn.attempt_id,),
             ).fetchall()
+            interactive = _interactive_tx5_admitted(job)
+            if interactive:
+                candidate_rows = [
+                    row
+                    for row in candidate_rows
+                    if _json_loads(row["payload_json"], fallback={})
+                    .get("turn", {})
+                    .get("turn_id")
+                    == turn.turn_id
+                ]
             if len(candidate_rows) != 1:
                 raise StateConflict("role result requires exactly one candidate Event")
             candidate_event = candidate_rows[0]
@@ -22490,6 +23173,8 @@ class Runtime:
     events: EventRegistry
     operator_harness: OperatorHarnessRegistry
     broker: ResourceBroker
+
+
 
     @classmethod
     def from_store(cls, store: RuntimeStore) -> "Runtime":

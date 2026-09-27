@@ -5154,6 +5154,14 @@ class ExecutiveControlService:
                     )
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
+                if (
+                    job.orchestration_role == "plan"
+                    and job.constraints.get("execution_profile_id")
+                    == "operator.appserver.interactive.v1"
+                ):
+                    raise StateConflict(
+                        "interactive plan Jobs are not routed to the planner supervisor"
+                    )
                 supervisor: Any = (
                     self._require_operator_supervisor()
                     if (
