@@ -65,6 +65,14 @@ class DirectServiceTests(unittest.TestCase):
         self.assertEqual((self.target / "runtime/bridge.py").read_bytes(),
                          (ROOT / "integrations/paper_desktop/bridge.py").read_bytes())
 
+    def test_enrollment_advertises_target_scoped_multi_writer_contract(self):
+        self.stage()
+        text = (self.target / "ENROLLMENT.md").read_text()
+        self.assertIn("Multiple admitted sessions/hosts may modify the same", text)
+        self.assertIn("board/artboard/node", text)
+        self.assertIn("not a document lease", text)
+        self.assertNotIn("One writer per file across all hosts remains required", text)
+
     def test_read_only_is_default(self):
         receipt = self.stage(allow_write=False)
         self.assertEqual(receipt["tools"], ["paper_catalog", "paper_inspect", "paper_read"])

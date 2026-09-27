@@ -256,6 +256,55 @@ class CoreTests(unittest.TestCase):
         with b.desktop_lock(self.root), self.assertRaisesRegex(b.Refusal, "DESKTOP_BUSY"):
             self.call()
         self.assertEqual(self.client.calls, [])
+
+    def test_same_file_disjoint_targets_can_modify_concurrently_across_hosts(self):
+        barrier = threading.Barrier(2)
+
+        class ConcurrentFake(Fake):
+            def call(self, name, arguments):
+                if name in b.EDIT_TOOLS:
+                    self.calls.append(name)
+                    barrier.wait(timeout=3)
+                    self.info["nodeCount"] = self.info.get("nodeCount", 0) + 1
+                    return {"content": [{"type": "text", "text": "ok"}]}
+                return super().call(name, arguments)
+
+        clients = [ConcurrentFake(), ConcurrentFake()]
+        roots = [self.root / "host-a", self.root / "host-b"]
+        results = [None, None]
+        errors = []
+
+        def worker(index, node_id):
+            try:
+                results[index] = b.execute(
+                    "edit",
+                    tool="set_text_content",
+                    arguments={"fileId": "file-fixture", "nodeId": node_id, "text": node_id},
+                    expected_snapshot=b.digest(INFO),
+                    operation_id=f"paper-concurrent-{index}",
+                    allow_write=True,
+                    client=clients[index],
+                    lock_root=roots[index],
+                    _server_pin=None,
+                    _catalog_pin=None,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(0, "node-a")),
+            threading.Thread(target=worker, args=(1, "node-b")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertFalse(errors)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual([result["state"] for result in results],
+                         ["APPLIED_RESPONSE_OBSERVED", "APPLIED_RESPONSE_OBSERVED"])
+        self.assertTrue(all("set_text_content" in client.calls for client in clients))
     def test_lock_symlink_refused(self):
         target = self.root / "unrelated"
         target.write_text("unchanged")
@@ -295,6 +344,10 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(receipt["provider_homes_modified"])
         self.assertFalse(receipt["executive_production_armed"])
         self.assertTrue(receipt["client_enrollment"]["codex"]["project_trust_required"])
+        agents = (dest / "workspace/AGENTS.md").read_text()
+        self.assertIn("Multiple designers may modify the same Paper file/page", agents)
+        self.assertIn("board/artboard/node", agents)
+        self.assertNotIn("Only one designer owns the active desktop file", agents)
         enrollment = (dest / "ENROLLMENT.md").read_text()
         self.assertIn('trust_level = "trusted"', enrollment)
         self.assertIn("codex login status", enrollment)

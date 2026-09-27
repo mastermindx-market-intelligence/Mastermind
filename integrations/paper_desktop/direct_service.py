@@ -234,7 +234,9 @@ The selected tool surface is recorded in INSTALLATION.json. Optional paper_prepa
 binds one exact existing file through Paper's explicit `fileId` API, never a host helper,
 URL, path, or raw open_file transition. Paper must already be running. A fresh active-context
 snapshot and stable operation ID are required; prepare returns the exact target snapshot used
-by the subsequent target-bound edit. One writer per file across all hosts remains required.
+by the subsequent target-bound edit. Multiple admitted sessions/hosts may modify the same
+fileId, including the same page. Coordinate by board/artboard/node target and re-read/re-plan
+known overlap; the per-OS-user desktop mutex is a local call guard, not a document lease.
 
 1. Verify the existing Chairman-created tunnel ID and exact Business workspace
    association in OpenAI's admin surface. Check for an existing Paper app/client.
