@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from paper_direct_test_support import PrivatePython
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "integrations/paper_desktop/direct_service.py"
@@ -19,6 +21,14 @@ SOURCE = ROOT / "integrations/paper_desktop/direct_service.py"
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "Dedicated MCP SDK required")
 class DirectStdioTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._python_fixture = PrivatePython()
+        cls.private_python = cls._python_fixture.python
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._python_fixture.close()
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name).resolve()
@@ -39,19 +49,26 @@ class DirectStdioTests(unittest.TestCase):
             import inspect
             self.assertIn("allow_prepare", inspect.signature(self.svc.stage).parameters)
             options["allow_prepare"] = True
-        self.svc.stage(root, python=Path(sys.executable).absolute(), tunnel_client=self.binary,
+        self.svc.stage(root, python=self.private_python, tunnel_client=self.binary,
                        source_revision="0" * 40, allow_write=write, **options)
         return root
 
+    def probe_bundle(self, root):
+        # probe() validates that the invoking process is the staged runtime.
+        # This in-process test models that identity; the server subprocess still
+        # executes through the actual private staged interpreter.
+        with patch.object(sys, "executable", str(self.private_python)):
+            return asyncio.run(asyncio.wait_for(self.svc.probe(root), timeout=20))
+
     def test_real_stdio_readonly_surface(self):
-        result = asyncio.run(asyncio.wait_for(self.svc.probe(self.stage(False)), timeout=20))
+        result = self.probe_bundle(self.stage(False))
         self.assertEqual(result["state"], "LOCAL_STDIO_PROVEN")
         self.assertEqual(result["tools"], ["paper_catalog", "paper_inspect", "paper_read"])
         self.assertFalse(result["paper_called"])
         self.assertFalse(result["chatgpt_enrolled"])
 
     def test_real_stdio_write_surface_preserves_consequential_annotations(self):
-        result = asyncio.run(asyncio.wait_for(self.svc.probe(self.stage(True)), timeout=20))
+        result = self.probe_bundle(self.stage(True))
         tools = {t["name"]: t for t in result["catalog"]["tools"]}
         self.assertEqual(set(tools), {"paper_catalog", "paper_inspect", "paper_read", "paper_edit"})
         edit = tools["paper_edit"]
@@ -64,7 +81,7 @@ class DirectStdioTests(unittest.TestCase):
         self.assertFalse(result["production_acceptance"])
 
     def test_real_stdio_prepare_is_a_closed_non_destructive_write(self):
-        result = asyncio.run(asyncio.wait_for(self.svc.probe(self.stage(True, prepare=True)), timeout=20))
+        result = self.probe_bundle(self.stage(True, prepare=True))
         tools = {t["name"]: t for t in result["catalog"]["tools"]}
         self.assertEqual(set(tools), {"paper_catalog", "paper_inspect", "paper_read", "paper_edit", "paper_prepare"})
         tool = tools["paper_prepare"]
@@ -81,7 +98,7 @@ class DirectStdioTests(unittest.TestCase):
         async def run():
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
-            command = [sys.executable, "-I", str(root / "runtime/direct_service.py"), "serve", "--root", str(root)]
+            command = [str(self.private_python), "-I", str(root / "runtime/direct_service.py"), "serve", "--root", str(root)]
             async with stdio_client(StdioServerParameters(command=command[0], args=command[1:],
                                                          env=self.svc.clean_env(dict(os.environ)))) as (reader, writer):
                 async with ClientSession(reader, writer) as client:
@@ -95,7 +112,7 @@ class DirectStdioTests(unittest.TestCase):
 
     def test_unbound_cli_cannot_start_a_tunnel(self):
         root = self.stage(True)
-        result = subprocess.run([sys.executable, "-I", str(root / "runtime/direct_service.py"),
+        result = subprocess.run([str(self.private_python), "-I", str(root / "runtime/direct_service.py"),
                                  "run", "--root", str(root)], capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stderr)["state"], "BINDING_REQUIRED")
@@ -103,7 +120,7 @@ class DirectStdioTests(unittest.TestCase):
     def test_bound_cli_still_requires_final_runtime_key(self):
         root = self.stage(True)
         self.svc.bind(root, "tunnel_" + "b" * 32, "workspace-business-test")
-        result = subprocess.run([sys.executable, "-I", str(root / "runtime/direct_service.py"),
+        result = subprocess.run([str(self.private_python), "-I", str(root / "runtime/direct_service.py"),
                                  "run", "--root", str(root)], capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stderr)["state"], "RUNTIME_KEY_MISSING")

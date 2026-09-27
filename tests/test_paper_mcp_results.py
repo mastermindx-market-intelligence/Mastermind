@@ -15,12 +15,31 @@ ROOT = Path(__file__).resolve().parents[1] / "integrations/paper_desktop"
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "Dedicated pinned MCP SDK required")
 class McpResultTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        # The repository also has a top-level `bridge` package. mcp_server.py is
+        # normally a fresh isolated stdio process, so reproduce that module
+        # identity explicitly instead of inheriting pytest's module cache.
+        self._prior_modules = {name: sys.modules.get(name) for name in ("bridge", "prepare")}
+
+        def load_exact(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            return module
+
+        load_exact("bridge", ROOT / "bridge.py")
+        self.prepare = load_exact("prepare", ROOT / "prepare.py")
         spec = importlib.util.spec_from_file_location("paper_result_test_server", ROOT / "mcp_server.py")
         self.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.module)
-        import prepare
-        self.prepare = prepare
         self.server = self.module.build_server(allow_write=True, allow_prepare=True)
+
+    def tearDown(self):
+        for name, previous in self._prior_modules.items():
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
 
     async def invoke(self, name, args):
         # The real SDK's registered callable returns the exact CallToolResult

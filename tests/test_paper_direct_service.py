@@ -9,12 +9,21 @@ import plistlib
 import sys
 import tempfile
 import unittest
+from paper_direct_test_support import PrivatePython
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "integrations/paper_desktop/direct_service.py"
 
 
 class DirectServiceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._python_fixture = PrivatePython()
+        cls.private_python = cls._python_fixture.python
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._python_fixture.close()
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name).resolve()
@@ -36,7 +45,7 @@ class DirectServiceTests(unittest.TestCase):
         return self._service
 
     def stage(self, **kw):
-        params = dict(python=Path(sys.executable).resolve(), tunnel_client=self.binary,
+        params = dict(python=self.private_python, tunnel_client=self.binary,
                       source_revision="a" * 40, allow_write=True)
         params.update(kw)
         return self.service().stage(self.target, **params)
@@ -280,7 +289,7 @@ class DirectServiceTests(unittest.TestCase):
         value = self.stage()
         self.assertIn("sdk_distributions", value)
         self.assertIsInstance(value["sdk_distributions"], dict)
-        self.assertEqual(value["sdk_distributions"], self.service().sdk_distributions())
+        self.assertEqual(value["sdk_distributions"], self.service().sdk_distributions(self.private_python))
 
     def test_dependency_drift_is_rejected(self):
         self.stage()

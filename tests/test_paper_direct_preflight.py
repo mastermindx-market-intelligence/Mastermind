@@ -11,11 +11,20 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from paper_direct_test_support import PrivatePython
 
 SOURCE = Path(__file__).resolve().parents[1] / "integrations/paper_desktop/direct_service.py"
 
 
 class DirectPreflightTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._python_fixture = PrivatePython()
+        cls.private_python = cls._python_fixture.python
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._python_fixture.close()
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name).resolve()
@@ -29,14 +38,14 @@ class DirectPreflightTests(unittest.TestCase):
         self.env = self.svc.clean_env(dict(os.environ))
         self.env["HOME"] = str(self.home)
         with patch.dict(os.environ, {"HOME": str(self.home)}):
-            self.svc.stage(self.root, python=Path(sys.executable).resolve(),
+            self.svc.stage(self.root, python=self.private_python,
                            tunnel_client=self.binary, source_revision="0" * 40)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def cli(self, action):
-        return subprocess.run([sys.executable, "-I", str(self.root / "runtime/direct_service.py"),
+        return subprocess.run([str(self.private_python), "-I", str(self.root / "runtime/direct_service.py"),
                                action, "--root", str(self.root)],
                               capture_output=True, text=True, env=self.env, timeout=8)
 
@@ -120,7 +129,7 @@ class DirectPreflightTests(unittest.TestCase):
             "\nexcept m.Refusal as e: print(str(e))"
         )
         try:
-            result = subprocess.run([sys.executable, "-I", "-c", code, str(SOURCE), function, str(fifo)],
+            result = subprocess.run([str(self.private_python), "-I", "-c", code, str(SOURCE), function, str(fifo)],
                                     capture_output=True, text=True, timeout=2)
         except subprocess.TimeoutExpired:
             self.fail("Special file blocked before regular-file validation")

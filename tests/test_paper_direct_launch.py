@@ -13,12 +13,21 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from paper_direct_test_support import PrivatePython
 
 SOURCE = Path(__file__).resolve().parents[1] / "integrations/paper_desktop/direct_service.py"
 
 
 @unittest.skipUnless(importlib.util.find_spec("mcp"), "Dedicated pinned MCP SDK required")
 class DirectLaunchTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._python_fixture = PrivatePython()
+        cls.private_python = cls._python_fixture.python
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._python_fixture.close()
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name).resolve()
@@ -28,7 +37,7 @@ class DirectLaunchTests(unittest.TestCase):
         spec.loader.exec_module(self.svc)
         self.binary = self.home / "fixture-client"
         self.binary.write_text(
-            "#!" + sys.executable + "\n"
+            "#!" + str(self.private_python) + "\n"
             "import json, os, select, sys\n"
             "names=['OPENAI_API_KEY','OPENAI_ADMIN_KEY','CONTROL_PLANE_API_KEY',"
             "'CONTROL_PLANE_TUNNEL_ID','MCP_COMMAND','PYTHONPATH','HTTPS_PROXY']\n"
@@ -58,7 +67,7 @@ class DirectLaunchTests(unittest.TestCase):
     def stage(self, name):
         root = self.home / name
         with patch.dict(os.environ, {"HOME": str(self.home)}):
-            self.svc.stage(root, python=Path(sys.executable), tunnel_client=self.binary,
+            self.svc.stage(root, python=self.private_python, tunnel_client=self.binary,
                            source_revision="0" * 40, allow_write=True, allow_prepare=True)
             self.svc.bind(root, "tunnel_" + "b" * 32, "workspace-fixture-business")
         # Deliberately fake and local. The fixture binary never contacts OpenAI.
@@ -68,7 +77,7 @@ class DirectLaunchTests(unittest.TestCase):
         return root
 
     def start(self, root, extra_env=None, action="run"):
-        child = subprocess.Popen([sys.executable, "-I", str(root / "runtime/direct_service.py"),
+        child = subprocess.Popen([str(self.private_python), "-I", str(root / "runtime/direct_service.py"),
                                   action, "--root", str(root)],
                                  env=dict(self.env, **(extra_env or {})), stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
