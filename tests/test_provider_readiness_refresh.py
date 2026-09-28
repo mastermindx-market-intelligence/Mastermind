@@ -3,7 +3,8 @@
 These tests cover the `reuse` exit-code-4 path and the `reserve --refresh-expired`
 path that allow a historically passing device-auth receipt whose
 ``readiness_expires_at`` only fell past the current acceptance margin to be
-re-bound to a fresh credential deadline, while every other receipt class
+re-bound to a fresh readiness deadline without extending the credential
+deadline, while every other receipt class
 (reservation, adverse marker, tampered document, stale identity, non device-auth
 credential kind) remains fail-closed.
 """
@@ -342,7 +343,7 @@ def test_t1_expired_device_auth_receipt_reuse_exits_4(
     _write_personal_auth(auth_path, 454)
 
     rc, _, stderr = _run_cli(
-        _personal_pro_reuse_args(receipt_path, auth_path, _credential_expiry(hours=12)),
+        _personal_pro_reuse_args(receipt_path, auth_path, receipt["credential_expires_at"]),
         monkeypatch,
         tmp_path,
     )
@@ -438,7 +439,8 @@ def test_t2_refresh_expired_creates_new_reservation_and_supersedes_sibling(
     receipt_path = tmp_path / "readiness.json"
     _write_with_storage(receipt_path, receipt)
 
-    new_deadline = _credential_expiry(hours=12)
+    # Readiness refresh retains the same credential deadline, even if time passes.
+    new_deadline = receipt["credential_expires_at"]
     identity_payload = _personal_identity(454)
     identity_json = tmp_path / "identity.json"
     identity_json.write_text(json.dumps(identity_payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
@@ -812,7 +814,7 @@ def test_t7_refresh_expired_idempotent_second_run_refuses(
     auth_path = tmp_path / "auth.json"
     _write_personal_auth(auth_path, 454)
 
-    new_deadline = _credential_expiry(hours=12)
+    new_deadline = receipt["credential_expires_at"]
     args = [
         "reserve", "--refresh-expired",
         "--receipt", str(receipt_path),
@@ -879,7 +881,7 @@ def test_t8_superseded_sibling_with_different_bytes_conflicts(
             "--identity-json", str(identity_json),
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
-            "--credential-expires-at", _credential_expiry(hours=12),
+            "--credential-expires-at", receipt["credential_expires_at"],
             "--worker-uid", "454",
             "--worker-gid", "454",
         ],
@@ -1334,7 +1336,7 @@ def test_t13_partial_superseded_sibling_is_repaired_on_retry(
             "--identity-json", str(identity_json),
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
-            "--credential-expires-at", _credential_expiry(hours=12),
+            "--credential-expires-at", receipt["credential_expires_at"],
             "--worker-uid", "454",
             "--worker-gid", "454",
         ],
@@ -1363,7 +1365,7 @@ def test_t13_partial_superseded_sibling_is_repaired_on_retry(
             "--identity-json", str(identity_json),
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
-            "--credential-expires-at", _credential_expiry(hours=12),
+            "--credential-expires-at", receipt["credential_expires_at"],
             "--worker-uid", "454",
             "--worker-gid", "454",
         ],
@@ -1451,7 +1453,7 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
             "--identity-json", str(identity_json),
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
-            "--credential-expires-at", _credential_expiry(hours=12),
+            "--credential-expires-at", receipt["credential_expires_at"],
             "--worker-uid", "454",
             "--worker-gid", "454",
         ],
@@ -1492,7 +1494,7 @@ def test_t13b_crash_between_temp_write_and_replace_leaves_no_partial_sibling(
             "--identity-json", str(identity_json),
             "--expected-kind", "device-auth",
             "--workspace-binding-class", identity_policy.PERSONAL_PRO_WORKER_BINDING_CLASS,
-            "--credential-expires-at", _credential_expiry(hours=12),
+            "--credential-expires-at", receipt["credential_expires_at"],
             "--worker-uid", "454",
             "--worker-gid", "454",
         ],
