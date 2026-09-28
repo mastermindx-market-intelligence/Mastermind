@@ -19,7 +19,9 @@ from control_plane.executive_agent_capabilities import (
     CLAUDE_OPERATOR_EXECUTION_SURFACE,
     CLAUDE_OPERATOR_HARNESS_KIND,
     CLAUDE_OPERATOR_PROVIDER,
+    COO_DOMAIN_EXECUTION_PROFILE,
     CapabilityPolicyError,
+    ExecutionCapabilityProfile,
     ExecutionCapabilityRegistry,
 )
 from control_plane.executive_operator_harness_port import ExecutiveOperatorHarnessPort
@@ -48,6 +50,7 @@ from control_plane.operator_harness_contract import (
     AuthRealmRequirement,
     EventCursor,
     LaunchDecision,
+    NativeHelperPolicy,
     OperationId,
     OperationKind,
     OperationReceiptKind,
@@ -63,6 +66,7 @@ from control_plane.operator_harness_contract import (
     operation_receipt_command_id,
 )
 from control_plane.operator_harness_orchestrator import (
+    OperatorEffectUnknown,
     OperatorHarnessOrchestrator,
     OperatorSessionReceipt,
     OperatorStartHandle,
@@ -209,12 +213,25 @@ class ExecutiveOperatorSupervisor:
             )
         try:
             registry = ExecutionCapabilityRegistry.load()
-            profile = registry.resolve(
-                str(job.constraints.get("execution_profile_id") or "")
-            )
         except CapabilityPolicyError as exc:
             raise ExecutiveOperatorSupervisorError(
                 f"operator capability policy is invalid: {exc}"
+            ) from exc
+        requested_profile_id = str(
+            job.constraints.get("execution_profile_id") or ""
+        )
+        try:
+            # Ordinary admission for every profile.  A disabled profile
+            # (including the shipped-disabled COO domain source shape) is
+            # refused here; no caller may index ``registry.profiles`` to
+            # bypass admission.  The closed read-only domain shape remains
+            # validated by ``domain_profile_ok`` below and by
+            # ``ExecutionCapabilityRegistry.load`` against
+            # ``COO_DOMAIN_PROFILE_SHAPE``.
+            profile = registry.resolve(requested_profile_id)
+        except CapabilityPolicyError as exc:
+            raise ExecutiveOperatorSupervisorError(
+                f"operator capability profile is not admitted: {exc}"
             ) from exc
         common_profile_ok = (
             registry.policy_version
@@ -265,8 +282,19 @@ class ExecutiveOperatorSupervisor:
             and not profile.mcp_server_grants
             and not profile.resource_grants
         )
+        domain_profile_ok = (
+            profile.profile_id == COO_DOMAIN_EXECUTION_PROFILE
+            and profile.execution_surface == "codex-app-server"
+            and profile.network_policy == "disabled"
+            and profile.native_helper_policy is NativeHelperPolicy.DISABLED
+            and profile.native_helper is None
+            and not profile.mcp_server_grants
+            and not profile.resource_grants
+            and not profile.skill_grants
+        )
         if not common_profile_ok or not (
-            docs_profile_ok or browser_profile_ok or native_claude_profile_ok
+            docs_profile_ok or browser_profile_ok or domain_profile_ok
+            or native_claude_profile_ok
         ):
             raise ExecutiveOperatorSupervisorError(
                 "operator planner profile is not one reviewed rich read-only lane"
@@ -286,14 +314,9 @@ class ExecutiveOperatorSupervisor:
             )
         return RequestedExecutionProfile(
             worker_id=lease.attempt.worker_id,
-            provider=(
-                CLAUDE_OPERATOR_PROVIDER if native_claude_profile_ok else "openai-codex"
-            ),
+            provider=(CLAUDE_OPERATOR_PROVIDER if native_claude_profile_ok else "openai-codex"),
             requested_model=str(quota.model),
-            harness_kind=(
-                CLAUDE_OPERATOR_HARNESS_KIND
-                if native_claude_profile_ok else "codex-app-server"
-            ),
+            harness_kind=(CLAUDE_OPERATOR_HARNESS_KIND if native_claude_profile_ok else "codex-app-server"),
             harness_binary_digest=harness_digest,
             harness_version=harness_version,
             workspace=self._workspace_identity(job),
@@ -748,6 +771,10 @@ class ExecutiveOperatorSupervisor:
         self, job: Job, lease: AttemptLease
     ) -> OrchestrationDispatchOutcome:
         requested = self._requested_profile(job, lease)
+        is_domain_job = (
+            str(job.constraints.get("execution_profile_id") or "")
+            == COO_DOMAIN_EXECUTION_PROFILE
+        )
         prompt_by_turn: dict[str, str] = {}
 
         def load_turn(turn: Any) -> str:
@@ -764,7 +791,11 @@ class ExecutiveOperatorSupervisor:
         start_operation = OperationId(f"ohf-op:start:{attempt_id}")
         turn_operation = OperationId(f"ohf-op:turn:{attempt_id}")
         stop_operation = OperationId(f"ohf-op:stop:{attempt_id}")
+        checkpoint_operation = OperationId(
+            f"ohf-op:checkpoint:{attempt_id}"
+        )
         session: OperatorSessionReceipt | None = None
+        domain_checkpoint_effect_unknown = False
         try:
             session = orchestrator.start_attempt(
                 attempt_id=attempt_id,
@@ -785,14 +816,37 @@ class ExecutiveOperatorSupervisor:
                 timeout_seconds=300.0,
             )
             raw = adapter.observe_raw_role_result(turn.turn)
-            self._complete_after_stop(
-                job=job,
-                lease=lease,
-                session=session,
-                adapter=adapter,
-                canonical_result_json=raw.canonical_result_json,
-                stop_operation=stop_operation,
-            )
+            if is_domain_job:
+                # Domain post-claim path: the initial plan is sealed only as
+                # a typed checkpoint under the same deterministic operation
+                # ID.  We deliberately do NOT seal a terminal role result,
+                # NOT call _complete_after_stop/_complete_after_shutdown/
+                # complete_attempt/abandon_epoch here; the same nonterminal
+                # Attempt, current epoch/session and observed generation are
+                # preserved until the later same-domain consumption turn.
+                try:
+                    orchestrator.checkpoint(
+                        session,
+                        operation_id=checkpoint_operation,
+                    )
+                except OperatorEffectUnknown:
+                    # The checkpoint external effect is UNKNOWN.  Do not
+                    # stop/terminalize/abandon/replay provider work; the
+                    # nonterminal Attempt, current epoch and observed
+                    # generation stay preserved for later same-actor
+                    # consumption (the generic handler below must skip
+                    # cleanup for this exact case).
+                    domain_checkpoint_effect_unknown = True
+                    raise
+            else:
+                self._complete_after_stop(
+                    job=job,
+                    lease=lease,
+                    session=session,
+                    adapter=adapter,
+                    canonical_result_json=raw.canonical_result_json,
+                    stop_operation=stop_operation,
+                )
         except OperatorStartRefused as exc:
             try:
                 self._cleanup_failed_session(
@@ -806,6 +860,12 @@ class ExecutiveOperatorSupervisor:
                 pass
             raise
         except Exception as exc:
+            # A domain initial-plan checkpoint with UNKNOWN external effect
+            # must never stop/abandon/terminalize or replay provider work;
+            # preserve state for later same-actor consumption.  Ordinary
+            # flat-planner failures keep the bounded cleanup below.
+            if domain_checkpoint_effect_unknown:
+                raise
             # Never blind-retry a provider effect.  If a session exists, make
             # one bounded stop attempt under the same generation; Runtime
             # receipts decide whether later reconciliation may proceed.
@@ -822,6 +882,26 @@ class ExecutiveOperatorSupervisor:
                     pass
             raise
         current = self.runtime.attempts.get_attempt(attempt_id)
+        if is_domain_job:
+            if current is None or current.status is not AttemptStatus.CHECKPOINTED:
+                raise ExecutiveOperatorSupervisorError(
+                    "operator domain Attempt did not reach durable CHECKPOINTED"
+                )
+            # Real nonterminal outcome for a checkpointed domain: the lease
+            # is still active (CHECKPOINTED is in
+            # ``_LEASE_ACTIVE_ATTEMPT_STATUSES``) and the same generation
+            # stays observed for the later same-domain consumption turn.
+            return OrchestrationDispatchOutcome(
+                command_id=(
+                    f"coo-cycle:{job.root_job_id}:dispatch:{job.job_id}:attempt:"
+                    f"{job.attempt_count}"
+                ),
+                job_id=job.job_id,
+                attempt=current,
+                outcome="ACTIVE",
+                lease_token=lease.lease_token,
+                claimed_now=False,
+            )
         if current is None or current.status is not AttemptStatus.COMPLETED:
             raise ExecutiveOperatorSupervisorError(
                 "operator Attempt did not reach durable COMPLETED"
@@ -866,6 +946,20 @@ class ExecutiveOperatorSupervisor:
         # All remote proxy methods are deliberately synchronous so the frozen
         # orchestrator cannot hide provider calls inside an event loop.
         completed = await asyncio.to_thread(self._run_claimed, job, lease)
+        if completed.outcome != "TERMINAL":
+            # A domain post-claim path returns a real nonterminal
+            # (ACTIVE) outcome here.  Propagate it unchanged so the
+            # upstream caller observes the same checkpointed Attempt
+            # instead of an unconditional TERMINAL.  The flat planner
+            # path still falls through to the wrapping TERMINAL below.
+            return OrchestrationDispatchOutcome(
+                command_id=command_id,
+                job_id=completed.job_id,
+                attempt=completed.attempt,
+                outcome=completed.outcome,
+                lease_token=completed.lease_token,
+                claimed_now=completed.claimed_now,
+            )
         return OrchestrationDispatchOutcome(
             command_id=command_id,
             job_id=completed.job_id,
@@ -885,6 +979,78 @@ class ExecutiveOperatorSupervisor:
         if previous_job is not None and previous_job.constraints.get(
             "execution_profile_id"
         ) == INTERACTIVE_TX5_EXECUTION_PROFILE:
+            return ReconcileReceipt(
+                attempt_id=attempt_id,
+                job_id=previous.job_id,
+                status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                process_was_live=False,
+            )
+        # Domain post-claim path: an Attempt whose initial plan was sealed
+        # only as a typed checkpoint (or whose process crashed after that
+        # seal but before the checkpoint reservation) must NOT be
+        # terminalized here merely because the plan seal exists.  Preserve
+        # the nonterminal domain Attempt and return a bounded pending
+        # status until the later same-domain consumption turn.
+        #
+        # Preservation is authorized by the *live* identity bind observed in
+        # the current epoch/generation rows, never by a historical event
+        # receipt.  An earlier ``OPERATOR_OPERATION_EFFECT_UNKNOWN``
+        # checkpoint event is not authority: the same nonterminal state is
+        # produced when the initial plan was sealed and the process crashed
+        # before the checkpoint reservation wrote any event.  Requiring that
+        # historical receipt is what let a live initial-plan state fall
+        # through to ordinary takeover and be finalized as a completed
+        # result below.
+        domain_preserve = bool(
+            previous_job is not None
+            and previous_job.constraints.get("execution_profile_id")
+            == COO_DOMAIN_EXECUTION_PROFILE
+            and previous.status
+            in {AttemptStatus.CHECKPOINTED, AttemptStatus.RUNNING}
+        )
+        if domain_preserve:
+            # The preserved Attempt is only surfaced as pending when exactly
+            # one CURRENT epoch of THIS Attempt still owns the executive
+            # writer, and that held writer belongs to that same CURRENT
+            # epoch.  Counting a held writer from an unrelated or stale epoch
+            # would otherwise satisfy a naive (1, 1) match and grant live
+            # authority to a dead generation.  Missing, ambiguous or stale
+            # identity fails closed: it neither claims live success nor
+            # terminalizes from the initial-plan seal.
+            with self.runtime.store.read() as connection:
+                domain_authority = connection.execute(
+                    """
+                    SELECT
+                      (SELECT COUNT(*) FROM harness_session_epochs
+                       WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
+                      (SELECT COUNT(*) FROM process_generations g
+                       JOIN harness_session_epochs e
+                         ON e.session_epoch_id=g.session_epoch_id
+                       WHERE e.attempt_id=? AND e.state='CURRENT'
+                         AND g.executive_writer_held=1) AS current_writers,
+                      (SELECT COUNT(*) FROM process_generations g
+                       JOIN harness_session_epochs e
+                         ON e.session_epoch_id=g.session_epoch_id
+                       WHERE e.attempt_id=?
+                         AND g.executive_writer_held=1) AS total_writers
+                    """,
+                    (attempt_id, attempt_id, attempt_id),
+                ).fetchone()
+            if domain_authority is None:
+                raise ExecutiveOperatorSupervisorError(
+                    "operator domain checkpoint authority disappeared"
+                )
+            if (
+                int(domain_authority["current_epochs"]),
+                int(domain_authority["current_writers"]),
+                int(domain_authority["total_writers"]),
+            ) != (1, 1, 1):
+                return ReconcileReceipt(
+                    attempt_id=attempt_id,
+                    job_id=previous.job_id,
+                    status=ReconcileStatus.IDENTITY_AMBIGUOUS,
+                    process_was_live=False,
+                )
             return ReconcileReceipt(
                 attempt_id=attempt_id,
                 job_id=previous.job_id,

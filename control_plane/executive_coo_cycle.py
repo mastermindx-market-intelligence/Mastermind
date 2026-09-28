@@ -37,6 +37,7 @@ from control_plane.executive_runtime import (
     _current_orchestration_tree_material,
     _current_orchestration_tree_material_for_dispatch,
     _review_attempt_is_independent,
+    _admitted_coo_policy,
     _validated_aggregation_handoff,
     _validated_plan_admission,
     _validated_role_completion_material,
@@ -286,7 +287,7 @@ class CooCycle:
         return True
 
     def _dispatch_queued(
-        self, root_id: str, selected: Job
+        self, root_id: str, selected: Job, *, policy_sha: str
     ) -> CooCycleOutcome | None:
         command = (
             f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
@@ -316,7 +317,10 @@ class CooCycle:
                 )
             if self._uses_inert_dispatcher:
                 return self._block(
-                    root_id, selected.job_id, "exact_dispatch_unavailable"
+                    root_id,
+                    selected.job_id,
+                    "exact_dispatch_unavailable",
+                    policy_sha=policy_sha,
                 )
             return None
         return self._outcome(
@@ -330,6 +334,7 @@ class CooCycle:
         reason: str,
         *,
         evidence: dict[str, Any] | None = None,
+        policy_sha: str | None = None,
     ) -> CooCycleOutcome:
         if reason not in COO_CYCLE_BLOCK_REASONS:
             reason = "state_conflict"
@@ -340,7 +345,7 @@ class CooCycle:
             reason=reason,
             command_id=command,
             evidence=evidence,
-            policy_sha=EXPECTED_POLICY_SHA256,
+            policy_sha=policy_sha,
         )
         return self._outcome(root, "BLOCKED", selected, command, receipt)
 
@@ -761,13 +766,55 @@ class CooCycle:
             )
 
         try:
-            policy = CooCyclePolicy.load()
-        except CooCyclePolicyError as exc:
+            with self.runtime.store.read() as connection:
+                root_row = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (root_id,)
+                ).fetchone()
+                if root_row is None:
+                    raise StateConflict("root job is absent")
+                admitted_event = connection.execute(
+                    """
+                    SELECT payload_json FROM events
+                    WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+                    ORDER BY event_id
+                    """,
+                    (root_id,),
+                ).fetchall()
+                if len(admitted_event) == 0:
+                    post_admission_child = connection.execute(
+                        """
+                        SELECT 1 FROM jobs
+                        WHERE root_job_id=? AND orchestration_role <> 'plan'
+                          AND job_id<>? LIMIT 1
+                        """,
+                        (root_id, root_id),
+                    ).fetchone()
+                    if post_admission_child is not None:
+                        raise StateConflict(
+                            "admitted COO root lost its plan admission"
+                        )
+                    policy = CooCyclePolicy.load()
+                elif len(admitted_event) != 1:
+                    raise StateConflict(
+                        "COO cycle requires exactly one root plan admission"
+                    )
+                else:
+                    admission_payload = json.loads(
+                        str(admitted_event[0]["payload_json"])
+                    )
+                    if not isinstance(admission_payload, dict):
+                        raise StateConflict(
+                            "COO plan admission is not the closed wire"
+                        )
+                    policy = _admitted_coo_policy(admission_payload)
+                policy_sha = policy.policy_sha256
+        except (StateConflict, CooCyclePolicyError) as exc:
             return self._block(
                 root_id,
                 root_id,
                 "invalid_policy",
                 evidence={"error_type": type(exc).__name__},
+                policy_sha=EXPECTED_POLICY_SHA256,
             )
 
         existing_block = self.runtime.jobs.validated_cycle_block(root_id)
@@ -937,7 +984,7 @@ class CooCycle:
                     root_id,
                     selected_job_id=selected.job_id,
                     expectation=expectation,
-                    policy_sha=EXPECTED_POLICY_SHA256,
+                    policy_sha=policy.policy_sha256,
                 )
             except StateConflict as exc:
                 return self._outcome(
@@ -1229,7 +1276,9 @@ class CooCycle:
             for candidate in queued:
                 if not self._ready_frontier_candidate(candidate, active):
                     continue
-                outcome = self._dispatch_queued(root_id, candidate)
+                outcome = self._dispatch_queued(
+                    root_id, candidate, policy_sha=policy.policy_sha256
+                )
                 if outcome is not None:
                     return outcome
 
@@ -1263,7 +1312,9 @@ class CooCycle:
         if queued:
             unavailable: list[str] = []
             for candidate in queued:
-                outcome = self._dispatch_queued(root_id, candidate)
+                outcome = self._dispatch_queued(
+                    root_id, candidate, policy_sha=policy.policy_sha256
+                )
                 if outcome is not None:
                     return outcome
                 unavailable.append(candidate.job_id)

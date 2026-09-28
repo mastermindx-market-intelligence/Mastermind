@@ -131,6 +131,22 @@
       "plugins": [],
       "forbidden": []
     },
+    "operator.coo.domain.readonly.v1": {
+      "enabled": false,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    },
     "sealed.worker.readonly.no-extensions.v1": {
       "enabled": true,
       "execution_surface": "codex-exec",

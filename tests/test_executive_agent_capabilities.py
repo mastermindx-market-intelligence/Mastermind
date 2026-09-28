@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -24,6 +25,12 @@ from integrations.mastermind_company_mcp.schemas import (
     TOOL_SCHEMA_DIGEST as COMPANY_DIALOGUE_TOOL_DIGEST,
     TOOL_SPECS as COMPANY_DIALOGUE_TOOL_SPECS,
 )
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
 
 
 def _raw_policy() -> dict:
@@ -652,7 +659,7 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 
-def test_v3_ratified_generation_and_schema_constants_remain_exact():
+def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     """Freeze the explicitly ratified V3 Browser B1 runtime generation.
 
     CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
@@ -665,12 +672,48 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact():
     assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
     assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
 
+    current_raw = _raw_policy()
+    v3_raw = json.loads(json.dumps(current_raw))
+    domain_profile = v3_raw["profiles"].pop("operator.coo.domain.readonly.v1")
+    assert domain_profile == {
+        "enabled": False,
+        "execution_surface": "codex-app-server",
+        "auth_realm": "dedicated-worker-account",
+        "sandbox_policy": "read-only",
+        "approval_policy": "never",
+        "network_policy": "disabled",
+        "write_capable": False,
+        "native_helper_policy": "disabled",
+        "native_helper": None,
+        "skills": [],
+        "mcp_servers": [],
+        "resources": [],
+        "plugins": [],
+        "forbidden": [],
+    }
+
+    v3_registry = ExecutionCapabilityRegistry.load(_write(tmp_path, v3_raw))
+    assert v3_registry.policy_digest == (
+        "f29fd9038a4b0d96dba1d50b24570f8f7fb383f046b48ec5ae4aae44363a38b0"
+    )
+    forged_v3_raw = json.loads(json.dumps(v3_raw))
+    forged_v3_raw["schema_version"] = "unknown-v3-pin"
+    forged_v3_path = tmp_path / "corrupt-v3-capabilities.json"
+    forged_v3_path.write_text(json.dumps(forged_v3_raw), encoding="utf-8")
+    with pytest.raises(CapabilityPolicyError):
+        ExecutionCapabilityRegistry.load(forged_v3_path)
+
     registry = ExecutionCapabilityRegistry.load()
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert registry.capability_packages == {}
     assert registry.policy_digest == (
-        "f29fd9038a4b0d96dba1d50b24570f8f7fb383f046b48ec5ae4aae44363a38b0"
+        "c91a0450d4f75b51a0f09ea47fbfaf6e812b2be53fa65accc0c4ae03e85eafa5"
     )
+    assert v3_registry.profiles.keys() == registry.profiles.keys() - {
+        "operator.coo.domain.readonly.v1"
+    }
+    for profile_name, v3_profile in v3_registry.profiles.items():
+        assert registry.profiles[profile_name] == v3_profile
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     ).profile_digest == (

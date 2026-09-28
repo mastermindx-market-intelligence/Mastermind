@@ -18,6 +18,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -229,6 +230,23 @@ COMPANY_CONSULTATION_ENABLED_TOOLS = (
     "company.reply",
     "company.consultation",
 )
+COO_DOMAIN_EXECUTION_PROFILE = "operator.coo.domain.readonly.v1"
+COO_DOMAIN_PROFILE_SHAPE = MappingProxyType({
+    "enabled": False,
+    "execution_surface": "codex-app-server",
+    "auth_realm": "dedicated-worker-account",
+    "sandbox_policy": "read-only",
+    "approval_policy": "never",
+    "network_policy": "disabled",
+    "write_capable": False,
+    "native_helper_policy": "disabled",
+    "native_helper": None,
+    "skills": (),
+    "mcp_servers": (),
+    "resources": (),
+    "plugins": (),
+    "forbidden": (),
+})
 _PROFILE_KEYS = frozenset(
     {
         "enabled",
@@ -1554,6 +1572,16 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot inherit browser resource authority"
                 )
+            if profile_id == COO_DOMAIN_EXECUTION_PROFILE and any(
+                value.get(key) != list(expected)
+                if isinstance(expected, tuple)
+                else value.get(key) != expected
+                for key, expected in COO_DOMAIN_PROFILE_SHAPE.items()
+            ):
+                raise CapabilityPolicyError(
+                    "COO domain execution profile must remain the exact disabled "
+                    "read-only source shape"
+                )
             if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
                 skill_capability_ids = _identities(
                     value.get("skill_capabilities"),
@@ -1743,15 +1771,17 @@ class ExecutionCapabilityRegistry:
             policy_version=policy_version,
             lifecycle_authority="executive_os",
             production_armed=False,
-            mcp_servers=mcp_registry,
-            resources=resource_registry,
-            capability_packages=capability_packages,
-            profiles=profiles,
+            mcp_servers=MappingProxyType(mcp_registry),
+            resources=MappingProxyType(resource_registry),
+            capability_packages=MappingProxyType(capability_packages),
+            profiles=MappingProxyType(profiles),
             policy_digest=_digest(normalized_policy),
             source_path=source,
         )
 
-    def resolve(self, profile_id: str) -> ExecutionCapabilityProfile:
+    def resolve(
+        self, profile_id: str
+    ) -> ExecutionCapabilityProfile:
         token = _identifier(profile_id, field="profile_id")
         try:
             profile = self.profiles[token]
@@ -1761,8 +1791,24 @@ class ExecutionCapabilityRegistry:
             raise CapabilityPolicyError(f"execution capability profile {token!r} is disabled")
         return profile
 
+    def validate_disabled_profile_shape(self, profile_id: str) -> None:
+        """Validate source metadata without creating dispatch permission."""
+
+        try:
+            profile = self.profiles[_identifier(profile_id, field="profile_id")]
+        except KeyError as exc:
+            raise CapabilityPolicyError(
+                f"unknown execution capability profile {profile_id!r}"
+            ) from exc
+        if profile.enabled:
+            raise CapabilityPolicyError(
+                f"execution capability profile {profile_id!r} is not disabled"
+            )
+
 
 __all__ = [
+    "COO_DOMAIN_EXECUTION_PROFILE",
+    "COO_DOMAIN_PROFILE_SHAPE",
     "CAPABILITY_POLICY_SCHEMA",
     "CAPABILITY_POLICY_SCHEMA_V3",
     "CAPABILITY_POLICY_SCHEMA_V4",

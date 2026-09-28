@@ -51,10 +51,14 @@ from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
 )
+from control_plane.executive_agent_capabilities import COO_DOMAIN_EXECUTION_PROFILE
 from control_plane.executive_coo_policy import (
     CooCyclePolicy,
     CooCyclePolicyError,
     EXPECTED_POLICY_SHA256,
+    EXPECTED_POLICY_SHA256_BY_VERSION,
+    EXPECTED_V1_POLICY_SHA256,
+    load_pinned_coo_cycle_policy,
 )
 from control_plane.executive_orchestration_principal import (
     OperatorPrincipalObservation,
@@ -104,6 +108,11 @@ SCHEMA_VERSION = 5
 WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
+_COO_PROVIDER_BUDGET_SCHEMA = (
+    "mastermind.executive_coo_provider_work_budget_reservation/v1"
+)
+_COO_PROVIDER_BUDGET_EVENT = "COO_PROVIDER_WORK_BUDGET_RESERVED"
+_COO_CYCLE_DOMAIN_BUDGET_CAPABILITY = object()
 
 
 def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
@@ -693,6 +702,18 @@ def _normalise_constraints(
                 )
             result[key] = normalized
 
+    if "delegation_scope_digest" in raw:
+        delegation_scope_digest = raw["delegation_scope_digest"]
+        if (
+            not isinstance(delegation_scope_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", delegation_scope_digest) is None
+        ):
+            raise StateConflict(
+                "constraint delegation_scope_digest must be an exact lowercase "
+                "SHA-256 digest"
+            )
+        result["delegation_scope_digest"] = delegation_scope_digest
+
     capability_keys = {
         "execution_profile_id",
         "execution_profile_digest",
@@ -738,6 +759,10 @@ def _normalise_constraints(
         result["provider"] = provider
     if capabilities:
         result["required_capabilities"] = capabilities
+    if "remaining_depth" in raw:
+        if type(raw["remaining_depth"]) is not int or raw["remaining_depth"] < 0:
+            raise StateConflict("remaining_depth must be a non-negative integer")
+        result["remaining_depth"] = raw["remaining_depth"]
     for key in ("model", "effort", "cost_class"):
         normalized = str(raw.get(key) or "").strip().lower()
         if normalized:
@@ -1756,12 +1781,35 @@ def _validated_interactive_active_plan_seal(
         != attempt_row["execution_principal_snapshot_digest"]
         or seal["placement_snapshot_digest"]
         != attempt_row["placement_snapshot_digest"]
-        or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _attempt_root_policy_sha(connection, attempt_row)
     ):
         raise StateConflict(
             "interactive active plan seal does not match its durable identity"
         )
     return seal
+
+
+def _validated_domain_active_plan_seal(
+    connection: sqlite3.Connection,
+    *,
+    attempt_row: sqlite3.Row,
+    job_row: sqlite3.Row,
+) -> dict[str, Any]:
+    """Validate a typed active-domain plan seal against its durable identity.
+
+    The same ORCHESTRATION_WORK_ADMITTED/CURRENT writer identity that authorises
+    an interactive plan seal also authorises a domain plan seal: both are
+    operator-harness work admissions and both write the same sealed envelope.
+    The planner Job identity itself was already validated by the call site via
+    ``_coo_domain_admitted``; this helper reuses the same generation binding
+    because the harness contract is profile-agnostic.
+    """
+
+    return _validated_interactive_active_plan_seal(
+        connection,
+        attempt_row=attempt_row,
+        job_row=job_row,
+    )
 
 
 def _admitted_current_generation_for_interactive_seal(
@@ -1896,6 +1944,280 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
     if not closed:
         raise StateConflict("interactive capability profile is not closed")
     return True
+
+
+def _coo_domain_admitted(row: sqlite3.Row, *, allow_disabled: bool = False) -> bool:
+    if row["orchestration_role"] != "plan":
+        return False
+    constraints = _strict_canonical_json_loads(
+        str(row["constraints_json"]), name="COO domain constraints"
+    )
+    if not isinstance(constraints, dict):
+        raise StateConflict("COO domain constraints are malformed")
+    if constraints.get("execution_profile_id") != COO_DOMAIN_EXECUTION_PROFILE:
+        return False
+    delegation = constraints.get("delegation_scope_digest")
+    _role, provenance, _digest = _decode_orchestration_job_fields(row)
+    if (
+        row["parent_job_id"] != row["root_job_id"]
+        or int(row["depth"]) != 1
+        or provenance is None
+        or provenance.get("creator") != "coo_cycle"
+        or provenance.get("command_id")
+        != f"coo-cycle:{row['root_job_id']}:create-domain:0"
+        or provenance.get("job_id") != row["job_id"]
+        or provenance.get("parent_job_id") != row["parent_job_id"]
+        or provenance.get("root_job_id") != row["root_job_id"]
+        or provenance.get("role") != "plan"
+        or provenance.get("source_id") != row["root_job_id"]
+    ):
+        raise StateConflict("COO domain provenance is not deterministic")
+    registry = ExecutionCapabilityRegistry.load()
+    registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+    profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+    closed = (
+        profile.execution_surface == "codex-app-server"
+        and profile.auth_realm == "dedicated-worker-account"
+        and profile.sandbox_policy == "read-only"
+        and profile.approval_policy == "never"
+        and profile.network_policy == "disabled"
+        and profile.native_helper_policy is NativeHelperPolicy.DISABLED
+        and profile.native_helper is None
+        and not profile.skills
+        and not profile.skill_grants
+        and not profile.mcp_server_grants
+        and not profile.resource_grants
+        and not profile.plugins
+        and not profile.forbidden
+        and not profile.write_capable
+    )
+    expected_identity = {
+        "execution_profile_id": profile.profile_id,
+        "execution_profile_digest": profile.profile_digest,
+        "capability_policy_version": registry.policy_version,
+        "capability_policy_digest": registry.policy_digest,
+    }
+    if any(constraints.get(key) != value for key, value in expected_identity.items()):
+        raise StateConflict("COO domain capability identity is stale or malformed")
+    if not isinstance(delegation, str) or re.fullmatch(r"[0-9a-f]{64}", delegation) is None:
+        raise StateConflict("COO domain delegation envelope is malformed")
+    if not closed:
+        raise StateConflict("COO domain capability profile is not closed")
+    if not allow_disabled:
+        raise StateConflict("COO domain execution profile is production-disarmed")
+    return True
+
+
+def _coo_domain_row(
+    connection: sqlite3.Connection,
+    root_row: sqlite3.Row,
+    *,
+    required: bool = False,
+) -> sqlite3.Row | None:
+    rows = connection.execute(
+        """
+        SELECT * FROM jobs
+        WHERE root_job_id=? AND job_id<>? AND orchestration_role='plan' AND depth=1
+        """,
+        (str(root_row["job_id"]), str(root_row["job_id"])),
+    ).fetchall()
+    domains = [row for row in rows if _coo_domain_admitted(row, allow_disabled=True)]
+    if len(domains) > 1:
+        raise StateConflict("COO root has multiple admitted domain orchestrators")
+    if domains:
+        return domains[0]
+    if required:
+        raise StateConflict("COO hierarchy requires its admitted domain orchestrator")
+    return None
+
+
+def _coo_provider_budget_body(
+    *,
+    root_job_id: str,
+    domain_job_id: str,
+) -> dict[str, Any]:
+    policy = CooCyclePolicy.load()
+    registry = ExecutionCapabilityRegistry.load()
+    registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+    profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+    if (
+        policy.schema_version != 2
+        or policy.policy_sha256 != EXPECTED_POLICY_SHA256
+        or policy.max_provider_work_units_per_root != 32
+        or policy.reserved_domain_consumption_units != 1
+    ):
+        raise StateConflict("COO provider budget requires the exact current v2 policy")
+    body = {
+        "schema_version": _COO_PROVIDER_BUDGET_SCHEMA,
+        "root_job_id": root_job_id,
+        "domain_job_id": domain_job_id,
+        "policy_schema_version": policy.schema_version,
+        "policy_sha256": policy.policy_sha256,
+        "execution_profile_id": profile.profile_id,
+        "execution_profile_digest": profile.profile_digest,
+        "capability_policy_version": registry.policy_version,
+        "capability_policy_digest": registry.policy_digest,
+        "max_provider_work_units_per_root": (
+            policy.max_provider_work_units_per_root
+        ),
+        "reserved_domain_consumption_units": (
+            policy.reserved_domain_consumption_units
+        ),
+        "spent_provider_work_units": 0,
+        "available_provider_work_units": (
+            policy.max_provider_work_units_per_root
+            - policy.reserved_domain_consumption_units
+        ),
+        "reservation_status": "reservation_only",
+    }
+    body["reservation_digest"] = orchestration_digest(body)
+    return body
+
+
+def _validated_coo_provider_budget_event(
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    domain_job_id: str,
+) -> dict[str, Any]:
+    budget_command_id = (
+        f"coo-cycle:{root_row['job_id']}:reserve-provider-budget:0"
+    )
+    events = connection.execute(
+        """
+        SELECT * FROM events
+        WHERE event_type=? AND (
+          command_id=? OR aggregate_id IN (?,?)
+          OR job_id IN (?,?)
+        )
+        ORDER BY event_id
+        """,
+        (
+            _COO_PROVIDER_BUDGET_EVENT,
+            budget_command_id,
+            str(root_row["job_id"]),
+            domain_job_id,
+            str(root_row["job_id"]),
+            domain_job_id,
+        ),
+    ).fetchall()
+    if len(events) != 1:
+        raise StateConflict("COO provider budget evidence is missing or duplicated")
+    event = events[0]
+    payload = _strict_canonical_json_loads(
+        str(event["payload_json"]), name="COO provider budget payload"
+    )
+    expected = _coo_provider_budget_body(
+        root_job_id=str(root_row["job_id"]), domain_job_id=domain_job_id
+    )
+    if (
+        event["command_id"] != budget_command_id
+        or event["aggregate_type"] != "job"
+        or event["aggregate_id"] != str(root_row["job_id"])
+        or event["actor"] != "coo"
+        or event["job_id"] != str(root_row["job_id"])
+        or event["attempt_id"] is not None
+        or event["worker_id"] is not None
+        or event["quota_class"] is not None
+        or json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        != json.dumps(
+            expected,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    ):
+        raise StateConflict("COO provider budget evidence is foreign or drifted")
+    return expected
+
+
+def _append_or_validate_coo_provider_budget(
+    store: RuntimeStore,
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    domain_job_id: str,
+) -> dict[str, Any]:
+    events = connection.execute(
+        """
+        SELECT 1 FROM events
+        WHERE event_type=? AND (
+          aggregate_id IN (?,?) OR job_id IN (?,?)
+          OR command_id=?
+        )
+        """,
+        (
+            _COO_PROVIDER_BUDGET_EVENT,
+            str(root_row["job_id"]),
+            domain_job_id,
+            str(root_row["job_id"]),
+            domain_job_id,
+            f"coo-cycle:{root_row['job_id']}:reserve-provider-budget:0",
+        ),
+    ).fetchall()
+    if events:
+        raise StateConflict(
+            "COO provider budget reservation already exists for a new domain"
+        )
+    payload = _coo_provider_budget_body(
+        root_job_id=str(root_row["job_id"]), domain_job_id=domain_job_id
+    )
+    store.append_event(
+        connection,
+        aggregate_type="job",
+        aggregate_id=str(root_row["job_id"]),
+        event_type=_COO_PROVIDER_BUDGET_EVENT,
+        actor="coo",
+        job_id=str(root_row["job_id"]),
+        payload=payload,
+        command_id=(
+            f"coo-cycle:{root_row['job_id']}:reserve-provider-budget:0"
+        ),
+    )
+    return _validated_coo_provider_budget_event(
+        connection, root_row=root_row, domain_job_id=domain_job_id
+    )
+
+
+def _coo_domain_consumption_projection(
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    domain_job_id: str,
+    domain_attempt_id: str,
+) -> dict[str, Any]:
+    """Derive exact reviewed leaves for the domain's second turn.
+
+    Digest is computed over the complete bound material (domain_job_id and
+    domain_attempt_id included) so the digest itself is the canonical binding.
+    """
+
+    admission, plan_body = _validated_plan_admission(connection, root_row)
+    revisions, _history = _current_orchestration_tree_material(
+        connection,
+        root_row,
+        admission,
+        plan_body,
+        allow_active_domain_job_id=domain_job_id,
+    )
+    projection = {
+        "schema_version": "mastermind.executive_coo_domain_consumption_projection/v1",
+        "root_job_id": str(root_row["job_id"]),
+        "domain_job_id": domain_job_id,
+        "domain_attempt_id": domain_attempt_id,
+        "plan_attempt_id": str(admission["plan_attempt_id"]),
+        "plan_digest": str(admission["plan_digest"]),
+        "revisions": revisions,
+    }
+    projection["consumption_projection_digest"] = orchestration_digest(projection)
+    return projection
 
 
 def _interactive_in_flight_turn_id(
@@ -6604,7 +6926,7 @@ def _validated_coo_cycle_block_event(
         or not isinstance(selected_id, str)
         or not selected_id
         or reason not in COO_CYCLE_BLOCK_REASONS
-        or payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+        or payload.get("policy_sha") not in EXPECTED_POLICY_SHA256_BY_VERSION.values()
         or not isinstance(evidence_value, dict)
         or not isinstance(payload.get("evidence_digest"), str)
         or payload["evidence_digest"] != orchestration_digest(evidence_value)
@@ -6628,23 +6950,32 @@ def _validated_coo_cycle_block_event(
         or event_row["attempt_id"] != selected["current_attempt_id"]
     ):
         raise StateConflict("COO_CYCLE_BLOCKED Job/Attempt binding drifted")
-    plan_event = connection.execute(
+    plan_events = connection.execute(
         "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
         (expected_root_id,),
-    ).fetchone()
-    handoff_event = connection.execute(
+    ).fetchall()
+    if len(plan_events) > 1:
+        raise StateConflict("COO block requires unique root orchestration events")
+    plan_event = plan_events[0] if plan_events else None
+    handoff_events = connection.execute(
         """
         SELECT payload_json FROM events
         WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?
         """,
         (expected_root_id,),
-    ).fetchone()
-    plan_digest = (
+    ).fetchall()
+    if len(handoff_events) > 1:
+        raise StateConflict("COO block requires unique root orchestration events")
+    handoff_event = handoff_events[0] if handoff_events else None
+    plan_admission = (
         _strict_canonical_json_loads(
             str(plan_event["payload_json"]), name="COO_PLAN_ADMITTED payload"
-        ).get("plan_digest")
+        )
         if plan_event is not None
         else None
+    )
+    plan_digest = (
+        plan_admission.get("plan_digest") if plan_admission is not None else None
     )
     handoff_digest = (
         _strict_canonical_json_loads(
@@ -6654,11 +6985,39 @@ def _validated_coo_cycle_block_event(
         if handoff_event is not None
         else None
     )
-    if (
-        payload.get("plan_digest") != plan_digest
-        or payload.get("handoff_digest") != handoff_digest
-    ):
-        raise StateConflict("COO_CYCLE_BLOCKED plan/handoff digest drifted")
+    historical_policy = (
+        _historical_admitted_coo_policy_sha(plan_admission)
+        if plan_admission is not None
+        else None
+    )
+    # Case A: no admission yet — block must use current reviewed policy
+    if plan_admission is None:
+        if (
+            payload.get("plan_digest") is not None
+            or payload.get("handoff_digest") is not None
+            or payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+        ):
+            raise StateConflict("COO_CYCLE_BLOCKED plan/handoff pin drifted")
+    # Cases B/C: admission exists — block must match admission's policy pin
+    else:
+        # Exception: invalid_policy diagnostic on corrupted admission — the block
+        # carries current reviewed policy as its pin, not the corrupted historical.
+        # All identity fields must still match (plan_digest, handoff_digest) so
+        # a tampered or post-write drifted block is refused even on this path.
+        if reason == "invalid_policy" and historical_policy is None:
+            if (
+                payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+                or payload.get("plan_digest") != plan_digest
+                or payload.get("handoff_digest") != handoff_digest
+            ):
+                raise StateConflict("COO_CYCLE_BLOCKED plan/handoff pin drifted")
+        elif (
+            payload.get("plan_digest") != plan_digest
+            or payload.get("handoff_digest") != handoff_digest
+            or historical_policy is None
+            or payload.get("policy_sha") != historical_policy
+        ):
+            raise StateConflict("COO_CYCLE_BLOCKED plan/handoff pin drifted")
     _validated_retry_safety_block_evidence(
         connection,
         evidence_value,
@@ -7839,7 +8198,7 @@ def _sealed_worker_result_payload(
         ),
         "placement_snapshot_digest": str(attempt_row["placement_snapshot_digest"]),
         "effective_grant_digest": str(attempt_row["effective_grant_digest"]),
-        "policy_sha": CooCyclePolicy.load().policy_sha256,
+        "policy_sha": _attempt_root_policy_sha(connection, attempt_row),
     }
 
 
@@ -8122,7 +8481,7 @@ def _validated_orchestration_terminal_generation(
         or admission.get("effective_grant_digest")
         != attempt_row["effective_grant_digest"]
         or admission.get("effective_grant_digest") != seal["effective_grant_digest"]
-        or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+        or admission.get("policy_sha") != _attempt_root_policy_sha(connection, attempt_row)
         or admission.get("policy_sha") != seal["policy_sha"]
         or admission.get("launch_decision") != LaunchDecision.ALLOW.value
         or not isinstance(decision, dict)
@@ -8188,7 +8547,7 @@ def _validated_sealed_worker_terminal_evidence(
         seal["observed_attestation_digest"] != attestation_digest
         or seal["work_admission_command_id"]
         != f"sealed-worker-launch:{attempt_row['attempt_id']}"
-        or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _attempt_root_policy_sha(connection, attempt_row)
         or seal["execution_principal_snapshot_digest"]
         != attempt_row["execution_principal_snapshot_digest"]
         or seal["placement_snapshot_digest"] != attempt_row["placement_snapshot_digest"]
@@ -8656,7 +9015,21 @@ def _validated_plan_admission(
         raise StateConflict("COO plan admission is not the closed wire")
     digest_input = dict(admission)
     reservation_digest = digest_input.pop("reservation_digest", None)
-    policy = CooCyclePolicy.load()
+    policy_digest = (
+        admission.get("policy_sha")
+        if isinstance(admission, dict)
+        and type(admission.get("policy_sha")) is str
+        else ""
+    )
+    try:
+        if policy_digest == EXPECTED_POLICY_SHA256:
+            policy = load_pinned_coo_cycle_policy(2, policy_sha256=policy_digest)
+        elif policy_digest == EXPECTED_V1_POLICY_SHA256:
+            policy = load_pinned_coo_cycle_policy(1, policy_sha256=policy_digest)
+        else:
+            raise CooCyclePolicyError("pinned COO policy digest is unknown")
+    except (CooCyclePolicyError, TypeError) as exc:
+        raise StateConflict(f"COO plan policy pin is unavailable: {exc}") from exc
     expected_command = (
         f"coo-cycle:{root_row['job_id']}:admit-plan:{admission.get('plan_attempt_id')}"
     )
@@ -8693,6 +9066,11 @@ def _validated_plan_admission(
         in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
         and _interactive_tx5_admitted(plan_attempt)
     )
+    active_domain = plan_attempt is not None and (
+        plan_attempt["status"]
+        in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+        and _coo_domain_admitted(plan_attempt, allow_disabled=True)
+    )
     completed_history = plan_attempt is not None and (
         plan_attempt["status"] == AttemptStatus.COMPLETED.value
         or connection.execute(
@@ -8706,16 +9084,27 @@ def _validated_plan_admission(
         is not None
     )
     if (
-        not (completed_history or active_interactive)
+        not (completed_history or active_interactive or active_domain)
         or plan_attempt["plan_role"] != "plan"
         or plan_attempt["plan_parent"] != root_row["job_id"]
         or plan_attempt["plan_root"] != root_row["job_id"]
     ):
         raise StateConflict(
-            "COO plan admission lost its active interactive or completed planner Attempt"
+            "COO plan admission lost its active planner or completed planner Attempt"
         )
-    if active_interactive:
-        seal = _validated_interactive_active_plan_seal(
+    if not active_interactive and not active_domain:
+        historical_policy_sha = policy.policy_sha256
+        seal = _validated_orchestration_role_result_payload(
+            connection,
+            attempt_row=plan_attempt,
+            expected_role="plan",
+            terminal_payload={
+                "schema_version": "mastermind.orchestration_terminal_receipt/v1",
+                "policy_sha": historical_policy_sha,
+            },
+        )
+    elif active_domain:
+        seal = _validated_domain_active_plan_seal(
             connection,
             attempt_row=plan_attempt,
             job_row=connection.execute(
@@ -8724,10 +9113,13 @@ def _validated_plan_admission(
             ).fetchone(),
         )
     else:
-        seal = _validated_orchestration_role_result_payload(
+        seal = _validated_interactive_active_plan_seal(
             connection,
             attempt_row=plan_attempt,
-            expected_role="plan",
+            job_row=connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?",
+                (plan_attempt["job_id"],),
+            ).fetchone(),
         )
     if (
         seal["job_id"] != plan_attempt["plan_job_id"]
@@ -8738,9 +9130,14 @@ def _validated_plan_admission(
         != plan_attempt["placement_snapshot_digest"]
         or seal["execution_principal_snapshot_digest"]
         != plan_attempt["execution_principal_snapshot_digest"]
+        or seal["policy_sha"] != policy.policy_sha256
     ):
         raise StateConflict("sealed planner evidence does not match its Attempt")
-    if not active_interactive:
+    if not active_interactive and not active_domain:
+        # Only a historically completed planner carries the post-shutdown
+        # terminal receipt.  An active interactive or active COO-domain plan
+        # is admitted from its nonterminal (RUNNING/CHECKPOINTED) seal and has
+        # no terminal receipt by design.
         _orchestration_terminal_receipt(
             connection,
             attempt_id=str(admission["plan_attempt_id"]),
@@ -8896,7 +9293,8 @@ def _validated_plan_admission(
         if (
             member is None
             or member_role != "work"
-            or member["parent_job_id"] != root_row["job_id"]
+            or member["root_job_id"] != root_row["job_id"]
+            or int(member["depth"]) not in {1, 2}
             or member["plan_attempt_id"] != admission["plan_attempt_id"]
             or member["plan_digest"] != admission["plan_digest"]
             or member["plan_step_id"] != step["step_id"]
@@ -8944,6 +9342,12 @@ def _validated_plan_admission(
             repair_round=0,
             placement=step.get("placement"),
             dependency_manifest=dependency_manifest,
+            # An active COO-domain plan mints depth-two direct children under
+            # the admitted domain, not depth-one children under the root.
+            parent_domain_row=(
+                _coo_domain_row(connection, root_row) if active_domain else None
+            ),
+            policy=policy,
         )
     try:
         expected_total = policy.reserved_children_total(tuple(requirements))
@@ -8952,6 +9356,200 @@ def _validated_plan_admission(
     if admission["reserved_children_total"] != expected_total:
         raise StateConflict("COO plan admission total reservation drifted")
     return admission, plan_body
+
+
+def _admitted_coo_policy(admission: Mapping[str, Any]) -> CooCyclePolicy:
+    """Replay the exact policy identity admitted by one immutable root."""
+
+    policy_sha = admission.get("policy_sha")
+    if type(policy_sha) is not str:
+        raise StateConflict("COO plan admission policy pin is malformed")
+    if policy_sha not in EXPECTED_POLICY_SHA256_BY_VERSION.values():
+        raise StateConflict("COO plan admission policy pin is unavailable")
+    version = 2 if policy_sha == EXPECTED_POLICY_SHA256 else 1
+    try:
+        return load_pinned_coo_cycle_policy(version, policy_sha256=policy_sha)
+    except CooCyclePolicyError as exc:
+        raise StateConflict(f"COO plan policy pin is unavailable: {exc}") from exc
+
+
+def _unique_root_plan_admission_rows(
+    connection: sqlite3.Connection, root_job_id: str
+) -> list[sqlite3.Row]:
+    """Return the unique root admission rows, or refuse duplicates."""
+
+    rows = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+        ORDER BY event_id
+        """,
+        (root_job_id,),
+    ).fetchall()
+    if len(rows) > 1:
+        raise StateConflict("COO block requires unique root orchestration events")
+    return rows
+
+
+def _historical_admitted_coo_policy_sha(admission: Any) -> str | None:
+    """Return the immutable pin for one valid admission, else None.
+
+    Unknown, corrupt, or malformed admissions are not a valid historical root
+    and never authorize work.
+    """
+
+    if not isinstance(admission, Mapping):
+        return None
+    try:
+        return _admitted_coo_policy(admission).policy_sha256
+    except (StateConflict, CooCyclePolicyError):
+        return None
+
+
+def _required_admitted_coo_policy_sha(admission: Any) -> str:
+    """Return a valid admitted root pin or refuse all block identity use."""
+
+    if not isinstance(admission, Mapping):
+        raise StateConflict("COO root admission policy is unknown or corrupt")
+    try:
+        return _admitted_coo_policy(admission).policy_sha256
+    except (StateConflict, CooCyclePolicyError) as exc:
+        raise StateConflict(
+            "COO root admission policy is unknown or corrupt"
+        ) from exc
+
+
+def _resolve_coo_block_policy_sha(
+    connection: sqlite3.Connection,
+    root_job_id: str,
+    *,
+    supplied_policy_sha: str | None,
+    reason: str,
+) -> str:
+    """Derive the block policy independently of the caller-supplied pin.
+
+    A unique valid ``COO_PLAN_ADMITTED`` event is the immutable root pin. A
+    caller-supplied known but different hash refuses before any write.
+    Absence before admission uses the current reviewed policy. Unknown or
+    corrupt admission is not a valid historical root; the reviewed
+    diagnostic policy is used only as a diagnostic pin.
+    """
+
+    rows = _unique_root_plan_admission_rows(connection, root_job_id)
+    if not rows:
+        expected = EXPECTED_POLICY_SHA256
+    else:
+        payload = _json_loads(str(rows[0]["payload_json"]), fallback={})
+        if reason == "invalid_policy":
+            historical = _historical_admitted_coo_policy_sha(payload)
+            expected = (
+                historical if historical is not None else EXPECTED_POLICY_SHA256
+            )
+        else:
+            expected = _required_admitted_coo_policy_sha(payload)
+    if (
+        supplied_policy_sha is not None
+        and supplied_policy_sha != expected
+    ):
+        raise StateConflict(
+            "COO block policy digest differs from the root policy"
+        )
+    if expected not in EXPECTED_POLICY_SHA256_BY_VERSION.values():
+        raise StateConflict(
+            "COO block policy digest is not the reviewed policy"
+        )
+    return expected
+
+
+def _attempt_root_policy_sha(
+    connection: sqlite3.Connection, attempt_row: sqlite3.Row
+) -> str:
+    job_row = connection.execute(
+        "SELECT job_id,root_job_id,orchestration_role FROM jobs WHERE job_id=?",
+        (attempt_row["job_id"],),
+    ).fetchone()
+    if (
+        job_row is None
+        or job_row["orchestration_role"]
+        not in {"plan", "work", "review", "repair", "aggregation"}
+        or job_row["root_job_id"] is None
+    ):
+        raise StateConflict("orchestration evidence lost its root Job")
+    if job_row["orchestration_role"] == "plan":
+        if job_row["job_id"] != job_row["root_job_id"]:
+            rows = connection.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+                ORDER BY event_id
+                """,
+                (job_row["root_job_id"],),
+            ).fetchall()
+            if len(rows) == 0:
+                pass
+            elif len(rows) != 1:
+                raise StateConflict(
+                    "orchestration evidence requires one root plan admission"
+                )
+            else:
+                return _admitted_coo_policy(
+                    _strict_canonical_json_loads(
+                        str(rows[0]["payload_json"]), name="COO plan admission"
+                    )
+                ).policy_sha256
+        try:
+            return CooCyclePolicy.load().policy_sha256
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
+    if job_row["orchestration_role"] == "aggregation":
+        full_job_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job_row["job_id"],)
+        ).fetchone()
+        if full_job_row is None:
+            raise StateConflict("orchestration evidence lost its root Job")
+        handoff = _validated_aggregation_handoff(connection, full_job_row)
+        return str(handoff["policy_sha"])
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("orchestration evidence lost its root Job")
+    rows = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+        ORDER BY event_id
+        """,
+        (root_row["job_id"],),
+    ).fetchall()
+    if len(rows) != 1:
+        raise StateConflict("orchestration evidence requires one root plan admission")
+    admission = _strict_canonical_json_loads(
+        str(rows[0]["payload_json"]), name="COO plan admission"
+    )
+    if not isinstance(admission, dict):
+        raise StateConflict("COO plan admission is not the closed wire")
+    policy_sha = admission.get("policy_sha")
+    if type(policy_sha) is not str:
+        raise StateConflict("COO plan admission policy pin is malformed")
+    if policy_sha not in EXPECTED_POLICY_SHA256_BY_VERSION.values():
+        raise StateConflict("COO plan admission policy pin is unavailable")
+    return policy_sha
+
+
+def _root_admitted_orchestration_policy(
+    connection: sqlite3.Connection, job_row: sqlite3.Row
+) -> CooCyclePolicy:
+    """Resolve a root-owned role policy from its durable admission."""
+
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("orchestration Job lost its root")
+    admission = _validated_plan_admission(connection, root_row)[0]
+    return _admitted_coo_policy(admission)
+
 
 def _review_attempt_is_independent(
     connection: sqlite3.Connection,
@@ -9306,12 +9904,15 @@ def _current_orchestration_tree_material_for_dispatch(
     """Re-derive reservation/current-lineage eligibility without terminal claims."""
 
     children = connection.execute(
-        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
-        (root_row["job_id"],),
+        "SELECT * FROM jobs WHERE root_job_id=? AND job_id<>? ORDER BY job_id",
+        (root_row["job_id"], root_row["job_id"]),
     ).fetchall()
     if len(children) > int(admission["reserved_children_total"]):
         raise StateConflict("orchestration tree exceeds its reserved child total")
-    policy = CooCyclePolicy.load()
+    _admission, _plan_body = _validated_plan_admission(connection, root_row)
+    if (_admission, _plan_body) != (admission, plan_body):
+        raise StateConflict("dispatch admission replay policy identity drifted")
+    policy = _admitted_coo_policy(admission)
     reservations = {str(item["plan_step_id"]): item for item in admission["steps"]}
     result: list[dict[str, Any]] = []
     for step in plan_body["steps"]:
@@ -9382,7 +9983,19 @@ def _current_orchestration_tree_material_for_dispatch(
     expected_ids = {str(step["step_id"]) for step in plan_body["steps"]}
     if any(
         row["orchestration_role"] not in {"plan", "work", "repair", "review"}
-        or int(row["depth"]) != 1
+        or int(row["depth"]) not in {1, 2}
+        or (
+            row["orchestration_role"] != "plan"
+            and row["parent_job_id"]
+            not in {
+                str(root_row["job_id"]),
+                *(
+                    str(item["job_id"])
+                    for item in children
+                    if item["depth"] == 1 and item["orchestration_role"] == "plan"
+                ),
+            }
+        )
         or (
             row["orchestration_role"] != "plan"
             and row["plan_step_id"] not in expected_ids
@@ -9422,11 +10035,14 @@ def _accepted_current_step_revision(
     reservation = reservation_by_step[plan_step_id]
 
     children = connection.execute(
-        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
-        (root_row["job_id"],),
+        "SELECT * FROM jobs WHERE root_job_id=? AND job_id<>? ORDER BY job_id",
+        (root_row["job_id"], root_row["job_id"]),
     ).fetchall()
 
-    policy = CooCyclePolicy.load()
+    _admission, _plan_body = _validated_plan_admission(connection, root_row)
+    if (_admission, _plan_body) != (admission, plan_body):
+        raise StateConflict("aggregation admission replay policy identity drifted")
+    policy = _admitted_coo_policy(admission)
     revisions = [
         row
         for row in children
@@ -9709,23 +10325,26 @@ def _current_orchestration_tree_material(
     root_row: sqlite3.Row,
     admission: dict[str, Any],
     plan_body: dict[str, Any],
+    *,
+    allow_active_domain_job_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Derive the exact current revisions, approvals, and adverse history."""
 
     children = connection.execute(
-        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
-        (root_row["job_id"],),
+        "SELECT * FROM jobs WHERE root_job_id=? AND job_id<>? ORDER BY job_id",
+        (root_row["job_id"], root_row["job_id"]),
     ).fetchall()
     living = [
         str(row["job_id"])
         for row in children
         if JobStatus(row["status"]) not in _TERMINAL_JOB_STATUSES
+        and str(row["job_id"]) != str(allow_active_domain_job_id or "")
     ]
     if living:
         raise StateConflict(
             "aggregation handoff refuses living child Jobs: " + ", ".join(living)
         )
-    if any(int(row["depth"]) != 1 for row in children):
+    if any(int(row["depth"]) not in {1, 2} for row in children):
         raise StateConflict("orchestration tree contains a non-direct child")
     known_steps = {str(step["step_id"]) for step in plan_body["steps"]}
     allowed_roles = {"plan", "work", "repair", "review"}
@@ -9866,6 +10485,8 @@ def _assert_orchestration_lineage_for_create(
     rejected_review_job_id: str | None = None,
     rejected_review_result_digest: str | None = None,
     allow_active_interactive_plan: bool = False,
+    allow_active_domain_plan: bool = False,
+    parent_domain_row: sqlite3.Row | None = None,
 ) -> None:
     parent_role, parent_provenance, _ = _decode_orchestration_job_fields(parent_row)
     if (
@@ -9891,7 +10512,7 @@ def _assert_orchestration_lineage_for_create(
         or (
             plan_attempt["status"] != AttemptStatus.COMPLETED.value
             and not (
-                allow_active_interactive_plan
+                (allow_active_interactive_plan or allow_active_domain_plan)
                 and plan_attempt["status"]
                 in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
             )
@@ -9901,13 +10522,23 @@ def _assert_orchestration_lineage_for_create(
         or plan_attempt["plan_root"] != parent_row["root_job_id"]
     ):
         raise StateConflict("plan lineage does not name the completed plan child")
-    if allow_active_interactive_plan:
+    if allow_active_interactive_plan or allow_active_domain_plan:
         job_row = connection.execute(
             "SELECT * FROM jobs WHERE job_id=?", (plan_attempt["job_id"],)
         ).fetchone()
-        if job_row is None or not _interactive_tx5_admitted(job_row):
+        if job_row is None:
+            raise StateConflict(
+                "active plan lineage is not recognized"
+            )
+        if allow_active_interactive_plan and not _interactive_tx5_admitted(job_row):
             raise StateConflict(
                 "active interactive plan lineage is not recognized"
+            )
+        if allow_active_domain_plan and not _coo_domain_admitted(
+            job_row, allow_disabled=True
+        ):
+            raise StateConflict(
+                "active domain plan lineage is not recognized"
             )
     _, sealed_plan_digest = _sealed_role_result(
         connection, attempt_id=str(plan_attempt_id), expected_role="plan"
@@ -9922,7 +10553,13 @@ def _assert_orchestration_lineage_for_create(
         ).fetchone()
         if (
             reviewed is None
-            or reviewed["parent_job_id"] != parent_row["job_id"]
+            or (
+                reviewed["parent_job_id"] != parent_row["job_id"]
+                and not (
+                    parent_domain_row is not None
+                    and reviewed["parent_job_id"] == parent_domain_row["job_id"]
+                )
+            )
             or reviewed["root_job_id"] != parent_row["root_job_id"]
             or reviewed["orchestration_role"] not in {"work", "repair"}
             or reviewed["status"] != JobStatus.COMPLETED.value
@@ -10198,7 +10835,10 @@ def _assert_orchestration_dispatch_eligible(
             raise StateConflict("aggregation dispatch requires an eligible queued root")
         _validated_aggregation_handoff(connection, job_row)
         return
-    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != 1:
+    if job_row["root_job_id"] != root["job_id"] or int(job_row["depth"]) not in {
+        1,
+        2,
+    }:
         raise StateConflict(
             "orchestration dispatch target is outside the direct root subtree"
         )
@@ -10271,7 +10911,10 @@ def _assert_orchestration_requeue_eligible(
     if role == "aggregation":
         _validated_aggregation_handoff(connection, job_row)
         return
-    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != 1:
+    if job_row["root_job_id"] != root["job_id"] or int(job_row["depth"]) not in {
+        1,
+        2,
+    }:
         raise StateConflict(
             "orchestration requeue target is outside the direct subtree"
         )
@@ -10368,10 +11011,17 @@ def _insert_cycle_child(
     placement: dict[str, Any] | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
     allow_active_interactive_plan: bool = False,
+    allow_active_domain_plan: bool = False,
+    parent_domain_row: sqlite3.Row | None = None,
+    policy: CooCyclePolicy | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
-    policy = CooCyclePolicy.load()
+    if policy is None:
+        try:
+            policy = CooCyclePolicy.load()
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
     if role not in {"work", "review", "repair"}:
         raise StateConflict("cycle child insertion role is invalid")
     if _COMMAND_ID_RE.fullmatch(command_id) is None:
@@ -10381,8 +11031,11 @@ def _insert_cycle_child(
             str(root_row["constraints_json"]), name="root constraints"
         )
     )
+    domain = _coo_domain_row(connection, root_row)
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
+    if domain is not None:
+        constraints["remaining_depth"] = 0
     if role == "work" and placement is not None:
         constraints = _project_work_placement(
             constraints,
@@ -10447,7 +11100,18 @@ def _insert_cycle_child(
             "rejected_review_result_digest"
         ),
         allow_active_interactive_plan=allow_active_interactive_plan,
+        allow_active_domain_plan=allow_active_domain_plan,
+        parent_domain_row=parent_domain_row,
     )
+    if domain is None and parent_domain_row is not None:
+        raise StateConflict("depth-two child requires the admitted COO domain")
+    if parent_domain_row is not None and domain["job_id"] != parent_domain_row["job_id"]:
+        raise StateConflict("depth-two direct parent is not the admitted COO domain")
+    if domain is not None and (
+        not isinstance(constraints, dict)
+        or constraints.get("remaining_depth") != 0
+    ):
+        raise StateConflict("depth-two child requires integer remaining_depth=0")
     numbers = [
         int(match.group(1))
         for row in connection.execute("SELECT job_id FROM jobs")
@@ -10495,7 +11159,9 @@ def _insert_cycle_child(
         "source_digest": source_digest,
         "command_id": command_id,
         "job_id": job_id,
-        "parent_job_id": str(root_row["job_id"]),
+        "parent_job_id": str(
+            domain["job_id"] if domain is not None else root_row["job_id"]
+        ),
         "root_job_id": str(root_row["job_id"]),
         "role": role,
     }
@@ -10532,9 +11198,9 @@ def _insert_cycle_child(
             timestamp,
             timestamp,
             timestamp,
+            str(domain["job_id"] if domain is not None else root_row["job_id"]),
             root_row["job_id"],
-            root_row["job_id"],
-            1,
+            2 if domain is not None else 1,
             "coo",
             "coo",
             root_row["business_impact"],
@@ -10559,9 +11225,11 @@ def _insert_cycle_child(
         job_id=job_id,
         payload={
             "status": JobStatus.QUEUED.value,
-            "parent_job_id": str(root_row["job_id"]),
+            "parent_job_id": str(
+                domain["job_id"] if domain is not None else root_row["job_id"]
+            ),
             "root_job_id": str(root_row["job_id"]),
-            "depth": 1,
+            "depth": 2 if domain is not None else 1,
             "owner_seat": "coo",
             "escalation_target": "coo",
             "business_impact": str(root_row["business_impact"]),
@@ -10617,8 +11285,10 @@ def _reconcile_cycle_child_creation(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    policy: CooCyclePolicy | None = None,
     placement: dict[str, Any] | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
+    parent_domain_row: sqlite3.Row | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
 
@@ -10644,6 +11314,8 @@ def _reconcile_cycle_child_creation(
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
+    if parent_domain_row is not None:
+        expected_constraints["remaining_depth"] = 0
     if role == "work" and placement is not None:
         expected_constraints = _project_work_placement(
             expected_constraints,
@@ -10682,9 +11354,13 @@ def _reconcile_cycle_child_creation(
     source_digest = provenance_source_digest or plan_digest
     expected_payload: dict[str, Any] = {
         "status": JobStatus.QUEUED.value,
-        "parent_job_id": str(root_row["job_id"]),
+        "parent_job_id": str(
+            root_row["job_id"]
+            if parent_domain_row is None
+            else parent_domain_row["job_id"]
+        ),
         "root_job_id": str(root_row["job_id"]),
-        "depth": 1,
+        "depth": 1 if parent_domain_row is None else 2,
         "owner_seat": "coo",
         "escalation_target": "coo",
         "business_impact": str(root_row["business_impact"]),
@@ -10724,9 +11400,13 @@ def _reconcile_cycle_child_creation(
         or row["priority"] != root_row["priority"]
         or row["authority_level"] != root_row["authority_level"]
         or row["branch"] != root_row["branch"]
-        or row["parent_job_id"] != root_row["job_id"]
+        or row["parent_job_id"] != (
+            root_row["job_id"]
+            if parent_domain_row is None
+            else parent_domain_row["job_id"]
+        )
         or row["root_job_id"] != root_row["job_id"]
-        or int(row["depth"]) != 1
+        or int(row["depth"]) != (1 if parent_domain_row is None else 2)
         or row["owner_seat"] != "coo"
         or row["escalation_target"] != "coo"
         or row["business_impact"] != root_row["business_impact"]
@@ -10742,6 +11422,21 @@ def _reconcile_cycle_child_creation(
         or stored_validations != validation_commands
         or stored_constraints != expected_constraints
         or int(row["attempt_limit"]) != int(attempt_limit)
+        or (
+            policy is not None
+            and (
+                cost_class not in policy.allowed_child_cost_classes
+                or (
+                    role == "review"
+                    and int(attempt_limit) != policy.review_job_attempt_limit
+                )
+                or (
+                    role in {"work", "repair"}
+                    and int(attempt_limit)
+                    > policy.max_attempts_per_orchestration_job
+                )
+            )
+        )
         or payload != expected_payload
     ):
         raise StateConflict("cycle child command replay semantic payload drifted")
@@ -11539,6 +12234,7 @@ class JobRegistry:
         *,
         spec: _JobCreationSpec,
         _c2_capability: object | None = None,
+        _coo_cycle_domain_budget_capability: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -11614,6 +12310,18 @@ class JobRegistry:
             raise StateConflict(
                 "private C2 capability requires exact carrier provenance"
             )
+        if _coo_cycle_domain_budget_capability is not None and (
+            _coo_cycle_domain_budget_capability
+            is not _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY
+            or spec.orchestration_role != "plan"
+            or spec.parent_job_id is None
+            or spec.parent_root_job_id != spec.parent_job_id
+            or spec.owner_seat != "coo"
+            or spec.requested_authorities != ("READ",)
+            or spec.allowed_write_paths
+            or spec.validation_commands
+        ):
+            raise StateConflict("private COO domain budget capability is invalid")
 
         numbers: list[int] = []
         for row in connection.execute("SELECT job_id FROM jobs"):
@@ -11752,6 +12460,18 @@ class JobRegistry:
         ).fetchone()
         if row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("created Job disappeared inside its transaction")
+        if _coo_cycle_domain_budget_capability is not None:
+            root_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (spec.parent_job_id,)
+            ).fetchone()
+            if root_row is None:  # pragma: no cover - FK just admitted parent
+                raise PersistenceError("COO budget root disappeared in transaction")
+            _append_or_validate_coo_provider_budget(
+                self.store,
+                connection,
+                root_row=root_row,
+                domain_job_id=job_id,
+            )
         return _job_from_row(row)
 
     def create_v2_orchestration_root(
@@ -12037,6 +12757,89 @@ class JobRegistry:
                     constraints[key] = root_constraints[key]
         return constraints
 
+    def create_cycle_domain(
+        self,
+        root_job_id: str,
+        *,
+        command_id: str,
+    ) -> Job:
+        """Create the sole production-disarmed read-only domain parent."""
+
+        root_token = str(root_job_id or "").strip()
+        expected_command = f"coo-cycle:{root_token}:create-domain:0"
+        if command_id != expected_command:
+            raise StateConflict("domain command_id is not exact-root deterministic")
+        root = self.get_job(root_token)
+        if root is None:
+            raise StateConflict(f"root job {root_token!r} does not exist")
+        if (
+            root.orchestration_role != "aggregation"
+            or root.parent_job_id is not None
+            or root.root_job_id != root.job_id
+            or not isinstance(root.orchestration_provenance, dict)
+            or root.orchestration_provenance.get("creator") != "ceo_intent"
+        ):
+            raise StateConflict("domain creation requires a strict v2 aggregation root")
+        try:
+            policy = CooCyclePolicy.load()
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
+        constraints = self._operator_child_constraints(root)
+        constraints["execution_profile_id"] = COO_DOMAIN_EXECUTION_PROFILE
+        registry = ExecutionCapabilityRegistry.load()
+        registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+        profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+        constraints["execution_profile_digest"] = profile.profile_digest
+        constraints["capability_policy_version"] = registry.policy_version
+        constraints["capability_policy_digest"] = registry.policy_digest
+        constraints["remaining_depth"] = 1
+        constraints["delegation_scope_digest"] = orchestration_digest(
+            {
+                "schema_version": "mastermind.coo_domain_delegation/v1",
+                "root_job_id": root.job_id,
+                "authority_policy_sha256": ExecutiveAuthorityPolicy.load().sha256,
+                "execution_profile_id": COO_DOMAIN_EXECUTION_PROFILE,
+                "execution_profile_digest": profile.profile_digest,
+                "capability_policy_sha256": registry.policy_digest,
+                "remaining_depth": 1,
+            }
+        )
+        if not constraints.get("routing_policy_version"):
+            constraints["routing_policy_version"] = "coo-domain-routing"
+        return self.create_job(
+            f"Orchestrate the bounded COO domain for {root.job_id}: {root.objective}",
+            department=root.department,
+            priority=root.priority,
+            authority_level=root.authority_level,
+            branch=root.branch,
+            worktree=root.worktree,
+            constraints=constraints,
+            attempt_limit=min(
+                root.attempt_limit,
+                policy.max_attempts_per_orchestration_job,
+            ),
+            requested_authorities=["READ"],
+            allowed_write_paths=[],
+            validation_commands=[],
+            command_id=command_id,
+            parent_job_id=root.job_id,
+            owner_seat="coo",
+            escalation_target="coo",
+            business_impact=root.business_impact,
+            review_required=False,
+            orchestration_role="plan",
+            orchestration_provenance={
+                "schema_version": "mastermind.executive_orchestration_provenance_source/v1",
+                "creator": "coo_cycle",
+                "source_id": root.job_id,
+                "source_digest": str(root.orchestration_provenance_digest),
+            },
+            _coo_cycle_planner_capability=_COO_CYCLE_PLANNER_CREATION_CAPABILITY,
+            _coo_cycle_domain_budget_capability=(
+                _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY
+            ),
+        )
+
     def create_interactive_operator(
         self,
         root_job_id: str,
@@ -12107,6 +12910,94 @@ class JobRegistry:
                 "source_digest": str(root.orchestration_provenance_digest),
             },
             _coo_cycle_planner_capability=_COO_CYCLE_PLANNER_CREATION_CAPABILITY,
+        )
+
+    def project_cycle_domain_consumption(
+        self,
+        root_job_id: str,
+        *,
+        domain_attempt_id: str,
+    ) -> dict[str, Any]:
+        """Return only exact reviewed child material for the domain actor."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("domain projection root does not exist")
+            domain = _coo_domain_row(connection, root, required=True)
+            attempt = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?", (domain_attempt_id,)
+            ).fetchone()
+            if (
+                domain is None
+                or attempt is None
+                or attempt["job_id"] != domain["job_id"]
+                or attempt["status"]
+                not in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+                or domain["current_attempt_id"] != domain_attempt_id
+            ):
+                raise StateConflict("domain consumption requires an active domain")
+            _coo_domain_admitted(domain, allow_disabled=True)
+            projection = _coo_domain_consumption_projection(
+                connection,
+                root_row=root,
+                domain_job_id=str(domain["job_id"]),
+                domain_attempt_id=str(attempt["attempt_id"]),
+            )
+            return projection
+
+    def project_cycle_domain_provider_budget(
+        self,
+        root_job_id: str,
+    ) -> dict[str, Any]:
+        """Return the durable root reservation without interpreting charges."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("provider budget root does not exist")
+            domain = _coo_domain_row(connection, root, required=True)
+            if domain is None:  # pragma: no cover - required raises above
+                raise StateConflict("COO provider budget domain is missing")
+            budget = _validated_coo_provider_budget_event(
+                connection,
+                root_row=root,
+                domain_job_id=str(domain["job_id"]),
+            )
+            return dict(budget)
+
+    def seal_cycle_domain_consumption(
+        self,
+        root_job_id: str,
+        *,
+        domain_attempt_id: str,
+        observation: Any,
+        command_id: str,
+    ) -> dict[str, Any]:
+        """Fail closed until exact subsequent domain-consumption turn integration.
+
+        The removed acceptance path keyed on the mere existence of an
+        OHF_CANDIDATE_RESULT_RECORDED row for the attempt.  Any planning,
+        stale, sibling, or fabricated candidate event satisfies such a query,
+        so it is not evidence of observed subsequent domain-consumption turn
+        integration and must never seal caller text as actor consumption.
+
+        This API therefore refuses every invocation, before any transaction or
+        event append, until a separate actual actor-turn source integration
+        supplies and validates exact turn provenance.
+        """
+
+        raise StateConflict(
+            "domain consumption seal requires observed subsequent "
+            "domain-consumption turn integration; existence-only candidate "
+            "event evidence is insufficient. This fail-closed API refuses "
+            "every invocation until that actor-turn integration exists."
         )
 
     def admit_cycle_plan(
@@ -12188,6 +13079,8 @@ class JobRegistry:
                 )
             planner = children[0]
             interactive = False
+            domain_active = False
+            domain = _coo_domain_row(connection, root)
             if _interactive_tx5_admitted(planner):
                 expected_command = (
                     f"coo-cycle:{root_token}:admit-plan:"
@@ -12237,6 +13130,55 @@ class JobRegistry:
                     job_row=planner,
                 )
                 interactive = True
+            elif _coo_domain_admitted(planner, allow_disabled=True):
+                expected_command = (
+                    f"coo-cycle:{root_token}:admit-plan:"
+                    f"{planner['current_attempt_id']}"
+                )
+                if command_id != expected_command:
+                    raise StateConflict(
+                        "plan-admission command_id is not deterministic"
+                    )
+                if (
+                    planner["status"]
+                    not in (JobStatus.RUNNING.value, JobStatus.CHECKPOINTED.value)
+                    or planner["current_attempt_id"] is None
+                ):
+                    raise StateConflict(
+                        "domain plan admission requires an active parent"
+                    )
+                plan_attempt = connection.execute(
+                    """
+                    SELECT a.*,j.orchestration_role AS plan_role,
+                           j.parent_job_id AS plan_parent,j.root_job_id AS plan_root,
+                           j.depth AS plan_depth
+                    FROM attempts a JOIN jobs j ON j.job_id=a.job_id
+                    WHERE a.attempt_id=?
+                    """,
+                    (planner["current_attempt_id"],),
+                ).fetchone()
+                if (
+                    plan_attempt is None
+                    or plan_attempt["plan_role"] != "plan"
+                    or plan_attempt["plan_parent"] != root_token
+                    or plan_attempt["plan_root"] != root_token
+                    or plan_attempt["plan_depth"] != 1
+                    or plan_attempt["execution_mode"]
+                    != AttemptExecutionMode.OPERATOR_HARNESS.value
+                    or plan_attempt["status"]
+                    not in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+                    or plan_attempt["worker_id"] is None
+                    or plan_attempt["quota_class"] is None
+                ):
+                    raise StateConflict(
+                        "domain plan admission parent identity is invalid"
+                    )
+                seal = _validated_domain_active_plan_seal(
+                    connection,
+                    attempt_row=plan_attempt,
+                    job_row=planner,
+                )
+                domain_active = True
             else:
                 plan_attempt = connection.execute(
                     "SELECT * FROM attempts WHERE attempt_id=?",
@@ -12371,6 +13313,9 @@ class JobRegistry:
                     repair_round=0,
                     placement=step.get("placement"),
                     allow_active_interactive_plan=interactive,
+                    allow_active_domain_plan=domain_active,
+                    parent_domain_row=domain,
+                    policy=policy,
                 )
                 created_ids.append(str(member["job_id"]))
                 reservation_steps.append(
@@ -12432,10 +13377,13 @@ class JobRegistry:
                         plan_digest=plan_digest,
                         plan_step_id=str(step["step_id"]),
                         repair_round=0,
-                        placement=step.get("placement"),
-                        dependency_manifest=manifest,
-                        allow_active_interactive_plan=interactive,
-                    )
+                    placement=step.get("placement"),
+                    dependency_manifest=manifest,
+                    allow_active_interactive_plan=interactive,
+                    allow_active_domain_plan=domain_active,
+                    parent_domain_row=domain,
+                    policy=policy,
+                )
                     created_ids.append(str(member["job_id"]))
                     reservation_steps[ordinal]["initial_work_job_id"] = str(
                         member["job_id"]
@@ -12569,6 +13517,8 @@ class JobRegistry:
                 plan_body=plan_body,
                 plan_step_id=step_token,
             )
+            domain = _coo_domain_row(connection, root)
+            policy = _admitted_coo_policy(admission)
             supplied_manifest = _validate_work_dependency_manifest(
                 dependency_manifest,
                 root_job_id=root_token,
@@ -12612,6 +13562,8 @@ class JobRegistry:
                     repair_round=0,
                     placement=step.get("placement"),
                     dependency_manifest=expected_manifest,
+                    parent_domain_row=domain,
+                    policy=policy,
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
@@ -12628,7 +13580,8 @@ class JobRegistry:
                 raise StateConflict("deferred V3 step already consumed a reserved slot")
             child_count = int(
                 connection.execute(
-                    "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root_token,)
+                    "SELECT COUNT(*) FROM jobs WHERE root_job_id=? AND depth=2",
+                    (root_token,),
                 ).fetchone()[0]
             )
             if (
@@ -12655,6 +13608,8 @@ class JobRegistry:
                 repair_round=0,
                 placement=step.get("placement"),
                 dependency_manifest=expected_manifest,
+                parent_domain_row=domain,
+                policy=policy,
             )
             created_id = str(row["job_id"])
         result = self.get_job(str(created_id))
@@ -12708,7 +13663,9 @@ class JobRegistry:
                 str(root["validation_commands_json"]), name="root validations"
             )
             review_validations = root_validations if has_tests else []
-            policy = CooCyclePolicy.load()
+            admission_policy = _validated_plan_admission(connection, root)[0]
+            policy = _admitted_coo_policy(admission_policy)
+            domain = _coo_domain_row(connection, root)
             reviews = connection.execute(
                 "SELECT * FROM jobs WHERE reviews_job_id=? ORDER BY job_id",
                 (reviewed_job_id,),
@@ -12774,6 +13731,8 @@ class JobRegistry:
                     creation_evidence={
                         "reviewed_result_digest": reviewed_result_digest
                     },
+                    parent_domain_row=domain,
+                    policy=policy,
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
@@ -12844,6 +13803,9 @@ class JobRegistry:
                 provenance_source_id=reviewed_job_id,
                 provenance_source_digest=reviewed_result_digest,
                 creation_evidence={"reviewed_result_digest": reviewed_result_digest},
+                allow_active_domain_plan=domain is not None,
+                parent_domain_row=domain,
+                policy=policy,
             )
             created_id = str(row["job_id"])
         result = self.get_job(str(created_id))
@@ -12879,6 +13841,7 @@ class JobRegistry:
                 connection,
                 root
             )
+            domain = _coo_domain_row(connection, root)
             rejected_attempt, _work_seal, _work_terminal, rejected_result_digest = (
                 _validated_role_completion_material(
                     connection,
@@ -12968,6 +13931,7 @@ class JobRegistry:
                         "rejected_review_job_id": rejecting_review_job_id,
                         "rejected_review_result_digest": review_result_digest,
                     },
+                    parent_domain_row=domain,
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
@@ -12977,7 +13941,7 @@ class JobRegistry:
                     connection, root, admission, plan_body
                 )
             }.get(str(rejected["plan_step_id"]))
-            policy = CooCyclePolicy.load()
+            policy = _admitted_coo_policy(admission)
             if (
                 current is None
                 or current["current_job_id"] != rejected_job_id
@@ -13013,6 +13977,8 @@ class JobRegistry:
                     "rejected_review_job_id": rejecting_review_job_id,
                     "rejected_review_result_digest": review_result_digest,
                 },
+                parent_domain_row=domain,
+                policy=policy,
             )
             created_id = str(row["job_id"])
         result = self.get_job(str(created_id))
@@ -13069,6 +14035,20 @@ class JobRegistry:
             if prior is not None:
                 raise StateConflict("aggregation root already has a different handoff")
             _assert_cycle_root_open_for_child_mutation(connection, root)
+            domain = _coo_domain_row(connection, root)
+            if domain is not None:
+                seal_rows = connection.execute(
+                    """
+                    SELECT payload_json FROM events
+                    WHERE event_type='COO_DOMAIN_CONSUMPTION_SEALED' AND job_id=?
+                    ORDER BY event_id
+                    """,
+                    (root_token,),
+                ).fetchall()
+                if len(seal_rows) != 1:
+                    raise StateConflict(
+                        "domain aggregation requires its exact consumption seal"
+                    )
             admission, plan_body = _validated_plan_admission(
                 connection,
                 root
@@ -13365,19 +14345,26 @@ class JobRegistry:
                     receipt=receipt,
                 )
 
-            plan_event = connection.execute(
+            plan_events = connection.execute(
                 "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
                 (root_token,),
-            ).fetchone()
-            handoff_event = connection.execute(
+            ).fetchall()
+            handoff_events = connection.execute(
                 "SELECT payload_json FROM events WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?",
                 (root_token,),
-            ).fetchone()
-            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
-            if policy_digest != EXPECTED_POLICY_SHA256:
+            ).fetchall()
+            if len(plan_events) > 1 or len(handoff_events) > 1:
                 raise StateConflict(
-                    "COO block policy digest is not the reviewed policy"
+                    "COO block requires unique root orchestration events"
                 )
+            plan_event = plan_events[0] if plan_events else None
+            handoff_event = handoff_events[0] if handoff_events else None
+            policy_digest = _resolve_coo_block_policy_sha(
+                connection,
+                root_token,
+                supplied_policy_sha=policy_sha,
+                reason="state_conflict",
+            )
             evidence_value = {"retry_safety": retry_receipt}
             _validated_retry_safety_block_evidence(
                 connection,
@@ -13697,16 +14684,20 @@ class JobRegistry:
                 selected_job_id=selected_token,
                 attempt_id=selected["current_attempt_id"],
             )
-            plan_event = connection.execute(
+            plan_events = connection.execute(
                 """SELECT payload_json FROM events
                    WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?""",
                 (root_token,),
-            ).fetchone()
-            handoff_event = connection.execute(
+            ).fetchall()
+            handoff_events = connection.execute(
                 """SELECT payload_json FROM events
                    WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?""",
                 (root_token,),
-            ).fetchone()
+            ).fetchall()
+            if len(plan_events) > 1 or len(handoff_events) > 1:
+                raise StateConflict("COO block requires unique root orchestration events")
+            plan_event = plan_events[0] if plan_events else None
+            handoff_event = handoff_events[0] if handoff_events else None
             plan_payload = (
                 _json_loads(plan_event["payload_json"], fallback={})
                 if plan_event
@@ -13717,11 +14708,12 @@ class JobRegistry:
                 if handoff_event
                 else {}
             )
-            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
-            if policy_digest != EXPECTED_POLICY_SHA256:
-                raise StateConflict(
-                    "COO block policy digest is not the reviewed policy"
-                )
+            policy_digest = _resolve_coo_block_policy_sha(
+                connection,
+                root_token,
+                supplied_policy_sha=policy_sha,
+                reason=reason,
+            )
             payload = {
                 "schema_version": "mastermind.coo_cycle_block/v1",
                 "root_job_id": root_token,
@@ -13814,6 +14806,7 @@ class JobRegistry:
         _v2_root_capability: object | None = None,
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
+        _coo_cycle_domain_budget_capability: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -13869,6 +14862,9 @@ class JobRegistry:
                 )
         else:
             try:
+                # Roots and planners are created before COO_PLAN_ADMITTED exists.
+                # Admitted-root children replace this with the exact root pin
+                # after the parent row is visible in the insertion transaction.
                 coo_policy = CooCyclePolicy.load()
             except CooCyclePolicyError as exc:
                 raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
@@ -14037,7 +15033,8 @@ class JobRegistry:
                 existing = connection.execute(
                     """
                     SELECT e.event_type,e.job_id,e.aggregate_type,e.aggregate_id,
-                           e.payload_json,j.*
+                           e.payload_json,j.*,
+                           j.job_id AS replay_job_id
                     FROM events e LEFT JOIN jobs j ON j.job_id=e.job_id
                     WHERE e.command_id=?
                     """,
@@ -14052,6 +15049,10 @@ class JobRegistry:
                     ):
                         raise StateConflict(
                             "planner command_id is owned by another semantic action"
+                        )
+                    if existing["replay_job_id"] is None:
+                        raise StateConflict(
+                            "planner JOB_CREATED replay Job identity is missing"
                         )
                     replay_job = _job_from_row(existing)
                     replay_provenance = replay_job.orchestration_provenance or {}
@@ -14079,11 +15080,58 @@ class JobRegistry:
                         or replay_payload.get("orchestration_role") != "plan"
                         or replay_payload.get("orchestration_provenance_digest")
                         != replay_job.orchestration_provenance_digest
-                    ):
-                        raise StateConflict(
-                            "planner command replay semantic target drifted"
+                        ):
+                            raise StateConflict(
+                                "planner command replay semantic target drifted"
+                            )
+                    if _coo_cycle_domain_budget_capability is _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY:
+                        root_row = connection.execute(
+                            "SELECT * FROM jobs WHERE job_id=?",
+                            (str(parent_job_id),),
+                        ).fetchone()
+                        if root_row is None:
+                            raise StateConflict(
+                                "COO provider budget replay root is missing"
+                            )
+                        _validated_coo_provider_budget_event(
+                            connection,
+                            root_row=root_row,
+                            domain_job_id=str(replay_job.job_id),
                         )
                     return replay_job
+            if (
+                orchestration_role == "plan"
+                and _coo_cycle_planner_capability
+                is _COO_CYCLE_PLANNER_CREATION_CAPABILITY
+                and _coo_cycle_domain_budget_capability is not None
+            ):
+                if (
+                    _coo_cycle_domain_budget_capability
+                    is not _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY
+                ):
+                    raise StateConflict("invalid COO domain budget capability")
+                budget_root = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (str(parent_job_id),)
+                ).fetchone()
+                if (
+                    budget_root is None
+                    or budget_root["job_id"] != budget_root["root_job_id"]
+                    or budget_root["parent_job_id"] is not None
+                    or budget_root["orchestration_role"] != "aggregation"
+                ):
+                    raise StateConflict("COO domain budget root identity is invalid")
+                existing_domains = connection.execute(
+                    """
+                    SELECT COUNT(*) FROM jobs
+                    WHERE root_job_id=? AND job_id<>?
+                      AND orchestration_role='plan' AND depth=1
+                    """,
+                    (str(budget_root["job_id"]), str(budget_root["job_id"])),
+                ).fetchone()[0]
+                if int(existing_domains) != 0:
+                    raise StateConflict(
+                        "COO domain budget writer found an existing domain"
+                    )
             parent_row = None
             if parent_job_id is not None:
                 parent_row = connection.execute(
@@ -14095,6 +15143,19 @@ class JobRegistry:
                 if parent_row is None:
                     raise StateConflict(f"parent job {parent_job_id!r} does not exist")
                 _decode_orchestration_job_fields(parent_row)
+                if orchestration_role in {"work", "review", "repair"}:
+                    admitted = connection.execute(
+                        """
+                        SELECT 1 FROM events
+                        WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+                        LIMIT 1
+                        """,
+                        (str(parent_row["root_job_id"] or parent_row["job_id"]),),
+                    ).fetchone()
+                    if admitted is not None:
+                        coo_policy = _root_admitted_orchestration_policy(
+                            connection, parent_row
+                        )
                 if (
                     orchestration_role is None
                     and parent_row["orchestration_role"] is not None
@@ -14288,6 +15349,11 @@ class JobRegistry:
                     command_id=command_id,
                     event_provenance=provenance,
                     timestamp_ms=timestamp,
+                ),
+                _coo_cycle_domain_budget_capability=(
+                    _coo_cycle_domain_budget_capability
+                    if orchestration_role == "plan"
+                    else None
                 ),
             )
         return job
@@ -15366,7 +16432,11 @@ class AttemptRegistry:
             quarantined_workers: set[str] = set()
             if orchestration_role is not None:
                 try:
-                    coo_policy = CooCyclePolicy.load()
+                    coo_policy = (
+                        _root_admitted_orchestration_policy(connection, job_row)
+                        if job_row["orchestration_role"] in {"work", "review", "repair"}
+                        else CooCyclePolicy.load()
+                    )
                 except CooCyclePolicyError as exc:
                     raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
                 limit = int(job_row["attempt_limit"])
@@ -17723,6 +18793,12 @@ class OperatorHarnessRegistry:
                     str(existing_admission["payload_json"]),
                     name="orchestration work admission replay",
                 )
+                root_row = connection.execute(
+                    "SELECT 1 FROM jobs WHERE job_id=?", (row["job_id"],)
+                ).fetchone()
+                if root_row is None:
+                    raise StateConflict("orchestration work admission lost its root")
+                expected_policy_sha = _attempt_root_policy_sha(connection, row)
                 supplied = (
                     principal_observation.to_dict()
                     if isinstance(principal_observation, OperatorPrincipalObservation)
@@ -17738,6 +18814,7 @@ class OperatorHarnessRegistry:
                     or existing_admission["worker_id"] != row["worker_id"]
                     or existing_payload.get("principal_observation") != supplied
                     or existing_payload.get("observed_attestation_digest") != digest
+                    or existing_payload.get("policy_sha") != expected_policy_sha
                 ):
                     raise StateConflict("TX-4 admission replay semantic target drifted")
                 return digest
@@ -17913,7 +18990,7 @@ class OperatorHarnessRegistry:
                     "execution_principal_snapshot_digest": stable_digest,
                     "placement_snapshot_digest": str(row["placement_snapshot_digest"]),
                     "effective_grant_digest": str(row["effective_grant_digest"]),
-                    "policy_sha": CooCyclePolicy.load().policy_sha256,
+                    "policy_sha": _attempt_root_policy_sha(connection, row),
                     "launch_decision": LaunchDecision.ALLOW.value,
                 }
                 self.store.append_event(
@@ -18069,7 +19146,8 @@ class OperatorHarnessRegistry:
             or admission.get("placement_snapshot_digest")
             != row["placement_snapshot_digest"]
             or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or admission.get("policy_sha")
+            != _attempt_root_policy_sha(connection, row)
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {
@@ -18542,7 +19620,7 @@ class OperatorHarnessRegistry:
             != attempt_row["execution_principal_snapshot_digest"]
             or seal["placement_snapshot_digest"]
             != attempt_row["placement_snapshot_digest"]
-            or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _attempt_root_policy_sha(connection, attempt_row)
         ):
             raise StateConflict(
                 "interactive active plan seal does not match its durable identity"
@@ -18957,7 +20035,7 @@ class OperatorHarnessRegistry:
                 ),
                 "placement_snapshot_digest": str(row["placement_snapshot_digest"]),
                 "effective_grant_digest": str(row["effective_grant_digest"]),
-                "policy_sha": CooCyclePolicy.load().policy_sha256,
+                "policy_sha": admission["policy_sha"],
             }
             existing = self._event(connection, command_id)
             if existing is not None:
@@ -19857,7 +20935,7 @@ class OperatorHarnessRegistry:
             or admission.get("placement_snapshot_digest")
             != row["placement_snapshot_digest"]
             or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or admission.get("policy_sha") != _attempt_root_policy_sha(connection, row)
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {

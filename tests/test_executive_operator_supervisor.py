@@ -10,7 +10,15 @@ from pathlib import Path
 
 import pytest
 
+import control_plane.executive_operator_supervisor as operator_supervisor_module
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
+from control_plane.executive_agent_capabilities import (
+    COO_DOMAIN_EXECUTION_PROFILE,
+    ExecutionCapabilityRegistry,
+)
+from control_plane.executive_operator_supervisor import (
+    ExecutiveOperatorSupervisorError,
+)
 from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
@@ -37,6 +45,7 @@ from control_plane.operator_harness_contract import (
     CapabilityManifest,
     EventCursor,
     NativeHelperPolicy,
+    CheckpointObservation,
     NormalizedEvent,
     ObservedHarnessAttestation,
     ObservedCapabilityIdentity,
@@ -58,6 +67,7 @@ from control_plane.operator_harness_contract import (
     WorkspaceIdentity,
 )
 from control_plane.operator_harness_orchestrator import (
+    OperatorEffectUnknown,
     OperatorOperationApplied,
     OperatorSessionReceipt,
 )
@@ -504,7 +514,9 @@ class _PromptSource:
         return "Read the exact Job and produce the bounded plan."
 
 
-def _seed_dispatchable_operator_planner(tmp_path: Path):
+def _seed_dispatchable_operator_planner(
+    tmp_path: Path, *, operator_override=None, clock=None, lease_seconds=None
+):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
     workspace.mkdir(parents=True)
@@ -536,10 +548,26 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         text=True,
     ).stdout.strip()
 
-    runtime = Runtime.at(tmp_path / "runtime")
+    runtime_kwargs: dict = {}
+    if clock is not None:
+        runtime_kwargs["clock"] = clock
+    if lease_seconds is not None:
+        runtime_kwargs["lease_seconds"] = lease_seconds
+    runtime = Runtime.at(tmp_path / "runtime", **runtime_kwargs)
     router = ModelRouter.load()
     sealed = router.model_aliases["coo.sealed"]
     operator = router.model_aliases["coo.operator.readonly"]
+    operator_profile_id = operator.execution_profile_id
+    operator_profile_digest = operator.execution_profile_digest
+    operator_policy_version = operator.capability_policy_version
+    operator_policy_digest = operator.capability_policy_digest
+    if operator_override is not None:
+        (
+            operator_profile_id,
+            operator_profile_digest,
+            operator_policy_version,
+            operator_policy_digest,
+        ) = operator_override
     binding = {
         "eligible_quota_classes": ["codex-coo", "codex-coo-default"],
         "provider": sealed.provider_alias,
@@ -558,10 +586,10 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
         "operator_effort": operator.effort,
         "operator_cost_class": operator.cost_class,
         "operator_routing_policy_version": router.policy_version,
-        "operator_execution_profile_id": operator.execution_profile_id,
-        "operator_execution_profile_digest": operator.execution_profile_digest,
-        "operator_capability_policy_version": operator.capability_policy_version,
-        "operator_capability_policy_digest": operator.capability_policy_digest,
+        "operator_execution_profile_id": operator_profile_id,
+        "operator_execution_profile_digest": operator_profile_digest,
+        "operator_capability_policy_version": operator_policy_version,
+        "operator_capability_policy_digest": operator_policy_digest,
         "operator_harness_binary_digest": "a" * 64,
         "operator_harness_version": "0.147.0",
         "operator_harness_armed": True,
@@ -581,10 +609,10 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
                 "capabilities": list(operator.capabilities),
                 "metadata": {
                     "routing_policy_version": router.policy_version,
-                    "execution_profile_id": operator.execution_profile_id,
-                    "execution_profile_digest": operator.execution_profile_digest,
-                    "capability_policy_version": operator.capability_policy_version,
-                    "capability_policy_digest": operator.capability_policy_digest,
+                    "execution_profile_id": operator_profile_id,
+                    "execution_profile_digest": operator_profile_digest,
+                    "capability_policy_version": operator_policy_version,
+                    "capability_policy_digest": operator_policy_digest,
                     "harness_binary_digest": "a" * 64,
                     "harness_version": "0.147.0",
                 },
@@ -1284,3 +1312,527 @@ def test_remote_adapter_caches_closed_browser_receipt_only_after_stop():
         generation, operation_id=OperationId("ohf-op:stop-remote")
     ) == observation
     assert adapter.terminal_artifact_receipt(generation) == receipt
+
+
+class _AdmittingRegistry:
+    """Isolated test-only registry proxy that admits the disabled domain profile.
+
+    This is NOT production admission proof: production ``.resolve`` stays
+    fail-closed and the shipped profile remains ``enabled=false``.
+    """
+
+    def __init__(self, real: ExecutionCapabilityRegistry) -> None:
+        self._real = real
+        self.profiles = real.profiles
+        self.policy_version = real.policy_version
+        self.policy_digest = real.policy_digest
+
+    def resolve(self, profile_id: str):
+        if profile_id == COO_DOMAIN_EXECUTION_PROFILE:
+            return self.profiles[profile_id]
+        return self._real.resolve(profile_id)
+
+
+class _FakeRegistryLoader:
+    @staticmethod
+    def load(*_args, **_kwargs):
+        return _AdmittingRegistry(ExecutionCapabilityRegistry.load())
+
+
+def _domain_operator_override():
+    real = ExecutionCapabilityRegistry.load()
+    domain = real.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+    return (
+        COO_DOMAIN_EXECUTION_PROFILE,
+        domain.profile_digest,
+        real.policy_version,
+        real.policy_digest,
+    )
+
+
+class _DomainAdapter(_ActiveAdapter):
+    def __init__(self, runtime, loader, *, fail_checkpoint=False):
+        super().__init__(runtime, loader, cancel_during_collect=False)
+        self.checkpoint_calls = 0
+        self.fail_checkpoint = fail_checkpoint
+
+    def checkpoint(self, *, operation_id, generation):
+        self.checkpoint_calls += 1
+        if self.fail_checkpoint:
+            raise RuntimeError("simulated unobservable provider checkpoint")
+        return CheckpointObservation(
+            checkpoint_candidate={"sealed": "initial-plan", "phase": "postclaim"}
+        )
+
+
+def _domain_supervisor(
+    tmp_path: Path,
+    *,
+    admit: bool,
+    fail_checkpoint=False,
+    monkeypatch=None,
+    clock=None,
+    lease_seconds=None,
+):
+    override = _domain_operator_override()
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path,
+        operator_override=override,
+        clock=clock,
+        lease_seconds=lease_seconds,
+    )
+    adapters: list[_DomainAdapter] = []
+
+    def factory(loader):
+        adapter = _DomainAdapter(runtime, loader, fail_checkpoint=fail_checkpoint)
+        adapters.append(adapter)
+        return adapter
+
+    if admit and monkeypatch is not None:
+        monkeypatch.setattr(
+            operator_supervisor_module,
+            "ExecutionCapabilityRegistry",
+            _FakeRegistryLoader,
+        )
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_PromptSource(),  # type: ignore[arg-type]
+    )
+    command_id = (
+        f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1"
+    )
+    return runtime, root, planner, supervisor, adapters, command_id
+
+
+def test_disabled_domain_profile_is_refused_by_ordinary_admission(
+    tmp_path: Path,
+) -> None:
+    runtime, root, planner, supervisor, adapters, command_id = _domain_supervisor(
+        tmp_path, admit=False
+    )
+    with pytest.raises(ExecutiveOperatorSupervisorError) as excinfo:
+        asyncio.run(supervisor.start_cycle_job(planner.job_id, command_id=command_id))
+    assert "not admitted" in str(excinfo.value)
+    # Admission refusal happens before any adapter/provider turn exists.
+    assert adapters == []
+
+
+def test_domain_postclaim_checkpoint_is_nonterminal_and_replay_safe(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (
+        runtime,
+        root,
+        planner,
+        supervisor,
+        adapters,
+        command_id,
+    ) = _domain_supervisor(tmp_path, admit=True, monkeypatch=monkeypatch)
+    outcome = asyncio.run(
+        supervisor.start_cycle_job(planner.job_id, command_id=command_id)
+    )
+    assert outcome.outcome == "ACTIVE"
+    attempt = runtime.attempts.get_attempt(outcome.attempt.attempt_id)
+    job = runtime.jobs.get_job(planner.job_id)
+    assert attempt is not None and attempt.status is AttemptStatus.CHECKPOINTED
+    assert job is not None and job.status is not JobStatus.COMPLETED
+    assert len(adapters) == 1
+    assert adapters[0].begin_turn_calls == 1
+    assert adapters[0].checkpoint_calls == 1
+    assert adapters[0].stop_calls == 0
+    assert adapters[0].cancel_calls == 0
+    generation = attempt.fence_generation
+    with runtime.store.read() as connection:
+        epoch = connection.execute(
+            "SELECT state FROM harness_session_epochs WHERE attempt_id=?",
+            (attempt.attempt_id,),
+        ).fetchone()
+    assert epoch["state"] == "CURRENT"
+
+    # Exact replay of the deterministic dispatch command must not start a
+    # second provider turn nor mint a new generation.
+    replay = asyncio.run(
+        supervisor.start_cycle_job(planner.job_id, command_id=command_id)
+    )
+    assert replay.attempt.attempt_id == attempt.attempt_id
+    assert replay.attempt.status is AttemptStatus.CHECKPOINTED
+    assert len(adapters) == 1
+    assert adapters[0].begin_turn_calls == 1
+    assert adapters[0].checkpoint_calls == 1
+    current = runtime.attempts.get_attempt(attempt.attempt_id)
+    assert current is not None
+    assert current.fence_generation == generation
+    assert current.status is AttemptStatus.CHECKPOINTED
+
+
+def test_domain_unknown_checkpoint_preserves_generation_without_terminal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (
+        runtime,
+        root,
+        planner,
+        supervisor,
+        adapters,
+        command_id,
+    ) = _domain_supervisor(
+        tmp_path, admit=True, fail_checkpoint=True, monkeypatch=monkeypatch
+    )
+    with pytest.raises(OperatorEffectUnknown):
+        asyncio.run(supervisor.start_cycle_job(planner.job_id, command_id=command_id))
+    attempts = runtime.attempts.list_attempts(planner.job_id)
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    assert attempt.status is not AttemptStatus.COMPLETED
+    assert len(adapters) == 1
+    assert adapters[0].begin_turn_calls == 1
+    assert adapters[0].stop_calls == 0
+    assert adapters[0].cancel_calls == 0
+    job = runtime.jobs.get_job(planner.job_id)
+    assert job is not None and job.status is not JobStatus.COMPLETED
+    with runtime.store.read() as connection:
+        epoch = connection.execute(
+            "SELECT state FROM harness_session_epochs WHERE attempt_id=?",
+            (attempt.attempt_id,),
+        ).fetchone()
+    assert epoch["state"] == "CURRENT"
+
+
+def test_domain_recovery_initial_seal_cannot_complete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    (
+        runtime,
+        root,
+        planner,
+        supervisor,
+        adapters,
+        command_id,
+    ) = _domain_supervisor(tmp_path, admit=True, monkeypatch=monkeypatch)
+    outcome = asyncio.run(
+        supervisor.start_cycle_job(planner.job_id, command_id=command_id)
+    )
+    attempt_id = outcome.attempt.attempt_id
+    generation = runtime.attempts.get_attempt(attempt_id).fence_generation
+    receipt = supervisor._recover_one(attempt_id)
+    assert receipt.status is ReconcileStatus.AWAITING_LEASE_EXPIRY
+    assert receipt.attempt_id == attempt_id
+    attempt = runtime.attempts.get_attempt(attempt_id)
+    assert attempt is not None and attempt.status is AttemptStatus.CHECKPOINTED
+    assert attempt.fence_generation == generation
+    job = runtime.jobs.get_job(planner.job_id)
+    assert job is not None and job.status is not JobStatus.COMPLETED
+    assert adapters[0].begin_turn_calls == 1
+
+
+def test_domain_unknown_checkpoint_survives_forced_lease_expiry_recovery(
+    tmp_path: Path, monkeypatch
+) -> None:
+    clock = _Clock()
+    (
+        runtime,
+        root,
+        planner,
+        supervisor,
+        adapters,
+        command_id,
+    ) = _domain_supervisor(
+        tmp_path,
+        admit=True,
+        fail_checkpoint=True,
+        monkeypatch=monkeypatch,
+        clock=clock,
+        lease_seconds=2,
+    )
+    with pytest.raises(OperatorEffectUnknown):
+        asyncio.run(
+            supervisor.start_cycle_job(planner.job_id, command_id=command_id)
+        )
+    attempts = runtime.attempts.list_attempts(planner.job_id)
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    attempt_id = attempt.attempt_id
+    # An UNKNOWN initial-plan checkpoint leaves a nonterminal RUNNING Attempt
+    # with its current epoch and exact generation preserved.
+    assert attempt.status is AttemptStatus.RUNNING
+    generation = attempt.fence_generation
+    with runtime.store.read() as connection:
+        epoch = connection.execute(
+            "SELECT state FROM harness_session_epochs WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()
+    assert epoch["state"] == "CURRENT"
+    assert adapters[0].begin_turn_calls == 1
+
+    # Force the OHF lease past expiry so generic recovery would otherwise be
+    # permitted to take over the Attempt.
+    clock.advance(3600)
+    receipt = supervisor._recover_one(attempt_id)
+    assert receipt.status is ReconcileStatus.AWAITING_LEASE_EXPIRY
+    assert receipt.attempt_id == attempt_id
+    assert receipt.process_was_live is False
+
+    # The exact same actor/generation stays pending: no complete, stop,
+    # abandon, resume, new generation or extra provider turn.
+    current = runtime.attempts.get_attempt(attempt_id)
+    assert current is not None
+    assert current.status is AttemptStatus.RUNNING
+    assert current.fence_generation == generation
+    job = runtime.jobs.get_job(planner.job_id)
+    assert job is not None and job.status is not JobStatus.COMPLETED
+    assert adapters[0].begin_turn_calls == 1
+    assert adapters[0].stop_calls == 0
+    assert adapters[0].cancel_calls == 0
+    with runtime.store.read() as connection:
+        epochs = connection.execute(
+            "SELECT COUNT(*) AS n FROM harness_session_epochs WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()
+        writer_rows = connection.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM process_generations g
+            JOIN harness_session_epochs e
+              ON e.session_epoch_id=g.session_epoch_id
+            WHERE e.attempt_id=? AND g.executive_writer_held=1
+            """,
+            (attempt_id,),
+        ).fetchone()
+    assert epochs["n"] == 1
+    assert writer_rows["n"] == 1
+
+
+class _SimulatedProcessCrash(BaseException):
+    """Hard process death after the initial-plan seal, before checkpoint."""
+
+
+def _domain_identity_snapshot(runtime: Runtime, attempt_id: str) -> dict:
+    with runtime.store.read() as connection:
+        epoch = connection.execute(
+            "SELECT * FROM harness_session_epochs WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()
+        generation = connection.execute(
+            """
+            SELECT g.* FROM process_generations g
+            JOIN harness_session_epochs e
+              ON e.session_epoch_id=g.session_epoch_id
+            WHERE e.attempt_id=?
+            """,
+            (attempt_id,),
+        ).fetchone()
+        unknown = connection.execute(
+            """
+            SELECT COUNT(*) AS n FROM events
+            WHERE attempt_id=?
+              AND event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN'
+              AND json_extract(payload_json,'$.phase')='checkpoint'
+            """,
+            (attempt_id,),
+        ).fetchone()
+    return {
+        "epoch": dict(epoch),
+        "generation": dict(generation),
+        "checkpoint_unknown_events": int(unknown["n"]),
+    }
+
+
+def test_domain_crash_before_checkpoint_reservation_preserves_live_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A crash after the initial-plan seal but before checkpoint reservation
+    leaves a live, correctly bound RUNNING domain Attempt with NO historical
+    UNKNOWN-checkpoint event.  Recovery must preserve that exact identity
+    (epoch, generation, fence) instead of promoting the sealed initial plan
+    through ordinary takeover.
+    """
+
+    clock = _Clock()
+    (
+        runtime,
+        root,
+        planner,
+        supervisor,
+        adapters,
+        command_id,
+    ) = _domain_supervisor(
+        tmp_path,
+        admit=True,
+        monkeypatch=monkeypatch,
+        clock=clock,
+        lease_seconds=2,
+    )
+
+    def crash_before_checkpoint(*_args, **_kwargs):
+        raise _SimulatedProcessCrash(
+            "process died after initial-plan seal, before checkpoint reservation"
+        )
+
+    monkeypatch.setattr(
+        operator_supervisor_module.OperatorHarnessOrchestrator,
+        "checkpoint",
+        crash_before_checkpoint,
+    )
+    with pytest.raises(_SimulatedProcessCrash):
+        asyncio.run(
+            supervisor.start_cycle_job(planner.job_id, command_id=command_id)
+        )
+
+    attempts = runtime.attempts.list_attempts(planner.job_id)
+    assert len(attempts) == 1
+    attempt_id = attempts[0].attempt_id
+    before = runtime.attempts.get_attempt(attempt_id)
+    assert before is not None and before.status is AttemptStatus.RUNNING
+    generation_fence = before.fence_generation
+    assert generation_fence == 1
+    identity_before = _domain_identity_snapshot(runtime, attempt_id)
+    assert identity_before["epoch"]["state"] == "CURRENT"
+    assert identity_before["generation"]["executive_writer_held"] == 1
+    assert identity_before["generation"]["generation_number"] == 1
+    assert identity_before["checkpoint_unknown_events"] == 0
+    assert adapters[0].begin_turn_calls == 1
+    assert adapters[0].stop_calls == 0
+    assert adapters[0].cancel_calls == 0
+
+    # Represent the same observed provider session/process for any generic
+    # recovery path; the fixed code must return before reaching it.
+    supervisor.adapter_factory = lambda loader: adapters[0]  # type: ignore[assignment]
+    # Force a real lease expiry so ordinary recovery would otherwise be
+    # permitted to take over and terminalize the sealed initial plan.
+    clock.advance(3600)
+    receipt = supervisor._recover_one(attempt_id)
+    assert receipt.status is ReconcileStatus.AWAITING_LEASE_EXPIRY
+    assert receipt.attempt_id == attempt_id
+    assert receipt.process_was_live is False
+
+    after = runtime.attempts.get_attempt(attempt_id)
+    assert after is not None and after.status is AttemptStatus.RUNNING
+    assert after.fence_generation == generation_fence
+    identity_after = _domain_identity_snapshot(runtime, attempt_id)
+    assert (
+        identity_after["epoch"]["session_epoch_id"]
+        == identity_before["epoch"]["session_epoch_id"]
+    )
+    assert (
+        identity_after["generation"]["process_generation_id"]
+        == identity_before["generation"]["process_generation_id"]
+    )
+    assert (
+        identity_after["generation"]["provider_session_id"]
+        == identity_before["generation"]["provider_session_id"]
+    )
+    assert identity_after["generation"]["executive_writer_held"] == 1
+    assert identity_after["epoch"]["state"] == "CURRENT"
+    job = runtime.jobs.get_job(planner.job_id)
+    assert job is not None and job.status is not JobStatus.COMPLETED
+    assert adapters[0].begin_turn_calls == 1  # no extra provider turn
+    assert adapters[0].stop_calls == 0
+    assert adapters[0].cancel_calls == 0
+
+
+def test_domain_recovery_stale_identity_fails_closed_without_promotion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Counts drawn from unrelated/stale rows must not establish live
+    authority: a held writer that no longer belongs to the Attempt's CURRENT
+    epoch fails closed without completing, stopping or turning.
+    """
+
+    clock = _Clock()
+    (
+        runtime,
+        root,
+        planner,
+        supervisor,
+        adapters,
+        command_id,
+    ) = _domain_supervisor(
+        tmp_path,
+        admit=True,
+        fail_checkpoint=True,
+        monkeypatch=monkeypatch,
+        clock=clock,
+        lease_seconds=2,
+    )
+    with pytest.raises(OperatorEffectUnknown):
+        asyncio.run(
+            supervisor.start_cycle_job(planner.job_id, command_id=command_id)
+        )
+    attempt = runtime.attempts.list_attempts(planner.job_id)[0]
+    attempt_id = attempt.attempt_id
+    generation = attempt.fence_generation
+    assert attempt.status is AttemptStatus.RUNNING
+
+    # The held writer now belongs to a non-CURRENT (stale) epoch for the same
+    # Attempt: the live identity bind no longer resolves.
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE harness_session_epochs SET state='ABANDONED' WHERE attempt_id=?",
+            (attempt_id,),
+        )
+
+    clock.advance(3600)
+    receipt = supervisor._recover_one(attempt_id)
+    assert receipt.status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert receipt.attempt_id == attempt_id
+    assert receipt.process_was_live is False
+
+    current = runtime.attempts.get_attempt(attempt_id)
+    assert current is not None and current.status is AttemptStatus.RUNNING
+    assert current.fence_generation == generation
+    job = runtime.jobs.get_job(planner.job_id)
+    assert job is not None and job.status is not JobStatus.COMPLETED
+    assert adapters[0].begin_turn_calls == 1
+    assert adapters[0].stop_calls == 0
+    assert adapters[0].cancel_calls == 0
+
+
+def test_domain_pending_hold_does_not_bypass_cancellation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A durable cancellation request on a preserved domain Attempt must still
+    flow through the existing typed lifecycle: the pending hold is not a
+    cancellation bypass and the epoch is abandoned, not left active.
+    """
+
+    clock = _Clock()
+    (
+        runtime,
+        root,
+        planner,
+        supervisor,
+        adapters,
+        command_id,
+    ) = _domain_supervisor(
+        tmp_path,
+        admit=True,
+        fail_checkpoint=True,
+        monkeypatch=monkeypatch,
+        clock=clock,
+        lease_seconds=2,
+    )
+    with pytest.raises(OperatorEffectUnknown):
+        asyncio.run(
+            supervisor.start_cycle_job(planner.job_id, command_id=command_id)
+        )
+    attempt_id = runtime.attempts.list_attempts(planner.job_id)[0].attempt_id
+    cancelled = runtime.jobs.cancel_job(planner.job_id)
+    assert cancelled.status is JobStatus.CANCEL_REQUESTED
+    # Reuse the same observed provider session for the recovery reconcile.
+    supervisor.adapter_factory = lambda loader: adapters[0]  # type: ignore[assignment]
+    clock.advance(3600)
+
+    receipt = supervisor._recover_one(attempt_id)
+    assert receipt.status is ReconcileStatus.MISSING_CANCELLED
+    attempt = runtime.attempts.get_attempt(attempt_id)
+    job = runtime.jobs.get_job(planner.job_id)
+    assert attempt is not None and attempt.status is AttemptStatus.CANCELLED
+    assert job is not None and job.status is JobStatus.CANCELLED
+    assert adapters[0].cancel_calls == 1
+    with runtime.store.read() as connection:
+        epoch = connection.execute(
+            "SELECT state FROM harness_session_epochs WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()
+    assert epoch["state"] == "ABANDONED"
