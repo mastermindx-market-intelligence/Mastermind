@@ -305,7 +305,7 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
 ) -> None:
     workspace = tmp_path.resolve() / "workspace-that-must-not-cross-the-broker"
     workspace.mkdir()
-    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=no")
 
     def timed_out(argv, **kwargs):
         raise subprocess.TimeoutExpired(
@@ -323,11 +323,11 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
     error = raised.value
     assert isinstance(error, cw.LaunchValidationError)
     assert error.code == "git_preflight_timeout"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.timeout_seconds == cw._GIT_COMMAND_TIMEOUT_SECONDS == 15.0
     assert str(error) == (
         "Git preflight timed out after 15s: "
-        "status --porcelain=v1 -z --untracked-files=all"
+        "status --porcelain=v1 -z --untracked-files=no"
     )
     assert str(workspace) not in str(error)
     assert "private workspace" not in str(error)
@@ -351,16 +351,16 @@ def test_git_preflight_nonzero_names_only_operation_and_bounded_exit_code(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         )
 
     error = raised.value
     assert error.code == "git_preflight_failed"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.exit_code == 128
     assert str(error) == (
         "Git preflight failed: status --porcelain=v1 -z "
-        "--untracked-files=all (exit 128)"
+        "--untracked-files=no (exit 128)"
     )
     assert str(workspace) not in str(error)
     assert hostile_stderr.decode().strip() not in str(error)
@@ -482,7 +482,7 @@ def test_installed_git_sees_exact_trust_only_in_command_scope_without_writes(
     assert cw._git_command(workspace, "remote") == b""
     assert cw._git_command(workspace, "rev-parse", "--verify", "HEAD").decode().strip() == head
     assert cw._git_command(
-        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=no"
     ) == b""
     assert cw._git_command(workspace, "ls-files", "--others", "-z") == b""
     assert cw._git_command(workspace, "diff", "--name-only", "-z", "HEAD", "--") == b""
@@ -506,7 +506,7 @@ def test_git_preflight_safe_types_reject_arbitrary_operation_and_exit_code() -> 
             exit_code=128,
         )
     with pytest.raises(ValueError, match="exit code"):
-        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=all", exit_code=999)
+        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=no", exit_code=999)
 
 
 def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
@@ -525,7 +525,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         ):
             return subprocess.CompletedProcess(argv, 128, b"", hostile_stderr)
         raise AssertionError(operation)
@@ -535,7 +535,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
     with pytest.raises(cw.GitPreflightFailed) as raised:
         cw._git_snapshot(workspace, require_clean=True)
 
-    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert raised.value.exit_code == 128
     assert "top-secret" not in str(raised.value)
 
@@ -4365,3 +4365,61 @@ def test_recovery_reattach_anchors_exact_group_members(tmp_path: Path) -> None:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=2)
+
+
+@pytest.mark.parametrize("authority", ("READ", "RESEARCH"))
+@pytest.mark.parametrize("artifact_name", ("artifact.txt", "ignored.tmp"))
+def test_readonly_collection_rejects_declared_untracked_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    authority: str, artifact_name: str,
+) -> None:
+    """An artifact allowlist does not grant WRITE_BRANCH to a read-only run.
+
+    Exercise the actual collector with the existing local fake provider. The
+    fake deliberately ignores the provider sandbox; acceptance must independently
+    reject its write even when the declared artifact and hashes are valid.
+    """
+    monkeypatch.setitem(globals(), "_FAKE_CODEX", _FAKE_CODEX.replace(
+        "artifact.txt", artifact_name,
+    ))
+
+    async def exercise():
+        adapter, spec, workspace, _run_dir = _fixture(
+            tmp_path, prompt="artifact", authority=authority,
+            allowed_artifacts=(artifact_name,),
+        )
+        ref = await adapter.start(spec)
+        receipt = await adapter.collect_result(ref)
+        assert (workspace / artifact_name).read_text() == "bounded artifact\n"
+        assert receipt.result.artifact_manifest
+        return receipt
+
+    receipt = asyncio.run(exercise())
+    assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
+    assert "read-only worker changed the workspace" in (receipt.result.error or "")
+
+
+@pytest.mark.parametrize("relative_path, tracked", (
+    ("README.md", True),
+    ("artifact.txt", False),
+    ("nested/artifact.txt", False),
+    ("ignored.tmp", False),
+))
+def test_split_git_snapshot_rejects_real_tracked_and_untracked_dirt(
+    tmp_path: Path, relative_path: str, tracked: bool,
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    assert cw._git_snapshot(workspace, require_clean=True).status == b""
+    changed = workspace / relative_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("changed fixture content\n", encoding="utf-8")
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        cw._git_snapshot(workspace, require_clean=True)
+    assert raised.value.code == "launch_validation_stage"
+    assert raised.value.stage == "git_cleanliness"
+    assert str(raised.value) == "Launch validation failed at stage: git_cleanliness"
+
+    snapshot = cw._git_snapshot(workspace, require_clean=False)
+    assert bool(snapshot.status) is tracked
+    assert relative_path in cw._git_changed_paths(workspace)

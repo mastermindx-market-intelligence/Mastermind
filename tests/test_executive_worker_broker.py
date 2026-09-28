@@ -1365,7 +1365,7 @@ class _GitFailedStartAdapter(FakeAdapter):
 
     async def start(self, spec):
         raise GitPreflightFailed(
-            operation="status --porcelain=v1 -z --untracked-files=all",
+            operation="status --porcelain=v1 -z --untracked-files=no",
             exit_code=128,
         )
 
@@ -1593,7 +1593,7 @@ def test_git_preflight_timeout_is_typed_and_broker_survives_cleanup(
             _GitFailedStartAdapter(),
             "git_preflight_failed",
             None,
-            "status --porcelain=v1 -z --untracked-files=all",
+            "status --porcelain=v1 -z --untracked-files=no",
             128,
         ),
     ),
@@ -1668,9 +1668,9 @@ def test_safe_launch_failures_are_typed_private_and_broker_survives(
                 "code": "git_preflight_failed",
                 "message": (
                     "Git preflight failed: status --porcelain=v1 -z "
-                    "--untracked-files=all (exit 128)"
+                    "--untracked-files=no (exit 128)"
                 ),
-                "operation": "status --porcelain=v1 -z --untracked-files=all",
+                "operation": "status --porcelain=v1 -z --untracked-files=no",
                 "exit_code": 128,
             },
         ),
