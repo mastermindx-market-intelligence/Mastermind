@@ -1292,3 +1292,59 @@ census—not this preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Eve
 then, CF2-I-A is the next separate carrier. OAuth/device ceremonies,
 credentials, provider calls, service start, runtime composition, routing,
 fan-out and failover remain held.
+
+
+## Job-bound worker login check (P2-1)
+
+The current-attempt controller adds the `REQUEST_WORKER_LOGIN_CHECK` policy
+capability with scope `current_attempt_assigned_worker_slot`. It can perform only
+`executive.worker_auth.verify_only` for the real Attempt's assigned reviewed
+worker slot. A successful terminal observation is login-status evidence; it is
+never a READY claim or permission to dispatch another Job.
+
+Source acceptance and installed acceptance are separate. Before this policy
+transition, reconcile the installed Runtime and prove **zero living Attempts**,
+or settle them explicitly using the existing lifecycle. Do not replace the
+policy under living Attempts that carry the previous policy digest. Preserve the
+single installed Control/Runtime owner and its existing receipt/custody protocol.
+
+After independent exact-head review and required CI, merge through protected
+master and prepare that exact immutable release for the existing administrator
+bootstrap. The existing `install.sh --arm-privileged-broker` ceremony is the sole
+arm: it derives `privileged_readiness_armed=true` and the canonical privileged
+socket in root-owned Control configuration. A caller-supplied configuration that
+conflicts with the ceremony refuses. Without that flag the arm is false and the
+socket field is null; a retained older wrapper grants no command authority.
+
+Only after the broker's registration, socket ownership and mode are verified does
+the installer publish root-owned mode0555 `mmx-control`. The wrapper fixes the
+release, canonical Control socket, and `check-current-worker-login` subcommand.
+It accepts exactly three positional arguments and rejects option-prefixed values:
+
+```bash
+"/Library/Application Support/MastermindExecutive/bin/mmx-control" \
+  JOB_ID ATTEMPT_ID FENCE_GENERATION
+```
+
+Use this as the non-root approved operator, with one real bounded Job requesting
+`READ` and `REQUEST_WORKER_LOGIN_CHECK`, claimed by the existing Runtime for
+`codex-01`. Prove the current Job/Attempt/fence, policy digest and installed
+release first. The command requires the existing Control service to be READY.
+Verify the observed login status independently of the broker child's exit code,
+and retain the exact Runtime Event family plus broker request/receipt IDs,
+installed release, host boot identity and no-password-prompt evidence.
+
+Interrupt only the client and read the same logical family again. A terminal
+receipt replays without an effect; an uncertain effect performs at most one
+status read. `NOT_FOUND`, a broker marker, timeout, and malformed evidence remain
+`EFFECT_UNKNOWN`. None authorizes a resend. Prove exactly one effect, wrong Job
+and stale-fence refusals, and denial of a dedicated worker's direct broker
+socket access. Read back the existing broker peer policy: the operator UID
+retains its inherited direct `mmx-admin` grant; this wrapper does not contain that
+principal. No credentials, lease tokens or arbitrary child output belong in the
+acceptance record.
+
+P2-1 remains `BUILT_NOT_PROVEN` until that real installed path and fresh native
+orchestrator consumption are observed. Provider renewal, readiness canaries,
+service-control request authority and multi-host admission remain separately
+owned later slices; do not infer full autonomy from this login-check capability.

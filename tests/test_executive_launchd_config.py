@@ -763,6 +763,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "workspace_resource_policy",
         "workspace_control_room",
         "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)

@@ -3,7 +3,7 @@
 The exact request/binding/result contracts and Event-backed controller share
 one current-Attempt admission boundary. A family authorizes at most one fixed
 verify_only send; later invocations recover evidence through broker status.
-No worker root grant, retry plane, READY assertion or second Runtime is added.
+The result remains bounded login-status evidence on the existing Runtime.
 """
 from __future__ import annotations
 
