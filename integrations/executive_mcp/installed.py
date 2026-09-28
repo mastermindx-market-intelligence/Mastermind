@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import configparser
+import copy
 import ctypes
 import hashlib
 import json
@@ -16,6 +17,7 @@ import re
 import shutil
 import stat
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1742,6 +1744,10 @@ class InstalledBootPacketCollector:
         if expected_source_sha is not None and not _valid_sha(expected_source_sha):
             raise ValueError("expected installed source SHA must be lowercase hexadecimal")
         self._expected_source_sha = expected_source_sha
+        self._collection_lock = threading.Lock()
+        self._collections: dict[
+            tuple[str | None, float], concurrent.futures.Future[dict[str, Any]]
+        ] = {}
 
     def _repository_observation_pair(
         self, source_observer: Callable[[], tuple[str, str]],
@@ -1887,7 +1893,43 @@ class InstalledBootPacketCollector:
         total_timeout = float(timeout)
         if total_timeout <= 0:
             raise GatewayError("backend_unavailable", "installed boot-packet timeout is invalid")
-        deadline = time.monotonic() + total_timeout
+        # Share only overlapping identical source observations. The existing read
+        # executor still owns admission and physical capacity; every caller builds
+        # its own fresh Runtime/inbox projection after this packet is returned.
+        # Remove the entry before publication, so completed packets and failures
+        # are never cached or reused by a later call.
+        key = (now, total_timeout)
+        with self._collection_lock:
+            future = self._collections.get(key)
+            owner = future is None
+            if owner:
+                future = concurrent.futures.Future()
+                self._collections[key] = future
+        assert future is not None
+        if not owner:
+            try:
+                return copy.deepcopy(future.result(timeout=total_timeout))
+            except concurrent.futures.TimeoutError as exc:
+                raise GatewayError(
+                    "backend_unavailable",
+                    "installed boot-packet collector exceeded its cumulative deadline",
+                ) from exc
+        try:
+            packet = self._collect_packet(repo=repo, now=now, timeout=total_timeout)
+            shared_packet = copy.deepcopy(packet)
+        except BaseException as exc:
+            with self._collection_lock:
+                del self._collections[key]
+                future.set_exception(exc)
+            raise
+        with self._collection_lock:
+            del self._collections[key]
+            future.set_result(shared_packet)
+        return packet
+
+    def _collect_packet(self, *, repo: Path, now: str | None,
+                        timeout: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
 
         def remaining() -> float:
             try:
