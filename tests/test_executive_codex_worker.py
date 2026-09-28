@@ -4414,8 +4414,11 @@ def test_split_git_snapshot_rejects_real_tracked_and_untracked_dirt(
     changed.parent.mkdir(parents=True, exist_ok=True)
     changed.write_text("changed fixture content\n", encoding="utf-8")
 
-    with pytest.raises(cw.LaunchValidationError, match="must be clean"):
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
         cw._git_snapshot(workspace, require_clean=True)
+    assert raised.value.code == "launch_validation_stage"
+    assert raised.value.stage == "git_cleanliness"
+    assert str(raised.value) == "Launch validation failed at stage: git_cleanliness"
 
     snapshot = cw._git_snapshot(workspace, require_clean=False)
     assert bool(snapshot.status) is tracked
