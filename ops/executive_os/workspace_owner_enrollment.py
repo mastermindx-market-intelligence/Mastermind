@@ -23,7 +23,7 @@ Public surface
 ``main(argv=None)``
     Effect edge that loads the policy + request paths, performs the
     private-file fences, performs the output/parent/root fences, and
-    writes the closed document with one exclusive atomic write. Emits
+    writes the closed document with one exclusive descriptor-bound write. Emits
     one redacted receipt on stdout and a fixed bounded refusal text on
     stderr; never raises through to a traceback.
 
@@ -32,8 +32,9 @@ operations: every authority file and every private slot input is opened
 once with ``O_RDONLY|O_NOFOLLOW|O_CLOEXEC`` and the closed payload is
 written to one descriptor-bound directory descriptor via
 ``O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC``. No path is ever reopened. The
-single failure path through final verification removes only the
-descriptor-bound own inode when the directory entry still matches.
+Every post-create failure conservatively preserves the current directory entry.
+This can leave an inspectable own orphan, but it never performs a pathname
+cleanup that could delete a foreign replacement.
 """
 from __future__ import annotations
 
@@ -524,7 +525,7 @@ def _complete_write(cursor: _OutputCursor, payload: bytes) -> None:
 
 
 def _finalize_output(cursor: _OutputCursor) -> None:
-    """Run fchmod, fsync, parent fsync, readback; one path through cleanup."""
+    """Run fchmod, fsync, parent fsync, and descriptor-bound readback."""
 
     assert cursor.fd is not None
     try:
