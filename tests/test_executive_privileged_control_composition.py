@@ -19,7 +19,7 @@ from control_plane.executive_service import ExecutiveControlService, send_contro
 from scripts import executive_os_phase1c as cli
 from test_c1_installer_control_config import _embedded_control_config_generator
 from test_c1_ceo_ingress_composition import _raw
-from test_executive_privileged_controller import setup, BOOT, RELEASE
+from test_executive_privileged_controller import setup, BOOT, RELEASE, Broker
 from test_executive_service import _config, _FakeSupervisor
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -178,3 +178,74 @@ def test_worker_slot_import_from_isolated_release_root():
     code = 'import sys; sys.path.insert(0,sys.argv[1]); from ops.executive_os.provider_worker_slots import get_slot; print(get_slot("codex-01").slot_id)'
     result = subprocess.run([sys.executable,'-I','-S','-B','-c',code,str(ROOT)],cwd='/',capture_output=True,text=True)
     assert result.returncode == 0 and result.stdout.strip() == 'codex-01'
+
+
+@pytest.mark.parametrize('armed,finish_before_check', [(False, False), (True, False), (True, True)])
+def test_control_admits_its_own_proof_authority_and_refuses_terminal_window(
+    tmp_path, armed, finish_before_check
+):
+    """Real Control/Runtime admission; simulated provider timing is not live proof."""
+    with tempfile.TemporaryDirectory(prefix='p703-admit-', dir='/tmp') as short:
+        cfg = _config(tmp_path, socket_root=Path(short),
+            privileged_readiness_armed=armed,
+            privileged_broker_socket_path=SOCKET if armed else None)
+        broker = Broker()
+
+        async def exercise():
+            finish_gate = asyncio.Event()
+            service = ExecutiveControlService(cfg,
+                supervisor_factory=lambda rt: _FakeSupervisor(rt, finish_gate=finish_gate),
+                privileged_readiness_controller_factory=(
+                    lambda rt: PrivilegedReadinessController(rt, release_sha=RELEASE,
+                        boot_observer=lambda: BOOT, broker_client=broker)
+                ) if armed else None)
+            await service.start()
+            try:
+                async def call(command, args=None):
+                    return await send_control_request(cfg.socket_path, command, args or {})
+
+                assert (await call('register-worker'))['ok']
+                injected = await call('create-proof-job', {'requested_authorities': ['REQUEST_WORKER_LOGIN_CHECK']})
+                assert injected['ok'] is False
+                assert (await call('jobs'))['result'] == []
+                created = await call('create-proof-job')
+                assert created['ok'], created
+                job = created['result']
+                expected = ['READ', 'RESEARCH', 'RUN_TESTS', 'WRITE_BRANCH']
+                if armed:
+                    expected.append('REQUEST_WORKER_LOGIN_CHECK')
+                assert job['requested_authorities'] == sorted(expected)
+                # Admission alone never requests the privileged effect.
+                assert broker.effects == []
+                dispatched = await call('dispatch', {'job_id': job['job_id']})
+                assert dispatched['ok'], dispatched
+                attempt = dispatched['result']['attempt']
+                assert broker.effects == []
+                request = {'job_id': job['job_id'], 'attempt_id': attempt['attempt_id'],
+                           'fence_generation': attempt['fence_generation']}
+                if finish_before_check:
+                    finish_gate.set()
+                    await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+                    assert (await call('job', {'job_id': job['job_id']}))['result']['status'] == 'COMPLETED'
+                checked = await call('check-current-worker-login', request)
+                if not armed or finish_before_check:
+                    assert checked['ok'] is False
+                    assert broker.effects == []
+                else:
+                    assert checked['ok'], checked
+                    assert checked['result']['state'] == 'TERMINAL'
+                    assert checked['result']['evidence_currency'] == 'CURRENT'
+                    assert checked['result']['observation_scope'] == 'LOGIN_STATUS_ONLY_NO_READY_ASSERTION'
+                    assert len(broker.effects) == 1
+                    assert broker.effects[0]['args'] == {'slot_id': 'codex-01'}
+                    replay = await call('check-current-worker-login', request)
+                    assert replay['result']['replayed'] is True
+                    assert replay['result']['receipt'] == checked['result']['receipt']
+                    assert len(broker.effects) == 1
+                assert 'lease_token' not in json.dumps([created, dispatched, checked])
+            finally:
+                finish_gate.set()
+                await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+                await service.close()
+
+        asyncio.run(asyncio.wait_for(exercise(), 30))

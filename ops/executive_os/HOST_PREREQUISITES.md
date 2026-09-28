@@ -1326,10 +1326,17 @@ It accepts exactly three positional arguments and rejects option-prefixed values
   JOB_ID ATTEMPT_ID FENCE_GENERATION
 ```
 
-Use this as the non-root approved operator, with one real bounded Job requesting
-`READ` and `REQUEST_WORKER_LOGIN_CHECK`, claimed by the existing Runtime for
-`codex-01`. Prove the current Job/Attempt/fence, policy digest and installed
-release first. The command requires the existing Control service to be READY.
+Use the installed Control's existing `register-worker`, `create-proof-job`, and
+`dispatch` commands as the non-root approved operator. When the installer-derived
+readiness arm is true, the fixed proof contract adds `REQUEST_WORKER_LOGIN_CHECK`
+to its existing four authorities; the existing Supervisor/Runtime claims that
+real Job for `codex-01`. No caller supplies authorities and no direct Runtime or
+database write substitutes for admission. Creation and dispatch alone perform no
+privileged broker action. Prove the returned current Job/Attempt/fence, policy
+digest and installed release, then explicitly invoke `mmx-control`. It requires
+the existing Control service to be READY. If the worker already finished, first
+admission refuses with zero effect: record that result, never hold the worker or
+automatically redispatch just to obtain a proof window.
 Verify the observed login status independently of the broker child's exit code,
 and retain the exact Runtime Event family plus broker request/receipt IDs,
 installed release, host boot identity and no-password-prompt evidence.

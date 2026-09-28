@@ -101,6 +101,14 @@ The installed `mmx-control` consumer is a dedicated closed wrapper for `check-cu
 
 The wrapper is an ergonomics and governance consumer, not a sandbox boundary for the operator UID. Any process already running as an allowed control/operator socket peer can construct the same closed control request directly, and the operator UID retains the pre-existing direct `mmx-admin` path to all six broker actions. P2-1 neither widens nor falsely claims to remove that inherited operator authority.
 
+### Existing Control admission join
+
+When and only when the installer-derived `privileged_readiness_armed` configuration is true, the existing Control-owned fixed proof contract appends `REQUEST_WORKER_LOGIN_CHECK` to its existing `READ`, `RESEARCH`, `RUN_TESTS`, and `WRITE_BRANCH` authorities. Its objective, workspace isolation, validation commands, write scope, worker selection, and sealed-worker dispatch remain unchanged. Unarmed Control retains the original contract. `create-proof-job` still accepts no arguments, and `_is_fixed_proof_job` rederives the complete contract at dispatch; caller metadata and CEO/MCP profiles cannot opt into this capability.
+
+The approved operator uses the existing `register-worker`, `create-proof-job`, and `dispatch` commands. Existing Runtime admission and Supervisor claim own the actual Job/Attempt. Neither creation nor dispatch invokes the privileged broker automatically. Only the separate explicit `mmx-control` request may admit the login observation while that Attempt is current. Direct Runtime/database writes, another claim endpoint, and a proof-only lease/hold are excluded.
+
+There is deliberately no guaranteed operator timing window: the worker may finish before the login request arrives. In that case first admission refuses with zero broker effects; it must not fabricate a current grant, delay worker completion, or redispatch automatically. Installed acceptance requires observing an actual successful current-Attempt request, independently of controlled provider timing used in source tests. Later evidence replay retains the existing family semantics.
+
 ## 6. Deterministic current-attempt admission
 
 Current authority (this section) is required only for **first admission** of a new logical family. Reading an existing family — §8's existing-family-first recovery — requires none of the checks below; it is evidence retrieval, not authority admission.

@@ -4394,6 +4394,9 @@ class ExecutiveControlService:
         return value
 
     def _proof_contract(self, *, workspace: Path, branch: str) -> dict[str, Any]:
+        authorities = ["READ", "RESEARCH", "RUN_TESTS", "WRITE_BRANCH"]
+        if self.config.privileged_readiness_armed:
+            authorities.append("REQUEST_WORKER_LOGIN_CHECK")
         return {
             "objective": _PROOF_OBJECTIVE,
             "department": "executive-infrastructure",
@@ -4411,7 +4414,7 @@ class ExecutiveControlService:
                 "eligible_quota_classes": [self.config.quota_class],
             },
             "attempt_limit": 3,
-            "requested_authorities": ["READ", "RESEARCH", "RUN_TESTS", "WRITE_BRANCH"],
+            "requested_authorities": sorted(authorities),
             "allowed_write_paths": [_PROOF_ARTIFACT],
             "validation_commands": [list(_PROOF_VALIDATION)],
         }

@@ -604,7 +604,7 @@ This task is **not** delegated to an ordinary coding worker.
 3. Reconcile Runtime: zero living Attempts or lawful explicit termination/requeue.
 4. Perform the one attended administrator bootstrap on the selected Studio using the exact protected source and pinned root Python/Codex inputs.
 5. Prove privileged plist/socket/wrappers/config ownership and service registration; do not infer readiness from installation.
-6. Create/claim one real bounded Job with `REQUEST_WORKER_LOGIN_CHECK` for `codex-01`.
+6. Use the installed Control's existing `register-worker`, `create-proof-job`, and `dispatch` commands for `codex-01`. The installer-derived readiness arm adds `REQUEST_WORKER_LOGIN_CHECK` to that fixed proof contract; no caller-authored authority or direct Runtime/database claim is permitted. Preserve the returned Job/Attempt/fence and existing lifecycle.
 7. Invoke installed `mmx-control` as the non-root operator and prove exact root `verify_only`, the exact login-status observation, and absence of any READY claim.
 8. Reconcile a deliberately lost client response through the control command with exactly one broker effect.
 9. Prove wrong Job, stale fence, and direct dedicated-worker broker socket access refuse. Separately read back the installed broker policy and record the accepted residual that the operator UID retains direct access to all six reviewed `mmx-admin` actions and slots; do not claim `mmx-control` contains that principal.
@@ -612,6 +612,10 @@ This task is **not** delegated to an ordinary coding worker.
 11. Record exact Runtime Events, broker receipt/request ID, merged release SHA, host/boot identity, no-prompt evidence and remaining P3/P4/P5 gates in durable owners.
 
 Only after these observations may P2-1 become `PROVEN_LIVE` on the Studio. Then advance directly to the P3 secret-free credential-renewal vertical.
+
+### Admission-join qualification
+
+The armed fixed-proof contract is the existing admission owner for this vertical. Creation and dispatch alone execute no privileged action. Source tests must traverse the real Control socket through registration, fixed Job creation, the existing claim owner, and an explicit login request; they must also prove the unarmed contract is unchanged, caller-supplied authority fields refuse, and a worker that finishes before first observation produces no broker effect. A controlled fake-provider completion gate qualifies the source join only. Installed proof uses actual worker timing: if the Attempt has already terminated, report that refusal honestly and reassess the concrete evidence without an automatic redispatch or a synthetic hold.
 
 
 ## 2026-09-16 continuation — supervisor portion of Task 2
