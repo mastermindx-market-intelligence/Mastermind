@@ -31,7 +31,7 @@ The effect edge enforces every safety fence through descriptor-bound
 operations: every authority file and every private slot input is opened
 once with ``O_RDONLY|O_NOFOLLOW|O_CLOEXEC`` and the closed payload is
 written to one descriptor-bound directory descriptor via
-``O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC``. No path is ever reopened. The
+``O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC``. No path is ever reopened.
 Every post-create failure conservatively preserves the current directory entry.
 This can leave an inspectable own orphan, but it never performs a pathname
 cleanup that could delete a foreign replacement.
