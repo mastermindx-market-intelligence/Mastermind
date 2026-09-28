@@ -1,102 +1,80 @@
 # Selective Harness Reuse Implementation Plan
 
-> **For agentic workers:** Use `superpowers:executing-plans` for the assigned existing writer, or `superpowers:subagent-driven-development` only through the existing lawful placement owner. Do not create a new principal, nested workspace, or duplicate reviewer. The Chairman assigned Sol the research/design and the current Codex builders the later surgical integration; no repeated Chairman dispatch ceremony is required.
+**Revision R3 — 2026-09-28.** Reuse the existing ACP worker and #825 predecessor; do not create another DSH Worker adapter. This corrects the R1 omission of existing implementation. The original 53 acceptance IDs remain requirements, not proof that tests ran. Source acceptance, installation, provider eligibility and useful parent-consumed results remain separate.
 
-**Goal:** Deliver a qualified opt-in DSH worker and portable approved tools without replacing the native OS execution paths.
-**Architecture:** The current Python worker interface owns a pinned Node SDK runner per Attempt. Existing capability-policy/package, provider, lifecycle, result, and UI projection owners remain authoritative; a tiny donor MCP admission patch connects them.
-**Tech Stack:** Existing Python worker contracts and process inspector; pinned DSH/Cordis Node runtime and public TypeScript SDK; existing official MCP transports; pytest and the donor/package's native test runner after its checked-in script is verified.
-**Spec:** `docs/superpowers/specs/2026-09-27-selective-harness-reuse.md`.
+**Current procedure/source:** Mastermind `dcc4829a811d3f6e4fe8c16a103f813c3501f48e`, Skillpack 1.0.1/bootstrap1. **Operation:** `deepseek-harness-mastermind-integration-20260927-sol-001`. **Existing source parent:** #687; company integration #600. **Spec:** `docs/superpowers/specs/2026-09-27-selective-harness-reuse.md`.
 
-## Global constraints
+## Reuse inventory and source custody
 
-Mastermind base `55d7270570a0636dc19f75aecb38352386094ea1`; donor base `21638c56315ae6a2b552d6091945d3144c9af32e`. Re-pin current law and reconcile only overlapping/interface deltas before editing. No production flag, credential, provider call, package install on a shared host, service change, protected push, or release is authorized merely by this plan. Keep all legacy profiles and current native builders functioning. R1 is one runtime/session/task per Attempt with read-only tools, no extra input producers, no donor native subagents, no model-selected accounts/routes, no write or shell tools, no HMR/plugin manager, no background scheduling tools, and no hidden model-request retry. Existing worker interface and result shapes stay unchanged unless their actual owner accepts a necessary versioned amendment.
+- #825 at `838d70b3625ae61476336615ef4c9b841a208297` already adds provider-scoped ACP model selection, cancellation-time frame admission, the real DSH fixture, native tests and its runbook. Use `integrations/acp_worker/adapter.py`, `turn.py`, the existing `AcpNativeProcessOwner`, `experiments/harness_convergence/dsh_worker/acp_fixture.ts` and `tests/harness_convergence/test_dsh_acp_worker.py`.
+- The #825 author reports 109 focused cases and 13 Python ACP SDK conformance cases; a later source approval/hold is recorded. These are attributable historical receipts, not this session's rerun or production proof. Current #825 is unmerged and its source-custody recovery must remain on its own carrier. A missing/refused local binding does not authorize a replacement workspace or copied implementation.
+- Default-branch ACP already owns native resources, prompt/session framing, common WorkerResult/CollectionReceipt, bounded cancellation and cleanup. Its result check rejects complete changed paths independently of tracked status. Reuse this implementation, not only its abstract interface.
+- Donor pins differ: #825 native proof used `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`; R1/R2 source research inspected `21638c56315ae6a2b552d6091945d3144c9af32e`. Keep evidence bound to its actual pin. Choose one qualified closure before changing runtime bytes; do not treat the later commit as an automatic upgrade.
+- Not commissioned: `control_plane/dsh_worker.py`, `DshWorkerAdapter`, a second process/cancellation/result implementation, global Node migration, native adapter/auth rewrite, provider/account store, new MCP proxy, queue, lifecycle, memory plane or reviewer.
 
-## Review focus
+## Task 1 — Recover the predecessor and lock the chosen profile [H01–H08]
 
-1. A project `.env`, home patch, compatibility exemption, or optional-bundle failure changes actual execution despite a superficially correct configuration dump: exercise Tasks 1 and 2.
-2. A server changes schemas/instructions/resources during reconnect while the old tool remains listed: exercise Task 3 at both registration and call time.
-3. Output validation fails after a remote tool acted, or cancellation returns before descendants stop: exercise Tasks 4 and 5 without inferring no effect.
-4. A second queued input or foreign-session event contaminates the result attributed to the job: exercise Tasks 2 and 5.
-5. The model makes another provider request after a retryable error or reaches an ambient credential: exercise Tasks 1 and 6 with actual wire counters.
+**Existing owners/files:** #825's six-file scope and supply runbook; existing immutable package/capability owners. Do not copy #825 source into #1037 or recreate its completed process proof.
 
-## Delivery and source-custody map
+1. Reconcile the exact #825 remote head, approved semantic evidence, current source-writer binding and material protected-source changes through the existing custody owner. Its later documented hold is writer continuity, not an unanswered review request. Current Chairman review direction does not waive source custody or required checks.
+2. Keep the old valid proof where inputs are unchanged. Inspect the retained supply manifest/artifact identities through authorized access; cache-path existence is not artifact verification. Changed inputs invalidate only affected evidence.
+3. Bind exact Node, DSH package/lock, ACP dependencies, profile and ordered patches. Use explicit private runtime home/startup directory and a positively allowlisted environment, separate from the agent workspace. Prove project/home configuration cannot alter routing or expose unexpected tools.
+4. H01–H08 still cover artifact/config/include drift, optional-bundle omissions and incorrect compatibility claims. There is no model request, credential ceremony or shared-host package installation merely to enumerate readiness.
 
-New candidate files proposed for this bounded integration: `control_plane/dsh_worker.py`, `integrations/dsh_worker/runner.ts`, `integrations/dsh_worker/contracts.ts`, `integrations/dsh_worker/profile/`, `tests/test_dsh_worker.py`, `tests/test_dsh_worker_contract.py`, and `integrations/dsh_worker/tests/`. The integration package owns its lockfile/build artifact, not a mutable global install. The exact package-manager entrypoint is chosen from the owning repository's current build convention before the first edit; do not add a company-wide Node toolchain migration.
+## Task 2 — Extend the real ACP path to a useful credential-free task [P01–P06]
 
-Incumbent-owned seams: `control_plane/worker_adapter.py` descriptor table; `worker_execution_contract.py`; `executive_agent_capabilities.py`; `executive_capability_packages.py`; `sol_capability_status.py`; native `claude_worker.py`; existing supervisor/broker/placement and app client/producer files. The new writer may propose and test amendments, but a conflicting current writer retains those files. Do not edit Runtime/cycle/hierarchy files as a shortcut for adapting DSH. Record any required amendment against its actual owner and allow path-disjoint adapter/falsifier work to continue.
+**Existing fixture/turn owners:** #825 DSH fixture and ACP turn. Initial tool capability is a proposed separate profile, not a change that silently makes #825's intentionally rejected tool case pass.
 
-Donor patch scope is initially restricted to the existing MCP client's tool-generation and connection-context publication boundaries plus their tests. A patch queue or pinned package build is a dependency artifact, not a new upstream fork of the UI, agent teams, account manager, or company scheduler. Any scope expansion beyond that requires a concrete failing requirement and Sol adjudication.
+1. Reuse request-correlated ACP prompt completion and cancellation; do not substitute high-level SDK enqueue/whole-agent-idle behavior or build another SDK runner.
+2. Before enabling tools, bind actual process/Agent/session/model/profile identity at the existing pre-prompt seam. Then admit only lifecycle-correlated evidence for two bounded repository read/search operations under the exact approved workspace.
+3. The deterministic provider-free journey must perform a real approved tool call, obtain a fresh source nonce from that call, and return a schema-valid useful result through the existing ACP collection path. Correct prose without observed tool use fails.
+4. P01–P06 require missing capability, extra input producer, wrong session/model, malformed/oversized frames and fake readiness to fail. Keep source provenance and settled owned-process evidence. No real provider or production readiness is inferred.
 
-## Task 1 — Lock and prove the executable profile
+## Task 3 — Integrate MCP generation and actual dispatch admission [M01–M12]
 
-**Files:** Create the private build/profile manifest under `integrations/dsh_worker/profile/`, its runtime artifact manifest, and `integrations/dsh_worker/tests/profile.test.ts`. Consume the existing immutable package/profile owner; do not replace its digest algorithm.
-**Interface:** Define proposed `validateRuntimeBinding(binding: DshRuntimeBinding): ValidatedDshRuntimeBinding` in `integrations/dsh_worker/contracts.ts`. The binding contains exact artifact identity, profile/package digests, selected route/model/effort, capabilities, allowed environment variable names, and deadline inputs; no credential values. It is host-authored and validated, not model-authored.
-- [ ] Write failing profile tests for case IDs H01–H08. Assert the runtime rejects changed artifacts, unexpected patches/includes, project `.env` influence, skipped required bundles, ambiguous compatible-version claims, and undeclared tools before the first model request.
-- [ ] Run the integration package's declared profile test script, initially expecting those explicit failures. Record the exact command from its committed package metadata; no invented upstream script name.
-- [ ] Build an isolated pinned runtime using the normal DSH entrypoint and an explicit profile. Positively allowlist the runner and child environments; keep startup directory separate from the agent workspace. Exclude the retry executor and forbidden model-facing plugins. Include required internal dependencies only with a tested non-exposure assertion.
-- [ ] Compare configured closure, actual activated services/tools, and artifact digests. Assert no live API request or login occurs during keyless readiness. A missing required capability makes the job ineligible even when DSH would tolerate an optional plugin failure.
-- [ ] Commit the scoped profile/build/verification candidate using the current source-custody route; keep it uninstalled and unarmed outside the isolated qualification environment.
+**Scope:** only when MCP enters the chosen useful profile, use the existing donor client `ToolBridgeOptions`/`syncTools`, `registerServerContext`, and core dispatch pipeline. No parallel discovery service or registry.
 
-## Task 2 — Real-runtime, credential-free falsifier
+1. Reconcile these seams against the selected donor pin before applying the R1/R2 patch proposal. Bind configured server, raw tool identity, full schema and connection generation; filter discovery and revalidate at actual execution.
+2. Preserve the R2 counterexample: an asynchronous executor can separate approval from final callable lookup. A name-only guard must not bless a replacement body or revoked binding. Use the already supplied four-case fixture as proposed coverage, not as executed proof.
+3. Gate instructions/resources independently of tool discovery. Refusal must make an unprovable old generation non-executable. Retain cancellation/dispatch/result provenance; reconnect must not replay a potentially completed call.
+4. M01–M12 retain added/changed/duplicate tools, schema drift, stale generations, direct/own-scope bypass, replacement, resource/instruction changes and false read-only annotations. Include permitted-tool positives; denying everything is not success.
 
-**Files:** Create `integrations/dsh_worker/runner.ts`, the bounded request/result types in `contracts.ts`, and `integrations/dsh_worker/tests/runner.test.ts` with a loopback deterministic model/MCP fixture. Test fixtures are not new production providers or services.
-**Interfaces:** Define proposed `runAttempt(input: DshAttemptInput, binding: ValidatedDshRuntimeBinding): Promise<DshAttemptOutput>`. `DshAttemptInput` carries common job/run/worker identity, one task, workspace, one session ID, result-schema identity, grant references, and remaining deadline. `DshAttemptOutput` carries those identities, raw terminal observations, bounded root events/artifact references, usage observations, and cleanup evidence. It is an internal translation value, not a new lifecycle schema. The SDK interaction uses its public `DeepSeekHarness` API with explicit `dshBin`, `profile`, `patches`, `dshHome`, `processCwd`, `cwd`, `env`, route/model/effort, and timeout options.
-- [ ] Write failing tests P01–P06: actual runtime issues a tool call against the real loopback MCP fixture, receives the expected source nonce, and returns the schema-valid result; a missing required MCP server, second input producer, foreign session result, malformed/oversized wire frame, and fake handshake compatibility cannot pass.
-- [ ] Run the real pinned runtime against the deterministic model. The positive assertion includes one observed tools/call and exact received content; a model answer without that call fails even when its prose is correct.
-- [ ] Implement one runtime/session/task ownership and bounded output collection. No arbitrary command-line arguments, public Node inspector, listening control endpoint, or model-supplied profile. Avoid private SDK process fields.
-- [ ] Verify the root message's inbox receipt, whole-agent idle, terminal turn reason and absence of other input producers; retain bounded diagnostics. Do not map idle directly to success.
-- [ ] Commit the independently testable falsifier and runner. The receipt is HERMETIC_REAL_RUNTIME only, not provider or fleet acceptance.
+## Task 4 — Complete the existing native-owner qualification [W01–W07]
 
-## Task 3 — Add exact MCP generation admission, not another MCP service
+**Reuse:** `AcpNativeProcessOwner`, `AcpWorkerAdapter`, current `WorkerExecutionAdapter`/`WorkerProcessRef` contracts, inspector and host isolation. Do not introduce `DshWorkerAdapter` or a second recoverable process API.
 
-**Files:** Donor `packages/mcp/mcp-client/src/tools.ts` at `ToolBridgeOptions`/`syncTools`, the connection-owned context boundary `src/server-context.ts` plus the existing caller that supplies its connection, and package tests. Add the Mastermind companion guard in `integrations/dsh_worker/`; use the documented `ctx.tools.guard(guard)` synchronous deny mechanism after `tools/pre-execute`.
-**Interfaces:** Introduce a proposed optional trusted generation-admission callback to the existing tool bridge options. Its input is the configured server identity plus the complete discovered tool definitions and current connection identity; its output is an immutable approved subset/binding or a refusal. Our profile requires it. No independent persistence or discovery loop. Execution calls carry/revalidate the admitted binding before the existing `client.callTool` invocation.
-- [ ] Write failing M01–M12 tests: extra discovered tool, changed input/output schema, raw/public-name normalization collision, duplicate name, reconnect drift, stale generation after failed sync, same-name hostile replacement, own-scope ungranted tool, direct call bypass, instruction change, ungranted resource access, and a false read-only annotation.
-- [ ] Prove at least one current donor test demonstrates the initial defect: `syncTools` registers an extra tool or republishes changed instructions without the Mastermind grant. Do not weaken donor baseline tests to conceal the difference.
-- [ ] Add pre-registration filtering/validation at `syncTools` before Phase 2, plus execution-time binding checks. On a material refusal invalidate the old executable grant as well as rejecting the proposed generation; do not mistake retaining old definitions for current authorization.
-- [ ] Gate `registerServerContext` publication separately. Resource permission and bounded attributed instructions must be explicit; R1 otherwise exposes neither. Add the monotonic all-tools guard so filtering cannot be bypassed through own-scope registration or direct invocation.
-- [ ] Run donor bridge tests and Mastermind integration tests, including a positive server with only its approved subset. Freeze the minimal patch and exact patched-artifact digest. Submit an upstreamable change only as a separately authorized publication, not automatically from this task.
+1. Add only missing exact artifact/profile attestation and host confinement to the qualified native factory. Preserve spec/workspace/base/UID checks, one active run, run-id reuse refusal, finite deadlines and cleanup reserve.
+2. W01–W07 qualify wrong binary/profile/workspace/principal, PID reuse, initialization failure, surviving descendants and interruption/recovery against that actual owner. A frame-level cancellation acknowledgment does not prove settled processes or no remote tool effect.
+3. Reuse #825's cancellation-frame correction rather than reimplementing it. Recovery never resends a prompt; unsupported resume/validation capabilities remain explicitly unavailable. READ/RESEARCH does not permit write or test execution.
 
-## Task 4 — Bind process execution to the common worker adapter
+## Task 5 — Use the current result/parent contract [R01–R09]
 
-**Files:** Create `control_plane/dsh_worker.py` and `tests/test_dsh_worker.py`. Propose only the necessary descriptor insertion in incumbent `worker_adapter.py`; descriptor readiness and production route admission remain separate.
-**Interface:** Implement `DshWorkerAdapter` with the exact five methods of `WorkerExecutionAdapter` and the existing common values. Use an injected reviewed runtime binding and the existing `ProcessInspector`, workspace preparation, artifact, validation, and cleanup patterns. `start()` returns the owned runner's `WorkerProcessRef`, not a PID claimed by model output. Optional recovery is not advertised until its tests pass.
-- [ ] Write failing W01–W07 tests for the adapter interface, binary/profile mismatch, wrong workspace/base/UID, PID reuse, initialization timeout, surviving child after root exit, and crash/recovery before collection.
-- [ ] Run `python -m pytest -q tests/test_dsh_worker.py --tb=short`; expect the new discriminators to fail before implementation.
-- [ ] Implement spawn/attestation under the existing host-owned process boundary, finite deadlines with cleanup reserve, read-only status, and idempotent same-process cancellation/collection. Reuse shared primitives only through a reviewed existing seam; do not copy private Codex internals wholesale or refactor its active implementation to satisfy this adapter.
-- [ ] Observe actual process-tree exit and immutable process identity. A failed cleanup preserves the original execution as unresolved. A recovery probe never creates a second runtime or sends the task again.
-- [ ] Run the new suite plus the exact existing worker-adapter/contract tests identified by the incumbent owner. Commit only the assigned files and hand the descriptor amendment to its current writer where collision exists.
+**Reuse:** `AcpReadOnlyTurn`, `AcpWorkerAdapter._collection`, `WorkerResult`, `CollectionReceipt` and existing Executive parent-result projection. No DSH-specific result translator, transcript DB or result API.
 
-## Task 5 — Translate results, uncertainty, and artifacts
+1. Existing collection checks already bind job/run/worker/model/session, prompt stop reason, output schema, clean workspace and native settlement. Add required tool-result attribution and appropriate bounded artifacts only through their existing owners.
+2. R01–R09 preserve malformed/foreign/duplicate/oversized output, cancellation races and uncertain external effects. Ordinary errors or process exit never authorize retry. Preserve actual usage and exact result/artifact hashes.
+3. Parent acceptance must resolve the full canonical result/artifact, not an `executive_job` MCP bounded preview. Qualify an oversized result with a required tail sentinel: projection may be bounded while original-parent consumption preserves and validates the full result.
+4. The current ACP collector already checks complete changed paths. Preserve that invariant when #1042's tracked-only status optimization is composed; a declared artifact name cannot replace WRITE_BRANCH authority.
 
-**Files:** `control_plane/dsh_worker.py`, `integrations/dsh_worker/contracts.ts`, result translation in the runner, and `tests/test_dsh_worker_contract.py` / runner tests.
-**Interfaces:** Define proposed `translate_dsh_result(spec: WorkerLaunchSpec, observation: Mapping[str, object]) -> WorkerResult` in `dsh_worker.py`. The common adapter owns validation and collection; the mapping is an internal observed runner output, not a model authority assertion. Preserve `CollectionReceipt` hashes and the existing artifact limits.
-- [ ] Write failing R01–R09 tests for wrong job/run/worker identity, root/descendant substitution, absent/malformed terminal reason, max-token/error mapped to success, oversized or out-of-root artifact, remote effect followed by invalid output, lost result after dispatch, duplicate collection, and cancellation racing successful completion.
-- [ ] Run `python -m pytest -q tests/test_dsh_worker_contract.py --tb=short`, verifying the test checks the real outcome distinction rather than merely a status string.
-- [ ] Derive the terminal reason from validated root `turn/end` events; the TypeScript RunResult has no finishReason property. Validate task schema, required tool evidence, artifacts and Git manifest before success. Preserve bounded raw diagnostic evidence without exporting credentials or full sensitive responses.
-- [ ] Map uncertain effects through the existing supervisor/runtime policy; do not invent a new worker status or authorize automatic retry on generic error. Prove exactly one result is consumed for the same Attempt.
-- [ ] Run all new worker/runner tests and the incumbent result-consumer suite against the exact candidate. Commit the tested composition.
+## Task 6 — Bind eligible provider, budget and accounting [E01–E07]
 
-## Task 6 — Prove route, quota, and retry discipline
+**Reuse:** existing provider profile/binding, Model Router, Capacity, credential owner and WorkerResult.usage. First use a counting loopback provider in the useful fixture; real provider access requires its own current positive admission.
 
-**Files:** Integration profile/runner tests and only the current provider-binding consumer seam authorized by its owner. No new provider registry, account store, balance table, or scheduler.
-**Interfaces:** Consume the existing owner-selected provider/model/execution-mode binding and its reservation/accounting reference. Return observed usage through existing `WorkerResult.usage`; retain requested model versus observed served model separately.
-- [ ] Write failing E01–E07 tests: ambient credential discovery, unapproved endpoint/redirect, hidden retry after timeout/429, two harnesses charging one entitlement as two pools, output cap mistaken for total budget, and unverified served identity.
-- [ ] Use a counting loopback endpoint first. Assert one admitted model request for the no-retry error case, no credential lookups outside the supplied mechanism, no native developer-account fallback, and no silent alternate route.
-- [ ] Qualify the selected transport libraries' retry behavior in the actual built artifact; donor retry-plugin omission alone is not sufficient. Reject an unqualified route rather than inserting another retry shim or proxy.
-- [ ] Only after source/host/provider-policy/budget gates pass, run one bounded real provider request and collect its actual usage. No provider canary is preauthorized by this source plan; use the existing owner to admit it.
-- [ ] Commit the source tests and return the exact route/profile/host qualification evidence. Do not claim the catalog as a whole is qualified.
+1. E01–E07 require explicit endpoint/credential mechanism, no ambient login discovery, no hidden retry/redirect/fallback, honest requested-versus-served identity and exactly attributed whole-Attempt usage. Do not confuse output-token cap with total budget.
+2. Keep #825's private ACP `[provider, model]` selector separate from plain WorkerLaunchSpec.model. It grants no provider entitlement. Do not activate the historical SPEC_ONLY OpenCode Go realm or another subscription based on API compatibility.
+3. Preserve economical existing router defaults; parent/subagent topology alone cannot escalate model tier. Sharing an entitlement across harnesses creates no additional pool.
 
-## Task 7 — Native baseline, app consumption, and release qualification
+## Task 7 — Deliver useful native and ACP outcomes to the existing OS [U01–U04]
 
-**Files:** Existing native capability package/profile consumer and app status/result consumer owned by the current builders; no blanket write envelope over #999 Runtime/cycle or #1007 shared files. Add only the tests each incumbent requires for the consumed interface.
-**Interfaces:** Existing `CapabilityFact` / `project_sol_capability_status()` / `CapabilityStatus` and the actual current app producer-client method. Reuse the current parent result/Wake path; this plan introduces no alternative app launch/message/reopen endpoint.
-- [ ] Native owner first proves the required tool-bearing baseline task through an existing route; do not block it on DSH. Preserve current Claude authentication/realm repairs and qualify its richer profile separately.
-- [ ] App owner pins the real build-readiness task, source/devserver identity, expected result schema, and destination parent. Run the DSH worker only through actual existing admission/broker placement, then prove parent consumption, artifact visibility, truthful availability, and stop/recovery behavior.
-- [ ] Exercise U01–U04: source-only never looks live; missing auth/dependency remains specific; the parent consumes the correct result exactly once; disarming DSH for new jobs does not disturb native work or replay an uncertain Attempt.
-- [ ] Repeat the equivalent task on a second independently eligible provider. Compare quality and measured resource use with the native baseline; no fabricated performance or cost improvement.
-- [ ] Obtain independent exact-head review and current hosted checks, then the existing integrator releases the exact artifact through its normal process. Record source, installed, runtime, and accepted-product proof separately. Update the existing Macro Agent OS records through their current writer and read them back.
+**Reuse:** existing capability/status projection, app producer/consumer contracts, Executive parent-result path and Macro Agent OS. Native #987/#1043/#1007/hierarchy delivery remains independent of DSH.
 
-## Receiver-ready handoff and next execution boundary
+1. Use the current app owner's bounded real task/output schema and approved source/devserver. Show one useful native baseline and one admitted ACP/DSH tool-using result consumed by its actual parent; qualify a second eligible provider only after the first works.
+2. U01–U04 cover truthful unavailable/auth-required/denied/healthy status, original-parent consumption, unsupported capability refusal and disabling new DSH placements without disturbing native work or uncertain running Attempts.
+3. Preserve source/CI/merge/install/START/accepted distinctions. Use current Chairman review direction rather than add an independent-review wait already waived; required checks, source custody, provider permissions and actual product acceptance still apply.
+4. Record accepted decisions/discoveries/continuation in the existing Macro Agent OS owner with readback. A GitHub delivery or plan is not recipient pickup, a Worker START or proof of knowledge-plane adoption.
 
-The accompanying builder packet is an integration addendum to existing programs, not a new worker assignment disguised as a reply. First receiving action: reconcile current owned paths and consume the architecture; keep ongoing launchpad/backend/hierarchy work moving; place the path-disjoint Tasks 1–3 falsifier through the existing capable Codex worker owner when available. Native capability delivery proceeds independently. Record actual PICKUP and START separately if a new bounded child is commissioned. No model/seat label is a verified native-session target. Return exact candidate head, completed case IDs and proof levels, unresolved failures, runtime artifact identity, and parent-consumption evidence on the established carrier. Unchanged waiting does not justify another worker, branch, audit cycle, or observer.
+## Exact continuation and proof accounting
+
+The next DSH dependency is existing-carrier #825 source recovery/current-base integration followed by the useful pre-prompt/read-tool extension, not building a new adapter. This session's typed publication-status read for #825 returned TYPED_GIT_PRECHECK_REFUSED/NOT_APPLIED; it was not bypassed with a different tool, clone or branch. This is an exact surface limitation, not proof that the old owner is dead or all source access is unavailable. Existing custody recovery remains with its owner.
+
+The original acceptance matrix remains an unexecuted requirement inventory; do not relabel its 53 cases PASS using earlier #825 tests. Qualify only changed/new behavior, retain exact pin and case provenance, and do not replay any denied invocation. R1 SDK observations remain reference/fallback evidence, not current default implementation instructions. No package install, provider call, worker start or source transfer is performed by this plan revision.
