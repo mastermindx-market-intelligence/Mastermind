@@ -74,6 +74,7 @@ def _run_default_control_config(
             "501",
             "b" * 64,
             "0.147.0",
+            "0",
         ],
         cwd=ROOT,
         check=False,
