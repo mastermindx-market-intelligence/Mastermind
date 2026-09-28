@@ -235,7 +235,7 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             enrollment is not None and (
                 not isinstance(enrollment, dict)
             or set(enrollment) != {"generation", "binding_id"}
-            or not isinstance(enrollment["generation"], int)
+            or type(enrollment["generation"]) is not int
             or enrollment["generation"] < 1
             or not isinstance(enrollment["binding_id"], str)
             or not enrollment["binding_id"]
@@ -312,6 +312,14 @@ def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
         raise WorkerConfigError("native service requires current operator autonomy admission")
     binding = _subscription_binding_for_config(config)
     if binding is None:
+        return
+    # A root-owned v5 config with a valid subscription_realm_enrollment is the
+    # attended-only lane: the broker only accepts that request through the
+    # typed interactive-canary operation, which the underlying binding
+    # explicitly disallows for autonomous execution.  Without enrollment the
+    # v5 config cannot reach the autonomous _start path and must therefore be
+    # refused here, preserving the legacy autonomous-service posture.
+    if config.get("subscription_realm_enrollment") is not None:
         return
     if binding.implementation_state != "PROVEN_LIVE" or not binding.autonomous_allowed:
         raise WorkerConfigError("subscription harness binding is not armed for autonomous service")

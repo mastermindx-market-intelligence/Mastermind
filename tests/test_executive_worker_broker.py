@@ -675,6 +675,23 @@ def test_remote_facade_routes_only_validated_claims_to_interactive_canary(
     assert list(canary_calls[-1][1]) == ["launch_spec", "subscription_canary_observation"]
 
 
+def test_ordinary_broker_start_refuses_claim_bearing_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker, _adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
+    spec_value["subscription_canary_claim"] = _owner_claim()
+    monkeypatch.setattr(broker, "_require_current_autonomy", lambda: None)
+
+    with pytest.raises(
+        BrokerProtocolError,
+        match="ordinary broker start refuses a subscription canary claim",
+    ):
+        asyncio.run(broker._start({
+            "launch_spec": spec_value,
+            "validation_commands": [],
+        }))
+
+
 def test_interactive_canary_seals_real_peer_and_enforces_one_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

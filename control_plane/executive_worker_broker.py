@@ -3158,6 +3158,15 @@ class ExecutiveWorkerBroker:
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
         spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
+        # Ordinary autonomous broker start must refuse any spec carrying a
+        # subscription canary claim; only the interactive-canary operation
+        # may carry one.  An empty mapping (default factory) is fine because
+        # it normalizes to a frozen empty mapping.
+        if spec.subscription_canary_claim:
+            raise BrokerProtocolError(
+                "ordinary broker start refuses a subscription canary claim; "
+                "only the interactive-canary operation may carry one"
+            )
         commands = _validation_commands(payload["validation_commands"])
         async with self._state_lock:
             if self._quarantined_reason is not None:
@@ -4041,6 +4050,13 @@ def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
     serialized = _jsonable(spec)
     if not isinstance(serialized, dict):  # pragma: no cover - dataclass invariant
         raise BrokerProtocolError("worker launch spec did not serialize to an object")
+    # Mixed-version compatibility: ordinary Control hosts serialize a launch
+    # spec without a canary claim.  An empty mapping would re-introduce the
+    # field on every byte-stable wire payload, so strip it whenever the claim
+    # is empty.  A canary payload always carries the closed schema so the
+    # worker side keeps receiving it.
+    if not spec.subscription_canary_claim:
+        serialized.pop("subscription_canary_claim", None)
     return serialized
 
 
