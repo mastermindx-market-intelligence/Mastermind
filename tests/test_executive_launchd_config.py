@@ -745,9 +745,10 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
 
     value = json.loads((OPS / "control.json.template").read_text(encoding="utf-8"))
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
-    # Installed product groups and the optional read-profile selector stay
-    # omitted in the unconfigured template. Null groups fail validation;
-    # an omitted executive_mcp_profile preserves the legacy generation.
+    # Installed product groups, the optional read-profile selector, and the
+    # attended subscription realm stay omitted in the unconfigured template.
+    # Null groups fail validation; an omitted executive_mcp_profile preserves
+    # the legacy generation and an omitted realm preserves the v4 worker.
     installed_product_keys = {
         "executive_mcp_profile",
         "content_observer",
@@ -755,6 +756,7 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        "subscription_canary_realm",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)
