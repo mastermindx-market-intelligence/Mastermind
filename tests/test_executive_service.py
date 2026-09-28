@@ -8614,7 +8614,11 @@ def test_service_dispatch_and_requeue_refuse_nonproof_jobs(
             assert hashlib.sha256(receipt_bytes).hexdigest() == rotation["receipt_sha256"]
             receipt = json.loads(receipt_bytes)
             assert receipt["old_workspace"]["inode"] == interrupted_inode
-            assert receipt["old_workspace"]["status_dirty"] is True
+            # Untracked-only dirt is owned by the dedicated all-untracked
+            # observation; the tracked-status scan deliberately skips it.
+            assert receipt["old_workspace"]["status_dirty"] is False
+            assert receipt["old_workspace"]["all_untracked_dirty"] is True
+            assert receipt["old_workspace"]["launch_clean"] is False
             assert receipt["new_workspace"]["head"] == service.config.proof_base_sha
             assert receipt["new_workspace"]["status_dirty"] is False
             assert receipt["new_workspace"]["all_untracked_dirty"] is False
