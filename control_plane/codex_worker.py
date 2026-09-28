@@ -2431,6 +2431,7 @@ class CodexWorkerAdapter:
         inspector: ProcessInspector | None = None,
         provider_realm: Any | None = None,
         provider_credential_loader: Any | None = None,
+        subscription_realm_owner: Any | None = None,
     ) -> None:
         path = Path(binary_path)
         if not path.is_absolute():
@@ -2458,6 +2459,14 @@ class CodexWorkerAdapter:
             raise ProviderRealmError(
                 "provider realm and credential loader must be configured together"
             )
+        self.subscription_realm_owner = subscription_realm_owner
+        if subscription_realm_owner is not None:
+            from control_plane.codex_provider_realm import SubscriptionRealmOwner
+
+            if not isinstance(subscription_realm_owner, SubscriptionRealmOwner):
+                raise LaunchValidationError(
+                    "subscription_realm_owner must be a SubscriptionRealmOwner"
+                )
         self.inspector = inspector or ProcessInspector()
         self._runs: dict[str, _RunStateLike] = {}
         _CONSTRUCTED_CODEX_ADAPTERS.add(self)
@@ -2479,6 +2488,65 @@ class CodexWorkerAdapter:
         if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
             return _validate_codex_home(self.codex_home)
         return self._validated_codex_home_directory()
+
+    def _verify_subscription_canary(self, spec: LaunchSpec, admission: Any) -> None:
+        """Re-validate the typed broker admission at the pre-credential edge.
+
+        When the adapter was constructed with a ``subscription_realm_owner``,
+        every ``start`` must carry the typed broker admission produced by
+        ``seal_broker_subscription_canary_admission``. Raw observation dicts
+        are refused; only the typed admission reaches this seam, and it must
+        re-prove identity, freshness, binding, realm and exact launch bytes
+        immediately before any provider credential or subprocess is touched.
+        """
+
+        if admission is None:
+            raise LaunchValidationError(
+                "typed subscription canary admission is required"
+            )
+        from control_plane.subscription_canary_admission import (
+            verify_broker_subscription_canary_admission,
+        )
+
+        try:
+            verify_broker_subscription_canary_admission(admission, spec=spec)
+        except Exception as exc:
+            raise LaunchValidationError(
+                "subscription canary admission was refused: "
+                f"{type(exc).__name__}"
+            ) from exc
+
+    def _refuse_subscription_for_plain_start(self, spec: LaunchSpec) -> None:
+        if (
+            self.provider_realm is not None
+            or self.subscription_realm_owner is not None
+            or spec.subscription_canary_claim
+        ):
+            raise LaunchValidationError(
+                "interactive subscription launch requires the typed admission seam"
+            )
+
+    async def start_subscription_canary(
+        self,
+        spec: LaunchSpec,
+        admission: Any,
+    ) -> ProcessRef:
+        """Start one peer-authenticated interactive subscription launch."""
+
+        if self.subscription_realm_owner is None:
+            raise LaunchValidationError(
+                "interactive subscription launch is not configured"
+            )
+        if not spec.subscription_canary_claim:
+            raise LaunchValidationError("subscription canary claim is required")
+        if admission is None:
+            raise LaunchValidationError(
+                "typed subscription canary admission is required"
+            )
+        return await self._start(
+            spec,
+            subscription_canary_admission=admission,
+        )
 
     def _bind_legacy_codex_home(self, _codex_home: str | os.PathLike[str]) -> None:
         """Reject every attempt to inject a second provider-home authority."""
@@ -3539,6 +3607,21 @@ class CodexWorkerAdapter:
         )
 
     async def start(self, spec: LaunchSpec) -> ProcessRef:
+        self._refuse_subscription_for_plain_start(spec)
+        return await self._start(spec)
+
+    async def _start(
+        self,
+        spec: LaunchSpec,
+        *,
+        subscription_canary_admission: Any | None = None,
+    ) -> ProcessRef:
+        if bool(spec.subscription_canary_claim) != (
+            subscription_canary_admission is not None
+        ):
+            raise LaunchValidationError(
+                "subscription canary claim and typed admission must be supplied together"
+            )
         codex_home = self._validated_codex_home()
         workspace, run_dir, home, tmp, baseline, _schema = self._validate_spec(
             spec,
@@ -3571,6 +3654,11 @@ class CodexWorkerAdapter:
                 tmp,
                 codex_home,
             )
+            if subscription_canary_admission is not None:
+                self._verify_subscription_canary(
+                    spec,
+                    subscription_canary_admission,
+                )
             environment = self._environment(spec, home, tmp, codex_home)
             process = await asyncio.create_subprocess_exec(
                 *argv,
@@ -3701,6 +3789,21 @@ class CodexWorkerAdapter:
                     "real_uid": ref.real_uid,
                     "real_gid": ref.real_gid,
                 },
+                subscription_canary_observation_digest=(
+                    subscription_canary_admission.observation_digest
+                    if subscription_canary_admission is not None
+                    else None
+                ),
+                subscription_canary_binding_id=(
+                    subscription_canary_admission.binding_id
+                    if subscription_canary_admission is not None
+                    else None
+                ),
+                subscription_canary_model=(
+                    subscription_canary_admission.model
+                    if subscription_canary_admission is not None
+                    else None
+                ),
             )
             parser = _JSONLState()
             process_wait_task = asyncio.create_task(process.wait())

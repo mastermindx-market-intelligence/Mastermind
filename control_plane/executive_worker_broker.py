@@ -119,6 +119,7 @@ from control_plane.worker_execution_contract import (
     CancelReceipt,
     CollectionReceipt,
     ValidationReceipt,
+    validate_subscription_canary_claim,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRecoveryBinding,
@@ -185,7 +186,8 @@ _OHF_OPERATIONS = frozenset(
     }
 )
 _ALLOWED_OPERATIONS = frozenset(
-    {"start", "status", "collect", "cancel", "validate", "autonomy-canary"}
+    {"start", "status", "collect", "cancel", "validate", "autonomy-canary",
+     "interactive-canary"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -207,6 +209,13 @@ _SHELL_EXECUTABLES = frozenset(
         "/usr/bin/env",
     }
 )
+_SUBSCRIPTION_CANARY_OBSERVATION_FIELDS = frozenset({
+    "schema", "execution_mode", "run_id", "job_id", "worker_id", "quota_class",
+    "fence_generation", "capacity_generation", "capacity_state", "held_attempt_id",
+    "current_attempt_id", "binding_id", "profile_id", "adapter_id", "model",
+    "realm_config_sha256", "realm_generation", "catalog_digest", "issued_at_ms",
+    "expires_at_ms", "observation_digest",
+})
 
 
 class WorkerBrokerError(RuntimeError):
@@ -1024,6 +1033,7 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "shared_run_gid",
         "secret_canary_verdict",
         "require_secret_canary",
+        "subscription_canary_claim",
     }
 )
 _PROVIDER_OWNED_LAUNCH_FIELDS = frozenset(
@@ -1050,6 +1060,10 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     unknown = set(value) - _LAUNCH_SPEC_FIELDS
     if unknown:
         raise BrokerProtocolError(f"launch_spec has unknown fields: {sorted(unknown)}")
+    try:
+        validate_subscription_canary_claim(value.get("subscription_canary_claim", {}))
+    except WorkerRecoveryContractError as exc:
+        raise BrokerProtocolError(str(exc)) from exc
     required = {
         "run_id",
         "job_id",
@@ -1240,7 +1254,29 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     ):
         if optional in value:
             keyword[optional] = value[optional]
+    keyword["subscription_canary_claim"] = validate_subscription_canary_claim(
+        value.get("subscription_canary_claim", {}),
+    )
     return WorkerLaunchSpec(**keyword)
+
+
+def _subscription_canary_observation_from_wire(value: Any) -> dict[str, Any]:
+    """Parse only the closed claim schema into a dict ready for sealing.
+
+    The 21-field schema is owned by the broker-admission module; we mirror it
+    here so the wire cannot smuggle in unknown keys before the typed
+    admission refuses them.  The seal step still re-validates types, hashes,
+    freshness and exact launch-spec identity.
+    """
+
+    if not isinstance(value, dict) or set(value) != _SUBSCRIPTION_CANARY_OBSERVATION_FIELDS:
+        raise BrokerProtocolError(
+            "subscription canary observation is not the closed claim schema"
+        )
+    try:
+        return dict(validate_subscription_canary_claim(value))
+    except WorkerRecoveryContractError as exc:
+        raise BrokerProtocolError(str(exc)) from exc
 
 
 def get_peer_credentials(peer_socket: socket.socket) -> PeerCredentials:
@@ -1332,6 +1368,7 @@ class ExecutiveWorkerBroker:
             [Mapping[str, Any]], Mapping[str, Any]
         ]
         | None = None,
+        subscription_realm_owner: Any | None = None,
     ) -> None:
         self._operator_only = adapter is None
         self._operator_binary_attestation = operator_binary_attestation
@@ -1419,6 +1456,14 @@ class ExecutiveWorkerBroker:
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
         self.autonomy_canary_factory = autonomy_canary_factory
+        if subscription_realm_owner is not None:
+            from control_plane.codex_provider_realm import SubscriptionRealmOwner
+
+            if not isinstance(subscription_realm_owner, SubscriptionRealmOwner):
+                raise WorkerBrokerError(
+                    "subscription_realm_owner must be a SubscriptionRealmOwner"
+                )
+        self.subscription_realm_owner = subscription_realm_owner
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
@@ -1523,7 +1568,7 @@ class ExecutiveWorkerBroker:
         payload = request.get("payload")
         if not isinstance(payload, dict):
             raise BrokerProtocolError("payload must be an object")
-        result = await self._dispatch(str(operation), payload)
+        result = await self._dispatch(str(operation), payload, peer=peer)
         return {
             "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
             "request_id": request_id,
@@ -1536,7 +1581,8 @@ class ExecutiveWorkerBroker:
         if self._operator_only:
             raise BrokerStateError("operator-only broker refuses flat worker operations")
 
-    async def _dispatch(self, operation: str, payload: dict[str, Any]) -> Any:
+    async def _dispatch(self, operation: str, payload: dict[str, Any],
+                        *, peer: PeerCredentials) -> Any:
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1549,6 +1595,8 @@ class ExecutiveWorkerBroker:
             return await self._validate(payload)
         if operation == "autonomy-canary":
             return await self._autonomy_canary(payload)
+        if operation == "interactive-canary":
+            return await self._interactive_canary(payload, peer=peer)
         if operation == "ohf-validate":
             return await self._ohf_validate(payload)
         if operation == "ohf-identity":
@@ -1631,6 +1679,140 @@ class ExecutiveWorkerBroker:
         finally:
             async with self._state_lock:
                 self._validation_busy = False
+
+    async def _interactive_canary(
+        self, payload: dict[str, Any], *, peer: PeerCredentials,
+    ) -> dict[str, Any]:
+        """Launch one interactive subscription canary through the typed
+        broker seam.  The claim observation travels only over the kernel-
+        authenticated Control-UID Unix peer; this operation must not call
+        ``_require_current_autonomy`` and must not widen autonomous broker
+        execution.
+        """
+
+        if self.subscription_realm_owner is None:
+            raise BrokerStateError(
+                "interactive subscription canary is not configured for this worker"
+            )
+        self._require_flat_adapter()
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for interactive canary execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for interactive canary execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is not False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow interactive canary execution"
+                )
+        if set(payload) != {"launch_spec", "subscription_canary_observation"}:
+            raise BrokerProtocolError(
+                "interactive-canary payload fields are invalid"
+            )
+        spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
+        if spec.authorities != ("READ",) or spec.authority is not None:
+            raise BrokerProtocolError(
+                "interactive subscription canary requires READ-only job authority"
+            )
+        observation = _subscription_canary_observation_from_wire(
+            payload["subscription_canary_observation"]
+        )
+        if dict(spec.subscription_canary_claim) != observation:
+            raise BrokerProtocolError(
+                "subscription canary observation differs from the launch specification"
+            )
+        async with self._state_lock:
+            if self._quarantined_reason is not None:
+                raise BrokerStateError(
+                    f"worker broker is quarantined: {self._quarantined_reason}"
+                )
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError(
+                    "the worker broker already has active work"
+                )
+            if spec.run_id in self._runs:
+                raise BrokerStateError("run_id cannot be reused")
+            self._starting = True
+        try:
+            started = False
+            admission: Any = None
+            from control_plane.subscription_canary_admission import (
+                seal_broker_subscription_canary_admission,
+            )
+
+            admission = seal_broker_subscription_canary_admission(
+                observation,
+                realm_owner=self.subscription_realm_owner,
+                peer=peer,
+                spec=spec,
+            )
+            start_canary = getattr(self.adapter, "start_subscription_canary", None)
+            if not callable(start_canary):
+                raise BrokerStateError(
+                    "adapter does not implement interactive subscription canary launch"
+                )
+            process_ref = await start_canary(spec, admission)
+            attestation_reader = getattr(self.adapter, "launch_attestation", None)
+            attestation = (
+                attestation_reader(process_ref)
+                if callable(attestation_reader)
+                else None
+            )
+            started = True
+        except Exception:
+            await self._handle_canary_start_failure()
+            raise
+        finally:
+            async with self._state_lock:
+                if started:
+                    state = _BrokerRun(
+                        spec=spec,
+                        process_ref=process_ref,
+                        validation_commands=(),
+                        launch_attestation=attestation,
+                    )
+                    self._remember(spec.run_id, state)
+                    self._active_run_id = spec.run_id
+                self._starting = False
+        return {
+            "adapter_id": self.adapter_id,
+            "process_ref": process_ref,
+            "launch_attestation": attestation,
+            "subscription_canary_observation_digest": admission.observation_digest,
+            "subscription_canary_binding_id": admission.binding_id,
+            "subscription_canary_model": admission.model,
+            "startup_sweep": self.startup_sweep,
+        }
+
+    async def _handle_canary_start_failure(self) -> None:
+        """Sweep the dedicated worker UID on canary launch failure, mirroring
+        the production start-failure cleanup so an interactive canary cannot
+        leave residual processes behind.
+        """
+
+        try:
+            self.last_sweep = await asyncio.to_thread(
+                self.sweeper.sweep, "canary_start_failed",
+            )
+        except Exception as sweep_exc:
+            async with self._state_lock:
+                self._quarantined_reason = (
+                    f"canary start cleanup failed: {type(sweep_exc).__name__}"
+                )
 
     def _operator_factory(
         self, requested: RequestedExecutionProfile
@@ -3876,20 +4058,46 @@ class RemoteCodexWorkerAdapter:
         self.inspector = _UnavailableRemoteInspector()
 
     async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
-        commands = [list(command) for command in self.validation_commands_for_spec(spec)]
-        result = await self.client.request(
-            "start",
-            {
+        is_canary = bool(spec.subscription_canary_claim)
+        if is_canary:
+            try:
+                validate_subscription_canary_claim(spec.subscription_canary_claim)
+            except WorkerRecoveryContractError as exc:
+                raise BrokerProtocolError(str(exc)) from exc
+        if is_canary:
+            operation = "interactive-canary"
+            payload = {
+                    "launch_spec": _launch_spec_to_json(spec),
+                    "subscription_canary_observation": dict(spec.subscription_canary_claim),
+                }
+        else:
+            operation = "start"
+            payload = {
                 "launch_spec": _launch_spec_to_json(spec),
-                "validation_commands": commands,
-            },
-        )
+                "validation_commands": [
+                    list(command)
+                    for command in self.validation_commands_for_spec(spec)
+                ],
+            }
+        result = await self.client.request(operation, payload)
         if result.get("adapter_id") != self.adapter_id:
             raise BrokerProtocolError("remote broker adapter identity does not match facade")
         process_ref = _process_ref_from_json(result.get("process_ref"))
         if process_ref.run_id != spec.run_id:
             raise BrokerProtocolError("remote process run_id does not match LaunchSpec")
         attestation = _mapping(result.get("launch_attestation"), field="launch attestation")
+        if is_canary:
+            claim = spec.subscription_canary_claim
+            expected = {
+                "subscription_canary_observation_digest": claim["observation_digest"],
+                "subscription_canary_binding_id": claim["binding_id"],
+                "subscription_canary_model": claim["model"],
+            }
+            for field, value in expected.items():
+                if result.get(field) != value or attestation.get(field) != value:
+                    raise BrokerProtocolError(
+                        "remote subscription canary receipt does not match LaunchSpec"
+                    )
         startup_sweep = _uid_sweep_from_json(result.get("startup_sweep"))
         self._refs[spec.run_id] = process_ref
         self._attestations[spec.run_id] = attestation
