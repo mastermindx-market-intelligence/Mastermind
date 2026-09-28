@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -34,6 +35,10 @@ from control_plane.codex_provider_realm import (
     provider_home_credential_loader,
 )
 from control_plane.codex_operator_adapter import CodexOperatorAdapter
+from control_plane.codex_account_environment import (
+    CodexAccountEnvironment,
+    native_codex_account_scope,
+)
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
     sha256_file,
@@ -63,11 +68,13 @@ from control_plane.subscription_harness_bindings import (
     get_binding,
 )
 from control_plane.worker_adapter import adapter_descriptor
+from control_plane.worker_execution_contract import BinaryAttestation
 from control_plane.worker_browser_b1 import BrowserGenerationResource
 
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
 SUBSCRIPTION_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v5"
+NATIVE_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v6"
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
 )
@@ -99,6 +106,13 @@ _CONFIG_FIELDS = frozenset(
     }
 )
 _SUBSCRIPTION_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({"harness_binding_id"})
+_NATIVE_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({
+    "native_provider", "native_realm_enrollment",
+})
+_NATIVE_CLAUDE_CONFIG_FIELDS = (_NATIVE_CONFIG_FIELDS - frozenset({
+    "codex_binary", "codex_attestation_receipt", "allowed_codex_versions",
+    "required_team_identifier",
+})) | frozenset({"claude_binary", "claude_attestation_receipt", "allowed_claude_versions"})
 _CONTROL_ENV_ATTESTATION_FIELDS = frozenset(
     {
         "schema_version",
@@ -161,11 +175,22 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         expected_fields = _CONFIG_FIELDS
     elif schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
         expected_fields = _SUBSCRIPTION_CONFIG_FIELDS
+    elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
+        expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
+                           else _NATIVE_CONFIG_FIELDS)
+        if value.get("native_provider") == "claude" and "claude_sdk_python" in value:
+            expected_fields = expected_fields | frozenset({"claude_sdk_python"})
     else:
         raise WorkerConfigError("worker config schema version is unsupported")
     if set(value) != expected_fields:
         raise WorkerConfigError("worker config fields do not match the schema")
-    versions = value.get("allowed_codex_versions")
+    if schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
+        if value.get("native_provider") not in {"codex", "claude"}:
+            raise WorkerConfigError("native provider is not supported")
+        if not isinstance(value.get("native_realm_enrollment"), dict):
+            raise WorkerConfigError("native realm enrollment must be an object")
+    provider = "claude" if value.get("native_provider") == "claude" else "codex"
+    versions = value.get(f"allowed_{provider}_versions")
     if (
         not isinstance(versions, list)
         or not versions
@@ -178,13 +203,17 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         "workspace_root",
         "run_root",
         "provider_home",
-        "codex_binary",
-        "codex_attestation_receipt",
+        f"{provider}_binary",
+        f"{provider}_attestation_receipt",
         "uid_sweep_receipt",
     ):
         if not isinstance(value.get(field), str) or not Path(value[field]).is_absolute():
             raise WorkerConfigError(f"{field} must be an absolute path")
-    if value.get("required_team_identifier") != _OPENAI_TEAM_IDENTIFIER:
+    if "claude_sdk_python" in value and (
+            not isinstance(value["claude_sdk_python"], str)
+            or not Path(value["claude_sdk_python"]).is_absolute()):
+        raise WorkerConfigError("claude_sdk_python must be an absolute path")
+    if provider == "codex" and value.get("required_team_identifier") != _OPENAI_TEAM_IDENTIFIER:
         raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
     if value.get("require_secret_canary") is not True:
         raise WorkerConfigError("production worker config must require the secret canary")
@@ -257,6 +286,12 @@ def _subscription_binding_for_config(
 
 
 def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
+    if (config.get("native_provider") == "claude"
+            and not config.get("claude_sdk_python")):
+        raise WorkerConfigError("native Claude requires an explicit SDK runtime")
+    if (config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION
+            and config.get("operator_harness_armed") is not True):
+        raise WorkerConfigError("native service requires current operator autonomy admission")
     binding = _subscription_binding_for_config(config)
     if binding is None:
         return
@@ -471,11 +506,7 @@ def _build_autonomy_canary_factory(
     return issue
 
 
-def _build_broker(
-    config: dict[str, Any],
-    *,
-    autonomy_guard=None,
-) -> ExecutiveWorkerBroker:
+def _broker_policy(config: Mapping[str, Any]) -> BrokerPolicy:
     policy = BrokerPolicy(
         control_uid=int(config["control_uid"]),
         worker_uid=int(config["worker_uid"]),
@@ -490,6 +521,118 @@ def _build_broker(
     )
     if os.geteuid() != policy.worker_uid or os.getegid() != policy.worker_gid:
         raise WorkerConfigError("worker broker is not running as its configured OS principal")
+    return policy
+
+
+def _load_native_claude_binary(config: Mapping[str, Any]):
+    """Consume Runtime's installed CLI/SDK attestation; never re-attest or guess."""
+    if not config.get("claude_sdk_python"):
+        raise WorkerConfigError("native Claude requires an explicit SDK runtime")
+    try:
+        from control_plane.native_provider_attestation import load_native_claude_attestation
+    except ImportError:
+        raise WorkerConfigError("native Claude binary attestation reader is not composed") from None
+    try:
+        binary = load_native_claude_attestation(
+            Path(config["claude_attestation_receipt"]),
+            expected_binary_path=Path(config["claude_binary"]),
+            expected_owner_gid=int(config["worker_gid"]),
+            allowed_versions=frozenset(config["allowed_claude_versions"]),
+            sdk_python=Path(config["claude_sdk_python"]),
+        )
+        if (not isinstance(binary, BinaryAttestation)
+                or binary.version not in config["allowed_claude_versions"]
+                or binary.path != config["claude_binary"]
+                or binary.sha256 != config["native_realm_enrollment"].get("provider_binary_sha256")):
+            raise WorkerConfigError("native binary attestation differs from its enrollment")
+        return binary
+    except Exception:
+        raise WorkerConfigError("native Claude binary/SDK attestation refused") from None
+
+
+def _native_claude_adapter_types():
+    try:
+        from control_plane.claude_operator_adapter import (
+            ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver,
+        )
+    except ImportError:
+        raise WorkerConfigError("native Claude broker factory is not composed") from None
+    return ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver
+
+
+def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
+    _assert_service_activation_allowed(config)
+    policy = _broker_policy(config)
+    binary = _load_native_claude_binary(config)
+    adapter_type, observer_type = _native_claude_adapter_types()
+    try:
+        registry = ExecutionCapabilityRegistry.load()
+    except CapabilityPolicyError:
+        raise WorkerConfigError("native Claude capability policy is invalid") from None
+
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        matches = []
+        for profile in registry.profiles.values():
+            if (not profile.enabled or profile.execution_surface != "claude-agent-sdk"
+                    or requested.provider != "claude"
+                    or requested.harness_kind != "claude-agent-sdk"):
+                continue
+            try:
+                manifest = profile.capability_manifest(
+                    harness_binary_digest=requested.harness_binary_digest)
+            except CapabilityPolicyError:
+                continue
+            if (manifest == requested.capabilities
+                    and profile.sandbox_policy == requested.sandbox_policy
+                    and profile.approval_policy == requested.approval_policy
+                    and profile.network_policy == requested.network_policy
+                    and profile.write_capable == requested.write_capable
+                    and profile.native_helper_policy == requested.native_helper_policy
+                    and profile.expected_config_digest == requested.expected_config_digest):
+                matches.append(profile)
+        if len(matches) != 1:
+            raise WorkerConfigError("native Claude request does not resolve to one reviewed policy")
+        profile = matches[0]
+        return adapter_type(
+            binary_path=Path(config["claude_binary"]),
+            provider_home=policy.provider_home,
+            workspace_root=workspace,
+            worker_id=policy.worker_id,
+            expected_harness_version=binary.version,
+            expected_config_digest=profile.expected_config_digest,
+            network_policy=profile.network_policy,
+            turn_input_loader=turn_input_loader,
+            policy_observer=observer_type(profile.claude_sdk_config_projection()),
+            sdk_python=Path(config["claude_sdk_python"]),
+        )
+
+    return ExecutiveWorkerBroker(
+        None,
+        policy,
+        DedicatedUIDSweeper(policy.worker_uid, receipt_path=Path(config["uid_sweep_receipt"]),
+                            ambient_classifier=DarwinDistnotedClassifier()),
+        adapter_id=None,
+        operator_binary_attestation=binary,
+        operator_adapter_factory=operator_adapter_factory,
+        operator_harness_armed=True,
+        autonomy_guard=autonomy_guard,
+        autonomy_canary_factory=_build_autonomy_canary_factory(config),
+    )
+
+
+def _build_broker(
+    config: dict[str, Any],
+    *,
+    autonomy_guard=None,
+    native_account: CodexAccountEnvironment | None = None,
+) -> ExecutiveWorkerBroker:
+    if config.get("native_provider") == "claude":
+        if native_account is not None:
+            raise WorkerConfigError("native Claude cannot borrow a Codex account scope")
+        return _build_native_claude_broker(config, autonomy_guard=autonomy_guard)
+    if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION and native_account is None:
+        raise WorkerConfigError("native broker requires its lifetime account scope")
+    policy = _broker_policy(config)
     # Fast, no-subprocess path: the receipt was attested once, warm, at
     # normal priority, by install.sh running as root.  Loading it here (one
     # open+fstat of the receipt, one open+fstat of the binary) is what keeps
@@ -516,15 +659,25 @@ def _build_broker(
         if provider_realm is not None
         else None
     )
-    adapter = CodexWorkerAdapter(
-        Path(config["codex_binary"]),
-        codex_home=policy.provider_home,
-        binary_attestation=binary_attestation,
-        allowed_versions=frozenset(config["allowed_codex_versions"]),
-        required_team_identifier=str(config["required_team_identifier"]),
-        provider_realm=provider_realm,
-        provider_credential_loader=credential_loader,
-    )
+    if native_account is not None:
+        if provider_realm is not None or native_account.home != policy.provider_home:
+            raise WorkerConfigError("native account differs from the configured provider realm")
+        adapter = native_account.worker_adapter(
+            Path(config["codex_binary"]),
+            binary_attestation=binary_attestation,
+            allowed_versions=frozenset(config["allowed_codex_versions"]),
+            required_team_identifier=str(config["required_team_identifier"]),
+        )
+    else:
+        adapter = CodexWorkerAdapter(
+            Path(config["codex_binary"]),
+            codex_home=policy.provider_home,
+            binary_attestation=binary_attestation,
+            allowed_versions=frozenset(config["allowed_codex_versions"]),
+            required_team_identifier=str(config["required_team_identifier"]),
+            provider_realm=provider_realm,
+            provider_credential_loader=credential_loader,
+        )
     sweeper = DedicatedUIDSweeper(
         policy.worker_uid,
         receipt_path=Path(config["uid_sweep_receipt"]),
@@ -564,6 +717,8 @@ def _build_broker(
         return matching[0]
 
     def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+        if native_account is not None:
+            native_account.auth_metadata()
         profile = resolve_operator_profile(requested)
         return CodexOperatorAdapter(
             binary_path=Path(config["codex_binary"]),
@@ -607,9 +762,25 @@ def _build_broker(
 
 
 async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
-    broker = _build_broker(config, autonomy_guard=autonomy_guard)
-    activated = activate_launchd_socket(str(config["launchd_socket_name"]))
-    task = asyncio.create_task(broker.serve(activated))
+    if (os.geteuid() != config["worker_uid"] or os.getegid() != config["worker_gid"]
+            or config["control_uid"] == config["worker_uid"]):
+        raise WorkerConfigError("native scope requires the configured distinct worker principal")
+    if config.get("native_provider") == "claude":
+        broker = _build_broker(config, autonomy_guard=autonomy_guard)
+        await _serve_broker(broker, str(config["launchd_socket_name"]))
+        return
+    scope = (nullcontext(None) if _subscription_binding_for_config(config) is not None
+             else native_codex_account_scope(Path(config["provider_home"]),
+                                             principal_home_admitted=True))
+    with scope as native_account:
+        broker = _build_broker(config, autonomy_guard=autonomy_guard,
+                               native_account=native_account)
+        await _serve_broker(broker, str(config["launchd_socket_name"]))
+
+
+async def _serve_broker(broker, socket_name: str) -> None:
+    activated = None
+    task = stop_task = None
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -621,19 +792,53 @@ async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
             loop.add_signal_handler(signum, request_stop)
         except NotImplementedError:  # pragma: no cover - Unix service only
             pass
-    stop_task = asyncio.create_task(stopping.wait())
-    done, _ = await asyncio.wait({task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
-    if task in done:
-        stop_task.cancel()
-        await asyncio.gather(stop_task, return_exceptions=True)
-        await task
-        return
-    task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
     try:
-        await broker.shutdown()
+        activated = activate_launchd_socket(socket_name)
+        task = asyncio.create_task(broker.serve(activated))
+        stop_task = asyncio.create_task(stopping.wait())
+        done, _ = await asyncio.wait({task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            await task
     finally:
-        activated.close()
+        for pending in (task, stop_task):
+            if pending is not None:
+                pending.cancel()
+        await asyncio.gather(*(p for p in (task, stop_task) if p is not None),
+                             return_exceptions=True)
+        try:
+            await broker.shutdown()
+        finally:
+            if activated is not None:
+                activated.close()
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.remove_signal_handler(signum)
+                except NotImplementedError:
+                    pass
+
+
+def _native_identity_guard(config: Mapping[str, Any], config_path: Path):
+    """Consume the existing realm owner's typed config-bound identity join."""
+    from control_plane import codex_provider_realm
+    loader = getattr(codex_provider_realm, "load_native_realm_owner", None)
+    if loader is None:
+        raise WorkerConfigError("native realm owner is not composed")
+    digest = sha256_file(config_path)
+    if (_load_config(config_path, require_root_owner=True) != dict(config)
+            or sha256_file(config_path) != digest):
+        raise WorkerConfigError("native config changed before identity binding")
+    owner = loader(config_path, expected_config_sha256=digest)
+    enrollment = config["native_realm_enrollment"]
+    def require_identity() -> None:
+        try:
+            result = owner.require_current_identity(
+                enrollment["host_ref"], enrollment["os_principal_ref"])
+            if result is not None:
+                raise WorkerConfigError("native realm identity owner returned an invalid result")
+        except Exception:
+            raise WorkerConfigError("native realm identity refused") from None
+    require_identity()
+    return require_identity
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -671,11 +876,17 @@ def main(argv: list[str] | None = None) -> int:
             # too, so a broken or unreadable receipt fails installation
             # loudly and up front, not only later and silently when
             # launchd first starts the daemon.
-            load_codex_attestation_receipt(
-                Path(value["codex_attestation_receipt"]),
-                expected_binary_path=Path(value["codex_binary"]),
-                expected_owner_gid=int(value["worker_gid"]),
-            )
+            if value.get("native_provider") == "claude":
+                _load_native_claude_binary(value)
+                _native_claude_adapter_types()
+            else:
+                load_codex_attestation_receipt(
+                    Path(value["codex_attestation_receipt"]),
+                    expected_binary_path=Path(value["codex_binary"]),
+                    expected_owner_gid=int(value["worker_gid"]),
+                )
+            if value.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION:
+                _native_identity_guard(value, Path(args.config))
             print(
                 json.dumps(
                     {
@@ -694,6 +905,9 @@ def main(argv: list[str] | None = None) -> int:
         config = _load_config(config_path, require_root_owner=True)
         _assert_service_activation_allowed(config)
         autonomy_guard = None
+        native_guard = (_native_identity_guard(config, config_path)
+                        if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION
+                        else None)
         if config.get("operator_harness_armed") is True:
             own_config_sha256 = sha256_file(config_path)
             release_sha = _ROOT.name
@@ -704,6 +918,8 @@ def main(argv: list[str] | None = None) -> int:
 
             def require_autonomy() -> None:
                 try:
+                    if native_guard is not None:
+                        native_guard()
                     validate_runtime_guard_file(
                         AUTONOMY_RECEIPT,
                         role="worker",

@@ -97,6 +97,7 @@ _TARGET_CONSTRUCTORS = {
     "control_plane.executive_supervisor.ExecutiveSupervisor": "supervisor",
 }
 _EXPECTED_CONSTRUCTOR_SITES = {
+    ("control_plane/codex_account_environment.py", "CodexAccountEnvironment.worker_adapter", "adapter", 1),
     ("scripts/executive_os_phase1b.py", "_supervisor", "adapter", 1),
     ("scripts/executive_os_phase1b.py", "_supervisor", "supervisor", 1),
     ("scripts/executive_os_phase1b_proof.py", "_run", "adapter", 1),
@@ -852,7 +853,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
     assert census.violations == ()
     assert {site.identity for site in census.sites} == _EXPECTED_CONSTRUCTOR_SITES
     assert sum(site.kind == "supervisor" for site in census.sites) == 6
-    assert sum(site.kind == "adapter" for site in census.sites) == 5
+    assert sum(site.kind == "adapter" for site in census.sites) == 6
 
     killed: list[tuple[str, str, str, int]] = []
     for site in census.sites:
@@ -866,7 +867,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
         assert len(mutant.violations) == 1
         assert expected in mutant.violations[0]
         killed.append(site.identity)
-    assert len(killed) == 11
+    assert len(killed) == 12
 
 
 def test_constructor_source_law_preserves_alias_qualified_opaque_and_foreign_controls(
