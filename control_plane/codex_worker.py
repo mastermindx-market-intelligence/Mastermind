@@ -5024,8 +5024,11 @@ class CodexWorkerAdapter:
                         + "; ".join(details)
                     )
                 if "WRITE_BRANCH" not in _authority_set(state.spec) and (
-                    git_after.status != state.baseline.status
+                    git_after.status != state.baseline.status or changed_paths
                 ):
+                    # Tracked status excludes untracked paths. The independent
+                    # changed-path observation includes ignored files too; an
+                    # artifact allowlist never substitutes for WRITE_BRANCH.
                     raise ResultValidationError("read-only worker changed the workspace")
                 status_value = WorkerRunStatus.SUCCEEDED
         except (CodexWorkerError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:

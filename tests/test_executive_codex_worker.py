@@ -4365,3 +4365,58 @@ def test_recovery_reattach_anchors_exact_group_members(tmp_path: Path) -> None:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=2)
+
+
+@pytest.mark.parametrize("authority", ("READ", "RESEARCH"))
+@pytest.mark.parametrize("artifact_name", ("artifact.txt", "ignored.tmp"))
+def test_readonly_collection_rejects_declared_untracked_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    authority: str, artifact_name: str,
+) -> None:
+    """An artifact allowlist does not grant WRITE_BRANCH to a read-only run.
+
+    Exercise the actual collector with the existing local fake provider. The
+    fake deliberately ignores the provider sandbox; acceptance must independently
+    reject its write even when the declared artifact and hashes are valid.
+    """
+    monkeypatch.setitem(globals(), "_FAKE_CODEX", _FAKE_CODEX.replace(
+        "artifact.txt", artifact_name,
+    ))
+
+    async def exercise():
+        adapter, spec, workspace, _run_dir = _fixture(
+            tmp_path, prompt="artifact", authority=authority,
+            allowed_artifacts=(artifact_name,),
+        )
+        ref = await adapter.start(spec)
+        receipt = await adapter.collect_result(ref)
+        assert (workspace / artifact_name).read_text() == "bounded artifact\n"
+        assert receipt.result.artifact_manifest
+        return receipt
+
+    receipt = asyncio.run(exercise())
+    assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
+    assert "read-only worker changed the workspace" in (receipt.result.error or "")
+
+
+@pytest.mark.parametrize("relative_path, tracked", (
+    ("README.md", True),
+    ("artifact.txt", False),
+    ("nested/artifact.txt", False),
+    ("ignored.tmp", False),
+))
+def test_split_git_snapshot_rejects_real_tracked_and_untracked_dirt(
+    tmp_path: Path, relative_path: str, tracked: bool,
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    assert cw._git_snapshot(workspace, require_clean=True).status == b""
+    changed = workspace / relative_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("changed fixture content\n", encoding="utf-8")
+
+    with pytest.raises(cw.LaunchValidationError, match="must be clean"):
+        cw._git_snapshot(workspace, require_clean=True)
+
+    snapshot = cw._git_snapshot(workspace, require_clean=False)
+    assert bool(snapshot.status) is tracked
+    assert relative_path in cw._git_changed_paths(workspace)
