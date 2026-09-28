@@ -176,8 +176,45 @@ describe("closed Work document", () => {
     ["composer-only observation", (d: any) => (d.source_observation = null)],
     ["unknown top-level key", (d: any) => (d.extra = true)],
     ["unknown group", (d: any) => (d.groups.NEW_GROUP = [])],
-    ["group mismatch", (d: any) => (d.groups.QUEUED[0].group = "RUNNING")],
+    ["group field mismatch", (d: any) => (d.groups.QUEUED[0].group = "RUNNING")],
+    ["lifecycle/group mismatch", (d: any) => (d.groups.QUEUED[0].lifecycle.status = "FAILED")],
     ["status drift", (d: any) => (d.groups.RUNNING[0].lifecycle.status = "PAUSED")],
+    ["post-start capacity drift", (d: any) => {
+      d.groups.RUNNING[0].capacity = {
+        value: "UNKNOWN",
+        source: null,
+        reason: "no_producer",
+        evidence_ref: null,
+        observed_at: null,
+      };
+    }],
+    ["effect precedence drift", (d: any) => {
+      d.groups.QUEUED[0].effect = {
+        value: "EFFECT_UNKNOWN",
+        source: "EFFECT_PRODUCER",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: d.generated_at,
+      };
+    }],
+    ["actor precedence drift", (d: any) => {
+      d.groups.QUEUED[0].next_actor = {
+        value: "NEEDS_SOL",
+        source: "AGENT_OS",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: d.generated_at,
+      };
+    }],
+    ["capacity precedence drift", (d: any) => {
+      d.groups.QUEUED[0].capacity = {
+        value: "WAITING_CAPACITY",
+        source: "AUTONOMY",
+        reason: "pre_start_placement_evidence",
+        evidence_ref: "f".repeat(64),
+        observed_at: d.generated_at,
+      };
+    }],
     ["acceptance promotion", (d: any) => (d.groups.QUEUED[0].acceptance.state = "ACCEPTED")],
     ["count mismatch", (d: any) => (d.coverage.count = 3)],
     ["runtime drift", (d: any) => (d.source_observation.runtime.after = 10)],
@@ -186,6 +223,44 @@ describe("closed Work document", () => {
     const value: any = structuredClone(workAvailable());
     mutate(value);
     expect(decodeWorkDocument(value)).toBeNull();
+  });
+
+  it.each([
+    ["EFFECT_EXCEPTION", (row: any, generatedAt: string) => {
+      row.effect = {
+        value: "EFFECT_UNKNOWN",
+        source: "EFFECT_PRODUCER",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: generatedAt,
+      };
+    }],
+    ["NEEDS_SOL", (row: any, generatedAt: string) => {
+      row.next_actor = {
+        value: "NEEDS_SOL",
+        source: "AGENT_OS",
+        reason: "evidence_supplied",
+        evidence_ref: "f".repeat(64),
+        observed_at: generatedAt,
+      };
+    }],
+    ["WAITING_CAPACITY", (row: any, generatedAt: string) => {
+      row.capacity = {
+        value: "WAITING_CAPACITY",
+        source: "AUTONOMY",
+        reason: "pre_start_placement_evidence",
+        evidence_ref: "f".repeat(64),
+        observed_at: generatedAt,
+      };
+    }],
+  ])("accepts the closed %s precedence promotion", (group, mutate) => {
+    const value: any = structuredClone(workAvailable());
+    const row = value.groups.QUEUED.shift();
+    mutate(row, value.generated_at);
+    row.group = group;
+    const key = group as keyof WorkDocument["groups"];
+    value.groups[key].push(row);
+    expect(decodeWorkDocument(value)?.groups[key][0]?.root_job_id).toBe("JOB-1");
   });
 
   it("does not coerce unsupported COO ownership into a Work row", () => {

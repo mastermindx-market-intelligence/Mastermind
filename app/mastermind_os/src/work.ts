@@ -46,6 +46,17 @@ export type WorkLifecycleStatus = (typeof WORK_LIFECYCLE_STATUSES)[number];
 
 const GROUPS = new Set<string>(WORK_GROUP_ORDER);
 const STATUSES = new Set<string>(WORK_LIFECYCLE_STATUSES);
+const LIFECYCLE_GROUP: Record<WorkLifecycleStatus, WorkGroup> = {
+  QUEUED: "QUEUED",
+  RUNNING: "RUNNING",
+  CHECKPOINTED: "RUNNING",
+  RATE_LIMITED: "RUNNING",
+  CANCEL_REQUESTED: "RUNNING",
+  COMPLETED: "COMPLETED_NOT_ACCEPTED",
+  FAILED: "TERMINAL",
+  LOST: "TERMINAL",
+  CANCELLED: "TERMINAL",
+};
 const REASON_CODES = new Set([
   "source_unavailable",
   "runtime_observation_not_same",
@@ -366,6 +377,31 @@ function effect(value: unknown): value is WorkColumn {
   );
 }
 
+function expectedGroup(value: WorkRow): WorkGroup {
+  if (value.effect.value === "EFFECT_UNKNOWN") return "EFFECT_EXCEPTION";
+  const lifecycle = LIFECYCLE_GROUP[value.lifecycle.status];
+  if (
+    (lifecycle === "QUEUED" || lifecycle === "RUNNING") &&
+    (value.next_actor.value === "NEEDS_SOL" ||
+      value.next_actor.value === "NEEDS_WORKER")
+  )
+    return value.next_actor.value;
+  if (value.capacity.value === "WAITING_CAPACITY") return "WAITING_CAPACITY";
+  return lifecycle;
+}
+
+function lifecycleCapacityConsistent(value: WorkRow): boolean {
+  if (value.lifecycle.status === "QUEUED")
+    return value.capacity.value !== "NOT_APPLICABLE";
+  return (
+    value.capacity.value === "NOT_APPLICABLE" &&
+    value.capacity.source === "EXECUTIVE_RUNTIME" &&
+    value.capacity.reason === "post_start_lifecycle" &&
+    value.capacity.evidence_ref === null &&
+    value.capacity.observed_at === null
+  );
+}
+
 function row(value: unknown, group: WorkGroup): WorkRow | null {
   if (
     !record(value) ||
@@ -398,7 +434,10 @@ function row(value: unknown, group: WorkGroup): WorkRow | null {
       "product acceptance has no producer in this projection"
   )
     return null;
-  return value as unknown as WorkRow;
+  const decoded = value as unknown as WorkRow;
+  if (!lifecycleCapacityConsistent(decoded) || expectedGroup(decoded) !== group)
+    return null;
+  return decoded;
 }
 
 export function decodeWorkDocument(input: unknown): WorkDocument | null {
