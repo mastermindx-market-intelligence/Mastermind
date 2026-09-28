@@ -33,6 +33,8 @@ import v3Unavailable from "./fixtures/mission-v3-design-unavailable.json";
 import resultAvailable from "./fixtures/result-design-available-at-16384-socket-bytes.json";
 import resultUnavailableSource from "./fixtures/result-design-unavailable-source_changed.json";
 import resultContentOverBudget from "./fixtures/result-design-content-over-budget-preserves-reject.json";
+import workAvailable from "./fixtures/work-service-available.json";
+import workUnavailable from "./fixtures/work-service-unavailable.json";
 
 const invoke = vi.fn().mockResolvedValue({
   version: "0.1.0",
@@ -377,7 +379,41 @@ describe("React read lifecycle fences", () => {
 });
 
 describe("Executive OS convergence surfaces", () => {
-  it("keeps global Work and Fleet unavailable without their canonical feeds", async () => {
+  it("renders source-qualified Work without turning unknown ownership into zero", async () => {
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms,
+      readWork: async () => workAvailable as never,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+    };
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    expect(await screen.findByText("JOB-2")).toBeTruthy();
+    expect(screen.getByText("CHECKPOINTED")).toBeTruthy();
+    expect(screen.getByText("JOB-1")).toBeTruthy();
+    expect(screen.getAllByText("UNKNOWN").length).toBeGreaterThan(0);
+    expect(screen.getByText(/4 of 4 roots observed/i)).toBeTruthy();
+    expect(screen.queryByText("WORK_QUEUE_SOURCE_NOT_CONNECTED")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Open Mission/i })).toBeNull();
+  });
+
+  it("renders typed Work unavailability as unavailable, not an empty all-clear", async () => {
+    window.MastermindMissionHost = {
+      readPrograms,
+      readWork: async () => workUnavailable as never,
+    };
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    expect(await screen.findByText("projection_refused")).toBeTruthy();
+    expect(screen.getAllByText("UNAVAILABLE").length).toBeGreaterThan(0);
+    expect(screen.getByText(/not evidence of zero work/i)).toBeTruthy();
+  });
+
+  it("keeps Fleet unavailable without its canonical feed", async () => {
     window.MastermindMissionHost = {
       selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
       readPrograms,
@@ -385,13 +421,6 @@ describe("Executive OS convergence surfaces", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-
-    await user.click(screen.getByRole("button", { name: "Work" }));
-    expect(
-      screen.getByRole("heading", { name: "Work", level: 1 }),
-    ).toBeTruthy();
-    expect(screen.getByText("WORK_QUEUE_SOURCE_NOT_CONNECTED")).toBeTruthy();
-    expect(screen.queryByText("Missingness and source state")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Fleet & Capacity" }));
     expect(

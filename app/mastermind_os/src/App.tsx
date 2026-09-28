@@ -48,6 +48,11 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import {
+  decodeWorkDocument,
+  WORK_GROUP_ORDER,
+  type WorkDocument,
+} from "./work";
 export const navigation = [
   "Today",
   "Work",
@@ -100,6 +105,10 @@ declare global {
 type ProgramIndex =
   | ReturnType<typeof programsFromControlRoom>
   | { programs: []; state: "PENDING"; reason: "SOURCE_READ_PENDING" };
+type WorkState =
+  | { kind: "PENDING" }
+  | { kind: "DOCUMENT"; document: WorkDocument }
+  | { kind: "UNAVAILABLE"; reason: string };
 const display = (v: unknown, f = "Not established") =>
   typeof v === "string" && v ? v : f;
 const label = (v: unknown) => display(v, "UNKNOWN").replaceAll("_", " ");
@@ -117,6 +126,126 @@ function State({ value }: { value: unknown }) {
 }
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="empty">{children}</p>;
+}
+
+function WorkQueue({ state }: { state: WorkState }) {
+  if (state.kind === "PENDING")
+    return (
+      <section className="card">
+        <div className="section-title">
+          <div>
+            <h2>Work</h2>
+            <p className="muted">
+              Company-wide lifecycle and next-action ownership from the bounded Executive projection.
+            </p>
+          </div>
+          <State value="SOURCE_READ_PENDING" />
+        </div>
+        <Empty>Reading the bounded Work projection…</Empty>
+      </section>
+    );
+  if (state.kind === "UNAVAILABLE")
+    return (
+      <section className="card source-gap">
+        <div className="section-title">
+          <div>
+            <h2>Work</h2>
+            <p className="muted">
+              The fixed Work read did not return a qualified document.
+            </p>
+          </div>
+          <State value="UNAVAILABLE" />
+        </div>
+        <p>Work source unavailable. This is not evidence of zero work.</p>
+        <details className="reason-details">
+          <summary>Technical details</summary>
+          <code>{state.reason}</code>
+        </details>
+      </section>
+    );
+
+  const doc = state.document;
+  if (doc.availability === "UNAVAILABLE")
+    return (
+      <section className="card source-gap">
+        <div className="section-title">
+          <div>
+            <h2>Work</h2>
+            <p className="muted">
+              The canonical Work owner returned a typed refusal document.
+            </p>
+          </div>
+          <State value="UNAVAILABLE" />
+        </div>
+        <p>Work is unavailable in this observation. This is not evidence of zero work.</p>
+        <p className="muted">
+          Coverage is partial by contract; no empty queue or ownership all-clear is inferred.
+        </p>
+        <details className="reason-details" open>
+          <summary>Technical details</summary>
+          <code>{doc.reason_codes.join(", ") || "source_unavailable"}</code>
+        </details>
+      </section>
+    );
+
+  return (
+    <div className="today-view">
+      <section className="card">
+        <div className="section-title">
+          <div>
+            <h2>Work</h2>
+            <p className="muted">
+              Read-only company work projection. Lifecycle, ownership, capacity, effects and acceptance stay separate.
+            </p>
+          </div>
+          <State value={doc.availability} />
+        </div>
+        <p className="muted">
+          {doc.coverage.count} of {doc.coverage.total ?? "unknown"} roots observed · {label(doc.coverage.completeness)}
+          {doc.coverage.truncated ? " · truncated" : ""}
+        </p>
+        <p className="muted">
+          Queue effect <b>{label(doc.effect_exception.value)}</b> · {label(doc.effect_exception.reason)}
+        </p>
+      </section>
+      <div className="today-grid">
+        {WORK_GROUP_ORDER.map((group) => {
+          const rows = doc.groups[group];
+          return (
+            <section className="card" key={group}>
+              <div className="section-title">
+                <div>
+                  <h2>{label(group)}</h2>
+                  <p className="muted">{rows.length} roots in this qualified group</p>
+                </div>
+              </div>
+              {rows.length === 0 ? (
+                <Empty>No roots were projected into this group.</Empty>
+              ) : (
+                <ul className="items">
+                  {rows.map((row) => (
+                    <li key={row.root_job_id}>
+                      <div>
+                        <code>{row.root_job_id}</code>
+                        <State value={row.lifecycle.status} />
+                      </div>
+                      <span>
+                        Next actor <b>{label(row.next_actor.value)}</b> · Capacity{" "}
+                        <b>{label(row.capacity.value)}</b>
+                      </span>
+                      <small>
+                        Effect {label(row.effect.value)} · Acceptance {label(row.acceptance.state)}
+                      </small>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function ResultRefs({
@@ -930,6 +1059,7 @@ export function App() {
       state: "PENDING",
       reason: "SOURCE_READ_PENDING",
     }),
+    [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
       unavailableMission(
         initial,
@@ -988,6 +1118,7 @@ export function App() {
     resultRequest = useRef(0),
     missionRequest = useRef(0),
     programRequest = useRef(0),
+    workRequest = useRef(0),
     missionSelectionState =
       native && !window.MastermindMissionHost?.readPrograms
         ? "NATIVE"
@@ -1305,6 +1436,51 @@ export function App() {
     };
   }, [native, authRevision, authState?.acquisition]);
   useEffect(() => {
+    let attached = true;
+    const current = ++workRequest.current;
+    const controller = new AbortController();
+    const host = window.MastermindMissionHost;
+    const read = host?.readWork;
+    if (native && !read) {
+      setWorkState({ kind: "UNAVAILABLE", reason: "NATIVE_TRANSPORT_UNCONFIGURED" });
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    if (authState && !authState.acquisition) {
+      setWorkState({ kind: "UNAVAILABLE", reason: "AUTHENTICATION_REQUIRED" });
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    if (typeof read !== "function") {
+      setWorkState({ kind: "UNAVAILABLE", reason: "QUALIFIED_WORK_READ_UNAVAILABLE" });
+      return () => {
+        attached = false;
+        controller.abort();
+      };
+    }
+    setWorkState({ kind: "PENDING" });
+    Promise.resolve()
+      .then(() => read({ signal: controller.signal }))
+      .then((raw) => {
+        if (!attached || workRequest.current !== current || controller.signal.aborted) return;
+        const document = decodeWorkDocument(raw);
+        if (!document) throw new Error("WORK_RESPONSE_INVALID");
+        setWorkState({ kind: "DOCUMENT", document });
+      })
+      .catch(() => {
+        if (attached && workRequest.current === current && !controller.signal.aborted)
+          setWorkState({ kind: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" });
+      });
+    return () => {
+      attached = false;
+      controller.abort();
+    };
+  }, [native, authRevision, authState?.acquisition]);
+  useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
       selectionSeq.current += 1;
@@ -1481,9 +1657,15 @@ export function App() {
         ? index.state === "PENDING"
           ? "SOURCE_READ_PENDING"
           : index.state
-        : active === "Work" || active === "Fleet & Capacity"
-          ? "NOT_PROJECTED"
-          : (d?.read_state.state ?? "UNAVAILABLE"),
+        : active === "Work"
+          ? workState.kind === "PENDING"
+            ? "SOURCE_READ_PENDING"
+            : workState.kind === "DOCUMENT"
+              ? workState.document.availability
+              : "UNAVAILABLE"
+          : active === "Fleet & Capacity"
+            ? "NOT_PROJECTED"
+            : (d?.read_state.state ?? "UNAVAILABLE"),
     headerSummary = conversationActive
       ? association
         ? "Observed window for this Mission from separately authorized owner observations."
@@ -1499,7 +1681,13 @@ export function App() {
               ? `${index.programs.length} Programs from the bounded source observation.`
               : "Program source unavailable; current company movement is not inferred."
         : active === "Work"
-          ? "Global next-action ownership is not yet exposed by this frontend read contract."
+          ? workState.kind === "PENDING"
+            ? "Reading the bounded Work projection; no queue is inferred yet."
+            : workState.kind === "DOCUMENT"
+              ? workState.document.availability === "AVAILABLE"
+                ? `${workState.document.coverage.count} Work roots from the bounded Executive observation.`
+                : "Work owner returned a typed unavailable observation; no empty queue is inferred."
+              : "Work source unavailable; no empty queue is inferred."
           : active === "Fleet & Capacity"
             ? "Fleet health and placement require their canonical Capacity source."
             : d
@@ -1518,7 +1706,13 @@ export function App() {
             ? "Reading the current permitted window…"
             : "No Mission-linked conversation is currently established."
       : active === "Work"
-        ? "Global Work source not connected. Mission Activity remains source-qualified."
+        ? workState.kind === "PENDING"
+          ? "Reading the source-qualified Work queue…"
+          : workState.kind === "DOCUMENT"
+            ? workState.document.availability === "AVAILABLE"
+              ? "Work queue is source-qualified; ownership, capacity, effects, and acceptance remain evidence-bound."
+              : "Work projection unavailable; zero work is not inferred."
+            : "Work source unavailable; zero work is not inferred."
         : active === "Fleet & Capacity"
           ? "Capacity source not connected. No host readiness was inferred."
           : notice,
@@ -2006,33 +2200,8 @@ export function App() {
   else if (active === "Work")
     content = (
       <>
-      {commandPanel}
-      <section className="card source-gap">
-        <div className="section-title">
-          <div>
-            <h2>Work</h2>
-            <p className="muted">
-              Company-wide next-action ownership requires its own qualified
-              Executive projection.
-            </p>
-          </div>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          The current frontend read contract does not yet expose the global
-          Needs Sol / Needs Worker / Waiting Capacity queues. Mission-level
-          Activity remains available from the admitted Mission document.
-        </p>
-        {d ? (
-          <button className="primary" onClick={() => setActive("Activity")}>
-            Open selected Mission Activity
-          </button>
-        ) : null}
-        <details className="reason-details">
-          <summary>Technical details</summary>
-          <code>WORK_QUEUE_SOURCE_NOT_CONNECTED</code>
-        </details>
-      </section>
+        {commandPanel}
+        <WorkQueue state={workState} />
       </>
     );
   else if (active === "Fleet & Capacity")
