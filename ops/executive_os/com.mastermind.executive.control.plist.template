@@ -36,8 +36,12 @@
   <integer>15</integer>
   <key>AbandonProcessGroup</key>
   <false/>
+  <!-- User-requested reads have a bounded response deadline. Standard clamps
+       their threads and Git children to utility QoS under contention. Our Unix
+       socket transport has no XPC transactions to drive Adaptive policy. Keep
+       the worker daemon Background and the explicit resource limits below. -->
   <key>ProcessType</key>
-  <string>Standard</string>
+  <string>Interactive</string>
   <key>Umask</key>
   <integer>63</integer>
   <key>HardResourceLimits</key>
