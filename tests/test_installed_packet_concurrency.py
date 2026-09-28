@@ -71,7 +71,7 @@ def test_success_is_copied_per_caller_and_next_call_rebuilds(tmp_path, monkeypat
         first = pool.submit(call, collector)
         assert entered.wait(1)
         # Observe follower entry without sleeps or allowing the owner to finish.
-        pending = next(iter(collector._collections.values()))
+        pending = next(iter(collector._collections.values())).future
         original = pending.result
         def wait_for_result(timeout):
             joined.set()
@@ -153,3 +153,112 @@ def test_root_mismatch_cannot_join_an_active_collection(tmp_path, monkeypatch):
         finally:
             release.set()
         assert first.result(2) == {'complete': True}
+
+
+def test_queued_reads_share_overlap_but_project_runtime_separately(tmp_path, monkeypatch):
+    import asyncio
+    from common.bounded_sync_executor import BoundedSyncExecutor
+    from integrations.executive_mcp.adapter import ExecutiveMcpGateway
+    from integrations.executive_mcp.installed import InstalledExecutiveReaders
+
+    reader = InstalledExecutiveReaders(
+        repo_root=tmp_path/'source', macro_root=tmp_path/'macro',
+        runtime_root=tmp_path/'runtime', code_root=tmp_path/'code',
+        boot_python=Path('/usr/bin/python3'),
+    )
+    reader._read_executor = BoundedSyncExecutor(max_concurrency=2)
+    collector = reader._packet_builder
+    entered, release = Event(), Event()
+    builds = projections = 0
+    lock = Lock()
+
+    def build(**kwargs):
+        nonlocal builds
+        builds += 1
+        entered.set()
+        assert release.wait(3)
+        return {'source_generation': builds}
+
+    def project(self, name, arguments, generated_at):
+        nonlocal projections
+        packet = collector(repo_root=self.config.repo_root,
+                           macro_root_flag=self.config.macro_root_flag,
+                           now=self.config.now, timeout=self.config.boot_packet_timeout)
+        with lock:
+            projections += 1
+            revision = projections
+        packet['runtime_revision'] = revision
+        return packet
+
+    monkeypatch.setattr(collector, '_collect_packet', build)
+    monkeypatch.setattr(ExecutiveMcpGateway, '_read', project)
+
+    async def scenario():
+        reads = [asyncio.create_task(reader._run_read_attempt(
+            'executive_state' if i % 2 else 'executive_inbox', {}, 'now')) for i in range(7)]
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            assert next(iter(collector._collections.values())).subscribers == 7
+            release.set()
+            results = await asyncio.gather(*reads)
+            assert builds == 1
+            assert [r['source_generation'] for r in results] == [1] * 7
+            assert sorted(r['runtime_revision'] for r in results) == list(range(1, 8))
+            assert not collector._collections
+            later = await reader._run_read_attempt('executive_state', {}, 'later')
+            assert later == {'source_generation': 2, 'runtime_revision': 8}
+        finally:
+            release.set()
+            await reader.aclose()
+    asyncio.run(scenario())
+
+
+def test_abandoned_pre_admission_scope_has_no_pending_collection(tmp_path):
+    collector = collector_at(tmp_path)
+    with pytest.raises(RuntimeError, match='admission closed'):
+        with collector.request_scope(now=None, timeout=3):
+            assert len(collector._collections) == 1
+            raise RuntimeError('admission closed')
+    assert not collector._collections
+
+
+def test_abandoned_caller_preserves_admitted_physical_subscription(tmp_path, monkeypatch):
+    import contextvars
+    collector = collector_at(tmp_path)
+    physical, proceed, building, release = Event(), Event(), Event(), Event()
+    count = 0
+
+    def build(**kwargs):
+        nonlocal count
+        count += 1
+        building.set()
+        assert release.wait(3)
+        return {'generation': count}
+
+    def delayed_read():
+        with collector.physical_scope():
+            physical.set()
+            assert proceed.wait(3)
+            return call(collector)
+
+    monkeypatch.setattr(collector, '_collect_packet', build)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        with collector.request_scope(now=None, timeout=3):
+            context = contextvars.copy_context()
+            first = pool.submit(context.run, delayed_read)
+            assert physical.wait(1)
+        # The async caller has left, but admitted physical work retains its
+        # original collection until it drains. A new caller must join it.
+        entry = next(iter(collector._collections.values()))
+        assert entry.subscribers == 0 and entry.physical == 1
+        second = pool.submit(call, collector)
+        try:
+            assert building.wait(1)
+            proceed.set()
+            release.set()
+            assert first.result(2) == second.result(2) == {'generation': 1}
+        finally:
+            proceed.set()
+            release.set()
+    assert count == 1
+    assert not collector._collections
