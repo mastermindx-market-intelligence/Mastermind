@@ -102,6 +102,8 @@ def _subprocess_sandbox_request() -> dict[str, Any]:
 _MAX_POLICY_GENERATION = 2**63 - 1
 _FORBIDDEN_TOOLS = (
     "Agent",
+    "AskUserQuestion",
+    "ExitPlanMode",
     "NotebookEdit",
     "Skill",
     "Task",
@@ -1176,6 +1178,9 @@ class ClaudeCodeWorkerAdapter:
             "enabledMcpjsonServers": [],
             "permissions": {
                 "allow": list(preapproved),
+                # The worker is noninteractive by construction. dontAsk keeps
+                # the reviewed allowlist meaningful while converting every
+                # would-be permission prompt into a deterministic refusal.
                 "ask": [],
                 "defaultMode": "dontAsk",
                 "deny": deny,
@@ -1216,6 +1221,20 @@ class ClaudeCodeWorkerAdapter:
         if not isinstance(permissions, Mapping):
             raise ClaudeWorkerContractError(
                 "protected path file-tool deny fence drifted: mutation refuses"
+            )
+        # Autonomy is a launch invariant, not a remembered user preference.
+        # Hooks, ask rules, project MCP servers, or the bypass-disable setting
+        # could all reintroduce a human prompt or silently downgrade this worker.
+        if (
+            observed.get("disableAllHooks") is not True
+            or observed.get("enableAllProjectMcpServers") is not False
+            or observed.get("enabledMcpjsonServers") != []
+            or permissions.get("ask") != []
+            or permissions.get("defaultMode") != "dontAsk"
+            or permissions.get("disableBypassPermissionsMode") != "disable"
+        ):
+            raise ClaudeWorkerContractError(
+                "unattended permission fence drifted: mutation refuses"
             )
         allow = permissions.get("allow") or []
         if not isinstance(allow, list) or any(not isinstance(rule, str) for rule in allow):
@@ -1265,6 +1284,9 @@ class ClaudeCodeWorkerAdapter:
             "isolation_manifest_sha256": spec.isolation_manifest_sha256,
             "network_enabled": False,
             "safe_mode": True,
+            "permission_mode": "dontAsk",
+            "noninteractive": True,
+            "human_interaction_policy": "deny",
             "session_persistence": False,
             "mcp_servers": [],
             "shell_environment_policy": "include_only",

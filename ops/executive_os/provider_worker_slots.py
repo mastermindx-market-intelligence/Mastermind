@@ -1,4 +1,4 @@
-"""Reviewed, secret-free Executive Codex worker realm inventory.
+"""Reviewed, secret-free Executive provider worker realm inventory.
 
 Provider account identifiers and Multilogin profile identifiers are private
 host state and are deliberately absent.  ``oauth_seat_ref`` is only the
@@ -12,7 +12,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 _SCRIPT_DIRECTORY = Path(__file__).resolve().parent
 if __package__ in {None, ""} and str(_SCRIPT_DIRECTORY) not in sys.path:
@@ -54,9 +54,12 @@ class ProviderWorkerSlot:
     workspace_binding_class: str
     allowed_credential_kinds: tuple[str, ...]
     oauth_seat_ref: str | None
+    provider_family: str = "openai"
 
     @property
     def auth_path(self) -> Path:
+        if self.provider_family == "anthropic":
+            return self.provider_home / ".claude" / ".credentials.json"
         return self.provider_home / "auth.json"
 
     @property
@@ -112,6 +115,7 @@ _SLOTS = (
         )
         for index in range(1, 4)
     ),
+
 )
 
 
@@ -185,6 +189,40 @@ def all_slots() -> tuple[ProviderWorkerSlot, ...]:
     return validate_slots(_SLOTS)
 
 
+def native_slot_from_config(config: Mapping[str, Any]) -> ProviderWorkerSlot:
+    """Project one native slot from the existing root-owned broker config.
+
+    This is structural validation, not authority. The realm owner must read
+    and pin the actual root-owned config before calling it. OS identities are
+    provisioned host state; they are never new source-code defaults.
+    """
+    enrollment = config.get("native_realm_enrollment")
+    if (config.get("native_provider") != "claude" or not isinstance(enrollment, Mapping)
+            or enrollment.get("slot_id") != "claude8-native-01"):
+        raise SlotCatalogError("native_slot_inventory_invalid")
+    worker_user = config.get("worker_user")
+    worker_uid, worker_gid = config.get("worker_uid"), config.get("worker_gid")
+    if (not isinstance(worker_user, str) or not _WORKER_USER_RE.fullmatch(worker_user)
+            or type(worker_uid) is not int or worker_uid <= 0
+            or type(worker_gid) is not int or worker_gid <= 0
+            or type(config.get("control_uid")) is not int
+            or worker_uid == config["control_uid"]):
+        raise SlotCatalogError("native_slot_identity_invalid")
+    row = ProviderWorkerSlot(
+        slot_id=enrollment["slot_id"], worker_user=worker_user,
+        worker_group=worker_user, worker_uid=worker_uid, worker_gid=worker_gid,
+        provider_home=RUNTIME_WORKER_ROOT / enrollment["slot_id"] / "provider-home",
+        readiness_receipt=SYSTEM_CONFIG_ROOT / f"provider-readiness-{enrollment['slot_id']}.json",
+        workspace_binding_class="native_claude_subscription",
+        allowed_credential_kinds=("claudeai-subscription",), oauth_seat_ref="claude8",
+        provider_family="anthropic",
+    )
+    for field in ("slot_id", "worker_user", "worker_group", "worker_uid", "worker_gid",
+                  "provider_home", "readiness_receipt"):
+        _unique(all_slots() + (row,), field)
+    return row
+
+
 def get_slot(slot_id: str) -> ProviderWorkerSlot:
     if not isinstance(slot_id, str) or _SLOT_ID_RE.fullmatch(slot_id) is None:
         raise SlotCatalogError("unknown_slot")
@@ -246,6 +284,7 @@ __all__ = [
     "all_slots",
     "get_slot",
     "main",
+    "native_slot_from_config",
     "resolve_field",
     "validate_slots",
 ]

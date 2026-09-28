@@ -631,7 +631,7 @@ def test_installer_ships_the_backup_daemon_disabled_like_the_others() -> None:
         '/bin/launchctl bootout "system/$BACKUP_LABEL"',
     ):
         assert line in install
-    assert 'if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then' in install
+    assert 'wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65' in install
     assert (
         '/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"'
         in install
@@ -1707,10 +1707,10 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     source = (OPS / "install.sh").read_text(encoding="utf-8")
     stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"')
     control_absent = source.index(
-        'if /bin/launchctl print "system/$CONTROL_LABEL"', stop
+        'wait_for_launchd_absent "$CONTROL_LABEL" control', stop
     )
     worker_absent = source.index(
-        'if /bin/launchctl print "system/$WORKER_LABEL"', control_absent
+        'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
     archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
     config_write = source.index('temporary.write_text(', archive)
@@ -1728,6 +1728,30 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     bootstrap = tail_after_plists.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"')
     manifest_verify = tail_after_plists.rindex('release_manifest.py" verify', 0, arm)
     assert manifest_verify < arm < bootstrap
+
+
+def test_installer_waits_boundedly_for_asynchronous_launchd_bootout() -> None:
+    source = (OPS / "install.sh").read_text(encoding="utf-8")
+    helper_start = source.index("wait_for_launchd_absent() {")
+    helper_end = source.index("\n}\nleave_installed_services_stopped()", helper_start)
+    helper = source[helper_start:helper_end]
+    assert "for attempt in 1 2 3 4 5; do" in helper
+    assert 'launchctl print "system/$label"' in helper
+    assert 'if [ "$attempt" -lt 5 ]; then' in helper
+    assert "/bin/sleep 1" in helper
+    assert "return 1" in helper
+
+    mutation_start = source.index("trap leave_installed_services_stopped EXIT")
+    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive', mutation_start)
+    mutation = source[mutation_start:archive]
+    for label, description in (
+        ("RELAY_LABEL", "relay"),
+        ("CONTROL_LABEL", "control"),
+        ("WORKER_LABEL", "worker"),
+        ("BACKUP_LABEL", "backup"),
+        ("PRIVILEGED_LABEL", "privileged"),
+    ):
+        assert f'wait_for_launchd_absent "${label}" {description} || exit 65' in mutation
 
 
 @pytest.mark.skipif(sys.platform != 'darwin', reason='macOS plutil installer rendering')

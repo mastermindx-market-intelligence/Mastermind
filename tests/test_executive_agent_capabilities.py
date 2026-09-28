@@ -52,6 +52,11 @@ def test_claude_policy_is_a_distinct_disabled_projection_not_an_attestation(tmp_
     assert profile.execution_surface == "claude-agent-sdk"
     requested = profile.claude_sdk_config_projection()
     assert requested["tools"] == ["Read", "Glob", "Grep"]
+    manifest = profile.capability_manifest(harness_binary_digest="a" * 64)
+    assert {(item.kind, item.name) for item in manifest.required} == {
+        ("tool", name) for name in ("Read", "Glob", "Grep", "StructuredOutput")}
+    assert all(item.harness_binary_digest == "a" * 64 for item in manifest.required)
+    assert manifest.allowed_ambient == ()
     assert requested["sandbox"]["failIfUnavailable"] is True
     assert requested["sandbox"]["allowUnsandboxedCommands"] is False
     assert requested["sandbox"]["excludedCommands"] == []

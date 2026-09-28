@@ -352,8 +352,10 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
                 "deny": (
                     [
                         "Agent",
+                        "AskUserQuestion",
                         "Bash",
                         "Edit",
+                        "ExitPlanMode",
                         "NotebookEdit",
                         "Skill",
                         "Task",
@@ -385,6 +387,8 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
                     if invocation is read_only
                     else [
                         "Agent",
+                        "AskUserQuestion",
+                        "ExitPlanMode",
                         "NotebookEdit",
                         "Skill",
                         "Task",
@@ -475,10 +479,12 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
             "Write",
         }.intersection(allowed)
     assert read_only.argv[read_only.argv.index("--disallowedTools") + 1] == (
-        "Agent,Bash,Edit,NotebookEdit,Skill,Task,WebFetch,WebSearch,Write,mcp__*"
+        "Agent,AskUserQuestion,Bash,Edit,ExitPlanMode,NotebookEdit,Skill,Task,"
+        "WebFetch,WebSearch,Write,mcp__*"
     )
     assert write_and_test.argv[write_and_test.argv.index("--disallowedTools") + 1] == (
-        "Agent,NotebookEdit,Skill,Task,WebFetch,WebSearch,mcp__*"
+        "Agent,AskUserQuestion,ExitPlanMode,NotebookEdit,Skill,Task,WebFetch,"
+        "WebSearch,mcp__*"
     )
 
 
@@ -2621,6 +2627,9 @@ def test_compile_launch_argv_contains_restricted_and_closed_model_policy(
     argv = invocation.argv
     assert "--restricted" in argv
     assert "--safe-mode" in argv
+    assert ("--permission-mode", "dontAsk") == (
+        argv[argv.index("--permission-mode") : argv.index("--permission-mode") + 2]
+    )
     assert ("--model", _EXACT_MODEL) == (
         argv[argv.index("--model") : argv.index("--model") + 2]
     )
@@ -2710,6 +2719,30 @@ def test_permission_profile_reflects_the_emitted_settings_request(
             id="enable-switchModelsOnFlag",
         ),
         pytest.param(
+            lambda s: s.__setitem__("disableAllHooks", False),
+            id="enable-hooks",
+        ),
+        pytest.param(
+            lambda s: s.__setitem__("enableAllProjectMcpServers", True),
+            id="enable-project-mcp",
+        ),
+        pytest.param(
+            lambda s: s["enabledMcpjsonServers"].append("project-server"),
+            id="enable-mcpjson-server",
+        ),
+        pytest.param(
+            lambda s: s["permissions"]["ask"].append("Read(./**)"),
+            id="add-ask-rule",
+        ),
+        pytest.param(
+            lambda s: s["permissions"].__setitem__("defaultMode", "bypassPermissions"),
+            id="widen-default-mode",
+        ),
+        pytest.param(
+            lambda s: s["permissions"].pop("disableBypassPermissionsMode"),
+            id="remove-bypass-lock",
+        ),
+        pytest.param(
             lambda s: s["permissions"]["deny"].remove("Read(.git/**)"),
             id="delete-git-deny",
         ),
@@ -2793,7 +2826,8 @@ def test_any_single_emitted_fence_mutation_refuses(
     mutator(settings)
     attempted = _refuse_spawn(monkeypatch)
     with pytest.raises(
-        ClaudeWorkerContractError, match="(model fence|deny fence|sandbox fence)"
+        ClaudeWorkerContractError,
+        match="(model fence|deny fence|sandbox fence|unattended permission fence)",
     ):
         adapter.validate_settings(settings)
     assert attempted == []
