@@ -9,6 +9,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "ops" / "executive_os" / "service-control.sh"
 
@@ -79,6 +81,7 @@ def _native_shims(tmp_path: Path) -> dict[str, Path]:
         "/usr/bin/uname": _write_executable(root / "uname", UNAME_SHIM),
         "/usr/bin/plutil": _write_executable(root / "plutil", PLUTIL_SHIM),
         "/bin/launchctl": _write_executable(root / "launchctl", LAUNCHCTL_SHIM),
+        "/bin/sleep": _write_executable(root / "sleep", '#!/bin/bash\n[ "$*" = "1" ]\n'),
     }
 
 
@@ -552,3 +555,72 @@ def test_stop_readside_stops_control_then_relay_and_preserves_mcp_worker_backup(
     )
     assert f"service={CONTROL_LABEL} state=absent" in out
     assert f"service={RELAY_LABEL} state=absent" in out
+
+
+@pytest.mark.parametrize("kickstart", [False, True])
+def test_readside_waits_for_async_start_without_repeating_effect(tmp_path, kickstart):
+    _script, control_plist, _worker_plist = _prepare_script(tmp_path)
+    relay_plist = tmp_path / "relay.plist"
+    initial = (0, "state = waiting") if kickstart else (113, "")
+    effect = (f"kickstart system/{RELAY_LABEL}" if kickstart
+              else f"bootstrap system {relay_plist}")
+    plan = _readside_preflight() + [
+        (f"enable system/{RELAY_LABEL}", 0, "", ""),
+        (f"print system/{RELAY_LABEL}", initial[0], initial[1], ""),
+        (effect, 0, "", ""),
+        (f"print system/{RELAY_LABEL}", 113, "", "absent"),
+        (f"print system/{RELAY_LABEL}", 0, "state = waiting", ""),
+        (f"print system/{RELAY_LABEL}", 0, "state = running", ""),
+    ] + _ensure_running_bootstrap(CONTROL_LABEL, control_plist) + _readside_postflight()
+    code, out, err, log, remaining, *_ = _run(tmp_path, "start-readside", plan)
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert log.count(effect) == 1
+    assert f"service={RELAY_LABEL} state=running existing=0" in out
+
+
+@pytest.mark.parametrize("status,output", [(113, ""), (0, "state = waiting")])
+def test_readside_readiness_wait_is_bounded_and_preserves_partial_state(tmp_path, status, output):
+    _script, control_plist, _worker_plist = _prepare_script(tmp_path)
+    effect = f"bootstrap system {control_plist}"
+    plan = _readside_preflight() + _ensure_running_already(RELAY_LABEL) + [
+        (f"enable system/{CONTROL_LABEL}", 0, "", ""),
+        (f"print system/{CONTROL_LABEL}", 113, "", "absent"),
+        (effect, 0, "", ""),
+    ] + [(f"print system/{CONTROL_LABEL}", status, output, "")] * 31
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "start-readside", plan)
+    assert code != 0
+    assert "did not become running" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert log.count(effect) == 1
+    assert not any(line.startswith(("bootout ", "disable ", "kickstart ")) for line in log)
+
+
+def test_readside_unknown_readiness_fails_immediately_without_restart(tmp_path):
+    _script, control_plist, _worker_plist = _prepare_script(tmp_path)
+    plan = _readside_preflight() + _ensure_running_already(RELAY_LABEL) + [
+        (f"enable system/{CONTROL_LABEL}", 0, "", ""),
+        (f"print system/{CONTROL_LABEL}", 113, "", "absent"),
+        (f"bootstrap system {control_plist}", 0, "", ""),
+        (f"print system/{CONTROL_LABEL}", 5, "", "unknown"),
+    ]
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "start-readside", plan)
+    assert code != 0
+    assert "state unknown after read-side start" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+
+
+def test_readside_failed_bootstrap_does_not_poll_or_retry(tmp_path):
+    _script, control_plist, _worker_plist = _prepare_script(tmp_path)
+    plan = _readside_preflight() + _ensure_running_already(RELAY_LABEL) + [
+        (f"enable system/{CONTROL_LABEL}", 0, "", ""),
+        (f"print system/{CONTROL_LABEL}", 113, "", "absent"),
+        (f"bootstrap system {control_plist}", 5, "", "bootstrap failed"),
+    ]
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "start-readside", plan)
+    assert code == 5
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
