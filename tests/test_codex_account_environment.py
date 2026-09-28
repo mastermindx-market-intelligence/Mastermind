@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+from control_plane import codex_account_environment as account_environment
 from control_plane.codex_account_environment import (
     CodexAccountError, account_readiness, native_codex_account_scope,
 )
@@ -93,6 +94,49 @@ def test_rejects_symlink_home_and_symlink_ancestor(home, tmp_path):
     with pytest.raises(CodexAccountError):
         with native_codex_account_scope(link / "nested"):
             pytest.fail("ancestor alias admitted")
+
+
+@pytest.mark.parametrize(
+    ("platform", "path", "canonical", "accepted"),
+    [
+        (
+            "darwin",
+            Path("/var/db/mastermind-executive/workers/codex-01/provider-home"),
+            Path("/private/var/db/mastermind-executive/workers/codex-01/provider-home"),
+            True,
+        ),
+        ("linux", Path("/var/db/provider-home"), Path("/private/var/db/provider-home"), False),
+        ("darwin", Path("/tmp/provider-home"), Path("/private/tmp/provider-home"), False),
+        ("darwin", Path("/var/db/provider-home"), Path("/private/var/other-home"), False),
+    ],
+)
+def test_only_darwin_system_var_alias_is_admitted(
+    monkeypatch, platform, path, canonical, accepted,
+):
+    monkeypatch.setattr(account_environment.sys, "platform", platform)
+    assert account_environment._is_macos_var_alias(path, canonical) is accepted
+
+
+def test_macos_var_alias_preserves_principal_home_refusal(home, monkeypatch):
+    canonical = Path("/private/var/db/mastermind-executive/workers/codex-01/provider-home")
+    original_resolve = Path.resolve
+
+    def alias_resolve(path, strict=False):
+        if path == home:
+            return canonical
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", alias_resolve)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(
+        account_environment,
+        "_is_macos_var_alias",
+        lambda path, observed: path == home and observed == canonical,
+    )
+
+    with pytest.raises(CodexAccountError, match="PRIVATE_DEDICATED"):
+        account_environment._home(home)
+    assert account_environment._home(home, principal_home_admitted=True) == home
 
 
 @pytest.mark.parametrize("name", ["auth.json", ".executive-native-account.lock"])
