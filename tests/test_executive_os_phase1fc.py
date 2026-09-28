@@ -3739,38 +3739,43 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
-    # Reviewed-v2 golden. Protected 3c35c5f8 used policy_sha 6cc80806...
-    # (pre-hierarchy) and receipt_digest 63b65e.... Canonical v2 is
-    # EXPECTED_POLICY_SHA256 (schema_version=2, b6fbbd0c...), copied into
-    # every effective grant and therefore every grant/event/acceptance
-    # digest that embeds policy identity. R3C-PARENT-RECEIPT-DELTA.json
-    # records the 75 recursive digest paths; behavioral cycle/exhaustion/tx9
-    # values are unchanged. dispatch_boundary/tx9/bounded_exhaustion digests
-    # do not carry that pin and stay at the protected values. R10-PIN-DELTA.json
-    # adds only the two provider-work/consumption policy fields; all 75 recursive
-    # differences remain 64-character digest fields.
+    # Reviewed-v2 golden + controller-only authority changes.
+    # Canonical v2 (d426 review) sets EXPECTED_POLICY_SHA256
+    # (schema_version=2, 908273f1c5ebdc45f6141aaf1b3e2f4d7a65f675ba6070493fc90178947a0da8),
+    # which is bound into every effective grant and therefore every
+    # grant/event/acceptance digest that embeds policy identity.
+    # The protected 7aa2 review introduced a controller-only authority
+    # change that propagates into the same derived digest goldens, so only
+    # the 64-character digest literals shift while every non-digest
+    # behavioral assertion (cycle/exhaustion/tx9 actions and reasons,
+    # dispatch_boundary/tx9/bounded_exhaustion acceptance_digests) stays
+    # fixed. All 73 changed leaves are 64-character hexadecimal digests
+    # whose paths live in ALLOWED-DIGEST-PATHS.json; the two unchanged
+    # allowed paths are /policy_sha (canonical v2 identity, pinned to
+    # EXPECTED_POLICY_SHA256 on both sides) and /cycle/replay_outcome_digest
+    # (does not embed the policy pin).
     assert receipt["policy_sha"] == EXPECTED_POLICY_SHA256
     assert receipt["policy_sha"] != EXPECTED_V1_POLICY_SHA256
     assert receipt["receipt_digest"] == (
-        "3da79c3d01763a44c8404a65f9e92d7d00154121bc1c5d7e017c7f19b438e4c0"
+        "10fe5ae9a67d9749fa87384fd0e65b8a7005fb2062535c0cbb14b3a63967083a"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
     )
     assert receipt["dispatch_crash_replay"]["acceptance_digest"] == (
-        "d9833d74752ed5ea2a9295a441f5570dff8301a7ba4fd4b6f614f3b693e8e6d7"
+        "8e668a1a2618cdd015175f0ad3406905d250f45a66b07cf28a2dc55b66656493"
     )
     assert receipt["happy_path"]["acceptance_digest"] == (
-        "1491aabc904f01b3442971c9827d81ce07ce811b9c129ea8db6442208ae46f08"
+        "27268732398f1d0ebc0ef38aaafea268016ab1ee51af0627ab00a09e97826480"
     )
     assert receipt["repair_path"]["acceptance_digest"] == (
-        "fc33e600e799a9964b8adaa6b4644d15e9a99650d5eee6addcd76c3616b4d6ef"
+        "b09d9c893c5dc8b2bbca35f1ae32401e8049605f5532d90b0ac6b693e167ba7a"
     )
     assert receipt["void_replacement"]["acceptance_digest"] == (
-        "7f7b5c4bc864a33293545d2dc8cf39ce13919518bc9a2de366c596bbf1d286f4"
+        "23ab571f892441603460a0a303383f1e3a35317e2e17e967d8054f58ca8dee5b"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
-        "5717d0d85a32021a59b044a3c9a0d2ca7183560cb00159f408c840d80470f28a"
+        "e193dd4aee86b5a44f77f33a2ddfcee52b31704b2be258d974ef28564e618b3f"
     )
     assert receipt["tx9"]["acceptance_digest"] == (
         "9a43476a06fb3ecc4351b96d5646c7b0e521fd30092c3882bc5e8d4532825585"

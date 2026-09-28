@@ -58,7 +58,7 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
     assert worker["GroupName"] == "__WORKER_GROUP__"
     assert control["UserName"] != worker["UserName"]
     assert worker["InitGroups"] is False
-    assert control["ProcessType"] == "Standard"
+    assert control["ProcessType"] == "Interactive"
     assert worker["ProcessType"] == "Background"
 
     for value in (control, worker):
@@ -142,9 +142,15 @@ def test_executive_daemons_do_not_throttle_disk_io() -> None:
     # launchd.plist(5) documents CPU and I/O resource limits, not CPU-only
     # politeness. In #987, the installed reader passed as UID450 with its
     # launchd file-size limit but timed out under a background QoS clamp.
+    # Standard also clamps these user-requested reads to utility QoS: the
+    # e981 installed reader exceeded its deadline under taskpolicy -c utility,
+    # while the same reader finished in 13.5s under taskpolicy -a. Request-level
+    # pthread QoS cannot override the process clamp. Interactive supplies the
+    # application resource policy; this Unix socket service has no XPC activity
+    # to drive Adaptive. Explicit resource/deadline limits remain in force.
     for value in (_plist(CONTROL), _plist(WORKER)):
         assert "LowPriorityIO" not in value
-    assert _plist(CONTROL)["ProcessType"] == "Standard"
+    assert _plist(CONTROL)["ProcessType"] == "Interactive"
     assert _plist(WORKER)["ProcessType"] == "Background"
 
 
@@ -298,7 +304,7 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
         "SockPathMode": 0o660,
     }
 
-    for rendered_path, process_type in ((control, "Standard"), (worker, "Background")):
+    for rendered_path, process_type in ((control, "Interactive"), (worker, "Background")):
         with rendered_path.open("rb") as handle:
             rendered = plistlib.load(handle)
         assert "LowPriorityIO" not in rendered
@@ -757,6 +763,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "workspace_resource_policy",
         "workspace_control_room",
         "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)

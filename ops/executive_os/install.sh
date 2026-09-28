@@ -873,7 +873,7 @@ fi
     "$CONTROL_RUNTIME_ROOT" "$ADMIN_CHECKOUT" "$WORKSPACE_ROOT" "$EXPECTED_SHA" \
     "$BACKUP_ROOT" "$RECEIPTS_ROOT" "$PROVIDER_HOME" "$RUN_ROOT" \
     "$CANARY_RECEIPT" "$CONTROL_ENV_ATTESTATION" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
-    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" <<'PY'
+    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" "$ARM_PRIVILEGED_BROKER" <<'PY'
 import json, os, pathlib, re, sys
 release_root = sys.argv.pop(1)
 sys.path.insert(0, release_root)
@@ -902,6 +902,7 @@ from scripts.executive_os_phase1c import (
     operator_uid,
     operator_harness_binary_digest,
     operator_harness_version,
+    arm_privileged_broker,
 ) = sys.argv[1:]
 
 ceo_ingress_expected = {
@@ -924,6 +925,18 @@ dialogue_bridge_expected = {
     },
 }
 schema_keys = _CONFIG_REQUIRED | _CONFIG_OPTIONAL
+readiness_fields = {"privileged_readiness_armed", "privileged_broker_socket_path"}
+readiness_schema_keys = readiness_fields & schema_keys
+if arm_privileged_broker not in {"0", "1"}:
+    raise SystemExit("invalid privileged broker installation arm")
+if readiness_schema_keys and readiness_schema_keys != readiness_fields:
+    raise SystemExit("partial privileged readiness control-config schema")
+if arm_privileged_broker == "1" and readiness_schema_keys != readiness_fields:
+    raise SystemExit("armed release lacks privileged readiness composition")
+readiness_expected = ({
+    "privileged_readiness_armed": arm_privileged_broker == "1",
+    "privileged_broker_socket_path": "/var/run/mastermind-executive/privileged.sock" if arm_privileged_broker == "1" else None,
+} if readiness_schema_keys else {})
 ceo_ingress_schema_keys = set(ceo_ingress_expected) & schema_keys
 if ceo_ingress_schema_keys and ceo_ingress_schema_keys != set(ceo_ingress_expected):
     raise SystemExit("partial CeoIngress control-config schema")
@@ -955,6 +968,7 @@ expected = {
     "operator_harness_binary_digest": operator_harness_binary_digest,
     "operator_harness_version": operator_harness_version,
 }
+expected.update(readiness_expected)
 if ceo_ingress_schema_keys:
     expected.update(ceo_ingress_expected)
 if dialogue_bridge_schema_keys:
@@ -987,6 +1001,10 @@ if source:
 else:
     value = {**expected, **defaults}
 
+for key, derived in readiness_expected.items():
+    if key in value and (type(value[key]) is not type(derived) or value[key] != derived):
+        raise SystemExit(f"control config {key} conflicts with privileged broker installation arm")
+    value[key] = derived
 keys = set(value)
 missing = _CONFIG_REQUIRED - keys
 unknown = keys - _CONFIG_REQUIRED - _CONFIG_OPTIONAL
@@ -1458,6 +1476,17 @@ if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then
       exit 65
     }
   PRIVILEGED_BROKER_LIVE="1"
+  # Publish the closed consumer only after the installed broker is proven live.
+  MMX_CONTROL="$SYSTEM_ROOT/bin/mmx-control"
+  MMX_CONTROL_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.mmx-control.XXXXXX")"
+  /usr/bin/printf '%s\n' '#!/bin/bash' 'set -eu' \
+    '[ "$#" -eq 3 ] || exit 64' \
+    'for arg in "$@"; do case "$arg" in -*) exit 64;; esac; done' \
+    "exec \"$PYTHON_BINARY\" -I -S -B \"$RELEASE_ROOT/scripts/executive_os_phase1c.py\" --socket \"/var/run/mastermind-executive/control.sock\" check-current-worker-login \"\$1\" \"\$2\" \"\$3\"" \
+    >"$MMX_CONTROL_TEMP"
+  /usr/sbin/chown root:wheel "$MMX_CONTROL_TEMP"
+  /bin/chmod 0555 "$MMX_CONTROL_TEMP"
+  /bin/mv -f "$MMX_CONTROL_TEMP" "$MMX_CONTROL"
   /bin/echo "privileged action broker armed at $PRIVILEGED_SOCKET"
 fi
 

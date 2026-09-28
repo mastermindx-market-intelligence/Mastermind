@@ -251,6 +251,8 @@ _CONFIG_OPTIONAL = frozenset(
         "dialogue_bridge_armed",
         "dialogue_wake_retry_policy",
         "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -323,6 +325,11 @@ def _parser() -> argparse.ArgumentParser:
                 choices=["web", "mac"],
                 help="Content profile key (web or mac). Omit for legacy single-profile.",
             )
+
+    readiness = sub.add_parser("check-current-worker-login", help="Read assigned worker login status for one current Attempt.")
+    readiness.add_argument("job_id")
+    readiness.add_argument("attempt_id")
+    readiness.add_argument("fence_generation", type=int)
 
     job = sub.add_parser("job", help="Inspect one Job.")
     job.add_argument("job_id")
@@ -759,6 +766,12 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    arm = config.get("privileged_readiness_armed", False)
+    broker_socket = config.get("privileged_broker_socket_path")
+    if type(arm) is not bool:
+        raise ServiceError("privileged_readiness_armed must be boolean")
+    if (arm and broker_socket != "/var/run/mastermind-executive/privileged.sock") or (not arm and broker_socket is not None):
+        raise ServiceError("privileged readiness requires the armed canonical broker socket")
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
@@ -1573,6 +1586,8 @@ def _service_from_config(
         model=worker_model,
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
+        privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
+        privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
@@ -1920,9 +1935,15 @@ def _service_from_config(
                     "terminal-return Relay socket must be distinct from every "
                     "activated listener"
                 )
+    readiness_factory = None
+    if config.privileged_readiness_armed:
+        from control_plane.executive_privileged_authority import PrivilegedReadinessController
+        def readiness_factory(runtime):
+            return PrivilegedReadinessController(runtime, release_sha=config.proof_base_sha)
     service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        privileged_readiness_controller_factory=readiness_factory,
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
@@ -2075,6 +2096,9 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return args.command, {}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
+    if args.command == "check-current-worker-login":
+        return args.command, {"job_id": args.job_id, "attempt_id": args.attempt_id,
+                              "fence_generation": args.fence_generation}
     if args.command == "run-coo-cycle":
         return args.command, {"root_job_id": args.root_job_id}
     if args.command == "attempt":
