@@ -532,6 +532,7 @@ class _ExecutivePathFence:
         if workspace_app is not None:
             self._workspace_routes.update((
                 "/workspace/programs/current",
+                "/workspace/work/current",
                 "/workspace/mission/current",
                 "/workspace/mission/v3/current",
                 "/workspace/result/current",
@@ -954,6 +955,7 @@ def _build_profile_mcp_app(
     if workspace_app is not None:
         outer_routes.extend(Route(path, workspace_app, methods=["GET"]) for path in
                             ("/workspace/programs/current",
+                             "/workspace/work/current",
                              "/workspace/mission/current",
                              "/workspace/mission/v3/current",
                              "/workspace/result/current"))
