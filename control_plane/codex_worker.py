@@ -98,7 +98,7 @@ _GIT_COMMAND_TIMEOUT_SECONDS = 15.0
 _SAFE_GIT_OPERATION_IDENTITIES = {
     ("remote",): "remote",
     ("rev-parse", "--verify", "HEAD"): "rev-parse --verify HEAD",
-    LAUNCH_CLEAN_STATUS_ARGS: "status --porcelain=v1 -z --untracked-files=all",
+    LAUNCH_CLEAN_STATUS_ARGS: "status --porcelain=v1 -z --untracked-files=no",
     LAUNCH_CLEAN_UNTRACKED_ARGS: "ls-files --others -z",
     ("diff", "--name-only", "-z", "HEAD", "--"): "diff --name-only -z HEAD --",
 }

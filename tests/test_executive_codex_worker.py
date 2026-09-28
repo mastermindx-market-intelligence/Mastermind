@@ -305,7 +305,7 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
 ) -> None:
     workspace = tmp_path.resolve() / "workspace-that-must-not-cross-the-broker"
     workspace.mkdir()
-    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=no")
 
     def timed_out(argv, **kwargs):
         raise subprocess.TimeoutExpired(
@@ -323,11 +323,11 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
     error = raised.value
     assert isinstance(error, cw.LaunchValidationError)
     assert error.code == "git_preflight_timeout"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.timeout_seconds == cw._GIT_COMMAND_TIMEOUT_SECONDS == 15.0
     assert str(error) == (
         "Git preflight timed out after 15s: "
-        "status --porcelain=v1 -z --untracked-files=all"
+        "status --porcelain=v1 -z --untracked-files=no"
     )
     assert str(workspace) not in str(error)
     assert "private workspace" not in str(error)
@@ -351,16 +351,16 @@ def test_git_preflight_nonzero_names_only_operation_and_bounded_exit_code(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         )
 
     error = raised.value
     assert error.code == "git_preflight_failed"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.exit_code == 128
     assert str(error) == (
         "Git preflight failed: status --porcelain=v1 -z "
-        "--untracked-files=all (exit 128)"
+        "--untracked-files=no (exit 128)"
     )
     assert str(workspace) not in str(error)
     assert hostile_stderr.decode().strip() not in str(error)
@@ -482,7 +482,7 @@ def test_installed_git_sees_exact_trust_only_in_command_scope_without_writes(
     assert cw._git_command(workspace, "remote") == b""
     assert cw._git_command(workspace, "rev-parse", "--verify", "HEAD").decode().strip() == head
     assert cw._git_command(
-        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=no"
     ) == b""
     assert cw._git_command(workspace, "ls-files", "--others", "-z") == b""
     assert cw._git_command(workspace, "diff", "--name-only", "-z", "HEAD", "--") == b""
@@ -506,7 +506,7 @@ def test_git_preflight_safe_types_reject_arbitrary_operation_and_exit_code() -> 
             exit_code=128,
         )
     with pytest.raises(ValueError, match="exit code"):
-        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=all", exit_code=999)
+        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=no", exit_code=999)
 
 
 def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
@@ -525,7 +525,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         ):
             return subprocess.CompletedProcess(argv, 128, b"", hostile_stderr)
         raise AssertionError(operation)
@@ -535,7 +535,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
     with pytest.raises(cw.GitPreflightFailed) as raised:
         cw._git_snapshot(workspace, require_clean=True)
 
-    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert raised.value.exit_code == 128
     assert "top-secret" not in str(raised.value)
 
