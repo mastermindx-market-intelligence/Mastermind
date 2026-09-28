@@ -27,9 +27,11 @@ from control_plane.executive_privileged_broker import (
     BrokerTrustError,
     STATUS_EFFECT_UNKNOWN,
     STATUS_NOT_FOUND,
+    STATUS_RECONCILED_NOT_APPLIED,
     STATUS_TERMINAL,
     WIRE_RESPONSE_SCHEMA,
     validate_terminal_receipt,
+    validate_reconciliation_record,
 )
 
 
@@ -165,6 +167,8 @@ def validate_status_response(
         expected_keys = base_keys | {"receipt"}
     elif status == STATUS_EFFECT_UNKNOWN:
         expected_keys = base_keys | {"marker_release_sha"}
+    elif status == STATUS_RECONCILED_NOT_APPLIED:
+        expected_keys = base_keys | {"marker_release_sha", "reconciliation"}
     elif status == STATUS_NOT_FOUND:
         expected_keys = base_keys
     else:
@@ -176,10 +180,17 @@ def validate_status_response(
         result["receipt"] = validate_terminal_receipt(
             response["receipt"], expected_request_id=expected_request_id,
         )
-    elif status == STATUS_EFFECT_UNKNOWN:
+    elif status in (STATUS_EFFECT_UNKNOWN, STATUS_RECONCILED_NOT_APPLIED):
         marker_release = response["marker_release_sha"]
         if not isinstance(marker_release, str) or _SHA40_RE.fullmatch(marker_release) is None:
             raise RuntimeError("privileged broker returned an invalid marker release")
+        if status == STATUS_RECONCILED_NOT_APPLIED:
+            record = validate_reconciliation_record(
+                response["reconciliation"], expected_request_id=expected_request_id,
+            )
+            if record["target_release_sha"] != marker_release:
+                raise RuntimeError("privileged broker reconciliation differs from marker release")
+            result["reconciliation"] = record
     return result
 
 

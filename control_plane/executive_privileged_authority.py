@@ -34,12 +34,11 @@ RESULT_SCHEMA = "mastermind.executive_privileged_readiness_result/v1"
 
 READINESS_AGGREGATE_TYPE = "privileged_readiness"
 
-# The merged PR #613 broker emits exactly four wire error codes. Three of them
-# are pre-effect refusals; EFFECT_UNKNOWN names an unresolved effect and must
-# never be projected as a refusal. This set reuses that merged domain rather
-# than forking a second reason vocabulary.
+# The protected broker also refuses replay of a reconciled NOT_APPLIED
+# request. Preserve that reason without a success or retry assertion.
+# EFFECT_UNKNOWN names an unresolved effect and must never become a refusal.
 BROKER_REFUSAL_REASON_CODES = frozenset(
-    {"PEER_UNAUTHORIZED", "REQUEST_ID_CONFLICT", "REFUSED"}
+    {"PEER_UNAUTHORIZED", "REQUEST_ID_CONFLICT", "REFUSED", "RECONCILED_NOT_APPLIED"}
 )
 BROKER_EFFECT_UNKNOWN_ERROR = "EFFECT_UNKNOWN"
 
@@ -468,7 +467,97 @@ class ReadinessResult:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class ReadinessEventFamily:
+    """Validated immutable history; its presence never grants another effect."""
+
+    binding: ReadinessBinding
+    phase: ReadinessEventPhase
+    state: ReadinessResultState
+    receipt: Mapping[str, Any] | None = None
+    reason_code: str | None = None
+
+
+def broker_request_for(binding: ReadinessBinding) -> dict[str, Any]:
+    from control_plane.executive_privileged_action import REQUEST_SCHEMA
+
+    return {"schema": REQUEST_SCHEMA, "request_id": binding.operation_id,
+            "action": FIXED_ACTION, "args": {"slot_id": binding.slot_id}}
+
+
+def validate_event_family(events, request: ReadinessRequest) -> ReadinessEventFamily | None:
+    """Validate a complete exact-aggregate history before replay or reconciliation.
+
+    INTENT and ATTEMPTED are one atomic admission; a lone intent is corrupt.
+    Terminal evidence is correlated against the original frozen action, digest
+    and release, including after policy/boot/Attempt turnover. No current
+    authority, database, filesystem or broker read is performed here.
+    """
+    from control_plane.executive_privileged_action import canonical_request_bytes, validate_request
+    from control_plane.executive_privileged_broker import validate_terminal_receipt
+
+    if not events:
+        return None
+    try:
+        binding_value = events[0].payload["binding"]
+        _require_exact_keys(binding_value, BINDING_CANONICAL_KEYS, "stored binding")
+        binding = ReadinessBinding(**binding_value)
+        expected_family = family_key_from_request(request).family_id
+        actual_family = ReadinessFamilyKey(
+            binding.job_id, binding.attempt_id, binding.fence_generation,
+        ).family_id
+        if actual_family != expected_family:
+            raise PrivilegedReadinessError("stored family does not match the request")
+        phases = tuple(ReadinessEventPhase(event.event_type) for event in events)
+        P = ReadinessEventPhase
+        admitted = (P.INTENT, P.ATTEMPTED)
+        allowed = {admitted, admitted + (P.TERMINAL,), admitted + (P.BROKER_REFUSED,),
+                   admitted + (P.EFFECT_UNKNOWN,), admitted + (P.RECONCILED,),
+                   admitted + (P.EFFECT_UNKNOWN, P.RECONCILED)}
+        if phases not in allowed:
+            raise PrivilegedReadinessError("stored family phase ordering is invalid")
+        for sequence, (event, phase) in enumerate(zip(events, phases), 1):
+            suffix = "" if phase is P.INTENT else ":" + phase.name.lower()
+            if (event.aggregate_type != READINESS_AGGREGATE_TYPE
+                    or event.aggregate_id != expected_family or event.sequence != sequence
+                    or event.command_id != binding.operation_id + suffix
+                    or event.job_id != binding.job_id or event.attempt_id != binding.attempt_id
+                    or event.worker_id != binding.worker_id or event.quota_class != binding.quota_class
+                    or event.payload.get("binding") != binding.to_canonical_dict()):
+                raise PrivilegedReadinessError("stored family identity or binding drifted")
+            keys = {"binding"}
+            if phase in (P.TERMINAL, P.RECONCILED):
+                keys.add("receipt")
+            elif phase is P.BROKER_REFUSED:
+                keys.add("reason_code")
+            _require_exact_keys(event.payload, frozenset(keys), "stored event payload")
+        receipt = None
+        reason_code = None
+        phase = phases[-1]
+        if phase in (P.TERMINAL, P.RECONCILED):
+            wire_request = validate_request(broker_request_for(binding))
+            receipt = validate_terminal_receipt(
+                events[-1].payload["receipt"], expected_request_id=binding.operation_id,
+                expected_request_sha256=hashlib.sha256(canonical_request_bytes(wire_request)).hexdigest(),
+                expected_release_sha=binding.release_sha, expected_action=FIXED_ACTION,
+            )
+            state = ReadinessResultState.TERMINAL
+        elif phase is P.BROKER_REFUSED:
+            reason_code = events[-1].payload["reason_code"]
+            state = result_state_for_broker_error(reason_code)
+            if state is not ReadinessResultState.REFUSED:
+                raise PrivilegedReadinessError("stored refusal contains an unresolved effect")
+        else:
+            state = ReadinessResultState.EFFECT_UNKNOWN
+        return ReadinessEventFamily(binding, phase, state, receipt, reason_code)
+    except (KeyError, TypeError, AttributeError, ValueError, RuntimeError) as exc:
+        raise PrivilegedReadinessError("privileged readiness event family is invalid") from exc
+
+
 __all__ = [
+    "ReadinessEventFamily",
+    "broker_request_for",
+    "validate_event_family",
     "BROKER_EFFECT_UNKNOWN_ERROR",
     "BROKER_REFUSAL_REASON_CODES",
     "REASON_ORIGIN_BROKER",

@@ -7,6 +7,7 @@ import os
 import plistlib
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from unittest import mock
 
@@ -162,11 +163,17 @@ def test_command_adapter_has_exact_allowlist_and_nonmutating_subprocess_contract
 
     def runner(argv, **kwargs):
         calls.append((tuple(argv), kwargs))
+        if tuple(argv)[:3] == ("/usr/bin/stat", "-f", "%Sp"):
+            return Completed(stdout=b"srw-rw---- \n")
         return Completed(stdout=b"disabled services = {\n}\n")
 
     adapter = module.CommandAdapter(runner=runner)
     result = adapter.run(("/bin/launchctl", "print-disabled", "system"))
     assert result == {"status": "ok", "stdout": "disabled services = {\n}\n"}
+    socket_result = adapter.run(
+        ("/usr/bin/stat", "-f", "%Sp", module.SOCKET_METADATA_PATHS[0])
+    )
+    assert socket_result == {"status": "ok", "stdout": "srw-rw---- \n"}
     argv, kwargs = calls[0]
     assert argv == ("/bin/launchctl", "print-disabled", "system")
     assert kwargs == {
@@ -184,12 +191,13 @@ def test_command_adapter_has_exact_allowlist_and_nonmutating_subprocess_contract
         ("/bin/launchctl", "kickstart", "system/com.mastermind.executive.control"),
         ("/bin/ps", "aux"),
         ("/usr/bin/stat", "-f", "%Sp", "/tmp/not-frozen"),
+        ("/usr/bin/stat", "-f", "%Sp", module.CONTROL_CONFIG),
     )
     for argv in forbidden:
         with pytest.raises(module.PreimageRefusal) as error:
             adapter.run(argv)
         assert error.value.code == "COMMAND_REFUSED"
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -400,6 +408,25 @@ def test_cli_refuses_arguments_platform_and_euid_before_collection(monkeypatch, 
     assert called is False
 
 
+def test_isolated_cli_describe_bootstraps_repository_import_path():
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(repo_root, "ops", "executive_os", "c1_private_preimage.py")
+    completed = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", script, "--describe"],
+        cwd="/",
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    described = json.loads(completed.stdout)
+    assert described["schema"] == "mastermind.c1_private_preimage/v1"
+    assert described["mutation_count"] == 0
+
+
 def test_describe_is_static_and_does_not_collect(monkeypatch, capsysbinary):
     module = subject()
     monkeypatch.setattr(
@@ -570,6 +597,54 @@ def test_acl_marker_requires_stable_identity_and_closed_marker():
             side_effect=module.FilesystemSecurityError("observer fixture"),
         ):
             module.inspect_acl(FS(), Commands(), module.CONTROL_CONFIG)
+    assert error.value.code == "ACL_UNKNOWN"
+
+
+def test_socket_acl_uses_bounded_stat_marker_and_never_file_acl_observer():
+    module = subject()
+    path = module.SOCKET_METADATA_PATHS[0]
+    metadata = {
+        "path": path,
+        "exists": True,
+        "type": "socket",
+        "device": 4,
+        "inode": 9,
+    }
+
+    class FS:
+        def metadata(self, observed_path):
+            assert observed_path == path
+            return dict(metadata)
+
+    class Commands:
+        def __init__(self, marker):
+            self.marker = marker
+            self.calls = []
+
+        def run(self, argv):
+            self.calls.append(tuple(argv))
+            return {"status": "ok", "stdout": self.marker}
+
+    no_acl = Commands("srw-rw---- \n")
+    with mock.patch.object(
+        module,
+        "has_macos_acl",
+        side_effect=AssertionError("socket path must not use file ACL observer"),
+    ):
+        assert module.inspect_acl(FS(), no_acl, path) is False
+    assert no_acl.calls == [("/usr/bin/stat", "-f", "%Sp", path)]
+
+    with_acl = Commands("srw-rw----+\n")
+    with mock.patch.object(
+        module,
+        "has_macos_acl",
+        side_effect=AssertionError("socket path must not use file ACL observer"),
+    ):
+        assert module.inspect_acl(FS(), with_acl, path) is True
+
+    malformed = Commands("not-a-mode\n")
+    with pytest.raises(module.PreimageUnsettled) as error:
+        module.inspect_acl(FS(), malformed, path)
     assert error.value.code == "ACL_UNKNOWN"
 
 
@@ -930,6 +1005,9 @@ class InstalledCommands:
         command = tuple(argv)
         if command == ("/usr/bin/true",):
             return {"status": "ok", "stdout": ""}
+        if command[:3] == ("/usr/bin/stat", "-f", "%Sp"):
+            assert command[3] in module.SOCKET_METADATA_PATHS
+            return {"status": "ok", "stdout": "srw-rw---- \n"}
         if command == ("/bin/launchctl", "print-disabled", "system"):
             entries = "".join(f'    "{label}" => true\n' for label in module.LABELS)
             return {"status": "ok", "stdout": f"disabled services = {{\n{entries}}}\n"}
@@ -1167,6 +1245,272 @@ def test_collect_coherent_older_documents_without_expected_manifest_is_stale():
         euid=0,
     )
     assert missing_principals["classification"] == "EFFECT_UNKNOWN"
+
+
+def _stale_prepared_only_agent_relay_fixture(module):
+    stale_sha = "d" * 40
+    filesystem = InstalledFilesystem(module)
+    control = json.loads(filesystem.payloads[module.CONTROL_CONFIG])
+    control.update(
+        {
+            "proof_base_sha": stale_sha,
+            "proof_source_repository": (
+                f"{module.RUNTIME_ROOT}/control/admin-checkout/{stale_sha}"
+            ),
+        }
+    )
+    filesystem.payloads[module.CONTROL_CONFIG] = json.dumps(control).encode()
+
+    stale_root = f"{module.SYSTEM_ROOT}/releases/{stale_sha}"
+    agent_label = "com.mastermind.executive.agent-relay"
+    agent_plist = module.PLISTS[module.LABELS.index(agent_label)]
+    for label, path in zip(module.LABELS, module.PLISTS, strict=True):
+        if label == agent_label:
+            continue
+        value = plistlib.loads(filesystem.payloads[path])
+        value["WorkingDirectory"] = stale_root
+        value["ProgramArguments"] = module.expected_program_arguments(label, stale_sha)
+        filesystem.payloads[path] = plistlib.dumps(value)
+
+    filesystem.payloads.pop(agent_plist)
+    filesystem.present.remove(agent_plist)
+    filesystem.payloads.pop(filesystem.manifest_path)
+    filesystem.present.remove(filesystem.manifest_path)
+    filesystem.present.remove(f"{module.SYSTEM_ROOT}/releases/{SHA}")
+    return filesystem
+
+
+def test_missing_agent_relay_plist_requires_explicit_prepared_only_evidence():
+    module = subject()
+    documents = module.expected_document_fixture(SHA, TREE)
+    agent_plist = module.PLISTS[
+        module.LABELS.index("com.mastermind.executive.agent-relay")
+    ]
+    documents.pop(agent_plist)
+
+    default = module.evaluate_installation(documents, SHA, TREE)
+    assert default["effect_unknown"] is True
+    assert default["matching_installation"] is False
+
+    prepared = module.evaluate_installation(
+        documents, SHA, TREE, agent_relay_prepared_only=True
+    )
+    assert prepared["effect_unknown"] is False
+    assert prepared["matching_installation"] is True
+
+
+def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
+    module = subject()
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+
+    class PreparedOnlyCommands(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => true\n'
+                    for label in module.LABELS
+                    if label != "com.mastermind.executive.agent-relay"
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=PreparedOnlyCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-18T23:45:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "STALE_STOPPED"
+    agent = next(
+        service
+        for service in receipt["facts"]["services"]
+        if service["label"] == "com.mastermind.executive.agent-relay"
+    )
+    assert agent["loaded"] is False
+    assert agent["disabled"] is None
+    assert receipt["mutation_count"] == 0
+
+
+def test_prepared_only_agent_relay_explicitly_enabled_remains_effect_unknown():
+    module = subject()
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+
+    class EnabledRelayCommands(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => {"false" if label == "com.mastermind.executive.agent-relay" else "true"}\n'
+                    for label in module.LABELS
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=EnabledRelayCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-18T23:45:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+def _stale_core_with_enrolled_sol_state_relay_fixture(module):
+    filesystem = _stale_prepared_only_agent_relay_fixture(module)
+    relay_sha = "c" * 40
+    relay_label = "com.mastermind.executive.sol-state-relay"
+    relay_path = module.PLISTS[module.LABELS.index(relay_label)]
+    value = plistlib.loads(filesystem.payloads[relay_path])
+    relay_root = f"{module.SYSTEM_ROOT}/releases/{relay_sha}"
+    value["WorkingDirectory"] = relay_root
+    value["ProgramArguments"] = module.expected_program_arguments(
+        relay_label, relay_sha
+    )
+    filesystem.payloads[relay_path] = plistlib.dumps(value)
+
+    relay_config = f"{module.SYSTEM_ROOT}/config/sol-state-relay.json"
+    relay_token = f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    filesystem.present.update({relay_config, relay_token})
+    filesystem.metadata_overrides[relay_config] = metadata_fixture(
+        uid=0, gid=452, mode=0o440
+    )
+    filesystem.metadata_overrides[relay_token] = metadata_fixture(
+        uid=452, gid=452, mode=0o400
+    )
+    return filesystem
+
+
+def test_stale_enrolled_sol_state_relay_allows_coherent_stopped_core():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+
+    assert receipt["state"] == "FACTS"
+    assert receipt["classification"] == "STALE_STOPPED"
+    relay = next(
+        service
+        for service in receipt["facts"]["services"]
+        if service["label"] == "com.mastermind.executive.sol-state-relay"
+    )
+    assert relay["active"] is False
+    assert relay["loaded"] is False
+    assert relay["disabled"] is True
+    assert receipt["mutation_count"] == 0
+
+
+def test_stale_sol_state_relay_explicitly_enabled_remains_effect_unknown():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+
+    class EnabledSolStateRelay(InstalledCommands):
+        def run(self, argv):
+            if tuple(argv) == ("/bin/launchctl", "print-disabled", "system"):
+                entries = "".join(
+                    f'    "{label}" => {"false" if label == "com.mastermind.executive.sol-state-relay" else "true"}\n'
+                    for label in module.LABELS
+                )
+                return {
+                    "status": "ok",
+                    "stdout": f"disabled services = {{\n{entries}}}\n",
+                }
+            return super().run(argv)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=EnabledSolStateRelay(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+@pytest.mark.parametrize("missing", ("config", "token"))
+def test_stale_sol_state_relay_requires_complete_enrollment_metadata(missing):
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+    path = (
+        f"{module.SYSTEM_ROOT}/config/sol-state-relay.json"
+        if missing == "config"
+        else f"{module.SYSTEM_ROOT}/config/sol-state-relay.token"
+    )
+    filesystem.present.remove(path)
+    filesystem.metadata_overrides.pop(path, None)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
+
+
+def test_stale_sol_state_relay_does_not_hide_a_mixed_core_generation():
+    module = subject()
+    filesystem = _stale_core_with_enrolled_sol_state_relay_fixture(module)
+    worker_label = "com.mastermind.executive.worker.codex"
+    worker_path = module.PLISTS[module.LABELS.index(worker_label)]
+    value = plistlib.loads(filesystem.payloads[worker_path])
+    foreign_sha = "b" * 40
+    value["WorkingDirectory"] = f"{module.SYSTEM_ROOT}/releases/{foreign_sha}"
+    value["ProgramArguments"] = module.expected_program_arguments(
+        worker_label, foreign_sha
+    )
+    filesystem.payloads[worker_path] = plistlib.dumps(value)
+
+    receipt = module.collect_preimage(
+        expected_release_sha=SHA,
+        expected_tree_sha=TREE,
+        filesystem=filesystem,
+        commands=InstalledCommands(),
+        principals=InstalledPrincipals(),
+        clock=lambda: "2026-09-19T03:00:00+00:00",
+        platform="darwin",
+        uid=0,
+        euid=0,
+    )
+    assert receipt["classification"] == "EFFECT_UNKNOWN"
+    assert receipt["mutation_count"] == 0
 
 
 @pytest.mark.parametrize(

@@ -212,7 +212,16 @@ if args[1] == "-read":
         if attribute not in values:
             raise SystemExit(1)
         value = values[attribute]
-        print(f"{{attribute}}: {{' '.join(value) if isinstance(value, list) else value}}")
+        display_attribute = attribute
+        if (
+            os.environ.get("A2_FAKE_NATIVE_ATTRIBUTE_PREFIX") == "1"
+            and attribute == "IsHidden"
+        ):
+            display_attribute = f"dsAttrTypeNative:{{attribute}}"
+        print(
+            f"{{display_attribute}}: "
+            f"{{' '.join(value) if isinstance(value, list) else value}}"
+        )
     raise SystemExit(0)
 if args[1] == "-create":
     kind, name = record(args[2])
@@ -373,6 +382,24 @@ def test_prepares_only_the_exact_principal_group_and_non_secret_directories_idem
     assert not (paths["config"] / "agent-relay.json").exists()
     assert not paths["plist"].exists()
 
+    second = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert second.returncode == 0, second.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8")) == state_after_first
+
+
+def test_idempotent_preparation_accepts_native_is_hidden_attribute_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    command = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+
+    first = subprocess.run(command, check=False, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    state_after_first = json.loads(state_path.read_text(encoding="utf-8"))
+
+    monkeypatch.setenv("A2_FAKE_NATIVE_ATTRIBUTE_PREFIX", "1")
     second = subprocess.run(command, check=False, capture_output=True, text=True)
 
     assert second.returncode == 0, second.stderr

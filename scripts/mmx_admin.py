@@ -35,6 +35,8 @@ _ACTIONS = (
     "executive.services.start",
     "executive.services.stop",
     "executive.services.restart",
+    "executive.services.start_readside",
+    "executive.services.stop_readside",
     "executive.worker_auth.verify_only",
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
@@ -126,7 +128,8 @@ def _status_exit_code(response: dict[str, object], request_id: str) -> int:
     except RuntimeError:
         return 1
     status = validated["status"]
-    if status == "TERMINAL":
+    if status in ("TERMINAL", "RECONCILED_NOT_APPLIED"):
+        # Zero means trusted retrieval; NOT_APPLIED remains NOT_APPLIED.
         return 0
     if status == "EFFECT_UNKNOWN":
         return 75

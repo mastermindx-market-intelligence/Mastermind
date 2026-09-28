@@ -614,10 +614,9 @@ def test_event_aggregate_type_is_the_reviewed_literal():
 
 
 def test_broker_refusal_reason_codes_reuse_the_merged_broker_domain():
-    # The merged PR #613 broker emits exactly four wire error codes. Only three
-    # of them are refusals; EFFECT_UNKNOWN is an effect state, never a refusal.
+    # Preserve the protected broker refusal domain; unresolved effects remain separate.
     assert epa.BROKER_REFUSAL_REASON_CODES == frozenset(
-        {"PEER_UNAUTHORIZED", "REQUEST_ID_CONFLICT", "REFUSED"}
+        {"PEER_UNAUTHORIZED", "REQUEST_ID_CONFLICT", "REFUSED", "RECONCILED_NOT_APPLIED"}
     )
     assert "EFFECT_UNKNOWN" not in epa.BROKER_REFUSAL_REASON_CODES
 
@@ -934,3 +933,16 @@ def test_broker_reason_domain_is_derived_from_the_merged_broker_source():
     assert emitted == epa.BROKER_REFUSAL_REASON_CODES | {epa.BROKER_EFFECT_UNKNOWN_ERROR}
     for code in emitted:
         assert isinstance(epa.result_state_for_broker_error(code), epa.ReadinessResultState)
+
+
+
+def test_reconciled_not_applied_refuses_reexecution_without_success_claim():
+    state = epa.result_state_for_broker_error("RECONCILED_NOT_APPLIED")
+    assert state is epa.ReadinessResultState.REFUSED
+    result = epa.ReadinessResult(**_terminal_kwargs(
+        state=state, receipt=None, reason_origin="BROKER",
+        reason_code="RECONCILED_NOT_APPLIED",
+    )).to_canonical_dict()
+    assert result["receipt"] is None
+    assert result["reason_code"] == "RECONCILED_NOT_APPLIED"
+    assert result["observation_scope"] == "LOGIN_STATUS_ONLY_NO_READY_ASSERTION"

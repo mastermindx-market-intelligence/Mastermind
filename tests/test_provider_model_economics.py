@@ -21,7 +21,7 @@ def test_catalog_loads_reviewed_routing_models_and_stays_inert():
         "capacity_and_quota": "shared_ai_provider_control",
         "lifecycle_and_claim": "executive_os",
     }
-    assert len(catalog.models) == 13
+    assert len(catalog.models) == 15
 
 
 def test_model_capability_and_harness_overlay_remain_distinct():
@@ -32,6 +32,8 @@ def test_model_capability_and_harness_overlay_remain_distinct():
     assert "browser" in cursor
     assert catalog.effective_context_window("xai.grok-4.6") == 500_000
     assert catalog.effective_context_window("xai.grok-4.6", surface="cursor") == 256_000
+    assert catalog.effective_context_window("xai.grok-4.7") == 500_000
+    assert catalog.effective_context_window("xai.grok-4.7", surface="cursor") == 500_000
 
 
 def test_api_cash_estimates_are_exact_decimal_and_context_banded():
@@ -78,6 +80,33 @@ def test_api_cash_estimates_are_exact_decimal_and_context_banded():
         input_tokens=1_000_000,
         output_tokens=1_000_000,
     ) == Decimal("5")
+    assert catalog.estimate_api_cash_usd(
+        "alibaba.qwen3.8-flash",
+        surface="alibaba_model_studio",
+        context_tokens=300_000,
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+    ) == Decimal("0.62")
+    assert catalog.estimate_api_cash_usd(
+        "xai.grok-4.7",
+        surface="cursor",
+        context_tokens=300_000,
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+    ) == Decimal("16")
+
+
+def test_qwen38_flash_rate_uses_documented_price_cut_provenance():
+    import json
+
+    raw = json.loads(CATALOG.read_text())
+    rate = raw["models"]["alibaba.qwen3.8-flash"]["api_rates"][0]
+    assert rate["effective_from"] == "2026-08-27"
+    assert rate["source_id"] == "alibaba-qwen38flash-price-cut"
+    assert raw["sources"]["alibaba-qwen38flash-price-cut"]["url"] == (
+        "https://www.alibabacloud.com/en/notice/"
+        "model_studioqwen38flash_price_reduction_notice_859"
+    )
 
 
 def test_unknown_or_unreviewed_cash_rate_fails_closed():

@@ -1,0 +1,329 @@
+{
+  "attention": {
+    "ceo": [
+      {
+        "attention_id": "ATTENTION-B5",
+        "kind": "decision",
+        "reason": "Review the harmless fixture",
+        "target": "ceo",
+        "workstream": "WS:B5"
+      }
+    ],
+    "chairman": [],
+    "coo": []
+  },
+  "autonomy": {
+    "chairman_decisions": [],
+    "counts": {
+      "actionable": 1,
+      "blocked": 0,
+      "declared_blocked": 0,
+      "empty": false,
+      "stale": 0,
+      "total": 1
+    },
+    "generated_at": "2026-09-05T00:00:00Z",
+    "issues": [
+      {
+        "code": "surface_not_reviewed",
+        "message": "the exact binding has no accepted review timestamp",
+        "responsibility_ref": "WS:B5",
+        "sources": [
+          {
+            "freshness": "current",
+            "observed_at": "2026-09-05T00:00:00Z",
+            "owner": "surface_bindings",
+            "ref": "55555555-5555-4555-8555-555555555555"
+          }
+        ]
+      }
+    ],
+    "owed_by_seat": {
+      "ceo": 1,
+      "chairman": 0,
+      "coo": 0,
+      "unknown": 0,
+      "worker": 0
+    },
+    "responsibilities": [
+      {
+        "accountable_seat": "ceo",
+        "actionability_reason": "actionable",
+        "blocker": null,
+        "chairman_decision_reason": null,
+        "chairman_decision_required": false,
+        "current_sol_target": null,
+        "current_worker": null,
+        "declared_blocker": null,
+        "disagreements": [],
+        "dispatch": {
+          "actionable": true,
+          "carrier": {
+            "actionable": false,
+            "historical": true,
+            "reason": null,
+            "state": "OWNER_HELD"
+          },
+          "dispatch_state": "RETURNED",
+          "evidence": {
+            "carrier_state": "OWNER_HELD",
+            "responsibility_ref": "WS:B5",
+            "root_job_id": "JOB-B5",
+            "runtime_root_state": "RESOLVED",
+            "w3c_snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "w3c_source_freshness": "SOURCE_EVIDENCE_TIME",
+            "w3c_source_observed_at": "2026-09-05T00:00:00Z",
+            "w3c_state": "RESOLVED",
+            "w3c_terminal_applied": "true",
+            "w3c_terminal_source_owner": "executive_terminal_return",
+            "w3c_terminal_state": "APPLIED",
+            "w3c_wake_source_owner": "wake_ledger",
+            "w3c_wake_state": "TARGET_ACKNOWLEDGED"
+          },
+          "historical": false,
+          "reason": "canonical_terminal_wake_acknowledged",
+          "responsibility_ref": "WS:B5",
+          "root_job_id": "JOB-B5",
+          "w3c": {
+            "reason": null,
+            "source_receipt": {
+              "freshness": "SOURCE_EVIDENCE_TIME",
+              "observed_at": "2026-09-05T00:00:00Z",
+              "snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "terminal_source_owner": "executive_terminal_return",
+              "wake_source_owner": "wake_ledger"
+            },
+            "state": "RESOLVED",
+            "terminal_applied": true,
+            "terminal_state": "APPLIED",
+            "wake_state": "TARGET_ACKNOWLEDGED"
+          },
+          "watch_proven": true
+        },
+        "freshness": "current",
+        "is_actionable": true,
+        "owed_turn": {
+          "reason": "attention_targets_seat",
+          "seat": "ceo",
+          "source_refs": [
+            {
+              "freshness": "current",
+              "observed_at": "2026-09-05T00:00:00Z",
+              "owner": "executive_inbox",
+              "ref": "ATTENTION-B5"
+            }
+          ]
+        },
+        "placement_state": {
+          "observable": false,
+          "reason": "no_canonical_producer",
+          "value": "not_observable"
+        },
+        "query_status": "ok",
+        "responsibility_ref": "WS:B5",
+        "root_job_ambiguous": false,
+        "root_job_candidates": [
+          "JOB-B5"
+        ],
+        "root_job_id": "JOB-B5",
+        "runtime_root_state": "RESOLVED",
+        "source_receipts": [
+          {
+            "freshness": "current",
+            "observed_at": "2026-09-03T00:00:01Z",
+            "owner": "agent_os",
+            "ref": "agent_os_state.workstreams:B5"
+          },
+          {
+            "freshness": "current",
+            "observed_at": "2026-09-05T00:00:00Z",
+            "owner": "executive_inbox",
+            "ref": "ATTENTION-B5"
+          }
+        ],
+        "state": "active",
+        "title": "Bounded fixture",
+        "validity": {
+          "card": {
+            "policy": "mapper-inclusive-48h-future-1h.v1",
+            "proof_ref": "91daf82d6160a57e2d06b5e1b09c4a7f08f157918a1cbe32d416650f59c981f3",
+            "qualified_at": "2026-09-05T00:00:00Z",
+            "reason": "source_budget",
+            "schema": "mastermind.autonomy_validity.v1",
+            "sources": [
+              {
+                "freshness": "current",
+                "observed_at": "2026-09-03T00:00:01Z",
+                "owner": "agent_os",
+                "ref": "agent_os_state.workstreams:B5"
+              },
+              {
+                "freshness": "current",
+                "observed_at": "2026-09-05T00:00:00Z",
+                "owner": "executive_inbox",
+                "ref": "ATTENTION-B5"
+              }
+            ],
+            "valid_for_ms": 1000
+          },
+          "decision_current": {
+            "policy": "mapper-inclusive-48h-future-1h.v1",
+            "proof_ref": "de879386767585a8626cdb32b4216276b3301e7de28acc649d22e11fdc81749f",
+            "qualified_at": "2026-09-05T00:00:00Z",
+            "reason": "source_budget",
+            "schema": "mastermind.autonomy_validity.v1",
+            "sources": [
+              {
+                "freshness": "current",
+                "observed_at": "2026-09-03T00:00:01Z",
+                "owner": "agent_os",
+                "ref": "agent_os_state.workstreams:B5"
+              },
+              {
+                "freshness": "current",
+                "observed_at": "2026-09-05T00:00:00Z",
+                "owner": "executive_inbox",
+                "ref": "ATTENTION-B5"
+              }
+            ],
+            "valid_for_ms": 1000
+          },
+          "dispatch": {
+            "policy": "mapper-inclusive-48h-future-1h.v1",
+            "proof_ref": "dc106ba87ebc0be580d32d496208de015c2333ecae81abcb7dbf5cb2f075d0c3",
+            "qualified_at": "2026-09-05T00:00:00Z",
+            "reason": "source_budget",
+            "schema": "mastermind.autonomy_validity.v1",
+            "sources": [
+              {
+                "field": "w3c_source_observed_at",
+                "freshness": "current",
+                "input": "dispatch_evidence",
+                "observed_at": "2026-09-05T00:00:00Z",
+                "snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "terminal_source_owner": "executive_terminal_return",
+                "wake_source_owner": "wake_ledger"
+              }
+            ],
+            "valid_for_ms": 172800000
+          },
+          "owed_open_age": {
+            "binding_fingerprint": "4c2fefb212613571ea0632839d0e8b9917226ae5a32545e8031839bf3043a815",
+            "binding_id": "55555555-5555-4555-8555-555555555555",
+            "owed_seat": "ceo",
+            "policy": "mapper-inclusive-48h-future-1h.v1",
+            "proof_ref": "5c797d0ae7b10a54d9e81ea8dec189a8ef6ac4860270edb14647152c0caf0f78",
+            "qualified_at": "2026-09-05T00:00:00Z",
+            "reason": "source_budget",
+            "schema": "mastermind.autonomy_validity.v1",
+            "sources": [
+              {
+                "freshness": "current",
+                "observed_at": "2026-09-03T00:00:01Z",
+                "owner": "agent_os",
+                "ref": "agent_os_state.workstreams:B5"
+              },
+              {
+                "freshness": "current",
+                "observed_at": "2026-09-05T00:00:00Z",
+                "owner": "executive_inbox",
+                "ref": "ATTENTION-B5"
+              },
+              {
+                "field": "w3c_source_observed_at",
+                "freshness": "current",
+                "input": "dispatch_evidence",
+                "observed_at": "2026-09-05T00:00:00Z",
+                "snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "terminal_source_owner": "executive_terminal_return",
+                "wake_source_owner": "wake_ledger"
+              },
+              {
+                "freshness": "current",
+                "observed_at": "2026-09-05T00:00:00Z",
+                "owner": "surface_bindings",
+                "ref": "55555555-5555-4555-8555-555555555555"
+              }
+            ],
+            "valid_for_ms": 1000
+          }
+        },
+        "wake_outcome": "not_observable"
+      }
+    ],
+    "schema": "mastermind.autonomy_control_room.v1",
+    "source_failures": [],
+    "unmapped_responsibilities": []
+  },
+  "binding_conflicts": [],
+  "degraded": [
+    "active_builds: unavailable",
+    "boot_packet: unavailable"
+  ],
+  "generated_at": "2026-09-05T00:00:00Z",
+  "placement_selection": null,
+  "schema": "mastermind.chairman_control_room.v1",
+  "sources": {
+    "active_builds_collected_at": null,
+    "active_builds_schema": null,
+    "agent_os_brief_schema": null,
+    "agent_os_state_generated_at": "2026-09-03T00:00:01Z",
+    "agent_os_state_schema": "agent_os_state.v1",
+    "bindings_path_present": true,
+    "executive_inbox_schema": "mastermind.executive_inbox.v2",
+    "macro_root": null,
+    "macro_sha": null,
+    "mastermind_branch": null,
+    "mastermind_sha": null,
+    "runtime_db_present": null
+  },
+  "unbound_surfaces": [],
+  "unjoined_open_prs": [],
+  "work": [
+    {
+      "agent_os": {
+        "depends_on": [],
+        "next_action": null,
+        "program": null,
+        "reason": null,
+        "reason_code": null,
+        "source": null,
+        "state": null,
+        "status": "active",
+        "title": "Bounded fixture",
+        "unmet_dependencies": [],
+        "workstream": "B5"
+      },
+      "attention_ids": [
+        "ATTENTION-B5"
+      ],
+      "bindings": [
+        {
+          "binding_id": "55555555-5555-4555-8555-555555555555",
+          "last_verified_at": null,
+          "locator_kind": "cursor_agent_thread",
+          "observed_at": "2026-09-05T00:00:00Z",
+          "provider": "cursor_agent",
+          "role": "ceo",
+          "seat_ref": null,
+          "work_ref": "WS:B5"
+        }
+      ],
+      "disagreements": [],
+      "executive": {
+        "jobs": [
+          {
+            "job_id": "JOB-B5",
+            "status": null,
+            "workstream": "WS:B5"
+          }
+        ],
+        "joined_by": "ceo_intent_provenance"
+      },
+      "github": {
+        "prs": []
+      },
+      "work_ref": "WS:B5"
+    }
+  ]
+}

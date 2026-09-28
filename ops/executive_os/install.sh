@@ -660,6 +660,21 @@ esac
 # install-owned daemons, including a separately prepared C1 Relay, disabled
 # and booted out across generation mutation and rollback.
 STAGING=""
+wait_for_launchd_absent() {
+  local label="$1"
+  local description="$2"
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if ! /bin/launchctl print "system/$label" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      /bin/sleep 1
+    fi
+  done
+  /bin/echo "$description LaunchDaemon remained loaded after bootout" >&2
+  return 1
+}
 leave_installed_services_stopped() {
   /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
@@ -696,26 +711,11 @@ trap leave_installed_services_stopped EXIT
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
-  /bin/echo "relay LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$CONTROL_LABEL" >/dev/null 2>&1; then
-  /bin/echo "control LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$WORKER_LABEL" >/dev/null 2>&1; then
-  /bin/echo "worker LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then
-  /bin/echo "backup LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
-  /bin/echo "privileged LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
+wait_for_launchd_absent "$RELAY_LABEL" relay || exit 65
+wait_for_launchd_absent "$CONTROL_LABEL" control || exit 65
+wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
+wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
+wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
@@ -842,6 +842,21 @@ fi
   LANG=C.UTF-8 LC_ALL=C.UTF-8 \
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
   /usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now
+# A complete checkout cloned from a legitimate partial-clone source can retain
+# an empty pack .promisor sidecar even after remote removal/repack/prune. The
+# installed reader correctly refuses that marker, so normalize only after a
+# no-lazy-fetch zero-missing closure proof. Unsafe/non-empty marker evidence is
+# fail-closed and left untouched by the reviewed helper.
+/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize \
+    --checkout "$ADMIN_CHECKOUT" --expected-commit "$EXPECTED_SHA" >/dev/null || {
+  /bin/echo "administrative checkout promisor normalization refused" >&2
+  exit 65
+}
 /usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"
 /bin/chmod -R go-rwx "$ADMIN_CHECKOUT"
 [ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
@@ -1217,15 +1232,14 @@ PY
 PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$WORKER_CONFIG" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
   "$WORKER_SUPPLEMENTARY_GIDS" "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" \
   "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_CONFIG" <<'PY'
-import json, os, pathlib, sys
+import hashlib, json, os, pathlib, sys
 (
     destination, control_uid, worker_uid, worker_gid, supplementary_gids, workspace_root,
     run_root, provider_home, codex_binary, codex_version, codex_attestation_receipt,
     control_config,
 ) = sys.argv[1:]
 control = json.loads(pathlib.Path(control_config).read_text(encoding="utf-8"))
-value = {
-    "schema_version": "mastermind.executive_worker_broker_config/v4",
+common = {
     "control_uid": int(control_uid),
     "worker_uid": int(worker_uid),
     "worker_gid": int(worker_gid),
@@ -1244,10 +1258,58 @@ value = {
     "require_secret_canary": True,
     "operator_harness_armed": bool(control.get("coo_operator_harness_armed", False)),
 }
+realm = control.get("subscription_canary_realm")
+realm_binding_id = realm.get("binding_id") if isinstance(realm, dict) else None
+realm_generation = realm.get("generation") if isinstance(realm, dict) else None
+realm_config_sha = realm.get("config_sha256") if isinstance(realm, dict) else None
+has_realm = (
+    isinstance(realm, dict)
+    and set(realm) == {"binding_id", "generation", "config_sha256"}
+    and isinstance(realm_binding_id, str) and realm_binding_id
+    and type(realm_generation) is int and realm_generation >= 1
+    and isinstance(realm_config_sha, str)
+    and len(realm_config_sha) == 64
+    and realm_config_sha == realm_config_sha.lower()
+)
+if has_realm:
+    # Attended subscription-canary lane: emit v5 with the exact Control realm.
+    # The worker side re-validates the binding identity, the realm config SHA,
+    # and the (non-boolean positive) generation on every startup; the digest
+    # fence below ensures the bytes that just landed on disk are exactly what
+    # Control signed, so the worker can never start with a different realm
+    # than the one the Control side composed against.
+    value = {
+        **common,
+        "schema_version": "mastermind.executive_worker_broker_config/v5",
+        "harness_binding_id": str(realm_binding_id),
+        "subscription_realm_enrollment": {
+            "binding_id": str(realm_binding_id),
+            "generation": int(realm_generation),
+        },
+    }
+else:
+    if realm is not None:
+        raise SystemExit("control subscription_canary_realm is malformed")
+    value = {
+        **common,
+        "schema_version": "mastermind.executive_worker_broker_config/v4",
+    }
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+payload = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode("utf-8")
+temporary.write_bytes(payload)
 os.chmod(temporary, 0o440)
+if has_realm:
+    # Fence before publication: a mismatched file never replaces the active
+    # worker configuration.
+    observed = hashlib.sha256(payload).hexdigest()
+    expected = str(realm_config_sha).lower()
+    if observed != expected:
+        temporary.unlink(missing_ok=True)
+        raise SystemExit(
+            "worker config SHA-256 differs from Control's "
+            "subscription_canary_realm.config_sha256"
+        )
 os.replace(temporary, path)
 PY
 /usr/sbin/chown "root:$WORKER_GROUP" "$WORKER_CONFIG"

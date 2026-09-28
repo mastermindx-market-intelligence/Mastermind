@@ -1,4 +1,4 @@
-"""Secret-free custom-provider realms for the hardened Codex worker.
+"""Secret-free provider realms and root-config native identity observations.
 
 A realm selects Codex's standard OpenAI-compatible provider transport. It owns
 no lifecycle, credential bytes, routing decision, or retry policy. Executive OS
@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import pwd
 import re
 import stat
 import sys
@@ -294,20 +295,33 @@ ALIBABA_TOKEN_PLAN = CodexProviderRealm(
 )
 
 REVIEWED_CODEX_PROVIDER_REALMS = {
-    realm.realm_id: realm for realm in (ALIBABA_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, ALIBABA_TOKEN_PLAN,)
 }
 
 CANDIDATE_CODEX_PROVIDER_REALMS_SPEC_ONLY = {
-    realm.realm_id: realm for realm in (MINIMAX_TOKEN_PLAN, OPENCODE_GO_TOKEN_PLAN,)
+    realm.realm_id: realm for realm in (OPENCODE_GO_TOKEN_PLAN,)
 }
 
-# Kit-side Responses transport was observed with Codex 0.147 against MiniMax's
-# OpenAI-compatible base, but it is not officially documented. Promotion to the
-# reviewed registry requires an exact-head native execution proof. No worker
-# binding is authorized from this candidate collection. The OpenCode Go realm
-# is SPEC-ONLY; kit-side Responses transport was proven only for some upstream
-# models (see kit GO_PROOF_LEDGER) and promotion requires the reviewed exact-head
-# native execution proof; no worker binding is authorized from it.
+# MiniMax Token Plan was promoted out of quarantine by the exact-head native
+# transport proof recorded in the secret-free, reviewable repository artifact:
+# review_evidence/provider_realms/minimax_codex_responses_20260915.json
+# (source receipt SHA-256
+# 84771422af5ef24e12f6ec0e82a2b107763fceaca77f1c7c7915493802bee3dd).
+# It records codex-cli 0.154.0, rc 0, MiniMax-M3 and wire_api "responses"
+# without credential fingerprints, credential type tags or host-local paths.
+# The observed helper used the existing `minimax` pool; the candidate
+# `minimax-codex` binding was not executed. The artifact therefore proves only
+# transport reachability -- not a governed-path canary, capacity observation,
+# usage-policy decision or autonomous-routing grant -- so
+# this realm is reviewed for transport and no worker binding is armed by the
+# promotion. The binding it enables (minimax-token-plan.codex-responses) stays
+# BUILT_NOT_PROVEN with autonomous_allowed false, and a live lane still requires
+# every per-binding enrollment, capacity, canary and usage-policy gate.
+#
+# The OpenCode Go realm remains SPEC-ONLY and quarantined: kit-side Responses
+# transport was proven only for some upstream models (see kit GO_PROOF_LEDGER)
+# and promotion requires the reviewed exact-head native execution proof; no
+# worker binding is authorized from it.
 
 ProviderCredentialLoader = Callable[[], str]
 
@@ -546,10 +560,385 @@ __all__ = [
     "PROVIDER_CREDENTIAL_FILENAME",
     "ProviderCredentialLoader",
     "ProviderRealmError",
+    "NATIVE_REALM_ENROLLMENT_SCHEMA",
+    "NativeRealmIdentityOwner",
     "issue_provider_realm_enrollment_receipt",
     "load_private_provider_credential",
+    "load_native_realm_owner",
     "provider_home_credential_loader",
     "set_provider_realm_test_enrollment",
     "set_provider_realm_test_key",
     "verify_provider_realm_enrollment_receipt",
 ]
+
+
+# Native enrollment is a stanza in the existing root-owned Worker Broker
+# configuration. No separate identity registry, credential store or HMAC key
+# file is introduced. Legacy custom-provider receipt minting above is unchanged.
+NATIVE_REALM_ENROLLMENT_SCHEMA = "mastermind.native_provider_realm_enrollment/v1"
+_NATIVE_ENROLLMENT_FIELDS = frozenset({
+    "schema_version", "slot_id", "host_ref", "os_principal_ref",
+    "config_custody_ref", "generation", "enrollment_state",
+    "provider_binary_sha256",
+})
+_NATIVE_SHA = re.compile(r"^[0-9a-f]{64}$")
+_NATIVE_PRINCIPAL = re.compile(r"^principal-[0-9a-f]{64}$")
+_NATIVE_CUSTODY = re.compile(r"^custody-[0-9a-f]{64}$")
+_NATIVE_OWNER_SEAL = object()
+
+
+def _native_refuse() -> None:
+    # Fixed diagnostics: no paths, account identifiers, credentials or raw
+    # filesystem/provider errors cross the caller boundary.
+    raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE")
+
+
+def _native_path(value: object) -> Path:
+    if not isinstance(value, (str, Path)):
+        _native_refuse()
+    raw = str(value)
+    path = Path(raw)
+    if not path.is_absolute() or str(path) != raw or ".." in path.parts:
+        _native_refuse()
+    return path
+
+
+def _native_canonical_home(path: Path) -> Path:
+    # /var is the OS-owned macOS alias. Do not resolve arbitrary caller paths.
+    if sys.platform == "darwin" and path.parts[:2] == ("/", "var"):
+        return Path("/private") / path.relative_to("/")
+    return path
+
+
+def _native_stat_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+@contextmanager
+def _native_open(path: Path, *, directory: bool = False,
+                 private_uid: int | None = None):
+    """Walk every component with held no-follow descriptors and ACL checks."""
+    path = _native_path(path)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    odirectory = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not odirectory:
+        _native_refuse()
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0)
+    # Darwin sys/fcntl.h defines O_SEARCH as O_EXEC (0x40000000) |
+    # O_DIRECTORY; CPython does not expose it on every supported release.
+    # O_RDONLY and O_EVTONLY incorrectly require listing permission on the
+    # installed root-owned 0711 traversal directories. Search-only descriptors
+    # retain no-follow, fstat and descriptor-bound ACL observations.
+    search = (getattr(os, "O_SEARCH", 0x40000000 | odirectory)
+              if sys.platform == "darwin" else getattr(os, "O_PATH", os.O_RDONLY))
+    directory_flags = search | nofollow | odirectory | getattr(os, "O_CLOEXEC", 0)
+    descriptors: list[int] = []
+    try:
+        parent = os.open("/", directory_flags)
+        descriptors.append(parent)
+        current = Path("/")
+        for index, part in enumerate(path.parts[1:]):
+            final = index == len(path.parts) - 2
+            is_directory = not final or directory
+            descriptor = os.open(part, directory_flags if is_directory else
+                                 flags | getattr(os, "O_NONBLOCK", 0), dir_fd=parent)
+            descriptors.append(descriptor)
+            current /= part
+            info = os.fstat(descriptor)
+            expected_type = stat.S_ISDIR if is_directory else stat.S_ISREG
+            if (not expected_type(info.st_mode)
+                    or info.st_uid not in ({0, private_uid} if is_directory else {0})
+                    or stat.S_IMODE(info.st_mode) & 0o022
+                    or (not is_directory and info.st_nlink != 1)
+                    or has_macos_acl(current, expected_identity=info, descriptor=descriptor)):
+                _native_refuse()
+            parent = descriptor
+        if len(descriptors) < 2:
+            _native_refuse()
+        before = os.fstat(parent)
+        yield parent, before
+        # Detect replacement of the named leaf while its old inode stayed open.
+        after = os.fstat(parent)
+        if (_native_stat_identity(before) != _native_stat_identity(after)
+                or _native_stat_identity(os.stat(path, follow_symlinks=False)) != _native_stat_identity(after)):
+            _native_refuse()
+    except (OSError, FilesystemSecurityError):
+        raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE") from None
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def _native_read_config(path: Path, expected_digest: str) -> dict[str, Any]:
+    if type(expected_digest) is not str or not _NATIVE_SHA.fullmatch(expected_digest):
+        _native_refuse()
+    with _native_open(path) as (descriptor, before):
+        if not 0 < before.st_size <= 65536:
+            _native_refuse()
+        raw = bytearray()
+        while len(raw) <= 65536:
+            chunk = os.read(descriptor, min(8192, 65537 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
+        if (len(raw) != before.st_size
+                or _native_stat_identity(before) != _native_stat_identity(os.fstat(descriptor))
+                or hashlib.sha256(raw).hexdigest() != expected_digest):
+            _native_refuse()
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                _native_refuse()
+            value[key] = item
+        return value
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
+                           parse_constant=lambda _: _native_refuse())
+    except (UnicodeDecodeError, ValueError):
+        raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE") from None
+    if type(value) is not dict:
+        _native_refuse()
+    return value
+
+
+def _native_enrollment(config: Mapping[str, Any]):
+    from control_plane.executive_host_pressure import HOST_REF_RE
+    from ops.executive_os.provider_worker_slots import (
+        get_slot, native_slot_from_config, SlotCatalogError,
+    )
+    enrollment = config.get("native_realm_enrollment")
+    if type(enrollment) is not dict or set(enrollment) != _NATIVE_ENROLLMENT_FIELDS:
+        _native_refuse()
+    if (enrollment["schema_version"] != NATIVE_REALM_ENROLLMENT_SCHEMA
+            or enrollment["enrollment_state"] != "enrolled"
+            or type(enrollment["generation"]) is not int
+            or not 1 <= enrollment["generation"] < 2**63):
+        _native_refuse()
+    for key, pattern in (("host_ref", HOST_REF_RE),
+                         ("os_principal_ref", _NATIVE_PRINCIPAL),
+                         ("config_custody_ref", _NATIVE_CUSTODY),
+                         ("provider_binary_sha256", _NATIVE_SHA)):
+        if type(enrollment[key]) is not str or not pattern.fullmatch(enrollment[key]):
+            _native_refuse()
+    try:
+        slot = (native_slot_from_config(config) if config.get("native_provider") == "claude"
+                else get_slot(enrollment["slot_id"]))
+    except (SlotCatalogError, TypeError):
+        raise ProviderRealmError("NATIVE_REALM_IDENTITY_UNAVAILABLE") from None
+    if (type(config.get("worker_uid")) is not int
+            or type(config.get("worker_gid")) is not int
+            or config["worker_uid"] != slot.worker_uid
+            or config["worker_gid"] != slot.worker_gid
+            or config.get("worker_user") != slot.worker_user
+            or _native_canonical_home(_native_path(config.get("provider_home")))
+               != _native_canonical_home(slot.provider_home)):
+        _native_refuse()
+    return enrollment, slot
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class NativeRealmIdentityOwner:
+    """Revalidating composition capability, never a serialized auth assertion.
+
+    The caller pins the already admitted broker configuration's SHA-256. The
+    root configuration owner assigns opaque references and generation once;
+    hostname, UID, home path and provider login cannot invent enrollment.
+    This checks identity, not provider login, quota or WORKER_BROKER context.
+    """
+    _config_path: Path
+    _config_sha256: str
+    _seal: object = dataclasses.field(repr=False, compare=False)
+
+    def observe(self):
+        from ops.executive_os.provider_realm_facts import NativeRealmIdentityObservation
+        if self._seal is not _NATIVE_OWNER_SEAL:
+            _native_refuse()
+        config = _native_read_config(self._config_path, self._config_sha256)
+        enrollment, slot = _native_enrollment(config)
+        home = _native_canonical_home(slot.provider_home)
+        try:
+            principal = pwd.getpwuid(os.geteuid())
+        except KeyError:
+            _native_refuse()
+        if (os.geteuid() != slot.worker_uid or os.getuid() != slot.worker_uid
+                or os.getegid() != slot.worker_gid or os.getgid() != slot.worker_gid
+                or principal.pw_name != slot.worker_user
+                or principal.pw_gid != slot.worker_gid
+                or _native_canonical_home(_native_path(principal.pw_dir)) != home):
+            _native_refuse()
+        allowed_groups = config.get("allowed_supplementary_gids")
+        if (type(allowed_groups) is not list
+                or any(type(gid) is not int or gid <= 0 for gid in allowed_groups)
+                or not set(os.getgroups()).issubset(set(allowed_groups) | {slot.worker_gid})):
+            _native_refuse()
+        config_dir = home / ".claude" if slot.provider_family == "anthropic" else home
+        if _native_canonical_home(_native_path(os.environ.get("HOME"))) != home:
+            _native_refuse()
+        environment_key = "CLAUDE_CONFIG_DIR" if slot.provider_family == "anthropic" else "CODEX_HOME"
+        if _native_canonical_home(_native_path(os.environ.get(environment_key))) != config_dir:
+            _native_refuse()
+        for path in (home, config_dir):
+            with _native_open(path, directory=True, private_uid=slot.worker_uid) as (_, info):
+                if (info.st_uid != slot.worker_uid or info.st_gid != slot.worker_gid
+                        or stat.S_IMODE(info.st_mode) != 0o700):
+                    _native_refuse()
+        # The factory owns provider selection and signature/version attestation;
+        # the identity join independently pins the exact current executable bytes.
+        binary_key = "claude_binary" if slot.provider_family == "anthropic" else "codex_binary"
+        binary = _native_path(config.get(binary_key))
+        with _native_open(binary) as (descriptor, before):
+            if not 0 < before.st_size <= 512 * 1024 * 1024 or not before.st_mode & 0o111:
+                _native_refuse()
+            digest = hashlib.sha256()
+            remaining = before.st_size
+            while remaining:
+                chunk = os.read(descriptor, min(1024 * 1024, remaining))
+                if not chunk:
+                    _native_refuse()
+                digest.update(chunk)
+                remaining -= len(chunk)
+            if (digest.hexdigest() != enrollment["provider_binary_sha256"]
+                    or _native_stat_identity(before) != _native_stat_identity(os.fstat(descriptor))):
+                _native_refuse()
+        # Revocation/config drift during observation invalidates this observation.
+        _native_read_config(self._config_path, self._config_sha256)
+        return NativeRealmIdentityObservation(
+            slot_id=slot.slot_id, host_ref=enrollment["host_ref"],
+            os_principal_ref=enrollment["os_principal_ref"],
+            config_custody_ref=enrollment["config_custody_ref"],
+            generation=enrollment["generation"],
+            source_config_sha256=self._config_sha256,
+            provider_binary_sha256=enrollment["provider_binary_sha256"],
+        )
+
+    def require_current_identity(self, host_ref: str, os_principal_ref: str) -> None:
+        observation = self.observe()
+        if (host_ref != observation.host_ref
+                or os_principal_ref != observation.os_principal_ref):
+            _native_refuse()
+        return None
+
+
+def load_native_realm_owner(config_path: Path, *, expected_config_sha256: str) -> NativeRealmIdentityOwner:
+    """Load from the existing root config, never request JSON or an environment tag."""
+    path = _native_path(config_path)
+    config = _native_read_config(path, expected_config_sha256)
+    _native_enrollment(config)
+    return NativeRealmIdentityOwner(path, expected_config_sha256, _NATIVE_OWNER_SEAL)
+
+
+_SUBSCRIPTION_REALM_OWNER_SEAL = object()
+_SUBSCRIPTION_REALM_SCHEMA = "mastermind.executive_worker_broker_config/v5"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class SubscriptionRealmOwner:
+    """Worker-local identity observer over the existing root broker config.
+
+    Enrollment is the root owner's explicit generation/binding stanza. A
+    credential is only observed for private-file custody; no credential bytes,
+    login verdict, provider call, capacity claim or autonomous grant is made.
+    """
+    _config_path: Path
+    _config_sha256: str
+    _seal: object
+
+    def observe(self) -> dict[str, Any]:
+        from control_plane.subscription_catalog import get_binding, compose_catalog_digest
+        from control_plane.codex_worker import load_codex_attestation_receipt, CodexWorkerError
+        from ops.executive_os.provider_worker_slots import RUNTIME_WORKER_ROOT
+
+        if self._seal is not _SUBSCRIPTION_REALM_OWNER_SEAL:
+            _native_refuse()
+        config = _native_read_config(self._config_path, self._config_sha256)
+        enrollment = config.get("subscription_realm_enrollment")
+        if (config.get("schema_version") != _SUBSCRIPTION_REALM_SCHEMA
+                or type(enrollment) is not dict or set(enrollment) != {"generation", "binding_id"}
+                or type(enrollment["generation"]) is not int
+                or not 1 <= enrollment["generation"] < 2**63
+                or enrollment["binding_id"] != config.get("harness_binding_id")
+                or config.get("operator_harness_armed") is not False):
+            _native_refuse()
+        binding = get_binding(enrollment["binding_id"])
+        realms = [realm for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+                  if realm.provider_alias == binding.provider
+                  and realm.base_url == binding.effective_base_url
+                  and realm.wire_api == binding.protocol]
+        if (binding.adapter_id != "codex-cli" or len(realms) != 1
+                or binding.implementation_state == "SPEC_ONLY" or binding.autonomous_allowed):
+            _native_refuse()
+        worker_id = config.get("worker_id")
+        uid, gid, control_uid = (config.get(key) for key in ("worker_uid", "worker_gid", "control_uid"))
+        if (type(worker_id) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", worker_id) is None
+                or any(type(value) is not int or value <= 0 for value in (uid, gid, control_uid))
+                or uid == control_uid):
+            _native_refuse()
+        home = _native_canonical_home(_native_path(config.get("provider_home")))
+        expected_home = _native_canonical_home(RUNTIME_WORKER_ROOT / worker_id / "provider-home")
+        try:
+            principal = pwd.getpwuid(os.geteuid())
+        except KeyError:
+            _native_refuse()
+        if (home != expected_home
+                or os.getuid() != uid or os.geteuid() != uid
+                or os.getgid() != gid or os.getegid() != gid
+                or principal.pw_name != config.get("worker_user") or principal.pw_gid != gid
+                or _native_canonical_home(_native_path(principal.pw_dir)) != home
+                or _native_canonical_home(_native_path(os.environ.get("HOME"))) != home
+                or _native_canonical_home(_native_path(os.environ.get("CODEX_HOME"))) != home):
+            _native_refuse()
+        groups = config.get("allowed_supplementary_gids")
+        if (type(groups) is not list or any(type(group) is not int or group <= 0 for group in groups)
+                or not set(os.getgroups()).issubset(set(groups) | {gid})):
+            _native_refuse()
+        with _native_open(home, directory=True, private_uid=uid) as (_, home_info):
+            if (home_info.st_uid != uid or home_info.st_gid != gid
+                    or stat.S_IMODE(home_info.st_mode) != 0o700):
+                _native_refuse()
+            credential_path = home / PROVIDER_CREDENTIAL_FILENAME
+            try:
+                before = credential_path.lstat()
+                descriptor, observed = _open_regular_credential(
+                    credential_path, before, expected_uid=uid, expected_gid=gid)
+                try:
+                    if (_has_macos_acl(credential_path, expected_identity=observed, descriptor=descriptor)
+                            or _native_stat_identity(observed) != _native_stat_identity(credential_path.lstat())):
+                        _native_refuse()
+                finally:
+                    os.close(descriptor)
+            except (OSError, ProviderRealmError):
+                raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
+        binary = _native_path(config.get("codex_binary"))
+        receipt = _native_path(config.get("codex_attestation_receipt"))
+        try:
+            with _native_open(binary), _native_open(receipt):
+                attestation = load_codex_attestation_receipt(
+                    receipt, expected_binary_path=binary, expected_owner_gid=gid)
+        except (OSError, CodexWorkerError):
+            raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
+        versions = config.get("allowed_codex_versions")
+        if (type(versions) is not list or not versions or len(versions) > 4
+                or any(type(version) is not str or not version for version in versions)
+                or attestation.version not in versions
+                or config.get("required_team_identifier") != "2DC432GLL2"
+                or attestation.team_identifier != "2DC432GLL2"):
+            _native_refuse()
+        _native_read_config(self._config_path, self._config_sha256)
+        return {
+            "worker_id": worker_id, "control_uid": control_uid,
+            "binding_id": binding.binding_id, "profile_id": binding.profile_id,
+            "adapter_id": binding.adapter_id,
+            "realm_config_sha256": self._config_sha256,
+            "realm_generation": enrollment["generation"],
+            "catalog_digest": compose_catalog_digest(),
+        }
+
+
+def load_subscription_realm_owner(config_path: Path, *, expected_config_sha256: str) -> SubscriptionRealmOwner:
+    """Pin the actual root-owned broker config; never accept a caller dict."""
+    owner = SubscriptionRealmOwner(_native_path(config_path), expected_config_sha256,
+                                   _SUBSCRIPTION_REALM_OWNER_SEAL)
+    owner.observe()
+    return owner

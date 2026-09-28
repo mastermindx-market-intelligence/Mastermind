@@ -27,6 +27,11 @@ SOL_SKILLS = (
     "review-worker-return",
     "review-pull-request",
     "close-out-program",
+    "mastermind-web-ceo",
+    "mastermind-principal-architect",
+    "mastermind-product-designer",
+    "mastermind-deep-research",
+    "mastermind-recovery",
 )
 OPERATOR_SKILLS = (
     "receive-commission",
@@ -35,6 +40,7 @@ OPERATOR_SKILLS = (
     "finish-operation",
 )
 CORTEX_SKILLS = ("orient-mastermind-mission",)
+NAVIGATOR_SKILLS = ("navigate-mastermind-universe",)
 
 
 def _copy_package(destination: Path) -> None:
@@ -118,9 +124,18 @@ def _closed_json_document_paths() -> tuple[str, ...]:
         "plugins/mastermind-sol/.codex-plugin/plugin.json",
         "plugins/mastermind-operator/.codex-plugin/plugin.json",
         "plugins/mastermind-cortex/.codex-plugin/plugin.json",
+        "plugins/mastermind-navigator/.codex-plugin/plugin.json",
         "plugins/mastermind-sol/references/app-bindings.template.json",
         "plugins/mastermind-operator/references/app-bindings.template.json",
         "plugins/mastermind-cortex/fixtures/orientation-cases.json",
+        "plugins/mastermind-navigator/references/boot-sources.json",
+        "plugins/mastermind-navigator/references/capability-health.schema.json",
+        "plugins/mastermind-navigator/references/capability-state-rules.json",
+        "plugins/mastermind-navigator/references/catalog.fragment.json",
+        "plugins/mastermind-navigator/references/owner-routing.json",
+        "plugins/mastermind-navigator/references/role-profiles.json",
+        "plugins/mastermind-navigator/fixtures/capability-health-cases.json",
+        "plugins/mastermind-navigator/fixtures/fresh-session-routing-cases.json",
     )
 
 
@@ -145,7 +160,7 @@ def test_repository_plugin_package_is_valid() -> None:
         "plugins": [
             {
                 "name": "mastermind-sol",
-                "version": "0.1.0",
+                "version": "0.2.0",
                 "manifest": "plugins/mastermind-sol/.codex-plugin/plugin.json",
                 "skills": list(SOL_SKILLS),
             },
@@ -160,6 +175,12 @@ def test_repository_plugin_package_is_valid() -> None:
                 "version": "0.1.0",
                 "manifest": "plugins/mastermind-cortex/.codex-plugin/plugin.json",
                 "skills": list(CORTEX_SKILLS),
+            },
+            {
+                "name": "mastermind-navigator",
+                "version": "0.1.0",
+                "manifest": "plugins/mastermind-navigator/.codex-plugin/plugin.json",
+                "skills": list(NAVIGATOR_SKILLS),
             },
         ],
         "errors": [],
@@ -611,6 +632,13 @@ def test_repository_documents_match_the_closed_contract() -> None:
                     "path": "./plugins/mastermind-cortex",
                 },
             },
+            {
+                "name": "mastermind-navigator",
+                "source": {
+                    "source": "local",
+                    "path": "./plugins/mastermind-navigator",
+                },
+            },
         ],
     }
     expected_bindings = {
@@ -625,9 +653,9 @@ def test_repository_documents_match_the_closed_contract() -> None:
             ("mastermind-dialogue", "integrations/mastermind_company_mcp/schemas.py")
         ],
     }
-    for plugin, display_name in (
-        ("mastermind-sol", "Mastermind Sol"),
-        ("mastermind-operator", "Mastermind Operator"),
+    for plugin, display_name, version, template_version in (
+        ("mastermind-sol", "Mastermind CEO", "0.2.0", "0.1.0"),
+        ("mastermind-operator", "Mastermind Operator", "0.1.0", "0.1.0"),
     ):
         manifest = json.loads(
             (ROOT / "plugins" / plugin / ".codex-plugin/plugin.json").read_text()
@@ -641,7 +669,7 @@ def test_repository_documents_match_the_closed_contract() -> None:
             "interface",
         }
         assert manifest["name"] == plugin
-        assert manifest["version"] == "0.1.0"
+        assert manifest["version"] == version
         assert manifest["author"] == {"name": "Mastermind-X"}
         assert manifest["skills"] == "./skills/"
         assert manifest["interface"]["displayName"] == display_name
@@ -649,12 +677,16 @@ def test_repository_documents_match_the_closed_contract() -> None:
         assert len(manifest["interface"]["longDescription"]) >= 80
         assert manifest["interface"]["capabilities"] == ["Read"]
         assert "apps" not in manifest and "mcpServers" not in manifest
+        if plugin == "mastermind-sol":
+            public_text = json.dumps(manifest["interface"]) + manifest["description"]
+            assert "Mastermind Sol" not in public_text
+            assert "Chairman and Sol" not in public_text
         template = json.loads(
             (ROOT / "plugins" / plugin / "references/app-bindings.template.json").read_text()
         )
         assert template["schema"] == "mastermind.plugin_app_bindings_template.v1"
         assert template["plugin"] == plugin
-        assert template["plugin_version"] == "0.1.0"
+        assert template["plugin_version"] == template_version
         assert template["generated_file"] == ".app.json"
         assert template["generated_by_wave"] == "BSC-U1"
         assert [
@@ -663,6 +695,22 @@ def test_repository_documents_match_the_closed_contract() -> None:
         ] == expected_bindings[plugin]
         assert all(binding["required"] is True for binding in template["bindings"])
         assert all(binding["app_id"] is None for binding in template["bindings"])
+
+
+def test_ceo_skill_package_facing_metadata_is_model_independent() -> None:
+    model_specific = re.compile(r"\bSol\b")
+    for skill in SOL_SKILLS:
+        text = _sol(skill)
+        assert text.startswith("---\n")
+        frontmatter, body = text[4:].split("\n---\n", 1)
+        description = next(
+            line.removeprefix("description:").strip()
+            for line in frontmatter.splitlines()
+            if line.startswith("description:")
+        )
+        heading = next(line.strip() for line in body.splitlines() if line.startswith("# "))
+        assert not model_specific.search(description), (skill, description)
+        assert not model_specific.search(heading), (skill, heading)
 
 
 @pytest.mark.parametrize("skill", SOL_SKILLS)
@@ -717,6 +765,31 @@ def test_key_workflow_semantics_are_explicit() -> None:
     assert "never self-merge" in _operator("finish-operation")
 
 
+def test_personal_ceo_release_preserves_frozen_business_u1_generation_one() -> None:
+    manifest = json.loads(
+        (ROOT / "plugins/mastermind-sol/.codex-plugin/plugin.json").read_text()
+    )
+    template = json.loads(
+        (ROOT / "plugins/mastermind-sol/references/app-bindings.template.json").read_text()
+    )
+    from integrations.business_sol_installation import bindings as business_u1
+
+    assert manifest["name"] == "mastermind-sol"
+    assert manifest["version"] == "0.2.0"
+    assert manifest["interface"]["displayName"] == "Mastermind CEO"
+
+    assert template["plugin"] == "mastermind-sol"
+    assert template["plugin_version"] == "0.1.0"
+    assert template["generated_by_wave"] == "BSC-U1"
+
+    assert business_u1.PLUGIN_NAME == "mastermind-sol"
+    assert business_u1.PLUGIN_DISPLAY_NAME == "Mastermind Sol"
+    assert business_u1.PLUGIN_VERSION == "0.1.0"
+    assert business_u1.PLUGIN_SCOPE == "WORKSPACE"
+    assert business_u1.GENERATION == 1
+    assert business_u1.GENERATED_BY_WAVE == "BSC-U1"
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_code"),
     (
@@ -752,7 +825,7 @@ def test_structural_authority_mutations_are_refused(
         path.write_text(path.read_text().replace("one already-bound operation and dialogue", "work"))
     elif mutation == "wrong_manifest_version":
         value = json.loads(manifest.read_text())
-        value["version"] = "0.2.0"
+        value["version"] = "0.3.0"
         _write_json(manifest, value)
     else:
         extra = tmp_path / "plugins/mastermind-sol/skills/unreviewed-extra/SKILL.md"
@@ -1005,7 +1078,7 @@ def test_closed_template_required_boolean_rejects_each_numeric_alias(
     assert "INVALID_APP_TEMPLATE" in _codes_without_exception(tmp_path)
 
 
-def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path) -> None:
+def test_closed_json_scalar_alias_sweep_refuses_every_mutation(tmp_path: Path) -> None:
     """Every closed JSON Boolean leaf rejects the three numeric alias spellings."""
     _copy_package(tmp_path)
     mutations: list[tuple[Path, str, int, str]] = []
@@ -1020,7 +1093,7 @@ def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path
             )
             for numeric in aliases:
                 mutations.append((path, text, index, numeric))
-    assert len(mutations) == 120
+    assert len(mutations) == 306
 
     for path, original, index, numeric in mutations:
         matches = list(re.finditer(r"\b(?:true|false)\b", original))
@@ -1028,7 +1101,12 @@ def test_closed_json_scalar_alias_sweep_refuses_all_120_mutations(tmp_path: Path
         path.write_text(original[:match.start()] + numeric + original[match.end():], encoding="utf-8")
         try:
             result = _validate_repository_twice_without_exception(tmp_path)
-            assert result["ok"] is False
+            assert result["ok"] is False, {
+                "path": path.relative_to(tmp_path).as_posix(),
+                "boolean_index": index,
+                "numeric_alias": numeric,
+                "result": result,
+            }
         finally:
             path.write_text(original, encoding="utf-8")
 
@@ -1077,6 +1155,7 @@ def test_validator_is_stdlib_only_and_has_no_action_surface() -> None:
             "argparse",
             "dataclasses",
             "errno",
+            "hashlib",
             "json",
             "os",
             "re",
@@ -1168,3 +1247,23 @@ def test_validator_rejects_nontrigger_skill_description(tmp_path: Path) -> None:
     path.write_text("\n".join(lines) + "\n")
     result = validate_repository(tmp_path)
     assert "INVALID_SKILL_DESCRIPTION" in {error["code"] for error in result["errors"]}
+
+
+@pytest.mark.parametrize("field", ("description", "shortDescription", "longDescription"))
+def test_navigator_manifest_truth_bearing_descriptions_are_closed(
+    tmp_path: Path, field: str
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-navigator/.codex-plugin/plugin.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if field == "description":
+        manifest[field] = "Changed Navigator package description with no authority claim."
+    else:
+        manifest["interface"][field] = (
+            "Changed Navigator interface description that remains non-empty, intentionally "
+            "longer than eighty characters, and carries no authority claim."
+        )
+    _write_json(path, manifest)
+
+    codes = _codes_without_exception(tmp_path)
+    assert "NAVIGATOR_CONTENT_CONTRACT_MISMATCH" in codes

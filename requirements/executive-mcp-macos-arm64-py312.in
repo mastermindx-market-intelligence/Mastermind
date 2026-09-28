@@ -1,0 +1,13 @@
+# Executive MCP production edge runtime — macOS arm64 / CPython 3.12
+#
+# The network process owns OAuth/MCP dependencies. Installed Executive reads also
+# invoke the canonical boot-packet collector here so the sealed control Python can
+# remain `-I -S -B` and SDK / site-package free. Resolver movement is a HOLD.
+mcp==1.28.1
+PyJWT[crypto]==2.13.0
+PyYAML==6.0.3
+httpx==0.28.1
+jsonschema==4.26.0
+pydantic==2.13.5
+starlette==1.6.0
+uvicorn[standard]==0.52.4
