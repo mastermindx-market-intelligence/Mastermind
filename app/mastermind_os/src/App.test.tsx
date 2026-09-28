@@ -12,6 +12,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { bindMissionHost, type AuthState } from "./host";
 import { createWebAuth } from "./web-auth";
+import type {
+  CommandIntent,
+  EffectReceipt,
+  FiniteCommandPort,
+  OperationPointer,
+  OwnerContext,
+  PendingPointerStore,
+} from "./orchestration/operation-controller";
+import type { OrchestratorCommandBinding } from "./orchestration/host-command-bindings";
+import { COMMAND_ROUTE_UNAVAILABLE } from "./orchestration/host-command-bindings";
 import {
   bothUnavailableMissionFixture,
   controlRoomFixture,
@@ -1426,5 +1436,1134 @@ describe("actual unconfigured web owner lifecycle", () => {
       screen.getByRole("heading", { name: "Programs", level: 1 }),
     );
     expect(calls).toBe(0);
+  });
+});
+
+function memoryStore(): PendingPointerStore {
+  const data = new Map<string, OperationPointer>();
+  return {
+    read: (scope) => data.get(scope) ?? null,
+    write: (scope, pointer) => {
+      data.set(scope, pointer);
+    },
+    clear: (scope, pointer) => {
+      const current = data.get(scope);
+      if (
+        current &&
+        current.operationKey === pointer.operationKey &&
+        current.kind === pointer.kind &&
+        current.targetKey === pointer.targetKey
+      )
+        data.delete(scope);
+    },
+  };
+}
+
+const defaultSession = {
+  sessionKey: "sess-1",
+  title: "Session One",
+  messages: [] as { id: string; role: "user" | "assistant" | "activity"; text: string }[],
+  observedAt: null as string | null,
+  connection: "connected" as const,
+  coverage: "COMPLETE",
+  turnBusy: false,
+  stopLabel: "Request stop" as const,
+  selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+};
+
+function makeCommandBinding(overrides: {
+  ctx?: OwnerContext | null;
+  view?: OrchestratorCommandBinding["getView"] extends () => infer V
+    ? V
+    : never;
+  store?: PendingPointerStore;
+  submit?: FiniteCommandPort["submit"];
+  readOperation?: FiniteCommandPort["readOperation"];
+  makeLaunchIntent?: OrchestratorCommandBinding["makeLaunchIntent"];
+  makeMessageIntent?: OrchestratorCommandBinding["makeMessageIntent"];
+  makeStopIntent?: OrchestratorCommandBinding["makeStopIntent"];
+} = {}) {
+  let ctx: OwnerContext | null =
+    overrides.ctx === undefined
+      ? { principalScope: "owner-a", generation: "gen-1" }
+      : overrides.ctx;
+  let view = overrides.view ?? {
+    projects: [{ ref: "proj-a", label: "Project A" }],
+    profiles: [{ ref: "prof-a", label: "Profile A" }],
+    session: defaultSession,
+  };
+  const listeners = new Set<() => void>();
+  let seq = 0;
+  const prepare = vi.fn((intent: CommandIntent): OperationPointer => ({
+    operationKey: `op-${++seq}`,
+    kind: intent.kind,
+    targetKey: intent.targetKey,
+  }));
+  const submit =
+    overrides.submit ??
+    vi.fn(async (pointer: OperationPointer, intent: CommandIntent): Promise<EffectReceipt> => ({
+      operationKey: pointer.operationKey,
+      kind: pointer.kind,
+      targetKey: pointer.targetKey,
+      disposition: "accepted",
+      ...(intent.kind === "launch"
+        ? { missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" } }
+        : {}),
+    }));
+  const readOperation =
+    overrides.readOperation ??
+    vi.fn(async (pointer: OperationPointer): Promise<EffectReceipt> => ({
+      operationKey: pointer.operationKey,
+      kind: pointer.kind,
+      targetKey: pointer.targetKey,
+      disposition: "accepted",
+      ...(pointer.kind === "launch"
+        ? { missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" } }
+        : {}),
+    }));
+  const port: FiniteCommandPort = {
+    context: () => ctx,
+    prepare,
+    submit,
+    readOperation,
+  };
+  const binding: OrchestratorCommandBinding = {
+    port,
+    store: overrides.store ?? memoryStore(),
+    getView: () => view,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    makeLaunchIntent:
+      overrides.makeLaunchIntent ??
+      ((form) => ({
+        kind: "launch",
+        targetKey: "opaque-launch",
+        payload: { ...form },
+      })),
+    makeMessageIntent:
+      overrides.makeMessageIntent ??
+      ((sessionKey, text) => ({
+        kind: "message",
+        targetKey: "opaque-session",
+        payload: { sessionKey, text },
+      })),
+    makeStopIntent:
+      overrides.makeStopIntent ??
+      ((sessionKey) => ({
+        kind: "stop",
+        targetKey: "opaque-session",
+        payload: { sessionKey },
+      })),
+  };
+  return {
+    binding,
+    prepare,
+    submit,
+    readOperation,
+    setCtx: (next: OwnerContext | null) => {
+      ctx = next;
+    },
+    setView: (next: typeof view) => {
+      view = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+function installCommandHost(
+  binding: OrchestratorCommandBinding | undefined,
+  auth: AuthState = {
+    status: "signed_in",
+    reason: null,
+    acquisition: true,
+    content: true,
+  },
+) {
+  let current = auth;
+  let listener = (_state: AuthState) => {};
+  window.MastermindMissionHost = {
+    selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+    readPrograms,
+    readMission: async ({ workRef, rootJobId }) =>
+      missionFixture(workRef, rootJobId),
+    ...(binding ? { commandBinding: binding } : {}),
+    auth: {
+      getState: () => current,
+      subscribe: (fn) => {
+        listener = fn;
+        return () => {};
+      },
+      signIn: async () => {},
+      signOut: async () => {},
+    },
+  };
+  return {
+    notify: (state: AuthState) => {
+      current = state;
+      listener(state);
+    },
+    setAuth: (state: AuthState) => {
+      current = state;
+    },
+  };
+}
+
+async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Work" }));
+  await user.type(
+    screen.getByLabelText("Goal"),
+    "Ship the orchestrator",
+  );
+  await user.click(screen.getByRole("button", { name: "Launch" }));
+}
+
+describe("App command composition", () => {
+  it("dispatches nothing for absent, incomplete, or unauthenticated bindings", async () => {
+    const incomplete = makeCommandBinding();
+    const user = userEvent.setup();
+
+    installCommandHost(undefined);
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+    cleanup();
+
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+      commandBinding: {
+        port: incomplete.binding.port,
+        store: incomplete.binding.store,
+        getView: incomplete.binding.getView,
+        subscribe: incomplete.binding.subscribe,
+        makeLaunchIntent: incomplete.binding.makeLaunchIntent,
+        makeMessageIntent: incomplete.binding.makeMessageIntent,
+      } as OrchestratorCommandBinding,
+      auth: {
+        getState: () => ({
+          status: "signed_in",
+          reason: null,
+          acquisition: true,
+          content: true,
+        }),
+        subscribe: () => () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
+    expect(incomplete.prepare).not.toHaveBeenCalled();
+    expect(incomplete.submit).not.toHaveBeenCalled();
+    cleanup();
+
+    const signedOut = makeCommandBinding();
+    installCommandHost(signedOut.binding, {
+      status: "signed_out",
+      reason: null,
+      acquisition: false,
+      content: false,
+    });
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+    expect(signedOut.prepare).not.toHaveBeenCalled();
+    expect(signedOut.submit).not.toHaveBeenCalled();
+  });
+
+  it("selects the exact returned mission after an accepted launch", async () => {
+    const { binding, prepare, submit } = makeCommandBinding();
+    installCommandHost(binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() =>
+      expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"),
+    );
+    expect(window.location.search).toContain("root_job_id=JOB-L");
+    expect(screen.getByRole("heading", { name: "Mission Workspace", level: 1 })).toBeTruthy();
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(prepare.mock.calls[0][0].kind).toBe("launch");
+    expect(prepare.mock.calls[0][0].targetKey).toBe("opaque-launch");
+  });
+
+  it("does not prepare or submit twice for double launch, send, or stop", async () => {
+    const launchHold = deferred<EffectReceipt>();
+    const { binding, prepare, submit } = makeCommandBinding({
+      submit: vi.fn(() => launchHold.promise),
+    });
+    installCommandHost(binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    await user.type(screen.getByLabelText("Goal"), "Ship the orchestrator");
+    const launch = screen.getByRole("button", { name: "Launch" });
+    await user.click(launch);
+    await user.click(launch);
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(prepare).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    history.replaceState(null, "", "/?work_ref=WS%3AALPHA&root_job_id=JOB-A");
+    const sendHold = deferred<EffectReceipt>();
+    const second = makeCommandBinding({
+      submit: vi.fn(() => sendHold.promise),
+    });
+    installCommandHost(second.binding);
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "Hello orchestrator");
+    const send = screen.getByRole("button", { name: "Send" });
+    await user.click(send);
+    await user.click(send);
+    await waitFor(() => expect(second.submit).toHaveBeenCalledTimes(1));
+    expect(second.prepare).toHaveBeenCalledTimes(1);
+    expect(second.prepare.mock.calls[0][0].kind).toBe("message");
+
+    cleanup();
+    history.replaceState(null, "", "/?work_ref=WS%3AALPHA&root_job_id=JOB-A");
+    const stopHold = deferred<EffectReceipt>();
+    const third = makeCommandBinding({
+      submit: vi.fn(() => stopHold.promise),
+    });
+    installCommandHost(third.binding);
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    const stop = screen.getByRole("button", { name: "Request stop" });
+    await user.click(stop);
+    await user.click(stop);
+    await waitFor(() => expect(third.submit).toHaveBeenCalledTimes(1));
+    expect(third.prepare).toHaveBeenCalledTimes(1);
+    expect(third.prepare.mock.calls[0][0].kind).toBe("stop");
+  });
+
+  it("recovers a lost launch with readOperation only", async () => {
+    const submit = vi.fn(async () => {
+      throw new Error("transport lost secret");
+    });
+    const { binding, prepare, readOperation } = makeCommandBinding({ submit });
+    installCommandHost(binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    expect(await screen.findByRole("button", { name: "Check status" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("transport lost secret");
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(1));
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an A-B-A late receipt set the new selection", async () => {
+    const pending = deferred<EffectReceipt>();
+    const submit = vi.fn((_pointer: OperationPointer, _intent: CommandIntent) => pending.promise);
+    const made = makeCommandBinding({ submit });
+    const host = installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    act(() =>
+      host.notify({
+        status: "signed_out",
+        reason: null,
+        acquisition: false,
+        content: false,
+      }),
+    );
+    made.setCtx({ principalScope: "owner-b", generation: "gen-2" });
+    host.setAuth({
+      status: "signed_in",
+      reason: null,
+      acquisition: true,
+      content: true,
+    });
+    act(() =>
+      host.notify({
+        status: "signed_in",
+        reason: null,
+        acquisition: true,
+        content: true,
+      }),
+    );
+    made.setCtx({ principalScope: "owner-a", generation: "gen-3" });
+    host.setAuth({
+      status: "signed_in",
+      reason: null,
+      acquisition: true,
+      content: true,
+    });
+    act(() =>
+      host.notify({
+        status: "signed_in",
+        reason: null,
+        acquisition: true,
+        content: true,
+      }),
+    );
+    await act(async () =>
+      pending.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" },
+      }),
+    );
+    expect(window.location.search).toContain("work_ref=WS%3AALPHA");
+    expect(window.location.search).not.toContain("WS%3ALAUNCH");
+    expect(made.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses a stale launch result after a mission switch", async () => {
+    const pending = deferred<EffectReceipt>();
+    const submit = vi.fn((_pointer: OperationPointer, _intent: CommandIntent) => pending.promise);
+    const made = makeCommandBinding({ submit });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await user.click(await screen.findByRole("button", { name: /Beta program/ }));
+    await act(async () =>
+      pending.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" },
+      }),
+    );
+    expect(window.location.search).toContain("work_ref=WS%3ABETA");
+    expect(window.location.search).not.toContain("WS%3ALAUNCH");
+    expect(made.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send when the session view root does not match the selection", async () => {
+    const made = makeCommandBinding({
+      view: {
+        projects: [{ ref: "proj-a", label: "Project A" }],
+        profiles: [{ ref: "prof-a", label: "Profile A" }],
+        session: {
+          ...defaultSession,
+          selection: { workRef: "WS:OTHER", rootJobId: "JOB-Z" },
+        },
+      },
+    });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("still passes all five result selector fields with a command binding installed", async () => {
+    const h = resultHost();
+    const made = makeCommandBinding();
+    window.MastermindMissionHost!.commandBinding = made.binding;
+    render(<App />);
+    await openResult();
+    expect(h.detail).toHaveBeenCalledTimes(1);
+    expect(h.detail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workRef: "WS:DESIGN",
+        rootJobId: "JOB-001",
+        jobId: "JOB-004",
+        attemptId: "ATT-44444444444444444444444444444444",
+        resultEnvelopeDigest:
+          "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      }),
+    );
+    expect(made.prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe("host-composition repair regressions (R2)", () => {
+  it("F1: a pre-existing pending pointer is recoverable through Check status without any new submit", async () => {
+    const seeded: OperationPointer = {
+      operationKey: "op-seeded",
+      kind: "launch",
+      targetKey: "opaque-launch",
+    };
+    const data = new Map<string, OperationPointer>([
+      ["owner-a", seeded],
+    ]);
+    const store: PendingPointerStore = {
+      read: (scope) => data.get(scope) ?? null,
+      write: (scope, pointer) => {
+        data.set(scope, pointer);
+      },
+      clear: (scope, pointer) => {
+        const current = data.get(scope);
+        if (
+          current &&
+          current.operationKey === pointer.operationKey &&
+          current.kind === pointer.kind &&
+          current.targetKey === pointer.targetKey
+        )
+          data.delete(scope);
+      },
+    };
+    const readOperation = vi
+      .fn(async (_pointer: OperationPointer): Promise<EffectReceipt> => {
+        throw new Error("unreachable without a seeded receipt");
+      })
+      .mockResolvedValueOnce({
+        operationKey: "op-seeded",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "unknown",
+      })
+      .mockResolvedValueOnce({
+        operationKey: "op-seeded",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "refused",
+      });
+    const made = makeCommandBinding({ store, readOperation });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    // begin() refuses to submit over the unresolved seeded pointer, and the
+    // static PENDING_POINTER hold keeps recovery reachable (not disabled).
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+
+    // First recovery is uncertain: read-only, exact pointer, still held.
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(1));
+    expect(readOperation.mock.calls[0][0]).toEqual(seeded);
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect(store.read("owner-a")).toEqual(seeded);
+
+    // Terminal refusal correlates completion: pointer cleared, guard released,
+    // draft preserved, no navigation.
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
+    );
+    expect(store.read("owner-a")).toBeNull();
+    expect(
+      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
+    ).toBe("Ship the orchestrator");
+    expect(window.location.search).toContain("work_ref=WS%3AALPHA");
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("F1: a validated terminal recovery of a seeded launch pointer navigates and clears the hint", async () => {
+    const seeded: OperationPointer = {
+      operationKey: "op-nav",
+      kind: "launch",
+      targetKey: "opaque-launch",
+    };
+    const data = new Map<string, OperationPointer>([["owner-a", seeded]]);
+    const store: PendingPointerStore = {
+      read: (scope) => data.get(scope) ?? null,
+      write: (scope, pointer) => {
+        data.set(scope, pointer);
+      },
+      clear: (scope) => {
+        data.delete(scope);
+      },
+    };
+    const readOperation = vi.fn(
+      async (_pointer: OperationPointer): Promise<EffectReceipt> => ({
+        operationKey: "op-nav",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" },
+      }),
+    );
+    const made = makeCommandBinding({ store, readOperation });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() =>
+      expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"),
+    );
+    expect(window.location.search).toContain("root_job_id=JOB-L");
+    expect(store.read("owner-a")).toBeNull();
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
+    expect(made.readOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it("F3: Conversation shows the fixed command-route unavailable code when the binding is absent", async () => {
+    installCommandHost(undefined);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    expect(screen.getByText("Session Workspace")).toBeTruthy();
+    expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
+    // No fabricated session, connection, or dispatch surface.
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request stop" })).toBeNull();
+    expect(screen.queryByText("Connected")).toBeNull();
+    // The read-only conversation reader card remains intact.
+    expect(
+      screen.getByText("This app has no connected conversation source yet."),
+    ).toBeTruthy();
+  });
+
+  it("F4: a stop requested while a send is held is refused once and never wedges", async () => {
+    const hold = deferred<EffectReceipt>();
+    const made = makeCommandBinding({
+      submit: vi.fn(() => hold.promise),
+    });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "Hello orchestrator");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.prepare.mock.calls[0][0].kind).toBe("message");
+
+    // Cross-action click while the send is unresolved.
+    await user.click(screen.getByRole("button", { name: "Request stop" }));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    // The new callback is refused exactly once: its own guard releases.
+    expect(screen.getByRole("button", { name: "Request stop" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stopping…" })).toBeNull();
+    // The original send stays visibly held.
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeTruthy();
+
+    // The original receipt settles only on the original guard; the stop
+    // control is usable again, not stuck at "Stopping…".
+    await act(async () =>
+      hold.resolve({
+        operationKey: "op-1",
+        kind: "message",
+        targetKey: "opaque-session",
+        disposition: "accepted",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Send" })).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: "Request stop" })).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("");
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("F4: a launch requested while another launch is held is refused once without touching the original", async () => {
+    const hold = deferred<EffectReceipt>();
+    const made = makeCommandBinding({
+      submit: vi.fn(() => hold.promise),
+    });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    await user.type(screen.getByLabelText("Goal"), "First launch");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+
+    // A second dispatch from a remounted leaf (mission switch and back).
+    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await user.click(await screen.findByRole("button", { name: /Beta program/ }));
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    await user.type(screen.getByLabelText("Goal"), "Second launch");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    // Refused once at click time: the second form is usable, draft preserved.
+    expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
+    ).toBe("Second launch");
+    expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
+
+    // The original launch is still the only pending operation; its receipt
+    // settles on its own guard and pointer only.
+    await act(async () =>
+      hold.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" },
+      }),
+    );
+    // The mission switch superseded the original selection, so even a valid
+    // terminal receipt must not navigate to the launch target here.
+    await waitFor(() => {
+      expect(window.location.search).toContain("work_ref=WS%3ABETA");
+      expect(window.location.search).not.toContain("WS%3ALAUNCH");
+    });
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("F2: replacing the binding object supersedes an in-flight receipt even under the same owner epoch", async () => {
+    const hold = deferred<EffectReceipt>();
+    const old = makeCommandBinding({ submit: vi.fn(() => hold.promise) });
+    installCommandHost(old.binding);
+    const replacement = makeCommandBinding();
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(old.submit).toHaveBeenCalledTimes(1));
+    // Same principalScope and generation, new binding object, no rerender yet.
+    window.MastermindMissionHost!.commandBinding = replacement.binding;
+    await act(async () =>
+      hold.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" },
+      }),
+    );
+    // The old receipt is stale: no navigation, callback completed refused
+    // exactly once, draft preserved, replacement dispatches nothing.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
+    );
+    expect(window.location.search).toContain("work_ref=WS%3AALPHA");
+    expect(window.location.search).not.toContain("WS%3ALAUNCH");
+    expect(replacement.prepare).not.toHaveBeenCalled();
+    expect(replacement.submit).not.toHaveBeenCalled();
+    expect(
+      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
+    ).toBe("Ship the orchestrator");
+    // The replacement route owns the next dispatch through its own controller.
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(replacement.submit).toHaveBeenCalledTimes(1));
+    expect(replacement.prepare).toHaveBeenCalledTimes(1);
+    expect(old.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("F2: a receipt after the rerender observed the replacement is refused and the uncertain pointer is kept", async () => {
+    const hold = deferred<EffectReceipt>();
+    // One shared store: the pointer written by the old binding must survive
+    // a stale settlement and remain recoverable under the replacement.
+    const data = new Map<string, OperationPointer>();
+    const store: PendingPointerStore = {
+      read: (scope) => data.get(scope) ?? null,
+      write: (scope, pointer) => {
+        data.set(scope, pointer);
+      },
+      clear: (scope, pointer) => {
+        const current = data.get(scope);
+        if (
+          current &&
+          current.operationKey === pointer.operationKey &&
+          current.kind === pointer.kind &&
+          current.targetKey === pointer.targetKey
+        )
+          data.delete(scope);
+      },
+    };
+    const replacementRead = vi.fn(
+      async (_pointer: OperationPointer): Promise<EffectReceipt> => ({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "refused",
+      }),
+    );
+    const old = makeCommandBinding({
+      store,
+      submit: vi.fn(() => hold.promise),
+    });
+    installCommandHost(old.binding);
+    const replacement = makeCommandBinding({
+      store,
+      readOperation: replacementRead,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(old.submit).toHaveBeenCalledTimes(1));
+    const written = store.read("owner-a");
+    expect(written).toEqual({
+      operationKey: "op-1",
+      kind: "launch",
+      targetKey: "opaque-launch",
+    });
+    // Swap the binding and force the composition to observe it.
+    window.MastermindMissionHost!.commandBinding = replacement.binding;
+    old.setView({
+      projects: [{ ref: "proj-a", label: "Project A churned" }],
+      profiles: [{ ref: "prof-a", label: "Profile A" }],
+      session: defaultSession,
+    });
+    // The old receipt resolves as UNCERTAIN after the replacement committed.
+    await act(async () =>
+      hold.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "unknown",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
+    );
+    expect(window.location.search).toContain("work_ref=WS%3AALPHA");
+    // The original uncertain pointer was not cleared by the stale admission.
+    expect(store.read("owner-a")).toEqual(written);
+
+    // A retry under the replacement sees the preserved pointer and recovers
+    // read-only: zero new prepare/submit anywhere.
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(replacementRead).toHaveBeenCalledTimes(1));
+    expect(replacementRead.mock.calls[0][0]).toEqual(written);
+    expect(replacement.prepare).not.toHaveBeenCalled();
+    expect(replacement.submit).not.toHaveBeenCalled();
+    expect(old.prepare).toHaveBeenCalledTimes(1);
+    expect(old.submit).toHaveBeenCalledTimes(1);
+    // Terminal refusal through the live route clears exactly that pointer.
+    await waitFor(() => expect(store.read("owner-a")).toBeNull());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
+    );
+  });
+
+  it("F2: subscription churn on the same binding keeps one controller and never re-dispatches", async () => {
+    const hold = deferred<EffectReceipt>();
+    const made = makeCommandBinding({ submit: vi.fn(() => hold.promise) });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
+    made.setView({
+      projects: [
+        { ref: "proj-a", label: "Project A renamed" },
+        { ref: "proj-b", label: "Project B" },
+      ],
+      profiles: [{ ref: "prof-a", label: "Profile A" }],
+      session: defaultSession,
+    });
+    made.setView({
+      projects: [{ ref: "proj-a", label: "Project A" }],
+      profiles: [{ ref: "prof-a", label: "Profile A" }],
+      session: defaultSession,
+    });
+    await act(async () =>
+      hold.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:LAUNCH", rootJobId: "JOB-L" },
+      }),
+    );
+    await waitFor(() =>
+      expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"),
+    );
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("host-composition repair regressions (R4)", () => {
+  it("F5: Check status after a pre-render binding replacement recovers through nothing and keeps the original uncertainty", async () => {
+    const seeded: OperationPointer = {
+      operationKey: "op-seeded",
+      kind: "launch",
+      targetKey: "opaque-launch",
+    };
+    const data1 = new Map<string, OperationPointer>([["owner-a", seeded]]);
+    const store1: PendingPointerStore = {
+      read: (scope) => data1.get(scope) ?? null,
+      write: (scope, pointer) => {
+        data1.set(scope, pointer);
+      },
+      clear: (scope, pointer) => {
+        const current = data1.get(scope);
+        if (
+          current &&
+          current.operationKey === pointer.operationKey &&
+          current.kind === pointer.kind &&
+          current.targetKey === pointer.targetKey
+        )
+          data1.delete(scope);
+      },
+    };
+    const data2 = new Map<string, OperationPointer>();
+    const store2: PendingPointerStore = {
+      read: (scope) => data2.get(scope) ?? null,
+      write: (scope, pointer) => {
+        data2.set(scope, pointer);
+      },
+      clear: (scope, pointer) => {
+        const current = data2.get(scope);
+        if (
+          current &&
+          current.operationKey === pointer.operationKey &&
+          current.kind === pointer.kind &&
+          current.targetKey === pointer.targetKey
+        )
+          data2.delete(scope);
+      },
+    };
+    const oldRead = vi.fn(
+      async (_pointer: OperationPointer): Promise<EffectReceipt> => ({
+        operationKey: "op-seeded",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:OLDROUTE", rootJobId: "JOB-OLD" },
+      }),
+    );
+    const replacementRead = vi.fn(
+      async (pointer: OperationPointer): Promise<EffectReceipt> => ({
+        operationKey: pointer.operationKey,
+        kind: pointer.kind,
+        targetKey: pointer.targetKey,
+        disposition: "refused",
+      }),
+    );
+    const old = makeCommandBinding({ store: store1, readOperation: oldRead });
+    installCommandHost(old.binding);
+    const replacement = makeCommandBinding({
+      store: store2,
+      readOperation: replacementRead,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    // Static PENDING_POINTER hold: recovery reachable, zero dispatch.
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Check status" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    expect(old.prepare).not.toHaveBeenCalled();
+    expect(old.submit).not.toHaveBeenCalled();
+    // Replace the binding object with the SAME owner scope/generation and
+    // no rerender, then ask for a status check through the live binding.
+    window.MastermindMissionHost!.commandBinding = replacement.binding;
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await act(async () => {
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    });
+    // The live binding owns the check: the superseded slot's controller,
+    // port, and store are untouched — no old readOperation, no status
+    // publication from the old route, no navigation, no uncertainty clear.
+    expect(oldRead).not.toHaveBeenCalled();
+    expect(replacementRead).not.toHaveBeenCalled();
+    expect(window.location.search).toContain("work_ref=WS%3AALPHA");
+    expect(window.location.search).not.toContain("WS%3AOLDROUTE");
+    expect(store1.read("owner-a")).toEqual(seeded);
+    // The hold is not wedged: the control stays enabled.
+    expect(
+      screen
+        .getByRole("button", { name: "Check status" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+
+    // Once the composition observes the replacement (a rerender swaps the
+    // slot), Check status recovers through the LIVE binding's controller.
+    // The seeded pointer lives only in the old store, so the live recover
+    // is read-only and reaches no old-port call; the uncertainty survives.
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await act(async () => {
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    });
+    expect(oldRead).not.toHaveBeenCalled();
+    expect(replacementRead).not.toHaveBeenCalled();
+    expect(window.location.search).toContain("work_ref=WS%3AALPHA");
+    expect(store1.read("owner-a")).toEqual(seeded);
+    // Re-entry: the in-flight flag reset and the control is usable again.
+    expect(
+      screen
+        .getByRole("button", { name: "Check status" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    expect(replacement.prepare).not.toHaveBeenCalled();
+    expect(replacement.submit).not.toHaveBeenCalled();
+  });
+
+  it("F5: Check status during a pre-render replacement with an in-flight submit neither joins nor re-reads the old route", async () => {
+    const hold = deferred<EffectReceipt>();
+    const old = makeCommandBinding({ submit: vi.fn(() => hold.promise) });
+    installCommandHost(old.binding);
+    const replacement = makeCommandBinding();
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(old.submit).toHaveBeenCalledTimes(1));
+    // Check status is rendered while the submit is unresolved.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy(),
+    );
+    // Pre-render replacement, then a status check through the live binding.
+    window.MastermindMissionHost!.commandBinding = replacement.binding;
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await act(async () =>
+      hold.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:STALE", rootJobId: "JOB-STALE" },
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    });
+    // The old submit's own receipt settles only its own pending: no fresh
+    // readOperation through the old port, no navigation under the live
+    // binding, the callback refused exactly once with the draft preserved.
+    expect(old.readOperation).not.toHaveBeenCalled();
+    expect(replacement.readOperation).not.toHaveBeenCalled();
+    expect(replacement.submit).not.toHaveBeenCalled();
+    expect(window.location.search).toContain("work_ref=WS%3AALPHA");
+    expect(window.location.search).not.toContain("WS%3ASTALE");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
+    );
+    expect(
+      (screen.getByLabelText("Goal") as HTMLTextAreaElement).value,
+    ).toBe("Ship the orchestrator");
+    // The exact terminal receipt cleared the OLD store's own pointer.
+    expect(old.binding.store.read("owner-a")).toBeNull();
+    expect(replacement.prepare).not.toHaveBeenCalled();
+  });
+
+  it("F6: an old-route settlement after an auth clear plus replacement never releases the newer pending; its own accepted receipt navigates", async () => {
+    const hold1 = deferred<EffectReceipt>();
+    const hold2 = deferred<EffectReceipt>();
+    const old = makeCommandBinding({ submit: vi.fn(() => hold1.promise) });
+    const host = installCommandHost(old.binding);
+    const replacement = makeCommandBinding({
+      submit: vi.fn(() => hold2.promise),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(old.submit).toHaveBeenCalledTimes(1));
+    // Auth clears the original pending (refused once) without resolving it.
+    host.notify({
+      status: "signed_out",
+      reason: null,
+      acquisition: false,
+      content: false,
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Launch" })).toBeNull(),
+    );
+    // The owner replaces the route object while signed out; the store is
+    // distinct, so the new route starts with no pending pointer.
+    window.MastermindMissionHost!.commandBinding = replacement.binding;
+    host.notify({
+      status: "signed_in",
+      reason: null,
+      acquisition: true,
+      content: true,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Launch" })).toBeTruthy(),
+    );
+    // Retry: a real dispatch under the replacement binding.
+    await user.type(screen.getByLabelText("Goal"), "Retry under replacement");
+    await user.click(screen.getByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(replacement.submit).toHaveBeenCalledTimes(1));
+    expect(old.submit).toHaveBeenCalledTimes(1);
+    expect(replacement.binding.store.read("owner-a")?.operationKey).toBe(
+      "op-1",
+    );
+    // The OLD route's receipt arrives while the newer launch is in flight:
+    // it must not navigate and must not complete or refuse the newer
+    // callback — the newer guard belongs to its own route's receipt.
+    await act(async () =>
+      hold1.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:STALE", rootJobId: "JOB-STALE" },
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    });
+    expect(window.location.search).not.toContain("WS%3ASTALE");
+    expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
+    expect(replacement.binding.store.read("owner-a")?.operationKey).toBe(
+      "op-1",
+    );
+    // The newer launch's own ACCEPTED receipt settles its own pending,
+    // navigates on the live route, and clears exactly its own pointer.
+    await act(async () =>
+      hold2.resolve({
+        operationKey: "op-1",
+        kind: "launch",
+        targetKey: "opaque-launch",
+        disposition: "accepted",
+        missionSelection: { workRef: "WS:FRESH2", rootJobId: "JOB-FRESH2" },
+      }),
+    );
+    await waitFor(() =>
+      expect(window.location.search).toContain("work_ref=WS%3AFRESH2"),
+    );
+    expect(window.location.search).not.toContain("WS%3ASTALE");
+    await waitFor(() =>
+      expect(replacement.binding.store.read("owner-a")).toBeNull(),
+    );
+    expect(old.readOperation).not.toHaveBeenCalled();
+    expect(replacement.readOperation).not.toHaveBeenCalled();
   });
 });

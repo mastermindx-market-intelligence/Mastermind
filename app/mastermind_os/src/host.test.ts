@@ -296,3 +296,65 @@ describe("native fixed command adapter", () => {
     expect(listener).toBeTypeOf("function");
   });
 });
+
+describe("optional orchestrator command binding", () => {
+  const port = {
+    context: () => ({ principalScope: "owner-a", generation: "gen-1" }),
+    prepare: vi.fn(),
+    submit: vi.fn(),
+    readOperation: vi.fn(),
+  };
+  const store = { read: () => null, write: () => {}, clear: () => {} };
+  const complete = {
+    port,
+    store,
+    getView: () => ({ projects: [], profiles: [], session: null }),
+    subscribe: () => () => {},
+    makeLaunchIntent: () => null,
+    makeMessageIntent: () => null,
+    makeStopIntent: () => null,
+  };
+
+  it("omits absent or incomplete bindings and never defaults a catalog", () => {
+    const e = raw();
+    expect(bindMissionHost(e.client).commandBinding).toBeUndefined();
+    expect(
+      bindMissionHost(e.client, { port, store, getView: complete.getView })
+        .commandBinding,
+    ).toBeUndefined();
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(e.client.readPrograms).not.toHaveBeenCalled();
+  });
+
+  it("exposes only a complete injected binding", () => {
+    const e = raw();
+    const host = bindMissionHost(e.client, complete);
+    expect(host.commandBinding).toBe(complete);
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(port.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the five-field result selector on the same host", async () => {
+    const e = raw();
+    const host = bindMissionHost(e.client, complete);
+    const signal = new AbortController().signal;
+    await host.readResult!({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    });
+    expect(e.client.readResult).toHaveBeenCalledWith({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    });
+  });
+});

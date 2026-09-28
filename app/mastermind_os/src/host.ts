@@ -19,6 +19,12 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import {
+  completeOrchestratorCommandBinding,
+  type OrchestratorCommandBinding,
+} from "./orchestration/host-command-bindings";
+
+export type { OrchestratorCommandBinding };
 
 export interface AuthState {
   status: "unconfigured" | "signed_out" | "signing_in" | "signed_in" | "error";
@@ -79,8 +85,12 @@ export interface MissionHost {
   invalidationGeneration?: () => number;
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
+  commandBinding?: OrchestratorCommandBinding;
 }
-export function bindMissionHost(client: RawClient): MissionHost {
+export function bindMissionHost(
+  client: RawClient,
+  commandBinding?: unknown,
+): MissionHost {
   let epoch = 0;
   let previous = JSON.stringify(client.getState());
   client.subscribe((state) => {
@@ -93,6 +103,7 @@ export function bindMissionHost(client: RawClient): MissionHost {
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
+  const command = completeOrchestratorCommandBinding(commandBinding);
   return {
     invalidationGeneration: () => epoch,
     auth: {
@@ -196,6 +207,7 @@ export function bindMissionHost(client: RawClient): MissionHost {
       if (!result) throw new Error("WINDOW_RESPONSE_INVALID");
       return result;
     },
+    ...(command ? { commandBinding: command } : {}),
   };
 }
 
