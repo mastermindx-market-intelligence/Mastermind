@@ -269,7 +269,7 @@ def compile_bindings(
 def _open_private_fd(
     path: str, *, label: str, maximum: int,
 ) -> tuple[int, os.stat_result, bytes]:
-    """Open ``path`` once with O_RDONLY|O_NOFOLLOW|O_CLOEXEC and read fully.
+    """Open ``path`` once without blocking, validate it, and read it fully.
 
     Returns ``(fd, fstat, bytes)``. Caller owns the descriptor.
     Validates root-owned regular file with no group/world bits, one link,
@@ -280,7 +280,10 @@ def _open_private_fd(
     try:
         fd = os.open(
             path,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+            os.O_RDONLY
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
         )
     except OSError:
         _refuse(f"{label}_open")
@@ -734,6 +737,8 @@ def main(argv: list[str] | None = None) -> int:
         if geteuid is not None and geteuid() != 0:
             return _refusal_exit()
 
+        policy_path = _require_absolute_path(policy_path, "policy")
+        request_path = _require_absolute_path(request_path, "request")
         _split_output_path(output_path)
 
         policy_value = _read_authority_json(policy_path, label="policy")
@@ -796,4 +801,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

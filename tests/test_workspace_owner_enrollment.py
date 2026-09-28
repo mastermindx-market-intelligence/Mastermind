@@ -16,8 +16,10 @@ import ast
 import hashlib
 import io
 import json
+import multiprocessing
 import os
 import re
+import runpy
 import stat
 import sys
 import types
@@ -502,6 +504,45 @@ def test_parse_argv_refuses_none() -> None:
     assert exc.value.code == "argv_none"
 
 
+def test_actual_entrypoint_consumes_valid_sys_argv(
+    monkeypatch, tmp_path, capsys,
+) -> None:
+    fixture = _make_authority_files(tmp_path)
+    monkeypatch.setattr(sys, "argv", [
+        compiler_module.__file__,
+        "--policy", str(fixture["policy"]),
+        "--request", str(fixture["request"]),
+        "--output", str(fixture["output"]),
+    ])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(compiler_module.__file__, run_name="__main__")
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    receipt = json.loads(captured.out)
+    assert receipt["status"] == "compiled"
+    assert receipt["output_path"] == str(fixture["output"])
+    assert fixture["output"].exists()
+    for forbidden in (WEB_CLIENT_ID, WEB_SUBJECT):
+        assert forbidden not in captured.out
+
+
+def test_actual_entrypoint_malformed_sys_argv_refuses_without_leak(
+    monkeypatch, capsys,
+) -> None:
+    leaked = "/private/raw-owner-identity"
+    monkeypatch.setattr(
+        sys, "argv", [compiler_module.__file__, "--policy", leaked],
+    )
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(compiler_module.__file__, run_name="__main__")
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "workspace owner binding compiler refused\n"
+    assert leaked not in captured.err
+
+
 # ---------------------------------------------------------------------------
 # Authority-file fences (symlink, nonregular, nonroot, mode, oversize, JSON,
 # replacement). Tests run as root-equivalent: mode is fixed, but ownership is
@@ -563,6 +604,60 @@ def _make_authority_files(tmp_path: Path) -> dict:
         "receipt": receipt_path,
         "output": out_dir / "bindings.json",
     }
+
+
+@pytest.mark.parametrize("relative_input", ["policy", "request"])
+def test_relative_authority_path_refused_before_open(
+    relative_input: str, monkeypatch, tmp_path, capsys,
+) -> None:
+    fixture = _make_authority_files(tmp_path)
+    monkeypatch.chdir(fixture["work"])
+    policy_path = (
+        fixture["policy"].name
+        if relative_input == "policy"
+        else str(fixture["policy"])
+    )
+    request_path = (
+        fixture["request"].name
+        if relative_input == "request"
+        else str(fixture["request"])
+    )
+    rc = main([
+        "--policy", policy_path,
+        "--request", request_path,
+        "--output", str(fixture["output"]),
+    ])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "workspace owner binding compiler refused\n"
+    assert not fixture["output"].exists()
+
+
+def _open_fifo_child(path: str) -> None:
+    try:
+        _open_private_fd(path, label="fifo", maximum=64)
+    except WorkspaceOwnerCompilerError:
+        return
+    raise AssertionError("FIFO input unexpectedly passed the regular-file fence")
+
+
+def test_private_fifo_refused_without_blocking(tmp_path: Path) -> None:
+    fifo = tmp_path / "private.fifo"
+    os.mkfifo(fifo, 0o600)
+    process = multiprocessing.get_context("fork").Process(
+        target=_open_fifo_child,
+        args=(str(fifo),),
+    )
+    process.start()
+    process.join(1)
+    blocked = process.is_alive()
+    if blocked:
+        process.terminate()
+    process.join(3)
+    assert not process.is_alive(), "owned FIFO probe must be reaped"
+    assert not blocked, "FIFO input blocked before the regular-file fence"
+    assert process.exitcode == 0
 
 
 def test_authority_file_symlink_refused(tmp_path: Path, monkeypatch, capsys) -> None:
