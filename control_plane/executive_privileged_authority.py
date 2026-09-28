@@ -1,17 +1,9 @@
-"""Immutable Job-bound login-check request/binding primitives.
+"""Job-bound login-status observations on the existing Runtime and broker.
 
-This module owns only the strict, model-free external request contract, the
-logical family key and its ``pvrf-`` family aggregate ID, and the complete
-first-admission binding and its ``pvr-`` operation/broker request ID for one
-Executive Job/Attempt's login-status observation
-(``executive.worker_auth.verify_only``). It performs no Runtime/Event
-mutation, no broker call, no service composition, and no host effect: it is
-the deterministic identifier/serialization contract that a later controller
-substep composes with Runtime authority and the shared broker client.
-
-Every observation this contract can name carries the fixed
-``observation_scope`` below and proves at most a login-status check; it never
-asserts a ready-to-work claim for any worker slot.
+The exact request/binding/result contracts and Event-backed controller share
+one current-Attempt admission boundary. A family authorizes at most one fixed
+verify_only send; later invocations recover evidence through broker status.
+No worker root grant, retry plane, READY assertion or second Runtime is added.
 """
 from __future__ import annotations
 
@@ -554,7 +546,260 @@ def validate_event_family(events, request: ReadinessRequest) -> ReadinessEventFa
         raise PrivilegedReadinessError("privileged readiness event family is invalid") from exc
 
 
+class PrivilegedReadinessController:
+    """One current-Attempt admission and one broker send, recovered from Events."""
+
+    def __init__(self, runtime, *, release_sha: str, boot_observer=None,
+                 policy_loader=None, broker_client=None):
+        from control_plane.executive_authority import ExecutiveAuthorityPolicy
+        from control_plane import executive_privileged_client
+        from control_plane.codex_worker import ProcessInspector
+
+        self.runtime = runtime
+        self.release_sha = validate_release_sha(release_sha)
+        self._boot_observer = boot_observer or ProcessInspector().boot_session_id
+        self._policy_loader = policy_loader or ExecutiveAuthorityPolicy.load
+        self._client = broker_client or executive_privileged_client
+        self._flights = {}
+        self._closed = False
+
+    async def check(self, raw: Mapping[str, Any]) -> dict[str, Any]:
+        import asyncio
+
+        if self._closed:
+            raise PrivilegedReadinessError("readiness controller is closing")
+        request = validate_readiness_request(raw)
+        key = family_key_from_request(request).family_id
+        task = self._flights.get(key)
+        if task is None:
+            task = asyncio.create_task(self._run(request))
+            self._flights[key] = task
+
+            def finished(done):
+                if self._flights.get(key) is done:
+                    self._flights.pop(key, None)
+                # A disconnected caller must not leave an unobserved exception.
+                if not done.cancelled():
+                    done.exception()
+            task.add_done_callback(finished)
+        # Client disconnect does not cancel an already admitted host effect.
+        return await asyncio.shield(task)
+
+    async def aclose(self):
+        """Stop local owners; durable ATTEMPTED evidence forbids resubmission."""
+        import asyncio
+
+        self._closed = True
+        tasks = tuple(self._flights.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _family(self, request, *, connection=None):
+        rows = self.runtime.store.list_events(
+            aggregate_type=READINESS_AGGREGATE_TYPE,
+            aggregate_id=family_key_from_request(request).family_id,
+            connection=connection,
+        )
+        return validate_event_family(rows, request)
+
+    @staticmethod
+    def _authority_inputs(job):
+        return canonical_json_bytes({
+            "requested_authorities": job.requested_authorities, "worktree": job.worktree,
+            "allowed_write_paths": job.allowed_write_paths,
+            "validation_commands": job.validation_commands,
+        })
+
+    def _admit_or_replay(self, request):
+        from control_plane.executive_runtime import AttemptStatus
+        from control_plane.executive_supervisor import validate_effective_grant
+        from control_plane.executive_privileged_action import validate_request
+        from ops.executive_os.provider_worker_slots import get_slot
+
+        family = self._family(request)
+        if family is not None:
+            return family, False
+        # All filesystem/policy/boot work precedes the global write lock.
+        policy = self._policy_loader()
+        boot_id = validate_boot_id(self._boot_observer())
+        release_sha = validate_release_sha(self.release_sha)
+        job = self.runtime.jobs.get_job(request.job_id)
+        if job is None:
+            raise PrivilegedReadinessError("readiness Job does not exist")
+        inputs = self._authority_inputs(job)
+        decision = policy.authorize(
+            job.requested_authorities, worktree=job.worktree,
+            allowed_write_paths=job.allowed_write_paths, validation_commands=job.validation_commands,
+        )
+        if "REQUEST_WORKER_LOGIN_CHECK" not in decision.requested:
+            raise PrivilegedReadinessError("Job does not grant the login-check capability")
+        with self.runtime.store.transaction() as connection:
+            family = self._family(request, connection=connection)
+            if family is not None:
+                return family, False
+            snapshot = self.runtime.attempts.current_authority_snapshot(
+                connection, job_id=request.job_id, attempt_id=request.attempt_id,
+                fence_generation=request.fence_generation, timestamp=self.runtime.store.now_ms(),
+                statuses={AttemptStatus.CLAIMED, AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            current_job, attempt = snapshot.job, snapshot.attempt
+            if (self._authority_inputs(current_job) != inputs
+                    or current_job.authority_policy_hash != policy.sha256
+                    or attempt.authority_policy_hash != policy.sha256
+                    or decision.policy_sha256 != policy.sha256
+                    or release_sha != self.release_sha):
+                raise PrivilegedReadinessError("readiness admission authority drifted")
+            grant = validate_effective_grant(current_job, attempt, decision)
+            if grant is not None and "REQUEST_WORKER_LOGIN_CHECK" not in grant["authorities"]:
+                raise PrivilegedReadinessError("effective grant excludes the login-check capability")
+            slot = get_slot(attempt.worker_id)
+            if slot.slot_id != attempt.worker_id:
+                raise PrivilegedReadinessError("assigned worker is not its exact reviewed slot")
+            binding = ReadinessBinding(
+                job_id=request.job_id, attempt_id=request.attempt_id,
+                worker_id=attempt.worker_id, quota_class=attempt.quota_class,
+                fence_generation=request.fence_generation, authority_policy_hash=policy.sha256,
+                effective_grant_digest=attempt.effective_grant_digest,
+                release_sha=release_sha, boot_id=boot_id, slot_id=slot.slot_id,
+            )
+            validate_request(broker_request_for(binding))
+            self._append(connection, binding, ReadinessEventPhase.INTENT)
+            self._append(connection, binding, ReadinessEventPhase.ATTEMPTED)
+            family = self._family(request, connection=connection)
+        return family, True
+
+    def _append(self, connection, binding, phase, *, receipt=None, reason_code=None):
+        payload = {"binding": binding.to_canonical_dict()}
+        if receipt is not None:
+            payload["receipt"] = receipt
+        if reason_code is not None:
+            payload["reason_code"] = reason_code
+        suffix = "" if phase is ReadinessEventPhase.INTENT else ":" + phase.name.lower()
+        self.runtime.store.append_event(
+            connection, aggregate_type=READINESS_AGGREGATE_TYPE,
+            aggregate_id=ReadinessFamilyKey(binding.job_id, binding.attempt_id, binding.fence_generation).family_id,
+            event_type=phase.value, command_id=binding.operation_id + suffix, actor="privileged-readiness",
+            job_id=binding.job_id, attempt_id=binding.attempt_id,
+            worker_id=binding.worker_id, quota_class=binding.quota_class, payload=payload,
+        )
+
+    def _record(self, request, binding, phase, *, receipt=None, reason_code=None):
+        with self.runtime.store.transaction() as connection:
+            current = self._family(request, connection=connection)
+            if current is None or current.binding != binding:
+                raise PrivilegedReadinessError("admitted readiness family disappeared or drifted")
+            if current.state is ReadinessResultState.TERMINAL:
+                if receipt is not None and current.receipt != receipt:
+                    raise PrivilegedReadinessError("broker terminal evidence conflicts with recorded evidence")
+                return current
+            if current.state is ReadinessResultState.REFUSED:
+                if receipt is not None or (reason_code is not None and reason_code != current.reason_code):
+                    raise PrivilegedReadinessError("broker outcome conflicts with recorded refusal")
+                return current
+            if current.phase is ReadinessEventPhase.EFFECT_UNKNOWN:
+                if receipt is None:
+                    # Once ambiguous, neither absence nor a later refusal erases it.
+                    return current
+                phase = ReadinessEventPhase.RECONCILED
+            self._append(connection, binding, phase, receipt=receipt, reason_code=reason_code)
+            return self._family(request, connection=connection)
+
+    async def _execute(self, request, family):
+        import asyncio
+
+        binding = family.binding
+        phase = ReadinessEventPhase.EFFECT_UNKNOWN
+        receipt = reason = None
+        try:
+            payload = broker_request_for(binding)
+            response = await asyncio.to_thread(self._client.send_effect, payload)
+            response = self._client.validate_effect_response(response, payload, expected_release_sha=binding.release_sha)
+            if response["ok"]:
+                phase, receipt = ReadinessEventPhase.TERMINAL, response["receipt"]
+            elif result_state_for_broker_error(response["error"]) is ReadinessResultState.REFUSED:
+                phase, reason = ReadinessEventPhase.BROKER_REFUSED, response["error"]
+        except asyncio.CancelledError:
+            self._record(request, binding, ReadinessEventPhase.EFFECT_UNKNOWN)
+            raise
+        except Exception:
+            # Any post-ATTEMPTED response ambiguity remains durable; never resend.
+            pass
+        # Corruption/storage failures are not broker ambiguity and must propagate.
+        return self._record(request, binding, phase, receipt=receipt, reason_code=reason)
+
+    async def _recover(self, request, family):
+        import asyncio
+        from control_plane.executive_privileged_action import STATUS_REQUEST_SCHEMA
+        from control_plane.executive_privileged_broker import WIRE_RESPONSE_SCHEMA
+
+        if family.state is not ReadinessResultState.EFFECT_UNKNOWN:
+            return family
+        binding = family.binding
+        receipt = None
+        try:
+            response = await asyncio.to_thread(self._client.send_status,
+                {"schema": STATUS_REQUEST_SCHEMA, "request_id": binding.operation_id})
+            response = self._client.validate_status_response(response, expected_request_id=binding.operation_id)
+            if response["status"] == "TERMINAL":
+                checked = self._client.validate_effect_response(
+                    {"schema": WIRE_RESPONSE_SCHEMA, "ok": True, "replayed": True, "receipt": response["receipt"]},
+                    broker_request_for(binding), expected_release_sha=binding.release_sha,
+                )
+                receipt = checked["receipt"]
+        except asyncio.CancelledError:
+            self._record(request, binding, ReadinessEventPhase.EFFECT_UNKNOWN)
+            raise
+        except Exception:
+            pass
+        # NOT_FOUND, a marker, malformed evidence and unrelated verify_ready
+        # reconciliation cannot establish a terminal result for this verify_only.
+        phase = ReadinessEventPhase.RECONCILED if receipt is not None else ReadinessEventPhase.EFFECT_UNKNOWN
+        return self._record(request, binding, phase, receipt=receipt)
+
+    def _result(self, request, family, replayed):
+        try:
+            boot = self._boot_observer()
+            policy_sha = self._policy_loader().sha256
+        except Exception:
+            boot = policy_sha = None
+        currency = evidence_currency_for(family.binding, current_boot_id=boot,
+            current_release_sha=self.release_sha, current_authority_policy_hash=policy_sha)
+        return ReadinessResult(
+            family_id=family_key_from_request(request).family_id, operation_id=family.binding.operation_id,
+            state=family.state, replayed=replayed, observed_at_ms=self.runtime.store.now_ms(),
+            evidence_currency=currency, binding=family.binding, receipt=family.receipt,
+            reason_origin=REASON_ORIGIN_BROKER if family.reason_code is not None else None,
+            reason_code=family.reason_code,
+        ).to_canonical_dict()
+
+    async def _run(self, request):
+        import asyncio
+
+        # Admission is short synchronous Runtime work; no connection survives the thread.
+        admission = asyncio.create_task(asyncio.to_thread(self._admit_or_replay, request))
+        try:
+            family, execute_once = await asyncio.shield(admission)
+        except asyncio.CancelledError:
+            # Cancellation does not stop a transaction already running in a
+            # thread. Reconcile its commit before releasing local ownership.
+            try:
+                family, execute_once = await admission
+            except Exception:
+                raise asyncio.CancelledError from None
+            if execute_once:
+                self._record(request, family.binding, ReadinessEventPhase.EFFECT_UNKNOWN)
+            raise
+        if execute_once:
+            family = await self._execute(request, family)
+        else:
+            family = await self._recover(request, family)
+        return await asyncio.to_thread(self._result, request, family, not execute_once)
+
+
 __all__ = [
+    "PrivilegedReadinessController",
     "ReadinessEventFamily",
     "broker_request_for",
     "validate_event_family",
