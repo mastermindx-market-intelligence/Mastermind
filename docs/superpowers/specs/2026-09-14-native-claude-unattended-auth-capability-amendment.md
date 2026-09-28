@@ -5,6 +5,38 @@
 **Status:** `RECORDS ONLY / SPEC_ONLY / PRODUCTION INERT`  
 **Authority correction:** current provider documentation and installed-version observations are evidence for future requalification; they do **not** silently supersede protected PF1/OCR-1 authentication source law.
 
+
+## 2026-09-27 unattended permission-mode requalification
+
+Native Claude Worker autonomy is a property of the canonical worker launch contract,
+not a remembered interactive-user preference or project-local setting. Executive
+workers launch noninteractively with `-p --permission-mode dontAsk`.
+The serialized policy must keep `permissions.ask = []`,
+`permissions.defaultMode = "dontAsk"`, and
+`disableBypassPermissionsMode = "disable"`; hooks and project MCP discovery are
+also disabled. Claude Code's `dontAsk` contract converts every action that would
+otherwise request permission into a deterministic refusal, so a headless worker
+never waits for Chairman input.
+
+Do not replace this profile with `bypassPermissions` merely to remove prompts.
+Claude Code documents that allow rules have no effect in bypass mode. This worker's
+reviewed authority-to-tool projection uses narrow allow rules, including scoped
+file-edit grants, so bypass could silently widen the effective write surface.
+`dontAsk` preserves those grants while refusing everything outside them.
+
+Existing protected-path denies, exact-model fencing, no-network sandbox,
+fail-if-sandbox-is-unavailable behavior, no session persistence, and explicit
+MCP/subagent/Web tool denials remain controlling. `AskUserQuestion` and
+`ExitPlanMode` are explicitly denied in the worker tool policy. Interaction-
+requiring MCP calls and other would-be prompts are refusals, not Chairman gates;
+the worker must replan or return through the existing Job/Attempt lifecycle.
+
+No new permission broker, approval queue, retry plane, lifecycle, identity, or
+credential owner is created here. This source amendment is a durability contract,
+not by itself installed-host or production proof; the exact accepted head still
+requires normal source checks/review and a real worker-path canary before the
+capability is called live.
+
 ## 2026-09-27 native storage requalification
 
 This delivery amendment supersedes the Keychain-only **storage** requirement in
