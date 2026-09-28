@@ -1572,16 +1572,44 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot inherit browser resource authority"
                 )
-            if profile_id == COO_DOMAIN_EXECUTION_PROFILE and any(
-                value.get(key) != list(expected)
-                if isinstance(expected, tuple)
-                else value.get(key) != expected
-                for key, expected in COO_DOMAIN_PROFILE_SHAPE.items()
-            ):
-                raise CapabilityPolicyError(
-                    "COO domain execution profile must remain the exact disabled "
-                    "read-only source shape"
-                )
+            if profile_id == COO_DOMAIN_EXECUTION_PROFILE:
+                # R15 source-contract amendment: domain ``enabled`` is a strict
+                # explicit Boolean activation toggle (already enforced at the
+                # generic loader guard above). Every other field in the
+                # COO_DOMAIN_PROFILE_SHAPE must remain exact, which keeps the
+                # bounded read-only authority ceiling (no write, no network,
+                # helpers disabled, no skills/MCP/resources/plugins grants)
+                # in force for both disabled and enabled domain instances.
+                for key, expected in COO_DOMAIN_PROFILE_SHAPE.items():
+                    if key == "enabled":
+                        continue
+                    actual = value.get(key)
+                    if isinstance(expected, tuple):
+                        if actual != list(expected):
+                            raise CapabilityPolicyError(
+                                f"profile {profile_id!r} COO domain field "
+                                f"{key!r} drifted from exact read-only source shape"
+                            )
+                    elif actual != expected:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} COO domain field "
+                            f"{key!r} drifted from exact read-only source shape"
+                        )
+                # R16 amendment: the V3 shape above does not name V4
+                # ``skill_capabilities`` and therefore cannot pin it.  The
+                # COO domain ceiling is empty effective skills in BOTH enabled
+                # states, so any nonempty V4 skill_capabilities list (single
+                # grant or the full combined list) must be refused at load.
+                # The ordinary V4 grant path for non-domain profiles is
+                # untouched and continues to resolve all reviewed packages.
+                if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+                    raw_skill_caps = value.get("skill_capabilities")
+                    if not isinstance(raw_skill_caps, list) or len(raw_skill_caps) != 0:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} COO domain ceiling forbids "
+                            "nonempty V4 skill_capabilities; the read-only "
+                            "authority ceiling is empty in both enabled states"
+                        )
             if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
                 skill_capability_ids = _identities(
                     value.get("skill_capabilities"),
