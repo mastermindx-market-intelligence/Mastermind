@@ -827,3 +827,118 @@ def load_native_realm_owner(config_path: Path, *, expected_config_sha256: str) -
     config = _native_read_config(path, expected_config_sha256)
     _native_enrollment(config)
     return NativeRealmIdentityOwner(path, expected_config_sha256, _NATIVE_OWNER_SEAL)
+
+
+_SUBSCRIPTION_REALM_OWNER_SEAL = object()
+_SUBSCRIPTION_REALM_SCHEMA = "mastermind.executive_worker_broker_config/v5"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class SubscriptionRealmOwner:
+    """Worker-local identity observer over the existing root broker config.
+
+    Enrollment is the root owner's explicit generation/binding stanza. A
+    credential is only observed for private-file custody; no credential bytes,
+    login verdict, provider call, capacity claim or autonomous grant is made.
+    """
+    _config_path: Path
+    _config_sha256: str
+    _seal: object
+
+    def observe(self) -> dict[str, Any]:
+        from control_plane.subscription_catalog import get_binding, compose_catalog_digest
+        from control_plane.codex_worker import load_codex_attestation_receipt, CodexWorkerError
+        from ops.executive_os.provider_worker_slots import RUNTIME_WORKER_ROOT
+
+        if self._seal is not _SUBSCRIPTION_REALM_OWNER_SEAL:
+            _native_refuse()
+        config = _native_read_config(self._config_path, self._config_sha256)
+        enrollment = config.get("subscription_realm_enrollment")
+        if (config.get("schema_version") != _SUBSCRIPTION_REALM_SCHEMA
+                or type(enrollment) is not dict or set(enrollment) != {"generation", "binding_id"}
+                or type(enrollment["generation"]) is not int
+                or not 1 <= enrollment["generation"] < 2**63
+                or enrollment["binding_id"] != config.get("harness_binding_id")
+                or config.get("operator_harness_armed") is not False):
+            _native_refuse()
+        binding = get_binding(enrollment["binding_id"])
+        realms = [realm for realm in REVIEWED_CODEX_PROVIDER_REALMS.values()
+                  if realm.provider_alias == binding.provider
+                  and realm.base_url == binding.effective_base_url
+                  and realm.wire_api == binding.protocol]
+        if (binding.adapter_id != "codex-cli" or len(realms) != 1
+                or binding.implementation_state == "SPEC_ONLY" or binding.autonomous_allowed):
+            _native_refuse()
+        worker_id = config.get("worker_id")
+        uid, gid, control_uid = (config.get(key) for key in ("worker_uid", "worker_gid", "control_uid"))
+        if (type(worker_id) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", worker_id) is None
+                or any(type(value) is not int or value <= 0 for value in (uid, gid, control_uid))
+                or uid == control_uid):
+            _native_refuse()
+        home = _native_canonical_home(_native_path(config.get("provider_home")))
+        expected_home = _native_canonical_home(RUNTIME_WORKER_ROOT / worker_id / "provider-home")
+        try:
+            principal = pwd.getpwuid(os.geteuid())
+        except KeyError:
+            _native_refuse()
+        if (home != expected_home
+                or os.getuid() != uid or os.geteuid() != uid
+                or os.getgid() != gid or os.getegid() != gid
+                or principal.pw_name != config.get("worker_user") or principal.pw_gid != gid
+                or _native_canonical_home(_native_path(principal.pw_dir)) != home
+                or _native_canonical_home(_native_path(os.environ.get("HOME"))) != home
+                or _native_canonical_home(_native_path(os.environ.get("CODEX_HOME"))) != home):
+            _native_refuse()
+        groups = config.get("allowed_supplementary_gids")
+        if (type(groups) is not list or any(type(group) is not int or group <= 0 for group in groups)
+                or not set(os.getgroups()).issubset(set(groups) | {gid})):
+            _native_refuse()
+        with _native_open(home, directory=True, private_uid=uid) as (_, home_info):
+            if (home_info.st_uid != uid or home_info.st_gid != gid
+                    or stat.S_IMODE(home_info.st_mode) != 0o700):
+                _native_refuse()
+            credential_path = home / PROVIDER_CREDENTIAL_FILENAME
+            try:
+                before = credential_path.lstat()
+                descriptor, observed = _open_regular_credential(
+                    credential_path, before, expected_uid=uid, expected_gid=gid)
+                try:
+                    if (_has_macos_acl(credential_path, expected_identity=observed, descriptor=descriptor)
+                            or _native_stat_identity(observed) != _native_stat_identity(credential_path.lstat())):
+                        _native_refuse()
+                finally:
+                    os.close(descriptor)
+            except (OSError, ProviderRealmError):
+                raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
+        binary = _native_path(config.get("codex_binary"))
+        receipt = _native_path(config.get("codex_attestation_receipt"))
+        try:
+            with _native_open(binary), _native_open(receipt):
+                attestation = load_codex_attestation_receipt(
+                    receipt, expected_binary_path=binary, expected_owner_gid=gid)
+        except (OSError, CodexWorkerError):
+            raise ProviderRealmError("SUBSCRIPTION_REALM_UNAVAILABLE") from None
+        versions = config.get("allowed_codex_versions")
+        if (type(versions) is not list or not versions or len(versions) > 4
+                or any(type(version) is not str or not version for version in versions)
+                or attestation.version not in versions
+                or config.get("required_team_identifier") != "2DC432GLL2"
+                or attestation.team_identifier != "2DC432GLL2"):
+            _native_refuse()
+        _native_read_config(self._config_path, self._config_sha256)
+        return {
+            "worker_id": worker_id, "control_uid": control_uid,
+            "binding_id": binding.binding_id, "profile_id": binding.profile_id,
+            "adapter_id": binding.adapter_id,
+            "realm_config_sha256": self._config_sha256,
+            "realm_generation": enrollment["generation"],
+            "catalog_digest": compose_catalog_digest(),
+        }
+
+
+def load_subscription_realm_owner(config_path: Path, *, expected_config_sha256: str) -> SubscriptionRealmOwner:
+    """Pin the actual root-owned broker config; never accept a caller dict."""
+    owner = SubscriptionRealmOwner(_native_path(config_path), expected_config_sha256,
+                                   _SUBSCRIPTION_REALM_OWNER_SEAL)
+    owner.observe()
+    return owner

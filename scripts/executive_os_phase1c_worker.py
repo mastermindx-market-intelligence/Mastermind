@@ -106,6 +106,7 @@ _CONFIG_FIELDS = frozenset(
     }
 )
 _SUBSCRIPTION_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({"harness_binding_id"})
+_SUBSCRIPTION_OPTIONAL_CONFIG_FIELDS = frozenset({"subscription_realm_enrollment"})
 _NATIVE_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({
     "native_provider", "native_realm_enrollment",
 })
@@ -174,7 +175,11 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     if schema_version == CONFIG_SCHEMA_VERSION:
         expected_fields = _CONFIG_FIELDS
     elif schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
-        expected_fields = _SUBSCRIPTION_CONFIG_FIELDS
+        expected_fields = _SUBSCRIPTION_CONFIG_FIELDS | (
+            _SUBSCRIPTION_OPTIONAL_CONFIG_FIELDS
+            if "subscription_realm_enrollment" in value
+            else frozenset()
+        )
     elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
         expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
                            else _NATIVE_CONFIG_FIELDS)
@@ -225,6 +230,19 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             raise WorkerConfigError("subscription Codex workers cannot arm the operator harness")
         if binding.implementation_state == "SPEC_ONLY":
             raise WorkerConfigError("subscription harness binding is not implemented")
+        enrollment = value.get("subscription_realm_enrollment")
+        if (
+            enrollment is not None and (
+                not isinstance(enrollment, dict)
+            or set(enrollment) != {"generation", "binding_id"}
+            or type(enrollment["generation"]) is not int
+            or enrollment["generation"] < 1
+            or not isinstance(enrollment["binding_id"], str)
+            or not enrollment["binding_id"]
+            or enrollment["binding_id"] != value["harness_binding_id"]
+            )
+        ):
+            raise WorkerConfigError("subscription realm enrollment contract is invalid")
     allowed_groups = value.get("allowed_supplementary_gids")
     if (
         not isinstance(allowed_groups, list)
@@ -294,6 +312,14 @@ def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
         raise WorkerConfigError("native service requires current operator autonomy admission")
     binding = _subscription_binding_for_config(config)
     if binding is None:
+        return
+    # A root-owned v5 config with a valid subscription_realm_enrollment is the
+    # attended-only lane: the broker only accepts that request through the
+    # typed interactive-canary operation, which the underlying binding
+    # explicitly disallows for autonomous execution.  Without enrollment the
+    # v5 config cannot reach the autonomous _start path and must therefore be
+    # refused here, preserving the legacy autonomous-service posture.
+    if config.get("subscription_realm_enrollment") is not None:
         return
     if binding.implementation_state != "PROVEN_LIVE" or not binding.autonomous_allowed:
         raise WorkerConfigError("subscription harness binding is not armed for autonomous service")
@@ -620,9 +646,47 @@ def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
     )
 
 
+def _build_subscription_realm_owner(
+    config: Mapping[str, Any], config_path: Path,
+) -> Any:
+    """Compose the typed worker-local subscription realm owner from the
+    root-owned v5 config. Uses the exact config SHA read from disk and the
+    exact existing provider binding; no second enrollment or authority map.
+    """
+    if config.get("schema_version") != SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
+        return None
+    from control_plane.codex_provider_realm import (
+        SubscriptionRealmOwner,
+        load_subscription_realm_owner,
+    )
+
+    enrollment = config.get("subscription_realm_enrollment")
+    if not isinstance(enrollment, dict):
+        raise WorkerConfigError(
+            "subscription realm enrollment is required for subscription service"
+        )
+    expected_sha = sha256_file(config_path)
+    owner = load_subscription_realm_owner(
+        config_path, expected_config_sha256=expected_sha,
+    )
+    if not isinstance(owner, SubscriptionRealmOwner):
+        raise WorkerConfigError(
+            "load_subscription_realm_owner did not return a SubscriptionRealmOwner"
+        )
+    observed = owner.observe()
+    if (
+        observed.get("binding_id") != enrollment["binding_id"]
+        or type(observed.get("realm_generation")) is not int
+        or observed["realm_generation"] != enrollment["generation"]
+    ):
+        raise WorkerConfigError("subscription realm owner disagrees with enrollment")
+    return owner
+
+
 def _build_broker(
     config: dict[str, Any],
     *,
+    config_path: Path | None = None,
     autonomy_guard=None,
     native_account: CodexAccountEnvironment | None = None,
 ) -> ExecutiveWorkerBroker:
@@ -659,6 +723,11 @@ def _build_broker(
         if provider_realm is not None
         else None
     )
+    subscription_realm_owner = (
+        _build_subscription_realm_owner(config, config_path)
+        if (binding is not None and config_path is not None)
+        else None
+    )
     if native_account is not None:
         if provider_realm is not None or native_account.home != policy.provider_home:
             raise WorkerConfigError("native account differs from the configured provider realm")
@@ -677,6 +746,7 @@ def _build_broker(
             required_team_identifier=str(config["required_team_identifier"]),
             provider_realm=provider_realm,
             provider_credential_loader=credential_loader,
+            subscription_realm_owner=subscription_realm_owner,
         )
     sweeper = DedicatedUIDSweeper(
         policy.worker_uid,
@@ -758,22 +828,26 @@ def _build_broker(
         autonomy_canary_factory=(
             _build_autonomy_canary_factory(config) if armed else None
         ),
+        subscription_realm_owner=subscription_realm_owner,
     )
 
 
-async def _serve(config: dict[str, Any], *, autonomy_guard=None) -> None:
+async def _serve(config: dict[str, Any], *, config_path: Path | None = None,
+                 autonomy_guard=None) -> None:
     if (os.geteuid() != config["worker_uid"] or os.getegid() != config["worker_gid"]
             or config["control_uid"] == config["worker_uid"]):
         raise WorkerConfigError("native scope requires the configured distinct worker principal")
     if config.get("native_provider") == "claude":
-        broker = _build_broker(config, autonomy_guard=autonomy_guard)
+        broker = _build_broker(config, config_path=config_path,
+                               autonomy_guard=autonomy_guard)
         await _serve_broker(broker, str(config["launchd_socket_name"]))
         return
     scope = (nullcontext(None) if _subscription_binding_for_config(config) is not None
              else native_codex_account_scope(Path(config["provider_home"]),
                                              principal_home_admitted=True))
     with scope as native_account:
-        broker = _build_broker(config, autonomy_guard=autonomy_guard,
+        broker = _build_broker(config, config_path=config_path,
+                               autonomy_guard=autonomy_guard,
                                native_account=native_account)
         await _serve_broker(broker, str(config["launchd_socket_name"]))
 
@@ -932,7 +1006,8 @@ def main(argv: list[str] | None = None) -> int:
                     ) from exc
 
             autonomy_guard = require_autonomy
-        asyncio.run(_serve(config, autonomy_guard=autonomy_guard))
+        asyncio.run(_serve(config, config_path=config_path,
+                           autonomy_guard=autonomy_guard))
         return 0
     except (WorkerBrokerError, BinaryAttestationError, OSError, ValueError) as exc:
         # BinaryAttestationError (and its CodexAttestationReceiptError subclass

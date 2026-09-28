@@ -1373,6 +1373,13 @@ class ServiceConfig:
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     shutdown_grace_seconds: float = 10.0
+    # Optional root-owned subscription-canary realm.  When present the primary
+    # ``quota_class`` is locked READ-only and carries
+    # ``metadata.subscription_canary_realm == <exact object>``.  Ordinary
+    # configs leave every field ``None`` and the realm is not advertised.
+    subscription_canary_realm_binding_id: str | None = None
+    subscription_canary_realm_generation: int | None = None
+    subscription_canary_realm_config_sha256: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -1467,6 +1474,92 @@ class ServiceConfig:
             raise ValueError("max_response_bytes must be between 4 KiB and 16 MiB")
         if not 0.1 <= float(self.shutdown_grace_seconds) <= 60:
             raise ValueError("shutdown_grace_seconds must be between 0.1 and 60 seconds")
+        self._validate_subscription_canary_realm()
+
+    # -- subscription_canary_realm validation ---------------------------------
+
+    def _validate_subscription_canary_realm(self) -> None:
+        binding_id = self.subscription_canary_realm_binding_id
+        generation = self.subscription_canary_realm_generation
+        config_sha = self.subscription_canary_realm_config_sha256
+        if binding_id is None and generation is None and config_sha is None:
+            return
+        if (
+            not isinstance(binding_id, str)
+            or not binding_id
+            or binding_id != binding_id.strip()
+        ):
+            raise ValueError("subscription_canary_realm binding_id is invalid")
+        if (
+            type(generation) is not int
+            or isinstance(generation, bool)
+            or generation < 1
+            or generation >= 2 ** 63
+        ):
+            raise ValueError("subscription_canary_realm generation is invalid")
+        if (
+            not isinstance(config_sha, str)
+            or config_sha != config_sha.lower()
+            or re.fullmatch(r"[0-9a-f]{64}", config_sha) is None
+        ):
+            raise ValueError("subscription_canary_realm config_sha256 is invalid")
+        try:
+            from control_plane.subscription_harness_bindings import (
+                HarnessBindingError,
+                get_binding,
+            )
+            binding = get_binding(binding_id)
+        except (HarnessBindingError, ValueError) as exc:
+            raise ValueError(
+                "subscription_canary_realm binding is not reviewed"
+            ) from exc
+        if (
+            binding.adapter_id != "codex-cli"
+            or binding.implementation_state == "SPEC_ONLY"
+            or binding.autonomous_allowed is not False
+        ):
+            raise ValueError(
+                "subscription_canary_realm binding is not a reviewed codex-cli "
+                "attended-only implementation"
+            )
+        if (
+            self.provider != binding.provider
+            or self.worker_type != binding.adapter_id
+        ):
+            raise ValueError(
+                "subscription_canary_realm worker provider/worker_type disagrees "
+                "with the reviewed binding"
+            )
+        from control_plane.subscription_provider_profiles import get_profile
+
+        profile = get_profile(binding.profile_id)
+        expected_model = binding.model_for(profile)
+        if (
+            not isinstance(self.model, str)
+            or self.model.casefold() != expected_model.casefold()
+        ):
+            raise ValueError(
+                "subscription_canary_realm worker model disagrees with the "
+                "reviewed binding"
+            )
+
+    def subscription_canary_realm(self) -> Mapping[str, Any] | None:
+        """Return the frozen exact subscription-canary realm object or ``None``.
+
+        The dict is built from the validated scalar fields only; no other
+        source may widen the advertised realm.  The returned mapping is the
+        same object the supervisor carries on the enriched ``WorkerLaunchSpec``
+        and the same object the worker side re-validates against its disk
+        config SHA.  Callers must treat the result as read-only.
+        """
+
+        if self.subscription_canary_realm_binding_id is None:
+            return None
+        return _FROZEN_REALM(
+            binding_id=str(self.subscription_canary_realm_binding_id),
+            generation=int(self.subscription_canary_realm_generation),
+            config_sha256=str(self.subscription_canary_realm_config_sha256),
+        )
 
 
 def _jsonable(value: Any) -> Any:
@@ -1483,6 +1576,56 @@ def _jsonable(value: Any) -> Any:
     if hasattr(value, "value") and isinstance(getattr(value, "value"), str):
         return value.value
     return value
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubscriptionCanaryRealm(Mapping[str, Any]):
+    """Immutable, secret-free subscription-canary realm record.
+
+    The exact field set is enforced by ``__post_init__`` so any caller that
+    bypasses the dataclass validation (e.g. ``dataclasses.replace``) cannot
+    widen or rename the advertised object.  This is the single shape that
+    crosses the Control-to-Worker boundary and the metadata boundary.
+    """
+
+    binding_id: str
+    generation: int
+    config_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding_id, str) or not self.binding_id.strip():
+            raise ValueError("subscription_canary_realm binding_id is invalid")
+        if (
+            type(self.generation) is not int
+            or isinstance(self.generation, bool)
+            or self.generation < 1
+            or self.generation >= 2 ** 63
+        ):
+            raise ValueError("subscription_canary_realm generation is invalid")
+        if (
+            not isinstance(self.config_sha256, str)
+            or self.config_sha256 != self.config_sha256.lower()
+            or re.fullmatch(r"[0-9a-f]{64}", self.config_sha256) is None
+        ):
+            raise ValueError("subscription_canary_realm config_sha256 is invalid")
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "binding_id":
+            return self.binding_id
+        if key == "generation":
+            return self.generation
+        if key == "config_sha256":
+            return self.config_sha256
+        raise KeyError(key)
+
+    def __iter__(self):
+        return iter(("binding_id", "generation", "config_sha256"))
+
+    def __len__(self) -> int:
+        return 3
+
+
+_FROZEN_REALM = _SubscriptionCanaryRealm
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -2197,6 +2340,46 @@ class ExecutiveControlService:
         if self.runtime is None:
             raise ServiceError("Executive control service is not started")
         return self.runtime
+
+    def _primary_quota_descriptor(
+        self, *, default_capabilities: Sequence[str],
+    ) -> tuple[dict[str, Any], tuple[str, ...]]:
+        """Return the primary quota-class descriptor used for the worker.
+
+        When the configured Control advertises a reviewed subscription-canary
+        realm, the primary quota class becomes strictly READ-only, carries the
+        realm object in its metadata, and the provider/model/effort/cost_class
+        are derived from the reviewed binding/profile rather than trusted
+        booleans on the Control config.  An ordinary (no realm) configuration
+        preserves the exact historical descriptor.
+        """
+
+        realm = self.config.subscription_canary_realm()
+        if realm is None:
+            capabilities = tuple(default_capabilities)
+            descriptor: dict[str, Any] = {
+                "provider": self.config.provider,
+                "model": self.config.model,
+                "effort": self.config.effort,
+                "cost_class": self.config.cost_class,
+                "capabilities": list(capabilities),
+            }
+            return descriptor, capabilities
+        from control_plane.subscription_harness_bindings import get_binding
+        from control_plane.subscription_provider_profiles import get_profile
+
+        binding = get_binding(self.config.subscription_canary_realm_binding_id)
+        profile = get_profile(binding.profile_id)
+        realm_model = binding.model_for(profile, None)
+        descriptor = {
+            "provider": str(binding.provider),
+            "model": str(realm_model),
+            "effort": self.config.effort,
+            "cost_class": self.config.cost_class,
+            "capabilities": ["read"],
+            "metadata": {"subscription_canary_realm": dict(realm)},
+        }
+        return descriptor, ("read",)
 
     def _require_supervisor(self) -> SupervisorProtocol:
         if self.supervisor is None:
@@ -4197,6 +4380,46 @@ class ExecutiveControlService:
 
     def _register_worker(self) -> Any:
         runtime = self._require_runtime()
+        realm = self.config.subscription_canary_realm()
+        if realm is not None:
+            descriptor, capabilities = self._primary_quota_descriptor(
+                default_capabilities=("read",),
+            )
+            expected_capabilities = list(capabilities)
+            expected_metadata = dict(descriptor.get("metadata", {}))
+            existing = runtime.workers.get_worker(self.config.worker_id)
+            if existing is not None:
+                quota = runtime.workers.get_quota_class(
+                    self.config.worker_id, self.config.quota_class
+                )
+                if (
+                    existing.provider != self.config.provider
+                    or existing.account_label != self.config.worker_account_label
+                    or existing.worker_type != self.config.worker_type
+                    or existing.capabilities != expected_capabilities
+                    or quota is None
+                    or quota.provider != descriptor["provider"]
+                    or quota.model != descriptor["model"]
+                    or quota.effort != descriptor["effort"]
+                    or quota.cost_class != descriptor["cost_class"]
+                    or quota.capabilities != expected_capabilities
+                    or quota.metadata != expected_metadata
+                ):
+                    raise StateConflict(
+                        "configured subscription-canary worker identity already "
+                        "exists with different policy"
+                    )
+                return existing
+            return runtime.workers.register_worker(
+                self.config.worker_id,
+                provider=self.config.provider,
+                account_label=self.config.worker_account_label,
+                worker_type=self.config.worker_type,
+                capabilities=expected_capabilities,
+                quota_classes={self.config.quota_class: descriptor},
+                metadata={"service_managed": True},
+            )
+
         binding = self._require_current_coo_binding()
         router = ModelRouter.load()
         alias = router.model_aliases[self.config.coo_model_alias]

@@ -1232,15 +1232,14 @@ PY
 PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$WORKER_CONFIG" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
   "$WORKER_SUPPLEMENTARY_GIDS" "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" \
   "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_CONFIG" <<'PY'
-import json, os, pathlib, sys
+import hashlib, json, os, pathlib, sys
 (
     destination, control_uid, worker_uid, worker_gid, supplementary_gids, workspace_root,
     run_root, provider_home, codex_binary, codex_version, codex_attestation_receipt,
     control_config,
 ) = sys.argv[1:]
 control = json.loads(pathlib.Path(control_config).read_text(encoding="utf-8"))
-value = {
-    "schema_version": "mastermind.executive_worker_broker_config/v4",
+common = {
     "control_uid": int(control_uid),
     "worker_uid": int(worker_uid),
     "worker_gid": int(worker_gid),
@@ -1259,10 +1258,58 @@ value = {
     "require_secret_canary": True,
     "operator_harness_armed": bool(control.get("coo_operator_harness_armed", False)),
 }
+realm = control.get("subscription_canary_realm")
+realm_binding_id = realm.get("binding_id") if isinstance(realm, dict) else None
+realm_generation = realm.get("generation") if isinstance(realm, dict) else None
+realm_config_sha = realm.get("config_sha256") if isinstance(realm, dict) else None
+has_realm = (
+    isinstance(realm, dict)
+    and set(realm) == {"binding_id", "generation", "config_sha256"}
+    and isinstance(realm_binding_id, str) and realm_binding_id
+    and type(realm_generation) is int and realm_generation >= 1
+    and isinstance(realm_config_sha, str)
+    and len(realm_config_sha) == 64
+    and realm_config_sha == realm_config_sha.lower()
+)
+if has_realm:
+    # Attended subscription-canary lane: emit v5 with the exact Control realm.
+    # The worker side re-validates the binding identity, the realm config SHA,
+    # and the (non-boolean positive) generation on every startup; the digest
+    # fence below ensures the bytes that just landed on disk are exactly what
+    # Control signed, so the worker can never start with a different realm
+    # than the one the Control side composed against.
+    value = {
+        **common,
+        "schema_version": "mastermind.executive_worker_broker_config/v5",
+        "harness_binding_id": str(realm_binding_id),
+        "subscription_realm_enrollment": {
+            "binding_id": str(realm_binding_id),
+            "generation": int(realm_generation),
+        },
+    }
+else:
+    if realm is not None:
+        raise SystemExit("control subscription_canary_realm is malformed")
+    value = {
+        **common,
+        "schema_version": "mastermind.executive_worker_broker_config/v4",
+    }
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+payload = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode("utf-8")
+temporary.write_bytes(payload)
 os.chmod(temporary, 0o440)
+if has_realm:
+    # Fence before publication: a mismatched file never replaces the active
+    # worker configuration.
+    observed = hashlib.sha256(payload).hexdigest()
+    expected = str(realm_config_sha).lower()
+    if observed != expected:
+        temporary.unlink(missing_ok=True)
+        raise SystemExit(
+            "worker config SHA-256 differs from Control's "
+            "subscription_canary_realm.config_sha256"
+        )
 os.replace(temporary, path)
 PY
 /usr/sbin/chown "root:$WORKER_GROUP" "$WORKER_CONFIG"

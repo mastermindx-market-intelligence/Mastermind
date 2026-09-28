@@ -243,6 +243,122 @@ def _passing_canary() -> dict:
     }
 
 
+def _subscription_spec(tmp_path: Path, adapter: cw.CodexWorkerAdapter) -> cw.LaunchSpec:
+    workspace, head = _workspace(tmp_path / "canary")
+    run_dir = tmp_path / "canary" / "run"
+    run_dir.mkdir(mode=0o700)
+    input_dir = run_dir / "input"
+    input_dir.mkdir(mode=0o700)
+    schema_path = input_dir / "worker-result.schema.json"
+    schema_path.write_text(json.dumps(_schema()), encoding="utf-8")
+    schema_path.chmod(0o600)
+    return cw.LaunchSpec(
+        run_id="run-1",
+        job_id="job-1",
+        worker_id="codex-01",
+        workspace_path=workspace,
+        run_dir=run_dir,
+        prompt="interactive canary",
+        result_schema_path=schema_path,
+        authorities=("READ",),
+        authority=None,
+        model="reviewed-model",
+        expected_base_sha=head,
+        subscription_canary_claim={
+            "schema": "mastermind.subscription_canary_claim/v1",
+            "execution_mode": "interactive_canary",
+            "run_id": "run-1",
+            "job_id": "job-1",
+            "worker_id": "codex-01",
+            "quota_class": "interactive",
+            "fence_generation": 7,
+            "capacity_generation": 7,
+            "capacity_state": "BUSY",
+            "held_attempt_id": "run-1",
+            "current_attempt_id": "run-1",
+            "binding_id": "reviewed-binding",
+            "profile_id": "reviewed-profile",
+            "adapter_id": "codex-cli",
+            "model": "reviewed-model",
+            "realm_config_sha256": "a" * 64,
+            "realm_generation": 2,
+            "catalog_digest": "b" * 64,
+            "issued_at_ms": 1,
+            "expires_at_ms": 2,
+            "observation_digest": "c" * 64,
+        },
+    )
+
+
+class _RecordingRealmOwner:
+    pass
+
+
+def test_plain_start_refuses_subscription_before_credential_or_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _ordinary_spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    adapter.subscription_realm_owner = _RecordingRealmOwner()
+    spec = _subscription_spec(tmp_path, adapter)
+    credential_calls: list[object] = []
+    subprocess_calls: list[object] = []
+    monkeypatch.setattr(
+        adapter, "_environment", lambda *_args, **_kwargs: credential_calls.append(1),
+    )
+    def record_subprocess(*_args, **_kwargs):
+        subprocess_calls.append(1)
+        raise _InterruptSubprocess()
+
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", record_subprocess)
+
+    with pytest.raises(cw.LaunchValidationError, match="typed admission seam"):
+        asyncio.run(adapter.start(spec))
+
+    assert credential_calls == []
+    assert subprocess_calls == []
+
+
+def test_canary_seam_reverifies_admission_before_credential_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _RecordingRealmOwner()
+    adapter, _ordinary_spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    object.__setattr__(adapter, "subscription_realm_owner", owner)
+    spec = _subscription_spec(tmp_path, adapter)
+    calls: list[tuple[object, cw.LaunchSpec]] = []
+    observed_order: list[str] = []
+
+    def verify(admission, *, spec):
+        calls.append((admission, spec))
+        observed_order.append("verify")
+
+    def environment(*_args, **_kwargs):
+        observed_order.append("credential")
+        return {}
+
+    def subprocess_exec(*_args, **_kwargs):
+        observed_order.append("subprocess")
+        raise _InterruptSubprocess()
+
+    monkeypatch.setattr(
+        "control_plane.subscription_canary_admission.verify_broker_subscription_canary_admission",
+        verify,
+    )
+    monkeypatch.setattr(adapter, "_environment", environment)
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", subprocess_exec)
+    admission = object()
+
+    with pytest.raises(_InterruptSubprocess):
+        asyncio.run(adapter.start_subscription_canary(spec, admission))
+
+    assert calls == [(admission, spec)]
+    assert observed_order == ["verify", "credential", "subprocess"]
+
+
+class _InterruptSubprocess(BaseException):
+    pass
+
+
 def test_native_binary_attestation_allows_bounded_cold_codesign_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

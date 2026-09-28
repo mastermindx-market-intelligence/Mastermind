@@ -636,11 +636,30 @@ class ExecutiveSupervisor:
         validation_timeout_seconds: float = 300.0,
         instance_id: str | None = None,
         exact_target_provider: Callable[[str], ExactWorkerClaimTarget | None] | None = None,
+        subscription_canary_claim_provider: Callable[
+            [str, str], Mapping[str, Any]
+        ] | None = None,
+        subscription_canary_binding_id: str | None = None,
     ) -> None:
         self.runtime = runtime
         if exact_target_provider is not None and not callable(exact_target_provider):
             raise SupervisorError("exact worker target provider must be callable")
         self._exact_target_provider = exact_target_provider
+        if subscription_canary_claim_provider is not None and (
+            not callable(subscription_canary_claim_provider)
+            or subscription_canary_binding_id is None
+            or not isinstance(subscription_canary_binding_id, str)
+            or not subscription_canary_binding_id
+        ):
+            raise SupervisorError(
+                "subscription canary claim provider requires a non-empty binding id"
+            )
+        self._subscription_canary_claim_provider = subscription_canary_claim_provider
+        self._subscription_canary_binding_id = (
+            str(subscription_canary_binding_id)
+            if subscription_canary_claim_provider is not None
+            else None
+        )
         self.adapter = adapter
         self.runs_root = (
             Path(runs_root).resolve()
@@ -1070,6 +1089,59 @@ class ExecutiveSupervisor:
             **spec_kwargs,
         )
 
+    def _enrich_spec_with_canary_claim(
+        self,
+        spec: WorkerLaunchSpec,
+        job: Job,
+    ) -> WorkerLaunchSpec:
+        """Apply one immutable subscription canary claim to a freshly built spec.
+
+        Only an injected claim provider (a callable taking ``attempt_id`` and
+        ``binding_id``) drives this path; ordinary composition leaves the
+        provider as ``None`` and the original spec is returned unchanged.  The
+        enrichment runs immediately after constructing the base ``spec`` and
+        before any prompt/recovery/broker write, so the durable WorkerLaunchSpec
+        sealed by the recovery binding already carries the exact claim.
+        """
+
+        provider = self._subscription_canary_claim_provider
+        if provider is None:
+            return spec
+        binding_id = self._subscription_canary_binding_id
+        if binding_id is None:
+            raise SupervisorError(
+                "subscription canary claim provider has no bound binding id"
+            )
+        try:
+            observation = provider(spec.run_id, binding_id)
+        except Exception as exc:
+            raise SupervisorError(
+                f"subscription canary claim provider refused: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not isinstance(observation, Mapping):
+            raise SupervisorError(
+                "subscription canary claim provider returned a non-mapping"
+            )
+        if (
+            observation.get("run_id") != spec.run_id
+            or observation.get("job_id") != spec.job_id
+            or observation.get("worker_id") != spec.worker_id
+            or observation.get("binding_id") != binding_id
+            or observation.get("model") != spec.model
+        ):
+            raise SupervisorError(
+                "subscription canary claim differs from the claimed launch spec"
+            )
+        # The observation owner is the existing typed
+        # ``observe_subscription_canary_claim``; it has already frozen and
+        # validated the exact closed schema, so passing it through
+        # ``dataclasses.replace`` lets WorkerLaunchSpec re-validate the exact
+        # contract on assignment.
+        return dataclasses.replace(
+            spec, subscription_canary_claim=dict(observation),
+        )
+
     def _validate_execution_profile(
         self,
         job: Job,
@@ -1330,6 +1402,7 @@ class ExecutiveSupervisor:
                 effective_grant=effective_grant,
             )
             spec = self._launch_spec(job, lease, schema_path, effective_grant)
+            spec = self._enrich_spec_with_canary_claim(spec, job)
             recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
             _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
             if exact_target is not None:
