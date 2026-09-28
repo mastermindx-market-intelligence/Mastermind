@@ -1581,8 +1581,13 @@ class ExecutiveWorkerBroker:
         if self._operator_only:
             raise BrokerStateError("operator-only broker refuses flat worker operations")
 
-    async def _dispatch(self, operation: str, payload: dict[str, Any],
-                        *, peer: PeerCredentials) -> Any:
+    async def _dispatch(
+        self,
+        operation: str,
+        payload: dict[str, Any],
+        *,
+        peer: PeerCredentials | None = None,
+    ) -> Any:
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1596,6 +1601,10 @@ class ExecutiveWorkerBroker:
         if operation == "autonomy-canary":
             return await self._autonomy_canary(payload)
         if operation == "interactive-canary":
+            if peer is None:
+                raise PeerAuthorizationError(
+                    "interactive subscription canary requires an authenticated Unix peer"
+                )
             return await self._interactive_canary(payload, peer=peer)
         if operation == "ohf-validate":
             return await self._ohf_validate(payload)
