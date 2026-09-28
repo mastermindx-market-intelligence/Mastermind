@@ -58,12 +58,13 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
     assert worker["GroupName"] == "__WORKER_GROUP__"
     assert control["UserName"] != worker["UserName"]
     assert worker["InitGroups"] is False
+    assert control["ProcessType"] == "Standard"
+    assert worker["ProcessType"] == "Background"
 
     for value in (control, worker):
         assert value["RunAtLoad"] is True
         assert value["KeepAlive"] is True
         assert value["AbandonProcessGroup"] is False
-        assert value["ProcessType"] == "Background"
         assert value["Umask"] == 0o77
         assert 1 <= value["ExitTimeOut"] <= 30
         assert value["HardResourceLimits"]["Core"] == 0
@@ -136,12 +137,15 @@ def test_executive_daemons_do_not_throttle_disk_io() -> None:
     # and why a manual `_mastermind_exec` shell reproduction always
     # succeeded: an interactive shell has normal I/O policy; only launchd's
     # plist-driven daemon start applies the throttle. Both Executive
-    # launchd plists must never set the key again. ProcessType=Background
-    # (CPU scheduling politeness, not disk I/O) is retained and is not the
-    # defect -- it stays asserted on both templates below.
+    # launchd plists must never set the key again. Separately, Control serves
+    # latency-bounded user reads, so it must not receive Background policy.
+    # launchd.plist(5) documents CPU and I/O resource limits, not CPU-only
+    # politeness. In #987, the installed reader passed as UID450 with its
+    # launchd file-size limit but timed out under a background QoS clamp.
     for value in (_plist(CONTROL), _plist(WORKER)):
         assert "LowPriorityIO" not in value
-        assert value["ProcessType"] == "Background"
+    assert _plist(CONTROL)["ProcessType"] == "Standard"
+    assert _plist(WORKER)["ProcessType"] == "Background"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="plutil is a Darwin-only binary")
@@ -294,11 +298,11 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
         "SockPathMode": 0o660,
     }
 
-    for rendered_path in (control, worker):
+    for rendered_path, process_type in ((control, "Standard"), (worker, "Background")):
         with rendered_path.open("rb") as handle:
             rendered = plistlib.load(handle)
         assert "LowPriorityIO" not in rendered
-        assert rendered["ProcessType"] == "Background"
+        assert rendered["ProcessType"] == process_type
 
 
 def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> None:
