@@ -142,17 +142,29 @@ ensure_running() {
       return 1
       ;;
   esac
-  local after_output after_status=0
-  after_output="$(/bin/launchctl print "system/$label" 2>/dev/null)" || after_status=$?
-  if [ "$after_status" -ne 0 ]; then
-    /bin/echo "service registration missing after read-side start: $label (launchctl print exit $after_status)" >&2
-    return 1
-  fi
-  if ! is_running_output "$after_output"; then
-    /bin/echo "service is registered but not running after read-side start: $label" >&2
-    return 1
-  fi
-  /bin/echo "service=$label state=running existing=0"
+  # launchd acknowledges bootstrap/kickstart before the daemon is running.
+  # Observe readiness for at most 30 sleeps; never repeat the modifying call.
+  local after_output after_status check
+  for ((check = 0; check <= 30; check++)); do
+    after_status=0
+    after_output="$(/bin/launchctl print "system/$label" 2>/dev/null)" || after_status=$?
+    if [ "$after_status" -eq 0 ] && is_running_output "$after_output"; then
+      /bin/echo "service=$label state=running existing=0"
+      return 0
+    fi
+    case "$after_status" in
+      0|113) ;;
+      *)
+        /bin/echo "service running state unknown after read-side start: $label (launchctl print exit $after_status)" >&2
+        return 1
+        ;;
+    esac
+    if [ "$check" -lt 30 ]; then
+      /bin/sleep 1
+    fi
+  done
+  /bin/echo "service did not become running within read-side startup wait: $label (launchctl print exit $after_status)" >&2
+  return 1
 }
 
 WORKER_OBSERVED_STATE=""
