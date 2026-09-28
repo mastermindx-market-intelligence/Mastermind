@@ -1434,10 +1434,11 @@ def _git_snapshot(workspace: Path, *, require_clean: bool) -> _GitSnapshot:
         cleanliness = observe_launch_cleanliness(
             lambda arguments: _git_command(workspace, *arguments)
         )
-        # `git status` intentionally respects ignore rules. A per-job clone
-        # must also be free of pre-existing ignored/untracked material, since
-        # ignored runtime files are still a mutation and secret-smuggling
-        # surface.
+        # The tracked-status leg deliberately skips untracked traversal.
+        # The dedicated `ls-files --others` leg then enumerates all untracked
+        # material (including ignored files because no exclude rules are
+        # supplied). A per-job clone must be free of both: ignored runtime
+        # files are still a mutation and secret-smuggling surface.
         if require_clean and cleanliness.dirty:
             raise LaunchValidationError("workspace clone must be clean before launch")
     return _GitSnapshot(head=head.lower(), status=cleanliness.status)
