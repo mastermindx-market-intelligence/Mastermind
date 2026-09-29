@@ -26,14 +26,17 @@ from control_plane.executive_release_contract import (
     canonical_release_bytes,
     parse_release_json,
     validate_admission,
+    validate_approval_evidence,
     validate_precondition_manifest,
+    validate_release_prestart_cancellation,
+    validate_release_prestart_reservation,
 )
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 
 JOURNAL_PRODUCTION_ROOT = "/var/db/mastermind-executive/release-actuator/journal"
 
-_SCHEMA = "mastermind.executive_release_actuator_journal/v1"
+_SCHEMA = "mastermind.executive_release_actuator_journal/v2"
 _STATES = (
     "STARTED",
     "PUBLISHED",
@@ -79,6 +82,7 @@ _RECORD_FIELDS = frozenset(
         "actuator_generation",
         "journal_generation",
         "started_at_ms",
+        "root_qualification_digest",
     }
 )
 _TERMINAL_FIELDS = frozenset(
@@ -108,6 +112,8 @@ _LOCK_POLL_SECONDS = 0.01
 _OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _OPEN_RECORD = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 _LOCAL_LOCK = threading.Lock()
+_RESERVATION_SUFFIX = ".reservation.json"
+_CANCELLATION_SUFFIX = ".cancellation.json"
 
 
 class ExecutiveReleaseActuatorJournalError(RuntimeError):
@@ -170,6 +176,31 @@ def _hash_record(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _operation_stem(operation_key: str) -> str:
+    """One stem derived from the validated original operation key.
+
+    The stem names the START `.json`, `.start`, `.next`, `.lock` family and
+    the separate `.reservation.json` / `.cancellation.json` sidecars. It is
+    sha256(operation_key) so callers digest the original operation key once.
+    """
+
+    return _operation_key(operation_key) and hashlib.sha256(
+        _operation_key(operation_key).encode("ascii")
+    ).hexdigest()
+
+
+def _validate_contract_record(
+    value: Any,
+    validator: Callable[..., ReleaseRecord],
+    **expected: Any,
+) -> ReleaseRecord:
+    try:
+        validated = validator(value, **expected)
+    except ReleaseContractError:
+        _fail("INVALID_EMBEDDED_RECORD")
+    return validated
+
+
 def _before_identity(record: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "release_commit": record["before_release_commit"],
@@ -186,6 +217,7 @@ def _start_identity(record: Mapping[str, Any]) -> dict[str, Any]:
         "admission": record["admission"],
         "actuator_generation": record["actuator_generation"],
         "started_at_ms": record["started_at_ms"],
+        "root_qualification_digest": record["root_qualification_digest"],
     }
 
 
@@ -285,6 +317,7 @@ def _validate_record(value: Any) -> ReleaseRecord:
         _commit(record[field], "INVALID_IDENTITY")
     _uuid(record["owner_installation_id"], "INVALID_IDENTITY")
     _uuid(record["boot_id"], "INVALID_IDENTITY")
+    _digest(record["root_qualification_digest"], "INVALID_ROOT_QUALIFICATION")
     _integer(record["actuator_generation"], "INVALID_GENERATION", minimum=1)
     _integer(record["journal_generation"], "INVALID_GENERATION", minimum=1)
     _integer(record["started_at_ms"], "INVALID_STARTED_AT_MS")
@@ -294,6 +327,10 @@ def _validate_record(value: Any) -> ReleaseRecord:
         admission = validate_admission(record["admission"])
     except ReleaseContractError:
         _fail("INVALID_EMBEDDED_RECORD")
+    # The embedded validated admission already carries approved_transition_ref
+    # and target_observation_digest, derived from operation_key and the
+    # canonical Runtime producer respectively. They are not caller-controlled
+    # copies at the START identity level.
     required_preconditions = {
         "owner_installation_id": record["owner_installation_id"],
         "target_ref": record["target_ref"],
@@ -388,7 +425,7 @@ class _ExecutiveReleaseActuatorJournal:
     @staticmethod
     def _name(operation_key: str) -> str:
         value = _operation_key(operation_key)
-        return hashlib.sha256(value.encode("ascii")).hexdigest() + ".json"
+        return _operation_stem(value) + ".json"
 
     def _check_descriptor(
         self,
@@ -717,6 +754,493 @@ class _ExecutiveReleaseActuatorJournal:
             _fail("OPERATION_MISMATCH")
         return record
 
+    @staticmethod
+    def _decode_approval(raw: Mapping[str, Any]) -> ReleaseRecord:
+        return _validate_contract_record(raw, validate_approval_evidence)
+
+    @staticmethod
+    def _validated_contract_bytes(record: ReleaseRecord) -> bytes:
+        encoded = canonical_release_bytes(record)
+        if len(encoded) > _MAX_RECORD_BYTES:
+            _fail("RECORD_SIZE")
+        return encoded
+
+    @classmethod
+    def _decode_reservation(
+        cls,
+        raw: Mapping[str, Any],
+        approval: ReleaseRecord,
+    ) -> tuple[bytes, ReleaseRecord]:
+        record = _validate_contract_record(
+            raw,
+            validate_release_prestart_reservation,
+            expected_approval=approval,
+        )
+        return cls._validated_contract_bytes(record), record
+
+    @classmethod
+    def _decode_cancellation(
+        cls,
+        raw: Mapping[str, Any],
+        reservation: ReleaseRecord,
+        admission: Mapping[str, Any],
+        approval: ReleaseRecord,
+    ) -> tuple[bytes, ReleaseRecord]:
+        record = _validate_contract_record(
+            raw,
+            validate_release_prestart_cancellation,
+            expected_reservation=reservation,
+            expected_admission=admission,
+            expected_approval=approval,
+        )
+        return cls._validated_contract_bytes(record), record
+
+    def _read_prestart_snapshot(
+        self,
+        root_descriptor: int,
+        stem: str,
+        *,
+        kind: str,
+        required: bool,
+    ) -> tuple[bytes, tuple[Any, ...]]:
+        suffix = _RESERVATION_SUFFIX if kind == "reservation" else _CANCELLATION_SUFFIX
+        return self._read_file(
+            root_descriptor,
+            stem + suffix,
+            required=required,
+        )
+
+    def _read_prestart_bytes(
+        self,
+        root_descriptor: int,
+        stem: str,
+        *,
+        kind: str,
+        required: bool,
+    ) -> bytes:
+        """Compatibility wrapper used by stable replay's middle observation."""
+
+        return self._read_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind=kind,
+            required=required,
+        )[0]
+
+    def _read_stable_prestart_snapshot(
+        self,
+        root_descriptor: int,
+        stem: str,
+        *,
+        kind: str,
+        required: bool,
+    ) -> tuple[bytes, tuple[Any, ...]]:
+        first_raw, first_identity = self._read_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind=kind,
+            required=required,
+        )
+        if not first_identity:
+            return first_raw, first_identity
+        middle_raw = self._read_prestart_bytes(
+            root_descriptor,
+            stem,
+            kind=kind,
+            required=True,
+        )
+        final_raw, final_identity = self._read_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind=kind,
+            required=True,
+        )
+        if (
+            first_raw != middle_raw
+            or middle_raw != final_raw
+            or first_identity != final_identity
+        ):
+            _fail("RECORD_REPLACED")
+        return final_raw, final_identity
+
+    def _validate_prestart_snapshot(
+        self,
+        raw: bytes,
+        *,
+        kind: str,
+        operation_key: str,
+        approval: ReleaseRecord,
+        reservation: ReleaseRecord | None = None,
+        admission: Mapping[str, Any] | None = None,
+    ) -> ReleaseRecord:
+        # An existing zero-byte sidecar is interrupted or malformed evidence,
+        # never absence. Keep it in place and fail closed.
+        if not raw:
+            _fail("RECORD_BYTES")
+        try:
+            parsed = parse_release_json(raw)
+        except ReleaseContractError:
+            _fail("RECORD_BYTES")
+        if kind == "reservation":
+            encoded, record = self._decode_reservation(parsed.to_dict(), approval)
+        else:
+            encoded, record = self._decode_cancellation(
+                parsed.to_dict(),
+                reservation,
+                admission,
+                approval,
+            )
+        if encoded != raw:
+            _fail("RECORD_BYTES")
+        if record["operation_key"] != operation_key:
+            _fail("OPERATION_MISMATCH")
+        return record
+
+    def _read_and_validate_prestart(
+        self,
+        root_descriptor: int,
+        stem: str,
+        *,
+        kind: str,
+        operation_key: str,
+        required: bool,
+        approval: ReleaseRecord,
+        reservation: ReleaseRecord | None = None,
+        admission: Mapping[str, Any] | None = None,
+    ) -> tuple[bytes, ReleaseRecord | None]:
+        raw, identity = self._read_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind=kind,
+            required=required,
+        )
+        if not identity:
+            return b"", None
+        record = self._validate_prestart_snapshot(
+            raw,
+            kind=kind,
+            operation_key=operation_key,
+            approval=approval,
+            reservation=reservation,
+            admission=admission,
+        )
+        return raw, record
+
+    def _start_evidence_exists(
+        self,
+        root_descriptor: int,
+        stem: str,
+        operation_key: str,
+    ) -> bool:
+        final_name = stem + ".json"
+        staged_name = stem + ".start"
+
+        def metadata(name: str) -> os.stat_result | None:
+            try:
+                return os.stat(
+                    name, dir_fd=root_descriptor, follow_symlinks=False
+                )
+            except FileNotFoundError:
+                return None
+            except OSError:
+                _fail("RECORD_METADATA")
+
+        final_info = metadata(final_name)
+        staged_info = metadata(staged_name)
+        if final_info is None and staged_info is None:
+            return False
+
+        # START publication has three valid durable shapes: a standalone
+        # staged inode before link(), a linked staged/final pair before staged
+        # cleanup, and a standalone final inode after cleanup. Reject every
+        # other shape rather than treating ambiguous filesystem state as an
+        # absence of START authority.
+        if final_info is not None and staged_info is not None:
+            if (
+                (final_info.st_dev, final_info.st_ino)
+                != (staged_info.st_dev, staged_info.st_ino)
+                or final_info.st_nlink != 2
+                or staged_info.st_nlink != 2
+            ):
+                _fail("RECORD_METADATA")
+            expected_final_links = expected_staged_links = 2
+        elif final_info is not None:
+            if final_info.st_nlink != 1:
+                _fail("RECORD_METADATA")
+            expected_final_links, expected_staged_links = 1, None
+        else:
+            if staged_info is None or staged_info.st_nlink != 1:
+                _fail("RECORD_METADATA")
+            expected_final_links, expected_staged_links = None, 1
+
+        final_raw = b""
+        staged_raw = b""
+        if expected_final_links is not None:
+            final_raw, _ = self._read_file(
+                root_descriptor,
+                final_name,
+                required=True,
+                expected_links=expected_final_links,
+            )
+        if expected_staged_links is not None:
+            staged_raw, _ = self._read_file(
+                root_descriptor,
+                staged_name,
+                required=True,
+                expected_links=expected_staged_links,
+            )
+        if final_raw and staged_raw and final_raw != staged_raw:
+            _fail("RECORD_METADATA")
+        for raw in (final_raw, staged_raw):
+            if raw:
+                record = self._decode(raw)
+                if record["operation_key"] != operation_key:
+                    _fail("OPERATION_MISMATCH")
+        return True
+
+    def reserve_prestart(
+        self,
+        *,
+        reservation: Mapping[str, Any],
+        approval: Mapping[str, Any],
+    ) -> ReleaseRecord:
+        validated_approval = self._decode_approval(approval)
+        reservation_bytes, validated_reservation = self._decode_reservation(
+            reservation,
+            validated_approval,
+        )
+        operation_key = validated_reservation["operation_key"]
+        stem = _operation_stem(operation_key)
+        name = stem + ".json"
+        return self._locked(
+            name,
+            lambda root, _: self._reserve_locked(
+                root,
+                stem,
+                reservation_bytes,
+                operation_key,
+                validated_approval,
+            ),
+            create_root=True,
+        )
+
+    def _reserve_locked(
+        self,
+        root_descriptor: int,
+        stem: str,
+        reservation_bytes: bytes,
+        operation_key: str,
+        validated_approval: ReleaseRecord,
+    ) -> ReleaseRecord:
+        # Read before write: exact byte-identical replay returns the stored
+        # record without any rewrite of metadata, including after cancellation
+        # or START. That is immutable history readback, not new authority. A
+        # different byte sequence conflicts before any state is changed.
+        existing_raw, existing_identity = self._read_stable_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind="reservation",
+            required=False,
+        )
+        if existing_identity:
+            if existing_raw == reservation_bytes:
+                return self._validate_prestart_snapshot(
+                    existing_raw,
+                    kind="reservation",
+                    operation_key=operation_key,
+                    approval=validated_approval,
+                )
+            _fail("RESERVATION_CONFLICT")
+        # A genuinely fresh reservation cannot appear after cancellation,
+        # final START, or any staged/partial START evidence.
+        _cancellation_raw, cancellation_identity = self._read_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind="cancellation",
+            required=False,
+        )
+        if cancellation_identity:
+            _fail("RESERVATION_CONFLICT")
+        if self._start_evidence_exists(root_descriptor, stem, operation_key):
+            _fail("RESERVATION_CONFLICT")
+        created_identity = self._write_new(
+            root_descriptor,
+            stem + _RESERVATION_SUFFIX,
+            reservation_bytes,
+        )
+        stored, stored_identity = self._read_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind="reservation",
+            required=True,
+        )
+        if stored != reservation_bytes or stored_identity != created_identity:
+            _fail("RECORD_REPLACED")
+        return self._validate_prestart_snapshot(
+            stored,
+            kind="reservation",
+            operation_key=operation_key,
+            approval=validated_approval,
+        )
+
+    def read_prestart_reservation(
+        self, operation_key: str, *, approval: Mapping[str, Any]
+    ) -> ReleaseRecord:
+        validated_operation_key = _operation_key(operation_key)
+        validated_approval = self._decode_approval(approval)
+        stem = _operation_stem(validated_operation_key)
+        name = stem + ".json"
+        return self._locked(
+            name,
+            lambda root, _: self._read_and_validate_prestart(
+                root,
+                stem,
+                kind="reservation",
+                operation_key=validated_operation_key,
+                required=True,
+                approval=validated_approval,
+            )[1],
+            create_root=False,
+        )
+
+    def cancel_prestart(
+        self,
+        *,
+        cancellation: Mapping[str, Any],
+        reservation: Mapping[str, Any],
+        admission: Mapping[str, Any],
+        approval: Mapping[str, Any],
+    ) -> ReleaseRecord:
+        validated_approval = self._decode_approval(approval)
+        reservation_bytes, validated_reservation = self._decode_reservation(
+            reservation,
+            validated_approval,
+        )
+        operation_key = validated_reservation["operation_key"]
+        stem = _operation_stem(operation_key)
+        name = stem + ".json"
+        return self._locked(
+            name,
+            lambda root, _: self._cancel_locked(
+                root,
+                stem,
+                cancellation,
+                reservation_bytes,
+                validated_reservation,
+                admission,
+                validated_approval,
+            ),
+            create_root=False,
+        )
+
+    def _cancel_locked(
+        self,
+        root_descriptor: int,
+        stem: str,
+        cancellation: Mapping[str, Any],
+        reservation_bytes: bytes,
+        validated_reservation: ReleaseRecord,
+        admission: Mapping[str, Any],
+        validated_approval: ReleaseRecord,
+    ) -> ReleaseRecord:
+        operation_key = validated_reservation["operation_key"]
+        # Cancellation requires a byte-identical stored reservation.
+        stored_reservation_bytes, stored_reservation = (
+            self._read_and_validate_prestart(
+                root_descriptor,
+                stem,
+                kind="reservation",
+                operation_key=operation_key,
+                required=True,
+                approval=validated_approval,
+            )
+        )
+        if reservation_bytes != stored_reservation_bytes:
+            _fail("RESERVATION_MISMATCH")
+        # Re-decode cancellation against the immutable stored reservation so
+        # all frozen validator joins are exercised against the on-disk bytes.
+        cancellation_bytes, validated_cancellation = self._decode_cancellation(
+            cancellation,
+            stored_reservation,
+            admission,
+            validated_approval,
+        )
+        # Refuse final or staged START.
+        if self._start_evidence_exists(root_descriptor, stem, operation_key):
+            _fail("RESERVATION_CONFLICT")
+        existing_raw, existing_identity = self._read_stable_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind="cancellation",
+            required=False,
+        )
+        if existing_identity:
+            if existing_raw == cancellation_bytes:
+                return self._validate_prestart_snapshot(
+                    existing_raw,
+                    kind="cancellation",
+                    operation_key=operation_key,
+                    approval=validated_approval,
+                    reservation=stored_reservation,
+                    admission=admission,
+                )
+            _fail("CANCELLATION_CONFLICT")
+        created_identity = self._write_new(
+            root_descriptor,
+            stem + _CANCELLATION_SUFFIX,
+            cancellation_bytes,
+        )
+        # The reservation file must never be deleted or rewritten.
+        stored, stored_identity = self._read_prestart_snapshot(
+            root_descriptor,
+            stem,
+            kind="cancellation",
+            required=True,
+        )
+        if stored != cancellation_bytes or stored_identity != created_identity:
+            _fail("RECORD_REPLACED")
+        return self._validate_prestart_snapshot(
+            stored,
+            kind="cancellation",
+            operation_key=operation_key,
+            approval=validated_approval,
+            reservation=stored_reservation,
+            admission=admission,
+        )
+
+    def read_prestart_cancellation(
+        self,
+        operation_key: str,
+        *,
+        reservation: Mapping[str, Any],
+        admission: Mapping[str, Any],
+        approval: Mapping[str, Any],
+    ) -> ReleaseRecord:
+        validated_operation_key = _operation_key(operation_key)
+        validated_approval = self._decode_approval(approval)
+        reservation_bytes, validated_reservation = self._decode_reservation(
+            reservation,
+            validated_approval,
+        )
+        if validated_reservation["operation_key"] != validated_operation_key:
+            _fail("OPERATION_MISMATCH")
+        stem = _operation_stem(validated_operation_key)
+        name = stem + ".json"
+        return self._locked(
+            name,
+            lambda root, _: self._read_and_validate_prestart(
+                root,
+                stem,
+                kind="cancellation",
+                operation_key=validated_operation_key,
+                required=True,
+                approval=validated_approval,
+                reservation=validated_reservation,
+                admission=admission,
+            )[1],
+            create_root=False,
+        )
+
     def _write_new(
         self, root_descriptor: int, name: str, raw: bytes
     ) -> tuple[Any, ...]:
@@ -833,6 +1357,9 @@ class _ExecutiveReleaseActuatorJournal:
         identity: Mapping[str, Any],
         preconditions: Mapping[str, Any],
         admission: Mapping[str, Any],
+        approval: Mapping[str, Any],
+        reservation: Mapping[str, Any],
+        root_qualification_digest: str,
         started_at_ms: int,
     ) -> ReleaseRecord:
         supplied = _exact_mapping(identity, _IDENTITY_FIELDS, "INVALID_IDENTITY")
@@ -845,17 +1372,164 @@ class _ExecutiveReleaseActuatorJournal:
             "actuator_generation": actuator_generation,
             "journal_generation": 1,
             "started_at_ms": started_at_ms,
+            "root_qualification_digest": root_qualification_digest,
         }
         validated = _validate_record(candidate)
         raw = canonical_release_bytes(validated)
-        name = self._name(validated["operation_key"])
+        validated_approval = self._decode_approval(approval)
+        reservation_bytes, validated_reservation = self._decode_reservation(
+            reservation,
+            validated_approval,
+        )
+        operation_key = validated_reservation["operation_key"]
+        if operation_key != validated["operation_key"]:
+            _fail("OPERATION_MISMATCH")
+        stem = _operation_stem(operation_key)
+        name = stem + ".json"
+        supplied_root_digest = _digest(
+            root_qualification_digest,
+            "INVALID_ROOT_QUALIFICATION",
+        )
+
+        def create_with_reservation(root_descriptor: int, record_name: str):
+            # 1. Read stored reservation; it must match caller bytes exactly.
+            stored_reservation_bytes, stored_reservation = (
+                self._read_and_validate_prestart(
+                    root_descriptor,
+                    stem,
+                    kind="reservation",
+                    operation_key=operation_key,
+                    required=True,
+                    approval=validated_approval,
+                )
+            )
+            if reservation_bytes != stored_reservation_bytes:
+                _fail("RESERVATION_MISMATCH")
+            # 2. The supplied root digest must equal sha256(stored reservation).
+            if supplied_root_digest != hashlib.sha256(
+                stored_reservation_bytes
+            ).hexdigest():
+                _fail("ROOT_QUALIFICATION_MISMATCH")
+            # 3. Bind every applicable START identity and the exact persisted
+            # precondition snapshot to the immutable reservation/approval.
+            self._validate_start_reservation_joins(
+                validated,
+                stored_reservation,
+                validated_approval,
+            )
+            # 4. Explicit admission join to reservation, preconditions, etc.
+            self._validate_admission_joins(
+                validated["admission"],
+                stored_reservation,
+                operation_key,
+            )
+            # 5. Any cancellation inode, including an interrupted zero-byte
+            # sidecar, permanently blocks START and remains for reconciliation.
+            _cancellation_raw, cancellation_identity = (
+                self._read_prestart_snapshot(
+                    root_descriptor,
+                    stem,
+                    kind="cancellation",
+                    required=False,
+                )
+            )
+            if cancellation_identity:
+                _fail("RESERVATION_CONFLICT")
+            # 6. Delegate exact-replay/recovery to the protected _create_locked.
+            return self._create_locked(
+                root_descriptor,
+                record_name,
+                raw,
+                validated,
+            )
+
         return self._locked(
             name,
-            lambda root, record_name: self._create_locked(
-                root, record_name, raw, validated
-            ),
+            create_with_reservation,
             create_root=True,
         )
+
+    @staticmethod
+    def _validate_start_reservation_joins(
+        start: ReleaseRecord,
+        reservation: ReleaseRecord,
+        approval: ReleaseRecord,
+    ) -> None:
+        before = reservation["before"]
+        effect = approval["normalized_requested_effect"]
+        expected = {
+            "operation_key": reservation["operation_key"],
+            "request_fingerprint": reservation["request_fingerprint"],
+            "approval_evidence_digest": reservation["approval_evidence_digest"],
+            "normalized_requested_effect_digest": reservation[
+                "normalized_requested_effect_digest"
+            ],
+            "expected_source_and_precondition_digest": reservation[
+                "expected_precondition_digest"
+            ],
+            "action_target_digest": reservation["action_target_digest"],
+            "owner_installation_id": reservation["owner_installation_id"],
+            "target_ref": reservation["target_ref"],
+            "before_release_commit": before["release_commit"],
+            "before_release_tree": before["release_tree"],
+            "before_installed_manifest_digest": before[
+                "installed_manifest_digest"
+            ],
+            "before_configuration_digest": before["configuration_digest"],
+            "target_release_commit": reservation["to_release_commit"],
+            "target_release_tree": effect["to_release_tree"],
+            "boot_id": reservation["preconditions"]["boot_id"],
+        }
+        if any(start[key] != value for key, value in expected.items()):
+            _fail("RESERVATION_MISMATCH")
+        if canonical_release_bytes(start["preconditions"]) != canonical_release_bytes(
+            reservation["preconditions"]
+        ):
+            _fail("RESERVATION_MISMATCH")
+        prepared = reservation["prepared_payload"]
+        if not (
+            reservation["reserved_at_ms"]
+            <= start["started_at_ms"]
+            < prepared["expires_at_ms"]
+        ):
+            _fail("RESERVATION_MISMATCH")
+
+    @staticmethod
+    def _validate_admission_joins(
+        admission: Mapping[str, Any],
+        reservation: ReleaseRecord,
+        operation_key: str,
+    ) -> None:
+        # Validate the admission with the frozen validator first, then
+        # explicitly byte-join its identity fields to the stored reservation.
+        try:
+            validated_admission = validate_admission(admission)
+        except ReleaseContractError:
+            _fail("INVALID_ADMISSION")
+        for key in (
+            "operation_key",
+            "approved_transition_ref",
+            "target_ref",
+            "owner_installation_id",
+            "effective_grant_digest",
+            "request_fingerprint",
+        ):
+            if validated_admission[key] != reservation[key]:
+                _fail("ADMISSION_JOIN_MISMATCH")
+        if validated_admission["boot_id"] != reservation["preconditions"]["boot_id"]:
+            _fail("ADMISSION_JOIN_MISMATCH")
+        if (
+            validated_admission["admission_contract_digest"]
+            != reservation["preconditions"]["admission_contract_digest"]
+        ):
+            _fail("ADMISSION_JOIN_MISMATCH")
+        if (
+            validated_admission["target_observation_digest"]
+            != reservation["target_observation_digest"]
+        ):
+            _fail("ADMISSION_JOIN_MISMATCH")
+        if validated_admission["operation_key"] != operation_key:
+            _fail("ADMISSION_JOIN_MISMATCH")
 
     def _create_locked(
         self,
@@ -874,6 +1548,8 @@ class _ExecutiveReleaseActuatorJournal:
             existing = self._decode_for_operation(
                 current, candidate_record["operation_key"]
             )
+            # Exact START replay returns only if the complete start identity,
+            # including root_qualification_digest, matches.
             if _start_identity(existing) == _start_identity(candidate_record):
                 return existing
             _fail("CONFLICT")
