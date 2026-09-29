@@ -1355,3 +1355,44 @@ P2-1 remains `BUILT_NOT_PROVEN` until that real installed path and fresh native
 orchestrator consumption are observed. Provider renewal, readiness canaries,
 service-control request authority and multi-host admission remain separately
 owned later slices; do not infer full autonomy from this login-check capability.
+# Optional private account-email comparison
+
+The existing `provider_identity_probe.py` has an opt-in `--compare-seat-stdin`
+diagnostic. Its entire output is one line: `MATCH`, `MISMATCH`, or `UNKNOWN`.
+Exit status is zero only for `MATCH`, and two otherwise. In this mode argument,
+input, policy, observation, and cleanup failures produce `UNKNOWN` without
+printing usage, identifiers, or raw error details. The default v1 identity JSON
+and the readiness receipt schema are unchanged.
+
+Supply the expected **account email** from an approved in-memory producer through
+private pipe stdin. The producer must close the pipe after the value; EOF is
+required, including when the value ends with a newline. The diagnostic reads at
+most 256 bytes and waits at most five seconds for this input. It rejects terminals,
+regular files, socket descriptors, extra lines, and oversized input. Never put a
+real expected identifier in command arguments, environment variables, shell
+history, temporary files, logs, receipts, or a persisted hash. Do not derive an
+email from a slot label or create a seat-to-account registry for this diagnostic.
+
+Comparison is exact and case-sensitive, with no alias stripping or normalization.
+Both values must be ASCII dot-atom emails: at most 254 bytes total, a local part
+of at most 64 bytes, and at least two nonempty domain labels of at most 63 bytes
+each. Display names, quoted local parts, Unicode, whitespace, controls, and other
+unsupported forms yield `UNKNOWN`. `MISMATCH` means two supported values differ;
+`UNKNOWN` includes absent email, an unmapped seat label, and any failed guard.
+
+The existing Darwin/root, approved worker principal and provider-home, credential
+kind, plan, workspace-binding-class, and host/auth-transaction requirements still
+apply. This mode uses the same pinned binary and existing
+`account/read(refreshToken:false)` observation. The existing forced-auth absence,
+login status, binary, and credential-metadata checks must all succeed, and the
+app-server must be closed, before `MATCH` or `MISMATCH` can leave the probe. The
+expected value is not sent to the app-server. Credential contents remain opaque.
+
+A match establishes only in-memory account-email equality under those checks.
+It establishes no workspace ID, independent quota domain, spend entitlement,
+readiness, routing eligibility, installation, or production acceptance. Source
+review, installation, and a later authorized diagnostic invocation are separate
+steps; this documentation authorizes none of those host effects. Do not use
+`provision-worker-auth.sh --verify-ready` as a comparison shortcut: that path may
+reserve and run inference. Existing canary reservations and adverse receipts
+remain unchanged and grant no retry.
