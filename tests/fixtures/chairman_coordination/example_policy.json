@@ -1,0 +1,197 @@
+{
+  "as_of": "2026-08-30T15:00:00Z",
+  "delegation_envelope": {
+    "allowed_actions": [
+      "DURABLE_RECORD_WRITE",
+      "SOURCE_BRANCH_WRITE",
+      "SOURCE_MERGE",
+      "EXECUTIVE_CHILD_COMMISSION",
+      "REVERSIBLE_RUNTIME_CANARY"
+    ],
+    "allowed_carrier_prefixes": [
+      "github:Mastermind:",
+      "agentos:",
+      "executive:"
+    ],
+    "allowed_path_prefixes": {
+      "mastermindx-market-intelligence/Mastermind": [
+        "control_plane",
+        "docs",
+        "scripts",
+        "tests"
+      ]
+    },
+    "allowed_repositories": [
+      "mastermindx-market-intelligence/Mastermind"
+    ],
+    "allowed_reversibility": [
+      "REVERSIBLE",
+      "COSTLY_REVERSIBLE"
+    ],
+    "allowed_scope_prefixes": [
+      "WS:CHAIRMAN-CONTROL-ROOM"
+    ],
+    "authority_source_refs": [
+      "SRC-CHAIRMAN"
+    ],
+    "envelope_id": "ENV-CCL-001",
+    "expires_at": "2026-09-30T00:00:00Z",
+    "max_active_children": 3,
+    "max_budget_units": 20,
+    "mode": "SUPERVISED_LIVE_CANARY",
+    "require_exact_carrier": true,
+    "schema": "mastermind.chairman_delegation_envelope.v1"
+  },
+  "options": [
+    {
+      "action": "SOURCE_BRANCH_WRITE",
+      "active_children_after": 1,
+      "affected_departments": [
+        "executive"
+      ],
+      "benefits": {
+        "chairman_load_reduction": 70,
+        "dependency_unlock": 70,
+        "learning_value": 70,
+        "strategic_leverage": 70,
+        "user_or_machine_value": 70
+      },
+      "budget_units": 5,
+      "carrier_ref": "github:Mastermind:branch:test",
+      "carrier_state": "EXACT_EXISTING",
+      "change_classes": [
+        "EXISTING_CAPABILITY_COMPLETION"
+      ],
+      "classification_source_ref": "SRC-GITHUB",
+      "costs": {
+        "coordination_risk": 30,
+        "execution_cost": 30,
+        "irreversibility_risk": 20,
+        "scarce_cognition_cost": 30,
+        "time_to_evidence": 30
+      },
+      "creates_duplicate_control_plane": false,
+      "effect_state": "NONE",
+      "expected_head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "falsifier": "Any duplicate lifecycle or authority owner is a failure.",
+      "operation_key": "chairman-cognition-test-001",
+      "option_id": "OPT-A",
+      "paths": [
+        "control_plane/chairman_cognition.py"
+      ],
+      "repositories": [
+        "mastermindx-market-intelligence/Mastermind"
+      ],
+      "reversibility": "REVERSIBLE",
+      "rollback_plan": "Delete no canonical state; abandon the branch if rejected.",
+      "scope_refs": [
+        "WS:CHAIRMAN-CONTROL-ROOM"
+      ],
+      "source_refs": [
+        "SRC-CHAIRMAN",
+        "SRC-GITHUB",
+        "SRC-PLAN",
+        "SRC-RETURN",
+        "SRC-PROOF",
+        "SRC-TARGET",
+        "SRC-EFFECT",
+        "SRC-PERMISSION",
+        "SRC-BUNDLE"
+      ],
+      "stop_condition": "Stop at one immutable review-ready branch head.",
+      "title": "Bounded strategic option"
+    }
+  ],
+  "schema": "mastermind.chairman_cognition_input.v1",
+  "source_receipts": [
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "STRATEGIC_STATE",
+      "revision": "strategy-current;constraints-sha256:107ac9a9fc850251d74d46f9034ee9eebd1697a55581612e140826e1ece146e5",
+      "source_ref": "SRC-STRATEGY",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "CHAIRMAN_DIRECTIVE",
+      "revision": "conversation:2026-08-30;envelope-sha256:2b79a9ae98cd9388c62a4c405f3c7aa0e047ff3584444842b391cfb3511bb00a",
+      "source_ref": "SRC-CHAIRMAN",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "GITHUB",
+      "revision": "620263090fb9f272f763e420ba103b0ff8dc5f31;classification-sha256:0494993ae671f3a0cd5673b6e9238df997e8e4b1cc9f862a837f7f9436d9bec3",
+      "source_ref": "SRC-GITHUB",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "AGENT_OS",
+      "revision": "revision:SRC-PLAN",
+      "source_ref": "SRC-PLAN",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "EXECUTIVE_OS",
+      "revision": "revision:SRC-RETURN",
+      "source_ref": "SRC-RETURN",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "GITHUB",
+      "revision": "revision:SRC-PROOF",
+      "source_ref": "SRC-PROOF",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "RUNTIME_BINDING",
+      "revision": "revision:SRC-TARGET",
+      "source_ref": "SRC-TARGET",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "EXECUTIVE_OS",
+      "revision": "revision:SRC-EFFECT",
+      "source_ref": "SRC-EFFECT",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "EXECUTIVE_OS",
+      "revision": "revision:SRC-PERMISSION",
+      "source_ref": "SRC-PERMISSION",
+      "state": "CURRENT"
+    },
+    {
+      "load_bearing": true,
+      "observed_at": "2026-08-30T15:00:00Z",
+      "owner": "AGENT_OS",
+      "revision": "sha256:3ea3ee1ca164ad1955e1943c43ec16962d5f354bf760a11cedd33399af6a3813",
+      "source_ref": "SRC-BUNDLE",
+      "state": "CURRENT"
+    }
+  ],
+  "strategic_constraints": {
+    "autonomous_live_capital_execution": "prohibited",
+    "autonomous_production_deploy": "prohibited",
+    "duplicate_control_planes": "prohibited",
+    "marketing_org_expansion_before_distribution_proof": "prohibited",
+    "new_feature_expansion": "constrained",
+    "unbounded_autonomous_strategic_modification": "prohibited"
+  },
+  "strategic_constraints_source_ref": "SRC-STRATEGY"
+}

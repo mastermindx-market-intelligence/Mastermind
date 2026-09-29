@@ -35,6 +35,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="JSON input path or '-' for stdin")
     parser.add_argument("--pretty", action="store_true", help="pretty-print output")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--coordination-review", metavar="PATH", help="review a project-scoped candidate from an owner-supplied context JSON file")
+    mode.add_argument("--coordination-brief", metavar="PATH", help="render existing compiled Agent OS context for one coordination judgment")
     return parser
 
 
@@ -49,7 +52,28 @@ def main(argv: list[str] | None = None) -> int:
         raw = _read(args.input)
         if not isinstance(raw, dict):
             raise ChairmanCognitionError("top-level JSON must be an object")
-        packet = evaluate_document(raw)
+        coordination_path = args.coordination_review or args.coordination_brief
+        if coordination_path:
+            if args.input == "-" and coordination_path == "-":
+                raise ChairmanCognitionError("two inputs cannot share stdin")
+            if coordination_path == "-":
+                review_text = sys.stdin.read(1024 * 1024 + 1)
+            else:
+                with Path(coordination_path).open(encoding="utf-8") as stream:
+                    review_text = stream.read(1024 * 1024 + 1)
+            if len(review_text.encode("utf-8")) > 1024 * 1024:
+                raise ChairmanCognitionError("coordination review exceeds input bound")
+            review = json.loads(review_text, object_pairs_hook=_strict_object)
+            keys = {"context", "candidate"} if args.coordination_review else {"context", "context_bundle", "bundle_source_ref"}
+            if not isinstance(review, dict) or set(review) != keys:
+                raise ChairmanCognitionError("invalid coordination input fields")
+            from control_plane.chairman_coordination import evaluate_coordination_candidate, render_coordination_brief
+            if args.coordination_review:
+                packet = evaluate_coordination_candidate(raw, context=review["context"], candidate=review["candidate"])
+            else:
+                packet = render_coordination_brief(raw, context=review["context"], context_bundle=review["context_bundle"], bundle_source_ref=review["bundle_source_ref"])
+        else:
+            packet = evaluate_document(raw)
     except (
         ChairmanCognitionError,
         _DuplicateKeyError,

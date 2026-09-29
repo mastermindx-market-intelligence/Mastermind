@@ -1,0 +1,148 @@
+{
+  "base_sha": "8b08228e6126fe4654b04ec4cf1b85ee7b00af3a",
+  "capability": "BUILT_NOT_PROVEN",
+  "checks": [
+    {
+      "errors": 0,
+      "failures": 44,
+      "log_sha256": "cebe13f5339da9f34d4442063bba90b7b18e75a45609e8636e3827b9dac09c3c",
+      "name": "coordination-red",
+      "skipped": 0,
+      "tests": 45,
+      "xml_sha256": "2698e18e0657701874dc2a05a4ef5b3beb098ed368b741ecbf161ab27014467d"
+    },
+    {
+      "errors": 0,
+      "failures": 14,
+      "log_sha256": "5801895d9b1143976494da9c8cee665e82286b9b5a61417026512e2e4c97c77a",
+      "name": "coordination-brief-red",
+      "skipped": 0,
+      "tests": 92,
+      "xml_sha256": "c63e7715cd1d5f7d635e1bafa0c20f61e0baf4ee10c42c8ec9a80ef9b5126f62"
+    },
+    {
+      "errors": 0,
+      "failures": 1,
+      "log_sha256": "42b034ef86d2298de0f8eb5218700f1944b9d9d9f594568f267e78693251e5d9",
+      "name": "coordination-upstream-shape-red",
+      "skipped": 0,
+      "tests": 1,
+      "xml_sha256": "fc6bb00912429bbcfbaeacf5f78640248c39646e341864c39e7eb81449716769"
+    },
+    {
+      "errors": 0,
+      "failures": 4,
+      "log_sha256": "188c990b8f856ad7f16ddba82502add38b8c407983614bb8df7fd4cac03097a6",
+      "name": "coordination-brief-binding-red",
+      "skipped": 0,
+      "tests": 4,
+      "xml_sha256": "d818a8e8f3846fb2c724e011408ce53c3a7e9defb6292e3fe3c87b33a65e5620"
+    },
+    {
+      "errors": 0,
+      "failures": 3,
+      "log_sha256": "6745955ad6acee25537972e886114077ccbe1f5f226361349d0cf268f857c4a4",
+      "name": "coordination-time-red",
+      "skipped": 0,
+      "tests": 3,
+      "xml_sha256": "357c84884cfbe1d203ad56b0b2948abbe4b905cebe9c7006481f36ff9ff6e215"
+    },
+    {
+      "errors": 0,
+      "failures": 2,
+      "log_sha256": "6369d545688c21d32764c7b21a66e1081a335a1c2dfd8652d47ab313e1da5e1b",
+      "name": "coordination-schema-red",
+      "skipped": 0,
+      "tests": 2,
+      "xml_sha256": "ef9db43489a65b30f2423b46c4814483c7e7272637a7e328edb23fd37a769fd9"
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "log_sha256": "9870fe3334aac7cc5980d944d86ef6ec8c0b927a18aac43b2bab40ab3b955890",
+      "name": "coordination-owning-final",
+      "skipped": 0,
+      "tests": 264,
+      "xml_sha256": "8601dccf174e07917aa88017ba62fbdbbc9a64d1ea8dd630273f1bb13a90c951"
+    }
+  ],
+  "full_repository": {
+    "exit_code": 1,
+    "first_error": "ModuleNotFoundError: No module named jwt",
+    "log_sha256": "28dbe9da55272c8b6ba997546b74f76c397a4df5a809daa2acd610d8528ee50c",
+    "scope": "Full pytest invocation stopped at first collection error; remaining repository not qualified",
+    "test_file": "tests/mastermind_window_reader/test_mission_association.py",
+    "timed_out": false
+  },
+  "limits": [
+    "No hosted or native model reasoning qualification",
+    "No actual Web input/turn or direct native messaging proof",
+    "No execution, acceptance, permission or account selection grant",
+    "Existing source adapters still owe trusted acquisition; fixture receipts are not authority",
+    "Base-builder enhancement handoff withdrawn; no new worker or review assignment"
+  ],
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "owning_suite": {
+    "failed": 0,
+    "files": 6,
+    "passed": 264,
+    "skipped": 0
+  },
+  "procedure_pin": "f91847688f8126511c854ab253cd5c3cb67baa4e",
+  "producer_compatibility": {
+    "all_compiled_content_preserved": true,
+    "bundle_sha256": "c5103dec6f0a27a7337c997b3259d67d0ce6b53460b87d75380ee17672e4c941",
+    "candidate_review_reasons": [],
+    "context_complete": true,
+    "fixture_repo_and_git_date_adapters": true,
+    "fixture_store": true,
+    "live_admission": false,
+    "producer_commit": "6e41fc72c90f154d6523478969bff6c305f4429b",
+    "producer_path": "scripts/agentos.py",
+    "producer_repository": "mastermindx-market-intelligence/macro",
+    "producer_sha256": "540e9e490955c975a18e2ee3425a264b641c4442b646789899f73f4a8e937ad1",
+    "real_compile_bundle_invoked": true,
+    "record_tree_unchanged": true,
+    "source_records_digest": "sha256:67a8fe129d4228dcbdef6185361044627a630b63c0f159bb33a4a3e806728b35"
+  },
+  "recorded_at": "2026-09-29T06:47:06.706097+00:00",
+  "source": [
+    {
+      "path": "control_plane/chairman_coordination.py",
+      "sha256": "e5e8b49395df659e1a1b5b7bd160a6a49dc92f9bfafad92a01d21f956dcf27b5"
+    },
+    {
+      "path": "scripts/chairman_cognition.py",
+      "sha256": "4775ba39f4ecd4a42db2a80e37a95cd514d03610639f4631c82142369428342e"
+    },
+    {
+      "path": "tests/test_chairman_coordination.py",
+      "sha256": "9021f97202c07d255ad8579cd516d9e12fcaf8001941a0fefdb29c284e6c122f"
+    },
+    {
+      "path": "tests/fixtures/chairman_coordination/upstream_context_bundle.json",
+      "sha256": "75b32b202c713cf9564195c251a2c987786fe284046b88cde344ccda11e6740e"
+    },
+    {
+      "path": "tests/fixtures/chairman_coordination/example_policy.json",
+      "sha256": "05b56bd317d33f55b17d7c07a07196aed3325ee61a881de130bf592417b2af7f"
+    },
+    {
+      "path": "tests/fixtures/chairman_coordination/example_brief_request.json",
+      "sha256": "37679610782f457c920ed3755fc9b36e8670ce7f046e82af8376575ab76e0f42"
+    },
+    {
+      "path": "tests/fixtures/chairman_coordination/example_review_request.json",
+      "sha256": "715f58d943ee0a01552458c00e5f555f74d391546b5b23003cb641b4ca241685"
+    }
+  ],
+  "source_collision": {
+    "complete_pr_file_count": 1239,
+    "disposition": "Historical identical-preimage path overlap; preserve release hold, no foreign mutation",
+    "foreign_and_current_preimage_blob": "445eb0c8b2254c88219f9b12b7bd94171a64306f",
+    "head": "23f97360131d05123acc440da15780b0bb200e82",
+    "path": "scripts/chairman_cognition.py",
+    "pr": 124
+  },
+  "syntax_exit_code": 0
+}
