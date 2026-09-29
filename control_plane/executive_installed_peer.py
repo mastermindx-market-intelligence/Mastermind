@@ -944,6 +944,7 @@ def _observe_real_boot_id() -> str:
 # ---------------------------------------------------------------------------
 
 import json                                             # noqa: E402
+import math                                             # noqa: E402
 import plistlib                                         # noqa: E402
 import stat                                             # noqa: E402
 from xml.etree import ElementTree                       # noqa: E402
@@ -1452,6 +1453,13 @@ def _reject_constant(_value: str):
     raise _refuse("SERVICE_DOCUMENT_NONFINITE_NUMBER")
 
 
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise _refuse("SERVICE_DOCUMENT_NONFINITE_NUMBER")
+    return parsed
+
+
 def _load_strict_json(raw: bytes, *, code: str) -> dict:
     if type(raw) is not bytes or not raw or len(raw) > _MAX_READ_BYTES:
         raise _refuse(code)
@@ -1462,6 +1470,7 @@ def _load_strict_json(raw: bytes, *, code: str) -> dict:
             raw.decode("ascii"),
             object_pairs_hook=_strict_json_object,
             parse_constant=_reject_constant,
+            parse_float=_finite_json_float,
         )
     except PeerIdentityError:
         raise
@@ -1774,6 +1783,7 @@ class _TreeObservation:
     digests: tuple
     root_identity: tuple
     ancestor_identities: tuple
+    manifest_identity: tuple
 
 
 def _directory_entries(directory: str, budget: _Budget) -> list:
@@ -1892,7 +1902,7 @@ def _verify_release(
     if not stat.S_ISDIR(root_info.st_mode):
         raise _refuse("SERVICE_RELEASE_NOT_DIRECTORY")
     manifest_path = release_path + "/" + _NETWORK_MANIFEST_NAME
-    raw, _manifest_info = _read_trusted_bytes(
+    raw, manifest_info = _read_trusted_bytes(
         manifest_path, budget=budget, maximum=_MAX_READ_BYTES, expected_mode=0o444
     )
     document = _load_strict_json(raw, code="SERVICE_MANIFEST_MALFORMED")
@@ -1985,6 +1995,7 @@ def _verify_release(
         digests=tuple(digests),
         root_identity=_object_identity(root_info),
         ancestor_identities=ancestors,
+        manifest_identity=_object_identity(manifest_info),
     )
 
 
@@ -1997,13 +2008,16 @@ def _recheck_release(before: _TreeObservation, budget: _Budget) -> None:
         raise _refuse("SERVICE_RELEASE_CHANGED")
     if _observe_ancestors(release_path, budget) != before.ancestor_identities:
         raise _refuse("SERVICE_ANCESTOR_CHANGED")
-    raw, _info = _read_trusted_bytes(
+    raw, manifest_info = _read_trusted_bytes(
         release_path + "/" + _NETWORK_MANIFEST_NAME,
         budget=budget,
         maximum=_MAX_READ_BYTES,
         expected_mode=0o444,
     )
-    if hashlib.sha256(raw).hexdigest() != before.manifest_digest:
+    if (
+        _object_identity(manifest_info) != before.manifest_identity
+        or hashlib.sha256(raw).hexdigest() != before.manifest_digest
+    ):
         raise _refuse("SERVICE_MANIFEST_CHANGED")
     rows = _walk_release(release_path, budget, hash_files=False)
     if tuple((row[0], row[7]) for row in sorted(rows)) != before.identities:

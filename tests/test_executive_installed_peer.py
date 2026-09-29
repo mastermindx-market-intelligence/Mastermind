@@ -1158,9 +1158,45 @@ def test_plist_profile_drift_refuses(role, profile, change):
     assert not m._profile_matches(m._EXPECTED_PLIST_PROFILES[role], value, [])
 
 
-@pytest.mark.parametrize('raw', [b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}', b'[]'])
+@pytest.mark.parametrize('raw', [b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}', b'[]',
+                                b'{"a":1e999}', b'{"a":-1e999}', b'{"a":{"nested":[1e999]}}'])
 def test_strict_json_refuses_ambiguous_or_nonfinite_document(raw):
     with pytest.raises(peer.PeerIdentityError): m._load_strict_json(raw, code='BAD_JSON')
+
+
+def test_strict_json_preserves_finite_numbers_and_integers():
+    assert m._load_strict_json(b'{"a":[1.25,-2e3,3e-4,42,1e308]}', code='BAD_JSON') == {
+        'a': [1.25, -2000.0, 0.0003, 42, 1e308]
+    }
+
+
+@pytest.mark.parametrize('changed_field', [None, 'st_ino', 'st_mtime_ns', 'st_ctime_ns'])
+def test_release_recheck_retains_manifest_descriptor_identity(monkeypatch, changed_field):
+    """An unchanged content digest must not hide replacement or metadata drift."""
+    raw = b'{"manifest":"unchanged"}'
+    original = SimpleNamespace(st_dev=1, st_ino=12, st_mode=0o100444,
+                               st_uid=0, st_gid=0, st_nlink=1, st_size=len(raw),
+                               st_mtime_ns=20, st_ctime_ns=30)
+    reread = copy.copy(original)
+    if changed_field:
+        setattr(reread, changed_field, getattr(reread, changed_field) + 1)
+    digest = m.hashlib.sha256(raw).hexdigest()
+    before = m._TreeObservation(
+        release='a' * 40, wrapper_relative='wrapper.py', manifest_digest=digest,
+        wrapper_digest=digest, identities=(), digests=(),
+        root_identity=m._object_identity(original), ancestor_identities=(),
+        manifest_identity=m._object_identity(original),
+    )
+    monkeypatch.setattr(m, '_open_trusted', lambda *a, **k: (999, original, original))
+    monkeypatch.setattr(m, '_close', lambda *a: None)
+    monkeypatch.setattr(m, '_observe_ancestors', lambda *a: ())
+    monkeypatch.setattr(m, '_read_trusted_bytes', lambda *a, **k: (raw, reread))
+    monkeypatch.setattr(m, '_walk_release', lambda *a, **k: [])
+    if changed_field:
+        with pytest.raises(peer.PeerIdentityError, match='SERVICE_MANIFEST_CHANGED'):
+            m._recheck_release(before, m._Budget(25))
+    else:
+        m._recheck_release(before, m._Budget(25))
 
 
 def test_plist_duplicate_key_refuses_before_dict_collapse():
@@ -1193,7 +1229,7 @@ def composition(monkeypatch):
             m._LAUNCHD_ROLES[role].plist_path, 'running', topology.launcher, plist.argv,
             profile['WorkingDirectory'], topology.username, topology.group, capture.pid)
         dynamic = m._DynamicCodeObservation('1' * 64, '2' * 64, 0, m._PYTHON_MAIN_EXECUTABLE)
-        tree = m._TreeObservation(release, topology.wrapper_relative, '3' * 64, '4' * 64, (), (), (), ())
+        tree = m._TreeObservation(release, topology.wrapper_relative, '3' * 64, '4' * 64, (), (), (), (), ())
         monkeypatch.setattr(m, '_observe_real_boot_id', lambda: '11111111-1111-4111-8111-111111111111')
         monkeypatch.setattr(m, '_observe_launchd_service', lambda _: launch)
         monkeypatch.setattr(m, '_verify_role_plist', lambda *a, **k: plist)
