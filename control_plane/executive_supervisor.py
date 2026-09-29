@@ -47,6 +47,7 @@ from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityRegistry,
 )
 from control_plane.executive_authority import (
+    AuthorityDecision,
     AuthorityDenied,
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
@@ -91,6 +92,76 @@ _ACTIVE_ATTEMPT_STATUSES = {
 
 class SupervisorError(RuntimeProofError):
     """The supervisor could not safely launch or accept an attempt."""
+
+
+def validate_effective_grant(
+    job: Job, attempt: Attempt, decision: AuthorityDecision
+) -> dict[str, Any] | None:
+    """Validate a persisted grant using the same Job's preauthorized decision.
+
+    The caller owns policy loading and authorization before a Runtime write
+    transaction. This seam performs no filesystem, policy, Runtime or broker I/O.
+    A decision for a different scope cannot validate this Job's effective grant.
+    """
+    if decision.policy_sha256 != attempt.authority_policy_hash:
+        raise SupervisorError("authority policy changed after claim; result is rejected")
+    if (
+        set(decision.requested) != set(job.requested_authorities)
+        or decision.allowed_write_paths != tuple(job.allowed_write_paths)
+        or decision.validation_commands != tuple(tuple(argv) for argv in job.validation_commands)
+        or ("WRITE_BRANCH" in decision.requested and decision.worktree != job.worktree)
+    ):
+        raise SupervisorError("preauthorized decision does not match Job authority scope")
+    if job.orchestration_role is None:
+        if attempt.effective_grant is not None or attempt.effective_grant_digest is not None:
+            raise SupervisorError("role-null Attempt carries orchestration grant evidence")
+        return None
+    value = attempt.effective_grant
+    keys = {
+        "schema_version",
+        "authorities",
+        "write_paths",
+        "validation_argv",
+        "policy_sha",
+        "job_id",
+        "role",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != keys
+        or value.get("schema_version")
+        != "mastermind.executive_effective_grant/v1"
+        or value.get("job_id") != job.job_id
+        or value.get("role") != job.orchestration_role
+        or value.get("policy_sha") != attempt.authority_policy_hash
+        or not isinstance(value.get("authorities"), list)
+        or not isinstance(value.get("write_paths"), list)
+        or not isinstance(value.get("validation_argv"), list)
+        or any(item not in job.requested_authorities for item in value["authorities"])
+        or any(item not in job.allowed_write_paths for item in value["write_paths"])
+        or any(item not in job.validation_commands for item in value["validation_argv"])
+    ):
+        raise SupervisorError("orchestration Attempt effective grant is malformed or widened")
+    digest = hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    if digest != attempt.effective_grant_digest:
+        raise SupervisorError("orchestration Attempt effective grant digest drifted")
+    return dict(value)
+
+
+CONTROLLER_ONLY_AUTHORITIES = frozenset({"REQUEST_WORKER_LOGIN_CHECK"})
+
+
+def worker_visible_authorities(authorities: Sequence[str]) -> tuple[str, ...]:
+    """Project worker-visible capability names without altering durable authority."""
+    return tuple(item for item in authorities if item not in CONTROLLER_ONLY_AUTHORITIES)
 
 
 class TerminalAssignmentSealError(SupervisorError):
@@ -636,11 +707,30 @@ class ExecutiveSupervisor:
         validation_timeout_seconds: float = 300.0,
         instance_id: str | None = None,
         exact_target_provider: Callable[[str], ExactWorkerClaimTarget | None] | None = None,
+        subscription_canary_claim_provider: Callable[
+            [str, str], Mapping[str, Any]
+        ] | None = None,
+        subscription_canary_binding_id: str | None = None,
     ) -> None:
         self.runtime = runtime
         if exact_target_provider is not None and not callable(exact_target_provider):
             raise SupervisorError("exact worker target provider must be callable")
         self._exact_target_provider = exact_target_provider
+        if subscription_canary_claim_provider is not None and (
+            not callable(subscription_canary_claim_provider)
+            or subscription_canary_binding_id is None
+            or not isinstance(subscription_canary_binding_id, str)
+            or not subscription_canary_binding_id
+        ):
+            raise SupervisorError(
+                "subscription canary claim provider requires a non-empty binding id"
+            )
+        self._subscription_canary_claim_provider = subscription_canary_claim_provider
+        self._subscription_canary_binding_id = (
+            str(subscription_canary_binding_id)
+            if subscription_canary_claim_provider is not None
+            else None
+        )
         self.adapter = adapter
         self.runs_root = (
             Path(runs_root).resolve()
@@ -692,7 +782,7 @@ class ExecutiveSupervisor:
         return job
 
     @staticmethod
-    def _revalidate_authority(job: Job, attempt: Attempt) -> None:
+    def _revalidate_authority(job: Job, attempt: Attempt) -> AuthorityDecision:
         try:
             decision = ExecutiveAuthorityPolicy.load().authorize(
                 job.requested_authorities,
@@ -704,54 +794,13 @@ class ExecutiveSupervisor:
             raise SupervisorError(f"job authority no longer validates: {exc}") from exc
         if decision.policy_sha256 != attempt.authority_policy_hash:
             raise SupervisorError("authority policy changed after claim; result is rejected")
+        return decision
 
     @staticmethod
     def _effective_grant(job: Job, attempt: Attempt) -> dict[str, Any] | None:
-        """Return the exact orchestration grant, leaving legacy Jobs byte-stable."""
-
-        ExecutiveSupervisor._revalidate_authority(job, attempt)
-        if job.orchestration_role is None:
-            if attempt.effective_grant is not None or attempt.effective_grant_digest is not None:
-                raise SupervisorError("role-null Attempt carries orchestration grant evidence")
-            return None
-        value = attempt.effective_grant
-        keys = {
-            "schema_version",
-            "authorities",
-            "write_paths",
-            "validation_argv",
-            "policy_sha",
-            "job_id",
-            "role",
-        }
-        if (
-            not isinstance(value, dict)
-            or set(value) != keys
-            or value.get("schema_version")
-            != "mastermind.executive_effective_grant/v1"
-            or value.get("job_id") != job.job_id
-            or value.get("role") != job.orchestration_role
-            or value.get("policy_sha") != attempt.authority_policy_hash
-            or not isinstance(value.get("authorities"), list)
-            or not isinstance(value.get("write_paths"), list)
-            or not isinstance(value.get("validation_argv"), list)
-            or any(item not in job.requested_authorities for item in value["authorities"])
-            or any(item not in job.allowed_write_paths for item in value["write_paths"])
-            or any(item not in job.validation_commands for item in value["validation_argv"])
-        ):
-            raise SupervisorError("orchestration Attempt effective grant is malformed or widened")
-        digest = hashlib.sha256(
-            json.dumps(
-                value,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8")
-        ).hexdigest()
-        if digest != attempt.effective_grant_digest:
-            raise SupervisorError("orchestration Attempt effective grant digest drifted")
-        return dict(value)
+        """Reauthorize once, then use the shared pure grant-validation owner."""
+        decision = ExecutiveSupervisor._revalidate_authority(job, attempt)
+        return validate_effective_grant(job, attempt, decision)
 
     def _run_dir(self, attempt_id: str) -> Path:
         return self.runs_root / attempt_id
@@ -913,10 +962,12 @@ class ExecutiveSupervisor:
         attempt: Attempt,
         effective_grant: Mapping[str, Any] | None = None,
     ) -> str:
-        authorities = (
-            list(effective_grant["authorities"])
-            if effective_grant is not None
-            else job.requested_authorities
+        authorities = list(
+            worker_visible_authorities(
+                effective_grant["authorities"]
+                if effective_grant is not None
+                else job.requested_authorities
+            )
         )
         write_paths = (
             list(effective_grant["write_paths"])
@@ -1043,7 +1094,7 @@ class ExecutiveSupervisor:
             run_dir=run_dir,
             prompt=self._prompt(job, attempt, effective_grant),
             result_schema_path=schema_path,
-            authorities=tuple(
+            authorities=worker_visible_authorities(
                 effective_grant["authorities"]
                 if effective_grant is not None
                 else job.requested_authorities
@@ -1068,6 +1119,59 @@ class ExecutiveSupervisor:
             secret_canary_verdict=self.secret_canary_verdict,
             require_secret_canary=self.require_complete_launch_attestation,
             **spec_kwargs,
+        )
+
+    def _enrich_spec_with_canary_claim(
+        self,
+        spec: WorkerLaunchSpec,
+        job: Job,
+    ) -> WorkerLaunchSpec:
+        """Apply one immutable subscription canary claim to a freshly built spec.
+
+        Only an injected claim provider (a callable taking ``attempt_id`` and
+        ``binding_id``) drives this path; ordinary composition leaves the
+        provider as ``None`` and the original spec is returned unchanged.  The
+        enrichment runs immediately after constructing the base ``spec`` and
+        before any prompt/recovery/broker write, so the durable WorkerLaunchSpec
+        sealed by the recovery binding already carries the exact claim.
+        """
+
+        provider = self._subscription_canary_claim_provider
+        if provider is None:
+            return spec
+        binding_id = self._subscription_canary_binding_id
+        if binding_id is None:
+            raise SupervisorError(
+                "subscription canary claim provider has no bound binding id"
+            )
+        try:
+            observation = provider(spec.run_id, binding_id)
+        except Exception as exc:
+            raise SupervisorError(
+                f"subscription canary claim provider refused: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not isinstance(observation, Mapping):
+            raise SupervisorError(
+                "subscription canary claim provider returned a non-mapping"
+            )
+        if (
+            observation.get("run_id") != spec.run_id
+            or observation.get("job_id") != spec.job_id
+            or observation.get("worker_id") != spec.worker_id
+            or observation.get("binding_id") != binding_id
+            or observation.get("model") != spec.model
+        ):
+            raise SupervisorError(
+                "subscription canary claim differs from the claimed launch spec"
+            )
+        # The observation owner is the existing typed
+        # ``observe_subscription_canary_claim``; it has already frozen and
+        # validated the exact closed schema, so passing it through
+        # ``dataclasses.replace`` lets WorkerLaunchSpec re-validate the exact
+        # contract on assignment.
+        return dataclasses.replace(
+            spec, subscription_canary_claim=dict(observation),
         )
 
     def _validate_execution_profile(
@@ -1330,6 +1434,7 @@ class ExecutiveSupervisor:
                 effective_grant=effective_grant,
             )
             spec = self._launch_spec(job, lease, schema_path, effective_grant)
+            spec = self._enrich_spec_with_canary_claim(spec, job)
             recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
             _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
             if exact_target is not None:

@@ -27,11 +27,58 @@ Screenshots remain native MCP image blocks. The Web caller cannot provide an
 arbitrary host path, Paper endpoint, account or credential.
 
 Studio Direct is the existing Web gateway/auth/transport owner; Paper does not get a
-second public gateway. Remote Desktop Commander remains an authorized local-ops and
-diagnostic carrier and supplied the original native proof, but is no longer the
-normal product path once a Studio Direct seat is Paper-enabled. Do not expose the raw
-unauthenticated Paper port through a public tunnel, add another OAuth service, or put
-design tools into Executive OS's bounded CEO-admission API.
+second public gateway. It is the preferred attended-Web carrier when the Paper tool
+family is actually exposed. Remote Desktop Commander is also a direct-host client of the
+**same guarded bridge**, but Studio Direct absence grants it no authority. RDC may be
+selected for a Paper effect only when the current Chairman assignment/delegation or
+accepted canonical placement independently authorizes that exact host carrier and
+Paper action, current host permission is observed, no explicit denial applies, and no
+conflicting or unknown Paper effect exists. Otherwise the session stops at the exact
+carrier gate. This is not a second gateway, auth plane, write authority, or permission
+fallback. The current protected `private_service.py` runtime/schema/SHA pins, not folder recency
+or an old installation receipt, determine the exact bridge that Desktop Commander may
+invoke. Do not expose the raw unauthenticated Paper port through a public tunnel, add
+another OAuth service, or put design tools into Executive OS's bounded CEO-admission API.
+
+Capability discovery is action-specific. A session that sees Studio Direct filesystem/
+process tools but has not checked for `paper_inspect`, `paper_catalog`, `paper_read`
+and `paper_edit` has **not** established Paper unavailability. `paper_inspect` now
+returns `gateway_surface`, which declares the exact Paper tool family the current gateway
+is built to advertise. If that contract includes `paper_prepare` while the ChatGPT client
+surface omits it, classify the mismatch as publication/surface drift: `STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`. Current-file
+reads/edits may remain available, but exact-file transition is held until the same Studio
+Direct app's **workspace-approved action snapshot** is current and `paper_prepare` is directly
+surfaced. OpenAI documents that approved MCP apps use a frozen tool/input snapshot and do not
+auto-update when the server changes. On Business, published custom apps currently cannot be
+updated in place; recreate + republish is required. Draft/dev apps must re-scan/recreate their
+tool catalog as applicable, then the caller starts a fresh chat/tool selection. Do not reproduce
+prepare with generic Studio `start_process`/filesystem tools, RDC, raw upstream `open_file`,
+shell, or UI automation. This keeps file transition inside the reviewed narrow action instead
+of silently broadening workstation authority.
+A proven pre-dispatch absence that remains after current same-Studio publication recovery
+may make an **independently authorized** RDC carrier eligible under the separate carrier
+law; absence itself never supplies permission. After edit dispatch, timeout/lost response
+remains `EFFECT_UNKNOWN` on the original carrier and forbids cross-carrier replay.
+
+### Paper 0.5.12 catalog drift qualification — 2026-09-26
+
+A later Paper 0.5.12 observation changed the full upstream catalog digest from
+`ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570` to
+`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb`.
+The release owner compared the exact current name-keyed tool dictionaries with the
+durable prior raw catalog. Tool count changed **34 -> 35**; `rename_pages` was the
+only added tool; no tool was removed and **no existing tool definition changed**.
+The bridge therefore keeps the same 17 read and 12 edit allowlists and leaves
+`rename_pages` blocked alongside `create_file`, `delete_nodes`, exports and raw
+`open_file`. Exact full-catalog pinning remains fail closed rather than weakening to
+a subset/schema-family check.
+
+The compatible bridge is version `0.1.1`, SHA-256
+`d3301a1466d46ae081ded963f438c019fabf39c9bccfc8c669f16562a52bf7f6`,
+owned by immutable Paper runtime generation `v5`. This source qualification is not a
+deployment or write canary; installed `v4` seats remain valid historical runtimes
+until the normal release owner moves an explicitly selected canary. Evidence:
+`docs/evidence/paper_desktop/20260926_0512_catalog_compatibility.json`.
 
 No MCP tool is disguised as read-only to bypass client write permissions.
 `paper_edit` is explicitly modifying/destructive/non-idempotent; it exists only
@@ -183,6 +230,11 @@ one catalog discovery per workflow and deliberate screenshots at meaningful chan
 no idle loops. Every guarded edit currently costs three Paper tool calls (pre-read,
 edit, post-read); plan this explicitly on the 100-call Free tier.
 
+For a Paper-canvas assignment, an HTML prototype or review package may support reasoning but cannot
+replace the required Paper effect while either lawful Paper route remains unprobed. If both routes
+are genuinely blocked, label the artifact `NOT_APPLIED_TO_PAPER` and preserve the exact carrier/
+permission/file-transition gate instead of reporting the canvas as updated.
+
 ## Figma migration
 
 Keep Figma as a read-only reference/archive until representative journeys pass.
@@ -200,10 +252,12 @@ code output is a starting point, not automatic tested production implementation.
 1. Exact source runtime installed without changing other worker homes.
 2. Native MCP initialize/list and real CLI read against Paper after login/file-open.
 3. Approved scratch edit, screenshot, JSX extraction; no wrong-document changes.
-4. Fresh ChatGPT Web session runs `paper_inspect`; when needed, `paper_read` with
-   `tool=list_files` -> `paper_prepare(file_id)`; then the same read/edit/screenshot/JSX
-   journey through a Paper-enabled Studio Direct seat. Tunnel health alone is not the
-   design-journey proof.
+4. Fresh ChatGPT Web session runs `paper_inspect` and confirms its
+   `gateway_surface` names the five exact Paper actions. When another file is needed, the
+   **client surface itself** must expose `paper_prepare`; `paper_read` with
+   `tool=list_files` -> direct `paper_prepare(file_id)` -> re-inspect -> read/edit/
+   screenshot/JSX. Generic host-command emulation does not satisfy this acceptance.
+   Tunnel health alone is not the design-journey proof.
 5. Existing capability registry attests a bounded worker; no second control plane.
 6. One real product design-to-code/browser journey before Figma retirement.
 
@@ -218,7 +272,10 @@ staging into PROVEN_LIVE. Continue at the first unmet item, retaining this carri
 - https://paper.design/pricing - Free 100 MCP calls/week; Pro 1M/week,
   $20/editor/month monthly or $16/month billed yearly. No purchase performed.
 - https://help.openai.com/en/articles/12584461 - custom app write/admin/plan gates;
-  Pro custom developer-mode MCP currently documented read/fetch only.
+  Pro custom developer-mode MCP currently documented read/fetch only. Rechecked 2026-09-26:
+  approved MCP apps use a frozen tool/input snapshot; server changes do not auto-update the
+  workspace app. Business published apps currently require recreate + republish to change
+  tools/metadata, while admin action refresh controls differ on Enterprise/Edu.
 - https://github.com/openai/tunnel-client - private outbound Secure MCP Tunnel, stdio support.
 - https://modelcontextprotocol.io/specification/2025-03-26/basic/transports - HTTP/SSE/session rules.
 - https://pypi.org/project/mcp/1.30.0/ - pinned official SDK maintenance line.

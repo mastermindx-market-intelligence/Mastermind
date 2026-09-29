@@ -41,7 +41,7 @@ LAUNCH_CLEAN_STATUS_ARGS = (
     "status",
     "--porcelain=v1",
     "-z",
-    "--untracked-files=all",
+    "--untracked-files=no",
 )
 LAUNCH_CLEAN_UNTRACKED_ARGS = ("ls-files", "--others", "-z")
 

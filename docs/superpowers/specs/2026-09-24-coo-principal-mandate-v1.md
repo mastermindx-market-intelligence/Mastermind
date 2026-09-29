@@ -342,12 +342,31 @@ Add a pure `control_plane/coo_principal_mandate.py`-class owner (exact file name
 
 It performs no I/O, persistence, OAuth verification, Runtime mutation, placement, GitHub action or provider call.
 
-The projection must distinguish:
+**Primary organizational input: the existing Mission Workspace v3 projection.** Do not make the mandate reducer reacquire Control Room, Fabric, Runtime or Agent OS independently. Mission Workspace v3 already joins the current workstream/program, root identity, Fabric state/results, owner-observation currentness, accountable/owed seats, transport/effect posture and source evidence.
 
+For a modifying COO mandate, require the supplied Mission Workspace v3 document to be fully qualified for the selected mission:
+- exact `program.work_ref`;
+- `read_state.state=CURRENT`;
+- owner observation `SAME` where the v3 owner contract requires it;
+- no root/source-generation conflict;
+- no `EFFECT_UNKNOWN` or reconciliation-required posture for the intended effect;
+- accountable/owed-seat facts consistent with the requested COO action.
+
+Separately consume exact already-owner-qualified facts that Mission Workspace does **not** own:
+- installed OAuth/COO principal-binding digest;
+- reviewed rich-principal capability-profile/package digest;
+- current source/Workspace/Workbench lease or grant digest when a source effect is requested;
+- mission release/economic/authority references from their current owners.
+
+If Mission Workspace is PARTIAL/HISTORICAL/UNAVAILABLE or its owner observation is not qualified, the mandate projection must preserve that degradation. It may return read/recommend context, but it cannot manufacture modifying authority.
+
+The projection must distinguish:
 - immutable mission/authority identity used for admission;
 - current dynamic mission/runtime/effect/capability state used to decide whether an action is safe now.
 
 Dynamic state is **not** a durable grant and must not be copied into a new authority store.
+
+**Current gap:** Mission Workspace v3 projects `current_worker`, `current_sol_target` and `owed_turn`, but it does not expose a dedicated `current_coo_target` RuntimeBinding. `SessionTarget`/generic `RuntimeBinding` already support `reasoning_surface=claude`, while the current `runtime_binding_projection.py` provider mapping is Codex-specific. Do not fabricate a Claude RuntimeBinding inside the mandate reducer. The first production level remains `COO_PRINCIPAL_MISSION_BOUND`; exact provider-session binding is the separate F0 hardening wave.
 
 ### P2-B — additive principal admission through the existing sink
 
@@ -375,6 +394,72 @@ No raw OAuth subject/client, account label, credential, provider session or mode
 Require `workstream` for a COO root/successor-root submission and require exact equality with the current mission authority before effect.
 
 A COO request identity should be separately namespaced from CEO/MCP/Slack identities and bind the logical operation to its mission, e.g. a trusted derivation over `work_ref + operation_key`. It must not depend on token lifetime, OAuth JTI, Claude transcript, provider session, clock or model output.
+
+### P2-B.1 — `submit_principal_intent` public request and receipt
+
+The first COO modifying tool must reuse the existing high-level request normalization law rather than exposing low-level Job fields.
+
+Public caller fields:
+
+```text
+required
+  operation_key
+  objective
+  department
+  priority
+  execution_profile
+  workstream
+
+optional
+  allowed_write_paths
+  validation
+  attempt_limit
+```
+
+Additional COO rules:
+- `workstream` is required and must equal the exact selected Mission Workspace `program.work_ref`;
+- `execution_profile` remains the existing `research_only | bounded_code_change` worker-root vocabulary;
+- `attempt_limit` is restricted to the current strict-v2 COO root ceiling (1..2, default 2), even though the older shared normalizer accepts up to 3 for other historical paths;
+- the caller cannot supply `actor`, `seat`, schema, principal/mission binding, authority level, requested authorities, branch, worktree, Job/root id, provider/model/account/host/realm, release class, raw argv, credential, service, dispatch or session fields.
+
+This narrow submission schema does **not** narrow Fable's organizational autonomy. It only defines how Fable asks Executive to create one bounded organizational work episode. Rich principal source/design/browser/Slack actions use their separately reviewed direct capability owners.
+
+Trusted code derives:
+- `seat=coo`;
+- principal-binding digest;
+- mission authority ref/generation;
+- namespaced request/intent identity;
+- actor/provenance;
+- grounding;
+- worker authorities from the existing execution profile;
+- branch/worktree/validation argv;
+- host execution binding and concrete placement inputs through existing owners.
+
+The accepted receipt is a new role-neutral/principal receipt schema, not a renamed CEO receipt. It should minimally report:
+
+```text
+schema
+request_ref
+intent_id
+fingerprint
+job_id
+status
+accepted
+duplicate
+dispatched = false
+principal { seat, principal_binding_digest, work_ref, authority_generation_digest }
+grounding
+created_at_ms
+```
+
+Every principal identity field is server-derived and secret-free. `dispatched=false` remains load-bearing: admission is not Worker START.
+
+Identity law:
+- same `work_ref + operation_key + immutable principal/mission authority identity + same semantic request` -> same accepted Job/duplicate receipt;
+- same logical request identity with changed semantic payload -> conflict;
+- same `operation_key` under a different work_ref -> different namespaced principal request;
+- CEO request identities and COO principal request identities never collide;
+- OAuth token issue/expiry/JTI, provider session, Claude session id and current dynamic posture do not participate in durable logical request identity.
 
 ### P2-C — role-correct ingress on the existing CeoIngress/service
 
