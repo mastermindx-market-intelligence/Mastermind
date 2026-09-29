@@ -122,7 +122,7 @@ async def send(path, value):
 
 def test_real_app_peer_can_submit_with_ceo_permission_disarmed(tmp_path):
     async def check():
-        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/private/tmp") as temp:
+        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/tmp") as temp:
             host = service(tmp_path, Path(temp))
             await host.start()
             try:
@@ -142,7 +142,7 @@ def test_real_app_peer_can_submit_with_ceo_permission_disarmed(tmp_path):
 ])
 def test_real_socket_refuses_c1_unarmed_and_unconfigured_principals(tmp_path, app_peer, armed, guard, expected):
     async def check():
-        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/private/tmp") as temp:
+        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/tmp") as temp:
             host = service(tmp_path, Path(temp), app_peer=app_peer, armed=armed, guard=guard)
             await host.start()
             try:
@@ -166,7 +166,7 @@ def test_wire_fields_cannot_grant_peer_or_host_authority(tmp_path, extra):
 
 def test_real_status_and_replay_survive_new_admission_disarm(tmp_path):
     async def check():
-        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/private/tmp") as temp:
+        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/tmp") as temp:
             host = service(tmp_path, Path(temp)); await host.start()
             try:
                 path = Path(temp) / "principal.sock"; value = frame(tmp_path)
@@ -191,7 +191,7 @@ def test_real_status_and_replay_survive_new_admission_disarm(tmp_path):
 @pytest.mark.parametrize("change", ["binding", "arming", "service_state", "closing"])
 def test_state_change_during_host_guard_refuses_before_effect(tmp_path, change):
     async def check():
-        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/private/tmp") as temp:
+        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/tmp") as temp:
             holder = {}
             def moving_guard(_):
                 host = holder["host"]
@@ -223,7 +223,7 @@ def test_socket_disconnect_preserves_the_original_effect_for_status(tmp_path):
         entered.set()
         if not release.wait(timeout=10): raise RuntimeError("test guard not released")
     async def check():
-        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/private/tmp") as temp:
+        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/tmp") as temp:
             host = service(tmp_path, Path(temp), guard=guard); await host.start()
             try:
                 path = Path(temp) / "principal.sock"; value = frame(tmp_path)
@@ -277,7 +277,7 @@ def test_c1_principal_frame_is_refused_before_admission_dispatch(tmp_path, monke
         calls.append(True)
         raise AssertionError("untrusted peer crossed the service frame gate")
     async def check():
-        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/private/tmp") as temp:
+        with tempfile.TemporaryDirectory(prefix="mmx-prin-", dir="/tmp") as temp:
             host = service(tmp_path, Path(temp), app_peer=False); await host.start()
             try:
                 monkeypatch.setattr(ingress, "handle_frame", must_not_dispatch)
