@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS = ROOT / "ops" / "executive_os"
@@ -47,6 +48,7 @@ def _run_default_control_config(
     tmp_path: Path,
     *,
     release_root: Path = ROOT,
+    source: Path | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     destination = tmp_path / "control.json"
     expected_sha = "a" * 40
@@ -57,7 +59,7 @@ def _run_default_control_config(
             _embedded_control_config_generator(),
             str(release_root),
             str(destination),
-            "",
+            str(source) if source is not None else "",
             "/private/runtime",
             "/private/admin-checkout",
             "/private/workspaces",
@@ -183,3 +185,70 @@ def test_installer_refuses_partial_dialogue_bridge_release_schema(
     assert completed.returncode != 0
     assert "partial Executive Dialogue Bridge control-config schema" in completed.stderr
     assert not destination.exists()
+
+SAFE_OPTIONAL_DEFAULTS = {
+    "ceo_submit_armed": False,
+    "exact_worker_claim_target": {"mode": "disabled"},
+    "terminal_return_armed": False,
+    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+}
+
+
+def test_default_installer_seeds_safe_optional_fields(tmp_path: Path) -> None:
+    value = _render_default_control_config(tmp_path)
+    for key, expected in SAFE_OPTIONAL_DEFAULTS.items():
+        assert value[key] == expected
+        assert value[key] == json.loads(TEMPLATE.read_text())[key]
+
+
+def test_old_source_migrates_only_missing_safe_fields(tmp_path: Path) -> None:
+    value = _render_default_control_config(tmp_path)
+    for key in SAFE_OPTIONAL_DEFAULTS:
+        value.pop(key, None)
+    value["model"] = "preserve-existing-model"
+    source = tmp_path / "old-control.json"
+    source.write_text(json.dumps(value))
+    original = source.read_bytes()
+    completed, destination = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(destination.read_text()) == {**value, **SAFE_OPTIONAL_DEFAULTS}
+    assert source.read_bytes() == original
+
+
+def test_existing_optional_values_are_not_replaced(tmp_path: Path) -> None:
+    value = _render_default_control_config(tmp_path)
+    value.update(SAFE_OPTIONAL_DEFAULTS)
+    value["ceo_submit_armed"] = True
+    value["terminal_return_armed"] = True
+    value["exact_worker_claim_target"] = {"mode": "fixed", "definition": "existing-owner-definition", "max_age_ms": 500}
+    source = tmp_path / "existing-control.json"
+    source.write_text(json.dumps(value))
+    completed, destination = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(destination.read_text()) == value
+
+
+@pytest.mark.parametrize("missing", ["terminal_return_armed", "terminal_return_socket_path"])
+def test_partial_terminal_return_source_refuses_before_write(tmp_path: Path, missing: str) -> None:
+    value = _render_default_control_config(tmp_path)
+    value.update(SAFE_OPTIONAL_DEFAULTS)
+    value.pop(missing)
+    source = tmp_path / "partial-control.json"
+    source.write_text(json.dumps(value))
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+    completed, _ = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode != 0
+    assert "partial terminal-return" in completed.stderr
+    assert destination.read_bytes() == before
+
+
+def test_older_schema_does_not_receive_new_optional_fields(tmp_path: Path) -> None:
+    release = _synthetic_release_schema(tmp_path, c1_keys=set())
+    schema = release / "scripts/executive_os_phase1c.py"
+    text = schema.read_text()
+    for key in SAFE_OPTIONAL_DEFAULTS:
+        text = text.replace(repr(key) + ", ", "").replace(", " + repr(key), "")
+    schema.write_text(text)
+    value = _render_default_control_config(tmp_path, release_root=release)
+    assert set(SAFE_OPTIONAL_DEFAULTS).isdisjoint(value)
