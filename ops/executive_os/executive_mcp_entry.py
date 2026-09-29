@@ -305,10 +305,12 @@ def main(argv=None):
         build_executive_mcp_app, build_personal_read_mcp_app,
         build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app,
         build_release_control_mcp_app,
+        build_web_ceo_release_mcp_app,
     )
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
     from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
+    from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import (
         WEB_CEO_V3_PROFILE, validate_installed_mcp_profile_current,
     )
@@ -348,6 +350,8 @@ def main(argv=None):
         )
         if profile == RELEASE_CONTROL_PROFILE:
             app = build_release_control_mcp_app(settings, audit_sink=sink)
+        elif profile == WEB_CEO_RELEASE_PROFILE:
+            app = build_web_ceo_release_mcp_app(settings, audit_sink=sink, **mounts)
         elif profile == PERSONAL_READ_PROFILE:
             app = build_personal_read_mcp_app(settings, audit_sink=sink)
         elif profile == WEB_CEO_V3_PROFILE:

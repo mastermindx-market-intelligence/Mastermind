@@ -1210,6 +1210,29 @@ def test_gateway_role_config_accepts_exact_release_control_profile(monkeypatch):
     assert observed.release == release
 
 
+def test_gateway_role_config_accepts_exact_combined_release_profile(monkeypatch):
+    from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
+
+    release = 'a' * 40
+    document = _gateway_install_document(release, WEB_CEO_RELEASE_PROFILE)
+    _installed_config_read(monkeypatch, document)
+    observed = m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+    assert m._GATEWAY_MCP_PROFILES == ('release_control_v1', WEB_CEO_RELEASE_PROFILE)
+    assert observed.release == release
+    assert observed.digest == m.hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+@pytest.mark.parametrize('profile', [
+    'web_ceo_release_v2', 'web_ceo_release_v1 ', 'WEB_CEO_RELEASE_V1',
+    'web_ceo_v3', 'personal_read', '',
+])
+def test_gateway_role_config_refuses_combined_profile_aliases(monkeypatch, profile):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release, profile))
+    with pytest.raises(peer.PeerIdentityError):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
 @pytest.mark.parametrize('profile,code', [
     ('web_ceo_v2', 'SERVICE_CONFIG_PROFILE_DRIFT'),
     ('legacy', 'SERVICE_CONFIG_PROFILE_DRIFT'),
