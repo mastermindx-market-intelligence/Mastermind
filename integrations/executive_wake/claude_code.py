@@ -44,7 +44,10 @@ Receiver-safety invariants (each has a pinned test):
   records carrying ``toolUseResult`` with list content and CLI-inserted notes
   carry ``isMeta``.  Only a user record equal to this nudge's exact prompt is
   the marker; the marker inside a tool result, a quoted human prompt, or a
-  meta note is not;
+  meta note is not.  A human prompt byte-equal to the whole prompt would be
+  indistinguishable from the adapter's own submission; the prompt carries
+  fabric-minted opaque ids, so that case is accepted as negligible, not
+  excluded;
 * DELIVERED requires a model-authored reply linked to the latest such marker
   by the transcript's own ``parentUuid`` chain through no ``type:"user"``
   record of any kind (provider-synthesised error or refusal records do not
@@ -65,7 +68,18 @@ Receiver-safety invariants (each has a pinned test):
   the same marker-and-reply rule and it never submits.  It asserts the strong
   negative (``TARGET_UNAVAILABLE``, the receiver observed nothing) only when
   no same-session record carries the nudge id at all; a nudge id present
-  without an exactly recognised marker is effect-unknown.
+  without an exactly recognised marker is effect-unknown.  In ``reconcile``
+  the transcript is the primary evidence; the live-writer listing is a
+  secondary guard measured only on the qualified CLI build, and a listing
+  the adapter cannot read degrades to effect-unknown, never to the strong
+  negative;
+* the unchanged-store proof compares the transcript bytes, the sibling file
+  *names* and the handle's uniqueness; it says nothing about the contents of
+  other sessions' transcripts, so it scopes "the receiver observed nothing" to
+  the receiver only;
+* transcript records are linked by their own ``uuid``; a uuid that appears
+  twice poisons both the node and any marker that carries it, so a duplicate
+  can never convert a chain-breaking record into a permeable one.
 
 Pre-effect refusals reach the fabric as ``TARGET_UNAVAILABLE`` receipts (the
 sibling idiom, valid on both fabric entry points).  Their closed refusal class
@@ -78,6 +92,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import re
 import stat
 import uuid
 from pathlib import Path
@@ -130,6 +145,8 @@ CLAUDE_WAKE_AUTH_REFRESH_CONTENTION_TEXT = "Failed to refresh OAuth token"
 #: CLI builds whose delivery argv, record shapes and listing semantics were measured on a real host.
 CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS = frozenset({"2.1.275"})
 _VERSION_STDOUT_MAX = 4 * 1024
+#: Exact single-line ``claude --version`` shape measured on the qualified build; any extra line refuses.
+_VERSION_LINE = re.compile(r"([0-9]+\.[0-9]+\.[0-9]+) \(Claude Code\)")
 #: Longest ``parentUuid`` chain walked when linking a reply to the marker.
 _CHAIN_MAX_DEPTH = 4096
 
@@ -407,6 +424,7 @@ class ClaudeCodeWakeDispatcher:
         marker_seen = False
         # uuid -> (is a user record, parentUuid); replies are linked after the pass.
         nodes: dict[str, tuple[bool, str | None]] = {}
+        duplicates: set[str] = set()
         genuine_parents: list[str] = []
         with transcript.open("rb") as handle:
             for raw in handle:
@@ -439,14 +457,24 @@ class ClaudeCodeWakeDispatcher:
                 if not isinstance(record_uuid, str):
                     continue
                 parent = parent_uuid if isinstance(parent_uuid, str) else None
+                if record_uuid in nodes:
+                    # A repeated uuid is never resolved by order: the node is poisoned (breaks every chain).
+                    duplicates.add(record_uuid)
+                    nodes[record_uuid] = (True, None)
+                    continue
                 if record_type == "user":
                     nodes[record_uuid] = (True, parent)
                     continue
                 nodes[record_uuid] = (False, parent)
                 if record_type == "assistant" and parent is not None and _genuine_reply(record):
                     genuine_parents.append(parent)
-        marker_replied = latest_marker_uuid is not None and any(
-            ClaudeCodeWakeDispatcher._chains_to_marker(parent, latest_marker_uuid, nodes) for parent in genuine_parents
+        marker_replied = (
+            latest_marker_uuid is not None
+            and latest_marker_uuid not in duplicates
+            and any(
+                ClaudeCodeWakeDispatcher._chains_to_marker(parent, latest_marker_uuid, nodes)
+                for parent in genuine_parents
+            )
         )
         return _TranscriptScan(
             digest=digest.hexdigest(),
@@ -542,8 +570,8 @@ class ClaudeCodeWakeDispatcher:
             raise _refuse("cli_unqualified")
         if len(result.stdout.encode("utf-8")) > _VERSION_STDOUT_MAX:
             raise _refuse("cli_unqualified")
-        version = result.stdout.strip().split(maxsplit=1)[0] if result.stdout.strip() else ""
-        if version not in CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS:
+        match = _VERSION_LINE.fullmatch(result.stdout.strip())
+        if match is None or match.group(1) not in CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS:
             raise _refuse("cli_unqualified")
 
     # -- exclusion: any listed writer for the handle refuses delivery ----------

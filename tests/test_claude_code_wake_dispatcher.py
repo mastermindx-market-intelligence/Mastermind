@@ -15,6 +15,7 @@ from control_plane.wake_dispatcher import (
     authenticate_transport_receipt,
     normalize_transport_completion,
 )
+from integrations.executive_wake import claude_code as claude_code_module
 from integrations.executive_wake.claude_code import (
     CLAUDE_WAKE_AUTH_REFRESH_CONTENTION_TEXT,
     CLAUDE_WAKE_DELIVERY_SENTINEL,
@@ -933,6 +934,53 @@ def test_reconcile_links_to_an_older_marker_through_a_newer_marker_only_if_the_n
         _reconcile(_dispatcher(_FakeRunner([]), store))
 
 
+@pytest.mark.parametrize("later_type", ["attachment", "system", "assistant"])
+def test_reconcile_treats_a_duplicated_uuid_as_poison_never_as_an_overwrite(tmp_path, later_type):
+    """A user record between marker and reply shares its uuid with a later non-user record; the later
+    record must not convert the chain-breaking user node into a permeable one."""
+
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    marker = _last_uuid(store)
+    shared = "00000000-0000-4000-8000-777777777777"
+    _append(store, _prompt_record("operator note", isMeta=True, uuid=shared, parentUuid=marker))
+    _append(store, _record(type=later_type, uuid=shared, parentUuid=marker,
+                           message={"role": "assistant", "model": "claude-opus-5", "content": []} if later_type == "assistant" else None))
+    _append(store, _genuine(cwd=str(store.receiver_cwd), parentUuid=shared))
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
+def test_reconcile_refuses_a_marker_whose_uuid_is_duplicated(tmp_path):
+    """A later attachment reusing the marker's uuid would let a reply 'reach the marker' by equality."""
+
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    marker = _last_uuid(store)
+    _append(store, _prompt_record("human turn", cwd=str(store.receiver_cwd)))
+    _append(store, _record(type="attachment", uuid=marker), _genuine(cwd=str(store.receiver_cwd), parentUuid=marker))
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
+def test_reconcile_terminates_on_a_parent_cycle_without_attribution(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    a, b = "00000000-0000-4000-8000-000000000aaa", "00000000-0000-4000-8000-000000000bbb"
+    _append(store, _record(type="attachment", uuid=a, parentUuid=b), _record(type="attachment", uuid=b, parentUuid=a),
+            _genuine(cwd=str(store.receiver_cwd), parentUuid=a))
+    monkeypatch.setattr(claude_code_module, "_CHAIN_MAX_DEPTH", 8)
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
+def test_reconcile_sees_but_cannot_attribute_to_a_marker_without_a_uuid(tmp_path):
+    store = _store(tmp_path)
+    _append(store, _prompt_record(_prompt_for(), cwd=str(store.receiver_cwd), uuid=None), _genuine(cwd=str(store.receiver_cwd)))
+    with pytest.raises(WakeEffectUnknownError, match="not recorded"):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
 def test_reconcile_round_trips_obligation_order_through_the_canonical_prompt(tmp_path):
     """The marker is written from one id order and reconciled from the reverse order (N3)."""
 
@@ -997,6 +1045,10 @@ def test_qualified_cli_version_set_is_exactly_the_measured_build():
         _version("(Claude Code)\n"),
         _version(QUALIFIED_VERSION_STDOUT, returncode=1),
         _version("x" * 5000),
+        _version("2.1.275 (Claude Code)\nWARNING: patched build\n"),
+        _version("2.1.275 (Claude Code) extra"),
+        _version("v2.1.275 (Claude Code)"),
+        _version("2.1.275"),
         ClaudeWakeCommandResult(returncode=0, stdout=json.dumps([]), stderr=""),
         TimeoutError("version probe"),
         OSError("no such binary"),
