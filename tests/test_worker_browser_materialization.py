@@ -59,6 +59,46 @@ def test_matching_receipt_admits_the_exact_launch(tmp_path):
 
 
 @pytest.mark.parametrize("field,value", [
+    ("pid", 202),
+    ("pgid", 202),
+    ("process_start_identity", "other-process-start"),
+    ("boot_id", "other-boot"),
+])
+def test_receipt_process_identity_must_match_owned_generation(
+    tmp_path, field, value
+):
+    """The logical launch IDs are insufficient without exact OS-process identity."""
+    (api, executive, lease, epoch, generation, profile, requested, config,
+     run_root) = _setup(tmp_path)
+    other = _root(tmp_path, f"process-mismatch-{field}")
+    process_identity = {
+        "pid": 101,
+        "pgid": 101,
+        "process_start_identity": "fixture-start",
+        "boot_id": "fixture-boot",
+    }
+    process_identity[field] = value
+    process_credentials = {
+        "process_identity": dict(process_identity),
+        "os_principal_name": "fixture",
+        "os_principal_uid": os.getuid(),
+    }
+    _materialize(
+        other, executive, epoch, generation, requested,
+        process_identity=process_identity,
+        process_credentials=process_credentials,
+    )
+
+    result = _drive(config, lambda runtime: api.create_worker_browser_server(
+        runtime, config.browser, api.WorkerBrowserAdmission(
+            executive.store, lease, epoch, generation, requested, profile,
+            "worker-browser-isolated", runtime,
+            run_root=other, expected_owner_uid=os.getuid())))
+    assert _error_code(result) == "CHANNEL_ADMISSION_REFUSED"
+    assert list(Path(config.action.artifact_directory).iterdir()) == []
+
+
+@pytest.mark.parametrize("field,value", [
     ("session_epoch_id", "EPOCH-other"),
     ("process_generation_id", "GEN-other"),
     ("requested_profile_digest", "d" * 64),
