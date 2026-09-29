@@ -10,6 +10,7 @@ import hashlib
 import os
 import sqlite3
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from control_plane import executive_release_contract as contract
@@ -62,6 +63,48 @@ class _RootReleaseResponse:
 
 class ReleaseBrokerClient:
     """One request to the existing fixed root-owned socket, never a retry."""
+    def read_release_closure(self, *, approval) -> _RootReleaseResponse:
+        """Private history query for the installed Control owner.
+
+        The original sealed approval is evidence, not a renewed Web principal.
+        This operation has no token, reservation, START, or effect selector.
+        """
+        from control_plane.executive_privileged_client import (
+            _send_one_frame, DEFAULT_SOCKET,
+        )
+        original = contract.validate_approval_evidence(approval)
+        operation = "read_release_closure"
+        response = _send_one_frame(
+            {"schema": BROKER_SCHEMA, "operation": operation,
+             "approval": original.to_dict()},
+            socket_path=DEFAULT_SOCKET, timeout_seconds=15, require_root_peer=True,
+        )
+        if (type(response) is not dict or response.get("schema") != BROKER_SCHEMA
+                or response.get("operation") != operation
+                or type(response.get("ok")) is not bool):
+            raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
+        if not response["ok"]:
+            if (set(response) != {"schema", "operation", "ok", "error"}
+                    or type(response["error"]) is not str
+                    or response["error"] not in {
+                        "RELEASE_OWNER_UNCONFIGURED", "RELEASE_COMMIT_DISARMED",
+                        "RELEASE_REFUSED"}):
+                raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
+            raise ReleaseConsumerError(response["error"])
+        if set(response) != {"schema", "operation", "ok", "approval", "result"}:
+            raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
+        validated = contract.validate_approval_evidence(response["approval"])
+        if contract.canonical_release_bytes(validated) != contract.canonical_release_bytes(original):
+            raise ReleaseConsumerError("RELEASE_BROKER_APPROVAL_CHANGED")
+        if (type(response["result"]) is not dict
+                or set(response["result"]) != {
+                    "reservation", "terminal_status", "cancellation"}):
+            raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
+        return _RootReleaseResponse(
+            approval=validated, result=response["result"],
+            capability=_BROKER_RESPONSE_CAPABILITY,
+        )
+
     def exchange(self, frame: ingress.ReleaseFrame, *, approval=None) -> _RootReleaseResponse:
         from control_plane.executive_privileged_client import (
             _send_one_frame, DEFAULT_SOCKET,
@@ -97,6 +140,59 @@ class ReleaseBrokerClient:
             raise ReleaseConsumerError("RELEASE_BROKER_APPROVAL_CHANGED")
         return _RootReleaseResponse(approval=validated, result=response["result"],
                                     capability=_BROKER_RESPONSE_CAPABILITY)
+
+
+def _validated_release_closure(response, evidence):
+    """Join root history to one canonical unresolved admission snapshot.
+
+    This detached validation neither writes an Event nor clears maintenance.
+    The caller must re-read the same evidence in its owner write transaction
+    before minting a purpose-bound closure context.
+    """
+    code = "RELEASE_CLOSURE_UNQUALIFIED"
+    if (type(response) is not _RootReleaseResponse
+            or response._capability is not _BROKER_RESPONSE_CAPABILITY
+            or response.receiver_pid != os.getpid()):
+        raise ReleaseConsumerError("RELEASE_BROKER_PROVENANCE_REQUIRED")
+    if (not isinstance(evidence, Mapping) or set(evidence) != {
+            "approval", "admission", "preconditions", "root_qualification_digest"}):
+        raise ReleaseConsumerError(code)
+    approval = contract.validate_approval_evidence(evidence["approval"])
+    admission = contract.validate_admission(evidence["admission"])
+    preconditions = contract.validate_precondition_manifest(evidence["preconditions"])
+    if contract.canonical_release_bytes(response.approval) != contract.canonical_release_bytes(approval):
+        raise ReleaseConsumerError(code)
+    result = response.result
+    if (type(result) is not dict or set(result) != {
+            "reservation", "terminal_status", "cancellation"}
+            or result["reservation"] is None
+            or (result["terminal_status"] is None) == (result["cancellation"] is None)):
+        raise ReleaseConsumerError(code)
+    reservation = contract.validate_release_prestart_reservation(
+        result["reservation"], expected_approval=approval)
+    if (_hash(reservation) != evidence["root_qualification_digest"]
+            or contract.canonical_release_bytes(reservation["preconditions"])
+            != contract.canonical_release_bytes(preconditions)
+            or reservation["target_observation_digest"] != admission["target_observation_digest"]):
+        raise ReleaseConsumerError(code)
+    if result["cancellation"] is not None:
+        cancellation = contract.validate_release_prestart_cancellation(
+            result["cancellation"], expected_reservation=reservation,
+            expected_admission=admission, expected_approval=approval)
+        return "cancellation", cancellation, reservation
+    status = contract.validate_release_terminal_status(
+        result["terminal_status"], expected_approval=approval)
+    if status["state"] not in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+        raise ReleaseConsumerError("RELEASE_EFFECT_IN_PROGRESS")
+    if (contract.canonical_release_bytes(status["admission"])
+            != contract.canonical_release_bytes(admission)
+            or contract.canonical_release_bytes(status["preconditions"])
+            != contract.canonical_release_bytes(preconditions)
+            or contract.canonical_release_bytes(status["terminal_receipt"]["before"])
+            != contract.canonical_release_bytes(reservation["before"])
+            or status["started_at_ms"] < reservation["reserved_at_ms"]):
+        raise ReleaseConsumerError(code)
+    return "terminal", status, reservation
 
 
 def _trusted_context(runtime, connection, response):
