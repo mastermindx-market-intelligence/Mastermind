@@ -5,6 +5,7 @@ import copy
 import io
 import json
 import os
+import queue
 import stat
 from types import SimpleNamespace
 
@@ -368,3 +369,19 @@ def test_credential_observation_does_not_read_contents(monkeypatch):
             pytest.fail("credential bytes were read")
     monkeypatch.setattr(probe, "_assert_no_macos_acl", lambda _path: None)
     assert probe.credential_identity(MetadataOnly()) == CREDENTIAL
+
+
+@pytest.mark.parametrize("failure", [OSError(SENTINEL), RuntimeError(EMAIL)])
+def test_reader_thread_failure_is_bounded_and_private(capsys, failure):
+    class BrokenStream:
+        def __iter__(self):
+            raise failure
+    client = object.__new__(probe._Client)
+    client._proc = SimpleNamespace(stdout=BrokenStream())
+    client._messages = queue.Queue()
+    client._read()
+    assert client._messages.get_nowait() == {"_malformed": True}
+    assert client._messages.get_nowait() is None
+    assert client._messages.empty()
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""

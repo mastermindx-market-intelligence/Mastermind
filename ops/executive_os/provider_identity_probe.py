@@ -515,15 +515,20 @@ class _Client:
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self) -> None:
-        assert self._proc.stdout is not None
-        for raw in self._proc.stdout:
-            try:
-                value = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                self._messages.put({"_malformed": True})
-                continue
-            self._messages.put(value if isinstance(value, dict) else {"_malformed": True})
-        self._messages.put(None)
+        # Reader threads must never render an unreviewed transport exception.
+        try:
+            assert self._proc.stdout is not None
+            for raw in self._proc.stdout:
+                try:
+                    value = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    self._messages.put({"_malformed": True})
+                    continue
+                self._messages.put(value if isinstance(value, dict) else {"_malformed": True})
+        except Exception:
+            self._messages.put({"_malformed": True})
+        finally:
+            self._messages.put(None)
 
     def _send(self, value: Mapping[str, Any]) -> None:
         if self._proc.stdin is None:
