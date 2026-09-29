@@ -117,6 +117,9 @@ def test_manifest_is_external_hash_metadata_only_and_permanently_disarmed():
         "worker_start": False,
     }
     assert manifest["context"]["mcp_profile"] == "web_ceo_v2"
+    assert manifest["context"]["control_uid"] == json.loads(
+        _resident_values()["control_config_bytes"]
+    )["control_uid"]
     assert b"private-fixture" not in plan.manifest_bytes
     assert b"release-owner-key.v1" not in plan.manifest_bytes
     assert b"approval" not in plan.manifest_bytes.lower()

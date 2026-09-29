@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import hashlib
+import json
 from typing import Any
 
 from control_plane.executive_authority import ReleaseControllerPolicy
@@ -376,6 +377,7 @@ def compile_resident_publication_plan(
     except (ReleaseOwnerInputError, ReleaseContractError) as error:
         code = getattr(error, "code", "RESIDENT_INPUT_INVALID")
         raise PublicationPlanError(code) from None
+    control_uid = json.loads(control)["control_uid"]
     preimage = _resident_preimage(
         expected_registration=registration,
         expected_registry=registry,
@@ -414,7 +416,7 @@ def compile_resident_publication_plan(
             "release_commit": release_commit,
             "release_tree": release_tree,
             "boot_id": boot_id,
-            "control_uid": 450,
+            "control_uid": control_uid,
             "policy_sha256": policy.sha256,
             "python_runtime_provenance_digest": python_runtime_provenance_digest,
             "provider_attestation_sha256": _sha(provider),
