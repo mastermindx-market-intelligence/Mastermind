@@ -169,7 +169,14 @@ def reviewed_literal_spans(path: str, source: str):
     exact character offsets too, including any prefix or trailing statement.
     Duplicate anchors of another AST type remain duplicates, never aliases.
     """
-    if path != REVIEWED_PATH or type(source) is not str:
+    if type(source) is not str:
+        return ()
+    if path == REVIEWED_PATH:
+        reviewed_anchors = REVIEWED_ANCHORS
+    elif path == "control_plane/executive_release_factory.py":
+        from tests.executive_release_identity_review import REVIEWED_ANCHORS as release_anchors
+        reviewed_anchors = release_anchors
+    else:
         return ()
     # str.splitlines recognizes these separators, while Python source/AST
     # coordinates do not. Never project across incompatible line models.
@@ -186,7 +193,7 @@ def reviewed_literal_spans(path: str, source: str):
         if name is not None:
             anchors.setdefault(name, []).append(node)
     spans = []
-    for name, expected in REVIEWED_ANCHORS.items():
+    for name, expected in reviewed_anchors.items():
         candidates = anchors.get(name, ())
         if len(candidates) != 1:
             continue

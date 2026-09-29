@@ -15,13 +15,18 @@ def filesystem(tmp_path, monkeypatch):
     if f.sys.platform != "darwin":
         pytest.skip("Darwin descriptor observer")
     real_stat, real_fstat = os.stat, os.fstat
+    external_volume = Path('/Volumes/Mastermind')
+    external_ino = real_stat(external_volume).st_ino if external_volume.exists() else None
     # Only identity ownership and absence of ACLs are synthetic. Actual opens,
     # directory descriptors, symlinks, FIFO types and replace races are real.
     def root_info(info):
-        names = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
-                 "st_size", "st_mtime_ns", "st_ctime_ns", "st_blocks")
-        return SimpleNamespace(**{name: 0 if name in {"st_uid", "st_gid"}
-                                  else getattr(info, name) for name in names})
+        values = {name: getattr(info, name) for name in dir(info) if name.startswith('st_')}
+        values.update(st_uid=0, st_gid=0)
+        # Qualify only the user's external-volume ancestor in this disposable
+        # fixture; never chmod the shared volume or weaken the real observer.
+        if info.st_ino == external_ino and stat.S_ISDIR(info.st_mode):
+            values['st_mode'] = info.st_mode & ~0o022
+        return SimpleNamespace(**values)
     def stat_info(*args, **kwargs):
         return root_info(real_stat(*args, **kwargs))
     def fstat_info(*args, **kwargs):

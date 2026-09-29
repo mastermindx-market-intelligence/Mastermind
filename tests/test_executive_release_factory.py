@@ -8,6 +8,7 @@ from pathlib import Path
 import socket
 import stat
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -135,7 +136,8 @@ def image(monkeypatch, inputs):
         transitions=[dict(transition_digest=transition, staging_generation=1, state="STAGED")])))
     class Reader:
         def __init__(self, **kwargs):
-            pass
+            self.deadline = time.monotonic() + 5
+        check = f._Reader.check
         def observe(self, path, *, directory=False, retain=True, **kwargs):
             if directory:
                 names = sorted(p.name for p in files if p.parent == path)
@@ -147,6 +149,9 @@ def image(monkeypatch, inputs):
     real_lstat = os.lstat
     monkeypatch.setattr(f.os, "lstat", lambda path, **kw: object() if Path(path) == f._REGISTRATION else real_lstat(path, **kw))
     monkeypatch.setattr(f.os, "geteuid", lambda: 0)
+    # This fixture models a Darwin installed image even on Linux CI. Real
+    # Darwin filesystem behavior is covered separately, not claimed here.
+    monkeypatch.setattr(f, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(f, "_Reader", Reader)
     monkeypatch.setattr(f, "_boot_id", lambda: boot)
     monkeypatch.setattr(f.time, "time", lambda: now[0])

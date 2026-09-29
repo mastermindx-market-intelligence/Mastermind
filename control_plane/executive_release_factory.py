@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import hashlib
 import hmac
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -88,6 +89,15 @@ class _File:
         return {"sha256": self.sha256, "identity": list(self.identity),
                 "ancestors": [list(row) for row in self.ancestors]}
 
+    def resident_identity(self):
+        # Directory contents can change when an unrelated staged registry is
+        # atomically published. Across requests retain directory identity and
+        # security metadata, not its contents' size/link count/timestamps.
+        # observe() still checks full metadata before/after every held read,
+        # and every later observation rechecks ownership, permissions and ACLs.
+        return {"sha256": self.sha256, "identity": list(self.identity),
+                "ancestors": [list(row[:5]) for row in self.ancestors]}
+
 
 class _Reader:
     """One bounded observation, with all parent descriptors held through read."""
@@ -124,7 +134,8 @@ class _Reader:
     def _trusted(info, descriptor, *, directory=False, mode=None, gid=0):
         expected = stat.S_ISDIR if directory else stat.S_ISREG
         if (not expected(info.st_mode) or info.st_uid != 0
-                or info.st_mode & 0o022 or (not directory and info.st_gid != gid)
+                or info.st_mode & 0o022
+                or ((not directory or mode is not None) and info.st_gid != gid)
                 or (mode is not None and stat.S_IMODE(info.st_mode) != mode)
                 or (not directory and info.st_nlink != 1)
                 or has_macos_acl("", expected_identity=info, descriptor=descriptor)):
@@ -290,6 +301,9 @@ def _match(value, pattern):
 
 
 def _strict_json(raw):
+    if (type(raw) is not bytes or not 0 < len(raw) <= 4 * 1024 * 1024
+            or not raw.isascii() or b"\x00" in raw):
+        _unavailable()
     def pairs(rows):
         value = {}
         for key, item in rows:
@@ -297,7 +311,15 @@ def _strict_json(raw):
                 _unavailable()
             value[key] = item
         return value
-    value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+    def constant(_value):
+        _unavailable()
+    def finite(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            _unavailable()
+        return parsed
+    value = json.loads(raw.decode("ascii"), object_pairs_hook=pairs,
+                       parse_constant=constant, parse_float=finite)
     if type(value) is not dict:
         _unavailable()
     return value
@@ -398,8 +420,11 @@ def _resident(config, reader, now, *, admission=False):
         files[relative] = observed
     # Keep the existing independent production trust gate, then pin the exact
     # same observations again at the owner operation boundary.
+    reader.check()
     verify_production_trust(config)
+    reader.check()
     policy = ReleaseControllerPolicy.from_bytes(files["config/authority_map.yml"].raw)
+    reader.check()
     if (policy.configuration_state is not ReleasePolicyState.CONFIGURED
             or policy.sha256 != files["config/authority_map.yml"].sha256):
         _unavailable()
@@ -418,7 +443,9 @@ def _resident(config, reader, now, *, admission=False):
         "issuer_binding_owner_installation_id issuer_binding_role issuer_binding_release_commit "
         "issuer_binding_boot_id issuer_binding_observed_at provider_attestation_observed_at "
         "production_disarming", "mastermind.executive_release_owner_installed_evidence/v1")
+    reader.check()
     boot = _boot_id()
+    reader.check()
     expected = {
         "owner_installation_id": reg["owner_installation_id"], "target_ref": reg["target_ref"],
         "registration_generation": reg["registration_generation"],
@@ -441,7 +468,7 @@ def _resident(config, reader, now, *, admission=False):
         _match(evidence[name], _HEX64)
     for name in ("issuer_binding_observed_at", "provider_attestation_observed_at"):
         observed_at(evidence[name], now, admission=admission)
-    public = {name: _digest(value.public_identity()) for name, value in files.items() if name != "key"}
+    public = {name: _digest(value.resident_identity()) for name, value in files.items() if name != "key"}
     public["key_metadata"] = list(files["key"].identity)
     public["boot_id"] = boot
     identity = hmac.new(files["key"].raw,
@@ -450,6 +477,7 @@ def _resident(config, reader, now, *, admission=False):
     codec = _OwnerReleaseCodec(key=files["key"].raw, key_id=reg["key_id"],
                               trust_generation=reg["trust_generation"],
                               owner_installation_id=reg["owner_installation_id"])
+    reader.check()
     return reg, files, evidence, policy, boot, codec, identity
 
 
