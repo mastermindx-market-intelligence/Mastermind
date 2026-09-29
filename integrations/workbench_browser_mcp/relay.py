@@ -270,7 +270,9 @@ class McpStdioSession:
                     env=dict(self._env),
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    # No diagnostic reader exists; an undrained pipe can block
+                    # the child before it replies to initialize or tools/call.
+                    stderr=subprocess.DEVNULL,
                     close_fds=True,
                 )
                 initialize = self._rpc(
@@ -459,13 +461,15 @@ class BrowserRelayServer:
         self._stop.set()
 
     def _owner_requires_stop(self) -> bool:
-        if self._expires_at_ms is not None:
-            now_ms = self._clock_ms()
-            if type(now_ms) is not int or now_ms < 0 or now_ms >= self._expires_at_ms:
-                return True
         if os.getppid() != self._parent_pid:
             return True
         return False
+
+    def _lease_expired(self) -> bool:
+        if self._expires_at_ms is None:
+            return False
+        now_ms = self._clock_ms()
+        return type(now_ms) is not int or now_ms < 0 or now_ms >= self._expires_at_ms
 
     def _response(
         self,
@@ -528,6 +532,10 @@ class BrowserRelayServer:
             arguments = value.get("arguments")
             if type(tool) is not str or type(arguments) is not dict:
                 raise BrowserRelayError("relay tool request is invalid")
+            if self._lease_expired():
+                return self._response(
+                    request_id=request_id, ok=False, error="REQUEST_REFUSED"
+                )
             try:
                 result = self._session.call(tool, arguments)
             except BrowserRelayError:

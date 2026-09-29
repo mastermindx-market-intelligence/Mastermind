@@ -347,12 +347,26 @@ class BrowserActionPort:
         caller: ActionCaller,
         browser_ref: object,
         action_ref: object,
+        *,
+        require_live: bool = True,
     ) -> tuple[BrowserResourceRef, ProjectActionBinding, Path, PreparedBrowserAction]:
         if type(browser_ref) is not str:
             raise BrowserPortRefused("BROWSER_REF_INVALID")
-        browser, binding, socket_path = self._resource(caller, browser_ref)
+        if require_live:
+            browser, binding, socket_path = self._resource(caller, browser_ref)
+        else:
+            try:
+                browser = self._codec.decode_resource(
+                    browser_ref, now_ms=self._now(), require_fresh=False
+                )
+            except BrowserContractError as error:
+                raise BrowserPortRefused("BROWSER_REF_INVALID") from error
+            binding = self._binding(caller, browser)
+            socket_path = self._relay_root / f"{browser.start_action_id}.sock"
         try:
-            prepared = self._codec.decode_action(action_ref, now_ms=self._now())
+            prepared = self._codec.decode_action(
+                action_ref, now_ms=self._now(), require_fresh=require_live
+            )
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_ACTION_INVALID") from error
         if (
@@ -390,7 +404,7 @@ class BrowserActionPort:
         action_ref: object,
     ) -> dict[str, Any]:
         browser, binding, _socket_path, prepared = self._decode_action(
-            caller, browser_ref, action_ref
+            caller, browser_ref, action_ref, require_live=False
         )
         identity = self._action_identity(browser, binding, prepared)
         classified = classify_action(self._store, identity)
@@ -417,7 +431,7 @@ class BrowserActionPort:
         action_ref: object,
     ) -> dict[str, Any]:
         browser, binding, socket_path, prepared = self._decode_action(
-            caller, browser_ref, action_ref
+            caller, browser_ref, action_ref, require_live=False
         )
         identity = self._action_identity(browser, binding, prepared)
         original_binding = _binding_key(binding)
@@ -438,6 +452,18 @@ class BrowserActionPort:
                     "observed_sha256": None,
                     "reconciled": True,
                 }
+            # No durable receipt exists. Fresh action authority and the exact
+            # live relay are required before claiming or dispatching a click.
+            fresh_browser, fresh_binding, fresh_socket, fresh_prepared = self._decode_action(
+                caller, browser_ref, action_ref
+            )
+            if (
+                fresh_browser != browser
+                or _binding_key(fresh_binding) != original_binding
+                or fresh_socket != socket_path
+                or fresh_prepared != prepared
+            ):
+                raise BrowserPortRefused("BROWSER_ACTION_BINDING_CHANGED")
             outcome = claim_action(
                 self._store,
                 identity,

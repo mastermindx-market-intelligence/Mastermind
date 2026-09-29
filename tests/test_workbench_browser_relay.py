@@ -47,7 +47,7 @@ def _digest():
     )
 
 
-def _fake_child(tmp_path: Path, *, schema_drift: bool = False) -> list[str]:
+def _fake_child(tmp_path: Path, *, schema_drift: bool = False, noisy: bool = False) -> list[str]:
     tools = json.loads(json.dumps(FAKE_TOOLS))
     if schema_drift:
         tools[0]["inputSchema"]["properties"]["changed"] = {"type": "string"}
@@ -55,8 +55,12 @@ def _fake_child(tmp_path: Path, *, schema_drift: bool = False) -> list[str]:
     program.write_text(
         """import json,sys
 TOOLS = %s
+NOISY = %s
 for line in sys.stdin:
     req=json.loads(line)
+    if NOISY:
+        sys.stderr.write("x" * 262144)
+        sys.stderr.flush()
     if req.get("method") == "initialize":
         out={"jsonrpc":"2.0","id":req["id"],"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}}
         print(json.dumps(out,separators=(",",":")),flush=True)
@@ -68,7 +72,7 @@ for line in sys.stdin:
         params=req.get("params",{})
         result={"content":[{"type":"text","text":json.dumps({"tool":params.get("name"),"arguments":params.get("arguments")},sort_keys=True)}],"isError":False}
         print(json.dumps({"jsonrpc":"2.0","id":req["id"],"result":result},separators=(",",":")),flush=True)
-""" % repr(tools),
+""" % (repr(tools), repr(noisy)),
         encoding="utf-8",
     )
     return [sys.executable, "-I", "-S", str(program)]
@@ -88,6 +92,21 @@ def test_stdio_session_initializes_verifies_schema_and_calls_tool(tmp_path):
         result = session.call("browser_click", {"target": "button"})
         text = result["content"][0]["text"]
         assert json.loads(text) == {"arguments": {"target": "button"}, "tool": "browser_click"}
+    finally:
+        session.close()
+
+
+def test_stdio_session_handles_child_stderr_backpressure(tmp_path):
+    session = McpStdioSession(
+        argv=_fake_child(tmp_path, noisy=True),
+        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        allowed_tools=frozenset({"browser_snapshot", "browser_click"}),
+        expected_tool_schema_digest=_digest(),
+        rpc_timeout_seconds=2,
+    )
+    try:
+        session.start()
+        assert session.call("browser_click", {"target": "button"})["isError"] is False
     finally:
         session.close()
 
@@ -375,7 +394,7 @@ def test_relay_refuses_preexisting_socket_path(tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")
-def test_relay_self_retires_at_authoritative_lease_expiry(tmp_path):
+def test_relay_preserves_carrier_at_lease_expiry_but_refuses_new_calls(tmp_path):
     socket_path = tmp_path / "relay-expiry.sock"
     now = {"value": 1000}
     session = McpStdioSession(
@@ -398,9 +417,75 @@ def test_relay_self_retires_at_authoritative_lease_expiry(tmp_path):
     relay.wait_ready(timeout=3)
     assert socket_path.exists()
     now["value"] = 2000
+    refused = relay_request(
+        socket_path,
+        {
+            "schema": "mastermind.workbench_browser_relay_request.v1",
+            "kind": "tool",
+            "request_id": "b" * 32,
+            "resource_id": "a" * 32,
+            "tool": "browser_click",
+            "arguments": {"target": "button"},
+        },
+        timeout=2,
+    )
+    assert refused["ok"] is False
+    assert refused["error"] == "REQUEST_REFUSED"
+    assert thread.is_alive()
+    assert socket_path.exists()
+    relay.stop()
     thread.join(timeout=3)
     assert not thread.is_alive()
-    assert not socket_path.exists()
+
+
+@pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")
+def test_relay_preserves_unknown_effect_carrier_after_expiry(tmp_path):
+    socket_path = tmp_path / "relay-unknown-expiry.sock"
+    now = {"value": 1000}
+    session = _PostDispatchFailureSession()
+    relay = BrowserRelayServer(
+        resource_id="a" * 32,
+        socket_path=socket_path,
+        session=session,
+        owner_pid=os.getpid(),
+        parent_pid=os.getppid(),
+        expires_at_ms=2000,
+        clock_ms=lambda: now["value"],
+    )
+    thread = threading.Thread(target=relay.serve_forever, daemon=True)
+    thread.start()
+    relay.wait_ready(timeout=3)
+    request = {
+        "schema": "mastermind.workbench_browser_relay_request.v1",
+        "kind": "tool",
+        "request_id": "b" * 32,
+        "resource_id": "a" * 32,
+        "tool": "browser_click",
+        "arguments": {"target": "button"},
+    }
+    try:
+        unknown = relay_request(socket_path, request, timeout=2)
+        assert unknown["error"] == "EFFECT_UNKNOWN"
+        now["value"] = 2000
+        refused = relay_request(socket_path, {**request, "request_id": "c" * 32}, timeout=2)
+        assert refused["error"] == "REQUEST_REFUSED"
+        status = relay_request(
+            socket_path,
+            {
+                "schema": "mastermind.workbench_browser_relay_request.v1",
+                "kind": "status",
+                "request_id": "d" * 32,
+                "resource_id": "a" * 32,
+            },
+            timeout=2,
+        )
+        assert status["ok"] is True
+        assert thread.is_alive()
+        assert socket_path.exists()
+        assert session.dispatched is True
+    finally:
+        relay.stop()
+        thread.join(timeout=3)
 
 
 @pytest.mark.skipif(not hasattr(socket, "AF_UNIX"), reason="Unix sockets required")

@@ -251,3 +251,65 @@ def test_wrong_process_identity_refuses_before_relay(tmp_path: Path):
             port.call_read_tool(caller, bad_ref, "browser_snapshot", {})
     finally:
         os.close(fd)
+
+
+@pytest.mark.parametrize("effect", ["APPLIED", "NOT_APPLIED", "EFFECT_UNKNOWN"])
+def test_durable_action_receipt_survives_relay_death_and_action_expiry(
+    tmp_path: Path, effect: str
+):
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        if effect == "EFFECT_UNKNOWN":
+            raise BrowserRelayError("response lost after dispatch")
+        if effect == "NOT_APPLIED":
+            return {
+                "schema": "mastermind.workbench_browser_relay_response.v1",
+                "request_id": request["request_id"],
+                "resource_id": "c" * 32,
+                "ok": False,
+                "error": "REQUEST_REFUSED",
+            }
+        return {
+            "schema": "mastermind.workbench_browser_relay_response.v1",
+            "request_id": request["request_id"],
+            "resource_id": "c" * 32,
+            "ok": True,
+            "result": {"content": [], "isError": False},
+        }
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        action_ref = port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+        assert port.run_action(caller, browser_ref, action_ref)["effect_state"] == effect
+
+        class DeadInspector:
+            def inspect(self, pid):
+                raise ProcessLookupError(pid)
+
+        port._inspector = DeadInspector()
+        port._clock_ms = lambda: 8500  # action and resource references have expired
+        assert port.reconcile_action(caller, browser_ref, action_ref)["effect_state"] == effect
+        replay = port.run_action(caller, browser_ref, action_ref)
+        assert replay["effect_state"] == effect
+        assert replay["reconciled"] is True
+        assert len(calls) == 1
+    finally:
+        os.close(fd)
+
+
+def test_expired_unclaimed_action_does_not_dispatch(tmp_path: Path):
+    def relay(_path, request, *, timeout):
+        raise AssertionError("expired action must not dispatch")
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        action_ref = port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+        port._clock_ms = lambda: 6000  # action expires at 5000, resource at 8000
+        with pytest.raises(BrowserPortRefused, match="BROWSER_ACTION_INVALID"):
+            port.run_action(caller, browser_ref, action_ref)
+        assert port.reconcile_action(caller, browser_ref, action_ref)["effect_state"] == "NOT_APPLIED"
+        assert list((tmp_path / "artifacts").iterdir()) == []
+    finally:
+        os.close(fd)
