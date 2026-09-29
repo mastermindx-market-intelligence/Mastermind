@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sqlite3
 import time
 from typing import Any
 
@@ -139,6 +140,30 @@ class ReleaseControlConsumer:
                     return None
                 raise
 
+    def _history_admission_matches(self, approval, status):
+        """Read the original admission through the one canonical registry.
+
+        This intentionally fails closed until the Runtime owner implements its
+        Event-qualified read seam. No journal bytes can manufacture admission,
+        and this consumer never persists an admission or releases maintenance.
+        """
+        registry = self.runtime.release_maintenance
+        read_admission = getattr(registry, "read_admission", None)
+        if not callable(read_admission):
+            return False
+        with self.runtime.store.read() as connection:
+            original = registry.read_approval(
+                connection, approved_transition_ref=approval["approved_transition_ref"])
+            if contract.canonical_release_bytes(original) != contract.canonical_release_bytes(approval):
+                return False
+            admission = read_admission(
+                connection, approved_transition_ref=approval["approved_transition_ref"],
+                request_fingerprint=status["request_fingerprint"])
+            if admission is None:
+                return False
+            validated = contract.validate_admission(admission)
+            return contract.canonical_release_bytes(validated) == contract.canonical_release_bytes(status["admission"])
+
     def handle(self, raw: bytes, connection) -> dict:
         frame = ingress.decode_frame(raw)
         _qualify_connection(connection, "gateway")
@@ -155,23 +180,30 @@ class ReleaseControlConsumer:
             # trust, without staging, expiry renewal, tokens or new Events.
             if approval is None:
                 return {**result, "approval": None, "broker_status": None}
-            self.broker.exchange(frame, approval=approval)
-            from control_plane.executive_privileged_client import send_status, validate_status_response
-            from control_plane.executive_privileged_action import STATUS_REQUEST_SCHEMA
-            request_id = contract.broker_request_id_for(contract.request_fingerprint_for(approval))
-            status = send_status({"schema": STATUS_REQUEST_SCHEMA, "request_id": request_id},
-                                 require_root_peer=True)
-            projection = validate_status_response(status, expected_request_id=request_id)
+            response = self.broker.exchange(frame, approval=approval)
             _qualify_connection(connection, "gateway")
             _current_principal(frame.principal, time.time_ns() // 1_000_000)
-            if projection["status"] != "NOT_FOUND":
-                # C1 has no P4 actuator/receipt schema. A historical P2 family
-                # with a colliding shortened id cannot attest the full P4
-                # fingerprint; neither terminal success nor not-applied may
-                # be inferred from it. Preserve ambiguity without mutation.
+            code = "RELEASE_HISTORY_FAMILY_UNQUALIFIED"
+            try:
+                if type(response.result) is not dict or set(response.result) != {"terminal_status"}:
+                    raise ReleaseConsumerError(code)
+                status = contract.validate_release_terminal_status(
+                    response.result["terminal_status"], expected_approval=approval)
+                if status["state"] != "NOT_FOUND":
+                    code = "RELEASE_HISTORY_ADMISSION_UNQUALIFIED"
+                    if not self._history_admission_matches(approval, status):
+                        raise ReleaseConsumerError(code)
+                if status["state"] in {"STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"}:
+                    code = "RELEASE_EFFECT_IN_PROGRESS"
+                    raise ReleaseConsumerError(code)
+            except (AttributeError, KeyError, TypeError, ValueError, OSError, RuntimeError, sqlite3.Error):
+                # No legacy P2 status query, fallback, resend or new Event.
+                # Unqualified and in-progress history never attest an outcome.
                 return {**result, "ok": False, "effect": "EFFECT_UNKNOWN",
-                        "error": {"code": "RELEASE_HISTORY_FAMILY_UNQUALIFIED"}}
-            return {**result, "approval": approval.to_dict(), "broker_status": projection}
+                        "error": {"code": code}}
+            _qualify_connection(connection, "gateway")
+            _current_principal(frame.principal, time.time_ns() // 1_000_000)
+            return {**result, "approval": approval.to_dict(), "broker_status": status.to_dict()}
         if operation == "prepare_release_transition" and approval is None:
             raise ReleaseConsumerError("RELEASE_APPROVAL_NOT_FOUND")
         _qualify_connection(connection, "gateway")
