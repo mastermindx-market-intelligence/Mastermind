@@ -15,7 +15,7 @@ OWNER = "11111111-1111-4111-8111-111111111111"
 TARGET = "5" * 64
 COMMIT = "1" * 40
 TREE = "2" * 40
-BOOT = "boot-accepted-1"
+BOOT = "abcdef12-3456-4789-abcd-123456789abc"
 PROVENANCE = "a" * 64
 NOW = 2_000_000_000
 OBSERVED = "2026-09-29T12:00:00Z"
@@ -94,6 +94,7 @@ def _configs():
             "schema_version": "mastermind.executive_control_config/v1",
             "proof_base_sha": COMMIT,
             "python_runtime_provenance_digest": PROVENANCE,
+            "control_uid": 450,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -102,6 +103,10 @@ def _configs():
         {
             "schema": "mastermind.executive_privileged_broker_config.v1",
             "release_root": "/Library/Application Support/MastermindExecutive/releases/" + COMMIT,
+            "receipt_root": "/var/db/mastermind-executive/privileged-actions/receipts",
+            "allowed_peer_uids": [450],
+            "timeout_seconds": 120,
+            "broker_version": "1",
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -277,6 +282,39 @@ def test_issuer_receipt_keeps_control_uid_fixed_at_450():
         )
 
 
+def test_issuer_receipt_refuses_boolean_uid_equal_to_integer_one():
+    value = _issuer()
+    value["app_peer_uid"] = True
+    with pytest.raises(r.ReleaseOwnerInputError, match="^ISSUER_BINDING_MISMATCH$"):
+        r.validate_issuer_binding_receipt(
+            value,
+            owner_installation_id=OWNER,
+            target_ref=TARGET,
+            release_commit=COMMIT,
+            release_tree=TREE,
+            boot_id=BOOT,
+            policy=_policy(),
+            app_peer_uid=1,
+            _now_seconds=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "boot_id",
+    [
+        "boot-accepted-1",
+        "00000000-0000-0000-0000-000000000000",
+        BOOT.upper(),
+        BOOT.replace("-", ""),
+    ],
+)
+def test_installed_evidence_requires_canonical_nonzero_boot_uuid(boot_id):
+    issuer = _issuer()
+    issuer["boot_id"] = boot_id
+    with pytest.raises(r.ReleaseOwnerInputError, match="^INSTALLED_BOOT$"):
+        _installed(boot_id=boot_id, issuer_binding_receipt=issuer)
+
+
 def test_installed_evidence_has_exact_digests_ordering_and_disarming():
     value = _installed()
     control, broker = _configs()
@@ -321,6 +359,51 @@ def test_installed_evidence_refuses_registration_and_config_join_drift():
         _installed(control_config_bytes=json.dumps(changed).encode())
     with pytest.raises(r.ReleaseOwnerInputError, match="^AUTHORITY_POLICY_MISMATCH$"):
         _installed(authority_map_bytes=_policy_source({**_policy_mapping(), "generation": 8}))
+
+
+@pytest.mark.parametrize("uid", [None, 451, True, 450.0])
+def test_installed_evidence_requires_exact_control_uid(uid):
+    control, _ = _configs()
+    changed = json.loads(control)
+    if uid is None:
+        changed.pop("control_uid")
+    else:
+        changed["control_uid"] = uid
+    with pytest.raises(r.ReleaseOwnerInputError, match="^CONTROL_CONFIG_MISMATCH$"):
+        _installed(control_config_bytes=json.dumps(changed).encode())
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "foreign_root",
+        "relative_root",
+        "missing_fields",
+        "wrong_schema",
+        "bad_receipt_root",
+        "boolean_peer",
+        "extra_field",
+    ],
+)
+def test_installed_evidence_requires_complete_installed_broker_contract(case):
+    _, broker = _configs()
+    changed = json.loads(broker)
+    if case == "foreign_root":
+        changed["release_root"] = "/untrusted/releases/" + COMMIT
+    elif case == "relative_root":
+        changed["release_root"] = "relative/releases/" + COMMIT
+    elif case == "missing_fields":
+        changed = {"schema": changed["schema"], "release_root": changed["release_root"]}
+    elif case == "wrong_schema":
+        changed["schema"] = "other"
+    elif case == "bad_receipt_root":
+        changed["receipt_root"] = "/untrusted/receipts"
+    elif case == "boolean_peer":
+        changed["allowed_peer_uids"] = [450, True]
+    else:
+        changed["extra"] = 1
+    with pytest.raises(r.ReleaseOwnerInputError, match="^BROKER_CONFIG_MISMATCH$"):
+        _installed(broker_config_bytes=json.dumps(changed).encode())
 
 
 def test_installed_evidence_refuses_issuer_and_timestamp_mismatch():

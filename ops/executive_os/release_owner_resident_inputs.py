@@ -23,6 +23,7 @@ from uuid import UUID
 
 from control_plane import executive_authority as authority
 from control_plane.executive_authority import ReleaseControllerPolicy
+from control_plane.executive_privileged_broker import PrivilegedBrokerConfig
 from control_plane.executive_release_contract import (
     ReleaseContractError,
     canonical_release_bytes,
@@ -280,7 +281,7 @@ def validate_issuer_binding_receipt(
     _hex(target_ref, _HEX64, "ISSUER_TARGET")
     _hex(release_commit, _HEX40, "ISSUER_RELEASE")
     _hex(release_tree, _HEX40, "ISSUER_RELEASE")
-    _identifier(boot_id, "ISSUER_BOOT")
+    _uuid(boot_id, "ISSUER_BOOT")
     _positive_integer(control_uid, "ISSUER_UID")
     _positive_integer(app_peer_uid, "ISSUER_UID")
     if control_uid != 450 or control_uid == app_peer_uid:
@@ -295,7 +296,11 @@ def validate_issuer_binding_receipt(
         "control_uid": control_uid,
         "app_peer_uid": app_peer_uid,
     }
-    if any(value[field] != expected_value for field, expected_value in expected.items()):
+    if any(
+        type(value[field]) is not type(expected_value)
+        or value[field] != expected_value
+        for field, expected_value in expected.items()
+    ):
         _fail("ISSUER_BINDING_MISMATCH")
     policy_mapping = _policy_mapping(policy)
     try:
@@ -373,7 +378,7 @@ def compile_installed_evidence(
     registration_value = _validate_registration(registration)
     release_commit = _hex(release_commit, _HEX40, "INSTALLED_RELEASE")
     release_tree = _hex(release_tree, _HEX40, "INSTALLED_RELEASE")
-    _identifier(boot_id, "INSTALLED_BOOT")
+    _uuid(boot_id, "INSTALLED_BOOT")
     _positive_integer(app_peer_uid, "INSTALLED_UID")
     provenance = _hex(
         python_runtime_provenance_digest, _HEX64, "INSTALLED_PROVENANCE"
@@ -388,14 +393,19 @@ def compile_installed_evidence(
     if (
         control_document.get("proof_base_sha") != release_commit
         or control_document.get("python_runtime_provenance_digest") != provenance
+        or type(control_document.get("control_uid")) is not int
+        or control_document["control_uid"] != 450
     ):
         _fail("CONTROL_CONFIG_MISMATCH")
     broker_document = _strict_json(broker, "BROKER_CONFIG")
-    release_root = broker_document.get("release_root")
-    if (
-        type(release_root) is not str
-        or not release_root.endswith("/releases/" + release_commit)
-    ):
+    try:
+        broker_config = PrivilegedBrokerConfig.from_mapping(broker_document)
+    except (TypeError, ValueError):
+        _fail("BROKER_CONFIG_MISMATCH")
+    expected_release_root = (
+        "/Library/Application Support/MastermindExecutive/releases/" + release_commit
+    )
+    if str(broker_config.release_root) != expected_release_root:
         _fail("BROKER_CONFIG_MISMATCH")
     provider_time = _timestamp(
         provider_attestation_observed_at,
