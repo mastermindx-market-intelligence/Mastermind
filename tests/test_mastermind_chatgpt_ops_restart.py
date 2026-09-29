@@ -112,16 +112,29 @@ class OpsRestartTests(unittest.TestCase):
             self.assertEqual(owner.actions, [])
             self.assertEqual(len(owner.observations), 1)
 
-    def test_service_mapping_is_closed_to_four_personal_seats(self):
+    def test_owner_action_refuses_before_subprocess_when_bundle_unverified(self):
+        with patch.object(
+            ops, "verify_studio_control_owner", side_effect=RuntimeError("bundle drift")
+        ), patch.object(ops.subprocess, "run") as run:
+            with self.assertRaisesRegex(RuntimeError, "bundle drift"):
+                ops._run_owner_action("chatgpt1", "stop")
+        run.assert_not_called()
+
+    def test_service_mapping_is_closed_to_isolated_studio_routes(self):
         self.assertEqual(
             ops.SERVICE_TO_ACCOUNT,
             {
                 "studio-direct.chatgpt1": "chatgpt1",
-                "studio-direct.chatgpt2": "chatgpt2",
-                "studio-direct.chatgpt3": "chatgpt3",
+                "studio-direct.chatgpt2-personal": "chatgpt2-personal",
+                "studio-direct.chatgpt2-business": "chatgpt2-business",
+                "studio-direct.admin-business": "admin-business",
+                "studio-direct.chatgpt3-w570f6f34": "chatgpt3-w570f6f34",
+                "studio-direct.chatgpt3-wa2a9e6f9": "chatgpt3-wa2a9e6f9",
                 "studio-direct.chatgpt4": "chatgpt4",
             },
         )
+        self.assertNotIn("studio-direct.chatgpt2", ops.SERVICE_TO_ACCOUNT)
+        self.assertNotIn("studio-direct.chatgpt3", ops.SERVICE_TO_ACCOUNT)
         self.assertNotIn("studio-direct.all", ops.SERVICE_TO_ACCOUNT)
 
     def test_manifest_identity_is_secret_free_and_changes_on_build_change(self):
@@ -155,6 +168,48 @@ class OpsRestartTests(unittest.TestCase):
         status["gateway"]["pid"] = 33
         two = ops._instance_identity("chatgpt1", status)
         self.assertNotEqual(one, two)
+
+    def test_tunnel_configuration_drift_blocks_semantic_restart(self):
+        manifest = {
+            "version": 2,
+            "account": "chatgpt1",
+            "label": "com.mastermind.studio-direct-private.chatgpt1",
+            "configHash": "a" * 64,
+            "nodeHash": "b" * 64,
+            "backendHash": "c" * 64,
+            "dependencyTreeHash": "d" * 64,
+            "plistHash": "e" * 64,
+            "files": {"gateway.mjs": "f" * 64},
+        }
+        status = {
+            "ready": False,
+            "gateway": {
+                "pid": 11,
+                "runtimeVersion": "0.1.6",
+                "configurationDrift": False,
+            },
+            "tunnel": {
+                "pid": 22,
+                "tunnelId": "tunnel_" + "a" * 32,
+                "configurationDrift": True,
+            },
+        }
+        observed = ops.observe_exact_service(
+            "studio-direct.chatgpt1",
+            status_reader=lambda _: status,
+            manifest_reader=lambda _: manifest,
+        )
+        self.assertEqual(observed.issues, ("CONFIGURATION_DRIFT",))
+        request = RestartRequest(
+            service_ref=observed.service_ref,
+            expected_instance_identity=observed.instance_identity,
+            expected_build_identity=observed.build_identity,
+            reason_code="health_recovery",
+        )
+        refused = ops.preflight_restart(request, observed)
+        self.assertIsNotNone(refused)
+        self.assertEqual(refused.state, RestartState.NOT_APPLIED)
+        self.assertEqual(refused.code, "CONFIGURATION_DRIFT")
 
     def test_success_restarts_once_and_duplicate_old_identity_refuses(self):
         before = self.observation()

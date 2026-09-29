@@ -6,6 +6,7 @@ sealed control Python remains SDK-free. This launcher never opens Runtime.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import copy
 import time
@@ -23,13 +24,32 @@ CONFIG_KEYS = frozenset({
     'port', 'policies', 'audit_root',
 })
 
+_EXECUTIVE_TUNNEL_RESOURCE_RE = re.compile(
+    r'^https://tunnel-service\.gateway\.unified-0\.internal\.api\.openai\.org/'
+    r'v1/mcp/tunnel_[0-9a-f]{32}$'
+)
+
+
+def validate_additional_resources(raw):
+    values = raw.get('executive_additional_resources', [])
+    if (type(values) is not list or len(values) > 16
+            or values != sorted(values) or len(values) != len(set(values))
+            or any(type(value) is not str
+                   or _EXECUTIVE_TUNNEL_RESOURCE_RE.fullmatch(value) is None
+                   for value in values)):
+        raise ValueError('additional Executive OAuth resources are invalid')
+    return tuple(values)
+
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'executive_mcp_profile'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'executive_mcp_profile', 'executive_additional_resources'}):
         raise ValueError('installed MCP configuration fields differ')
+    from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
-    validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
+    profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
+    if profile == PERSONAL_READ_PROFILE and ({'workspace', 'steward'} & set(raw)):
+        raise ValueError('Personal read profile refuses optional mounts')
     if raw['schema'] != CONFIG_SCHEMA:
         raise ValueError('installed MCP schema differs')
     if not isinstance(raw['release_sha'], str) or re.fullmatch('[0-9a-f]{40}', raw['release_sha']) is None:
@@ -42,6 +62,7 @@ def validate_document(raw):
         raise ValueError('MCP requires the canonical CeoIngress socket')
     if raw['audit_root'] != '/var/log/mastermind-executive/mcp-auth':
         raise ValueError('MCP requires its dedicated audit directory')
+    validate_additional_resources(raw)
     validate_optional_mounts(raw)
     return raw
 
@@ -275,11 +296,13 @@ def main(argv=None):
     if source.name != raw['release_sha'] or os.geteuid() != raw['service_uid']:
         raise ValueError('MCP source or process identity differs from its installation')
     from integrations.mastermind_executive_app.app import AppSettings
-    from integrations.mastermind_executive_app.gateway import load_app_policies
+    from integrations.business_mcp_auth.contracts import validate_resource_policy
+    from integrations.mastermind_executive_app.gateway import AppPolicies, load_app_policies
     from integrations.executive_mcp.server import (
-        build_executive_mcp_app, build_web_ceo_v2_mcp_app,
-        build_web_ceo_v3_mcp_app,
+        build_executive_mcp_app, build_personal_read_mcp_app,
+        build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app,
     )
+    from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import (
         WEB_CEO_V3_PROFILE, validate_installed_mcp_profile_current,
@@ -287,18 +310,40 @@ def main(argv=None):
     import uvicorn
 
     policies = load_app_policies(raw['policies'])
+    additional_resources = validate_additional_resources(raw)
+    additional_policies = ()
+    if additional_resources:
+        if policies.read.resource in additional_resources:
+            raise ValueError('primary Executive OAuth resource cannot be duplicated')
+        additional_policies = tuple(
+            AppPolicies(
+                read=validate_resource_policy(
+                    dataclasses.replace(policies.read, resource=resource)
+                ),
+                submit=validate_resource_policy(
+                    dataclasses.replace(policies.submit, resource=resource)
+                ),
+            )
+            for resource in additional_resources
+        )
     settings = AppSettings(
         policies=policies, mastermind_root=source, macro_root_flag=None, environ={},
         ceo_ingress_socket_path=raw['ceo_ingress_socket_path'],
-        read_from_ceo_ingress=True, read_timeout=65.0,
+        read_from_ceo_ingress=True, additional_policies=additional_policies,
+        read_timeout=65.0,
+    )
+    profile = validate_installed_mcp_profile_current(
+        raw.get('executive_mcp_profile', 'legacy')
     )
     sink = PolicyAuditSink(policies, Path(raw['audit_root']), optional=optional_policies(raw))
     try:
-        mounts = build_optional_apps(raw, source, args.config, sink)
-        profile = validate_installed_mcp_profile_current(
-            raw.get('executive_mcp_profile', 'legacy')
+        mounts = (
+            {} if profile == PERSONAL_READ_PROFILE
+            else build_optional_apps(raw, source, args.config, sink)
         )
-        if profile == WEB_CEO_V3_PROFILE:
+        if profile == PERSONAL_READ_PROFILE:
+            app = build_personal_read_mcp_app(settings, audit_sink=sink)
+        elif profile == WEB_CEO_V3_PROFILE:
             from integrations.mosyle_mdm.client import MosyleInventoryClient
             from integrations.mosyle_mdm.credential import FileMosyleCredentialSource
             mdm_reader = MosyleInventoryClient(

@@ -11,7 +11,7 @@ Report schema ``nw_reflection.v1``::
     {schema, asof, generated_at,
      contract_drift: [{code, field, status: dead|partial|ok|unknown, detail, severity}],
      coverage:       {open_theses_n, resolved_recent_n, with_context_row_n, coverage_rate,
-                      context_rows_n, state},
+                      context_rows_n, state, subjects_n, sample_scope, inputs_complete, input_status},
      attribution:    {state: building|scoring, n_resolved, joinable_n, note},
      context_quality:{window_runs, n_present, n_stale, n_absent, seen_rate,
                       current_streak, gap_notes_latest, asof_lag_days_latest},
@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import re
+import math
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,7 @@ _NUDGES_MAX = 10
 # the live rate flapped at exactly 0.5, and a knife-edge nudge is noise, not a signal
 _COVERAGE_NUDGE_FLOOR = 0.5
 _COVERAGE_NUDGE_CLEAR = 0.55
+_COVERAGE_SAMPLE_SCOPE = "open_theses_and_last_200_outcome_rows"
 
 _CODE_RE = re.compile(r"^[a-z0-9_]{1,60}$")
 
@@ -74,24 +76,51 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _read_jsonl(p: Path, limit: int | None = None) -> list[dict]:
-    """Tail-read a JSONL file; [] on any failure. limit = keep last N rows."""
+def _file_version(path: Path) -> tuple | None:
+    """Observation-only change detection; no lock, lease or new writer."""
     try:
-        if not p.exists():
+        info = path.stat()
+    except FileNotFoundError:
+        return None
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _read_jsonl(p: Path, limit: int | None = None, *, read_status: dict | None = None) -> list[dict]:
+    """Existing forgiving reader; optional diagnostics disclose incomplete reads.
+
+    Legacy callers keep the same return shape. A coverage caller requests status so
+    missing files, malformed lines and non-object rows cannot certify completeness.
+    Only fixed codes are returned; never include source text or private subjects.
+    """
+    def status(code: str) -> None:
+        if read_status is not None:
+            read_status["state"] = code
+    try:
+        if not p.is_file():
+            status("MISSING")
             return []
+        before = _file_version(p) if read_status is not None else None
         rows: list[dict] = []
+        malformed = False
         for line in p.read_text().splitlines():
-            line = line.strip()
-            if not line:
+            if not line.strip():
                 continue
             try:
                 row = json.loads(line)
-            except Exception:  # noqa: BLE001
+            except (ValueError, TypeError):
+                malformed = True
                 continue
-            if isinstance(row, dict):
-                rows.append(row)
+            if read_status is not None and not isinstance(row, dict):
+                malformed = True
+                continue
+            rows.append(row)
+        if read_status is not None and before != _file_version(p):
+            status("CHANGED_DURING_READ")
+        else:
+            status("MALFORMED" if malformed else "COMPLETE")
         return rows[-limit:] if limit else rows
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 -- fixed-code degradation, never source prose
+        status("UNREADABLE")
         return []
 
 
@@ -206,46 +235,86 @@ def contract_drift() -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def coverage() -> dict:
-    """Counts-only join: which of our decided subjects have an NW candidate row."""
+    """Counts-only join with an explicit DISTINCT-subject denominator and scope.
+
+    The sample is open theses plus the last 200 parsed outcome rows, not the whole
+    market or a complete historical cohort. Legacy counts/rate remain descriptive;
+    only inputs_complete certifies that the declared inputs were read successfully.
+    A candidate row establishes context availability, not research quality or alpha.
+    """
+    scope = _COVERAGE_SAMPLE_SCOPE
+    statuses = {"context": "UNAVAILABLE", "theses": "UNREADABLE", "outcomes": "UNREADABLE"}
     empty = {"state": "absent", "open_theses_n": 0, "resolved_recent_n": 0,
-             "with_context_row_n": 0, "coverage_rate": None, "context_rows_n": 0}
+             "with_context_row_n": 0, "coverage_rate": None, "context_rows_n": 0,
+             "subjects_n": 0, "sample_scope": scope, "inputs_complete": False,
+             "input_status": statuses}
     try:
         from brain import neural_web_context as nwc
         c = nwc.context()
         cc = c.get("candidate_context") if isinstance(c, dict) else None
-        context_keys = {k.upper() for k in cc} if isinstance(cc, dict) else set()
+        if isinstance(cc, dict):
+            usable = {k: row for k, row in cc.items()
+                      if isinstance(k, str) and k and k == k.strip().upper()
+                      and isinstance(row, dict)}
+            statuses["context"] = "COMPLETE" if len(usable) == len(cc) else "MALFORMED"
+            context_keys = set(usable)  # same exact uppercase keys candidate() actually reads
+        else:
+            statuses["context"] = "UNAVAILABLE" if not c else "MALFORMED"
+            context_keys = set()
 
         subjects: set[str] = set()
         open_n = 0
         try:
             from brain import ledger
-            for t in ledger.all_theses():
-                if t.get("status", "open") == "open":
-                    subj = str(t.get("subject", "")).upper()
-                    if subj:
-                        subjects.add(subj)
-                        open_n += 1
+            ledger_path = getattr(ledger, "_LEDGER", _ROOT / "data/brain/theses.jsonl")
+            statuses["theses"] = "COMPLETE" if ledger_path.is_file() else "MISSING"
+            before = _file_version(ledger_path)
+            rows = ledger.all_theses()
+            changed_during_read = before != _file_version(ledger_path)
+            if not isinstance(rows, list):
+                raise ValueError("malformed_thesis_rows")
+            for t in rows:
+                if not isinstance(t, dict):
+                    statuses["theses"] = "MALFORMED"
+                    continue
+                if t.get("status", "open") != "open":
+                    continue
+                subj = t.get("subject")
+                if not isinstance(subj, str) or not subj.strip():
+                    statuses["theses"] = "MALFORMED"
+                    continue
+                subjects.add(subj.upper())
+                open_n += 1
+            if changed_during_read:
+                statuses["theses"] = "CHANGED_DURING_READ"
+        except (ValueError, TypeError):
+            statuses["theses"] = "MALFORMED"
         except Exception:  # noqa: BLE001
-            pass
+            statuses["theses"] = "UNREADABLE"
 
         resolved_recent = 0
-        for row in _read_jsonl(_ROOT / "data" / "brain" / "outcome_ledger.jsonl", limit=200):
-            subj = str(row.get("subject", "")).upper()
-            if subj:
-                subjects.add(subj)
-                resolved_recent += 1
+        read_status: dict = {}
+        outcome_rows = _read_jsonl(_ROOT / "data/brain/outcome_ledger.jsonl",
+                                  limit=200, read_status=read_status)
+        statuses["outcomes"] = read_status.get("state", "UNREADABLE")
+        for row in outcome_rows:
+            subj = row.get("subject")
+            if not isinstance(subj, str) or not subj.strip():
+                statuses["outcomes"] = "MALFORMED"
+                continue
+            subjects.add(subj.upper())
+            resolved_recent += 1
 
-        if not context_keys and not subjects:
-            return empty
-        with_row = sum(1 for s in subjects if s in context_keys)
-        rate = round(with_row / len(subjects), 3) if subjects else None
+        with_row = sum(1 for subject in subjects if subject in context_keys)
         return {
-            "state": "ok" if context_keys else "context_absent",
-            "open_theses_n": open_n,
-            "resolved_recent_n": resolved_recent,
+            "state": ("ok" if context_keys else "context_absent") if context_keys or subjects else "absent",
+            "open_theses_n": open_n, "resolved_recent_n": resolved_recent,
             "with_context_row_n": with_row,
-            "coverage_rate": rate,
-            "context_rows_n": len(context_keys),
+            "coverage_rate": round(with_row / len(subjects), 3) if subjects else None,
+            "context_rows_n": len(context_keys), "subjects_n": len(subjects),
+            "sample_scope": scope,
+            "inputs_complete": all(state == "COMPLETE" for state in statuses.values()),
+            "input_status": statuses,
         }
     except Exception:  # noqa: BLE001
         return empty
@@ -412,6 +481,79 @@ def _update_nudge_registry(candidates: list[dict], asof: str, ran_kinds: set[str
     return codes
 
 
+def _coverage_nudge_evaluable(cov: dict) -> bool:
+    """Creation and resolution require the same complete owner observation.
+
+    Legacy state describes context availability, not input integrity. Unknown,
+    missing, malformed or concurrently changed inputs can neither raise a ranked
+    coverage request nor resolve/refresh a previously observed coverage request.
+    Descriptive counts remain available; the existing registry is preserved.
+    """
+    if not isinstance(cov, dict) or cov.get("state") != "ok" or cov.get("inputs_complete") is not True:
+        return False
+    statuses = cov.get("input_status")
+    if (not isinstance(statuses, dict) or set(statuses) != {"context", "theses", "outcomes"}
+            or any(value != "COMPLETE" for value in statuses.values())
+            or cov.get("sample_scope") != _COVERAGE_SAMPLE_SCOPE):
+        return False
+    fields = ("subjects_n", "with_context_row_n", "context_rows_n", "open_theses_n", "resolved_recent_n")
+    if any(type(cov.get(key)) is not int or not 0 <= cov[key] <= 10_000_000 for key in fields):
+        return False
+    total, covered, rows, opened, resolved = (cov[key] for key in fields)
+    rate = cov.get("coverage_rate")
+    return (total > 0 and covered <= min(total, rows) and total <= opened + resolved
+            and resolved <= 200 and type(rate) in (int, float) and math.isfinite(rate)
+            and 0 <= rate <= 1 and abs(rate - covered / total) <= 0.000501)
+
+
+def snapshot_available_by_asof(snapshot: dict, asof: date) -> bool:
+    """Owner and creation dates must both precede a requested UTC Agenda day.
+
+    A declared observation date cannot backdate the bytes that carry it. Invalid
+    clocks raise to the existing caller's unavailable/refusal handling. This is a
+    date-granularity cutoff, not proof of a point-in-time historical source store.
+    """
+    generated = datetime.fromisoformat(snapshot["generated_at"].replace("Z", "+00:00"))
+    if generated.tzinfo is None:
+        raise ValueError("owner_generation_timezone_required")
+    return (date.fromisoformat(snapshot["asof"]) <= asof
+            and generated.astimezone(timezone.utc).date() <= asof)
+
+
+def nudge_is_evaluable(report: dict, nudge: dict, *, asof: date | None = None) -> bool:
+    """Revalidate the existing coverage wire at every influence consumer.
+
+    This reads only supplied bytes; it neither refreshes the owner nor edits nudge
+    state. Old/malformed snapshots cannot bypass the producer fix by persisting a
+    coverage nudge. Unrelated nudge families keep their existing eligibility.
+    """
+    if not isinstance(nudge, dict):
+        return False
+    if nudge.get("code") != "coverage_below_half" and nudge.get("kind") != "coverage_gap":
+        return True
+    if not isinstance(report, dict) or report.get("schema") != SCHEMA:
+        return False
+    cov = report.get("coverage")
+    if not _coverage_nudge_evaluable(cov):
+        return False
+    # A persisted nudge cannot outlive its own reason.  The clear threshold is
+    # the widest legitimate hysteresis bound; no registry read/refresh is needed.
+    if cov["coverage_rate"] >= _COVERAGE_NUDGE_CLEAR or cov["open_theses_n"] + cov["resolved_recent_n"] < 5:
+        return False
+    try:
+        from brain.neural_web_context import _STALE_DAYS
+        now = datetime.fromisoformat(_now_iso().replace("Z", "+00:00"))
+        generated = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
+        source_asof = date.fromisoformat(report["asof"])
+        return (now.tzinfo is not None and generated.tzinfo is not None
+                and source_asof <= generated.date() <= now.date() and generated <= now
+                and (now - generated).total_seconds() <= _STALE_DAYS * 86400
+                and (now.date() - source_asof).days <= _STALE_DAYS
+                and (asof is None or snapshot_available_by_asof(report, asof)))
+    except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
+        return False
+
+
 def _nudge_candidates(drift: list[dict], cov: dict, quality: dict) -> list[dict]:
     """The FULL pre-cap candidate list {code, kind, severity, detail} — the registry update and
     the resolution judgement both run against this set, never the capped emission."""
@@ -430,7 +572,7 @@ def _nudge_candidates(drift: list[dict], cov: dict, quality: dict) -> list[dict]
     # only honest when the context was actually PRESENT — a stale/absent artifact is a
     # staleness story, not a coverage ask (review finding, 2026-07-13).
     rate = cov.get("coverage_rate")
-    if (cov.get("state") == "ok" and isinstance(rate, (int, float))
+    if (_coverage_nudge_evaluable(cov) and isinstance(rate, (int, float))
             and cov.get("open_theses_n", 0) + cov.get("resolved_recent_n", 0) >= 5):
         # hysteresis: an already-open nudge keeps firing until the rate CLEARS the band —
         # the live rate sat at exactly 0.5 and flapped the nudge on alternating builds
@@ -468,7 +610,7 @@ def _derive_nudges_state(drift: list[dict], cov: dict, quality: dict, asof: str,
     ran_kinds: set[str] = set()
     if drift_ran:
         ran_kinds.add("contract_drift")
-    if cov.get("state") == "ok":
+    if _coverage_nudge_evaluable(cov):
         ran_kinds.add("coverage_gap")
     if quality.get("state") == "ok":
         ran_kinds.add("staleness")
