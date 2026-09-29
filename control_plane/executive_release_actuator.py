@@ -491,7 +491,9 @@ class _ExecutiveReleaseActuatorJournal:
         except OSError:
             _fail("ROOT_FSYNC")
 
-    def _open_lock(self, root_descriptor: int, lock_name: str) -> int:
+    def _open_lock(
+        self, root_descriptor: int, lock_name: str
+    ) -> tuple[int, tuple[Any, ...]]:
         created = False
         try:
             descriptor = os.open(
@@ -525,10 +527,33 @@ class _ExecutiveReleaseActuatorJournal:
                 mode=_FILE_MODE,
                 code="LOCK_METADATA",
             )
-            return descriptor
+            if info.st_size != 0:
+                _fail("LOCK_METADATA")
+            return descriptor, _file_identity(info)
         except BaseException:
             os.close(descriptor)
             raise
+
+    @staticmethod
+    def _assert_file_path(
+        root_descriptor: int,
+        name: str,
+        descriptor: int,
+        expected_identity: tuple[Any, ...],
+        code: str,
+    ) -> None:
+        try:
+            path_info = os.stat(
+                name, dir_fd=root_descriptor, follow_symlinks=False
+            )
+            descriptor_info = os.fstat(descriptor)
+        except OSError:
+            _fail(code)
+        if (
+            _file_identity(path_info) != expected_identity
+            or _file_identity(descriptor_info) != expected_identity
+        ):
+            _fail(code)
 
     def _acquire_flock(self, descriptor: int, deadline: float) -> None:
         while True:
@@ -558,10 +583,26 @@ class _ExecutiveReleaseActuatorJournal:
         try:
             root_descriptor, root_identity = self._open_root(create=create_root)
             lock_name = name[:-5] + ".lock"
-            lock_descriptor = self._open_lock(root_descriptor, lock_name)
+            lock_descriptor, lock_identity = self._open_lock(
+                root_descriptor, lock_name
+            )
             self._acquire_flock(lock_descriptor, deadline)
             self._assert_root_path(root_descriptor, root_identity)
+            self._assert_file_path(
+                root_descriptor,
+                lock_name,
+                lock_descriptor,
+                lock_identity,
+                "LOCK_REPLACED",
+            )
             result = operation(root_descriptor, name)
+            self._assert_file_path(
+                root_descriptor,
+                lock_name,
+                lock_descriptor,
+                lock_identity,
+                "LOCK_REPLACED",
+            )
             self._assert_root_path(root_descriptor, root_identity)
             return result
         finally:
@@ -846,10 +887,23 @@ class _ExecutiveReleaseActuatorJournal:
         temporary_name = name[:-5] + ".tmp"
         self._write_new(root_descriptor, temporary_name, replacement)
         try:
+            temporary_raw, temporary_identity = self._read_file(
+                root_descriptor, temporary_name, required=True
+            )
+            if temporary_raw != replacement:
+                _fail("RECORD_REPLACED")
             observed_raw, observed_identity = self._read_file(
                 root_descriptor, name, required=True
             )
             if observed_raw != current_raw or observed_identity != current_identity:
+                _fail("RECORD_REPLACED")
+            temporary_again, temporary_identity_again = self._read_file(
+                root_descriptor, temporary_name, required=True
+            )
+            if (
+                temporary_again != replacement
+                or temporary_identity_again != temporary_identity
+            ):
                 _fail("RECORD_REPLACED")
             try:
                 os.replace(

@@ -482,6 +482,26 @@ def test_root_path_replacement_during_read_refuses(tmp_path, monkeypatch):
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         journal.read(OPERATION_KEY)
     assert caught.value.code == "ROOT_REPLACED"
+
+
+def test_lock_path_replacement_while_held_refuses(tmp_path, monkeypatch):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    _start(journal)
+    original_read = journal._read_file
+    lock_path = _record_path(root).with_suffix(".lock")
+
+    def replace_lock_after_read(*args, **kwargs):
+        result = original_read(*args, **kwargs)
+        lock_path.unlink()
+        lock_path.write_bytes(b"")
+        os.chmod(lock_path, 0o600)
+        return result
+
+    monkeypatch.setattr(journal, "_read_file", replace_lock_after_read)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.read(OPERATION_KEY)
+    assert caught.value.code == "LOCK_REPLACED"
     os.chmod(root, 0o700)
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         _journal(root, expected_uid=os.geteuid() + 1).read(OPERATION_KEY)
@@ -506,6 +526,40 @@ def test_atomic_replace_failure_preserves_prior_record_and_cleans_temp(
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLISHED")
     assert caught.value.code == "RECORD_REPLACE"
+    assert journal.read(OPERATION_KEY) == original
+    assert not list(root.glob("*.tmp"))
+
+
+def test_temporary_path_replacement_before_publish_refuses(tmp_path, monkeypatch):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    original = _start(journal)
+    original_read = journal._read_file
+    replaced = False
+
+    def replace_temporary_after_first_read(root_descriptor, name, *, required):
+        nonlocal replaced
+        result = original_read(root_descriptor, name, required=required)
+        if name.endswith(".tmp") and not replaced:
+            replaced = True
+            os.unlink(name, dir_fd=root_descriptor)
+            descriptor = os.open(
+                name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            try:
+                os.write(descriptor, result[0])
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        return result
+
+    monkeypatch.setattr(journal, "_read_file", replace_temporary_after_first_read)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLISHED")
+    assert caught.value.code == "RECORD_REPLACED"
     assert journal.read(OPERATION_KEY) == original
     assert not list(root.glob("*.tmp"))
 
