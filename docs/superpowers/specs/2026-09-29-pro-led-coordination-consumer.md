@@ -244,3 +244,101 @@ real provider is launched and no production Runtime is mutated.
 Negative cases use separate read bindings. A binding invalidated by a failed selection
 is not reset or weakened to keep a test running. The same production guard that closes
 an invalid reader remains unchanged.
+
+
+## Host supervisor composition — direct implementation follow-through
+
+The optional `control_plane/chairman_coordination_host.py` now connects the previous
+consumers to an actual ExecutiveSupervisor prompt/launch/completion path. The host
+selects one already-admitted coordination work Job. It does not register a new
+service, model role, queue, scheduler, operation identity or source authority.
+
+`CoordinationWorkSupervisor` subclasses the existing supervisor and overrides only
+its prompt hook. Original start, finish, heartbeat, validation, recovery, assignment
+sealing and command-replay methods remain inherited unchanged. All other Jobs retain
+their ordinary prompt. An exact selected Job with missing/unusable sources refuses
+before the adapter starts instead of silently falling back to generic work.
+
+The constructor requires the existing exact-target provider. A missing or foreign
+selected target refuses before claiming work; ordinary capacity selection is not a
+fallback for a task whose exact counterpart is required. The target is validated by
+the existing Runtime owner and is never reissued or fabricated by this composition.
+That same owner still performs its dispatch-time source/freshness/permission checks.
+
+### Trusted source inputs
+
+`CoordinationWorkSources` is a transient dataclass containing the already-owned
+policy document, scoped context, compiled Agent OS bundle, bundle source reference,
+artifact path and a current-source revalidator. It is neither a persistent memory
+record nor an authentication token. The installed host must acquire these inputs
+under its existing authorization, and must select the Job under the actual accepted
+coordination assignment—not take these values from arbitrary caller text.
+
+The revalidator follows the existing void-or-raise pattern: it returns exactly None
+on a valid observation or raises. Booleans, strings and other nominal success tokens
+are not accepted. Inputs are copied per call to prevent accidental mutation through
+a shared provider cache. Snapshot copying is not authentication or ongoing freshness.
+
+The original worker prompt/grant/result contract is preserved as the prefix. The
+source-bound coordination task is appended only after current root, Attempt, effective
+grant and source validation. The original supervisor persists the complete composed
+prompt in its existing private recovery artifact; no second prompt store is created.
+A task snapshot does not replace the effect owner's final dispatch fence.
+
+### One bounded host step
+
+`await supervisor.run_coordination_once(command_id=existing_command,
+artifact_reader=existing_authorized_reader)` calls the inherited finite
+`run_cycle_once` once, then collects a decision proposal. It returns the original
+SupervisorReceipt or OrchestrationDispatchOutcome alongside a derived review or None.
+No additional lifecycle/status model is introduced.
+
+- An active duplicate returns the original active outcome with no second model run,
+  source reasoning pass or result read.
+- Completed replay reads the same accepted work result and artifact; it never
+  re-plans, starts another worker, changes the command or creates another Attempt.
+- Failed/cancelled/non-completed execution remains the original execution outcome,
+  not a reviewed decision or a falsely accepted project.
+- Source or artifact unavailability after work completion does not rewrite the
+  canonical result as failed or restart the worker. Explicit same-command recovery
+  can later read the original result once the owner dependency actually changes.
+- A new Chairman intent observed after native completion holds the old candidate;
+  it does not silently rewrite the proposal or execute its next step.
+
+The helper invokes existing runtime effects only when explicitly called with an
+already-admitted Job, command and current target/permission. Import and construction
+start nothing. There is no automatic loop, background inference or polling.
+
+### Complete return and artifact acquisition
+
+`consume_coordination_completion` also supports a caller that already obtained an
+ordinary SupervisorReceipt. Before asking for any artifact, it reads and validates
+that exact canonical completed work result through the existing bounded Runtime and
+Fabric owners. Only its declared single exact path/hash is sent to the installed
+artifact reader, together with canonical Job/Attempt objects and a fixed byte ceiling.
+The physical Runtime observation is closed before the artifact reader is invoked.
+
+After acquisition, a second bounded observation revalidates the same result selector
+and complete bytes through the previous work-return consumer. Namespace loss, target
+change or source invalidation refuses without fallback/reacquisition loops. Neither
+observation claims a write exclusion beyond its sampling interval. The installed
+artifact reader remains responsible for safe physical read authorization and file
+identity: this module intentionally does not open paths, URLs or arbitrary files.
+
+The proposed next_step is not executed. Runtime work completion is not project
+acceptance. Review output continues to require semantic judgment and current owner
+admission; source hashes and test fixtures do not establish actual model intelligence.
+
+### Qualification boundary
+
+The new tests exercise the real supervisor and temporary canonical Runtime through
+claim, launch, private recovery-prompt persistence, collection, assignment sealing,
+completion, bounded artifact acquisition and decision review. The provider adapter
+and model decision are explicitly fake. They do not start Claude, Codex, a Web Pro
+turn or a production process. Fixture artifact readers are not installation recipes.
+
+Required before live activation: accepted source/review/release, the actual host's
+source and artifact acquisition bindings, an eligible current native profile and
+permission envelope, one benign admitted model work task, and meaningful parent
+consumption. The source does not substitute Extra High/native work for required Web
+Pro reasoning or establish automatic control of an existing ChatGPT conversation.
