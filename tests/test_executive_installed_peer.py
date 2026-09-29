@@ -746,3 +746,180 @@ def test_borrowed_main_url_survives_failures_and_information_releases_once(
         assert main_ref not in security.releases
     for constant in _CONSTANTS:
         assert constant not in security.releases
+
+
+# Launchd's nested diagnostic PID is deliberately different from its service
+# PID. These tests establish parsing and bounded IO, not installed authority.
+def _launchd_fixture(role='control'):
+    label, user = ('com.mastermind.executive.control', '_mastermind_exec') if role == 'control' else ('com.mastermind.executive.mcp', '_mastermind_executive_mcp')
+    return (f'system/{label} = {{\n'
+            f'\tpath = /Library/LaunchDaemons/{label}.plist\n'
+            '\ttype = LaunchDaemon\n\tstate = running\n'
+            '\tprogram = /test/python\n\targuments = {\n'
+            '\t\t/test/python\n\t\t-I\n\t}\n'
+            '\tworking directory = /test/release\n'
+            f'\tusername = {user}\n\tgroup = {user}\n'
+            '\tdomain = system\n\tpid = 41\n'
+            '\tdiagnostics = {\n\t\tpid = 9999\n'
+            '\t\tinner = {\n\t\t\tpath = /spoof\n\t\t}\n\t}\n'
+            '\tproperties = keepalive | runatload\n}\n').encode()
+
+
+@pytest.mark.parametrize('role', ['control', 'gateway'])
+def test_launchd_observer_parses_root_identity_not_nested_diagnostics(role):
+    o = installed._parse_launchctl_service(_launchd_fixture(role), role=role)
+    assert o.pid == 41
+    assert o.argv == ('/test/python', '-I')
+    assert o.plist_path.endswith(o.service_label + '.plist')
+    assert o.working_directory == '/test/release'
+    with pytest.raises(Exception):
+        o.pid = 9999
+
+
+@pytest.mark.parametrize('old,new', [
+    (b'\tpid = 41\n', b''),
+    (b'\tpid = 41\n', b'\tpid = 41\n\tpid = 9999\n'),
+    (b'\tpid = 41\n', b'\tpid = 041\n'),
+    (b'\tpid = 41\n', b'\tpid = 0\n'),
+    (b'\tpid = 41\n', b'\tpid = -1\n'),
+    (b'\tpid = 41\n', b'\tpid = 2147483648\n'),
+    (b'\ttype = LaunchDaemon', b'\ttype = LaunchAgent'),
+    (b'\tstate = running', b'\tstate = waiting'),
+    (b'\tdomain = system', b'\tdomain = user'),
+    (b'\tusername = _mastermind_exec', b'\tusername = attacker'),
+    (b'\tgroup = _mastermind_exec', b'\tgroup = attacker'),
+    (b'\tpath = /Library/LaunchDaemons/', b'\tpath = /tmp/'),
+    (b'\tprogram = /test/python', b'\tprogram = /test/other'),
+    (b'\targuments = {', b'\targuments = {\n\t\tinner = {'),
+    (b'\t\t-I\n', b'\t\t -I\n'),
+    (b'\t\t-I\n', b'\t\t-I \n'),
+    (b'\t\t-I\n', b'\t\t-I\x00\n'),
+    (b'\t\t-I\n', b'\t\t-I\x7f\n'),
+    (b'\t\t-I\n', b'\t\t-I\r\n'),
+    (b'\t\t-I\n', b'\t\t-I\n' * 64),
+    (b'\t\t-I\n', b'\t\t' + b'a'*4096 + b'\n'),
+    (b'\t\t}\n', b'\t}\n'),
+    (b'\t\tinner = {', b'\t\tinner = {\n' + b'\t'*9 + b'x = y'),
+    (b'\tproperties = keepalive | runatload', b'\tproperties = x\n\tproperties = y'),
+    (b'\tproperties = keepalive | runatload', b'\targuments = {\n\t\t/test/python\n\t}'),
+    (b'system/com.mastermind.executive.control = {', b'user/com.mastermind.executive.control = {'),
+])
+def test_launchd_parser_rejects_ambiguous_or_spoofed_service_identity(old, new):
+    raw = _launchd_fixture().replace(old, new)
+    with pytest.raises(peer.PeerIdentityError):
+        installed._parse_launchctl_service(raw, role='control')
+
+
+@pytest.mark.parametrize('raw', [None, {}, '', b'', b'x'*65537, b'\xff', _launchd_fixture()+b'extra\n', _launchd_fixture()+b'\n', _launchd_fixture()[:-2]])
+def test_launchd_parser_closed_input_bounds(raw):
+    with pytest.raises(peer.PeerIdentityError):
+        installed._parse_launchctl_service(raw, role='control')
+
+
+@pytest.mark.parametrize('role', [None, {}, [], True, 'CONTROL', 'root', 'gateway '])
+def test_launchd_parser_closed_roles(role):
+    with pytest.raises(peer.PeerIdentityError):
+        installed._parse_launchctl_service(_launchd_fixture(), role=role)
+
+
+def test_launchd_parse_line_count_and_depth_limits():
+    raw = _launchd_fixture().replace(b'\tproperties', b'\n'*1025 + b'\tproperties')
+    with pytest.raises(peer.PeerIdentityError):
+        installed._parse_launchctl_service(raw, role='control')
+
+
+def test_launchd_observation_checks_kernel_profile_every_time(monkeypatch):
+    calls = []
+    def run(argv, *, max_bytes):
+        calls.append((argv, max_bytes))
+        return b'25.5.0\n' if argv == installed._SYSCTL_OSRELEASE_ARGV else _launchd_fixture()
+    monkeypatch.setattr(installed, '_run_bounded', run)
+    assert installed._observe_launchd_service('control').pid == 41
+    assert installed._observe_launchd_service('control').pid == 41
+    assert [c[0] for c in calls] == [installed._SYSCTL_OSRELEASE_ARGV, installed._LAUNCHD_ROLES['control'].launchctl_argv] * 2
+
+
+@pytest.mark.parametrize('version', [b'25.6.0\n', b'26.0.0\n', b'25.5.0\nextra', b' 25.5.0\n', b'25.5.0\r\n', b'25.5.0\x00'])
+def test_launchd_unqualified_kernel_never_reads_service(monkeypatch, version):
+    calls = []
+    def run(argv, *, max_bytes):
+        calls.append(argv)
+        return version
+    monkeypatch.setattr(installed, '_run_bounded', run)
+    with pytest.raises(peer.PeerIdentityError):
+        installed._observe_launchd_service('control')
+    assert calls == [installed._SYSCTL_OSRELEASE_ARGV]
+
+
+@pytest.mark.parametrize('value', [b'00000000-0000-0000-0000-000000000000\n', b'garbage', b'01234567-89ab-cdef-0123-456789abcdef\nextra', b' 01234567-89ab-cdef-0123-456789abcdef\n', b'0'*129, None])
+def test_boot_observer_refuses_missing_malformed_or_nil_identity(monkeypatch, value):
+    monkeypatch.setattr(installed, '_run_bounded', lambda *a, **k: value)
+    with pytest.raises(peer.PeerIdentityError):
+        installed._observe_real_boot_id()
+
+
+def test_boot_observer_uses_actual_sysctl_and_normalizes_uppercase(monkeypatch):
+    calls = []
+    def run(argv, **kw):
+        calls.append((argv, kw))
+        return b'01234567-89AB-CDEF-0123-456789ABCDEF\n'
+    monkeypatch.setattr(installed, '_run_bounded', run)
+    assert installed._observe_real_boot_id() == '01234567-89ab-cdef-0123-456789abcdef'
+    assert calls == [(installed._SYSCTL_BOOT_ID_ARGV, {'max_bytes':128})]
+
+
+@pytest.mark.parametrize('argv,limit', [(('/bin/sh','-c','id'), 128), ([],128), (installed._SYSCTL_BOOT_ID_ARGV,True), (installed._SYSCTL_BOOT_ID_ARGV,0), (installed._SYSCTL_BOOT_ID_ARGV,65537)])
+def test_bounded_observer_has_no_generic_command_escape(monkeypatch, argv, limit):
+    monkeypatch.setattr(installed.subprocess, 'Popen', lambda *a, **k: pytest.fail('must not launch'))
+    with pytest.raises(peer.PeerIdentityError):
+        installed._run_bounded(argv, max_bytes=limit)
+
+
+def _observer_test_child(monkeypatch, code):
+    # Spawn only an isolated test child. The production fixed command tuple is
+    # inspected before substitution; this is no real launchd qualification.
+    import subprocess as sp
+    import sys as system
+    original = sp.Popen
+    children = []
+    executable = system.executable
+    def launch(argv, **kw):
+        assert tuple(argv) == installed._SYSCTL_BOOT_ID_ARGV
+        assert kw['stdin'] is sp.DEVNULL and kw['stderr'] is sp.DEVNULL
+        assert kw['cwd'] == '/' and kw['env'] == installed._LAUNCHD_ENVIRONMENT
+        child = original([executable, '-I', '-S', '-B', '-c', code], **kw)
+        children.append(child)
+        return child
+    monkeypatch.setattr(installed.sys, 'platform', 'darwin')
+    monkeypatch.setattr(installed.subprocess, 'Popen', launch)
+    return children
+
+
+@pytest.mark.parametrize('code,expected', [
+    ('import os;os.write(1,b"ok\\n")', b'ok\n'),
+    ('import sys;sys.exit(2)', None),
+    ('import os;os.write(1,b"a"*1000000)', None),
+    ('import time;time.sleep(5)', None),
+])
+def test_bounded_observer_reaps_real_owned_test_children(monkeypatch, code, expected):
+    children = _observer_test_child(monkeypatch, code)
+    monkeypatch.setattr(installed, '_LAUNCHD_TIMEOUT_SECONDS', 0.3)
+    if expected is None:
+        with pytest.raises(peer.PeerIdentityError):
+            installed._run_bounded(installed._SYSCTL_BOOT_ID_ARGV, max_bytes=128)
+    else:
+        assert installed._run_bounded(installed._SYSCTL_BOOT_ID_ARGV, max_bytes=128) == expected
+    assert len(children) == 1 and children[0].poll() is not None
+    assert children[0].stdout.closed
+
+
+def test_child_cleanup_failure_never_returns_positive_observation(monkeypatch):
+    children = _observer_test_child(monkeypatch, 'import os;os.write(1,b"ok\\n")')
+    real_cleanup = installed._discard_bounded_child
+    def report_unproven(child):
+        real_cleanup(child)
+        return False
+    monkeypatch.setattr(installed, '_discard_bounded_child', report_unproven)
+    with pytest.raises(peer.PeerIdentityError, match='SERVICE_LAUNCHCTL_CLEANUP_UNPROVEN'):
+        installed._run_bounded(installed._SYSCTL_BOOT_ID_ARGV, max_bytes=128)
+    assert children[0].poll() is not None

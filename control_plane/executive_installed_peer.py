@@ -12,7 +12,12 @@ import ctypes
 from dataclasses import dataclass
 from functools import lru_cache
 import hashlib
+import os
+import re
+import selectors
+import subprocess
 import sys
+import time
 
 from control_plane.executive_peer_identity import PeerIdentityError
 
@@ -455,3 +460,479 @@ def _observe_with_api(
         dynamic_code_status=0,
         executable_path=actual_path,
     )
+
+
+# ---------------------------------------------------------------------------
+# Appended private launchd observation slice.
+#
+# Everything above this marker is the frozen R5 dynamic-code primitive and is
+# byte-for-byte unchanged. The helpers below are internal building blocks for a
+# later complete installed-service factory: they observe launchd's own account
+# of one closed system service and the real kernel boot-session UUID. They do
+# not qualify an installation, pin release files, bind an owner, or arm the
+# public gateway.
+# ---------------------------------------------------------------------------
+
+_LAUNCHD_MAX_BYTES = 65536
+_LAUNCHD_MAX_LINES = 1024
+_LAUNCHD_MAX_LINE_BYTES = 4096
+_LAUNCHD_MAX_DEPTH = 8
+_LAUNCHD_MAX_ARGV = 64
+_LAUNCHD_MAX_COMMAND_BYTES = 65536
+_LAUNCHD_MAX_KERNEL_BYTES = 128
+_LAUNCHD_MAX_BOOT_ID_BYTES = 128
+_LAUNCHD_TIMEOUT_SECONDS = 3.0
+_LAUNCHD_POLL_SECONDS = 0.05
+_LAUNCHD_READ_CHUNK_BYTES = 4096
+_LAUNCHD_REAP_GRACE_SECONDS = 0.5
+_LAUNCHD_REQUIRED_TOTAL = 12
+
+_LAUNCHD_ENVIRONMENT = {
+    "LANG": "C",
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+}
+
+_LAUNCHD_KEY_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ()_.\-/]{0,63}")
+_LAUNCHD_PID_PATTERN = re.compile(r"[1-9][0-9]{0,9}")
+_LAUNCHD_KERNEL_PATTERN = re.compile(r"25\.5(?:\.[0-9]{1,4}){0,3}")
+_LAUNCHD_UUID_PATTERN = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+
+_SYSCTL_OSRELEASE_ARGV = ("/usr/sbin/sysctl", "-n", "kern.osrelease")
+_SYSCTL_BOOT_ID_ARGV = ("/usr/sbin/sysctl", "-n", "kern.bootsessionuuid")
+
+
+@dataclass(frozen=True, slots=True)
+class _LaunchdRoleSpec:
+    """Closed nonsecret launchd profile for exactly one qualified role."""
+
+    label: str
+    root: str
+    plist_path: str
+    username: str
+    group: str
+    launchctl_argv: tuple
+
+
+@dataclass(frozen=True, slots=True)
+class _LaunchdObservation:
+    """Immutable direct-root launchd facts. Not authority and not a public view."""
+
+    service_label: str
+    plist_path: str
+    state: str
+    program: str
+    argv: tuple
+    working_directory: str
+    username: str
+    group: str
+    pid: int
+
+
+_LAUNCHD_ROLES = {
+    "control": _LaunchdRoleSpec(
+        label="com.mastermind.executive.control",
+        root="system/com.mastermind.executive.control",
+        plist_path=(
+            "/Library/LaunchDaemons/com.mastermind.executive.control.plist"
+        ),
+        username="_mastermind_exec",
+        group="_mastermind_exec",
+        launchctl_argv=(
+            "/bin/launchctl",
+            "print",
+            "system/com.mastermind.executive.control",
+        ),
+    ),
+    "gateway": _LaunchdRoleSpec(
+        label="com.mastermind.executive.mcp",
+        root="system/com.mastermind.executive.mcp",
+        plist_path="/Library/LaunchDaemons/com.mastermind.executive.mcp.plist",
+        username="_mastermind_executive_mcp",
+        group="_mastermind_executive_mcp",
+        launchctl_argv=(
+            "/bin/launchctl",
+            "print",
+            "system/com.mastermind.executive.mcp",
+        ),
+    ),
+}
+
+_BOUNDED_COMMANDS = (
+    _LAUNCHD_ROLES["control"].launchctl_argv,
+    _LAUNCHD_ROLES["gateway"].launchctl_argv,
+    _SYSCTL_OSRELEASE_ARGV,
+    _SYSCTL_BOOT_ID_ARGV,
+)
+
+_LAUNCHD_REQUIRED_VALUE_KEYS = frozenset(
+    {
+        "domain",
+        "group",
+        "path",
+        "pid",
+        "program",
+        "state",
+        "type",
+        "username",
+        "working directory",
+    }
+)
+
+
+def _launchd_refusal(code: str) -> PeerIdentityError:
+    """Build a bounded failure. Only a closed code is ever carried outward."""
+    return PeerIdentityError(code)
+
+
+def _launchd_role_spec(role: object) -> _LaunchdRoleSpec:
+    spec = _LAUNCHD_ROLES.get(role) if type(role) is str else None
+    if spec is None:
+        raise _launchd_refusal("SERVICE_LAUNCHD_ROLE_INVALID")
+    return spec
+
+
+def _launchd_is_safe_text(value: object) -> bool:
+    """True for one bounded printable-ASCII line body without control bytes."""
+    return (
+        type(value) is str
+        and 1 <= len(value) <= _LAUNCHD_MAX_LINE_BYTES
+        and value.isascii()
+        and not any(ord(char) < 32 or ord(char) > 126 for char in value)
+    )
+
+
+def _launchd_lines(raw: object) -> list:
+    """Split untrusted launchd text into bounded, type-checked logical lines."""
+    if type(raw) is not bytes or not raw or len(raw) > _LAUNCHD_MAX_BYTES:
+        raise _launchd_refusal("SERVICE_LAUNCHD_RAW_INVALID")
+    if b"\r" in raw or not raw.isascii():
+        raise _launchd_refusal("SERVICE_LAUNCHD_RAW_INVALID")
+    text = raw.decode("ascii")
+    if text.endswith("\n"):
+        text = text[:-1]
+    if not text or text.endswith("\n"):
+        raise _launchd_refusal("SERVICE_LAUNCHD_RAW_INVALID")
+    lines = text.split("\n")
+    if len(lines) > _LAUNCHD_MAX_LINES:
+        raise _launchd_refusal("SERVICE_LAUNCHD_LINE_LIMIT")
+    for line in lines:
+        if len(line) > _LAUNCHD_MAX_LINE_BYTES:
+            raise _launchd_refusal("SERVICE_LAUNCHD_LINE_TOO_LARGE")
+    return lines
+
+
+def _launchd_indent(line: str) -> tuple:
+    depth = len(line) - len(line.lstrip("\t"))
+    return depth, line[depth:]
+
+
+def _parse_launchctl_service(raw: bytes, *, role: str) -> _LaunchdObservation:
+    """Extract only stable direct-root facts from one launchd service print.
+
+    raw is untrusted launchd text. Structure is authoritative: the root header,
+    brace balance, one-tab-per-level indentation, and every required direct-root
+    field must match the closed profile for role. Volatile direct-root fields
+    and nested diagnostic blocks are ignored, and a nested pid, path, type, or
+    state can never satisfy a missing root field.
+    """
+    spec = _launchd_role_spec(role)
+    lines = _launchd_lines(raw)
+    fields: dict = {}
+    seen: dict = {}
+    argv: list = []
+    arguments_closed = False
+    stack: list = []
+    root_closed = False
+
+    for index, line in enumerate(lines):
+        depth, body = _launchd_indent(line)
+        if depth > _LAUNCHD_MAX_DEPTH:
+            raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+        if body == "":
+            if not stack or root_closed:
+                raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+            continue
+        if body[:1] == " " or not _launchd_is_safe_text(body):
+            raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+        if index == 0:
+            if depth != 0 or body != spec.root + " = {":
+                raise _launchd_refusal("SERVICE_LAUNCHD_LABEL_MISMATCH")
+            stack.append((0, False))
+            seen[spec.root] = "block"
+            continue
+        if root_closed:
+            raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_TRAILER")
+        if body == "}":
+            if not stack or depth != stack[-1][0]:
+                raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+            _, is_arguments = stack.pop()
+            if is_arguments:
+                if not argv:
+                    raise _launchd_refusal("SERVICE_LAUNCHD_ARGV_MISSING")
+                arguments_closed = True
+            if not stack:
+                root_closed = True
+            continue
+        if not stack or depth != stack[-1][0] + 1:
+            raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+        if stack[-1][1]:
+            if (
+                body.endswith(" = {")
+                or body == "{"
+                or " = " in body
+                or " => " in body
+                or body != body.strip(" ")
+            ):
+                raise _launchd_refusal("SERVICE_LAUNCHD_ARGUMENT_MALFORMED")
+            if len(argv) >= _LAUNCHD_MAX_ARGV:
+                raise _launchd_refusal("SERVICE_LAUNCHD_ARGV_TOO_LARGE")
+            argv.append(body)
+            continue
+        opener = body.endswith(" = {")
+        if depth != 1:
+            # Nested diagnostic blocks still participate in brace/depth
+            # validation. None of their values can populate root identity.
+            if opener:
+                if depth >= _LAUNCHD_MAX_DEPTH:
+                    raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+                stack.append((depth, False))
+            elif "{" in body or "}" in body:
+                raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+            continue
+        key = body[:-4] if opener else body.partition(" = ")[0]
+        if not _LAUNCHD_KEY_PATTERN.fullmatch(key):
+            raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+        if key in seen:
+            raise _launchd_refusal("SERVICE_LAUNCHD_DUPLICATE_FIELD")
+        if opener:
+            seen[key] = "block"
+            stack.append((depth, key == "arguments"))
+            continue
+        _, separator, value = body.partition(" = ")
+        if not separator or not _launchd_is_safe_text(value) or value != value.strip(
+            " "
+        ):
+            raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+        seen[key] = "value"
+        fields[key] = value
+
+    if stack or not root_closed:
+        raise _launchd_refusal("SERVICE_LAUNCHD_OUTPUT_MALFORMED")
+    if not arguments_closed or len(argv) < 1:
+        raise _launchd_refusal("SERVICE_LAUNCHD_FIELD_MISSING")
+    if not _LAUNCHD_REQUIRED_VALUE_KEYS <= set(fields):
+        raise _launchd_refusal("SERVICE_LAUNCHD_FIELD_MISSING")
+    if fields["path"] != spec.plist_path:
+        raise _launchd_refusal("SERVICE_LAUNCHD_PLIST_MISMATCH")
+    if fields["type"] != "LaunchDaemon":
+        raise _launchd_refusal("SERVICE_LAUNCHD_TYPE_UNQUALIFIED")
+    if fields["state"] != "running":
+        raise _launchd_refusal("SERVICE_LAUNCHD_STATE_UNQUALIFIED")
+    if fields["domain"] != "system":
+        raise _launchd_refusal("SERVICE_LAUNCHD_DOMAIN_UNQUALIFIED")
+    if fields["username"] != spec.username or fields["group"] != spec.group:
+        raise _launchd_refusal("SERVICE_LAUNCHD_IDENTITY_MISMATCH")
+    pid_text = fields["pid"]
+    if not _LAUNCHD_PID_PATTERN.fullmatch(pid_text) or int(pid_text) > 2147483647:
+        raise _launchd_refusal("SERVICE_LAUNCHD_PID_MALFORMED")
+    program = fields["program"]
+    if program != argv[0]:
+        raise _launchd_refusal("SERVICE_LAUNCHD_PROGRAM_MISMATCH")
+    return _LaunchdObservation(
+        service_label=spec.label,
+        plist_path=fields["path"],
+        state=fields["state"],
+        program=program,
+        argv=tuple(argv),
+        working_directory=fields["working directory"],
+        username=fields["username"],
+        group=fields["group"],
+        pid=int(pid_text),
+    )
+
+
+def _reap_bounded_exit_code(process, deadline: float):
+    """Return a finished child's exit status, or None once the deadline passed."""
+    while True:
+        try:
+            code = process.poll()
+        except Exception:
+            raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_FAILED") from None
+        if type(code) is int:
+            return code
+        if time.monotonic() >= deadline:
+            return None
+        try:
+            time.sleep(_LAUNCHD_POLL_SECONDS)
+        except Exception:
+            raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_FAILED") from None
+
+
+def _discard_bounded_child(process) -> bool:
+    """Kill, reap, and release every descriptor of an owned bounded child."""
+    try:
+        if process.poll() is None:
+            process.kill()
+    except Exception:
+        pass
+    stream = getattr(process, "stdout", None)
+    if stream is not None:
+        try:
+            stream.close()
+        except Exception:
+            pass
+    try:
+        process.wait(timeout=_LAUNCHD_REAP_GRACE_SECONDS)
+    except Exception:
+        return False
+    return True
+
+
+def _run_bounded(argv: object, *, max_bytes: object) -> bytes:
+    """Run one fixed internal argv with bounded reads and a monotonic deadline.
+
+    Only the closed absolute-path command tuples below are ever executable: no
+    caller path, no shell, no inherited environment, no unbounded capture. The
+    child is killed, reaped, and its descriptors closed on every outcome.
+    """
+    if type(argv) is not tuple or argv not in _BOUNDED_COMMANDS:
+        raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_NOT_ALLOWED")
+    if (
+        type(max_bytes) is not int
+        or max_bytes < 1
+        or max_bytes > _LAUNCHD_MAX_COMMAND_BYTES
+    ):
+        raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_NOT_ALLOWED")
+    if sys.platform != "darwin":
+        raise _launchd_refusal("PEER_PLATFORM_UNSUPPORTED")
+    deadline = time.monotonic() + _LAUNCHD_TIMEOUT_SECONDS
+    try:
+        process = subprocess.Popen(
+            list(argv),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            cwd="/",
+            env=dict(_LAUNCHD_ENVIRONMENT),
+        )
+    except Exception:
+        raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_FAILED") from None
+
+    chunks: list = []
+    consumed = 0
+    payload = b""
+    refusal = ""
+    try:
+        try:
+            stream = process.stdout
+            if stream is None:
+                raise _launchd_refusal("SERVICE_LAUNCHCTL_COMMAND_FAILED")
+            descriptor = stream.fileno()
+            os.set_blocking(descriptor, False)
+            with selectors.DefaultSelector() as selector:
+                selector.register(descriptor, selectors.EVENT_READ)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        refusal = "SERVICE_LAUNCHCTL_TIMEOUT"
+                        break
+                    budget = max_bytes + 1 - consumed
+                    if budget <= 0:
+                        refusal = "SERVICE_LAUNCHCTL_OUTPUT_TOO_LARGE"
+                        break
+                    if not selector.select(
+                        remaining if remaining < _LAUNCHD_POLL_SECONDS else _LAUNCHD_POLL_SECONDS
+                    ):
+                        continue
+                    try:
+                        chunk = os.read(
+                            descriptor, min(_LAUNCHD_READ_CHUNK_BYTES, budget)
+                        )
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        break
+                    consumed += len(chunk)
+                    chunks.append(chunk)
+                    if consumed > max_bytes:
+                        refusal = "SERVICE_LAUNCHCTL_OUTPUT_TOO_LARGE"
+                        break
+            if not refusal:
+                code = _reap_bounded_exit_code(process, deadline)
+                if code is None:
+                    refusal = "SERVICE_LAUNCHCTL_TIMEOUT"
+                elif code != 0:
+                    refusal = "SERVICE_LAUNCHCTL_COMMAND_FAILED"
+                else:
+                    payload = b"".join(chunks)
+                    if not payload or len(payload) > max_bytes:
+                        refusal = "SERVICE_LAUNCHCTL_OUTPUT_TOO_LARGE"
+        except PeerIdentityError as error:
+            refusal = error.code or "SERVICE_LAUNCHCTL_COMMAND_FAILED"
+        except Exception:
+            if not refusal:
+                refusal = "SERVICE_LAUNCHCTL_COMMAND_FAILED"
+    finally:
+        if not _discard_bounded_child(process):
+            refusal = "SERVICE_LAUNCHCTL_CLEANUP_UNPROVEN"
+    if refusal:
+        raise _launchd_refusal(refusal)
+    return payload
+
+
+def _bounded_single_line(raw: object, *, maximum: int, code: str) -> str:
+    """Return one canonical printable-ASCII line or refuse with a closed code."""
+    if (
+        type(raw) is not bytes
+        or not raw
+        or maximum < 1
+        or len(raw) > maximum
+        or b"\r" in raw
+        or not raw.isascii()
+    ):
+        raise _launchd_refusal(code)
+    text = raw.decode("ascii")
+    if text.endswith("\n"):
+        text = text[:-1]
+    if "\n" in text or not _launchd_is_safe_text(text) or text != text.strip(" "):
+        raise _launchd_refusal(code)
+    return text
+
+
+def _require_qualified_kernel_profile() -> None:
+    """Accept only the observed Darwin 25.5 kernel family. No guessed futures."""
+    release = _bounded_single_line(
+        _run_bounded(_SYSCTL_OSRELEASE_ARGV, max_bytes=_LAUNCHD_MAX_KERNEL_BYTES),
+        maximum=_LAUNCHD_MAX_KERNEL_BYTES,
+        code="SERVICE_LAUNCHCTL_PROFILE_UNQUALIFIED",
+    )
+    if not _LAUNCHD_KERNEL_PATTERN.fullmatch(release):
+        raise _launchd_refusal("SERVICE_LAUNCHCTL_PROFILE_UNQUALIFIED")
+
+
+def _observe_launchd_service(role: str) -> _LaunchdObservation:
+    """Read one closed system service through launchd's own account of itself.
+
+    Live observations are never cached: every call re-runs both fixed commands.
+    Argument, working-directory, and on-disk pin checks belong to the forthcoming
+    file-closure factory and are deliberately not claimed here.
+    """
+    spec = _launchd_role_spec(role)
+    _require_qualified_kernel_profile()
+    raw = _run_bounded(spec.launchctl_argv, max_bytes=_LAUNCHD_MAX_BYTES)
+    return _parse_launchctl_service(raw, role=role)
+
+
+def _observe_real_boot_id() -> str:
+    """Return the kernel boot-session UUID, lowercased. Never a derived guess."""
+    value = _bounded_single_line(
+        _run_bounded(_SYSCTL_BOOT_ID_ARGV, max_bytes=_LAUNCHD_MAX_BOOT_ID_BYTES),
+        maximum=_LAUNCHD_MAX_BOOT_ID_BYTES,
+        code="SERVICE_BOOT_UUID_MALFORMED",
+    ).lower()
+    if not _LAUNCHD_UUID_PATTERN.fullmatch(value):
+        raise _launchd_refusal("SERVICE_BOOT_UUID_MALFORMED")
+    if not any(char != "0" for char in value.replace("-", "")):
+        raise _launchd_refusal("SERVICE_BOOT_UUID_NIL")
+    return value
