@@ -38,6 +38,7 @@ PINNED_PYTHON_RUNTIME_ROOT="/Library/Frameworks/Python.framework/Versions/3.12"
 PINNED_PYTHON_BINARY="$PINNED_PYTHON_RUNTIME_ROOT/bin/python3.12"
 PYTHON_RUNTIME_RECEIPT="/Library/Application Support/MastermindExecutive/python-runtime.json"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+CODEX_CODE_MODE_HOST_SHA256="a059beb029cdbc989e72e23f8680be9f703cb6cf83d9598d91041f82178d018d"
 CODEX_VERSION="0.147.0"
 CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
 
@@ -315,10 +316,113 @@ PY
   /bin/echo "Python runtime provenance receipt validation failed" >&2
   exit 65
 }
-[ -x "$CODEX_BINARY" ] && [ ! -L "$CODEX_BINARY" ] || {
-  /bin/echo "Codex binary must be a direct executable file" >&2
+# --- BEGIN Codex package component validation ---
+# Codex resolves this native helper beside its executable. Both hashes come
+# from the same signed @openai/codex@0.147.0-darwin-arm64 package.
+verify_codex_no_acl() {
+  local acl_listing
+  # Darwin stat reports POSIX mode bits only. ls -e emits ACL entries on
+  # additional lines, even when extended attributes mask its '+' with '@'.
+  acl_listing="$(LC_ALL=C /bin/ls -lde "$1")" || return 65
+  [ -n "$acl_listing" ] || return 65
+  case "$acl_listing" in
+    *$'\n'*) /bin/echo "Codex path has a filesystem ACL or ambiguous listing: $1" >&2; return 65 ;;
+  esac
+}
+
+verify_codex_component() {
+  local path="$1" expected_hash="$2" expected_identifier="$3" installed="$4"
+  local signature observed_hash
+  [ -f "$path" ] && [ -x "$path" ] && [ ! -L "$path" ] || {
+    /bin/echo "Codex component must be a direct regular executable: $path" >&2
+    return 65
+  }
+  [ "$(/usr/bin/stat -f '%l' "$path")" = "1" ] || {
+    /bin/echo "Codex component must have exactly one hard link: $path" >&2
+    return 65
+  }
+  verify_codex_no_acl "$path" || return 65
+  if [ "$installed" = "1" ]; then
+    [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "0:0:555" ] || {
+      /bin/echo "installed Codex component is not root:wheel mode 0555: $path" >&2
+      return 65
+    }
+  fi
+  observed_hash="$(/usr/bin/shasum -a 256 "$path" | /usr/bin/awk '{print $1}')" || return 65
+  [ "$observed_hash" = "$expected_hash" ] || {
+    /bin/echo "Codex component bytes differ from the reviewed package: $path" >&2
+    return 65
+  }
+  /usr/bin/codesign --verify --strict "$path" >/dev/null 2>&1 || {
+    /bin/echo "Codex component signature is invalid: $path" >&2
+    return 65
+  }
+  signature="$(/usr/bin/codesign -dv --verbose=4 "$path" 2>&1)" || return 65
+  [ "$(/bin/echo "$signature" | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')" = "2DC432GLL2" ] \
+    && [ "$(/bin/echo "$signature" | /usr/bin/awk -F= '$1 == "Identifier" {print $2}')" = "$expected_identifier" ] || {
+      /bin/echo "Codex component signer or identifier is not the reviewed OpenAI component: $path" >&2
+      return 65
+    }
+}
+
+verify_codex_bin_directory() {
+  local ancestor metadata
+  for ancestor in /Library "/Library/Application Support" "$SYSTEM_ROOT" "$SYSTEM_ROOT/bin"; do
+    [ -d "$ancestor" ] && [ ! -L "$ancestor" ] || return 65
+    metadata="$(/usr/bin/stat -f '%u:%g:%Lp' "$ancestor")" || return 65
+    # macOS may provision the shared Application Support directory root:admin;
+    # 0755 grants that group no write access. Our private bin domain is wheel.
+    if [ "$metadata" != "0:0:755" ]; then
+      [ "$ancestor" = "/Library/Application Support" ] && [ "$metadata" = "0:80:755" ] || {
+        /bin/echo "Codex bin ancestor ownership or mode is unsafe: $ancestor" >&2
+        return 65
+      }
+    fi
+    verify_codex_no_acl "$ancestor" || return 65
+  done
+}
+
+install_codex_code_mode_host() {
+  local destination="$SYSTEM_ROOT/bin/codex-code-mode-host"
+  verify_codex_bin_directory || return 65
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    # A mismatched existing helper is not silently replaced on reinstall.
+    verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1
+    return $?
+  fi
+  CODEX_CODE_MODE_HOST_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-code-mode-host.XXXXXX")" || return 65
+  /usr/bin/ditto --noqtn "$CODEX_CODE_MODE_HOST_BINARY" "$CODEX_CODE_MODE_HOST_TEMP" || return 65
+  /usr/sbin/chown root:wheel "$CODEX_CODE_MODE_HOST_TEMP" || return 65
+  /bin/chmod 0555 "$CODEX_CODE_MODE_HOST_TEMP" || return 65
+  # Recheck the copied bytes, signature, and metadata before publication; a
+  # mutable source can change after preflight. Never execute source bytes.
+  verify_codex_component "$CODEX_CODE_MODE_HOST_TEMP" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
+  # Publish this exact directory entry exclusively. Unlike mv, link never treats
+  # a concurrently created directory or directory symlink as a container.
+  "$PYTHON_BINARY" -I -S -B - "$CODEX_CODE_MODE_HOST_TEMP" "$destination" <<'PY' || return 65
+import os
+import sys
+
+try:
+    os.link(sys.argv[1], sys.argv[2], follow_symlinks=False)
+    os.unlink(sys.argv[1])
+except OSError:
+    sys.stderr.write("Codex helper exclusive publication failed\n")
+    sys.exit(65)
+PY
+  CODEX_CODE_MODE_HOST_TEMP=""
+  verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1
+}
+# --- END Codex package component validation ---
+
+# Check the complete package before stopping any service, even on reinstall.
+[ "$CODEX_VERSION" = "0.147.0" ] || {
+  /bin/echo "Codex package version differs from the reviewed 0.147.0 allowlist" >&2
   exit 65
 }
+CODEX_CODE_MODE_HOST_BINARY="$(/usr/bin/dirname "$CODEX_BINARY")/codex-code-mode-host"
+verify_codex_component "$CODEX_BINARY" "$CODEX_SHA256" codex 0 || exit 65
+verify_codex_component "$CODEX_CODE_MODE_HOST_BINARY" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 0 || exit 65
 if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
   [ -f "$CONTROL_CONFIG_SOURCE" ] && [ ! -L "$CONTROL_CONFIG_SOURCE" ] || {
     /bin/echo "control config source must be a regular non-symlink file" >&2
@@ -660,6 +764,7 @@ esac
 # install-owned daemons, including a separately prepared C1 Relay, disabled
 # and booted out across generation mutation and rollback.
 STAGING=""
+CODEX_CODE_MODE_HOST_TEMP=""
 wait_for_launchd_absent() {
   local label="$1"
   local description="$2"
@@ -676,6 +781,9 @@ wait_for_launchd_absent() {
   return 1
 }
 leave_installed_services_stopped() {
+  if [ -n "${CODEX_CODE_MODE_HOST_TEMP:-}" ]; then
+    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_TEMP"
+  fi
   /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
@@ -747,6 +855,8 @@ if [ -n "$(/usr/bin/find "$RELEASE_ROOT" -exec /usr/bin/stat -f '%Sp' {} \; \
   /bin/echo "installed release contains a filesystem ACL" >&2
   exit 65
 fi
+
+install_codex_code_mode_host || exit 65
 
 INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
 if [ ! -f "$INSTALLED_CODEX" ]; then
@@ -1000,6 +1110,28 @@ if source:
         raise SystemExit("control config source must contain an object")
 else:
     value = {**expected, **defaults}
+
+# Older installed inputs can omit these optional fields. Materialize only the
+# reviewed disabled defaults admitted by this release; retain every explicit
+# host value. Arming remains the existing controller's separate transaction.
+for key, default in {
+    "ceo_submit_armed": False,
+    "exact_worker_claim_target": {"mode": "disabled"},
+}.items():
+    if key in _CONFIG_OPTIONAL:
+        value.setdefault(key, default)
+terminal_return_defaults = {
+    "terminal_return_armed": False,
+    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+}
+terminal_schema = set(terminal_return_defaults) & schema_keys
+if terminal_schema and terminal_schema != set(terminal_return_defaults):
+    raise SystemExit("partial terminal-return control-config schema")
+terminal_present = set(terminal_return_defaults) & set(value)
+if terminal_present and terminal_present != set(terminal_return_defaults):
+    raise SystemExit("partial terminal-return control-config source")
+if terminal_schema and not terminal_present:
+    value.update(terminal_return_defaults)
 
 for key, derived in readiness_expected.items():
     if key in value and (type(value[key]) is not type(derived) or value[key] != derived):
