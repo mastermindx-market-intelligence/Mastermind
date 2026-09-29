@@ -7,10 +7,12 @@ same-process peer qualification. No request field can supply that composition.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sqlite3
 import time
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 from control_plane import executive_release_contract as contract
@@ -182,6 +184,8 @@ def _validated_release_closure(response, evidence):
         return "cancellation", cancellation, reservation
     status = contract.validate_release_terminal_status(
         result["terminal_status"], expected_approval=approval)
+    if status["state"] == "NOT_FOUND":
+        raise ReleaseConsumerError(code)
     if status["state"] not in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
         raise ReleaseConsumerError("RELEASE_EFFECT_IN_PROGRESS")
     if (contract.canonical_release_bytes(status["admission"])
@@ -193,6 +197,61 @@ def _validated_release_closure(response, evidence):
             or status["started_at_ms"] < reservation["reserved_at_ms"]):
         raise ReleaseConsumerError(code)
     return "terminal", status, reservation
+
+
+def _trusted_closure_context(runtime, connection, response, evidence):
+    # No test mint, public mapping, or historical approval-only context can
+    # supply this purpose. Provenance is rechecked in the owner transaction.
+    from control_plane import executive_runtime as runtime_api
+
+    kind, outcome, reservation = _validated_release_closure(response, evidence)
+    approval = contract.validate_approval_evidence(evidence["approval"])
+    # The release canonicalizer accepts closed record primitives, not the
+    # transport's nullable union or boolean envelope. Hash the qualified
+    # semantic observation after verifying its actual root provenance.
+    observation_digest = _hash({
+        "schema": "mastermind.executive_release_closure_observation/v1",
+        "purpose": kind, "approval_evidence_digest": _hash(approval),
+        "reservation_digest": _hash(reservation), "outcome_digest": _hash(outcome),
+    })
+    record = {
+        "approval_evidence_digest": _hash(approval),
+        "request_fingerprint": contract.request_fingerprint_for(approval),
+        "admission_digest": _hash(evidence["admission"]),
+        "journal_observation_digest": observation_digest,
+        "owner_installation_id": approval["owner_installation_id"],
+        "target_ref": approval["target_ref"],
+        "principal_digest": _hash(approval["principal_projection"]),
+        "grant_digest": approval["effective_grant_digest"],
+        "key_id": approval["owner_seal"]["key_id"],
+        "trust_generation": approval["owner_seal"]["trust_generation"],
+    }
+    if kind == "terminal":
+        purpose = "closing"
+        record.update(
+            schema="mastermind.executive_release_closing_context/v1",
+            terminal_status_digest=_hash(outcome),
+            terminal_receipt_digest=_hash(outcome["terminal_receipt"]),
+        )
+        context_type = getattr(runtime_api, "TrustedReleaseClosingContext", None)
+        capability = getattr(runtime_api, "_RELEASE_CLOSING_CAPABILITY", None)
+    else:
+        purpose = "cancellation"
+        record.update(
+            schema="mastermind.executive_release_cancellation_context/v1",
+            reservation_digest=_hash(reservation), cancellation_digest=_hash(outcome),
+            root_qualification_digest=evidence["root_qualification_digest"],
+        )
+        context_type = getattr(runtime_api, "TrustedReleaseCancellationContext", None)
+        capability = getattr(runtime_api, "_RELEASE_CANCELLATION_CAPABILITY", None)
+    if context_type is None or capability is None:
+        raise ReleaseConsumerError("RELEASE_RUNTIME_CLOSURE_UNAVAILABLE")
+    context = context_type(
+        _store=runtime.store, _connection=connection,
+        _evidence_digest=_hash({"purpose": purpose, "record": record}),
+        _capability=capability, _record=MappingProxyType(record),
+    )
+    return kind, outcome, reservation, context
 
 
 def _trusted_context(runtime, connection, response):
@@ -225,6 +284,51 @@ class ReleaseControlConsumer:
         self.broker = broker if broker is not None else ReleaseBrokerClient()
         if type(self.broker) is not ReleaseBrokerClient:
             raise TypeError("release consumer requires the existing root broker client")
+
+    def finalize_unresolved_admission(self) -> None:
+        """Close qualified historical work through the one Runtime owner.
+
+        Startup/canary callers quarantine on any exception. The root query is
+        outside SQL; its result never authorizes reserve, START, or execution.
+        """
+        registry = self.runtime.release_maintenance
+        if not all(callable(getattr(registry, name, None)) for name in (
+                "read_unresolved_admission", "record_terminal", "record_cancellation")):
+            raise ReleaseConsumerError("RELEASE_RUNTIME_CLOSURE_UNAVAILABLE")
+        with self.runtime.store.read() as connection:
+            original = registry.read_unresolved_admission(connection)
+            if original is None:
+                return None
+            original_bytes = contract.canonical_release_bytes(original)
+            # Detach before releasing the snapshot, even if a future reader
+            # implementation accidentally exposes a mutable mapping.
+            evidence = json.loads(original_bytes)
+        response = self.broker.read_release_closure(approval=evidence["approval"])
+        _validated_release_closure(response, evidence)
+        with self.runtime.store.transaction() as connection:
+            current = registry.read_unresolved_admission(connection)
+            if (current is None
+                    or contract.canonical_release_bytes(current) != original_bytes):
+                raise ReleaseConsumerError("RELEASE_CLOSURE_ADMISSION_CHANGED")
+            kind, outcome, reservation, context = _trusted_closure_context(
+                self.runtime, connection, response, current)
+            identity = {
+                "approved_transition_ref": evidence["approval"]["approved_transition_ref"],
+                "request_fingerprint": contract.request_fingerprint_for(evidence["approval"]),
+                "trusted_context": context,
+            }
+            if kind == "terminal":
+                recorded = registry.record_terminal(
+                    connection, terminal_status=outcome, **identity)
+            else:
+                recorded = registry.record_cancellation(
+                    connection, reservation=reservation, cancellation=outcome, **identity)
+            if contract.canonical_release_bytes(recorded) != contract.canonical_release_bytes(outcome):
+                raise ReleaseConsumerError("RELEASE_CLOSURE_READBACK_UNKNOWN")
+        with self.runtime.store.read() as connection:
+            if registry.read_unresolved_admission(connection) is not None:
+                raise ReleaseConsumerError("RELEASE_CLOSURE_READBACK_UNKNOWN")
+        return None
 
     def _read(self, operation_key):
         with self.runtime.store.read() as connection:
