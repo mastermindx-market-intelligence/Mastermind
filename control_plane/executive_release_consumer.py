@@ -227,7 +227,8 @@ class ReleaseControlConsumer:
         if type(response.result) is not dict or set(response.result) != {"preview", "prepared_token", "expires_at_ms"}:
             raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
         ingress.validate_arguments("commit_prepared_release_transition",
-                                   {"prepared_token": response.result["prepared_token"]})
+                                   {"operation_key": arguments["operation_key"],
+                                    "prepared_token": response.result["prepared_token"]})
         expiry = response.result["expires_at_ms"]
         now = time.time_ns() // 1_000_000
         effect = approval["normalized_requested_effect"]

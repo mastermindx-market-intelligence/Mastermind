@@ -38,7 +38,8 @@ RELEASE_CONTROL_TOOL_SPECS = (
           {"operation_key": _KEY, "approved_transition_ref": {"type": "string"}}, read_only=True),
     _spec("commit_prepared_release_transition",
           "Request the prepared release effect. Production commit is disarmed and refuses in this generation.",
-          {"prepared_token": {"type": "string", "minLength": 1, "maxLength": ingress.MAX_TOKEN_BYTES}},
+          {"operation_key": _KEY,
+           "prepared_token": {"type": "string", "minLength": 1, "maxLength": ingress.MAX_TOKEN_BYTES}},
           read_only=False),
     _spec("reconcile_release_transition",
           "Read the original approval and broker history for an operation. Never resend or retry an effect.",
@@ -101,7 +102,9 @@ def valid_release_result(value, operation, arguments, status_code) -> bool:
         if operation == "prepare_release_transition":
             if set(value) != base | {"preview", "prepared_token", "expires_at_ms"}:
                 return False
-            ingress.validate_arguments("commit_prepared_release_transition", {"prepared_token": value["prepared_token"]})
+            ingress.validate_arguments("commit_prepared_release_transition",
+                                       {"operation_key": arguments["operation_key"],
+                                        "prepared_token": value["prepared_token"]})
             preview = value["preview"]
             return (type(value["expires_at_ms"]) is int and 0 < value["expires_at_ms"] < (1 << 63)
                     and type(preview) is dict and set(preview) == {"action", "target_ref", "from_release", "to_release"}

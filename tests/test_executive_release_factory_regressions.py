@@ -274,7 +274,7 @@ def test_socket_restart_history_and_effect_counts(image, installed, delta):
                  approved_transition_ref=approved['approved_transition_ref']))
     assert prepared['ok'] is True
     refused = installed['call']('commit_prepared_release_transition',
-                               {'prepared_token': prepared['prepared_token']})
+                               {'operation_key': args['operation_key'], 'prepared_token': prepared['prepared_token']})
     assert refused['error']['code'] == 'RELEASE_COMMIT_DISARMED'
     image['now'][0] += delta
     installed['now'][0] = image['now'][0] * 1000

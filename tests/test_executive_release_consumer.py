@@ -202,7 +202,7 @@ def test_approval_replay_prepare_history_and_commit_disarming(installed):
     assert payload["approval_evidence_digest"] == digest(original)
     assert payload["request_fingerprint"] == contract.request_fingerprint_for(original)
     assert payload["expires_at_ms"] == original["expires_at_ms"]
-    blocked = call("commit_prepared_release_transition", {"prepared_token": prepared["prepared_token"]})
+    blocked = call("commit_prepared_release_transition", {"operation_key": args["operation_key"], "prepared_token": prepared["prepared_token"]})
     assert blocked["error"]["code"] == "RELEASE_COMMIT_DISARMED"
     history = call("reconcile_release_transition", {"operation_key": args["operation_key"]})
     assert history["approval"] == original.to_dict()
@@ -333,7 +333,7 @@ def test_unconfigured_broker_and_commit_cannot_reach_executor(installed):
     installed["root_broker"]._release_owner = None
     with pytest.raises(consumer.ReleaseConsumerError):
         installed["call"]("approve_release_transition", approve_arguments(installed))
-    result = installed["call"]("commit_prepared_release_transition", {"prepared_token": "x"})
+    result = installed["call"]("commit_prepared_release_transition", {"operation_key": "disarmed-proof", "prepared_token": "x"})
     assert result["error"]["code"] == "RELEASE_COMMIT_DISARMED"
     assert installed["root_broker"]._executor.calls == []
 
@@ -527,5 +527,33 @@ def test_history_requalifies_after_admission_read(installed, monkeypatch, mutati
     before = counts(installed["runtime"])
     with pytest.raises(consumer.ReleaseConsumerError):
         installed["call"]("reconcile_release_transition", {"operation_key": args["operation_key"]})
+    assert counts(installed["runtime"]) == before
+    assert installed["root_broker"]._executor.calls == []
+
+@pytest.mark.parametrize("arguments", [
+    {"prepared_token": "opaque-test-token"},
+    {"operation_key": "commit-identity-proof"},
+    {"operation_key": "commit-identity-proof", "prepared_token": "opaque-test-token", "approval": {}},
+    {"operation_key": True, "prepared_token": "opaque-test-token"},
+    {"operation_key": "UPPERCASE", "prepared_token": "opaque-test-token"},
+    {"operation_key": "commit-identity-proof", "prepared_token": ""},
+])
+def test_commit_identity_requires_closed_pair_without_effect(installed, arguments):
+    before = counts(installed["runtime"])
+    with pytest.raises(ingress.ReleaseIngressError):
+        installed["call"]("commit_prepared_release_transition", arguments)
+    assert counts(installed["runtime"]) == before
+    assert installed["root_broker"]._executor.calls == []
+
+
+def test_commit_operation_key_is_correlation_only_while_disarmed(installed, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("commit identity must not enter approval/token/effect path")
+    monkeypatch.setattr(installed["control"], "_read", forbidden)
+    monkeypatch.setattr(installed["control"].broker, "exchange", forbidden)
+    before = counts(installed["runtime"])
+    result = installed["call"]("commit_prepared_release_transition", {
+        "operation_key": "not-an-approved-operation", "prepared_token": "opaque-not-a-token"})
+    assert result["error"]["code"] == "RELEASE_COMMIT_DISARMED"
     assert counts(installed["runtime"]) == before
     assert installed["root_broker"]._executor.calls == []

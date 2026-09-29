@@ -112,7 +112,7 @@ def test_authenticated_vertical_and_rotated_token_replay(installed, rsa_key, oth
                                          "approved_transition_ref": approved["approved_transition_ref"]}})
                 assert prepared.json()["ok"] is True, prepared.json()
                 commit = await http.post("/v1/tools/commit_prepared_release_transition", headers=headers,
-                    json={"arguments": {"prepared_token": prepared.json()["prepared_token"]}})
+                    json={"arguments": {"operation_key": args["operation_key"], "prepared_token": prepared.json()["prepared_token"]}})
                 assert commit.json()["error"]["code"] == "RELEASE_COMMIT_DISARMED"
                 history = await http.post("/v1/tools/reconcile_release_transition", headers=headers,
                     json={"arguments": {"operation_key": args["operation_key"]}})
@@ -153,7 +153,7 @@ def test_closed_responses_preserve_valid_values_and_refuse_leaks(installed, monk
         "prepare_release_transition": {"operation_key": args["operation_key"],
                                        "approved_transition_ref": approved["approved_transition_ref"]},
         "reconcile_release_transition": {"operation_key": args["operation_key"]},
-        "commit_prepared_release_transition": {"prepared_token": "inert"},
+        "commit_prepared_release_transition": {"operation_key": args["operation_key"], "prepared_token": "inert"},
     }[operation]
     original = installed["call"](operation, arguments)
     monkeypatch.setattr(release_admission, "principal_projection", lambda _: installed["principal"])
