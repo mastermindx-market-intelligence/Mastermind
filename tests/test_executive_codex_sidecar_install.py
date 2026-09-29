@@ -46,7 +46,7 @@ if command == 'stat':
     st = path.lstat()
     fmt = args[1]
     if fmt == '%l': print(st.st_nlink)
-    elif fmt == '%Sp': print(stat.filemode(st.st_mode)+('+' if fault == 'acl' else ''))
+    elif fmt == '%Sp': print(stat.filemode(st.st_mode))
     elif fmt == '%u:%g:%Lp':
         # Only fake chown-marked inodes and the fixture's protected directory
         # ancestors are reported as root-owned; all others keep actual identity.
@@ -57,6 +57,10 @@ if command == 'stat':
         if fault == 'group': gid = 20
         print(f'{uid}:{gid}:{stat.S_IMODE(st.st_mode):o}')
     else: raise AssertionError(fmt)
+elif command == 'ls':
+    if fault == 'acl_observer_failure': sys.exit(1)
+    print(stat.filemode(path.lstat().st_mode)+'@ 1 root wheel 1 Sep 29 00:00 '+str(path))
+    if fault == 'acl': print(' 0: group:everyone allow write')
 elif command == 'codesign':
     if fault == 'signature': sys.exit(1)
     if '--verify' not in args:
@@ -124,10 +128,13 @@ def harness(tmp_path):
         "PYTHON_BINARY": sys.executable,
     }
 
-    def run(*, fault="", target="", tamper=False, race=False, version="0.147.0"):
+    def run(*, fault="", target="", tamper=False, race=False, version="0.147.0", real_acl=False):
         setup["CODEX_VERSION"] = version
         script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in setup.items())
-        script += "\n" + functions + "\ncleanup() {\n" + cleanup + "}\ntrap cleanup EXIT\n"
+        observed_functions = functions if real_acl else functions.replace(
+            "/bin/ls", f"{shlex.quote(sys.executable)} {shlex.quote(str(fake))} ls"
+        )
+        script += "\n" + observed_functions + "\ncleanup() {\n" + cleanup + "}\ntrap cleanup EXIT\n"
         script += preflight + "\ninstall_codex_code_mode_host || exit 65\n"
         return subprocess.run(["/bin/bash", "-c", script], text=True, capture_output=True, timeout=15,
                               env={**os.environ, "FIXTURE_ROOT": str(tmp_path), "FAULT": fault,
@@ -182,7 +189,7 @@ def test_bad_source_refused_without_publication(harness, case):
     assert '"ditto"' not in (root/"calls").read_text()
 
 
-@pytest.mark.parametrize("fault", ["signature", "team", "identifier", "acl", "stat_failure"])
+@pytest.mark.parametrize("fault", ["signature", "team", "identifier", "acl", "acl_observer_failure", "stat_failure"])
 def test_source_attestation_refusals(harness, fault):
     run, _, _, dest, _, _ = harness
     assert run(fault=fault, target="source").returncode == 65
@@ -197,7 +204,7 @@ def test_main_package_mismatch_and_version_refused(harness):
     assert not dest.exists()
 
 
-@pytest.mark.parametrize("fault", ["signature", "team", "identifier", "acl", "owner", "group", "stat_failure"])
+@pytest.mark.parametrize("fault", ["signature", "team", "identifier", "acl", "acl_observer_failure", "owner", "group", "stat_failure"])
 def test_staged_attestation_failure_never_publishes_and_cleans(harness, fault):
     run, _, _, dest, _, _ = harness
     result = run(fault=fault, target="stage")
@@ -220,7 +227,7 @@ def test_publication_does_not_replace_concurrent_target(harness):
     assert not list(dest.parent.glob('.codex-code-mode-host.*'))
 
 
-@pytest.mark.parametrize("fault", ["signature", "team", "identifier", "acl", "owner", "group", "stat_failure"])
+@pytest.mark.parametrize("fault", ["signature", "team", "identifier", "acl", "acl_observer_failure", "owner", "group", "stat_failure"])
 def test_installed_postimage_refused(harness, fault):
     run, _, _, dest, _, _ = harness
     assert run().returncode == 0
@@ -248,7 +255,7 @@ def test_bad_existing_destination_is_never_replaced(harness, case):
     assert dest.lstat().st_ino == inode
 
 
-@pytest.mark.parametrize("fault", ["owner", "group", "acl", "stat_failure"])
+@pytest.mark.parametrize("fault", ["owner", "group", "acl", "acl_observer_failure", "stat_failure"])
 def test_untrusted_destination_ancestor_refused(harness, fault):
     run, _, _, dest, _, _ = harness
     assert run(fault=fault, target="directory").returncode == 65
@@ -268,3 +275,31 @@ def test_concurrent_directory_is_not_treated_as_move_container(harness, race):
     assert (dest / "sentinel").read_bytes() == b"untouched"
     assert sorted(p.name for p in dest.iterdir()) == ["sentinel"]
     assert not list(dest.parent.glob('.codex-code-mode-host.*'))
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="real macOS ACL qualification")
+@pytest.mark.parametrize("target", ["source", "main", "directory"])
+def test_real_darwin_acl_is_refused_even_with_extended_attributes(harness, target):
+    run, helper, binary, dest, _, _ = harness
+    path = {"source": helper, "main": binary, "directory": dest.parent}[target]
+    baseline = run(real_acl=True)
+    assert baseline.returncode == 0, baseline.stderr
+    original_mode = path.stat().st_mode & 0o777
+    path.chmod(original_mode | 0o200)
+    subprocess.run(["/usr/bin/xattr", "-w", "com.mastermind.sidecar-test", "disposable", str(path)], check=True)
+    path.chmod(original_mode)
+    try:
+        subprocess.run(["/bin/chmod", "+a", "everyone allow write", str(path)], check=True)
+        mode = subprocess.check_output(["/usr/bin/stat", "-f", "%Sp", str(path)], text=True)
+        listing = subprocess.check_output(["/bin/ls", "-lde", str(path)], text=True)
+        assert "+" not in mode
+        assert "@" in listing.splitlines()[0]
+        assert "group:everyone allow " in listing
+        result = run(real_acl=True)
+        assert result.returncode == 65, result.stderr
+        assert not list(dest.parent.glob(".codex-code-mode-host.*"))
+    finally:
+        subprocess.run(["/bin/chmod", "-N", str(path)], check=True)
+        path.chmod(original_mode | 0o200)
+        subprocess.run(["/usr/bin/xattr", "-d", "com.mastermind.sidecar-test", str(path)], check=True)
+        path.chmod(original_mode)

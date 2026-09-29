@@ -319,9 +319,20 @@ PY
 # --- BEGIN Codex package component validation ---
 # Codex resolves this native helper beside its executable. Both hashes come
 # from the same signed @openai/codex@0.147.0-darwin-arm64 package.
+verify_codex_no_acl() {
+  local acl_listing
+  # Darwin stat reports POSIX mode bits only. ls -e emits ACL entries on
+  # additional lines, even when extended attributes mask its '+' with '@'.
+  acl_listing="$(LC_ALL=C /bin/ls -lde "$1")" || return 65
+  [ -n "$acl_listing" ] || return 65
+  case "$acl_listing" in
+    *$'\n'*) /bin/echo "Codex path has a filesystem ACL or ambiguous listing: $1" >&2; return 65 ;;
+  esac
+}
+
 verify_codex_component() {
   local path="$1" expected_hash="$2" expected_identifier="$3" installed="$4"
-  local metadata signature observed_hash
+  local signature observed_hash
   [ -f "$path" ] && [ -x "$path" ] && [ ! -L "$path" ] || {
     /bin/echo "Codex component must be a direct regular executable: $path" >&2
     return 65
@@ -330,10 +341,7 @@ verify_codex_component() {
     /bin/echo "Codex component must have exactly one hard link: $path" >&2
     return 65
   }
-  metadata="$(/usr/bin/stat -f '%Sp' "$path")" || return 65
-  case "$metadata" in
-    *+) /bin/echo "Codex component has a filesystem ACL: $path" >&2; return 65 ;;
-  esac
+  verify_codex_no_acl "$path" || return 65
   if [ "$installed" = "1" ]; then
     [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "0:0:555" ] || {
       /bin/echo "installed Codex component is not root:wheel mode 0555: $path" >&2
@@ -370,10 +378,7 @@ verify_codex_bin_directory() {
         return 65
       }
     fi
-    metadata="$(/usr/bin/stat -f '%Sp' "$ancestor")" || return 65
-    case "$metadata" in
-      *+) /bin/echo "Codex bin ancestor has a filesystem ACL: $ancestor" >&2; return 65 ;;
-    esac
+    verify_codex_no_acl "$ancestor" || return 65
   done
 }
 
@@ -1105,6 +1110,28 @@ if source:
         raise SystemExit("control config source must contain an object")
 else:
     value = {**expected, **defaults}
+
+# Older installed inputs can omit these optional fields. Materialize only the
+# reviewed disabled defaults admitted by this release; retain every explicit
+# host value. Arming remains the existing controller's separate transaction.
+for key, default in {
+    "ceo_submit_armed": False,
+    "exact_worker_claim_target": {"mode": "disabled"},
+}.items():
+    if key in _CONFIG_OPTIONAL:
+        value.setdefault(key, default)
+terminal_return_defaults = {
+    "terminal_return_armed": False,
+    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+}
+terminal_schema = set(terminal_return_defaults) & schema_keys
+if terminal_schema and terminal_schema != set(terminal_return_defaults):
+    raise SystemExit("partial terminal-return control-config schema")
+terminal_present = set(terminal_return_defaults) & set(value)
+if terminal_present and terminal_present != set(terminal_return_defaults):
+    raise SystemExit("partial terminal-return control-config source")
+if terminal_schema and not terminal_present:
+    value.update(terminal_return_defaults)
 
 for key, derived in readiness_expected.items():
     if key in value and (type(value[key]) is not type(derived) or value[key] != derived):
