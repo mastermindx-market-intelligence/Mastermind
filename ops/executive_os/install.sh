@@ -392,11 +392,19 @@ install_codex_code_mode_host() {
   # Recheck the copied bytes, signature, and metadata before publication; a
   # mutable source can change after preflight. Never execute source bytes.
   verify_codex_component "$CODEX_CODE_MODE_HOST_TEMP" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
-  /bin/mv -n "$CODEX_CODE_MODE_HOST_TEMP" "$destination" || return 65
-  [ ! -e "$CODEX_CODE_MODE_HOST_TEMP" ] || {
-    /bin/echo "Codex helper destination appeared during publication" >&2
-    return 65
-  }
+  # Publish this exact directory entry exclusively. Unlike mv, link never treats
+  # a concurrently created directory or directory symlink as a container.
+  "$PYTHON_BINARY" -I -S -B - "$CODEX_CODE_MODE_HOST_TEMP" "$destination" <<'PY' || return 65
+import os
+import sys
+
+try:
+    os.link(sys.argv[1], sys.argv[2], follow_symlinks=False)
+    os.unlink(sys.argv[1])
+except OSError:
+    sys.stderr.write("Codex helper exclusive publication failed\n")
+    sys.exit(65)
+PY
   CODEX_CODE_MODE_HOST_TEMP=""
   verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1
 }

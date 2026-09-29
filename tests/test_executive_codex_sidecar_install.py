@@ -1,7 +1,7 @@
 """Exercise the real installer component functions without root or live services.
 
 Darwin metadata/signature commands and chown are explicit OS fakes. File type,
-links, modes, hashes, copy, rename and refusal flow operate on real temp files.
+links, modes, hashes, copy, publication and refusal flow operate on real temp files.
 The production digest literals are checked separately from small fixture bytes.
 """
 from __future__ import annotations
@@ -69,8 +69,17 @@ elif command == 'ditto':
     shutil.copyfile(args[-2], path)
     if os.environ.get('TAMPER_STAGE') == '1':
         path.write_bytes(b'corrupt after source validation\n')
-    if os.environ.get('RACE_DESTINATION') == '1':
+    race = os.environ.get('RACE_DESTINATION')
+    if race == '1':
         (path.parent/'codex-code-mode-host').write_bytes(b'foreign winner\n')
+    elif race in ('directory', 'symlink_directory'):
+        destination = path.parent/'codex-code-mode-host'
+        if race == 'symlink_directory':
+            foreign = root/'foreign-directory'; foreign.mkdir()
+            destination.symlink_to(foreign, target_is_directory=True)
+        else:
+            destination.mkdir()
+        (destination/'sentinel').write_bytes(b'untouched')
 else: raise AssertionError(command)
 '''
 
@@ -112,6 +121,7 @@ def harness(tmp_path):
         "CODEX_VERSION": "0.147.0", "CODEX_SHA256": hashlib.sha256(MAIN).hexdigest(),
         "CODEX_CODE_MODE_HOST_SHA256": hashlib.sha256(HELPER).hexdigest(),
         "CODEX_CODE_MODE_HOST_TEMP": "",
+        "PYTHON_BINARY": sys.executable,
     }
 
     def run(*, fault="", target="", tamper=False, race=False, version="0.147.0"):
@@ -122,7 +132,7 @@ def harness(tmp_path):
         return subprocess.run(["/bin/bash", "-c", script], text=True, capture_output=True, timeout=15,
                               env={**os.environ, "FIXTURE_ROOT": str(tmp_path), "FAULT": fault,
                                    "FAULT_TARGET": target, "TAMPER_STAGE": str(int(tamper)),
-                                   "RACE_DESTINATION": str(int(race))})
+                                   "RACE_DESTINATION": race if isinstance(race, str) else str(int(race))})
 
     def root_owned(path):
         with (tmp_path / "root-inodes").open("a") as f:
@@ -249,3 +259,12 @@ def test_fresh_installed_postimage_is_checked(harness):
     run, _, _, dest, _, _ = harness
     assert run(fault="signature", target="installed").returncode == 65
     assert dest.read_bytes() == HELPER
+
+
+@pytest.mark.parametrize("race", ["directory", "symlink_directory"])
+def test_concurrent_directory_is_not_treated_as_move_container(harness, race):
+    run, _, _, dest, root, _ = harness
+    assert run(race=race).returncode == 65
+    assert (dest / "sentinel").read_bytes() == b"untouched"
+    assert sorted(p.name for p in dest.iterdir()) == ["sentinel"]
+    assert not list(dest.parent.glob('.codex-code-mode-host.*'))
