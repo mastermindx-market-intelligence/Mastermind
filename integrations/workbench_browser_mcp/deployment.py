@@ -64,9 +64,21 @@ async def _run_existing(services: RuntimeServices, operation: Callable[[], objec
     return await pending
 
 
+async def _run_recovery(
+    services: RuntimeServices, tool: str, operation: Callable[[], object]
+) -> object:
+    if services.run_recovery_io is None:
+        raise RuntimeError("browser recovery executor is unavailable")
+    pending = services.run_recovery_io(tool, operation)
+    if not inspect.isawaitable(pending):
+        raise RuntimeError("browser recovery executor did not return an awaitable")
+    return await pending
+
+
 def create_browser_ports(
     *,
     resolve_binding: Callable[..., Any],
+    resolve_recovery_binding: Callable[..., Any] | None = None,
     clock_ms: Callable[[], int],
     action_token_key: bytes,
     artifact_store: object,
@@ -92,6 +104,8 @@ def create_browser_ports(
         or action_ttl_ms <= 0
     ):
         raise ValueError("BROWSER_PORT_OWNERS_INVALID")
+    if resolve_recovery_binding is not None and not callable(resolve_recovery_binding):
+        raise ValueError("BROWSER_RECOVERY_BINDING_INVALID")
     selected_host = validate_host_config(host_config)
     selected_inspector = inspector or ProcessInspector()
     codec = BrowserRefCodec(action_token_key)
@@ -110,6 +124,7 @@ def create_browser_ports(
     )
     action_port = BrowserActionPort(
         resolve_binding=resolve_binding,
+        resolve_recovery_binding=resolve_recovery_binding,
         clock_ms=clock_ms,
         codec=codec,
         artifact_store=artifact_store,
@@ -143,8 +158,11 @@ def create_browser_deployment(
         raise ValueError("ACTION_SCOPE_REQUIRED")
     if not callable(services.run_io):
         raise ValueError("RUNTIME_SERVICES_INVALID")
+    if not callable(services.resolve_recovery_binding) or not callable(services.run_recovery_io):
+        raise ValueError("BROWSER_RECOVERY_OWNERS_REQUIRED")
     ports = create_browser_ports(
         resolve_binding=services.resolve_binding,
+        resolve_recovery_binding=services.resolve_recovery_binding,
         clock_ms=services.clock_ms,
         action_token_key=services.action_token_key,
         artifact_store=services.artifact_store,
@@ -182,8 +200,9 @@ def create_browser_deployment(
         )
 
     async def read_tool(caller, browser_ref, tool, arguments):
-        return await _run_existing(
+        return await _run_recovery(
             services,
+            tool,
             lambda: action_port.call_read_tool(
                 caller, browser_ref, tool, arguments
             ),
