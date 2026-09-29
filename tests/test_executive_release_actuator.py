@@ -47,16 +47,16 @@ def _approval_fixture(operation_key: str = OPERATION_KEY):
     effect = {
         "schema": "mastermind.executive_release_effect/v1",
         "repository": "mastermindx-market-intelligence/Mastermind",
-        "protected_source_sha": "1" * 40,
+        "protected_source_sha": "3" * 40,
         "source_policy_mode": "exact_protected_master",
-        "installer_source_commit": "1" * 40,
-        "installer_source_tree": "2" * 40,
+        "installer_source_commit": "3" * 40,
+        "installer_source_tree": "4" * 40,
         "installer_profile_digest": _hex64(5),
         "from_release_commit": "1" * 40,
         "from_release_tree": "2" * 40,
         "from_installed_manifest_digest": _hex64(6),
-        "to_release_commit": "1" * 40,
-        "to_release_tree": "2" * 40,
+        "to_release_commit": "3" * 40,
+        "to_release_tree": "4" * 40,
         "staged_artifact_digest": _hex64(7),
         "staged_content_metadata_digest": _hex64(8),
         "platform": "darwin",
@@ -353,29 +353,30 @@ def _cancellation_fixture(operation_key: str = OPERATION_KEY):
 
 
 def _inputs(operation_key: str = OPERATION_KEY):
-    target_ref = _hex64(14)
     reservation, approval, preconditions, _prep = _reservation_fixture(operation_key)
     admission_value, _r, _a = _admission_fixture(operation_key)
+    effect = approval["normalized_requested_effect"]
+    before = reservation["before"]
     identity = {
         "operation_key": operation_key,
-        "request_fingerprint": admission_value["request_fingerprint"],
-        "approval_evidence_digest": preconditions["approval_evidence_digest"],
-        "normalized_requested_effect_digest": _hex64(19),
-        "expected_source_and_precondition_digest": _canonical_hash(preconditions),
-        "action_target_digest": _hex64(21),
-        "owner_installation_id": BOOT_ID,
-        "target_ref": target_ref,
-        "before_release_commit": "1" * 40,
-        "before_release_tree": "2" * 40,
-        "before_installed_manifest_digest": preconditions[
-            "from_installed_manifest_digest"
+        "request_fingerprint": reservation["request_fingerprint"],
+        "approval_evidence_digest": reservation["approval_evidence_digest"],
+        "normalized_requested_effect_digest": reservation[
+            "normalized_requested_effect_digest"
         ],
-        "before_configuration_digest": preconditions[
-            "installed_configuration_digest"
+        "expected_source_and_precondition_digest": reservation[
+            "expected_precondition_digest"
         ],
-        "target_release_commit": "3" * 40,
-        "target_release_tree": "4" * 40,
-        "boot_id": BOOT_ID,
+        "action_target_digest": reservation["action_target_digest"],
+        "owner_installation_id": reservation["owner_installation_id"],
+        "target_ref": reservation["target_ref"],
+        "before_release_commit": before["release_commit"],
+        "before_release_tree": before["release_tree"],
+        "before_installed_manifest_digest": before["installed_manifest_digest"],
+        "before_configuration_digest": before["configuration_digest"],
+        "target_release_commit": reservation["to_release_commit"],
+        "target_release_tree": effect["to_release_tree"],
+        "boot_id": preconditions["boot_id"],
     }
     return identity, preconditions, admission_value
 
@@ -397,29 +398,11 @@ def _start(
     identity.update(changes.pop("identity", {}))
     preconditions.update(changes.pop("preconditions", {}))
     admission.update(changes.pop("admission", {}))
-    # Build a fresh reservation each time so identity/admission join values
-    # match the supplied fields (e.g. request_fingerprint changes).
+    # The durable reservation stays the immutable authority snapshot. Caller
+    # mutations exercise refusal; they never rewrite that ancestor to agree.
     reservation, approval, _res_preconds, _prepared = _reservation_fixture(
         operation_key
     )
-    # Caller-supplied identity overrides flow into the admission join.
-    if "request_fingerprint" in changes.get("identity", {}):
-        reservation["request_fingerprint"] = changes["identity"][
-            "request_fingerprint"
-        ]
-    if "request_fingerprint" in changes.get("admission", {}):
-        reservation["request_fingerprint"] = changes["admission"][
-            "request_fingerprint"
-        ]
-        admission["request_fingerprint"] = changes["admission"][
-            "request_fingerprint"
-        ]
-    if "effective_grant_digest" in changes.get("admission", {}):
-        admission["effective_grant_digest"] = changes["admission"][
-            "effective_grant_digest"
-        ]
-    if "boot_id" in changes.get("preconditions", {}):
-        reservation["preconditions"]["boot_id"] = changes["preconditions"]["boot_id"]
     root_digest = changes.pop("root_qualification_digest", _root_digest(reservation))
     # Materialize reservation on disk if it is not already present so the
     # exact-start-replay path can succeed without re-reserving.
@@ -440,7 +423,7 @@ def _start(
         approval=approval,
         reservation=reservation,
         root_qualification_digest=root_digest,
-        started_at_ms=changes.pop("started_at_ms", 1_000),
+        started_at_ms=changes.pop("started_at_ms", 2_001),
         **changes,
     )
 
@@ -490,7 +473,7 @@ def _terminal(journal, record, state):
         record["operation_key"],
         expected_generation=record["journal_generation"],
         state=state,
-        completed_at_ms=2_000,
+        completed_at_ms=3_000,
         postcondition_digest=POSTCONDITION,
         after=after,
         rollback=rollback,
@@ -627,7 +610,7 @@ def test_same_operation_immutable_mismatch_is_conflict(
     "changes",
     [
         {"actuator_generation": 8},
-        {"started_at_ms": 1_001},
+        {"started_at_ms": 2_002},
     ],
 )
 def test_start_generation_and_time_are_immutable(tmp_path, changes):
@@ -686,7 +669,7 @@ def test_state_and_generation_fencing(tmp_path):
             OPERATION_KEY,
             expected_generation=2,
             state="BROKER_RESTART_PENDING",
-            completed_at_ms=2_000,
+            completed_at_ms=3_000,
         )
     assert caught.value.code == "TERMINAL_ARGUMENTS"
 
@@ -732,7 +715,7 @@ def test_terminal_truth_refusals(tmp_path, state, after_kind, rollback):
             OPERATION_KEY,
             expected_generation=record["journal_generation"],
             state=state,
-            completed_at_ms=2_000,
+            completed_at_ms=3_000,
             postcondition_digest=POSTCONDITION,
             after=after,
             rollback=rollback,
@@ -1112,7 +1095,7 @@ def test_linked_start_crash_state_is_recovered_only_for_exact_candidate(tmp_path
             "admission": admission,
             "actuator_generation": 7,
             "journal_generation": 1,
-            "started_at_ms": 1_000,
+            "started_at_ms": 2_001,
             "root_qualification_digest": _root_digest(reservation),
         }
     )
@@ -1135,7 +1118,7 @@ def test_linked_start_crash_state_is_recovered_only_for_exact_candidate(tmp_path
             approval=approval,
             reservation=reservation,
             root_qualification_digest=_root_digest(reservation),
-            started_at_ms=1_001,
+            started_at_ms=2_002,
         )
     assert caught.value.code == "START_STAGED_CONFLICT"
     assert final_path.stat().st_nlink == 2
@@ -1149,7 +1132,7 @@ def test_linked_start_crash_state_is_recovered_only_for_exact_candidate(tmp_path
         approval=approval,
         reservation=reservation,
         root_qualification_digest=_root_digest(reservation),
-        started_at_ms=1_000,
+        started_at_ms=2_001,
     )
     assert recovered == candidate
     assert final_path.stat().st_nlink == 1
@@ -1576,7 +1559,7 @@ def test_cancellation_refuses_after_staged_start(tmp_path):
             "admission": admission_value,
             "actuator_generation": 7,
             "journal_generation": 1,
-            "started_at_ms": 1_000,
+            "started_at_ms": 2_001,
             "root_qualification_digest": _hex64(99),
         }
     )
@@ -1644,7 +1627,7 @@ def test_cancellation_blocks_subsequent_start(tmp_path):
             approval=approval,
             reservation=reservation,
             root_qualification_digest=_root_digest(reservation),
-            started_at_ms=1_000,
+            started_at_ms=2_001,
         )
     assert caught.value.code == "RESERVATION_CONFLICT"
 
@@ -1663,7 +1646,7 @@ def test_start_requires_existing_reservation(tmp_path):
             approval=approval,
             reservation=reservation,
             root_qualification_digest=_root_digest(reservation),
-            started_at_ms=1_000,
+            started_at_ms=2_001,
         )
     assert caught.value.code == "NOT_FOUND"
 
@@ -1685,7 +1668,7 @@ def test_start_requires_byte_identical_reservation(tmp_path):
             approval=approval,
             reservation=mutated,
             root_qualification_digest=_root_digest(reservation),
-            started_at_ms=1_000,
+            started_at_ms=2_001,
         )
     assert caught.value.code == "RESERVATION_MISMATCH"
 
@@ -1705,7 +1688,7 @@ def test_start_requires_matching_root_qualification_digest(tmp_path):
             approval=approval,
             reservation=reservation,
             root_qualification_digest=_hex64(123),
-            started_at_ms=1_000,
+            started_at_ms=2_001,
         )
     assert caught.value.code == "ROOT_QUALIFICATION_MISMATCH"
 
@@ -1727,7 +1710,7 @@ def test_start_requires_matching_admission_join(tmp_path):
             approval=approval,
             reservation=reservation,
             root_qualification_digest=_root_digest(reservation),
-            started_at_ms=1_000,
+            started_at_ms=2_001,
         )
     assert caught.value.code in {"ADMISSION_JOIN_MISMATCH", "INVALID_JOIN"}
 
@@ -1762,7 +1745,7 @@ def test_reservation_sidecar_metadata_and_mode_failures(tmp_path):
         approval=approval,
         reservation=reservation,
         root_qualification_digest=_root_digest(reservation),
-        started_at_ms=1_000,
+        started_at_ms=2_001,
     )
     path = _reservation_path(root)
     os.chmod(path, 0o644)
@@ -1979,3 +1962,176 @@ def test_read_prestart_reservation_rejects_wrong_operation_key(tmp_path):
             "not a valid key", approval=approval
         )
     assert caught.value.code == "INVALID_OPERATION_KEY"
+
+
+# ---------------------------------------------------------------------------
+# Independent R1 regressions: START ancestry and sidecar custody
+# ---------------------------------------------------------------------------
+
+
+def _coherent_prestart_context(tmp_path):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    reservation, approval, preconditions, _prepared = _reservation_fixture()
+    identity, _preconditions, admission = _inputs()
+    journal.reserve_prestart(reservation=reservation, approval=approval)
+    arguments = {
+        "actuator_generation": 7,
+        "identity": identity,
+        "preconditions": preconditions,
+        "admission": admission,
+        "approval": approval,
+        "reservation": reservation,
+        "root_qualification_digest": _root_digest(reservation),
+        "started_at_ms": 2_001,
+    }
+    return journal, root, arguments
+
+
+def test_coherent_prestart_start_control(tmp_path):
+    journal, _root, arguments = _coherent_prestart_context(tmp_path)
+    assert journal.create(**arguments)["state"] == "STARTED"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "normalized_requested_effect_digest",
+        "action_target_digest",
+        "before_release_commit",
+        "before_release_tree",
+        "target_release_commit",
+        "target_release_tree",
+    ],
+)
+def test_start_cannot_change_reserved_identity(tmp_path, field):
+    journal, root, arguments = _coherent_prestart_context(tmp_path)
+    arguments["identity"][field] = "f" * (
+        40 if "commit" in field or "tree" in field else 64
+    )
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.create(**arguments)
+    assert not _record_path(root).exists()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "python_runtime_provenance_digest",
+        "provider_binary_attestation_digest",
+        "authority_policy_hash",
+        "staged_artifact_digest",
+        "staged_content_metadata_digest",
+        "compatibility_proof_digest",
+        "preservation_plan_digest",
+        "issuer_binding_digest",
+        "production_arming_digest",
+        "installed_configuration_digest",
+        "from_installed_manifest_digest",
+    ],
+)
+def test_start_preconditions_equal_reserved_snapshot(tmp_path, field):
+    journal, root, arguments = _coherent_prestart_context(tmp_path)
+    arguments["preconditions"] = copy.deepcopy(arguments["preconditions"])
+    arguments["preconditions"][field] = "f" * 64
+    arguments["identity"]["expected_source_and_precondition_digest"] = (
+        _canonical_hash(arguments["preconditions"])
+    )
+    if field == "installed_configuration_digest":
+        arguments["identity"]["before_configuration_digest"] = "f" * 64
+    if field == "from_installed_manifest_digest":
+        arguments["identity"]["before_installed_manifest_digest"] = "f" * 64
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.create(**arguments)
+    assert not _record_path(root).exists()
+
+
+@pytest.mark.parametrize("started_at_ms", [1_999, 250_000])
+def test_start_time_stays_inside_reserved_prepared_window(
+    tmp_path, started_at_ms
+):
+    journal, root, arguments = _coherent_prestart_context(tmp_path)
+    arguments["started_at_ms"] = started_at_ms
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.create(**arguments)
+    assert not _record_path(root).exists()
+
+
+def test_exact_reservation_replay_cannot_adopt_changed_second_read(
+    tmp_path, monkeypatch
+):
+    journal, root, arguments = _coherent_prestart_context(tmp_path)
+    path = _reservation_path(root)
+    changed = copy.deepcopy(arguments["reservation"])
+    changed["target_observation_digest"] = "f" * 64
+    contract.validate_release_prestart_reservation(
+        changed, expected_approval=arguments["approval"]
+    )
+    original = journal._read_prestart_bytes
+    reads = []
+
+    def swap(*args, **kwargs):
+        raw = original(*args, **kwargs)
+        if kwargs["kind"] == "reservation" and not reads:
+            reads.append(1)
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(contract.canonical_release_bytes(changed))
+            replacement.chmod(0o600)
+            os.replace(replacement, path)
+        return raw
+
+    monkeypatch.setattr(journal, "_read_prestart_bytes", swap)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.reserve_prestart(
+            reservation=arguments["reservation"],
+            approval=arguments["approval"],
+        )
+
+
+@pytest.mark.parametrize("kind", ["reservation", "cancellation"])
+def test_sidecar_write_readback_refuses_replacement_inode(
+    tmp_path, monkeypatch, kind
+):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    cancellation, reservation, admission, approval = _cancellation_fixture()
+    if kind == "cancellation":
+        journal.reserve_prestart(reservation=reservation, approval=approval)
+    original = journal._write_new
+
+    def swap(root_descriptor, name, raw):
+        identity = original(root_descriptor, name, raw)
+        path = root / name
+        replacement = root / (name + ".foreign")
+        replacement.write_bytes(raw)
+        replacement.chmod(0o600)
+        assert replacement.stat().st_ino != path.stat().st_ino
+        os.replace(replacement, path)
+        return identity
+
+    monkeypatch.setattr(journal, "_write_new", swap)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        if kind == "reservation":
+            journal.reserve_prestart(
+                reservation=reservation,
+                approval=approval,
+            )
+        else:
+            journal.cancel_prestart(
+                cancellation=cancellation,
+                reservation=reservation,
+                admission=admission,
+                approval=approval,
+            )
+
+
+@pytest.mark.parametrize("content", [b"", b"{"])
+def test_any_cancellation_inode_blocks_start(tmp_path, content):
+    journal, root, arguments = _coherent_prestart_context(tmp_path)
+    path = _cancellation_path(root)
+    path.write_bytes(content)
+    path.chmod(0o600)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.create(**arguments)
+    assert path.read_bytes() == content
+    assert not _record_path(root).exists()
