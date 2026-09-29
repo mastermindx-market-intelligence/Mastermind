@@ -23,8 +23,8 @@ receipt validation and read-only recovery. No retry, timer, transport or state o
 ## Exact tested contribution
 
 `repair.patch` changes one production file, adds nine controller regressions, and
-adds one App interaction regression. It does not alter the incumbent branch.
-SHA-256: `9fdd115b77bb4dea62326d248960152c8432bcf7c15a799e6d42aceaf81bf9a7`.
+adds three App interaction regressions. It does not alter the incumbent branch.
+SHA-256: `d2d3a00c2ae79a741f7e7dabc3295b9b5929baba89cfcc711465c4933a5b076a`.
 Original controller blob: `d3bf12ac8936077778ddfc44121364cf2d468b5b`.
 Repaired controller blob: `72b3be184cc8e7a730c958844eeb1386f3e9e8b9`.
 All 77 original app files were compared; only controller and App test differ.
@@ -33,8 +33,10 @@ Unit RED: 7 failures / 2 passes on original; GREEN: 9 passes on repaired source.
 App RED: Check status fails to read the original operation; GREEN: exact read,
 correct navigation, one submit and pointer clearance. Uses real React/App/controller
 with explicit injected host ports; it is not a live service/provider canary.
-Final full frontend: **556 PASS / 1 inherited skip**, 13 test files.
-TypeScript, web build and native-mode Vite asset build: PASS. Reverse patch check: PASS.
+Conversation RED: 2 failures; GREEN: 2 passes, including draft retention and
+exact message recovery after a synchronous read failure without another send.
+Final full frontend: **558 PASS / 1 inherited skip**, 13 test files.
+TypeScript, web build and native-mode Vite asset build: PASS. Byte-verified forward/apply/reverse patch roundtrip: PASS.
 The existing Tauri static/dynamic import warning remains. Evidence details: `evidence.json`.
 The added App test's intermediate TS2339 matcher error was corrected and all checks rerun.
 
