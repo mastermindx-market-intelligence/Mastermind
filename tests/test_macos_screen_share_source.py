@@ -37,6 +37,21 @@ def test_screen_sharing_checks_route_and_remote_identity() -> None:
     assert "StrictHostKeyChecking=accept-new" not in SCRIPT
 
 
+def test_launches_require_exact_tunnel_binding() -> None:
+    assert "bound_tunnel_alias" in SCRIPT
+    assert "/usr/sbin/lsof" in SCRIPT
+    assert '[[ -n "$vpid" && "$vpid" == "$spid" ]]' in SCRIPT
+    gate = 'verify_target_route "$label" "$port" "$sshport" "$pin_alias"'
+    assert SCRIPT.count(gate) >= 2
+
+
+def test_enrollment_is_managed_and_bounded() -> None:
+    assert 'expires=$(( $(date +%s) + 900 ))' in SCRIPT
+    assert 'write_lease "$label" "$port" "$user" "$newpid" "$expires"' in SCRIPT
+    assert 'rm -f "$LEASE" "$ENROLL_DIR/$LEASE_PID"' in SCRIPT
+    assert 'rm -f "$LEASE" "$ENROLL_DIR/$old_pid"' in SCRIPT
+
+
 def test_expected_fleet_targets_are_closed() -> None:
     for target, vnc, ssh in (
         ("mini1", "15901", "12201"),
