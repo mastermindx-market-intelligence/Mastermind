@@ -27,7 +27,7 @@ KEY = "release-mcp-proof-001"
 ARGS = {
     "approve_release_transition": {"operation_key": KEY, "action": "executive.release.upgrade", "transition_digest": "a" * 64},
     "prepare_release_transition": {"operation_key": KEY, "approved_transition_ref": contract.approval_ref_for(KEY)},
-    "commit_prepared_release_transition": {"prepared_token": "inert-test-token"},
+    "commit_prepared_release_transition": {"operation_key": KEY, "prepared_token": "inert-test-token"},
     "reconcile_release_transition": {"operation_key": KEY},
 }
 
@@ -264,10 +264,40 @@ def test_durable_approval_lost_readback_and_typed_history_over_native_mcp(
                 _, prepared = await native.call(client, token, "prepare_release_transition", {
                     "operation_key": args["operation_key"], "approved_transition_ref": contract.approval_ref_for(args["operation_key"])})
                 assert prepared["ok"]
-                _, refused = await native.call(client, token, "commit_prepared_release_transition", {"prepared_token": prepared["prepared_token"]})
+                _, refused = await native.call(client, token, "commit_prepared_release_transition", {"operation_key": args["operation_key"], "prepared_token": prepared["prepared_token"]})
                 assert refused["error"]["code"] == "RELEASE_COMMIT_DISARMED"
             assert counts(service.runtime) == (before[0] + 1, before[1], before[2])
             assert installed["root_broker"]._executor.calls == []
         finally:
             await service.close()
     asyncio.run(exercise())
+
+
+def test_commit_discovery_requires_the_same_exact_pair_as_ingress():
+    spec = next(s for s in profile.RELEASE_CONTROL_TOOL_SPECS
+                if s.name == "commit_prepared_release_transition")
+    assert set(spec.input_schema["properties"]) == {"operation_key", "prepared_token"}
+    assert set(spec.input_schema["required"]) == {"operation_key", "prepared_token"}
+    assert spec.input_schema["additionalProperties"] is False
+
+
+@pytest.mark.parametrize("arguments", [
+    {"prepared_token": "opaque-test-token"},
+    {"operation_key": KEY},
+    {"operation_key": KEY, "prepared_token": "opaque-test-token", "principal": {}},
+    {"operation_key": True, "prepared_token": "opaque-test-token"},
+    {"operation_key": "UPPERCASE", "prepared_token": "opaque-test-token"},
+])
+def test_native_commit_invalid_identity_never_forwards(settings, rsa_key, monkeypatch, arguments):
+    frames = []
+    async def send(self, path, frame):
+        frames.append(frame)
+        raise AssertionError("invalid commit identity reached transport")
+    monkeypatch.setattr(CeoIngressClient, "send_frame", send)
+    async def exercise():
+        async with connection(settings) as client:
+            _, result = await native.call(client, native.fixture._submit_token(rsa_key),
+                                          "commit_prepared_release_transition", arguments)
+            assert result["ok"] is False
+    asyncio.run(exercise())
+    assert not frames

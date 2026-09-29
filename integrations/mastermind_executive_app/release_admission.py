@@ -67,7 +67,9 @@ def _closed_result(result, *, operation, arguments, principal):
     elif operation == "prepare_release_transition":
         if set(result) != base | {"preview", "prepared_token", "expires_at_ms"}:
             raise ValueError("invalid preparation response")
-        validate_arguments("commit_prepared_release_transition", {"prepared_token": result["prepared_token"]})
+        validate_arguments("commit_prepared_release_transition",
+                           {"operation_key": arguments["operation_key"],
+                            "prepared_token": result["prepared_token"]})
         preview = result["preview"]
         if (type(result["expires_at_ms"]) is not int or not 0 < result["expires_at_ms"] < (1 << 63)
                 or type(preview) is not dict or set(preview) != {"action", "target_ref", "from_release", "to_release"}

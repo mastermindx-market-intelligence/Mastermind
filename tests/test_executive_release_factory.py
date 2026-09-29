@@ -180,7 +180,7 @@ def test_real_factory_snapshot_approval_prepare_and_disarmed_commit(image):
     assert result["ok"] is True
     assert result["result"]["prepared_token"]
     commit = ingress.project_frame("commit_prepared_release_transition",
-        {"prepared_token": result["result"]["prepared_token"]}, principal=image["principal"])
+        {"operation_key": "factory-proof", "prepared_token": result["result"]["prepared_token"]}, principal=image["principal"])
     with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_COMMIT_DISARMED"):
         root.handle({**commit, "schema": consumer.BROKER_SCHEMA, "approval": None}, None)
 
@@ -246,7 +246,7 @@ def test_factory_composes_existing_socket_and_runtime_owner(image, installed):
         "operation_key": args["operation_key"], "approved_transition_ref": result["approved_transition_ref"]})
     assert prepared["ok"] is True
     blocked = installed["call"]("commit_prepared_release_transition", {
-        "prepared_token": prepared["prepared_token"]})
+        "operation_key": args["operation_key"], "prepared_token": prepared["prepared_token"]})
     assert blocked["error"]["code"] == "RELEASE_COMMIT_DISARMED"
     history = installed["call"]("reconcile_release_transition", {"operation_key": args["operation_key"]})
     # This factory has no typed journal producer yet: a verified approval
