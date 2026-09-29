@@ -525,7 +525,7 @@ class _Client:
                     self._messages.put({"_malformed": True})
                     continue
                 self._messages.put(value if isinstance(value, dict) else {"_malformed": True})
-        except Exception:
+        except BaseException:
             self._messages.put({"_malformed": True})
         finally:
             self._messages.put(None)

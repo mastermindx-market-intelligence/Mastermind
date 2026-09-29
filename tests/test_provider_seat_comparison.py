@@ -371,7 +371,10 @@ def test_credential_observation_does_not_read_contents(monkeypatch):
     assert probe.credential_identity(MetadataOnly()) == CREDENTIAL
 
 
-@pytest.mark.parametrize("failure", [OSError(SENTINEL), RuntimeError(EMAIL)])
+@pytest.mark.parametrize(
+    "failure",
+    [OSError(SENTINEL), RuntimeError(EMAIL), KeyboardInterrupt(SENTINEL)],
+)
 def test_reader_thread_failure_is_bounded_and_private(capsys, failure):
     class BrokenStream:
         def __iter__(self):
