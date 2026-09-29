@@ -1,0 +1,443 @@
+{
+  "architecture": "arm64",
+  "clean_input_preparation": {
+    "checks": {
+      "clean_download_and_patch": true,
+      "drift_not_overwritten": true,
+      "drift_refused": true
+    },
+    "donor_commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+    "network": "public pinned source fetch only; no providers",
+    "note": "Clean network-source fetch and drift refusal used the equivalent prior context-bearing patch; current zero-context patch is separately applied/hashed in every final verify run.",
+    "source_files": 14,
+    "temporary_tree_removed": true
+  },
+  "full_local_report_sha256": "7ee07f01f6ed127251fb2a7c2fadeefcb1d0f13250a94fe460cb222e4c83d05c",
+  "generated_at": "2026-09-29T06:50:21.355988+00:00",
+  "independent_review": "NOT_PERFORMED",
+  "input_sha256": {
+    "dispatch-binding.test.mjs": "62f7d741f2a9072343e2bea0bd299429e8fdd3a9f515aaaa137f15c5728e2299",
+    "donor-manifest.json": "9d0dbfac060dfdbc293c455012ba75cdfca55ff74daaea206cb89431db4ba54f",
+    "package-lock.json": "b22359bf374d9743f3bdf5a9ee950d5702bca7ac899ac07f3c83bc597ee0c729",
+    "package.json": "8203dbf76e0b9730c846b66086202873c80047487dc6abbeada5fc7231909daa",
+    "prepare.py": "3dca0cec77bb068d9d7b7a3d386e0193da89c726150347d95f9e127e5fb6f42d",
+    "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
+    "tsconfig.json": "001f949bce3428d8071a11c99e90cb7451b7989265e140251df147b1cb6881ad",
+    "verify.py": "c6a76008aff93204559690c73f6481c1415ce4cbc741dd00c47d01f660f8f47a",
+    "vitest.config.mjs": "ba36a3ec8059072999908f2e9989b079988d774924e95b59dd863c80ec025718"
+  },
+  "mutants": {
+    "remove_definition_check": {
+      "exit_code": 1,
+      "failed_cases": [
+        "replace-before-body-name-only",
+        "strict binding rejects own-scope shadowing during the wrapper"
+      ],
+      "killed": true,
+      "log": "mutant-definition.log",
+      "log_sha256": "63a787775b44817beb16ccc065ae12fe6cab8f6bd7e23ef2eca82b43b5f80c6e",
+      "mutant_sha256": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
+      "passed": 17,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "remove_guard_recheck": {
+      "exit_code": 1,
+      "failed_cases": [
+        "guard-throws-late",
+        "queued-revocation",
+        "revoke-before-body"
+      ],
+      "killed": true,
+      "log": "mutant-guard.log",
+      "log_sha256": "73d5e946fcd5e92eb1d307beb0b8a3e1207db434c1354965cab87d31cc89d914",
+      "mutant_sha256": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
+      "passed": 16,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "remove_result_binding": {
+      "exit_code": 1,
+      "failed_cases": [
+        "remove-during-body-post-value",
+        "replace-during-body-post-value",
+        "replace-during-body-wrapper-value"
+      ],
+      "killed": true,
+      "log": "mutant-result.log",
+      "log_sha256": "d173acd35abf7ad9904e060eeeb8036141d22ae43451632d915b0155efd72ed0",
+      "mutant_sha256": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901",
+      "passed": 16,
+      "stderr_empty": true,
+      "tests": 19
+    }
+  },
+  "node": "v26.8.2",
+  "node_sha256": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+  "platform": "Darwin",
+  "provider_calls": 0,
+  "publication_state": "SOURCE_CANDIDATE_NOT_INSTALLED",
+  "python": "3.14.7",
+  "schema": "mastermind.dsh_dispatch_verification.v1",
+  "success": true,
+  "supply": {
+    "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+    "patched_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
+    "runtime_started": false,
+    "source_files": 14
+  },
+  "targeted": {
+    "patched": {
+      "exit_code": 0,
+      "failed_cases": [],
+      "log": "patched-targeted.log",
+      "log_sha256": "72df3209788682a96e435380738cdace37c4696e834a4c188d6fcf304aac49bb",
+      "observations": {
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "guard-deny"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "guard-allow",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "Error: MASTERMIND_BINDING_REFUSED",
+                "type": "text"
+              }
+            ],
+            "error": {
+              "message": "MASTERMIND_BINDING_REFUSED"
+            },
+            "isError": true
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "guard-deny"
+          ]
+        }
+      },
+      "passed": 19,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "published_baseline": {
+      "exit_code": 1,
+      "failed_cases": [
+        "guard-throws-late",
+        "queued-revocation",
+        "remove-during-body-post-value",
+        "replace-before-body",
+        "replace-before-body-name-only",
+        "replace-during-body-post-value",
+        "replace-during-body-wrapper-value",
+        "revoke-before-body",
+        "strict binding rejects own-scope shadowing during the wrapper"
+      ],
+      "log": "baseline-npm.log",
+      "log_sha256": "c7a3a27a797f7feddf2e0b65b7bfcb6d92e71b96d6be1cafbc074f785c4e4e64",
+      "observations": {
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 1
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "replacement-body"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "approved-body"
+          ]
+        }
+      },
+      "passed": 10,
+      "stderr_empty": true,
+      "tests": 19
+    },
+    "source_baseline": {
+      "exit_code": 1,
+      "failed_cases": [
+        "guard-throws-late",
+        "queued-revocation",
+        "remove-during-body-post-value",
+        "replace-before-body",
+        "replace-before-body-name-only",
+        "replace-during-body-post-value",
+        "replace-during-body-wrapper-value",
+        "revoke-before-body",
+        "strict binding rejects own-scope shadowing during the wrapper"
+      ],
+      "log": "baseline-source.log",
+      "log_sha256": "5850cad14336410a20f1641cc47b48abebed8bb26c09b7ce6951874e52750bf9",
+      "observations": {
+        "replace-before-body": {
+          "counts": {
+            "approved": 0,
+            "replacement": 1
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "replaced",
+            "replacement-body"
+          ]
+        },
+        "replace-during-body-post-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:rewritten",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "rewritten"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "replace-during-body-wrapper-value": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "replacement:wrapped",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "wrapped"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "approved-body",
+            "replaced"
+          ]
+        },
+        "revoke-before-body": {
+          "counts": {
+            "approved": 1,
+            "replacement": 0
+          },
+          "result": {
+            "content": [
+              {
+                "text": "approved:original",
+                "type": "text"
+              }
+            ],
+            "isError": false,
+            "value": "original"
+          },
+          "trace": [
+            "guard-allow",
+            "wrapper-enter",
+            "revoked",
+            "approved-body"
+          ]
+        }
+      },
+      "passed": 10,
+      "stderr_empty": true,
+      "tests": 19
+    }
+  },
+  "test_leaf_effects": "IN_MEMORY_ONLY",
+  "typecheck": {
+    "exit_code": 0,
+    "log": "typecheck.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_empty": true
+  },
+  "upstream": {
+    "patched": {
+      "exit_code": 0,
+      "failed": 0,
+      "log": "upstream-patched.log",
+      "log_sha256": "84e61293e93d7fd493cac1ee05255ebb1cef3074c05b03918439748f3c70f544",
+      "passed": 178,
+      "report_sha256": "086bfde4ce5989ec38b8c69e23993712788ffdd336d3abcfb17b1c99389e494f",
+      "stderr_empty": true,
+      "tests": 178
+    },
+    "pristine": {
+      "exit_code": 0,
+      "failed": 0,
+      "log": "upstream-pristine.log",
+      "log_sha256": "95e53459c5199ef7accdd11a97691f6a1155a00e10ee5b736683360344acbcd4",
+      "passed": 178,
+      "report_sha256": "c09921cd33f10a593646256cd56a75ed6f7a927c4f1d2154c8e6250231e3032b",
+      "stderr_empty": true,
+      "tests": 178
+    }
+  }
+}

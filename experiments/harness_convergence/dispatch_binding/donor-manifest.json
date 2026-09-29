@@ -1,0 +1,126 @@
+{
+  "schema": "mastermind.dsh_dispatch_reproduction.v1",
+  "repository": "deepseek-ai/deepseek-harness",
+  "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+  "core_git_blob": "ca89f370febac1fa24f84cc25351a186866fe7e7",
+  "files": [
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/index.ts",
+      "name": "index.ts",
+      "bytes": 90679,
+      "git_blob": "ca89f370febac1fa24f84cc25351a186866fe7e7",
+      "sha256": "9107a2b6447b10c2ecb90429d7c1b80b956759e96d35230af16f5a88f5d3eccd"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/invariant.ts",
+      "name": "invariant.ts",
+      "bytes": 5819,
+      "git_blob": "d5edf996979773cfb9c406939ece1305974bff74",
+      "sha256": "919744eaa6c1e6489a68a4ea3be9831e1e6c576a4a2fce96801d0a3a33ac2a79"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/json-schema.ts",
+      "name": "json-schema.ts",
+      "bytes": 26289,
+      "git_blob": "c064fb294c7bb6349befc825699e3dc841766d30",
+      "sha256": "13deffdfd34539e23706b0fde235991da45b2f07c5c18dbbf3ca734c1da0c788"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/presentation.ts",
+      "name": "presentation.ts",
+      "bytes": 16880,
+      "git_blob": "8d8aa8ac24afc90002abd16c8a157ac2e57a43eb",
+      "sha256": "2e729538403ef924430187df13ec5e140de95e0ea41a8225093dba644c1f2b6a"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/ptc.ts",
+      "name": "ptc.ts",
+      "bytes": 38734,
+      "git_blob": "00d6abcd03e74886b706fd79966d31ff07e36fba",
+      "sha256": "a0569c4600191c4395e669ceb20f6bd279cc898d3ba506bd8e6a188e80ed8dfb"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/py-types.ts",
+      "name": "py-types.ts",
+      "bytes": 47524,
+      "git_blob": "850a78e596fc408688d02c86d6a8da012f025df0",
+      "sha256": "aa912e3f9e5ea1024600f0598f29de46c9308fd2774886576ba1f07ce81488ec"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/schema.ts",
+      "name": "schema.ts",
+      "bytes": 26148,
+      "git_blob": "5aea4f4f7fecb2b3408608e3abd5f97436d7e437",
+      "sha256": "d54459d0ad535ff3375138d40f3b37b39c6994703f1ea6a331df9a97c7e3cd23"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/testing.ts",
+      "name": "testing.ts",
+      "bytes": 1723,
+      "git_blob": "366f8ce92ef8cb79eb99e87c1751835b90b77828",
+      "sha256": "8b7bf72750d885c1acb52e99ccac9e42542cc5efcb581098ad3507e83ca0a651"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/ts-types.ts",
+      "name": "ts-types.ts",
+      "bytes": 15001,
+      "git_blob": "d92c98781727f8bf1bc6f5788700a92a3e25c407",
+      "sha256": "473562e67f2282579b2abb451acee759e2d2af681a051690c4980af4459016e1"
+    },
+    {
+      "kind": "source",
+      "path": "packages/core/tools/src/types.ts",
+      "name": "types.ts",
+      "bytes": 2709,
+      "git_blob": "48b2556278071ebfde755a3988092390e7f3c2ec",
+      "sha256": "2b2bfa5da56f7ebb67236a33329fff47064bcc8d2658ce24a4cdedc7668e6fe9"
+    },
+    {
+      "kind": "test",
+      "path": "packages/core/tools/tests/tools.spec.ts",
+      "name": "tools.spec.ts",
+      "bytes": 112568,
+      "git_blob": "dab5d43063ff1be372009e12544b7b1f4c33d0ea",
+      "sha256": "50daa493965ebaeca9e0189a413303d75610110c7d95b6b4eb07f8e6e9f88f0a"
+    },
+    {
+      "kind": "test",
+      "path": "packages/core/tools/tests/scoped.spec.ts",
+      "name": "scoped.spec.ts",
+      "bytes": 28588,
+      "git_blob": "7eac6489f7667a42874b563837d53e066f18dcce",
+      "sha256": "2da6c1615592bb5b523b9bf71972faaffaa391a39e09335b40157592c049586e"
+    },
+    {
+      "kind": "test",
+      "path": "packages/core/tools/tests/execution-mode.spec.ts",
+      "name": "execution-mode.spec.ts",
+      "bytes": 5327,
+      "git_blob": "333909c24a9313cf1b05ddc094726c345bc2afb0",
+      "sha256": "c5b3d310db4e4003766986eb353a9c18655b92b3edd058c96dd92fbbed2b3115"
+    },
+    {
+      "kind": "test",
+      "path": "packages/core/tools/tests/execution-signal-types.spec.ts",
+      "name": "execution-signal-types.spec.ts",
+      "bytes": 4082,
+      "git_blob": "95bd182e585ea33825f9f43fe59cbbbb57c1e06a",
+      "sha256": "5c9608da6f4f03bb5ee1def42ba5341140c6ddf4d2fe9505d29644e9316d51a9"
+    }
+  ],
+  "patch_file": "strict-dispatch-binding.patch",
+  "patch_sha256": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
+  "patched_index_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
+  "npm_lock_sha256": "b22359bf374d9743f3bdf5a9ee950d5702bca7ac899ac07f3c83bc597ee0c729",
+  "proof_scope": "Real core ToolRuntime with published support dependencies; not a whole DSH executable/profile qualification.",
+  "patch_format": "unified-zero-context; exact source preimage hash required"
+}
