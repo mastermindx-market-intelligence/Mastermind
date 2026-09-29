@@ -34,6 +34,8 @@ __all__ = [
     "broker_request_id_for",
     "canonical_release_bytes",
     "parse_release_json",
+    "validate_release_terminal_status",
+    "validate_release_terminal_receipt",
 ]
 
 _MAX_BYTES = 16 * 1024
@@ -622,3 +624,356 @@ def validate_prepared_payload(value: Any) -> ReleaseRecord:
     _lifetime(v, "issued_at_ms", "expires_at_ms")
     _lifetime(v, "issued_monotonic_ns", "expires_monotonic_ns", 1_000_000_000)
     return _freeze(v)
+
+
+# ---------------------------------------------------------------------------
+# P4 terminal status and receipt joins (R1). These correlate an already
+# recorded attempt with its canonical approval. Nothing below authenticates a
+# principal or seal, reads a journal, file, process or clock, or grants
+# release, retry, rollback or recovery authority.
+# ---------------------------------------------------------------------------
+
+_STATUS_SCHEMA = "mastermind.executive_release_terminal_status/v1"
+_RECEIPT_SCHEMA = "mastermind.executive_release_terminal_receipt/v1"
+_NOT_FOUND = "NOT_FOUND"
+_SUCCEEDED = "SUCCEEDED"
+_ROLLED_BACK = "ROLLED_BACK"
+_FAILED_NOT_APPLIED = "FAILED_NOT_APPLIED"
+_RECORDED_STATES = ("STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING")
+_TERMINAL_STATES = (_SUCCEEDED, _ROLLED_BACK, _FAILED_NOT_APPLIED)
+_STATES = (_NOT_FOUND,) + _RECORDED_STATES + _TERMINAL_STATES
+_SERVICE_ROLES = ("control", "worker", "relay", "gateway", "broker")
+_STATUS_COMMON_FIELDS = (
+    "schema state request_id request_fingerprint operation_key"
+    " approved_transition_ref approval_evidence_digest"
+    " authenticated_principal_digest effective_grant_digest"
+    " normalized_requested_effect_digest action_family action_target_digest"
+    " owner_installation_id target_ref from_release_commit to_release_commit"
+)
+_STATUS_RECORDED_FIELDS = (
+    " actuator_generation journal_generation started_at_ms preconditions"
+    " expected_precondition_digest admission admission_digest"
+)
+_STATUS_RECEIPT_FIELD = " terminal_receipt"
+_IDENTITY_FIELDS = (
+    "release_commit release_tree installed_manifest_digest"
+    " configuration_digest broker_source_commit broker_source_tree"
+    " broker_binary_digest service_generation_digests"
+)
+_IDENTITY_COMMITS = (
+    "release_commit release_tree broker_source_commit broker_source_tree"
+)
+_IDENTITY_DIGESTS = (
+    "installed_manifest_digest configuration_digest broker_binary_digest"
+)
+_SERVICE_ROLE_FIELDS = " control worker relay gateway broker"
+_RECEIPT_FIELDS = (
+    "schema request_id request_fingerprint approval_evidence_digest"
+    " expected_precondition_digest admission_digest actuator_generation"
+    " journal_generation started_at_ms completed_at_ms outcome before after"
+    " rollback postcondition_digest"
+)
+_RECEIPT_STATUS_FIELDS = (
+    "request_id request_fingerprint approval_evidence_digest"
+    " expected_precondition_digest admission_digest actuator_generation"
+    " journal_generation started_at_ms"
+)
+_PRECONDITION_EFFECT_FIELDS = (
+    "from_installed_manifest_digest staged_artifact_digest"
+    " staged_content_metadata_digest compatibility_proof_digest"
+    " preservation_plan_digest"
+)
+
+
+def _status_field_set(state: str) -> str:
+    # Key sets are exact per state: NOT_FOUND keeps only common fields, a
+    # terminal state is the only state carrying a receipt member.
+    if state == _NOT_FOUND:
+        return _STATUS_COMMON_FIELDS
+    fields = _STATUS_COMMON_FIELDS + _STATUS_RECORDED_FIELDS
+    if state in _TERMINAL_STATES:
+        return fields + _STATUS_RECEIPT_FIELD
+    return fields
+
+
+def _validate_installed_identity(value: Any, field: str) -> dict[str, Any]:
+    """Installed content identity. Not a PID, process birth or run state."""
+    v = _object(value, _IDENTITY_FIELDS, field)
+    for key in _IDENTITY_COMMITS.split():
+        _pattern(v[key], field + "." + key, _HEX40)
+    for key in _IDENTITY_DIGESTS.split():
+        _digest(v[key], field + "." + key)
+    roles = _object(
+        v["service_generation_digests"],
+        _SERVICE_ROLE_FIELDS,
+        field + ".service_generation_digests",
+    )
+    for key in _SERVICE_ROLES:
+        _digest(roles[key], field + ".service_generation_digests." + key)
+    v["service_generation_digests"] = roles
+    return v
+
+
+def _validate_rollback(value: Any, outcome: str, before: Mapping[str, Any]) -> None:
+    # The rollback union is fixed by outcome: only ROLLED_BACK may carry a
+    # restored preimage digest, and only of the saved content before-state.
+    restored = outcome == _ROLLED_BACK
+    v = _object(
+        value,
+        "attempted restored_preimage_digest" if restored else "attempted",
+        "rollback",
+    )
+    if type(v["attempted"]) is not bool:
+        _fail("rollback.attempted", "BOOLEAN")
+    if v["attempted"] is not restored:
+        _fail("rollback.attempted", "MISMATCH")
+    if not restored:
+        return
+    _digest(v["restored_preimage_digest"], "rollback.restored_preimage_digest")
+    _equal(
+        v["restored_preimage_digest"],
+        _hash(before),
+        "rollback.restored_preimage_digest",
+    )
+
+
+def _validate_terminal_receipt(
+    value: Any,
+    status: Mapping[str, Any],
+    approval: Mapping[str, Any],
+    field: str,
+) -> dict[str, Any]:
+    v = _object(value, _RECEIPT_FIELDS, field, _RECEIPT_SCHEMA)
+    for key in ("actuator_generation", "journal_generation"):
+        _integer(v[key], key, 1)
+    _integer(v["started_at_ms"], "started_at_ms")
+    for key in _RECEIPT_STATUS_FIELDS.split():
+        _equal(v[key], status[key], key)
+    _enum(v["outcome"], "outcome", _TERMINAL_STATES)
+    _equal(v["outcome"], status["state"], "outcome")
+    # Completion may legitimately land after approval expiry; only the
+    # ordering against this attempt's own start is structural.
+    _integer(v["completed_at_ms"], "completed_at_ms", v["started_at_ms"])
+    _digest(v["postcondition_digest"], "postcondition_digest")
+    effect = approval["normalized_requested_effect"]
+    before = _validate_installed_identity(v["before"], "before")
+    after = _validate_installed_identity(v["after"], "after")
+    _equal(
+        before["release_commit"],
+        effect["from_release_commit"],
+        "before.release_commit",
+    )
+    _equal(before["release_tree"], effect["from_release_tree"], "before.release_tree")
+    _equal(
+        before["installed_manifest_digest"],
+        effect["from_installed_manifest_digest"],
+        "before.installed_manifest_digest",
+    )
+    _equal(
+        before["configuration_digest"],
+        status["preconditions"]["installed_configuration_digest"],
+        "before.configuration_digest",
+    )
+    _equal(
+        before["broker_source_commit"],
+        before["release_commit"],
+        "before.broker_source_commit",
+    )
+    _equal(
+        before["broker_source_tree"],
+        before["release_tree"],
+        "before.broker_source_tree",
+    )
+    _equal(
+        after["broker_source_commit"],
+        after["release_commit"],
+        "after.broker_source_commit",
+    )
+    _equal(
+        after["broker_source_tree"],
+        after["release_tree"],
+        "after.broker_source_tree",
+    )
+    if v["outcome"] == _SUCCEEDED:
+        _equal(
+            after["release_commit"],
+            effect["to_release_commit"],
+            "after.release_commit",
+        )
+        _equal(after["release_tree"], effect["to_release_tree"], "after.release_tree")
+    elif canonical_release_bytes(after) != canonical_release_bytes(before):
+        _fail("after", "NOT_CONTENT_PREIMAGE")
+    _validate_rollback(v["rollback"], v["outcome"], before)
+    v["before"], v["after"] = before, after
+    return v
+
+
+def _validated_status_fields(
+    value: Any, expected_approval: Any, *, validate_receipt: bool
+) -> tuple[dict[str, Any], ReleaseRecord]:
+    # The expected approval is revalidated on every path. A caller-constructed
+    # ReleaseRecord is a Python object, never provenance.
+    approval = validate_approval_evidence(expected_approval)
+    if not isinstance(value, Mapping):
+        _fail("status", "OBJECT_REQUIRED")
+    # Read the caller's mapping once. The discriminator, exact field set and
+    # returned record must describe this same bounded detached snapshot.
+    snapshot = _plain(value)
+    canonical_release_bytes(snapshot)
+    state = snapshot.get("state")
+    if type(state) is not str or state not in _STATES:
+        _fail("state", "ENUM")
+    v = _object(snapshot, _status_field_set(state), "status", _STATUS_SCHEMA)
+    effect = approval["normalized_requested_effect"]
+    grant = approval["grant"]
+    fingerprint = request_fingerprint_for(approval)
+    _pattern(v["request_id"], "request_id", _BROKER_ID)
+    for key in (
+        "request_fingerprint",
+        "approval_evidence_digest",
+        "authenticated_principal_digest",
+        "effective_grant_digest",
+        "normalized_requested_effect_digest",
+        "action_target_digest",
+        "target_ref",
+    ):
+        _digest(v[key], key)
+    _uuid(v["owner_installation_id"], "owner_installation_id")
+    for key in ("from_release_commit", "to_release_commit"):
+        _pattern(v[key], key, _HEX40)
+    _enum(v["action_family"], "action_family", _ACTIONS)
+    # A matching shortened id alone never validates a family: the full
+    # fingerprint is required as well.
+    _equal(v["request_fingerprint"], fingerprint, "request_fingerprint")
+    _equal(v["request_id"], broker_request_id_for(fingerprint), "request_id")
+    for key in (
+        "operation_key",
+        "approved_transition_ref",
+        "owner_installation_id",
+        "target_ref",
+        "effective_grant_digest",
+    ):
+        _equal(v[key], approval[key], key)
+    _equal(
+        v["approval_evidence_digest"], _hash(approval), "approval_evidence_digest"
+    )
+    _equal(
+        v["authenticated_principal_digest"],
+        _hash(approval["principal_projection"]),
+        "authenticated_principal_digest",
+    )
+    _equal(
+        v["normalized_requested_effect_digest"],
+        _hash(effect),
+        "normalized_requested_effect_digest",
+    )
+    _equal(v["action_family"], approval["action"], "action_family")
+    _equal(
+        v["action_target_digest"],
+        _hash({"action": approval["action"], "target_ref": approval["target_ref"]}),
+        "action_target_digest",
+    )
+    _equal(
+        v["from_release_commit"],
+        effect["from_release_commit"],
+        "from_release_commit",
+    )
+    _equal(v["to_release_commit"], effect["to_release_commit"], "to_release_commit")
+    if state == _NOT_FOUND:
+        # Common fields only. This validator cannot establish the physical
+        # fact that a qualified owner found no journal family, and it neither
+        # fabricates a start identity nor authorizes dispatch or retry.
+        return v, approval
+    _integer(v["actuator_generation"], "actuator_generation", 1)
+    _integer(v["journal_generation"], "journal_generation", 1)
+    started = _integer(v["started_at_ms"], "started_at_ms")
+    # Historical ordering inside the original lifetime, not current-time proof.
+    if not approval["created_at_ms"] <= started < approval["expires_at_ms"]:
+        _fail("started_at_ms", "OUTSIDE_APPROVAL_LIFETIME")
+    preconditions = validate_precondition_manifest(v["preconditions"])
+    admission = validate_admission(v["admission"])
+    v["preconditions"], v["admission"] = preconditions, admission
+    _equal(
+        v["expected_precondition_digest"],
+        _hash(preconditions),
+        "expected_precondition_digest",
+    )
+    _equal(v["admission_digest"], _hash(admission), "admission_digest")
+    for key in ("owner_installation_id", "target_ref"):
+        _equal(preconditions[key], approval[key], "preconditions." + key)
+    _equal(
+        preconditions["approval_evidence_digest"],
+        _hash(approval),
+        "preconditions.approval_evidence_digest",
+    )
+    _equal(
+        preconditions["grant_digest"], _hash(grant), "preconditions.grant_digest"
+    )
+    _equal(
+        preconditions["authority_policy_hash"],
+        grant["authority_policy_hash"],
+        "preconditions.authority_policy_hash",
+    )
+    for key in _PRECONDITION_EFFECT_FIELDS.split():
+        _equal(preconditions[key], effect[key], "preconditions." + key)
+    for key in (
+        "operation_key",
+        "approved_transition_ref",
+        "target_ref",
+        "owner_installation_id",
+        "effective_grant_digest",
+    ):
+        _equal(admission[key], approval[key], "admission." + key)
+    _equal(
+        admission["request_fingerprint"], fingerprint, "admission.request_fingerprint"
+    )
+    _equal(admission["boot_id"], preconditions["boot_id"], "admission.boot_id")
+    _equal(
+        admission["admission_contract_digest"],
+        preconditions["admission_contract_digest"],
+        "admission.admission_contract_digest",
+    )
+    # admission.target_observation_digest keeps only its existing strict digest
+    # grammar: the canonical Runtime producer owns its derivation, and no
+    # durable Event write or maintenance exclusion is proved here.
+    if state in _TERMINAL_STATES and validate_receipt:
+        v["terminal_receipt"] = _validate_terminal_receipt(
+            v["terminal_receipt"], v, approval, "terminal_receipt"
+        )
+    return v, approval
+
+
+def validate_release_terminal_status(
+    value: Any, *, expected_approval: Any
+) -> ReleaseRecord:
+    """Validate one recorded status state against its canonical approval.
+
+    Detached evidence only. Consistency proves no journal write, effect,
+    observation, exclusion or recovery ever happened, and a valid NOT_FOUND
+    record authorizes neither dispatch nor retry.
+    """
+    v, _ = _validated_status_fields(value, expected_approval, validate_receipt=True)
+    return _freeze(v)
+
+
+def validate_release_terminal_receipt(
+    value: Any, *, expected_status: Any, expected_approval: Any
+) -> ReleaseRecord:
+    """Validate a supplied receipt against a complete terminal status header.
+
+    The expected status header is revalidated through the shared private
+    helper, which does not validate that status's embedded receipt, so no
+    status to receipt to status recursion exists. The supplied receipt must
+    equal the embedded one in canonical bytes. Correlation with the canonical
+    approval cannot be suppressed by any argument.
+    """
+    status, approval = _validated_status_fields(
+        expected_status, expected_approval, validate_receipt=False
+    )
+    _enum(status["state"], "state", _TERMINAL_STATES)
+    receipt = _validate_terminal_receipt(value, status, approval, "receipt")
+    if canonical_release_bytes(receipt) != canonical_release_bytes(
+        status["terminal_receipt"]
+    ):
+        _fail("receipt", "EMBEDDED_MISMATCH")
+    return _freeze(receipt)
