@@ -513,3 +513,71 @@ def test_overlapping_activation_cannot_retry_or_clear_quarantine(
             await service.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("phase", ["schedule", "terminal"])
+@pytest.mark.parametrize("failure", ["exception", "cancel"])
+def test_activation_phase_failure_quarantines_after_claim(
+    config, monkeypatch, phase, failure
+):
+    finalizations = []
+
+    def finalize(self):
+        finalizations.append(self)
+
+    monkeypatch.setattr(
+        ReleaseControlConsumer, "finalize_unresolved_admission", finalize, raising=False
+    )
+    monkeypatch.setattr(
+        "control_plane.codex_worker.validate_secret_canary_verdict", lambda v, **kw: v
+    )
+    s = _armed(
+        config,
+        release_control_consumer_factory=ReleaseControlConsumer,
+        service_state="AWAITING_CANARY",
+    )
+
+    async def run():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def phase_hook():
+            entered.set()
+            await release.wait()
+            raise StateConflict("synthetic phase failure")
+
+        await s.start()
+        s.supervisor.secret_canary_verdict = {}
+        s.supervisor.require_complete_launch_attestation = False
+        monkeypatch.setattr(
+            s,
+            (
+                "_schedule_recovered_runs"
+                if phase == "schedule"
+                else "_replay_terminal_returns_on_startup"
+            ),
+            phase_hook,
+        )
+        task = asyncio.create_task(s.activate_canary({}))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            assert s.service_state == "ACTIVATING_CANARY"
+            with pytest.raises(ServiceError):
+                await s.activate_canary({})
+            if failure == "cancel":
+                task.cancel()
+            else:
+                release.set()
+            result = await asyncio.gather(task, return_exceptions=True)
+            assert isinstance(
+                result[0],
+                asyncio.CancelledError if failure == "cancel" else StateConflict,
+            )
+            assert s.service_state == "QUARANTINED", (phase, failure, s.service_state)
+            assert len(finalizations) == (1 if phase == "terminal" else 0)
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+            await s.close()
+
+    asyncio.run(run())

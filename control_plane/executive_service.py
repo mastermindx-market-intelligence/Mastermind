@@ -2507,6 +2507,10 @@ class ExecutiveControlService:
         try:
             await self._finalize_release_admission_on_startup()
             await self._replay_terminal_returns_on_startup()
+        except asyncio.CancelledError:
+            if self.config.release_control_armed:
+                self._service_state = "QUARANTINED"
+            raise
         except Exception:
             self._service_state = "QUARANTINED"
             raise
