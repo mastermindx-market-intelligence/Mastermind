@@ -103,7 +103,14 @@ class DirectLaunchTests(unittest.TestCase):
         child = self.start(root, action="launch")
         value = self.started(child)
         self.assertEqual(value["argv"], ["run", "--profile-file", str(root / "connection/profile.yaml")])
-        self.finish(child)
+        out, err = child.communicate("stop\n", timeout=3)
+        self.assertEqual(child.returncode, 75)
+        self.assertEqual(out, "")
+        stopped = json.loads(err)
+        self.assertEqual(stopped["state"], "TUNNEL_CLIENT_EXITED")
+        self.assertEqual(stopped["child_returncode"], 0)
+        self.assertTrue(stopped["retry_allowed"])
+        self.assertTrue(stopped["automatic_restart_allowed"])
 
     def test_supervised_duplicate_stays_stopped_without_displacing_first(self):
         root = self.stage("supervised")
@@ -118,7 +125,12 @@ class DirectLaunchTests(unittest.TestCase):
         self.assertEqual(value["execution_state"], "NOT_STARTED")
         self.assertFalse(value["automatic_restart_allowed"])
         self.assertIsNone(first.poll(), "Existing client was displaced")
-        self.finish(first)
+        out, err = first.communicate("stop\n", timeout=3)
+        self.assertEqual(first.returncode, 75)
+        self.assertEqual(out, "")
+        stopped = json.loads(err)
+        self.assertEqual(stopped["state"], "TUNNEL_CLIENT_EXITED")
+        self.assertTrue(stopped["automatic_restart_allowed"])
 
     def test_exec_strips_other_account_and_tunnel_environment(self):
         root = self.stage("bundle")

@@ -660,7 +660,23 @@ def main() -> int:
             owner = service_owner(receipt)
             with service_lock(owner) as fd:
                 os.set_inheritable(fd, True)
-                os.execve(executable, command, clean_env(dict(os.environ)))
+                if args.action == "run":
+                    os.execve(executable, command, clean_env(dict(os.environ)))
+                # launchd uses KeepAlive SuccessfulExit=false so local/preflight
+                # refusals can return zero and remain stopped. Once the real
+                # tunnel client has started, however, any later return means the
+                # transport is no longer serving. Normalize even a clean child
+                # exit to a nonzero supervisor status so launchd restarts the
+                # same seat service instead of silently leaving it offline.
+                child = subprocess.run(command, env=clean_env(dict(os.environ)), check=False)
+                print(json.dumps({
+                    "state": "TUNNEL_CLIENT_EXITED",
+                    "child_returncode": child.returncode,
+                    "retry_allowed": True,
+                    "execution_state": "STOPPED",
+                    "automatic_restart_allowed": True,
+                }), file=sys.stderr)
+                return 75
             return 0
         else:
             value = verify(root)
