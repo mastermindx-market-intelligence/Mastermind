@@ -1,0 +1,137 @@
+{
+  "capability": "BUILT_NOT_PROVEN",
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "procedure_pin": "8b08228e6126fe4654b04ec4cf1b85ee7b00af3a",
+  "target_pr": 1046,
+  "target_head": "17ed169f071af69205cf7a074db32a7cd148c4c0",
+  "files": [
+    {
+      "path": "app/mastermind_os/src/orchestration/operation-controller.ts",
+      "original_sha256": "cc1a044ad42bd45c2379b2ab784b52bd951699117dd4e1fa2932af6389ff8963",
+      "repaired_sha256": "f6c7c9ce4cc4db25ac7b1dbef325408b2b8336751fa7b8dfc25f1a14a6b625ed"
+    },
+    {
+      "path": "app/mastermind_os/src/App.test.tsx",
+      "original_sha256": "9a8f9f45ca99de1756ee9f89ab88f0dc032d623f9bc139bb4d245dd5c568ac60",
+      "repaired_sha256": "f3d72397df6a059ceaaaeeda684e8a49af3fead1eb92f10d76c8cd4f681fe761"
+    }
+  ],
+  "new_test_path": "app/mastermind_os/src/orchestration/operation-controller-recovery.test.ts",
+  "new_test_sha256": "f446034403de5708a046d9eb1882ac7ef53bba5807383c4cf16d90a1f63555ba",
+  "patch_sha256": "9fdd115b77bb4dea62326d248960152c8432bcf7c15a799e6d42aceaf81bf9a7",
+  "original_app_paths_verified": 77,
+  "changed_original_paths": [
+    {
+      "path": "app/mastermind_os/src/App.test.tsx",
+      "original_blob": "9db08cc3cabaaf4e9ffc35716ab00260e5394bef",
+      "candidate_blob": "43af4abcfe8a881f08ab4e02bfc36d4f9637c45a"
+    },
+    {
+      "path": "app/mastermind_os/src/orchestration/operation-controller.ts",
+      "original_blob": "d3bf12ac8936077778ddfc44121364cf2d468b5b",
+      "candidate_blob": "72b3be184cc8e7a730c958844eeb1386f3e9e8b9"
+    }
+  ],
+  "checks": [
+    {
+      "name": "unit-regression-red",
+      "exit_code": 1,
+      "log_sha256": "8a7e34210e6624413bbfd762fd98b0ad8ab3f4fe00817cd109b11bdaaf0dcdf3",
+      "log_name": "pr1046-regression-red-final.log"
+    },
+    {
+      "name": "unit-regression-green",
+      "exit_code": 0,
+      "log_sha256": "5a3a8323b304f6d17e2d77e112922434a3c35ba71feddab79574ea5746bdf00b",
+      "log_name": "pr1046-regression-green-final.log"
+    },
+    {
+      "name": "ui-regression-red",
+      "exit_code": 1,
+      "log_sha256": "30ce10996bee7bbf33daf9a2a7c121850297a0c965a18edd6cc19c33020d46da",
+      "log_name": "pr1046-ui-red.log"
+    },
+    {
+      "name": "ui-regression-green",
+      "exit_code": 0,
+      "log_sha256": "6e7dfebbea62c0b3af9623b28334b0e2141024a9412accbd46afa90401ebaffa",
+      "log_name": "pr1046-ui-green.log"
+    },
+    {
+      "name": "typecheck-accepted",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "log_sha256": "20aa618c5feed49ebeca9949c4e1449d20443655e0fc77de19db43e4dfa2194c",
+      "log_name": "pr1046-typecheck-accepted.log"
+    },
+    {
+      "name": "full-frontend-accepted",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "exit_code": 0,
+      "log_sha256": "113cbd5c598f7e1cfcefd70af65790b0cb77273fa39dc8bab83fd829df2c5b25",
+      "log_name": "pr1046-full-frontend-accepted.log"
+    },
+    {
+      "name": "web-build-accepted",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exit_code": 0,
+      "log_sha256": "428a2c2bcd65a42cf06fc5899aa788f6b2fd0e9efd41f2c819a6238451f8fd26",
+      "log_name": "pr1046-web-build-accepted.log"
+    },
+    {
+      "name": "native-assets-accepted",
+      "command": [
+        "npm",
+        "run",
+        "build",
+        "--",
+        "--mode",
+        "native"
+      ],
+      "exit_code": 0,
+      "log_sha256": "5e103776d305a3a443415b1b77ee476cd3560d10c4208d9b1df249da54c42384",
+      "log_name": "pr1046-native-assets-accepted.log"
+    }
+  ],
+  "unit_regressions_before": {
+    "failed": 7,
+    "passed": 2
+  },
+  "unit_regressions_after": {
+    "passed": 9
+  },
+  "app_regression_before": {
+    "failed": 1,
+    "filtered": 64
+  },
+  "app_regression_after": {
+    "passed": 1,
+    "filtered": 64
+  },
+  "frontend_after": {
+    "passed": 556,
+    "skipped": 1,
+    "test_files": 13
+  },
+  "patch_reverse_check_exit": 0,
+  "self_repair": "The added App test initially accessed .mock on an interface-typed method, causing TS2339. Replaced it with the typed call-argument matcher; all final checks passed. Production repair unchanged.",
+  "limits": [
+    "Injected host ports; not live provider transport.",
+    "Full frontend suite, not repository-wide Python or native Rust.",
+    "No independent review, deployment, or native recipient consumption.",
+    "Existing Tauri static/dynamic import warning retained.",
+    "Publication is a patch for the incumbent #1046 carrier, not a replacement App source owner."
+  ],
+  "recorded_at": "2026-09-29T05:49:31.263575+00:00"
+}
