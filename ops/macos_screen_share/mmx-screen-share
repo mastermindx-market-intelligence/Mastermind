@@ -1,0 +1,422 @@
+#!/bin/zsh
+set -eu
+setopt NULL_GLOB
+umask 077
+
+STATE="$HOME/.local/state/mastermind/screen-share"
+LEASE="$STATE/lease"
+LOCK="$STATE/lock"
+PROMPT_DIR="$STATE/prompts"
+ENROLL_DIR="$STATE/enroll"
+DEFAULT_TTL=1800
+MAX_TTL=14400
+PROMPT_GRACE=300
+SCREEN_BIN="/System/Applications/Utilities/Screen Sharing.app/Contents/MacOS/Screen Sharing"
+
+mkdir -p "$STATE" "$PROMPT_DIR" "$ENROLL_DIR"
+
+usage() {
+  echo "usage:"
+  echo "  mmx-screen-share open <target> [ttl_seconds]"
+  echo "  mmx-screen-share close [target]"
+  echo "  mmx-screen-share status"
+  echo "  mmx-screen-share doctor [target]"
+  echo "  mmx-screen-share enroll <target>"
+  echo "  mmx-screen-share reap"
+}
+
+target_config() {
+  case "$1" in
+    mini1) echo "mini1 15901 mini1 12201 mini1.local" ;;
+    mini2) echo "mini2 15902 mini2 12202 mini2.local" ;;
+    mini3) echo "mini3 15903 mini3 12203 mini3.local" ;;
+    mini4) echo "mini4 15904 mini4 12204 mini4-fallback" ;;
+    m1studio) echo "m1studio 15911 chriswong 12211 m1studio.local" ;;
+    m2studio) echo "m2studio 15912 chriswong 12212 m2studio.taila6eca1.ts.net" ;;
+    *) return 1 ;;
+  esac
+}
+
+targets() {
+  printf '%s\n' mini1 mini2 mini3 mini4 m1studio m2studio
+}
+
+is_uint() {
+  [[ "$1" == <-> ]]
+}
+
+screen_pid_valid() {
+  local pid="$1" cmd
+  is_uint "$pid" || return 1
+  cmd=$(/bin/ps -p "$pid" -o command= 2>/dev/null || true)
+  [[ "$cmd" == "$SCREEN_BIN"* ]]
+}
+
+screen_pids() {
+  /usr/bin/pgrep -f "^/System/Applications/Utilities/Screen Sharing.app/Contents/MacOS/Screen Sharing" 2>/dev/null || true
+}
+
+port_ready() {
+  local banner
+  banner=$( (/usr/bin/nc -G 2 -w 3 127.0.0.1 "$1" | /usr/bin/head -c 12) 2>/dev/null || true)
+  [[ "$banner" == RFB\ 003.* ]]
+}
+keychain_seeded() {
+  local port="$1" user="$2"
+  /usr/bin/security find-internet-password -s 127.0.0.1 -P "$port" -r "vnc " -a "$user" >/dev/null 2>&1
+}
+
+read_lease() {
+  [[ -f "$LEASE" ]] || return 1
+  IFS=$'\t' read -r LEASE_TARGET LEASE_PORT LEASE_USER LEASE_PID LEASE_EXPIRES < "$LEASE" || return 1
+  [[ -n "$LEASE_TARGET" && -n "$LEASE_PORT" && -n "$LEASE_USER" ]] || return 1
+  is_uint "$LEASE_PID" || return 1
+  is_uint "$LEASE_EXPIRES" || return 1
+}
+
+write_lease() {
+  printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" > "$LEASE"
+}
+
+acquire_lock() {
+  if mkdir "$LOCK" 2>/dev/null; then
+    printf '%s\n' "$$" > "$LOCK/pid"
+    return 0
+  fi
+  local owner
+  owner=$(cat "$LOCK/pid" 2>/dev/null || true)
+  if is_uint "$owner" && ! kill -0 "$owner" 2>/dev/null; then
+    rm -rf "$LOCK"
+    mkdir "$LOCK"
+    printf '%s\n' "$$" > "$LOCK/pid"
+    return 0
+  fi
+  echo "BUSY another screen-share operation is active"
+  return 1
+}
+
+release_lock() {
+  rm -rf "$LOCK"
+}
+close_pid() {
+  local pid="$1" i
+  if ! screen_pid_valid "$pid"; then
+    return 0
+  fi
+  kill "$pid" 2>/dev/null || return 1
+  for i in {1..20}; do
+    screen_pid_valid "$pid" || return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+pid_prompt_state() {
+  local pid="$1"
+  /usr/bin/osascript - "$pid" <<'APPLESCRIPT' 2>/dev/null || { echo unknown; return 0; }
+on run argv
+  set wantedPid to item 1 of argv as integer
+  tell application "System Events"
+    set matches to every application process whose unix id is wantedPid
+    if (count of matches) is 0 then return "gone"
+    tell item 1 of matches
+      try
+        set promptText to (value of every static text of every window) as text
+        if promptText contains "requires a user name and password" then return "yes"
+        if promptText contains "Enter the user name and password to continue" then return "yes"
+      on error
+        return "unknown"
+      end try
+    end tell
+  end tell
+  return "no"
+end run
+APPLESCRIPT
+}
+cancel_pid_prompts() {
+  local pid="$1"
+  /usr/bin/osascript - "$pid" <<'APPLESCRIPT' >/dev/null 2>&1
+on run argv
+  set wantedPid to item 1 of argv as integer
+  tell application "System Events"
+    set matches to every application process whose unix id is wantedPid
+    if (count of matches) is 0 then return
+    tell item 1 of matches
+      set promptText to ""
+      try
+        set promptText to (value of every static text of every window) as text
+      end try
+      if promptText contains "requires a user name and password" or promptText contains "Enter the user name and password to continue" then
+        repeat with w in windows
+          try
+            click button "Cancel" of w
+          end try
+        end repeat
+      end if
+    end tell
+  end tell
+end run
+APPLESCRIPT
+}
+
+launch_new_instance() {
+  local url="$1" before newpid="" p i
+  before=" $(screen_pids | tr '\n' ' ') "
+  /usr/bin/open -n -a "Screen Sharing" "$url"
+  for i in {1..30}; do
+    sleep 0.2
+    for p in $(screen_pids); do
+      if [[ "$before" != *" $p "* ]]; then
+        newpid="$p"
+      fi
+    done
+    [[ -n "$newpid" ]] && break
+  done
+  [[ -n "$newpid" ]] || return 1
+  echo "$newpid"
+}
+
+ensure_screen_idle() {
+  local pids
+  pids=$(screen_pids | tr '\n' ',' | sed 's/,$//')
+  if [[ -n "$pids" ]]; then
+    echo "SCREEN_SHARING_BUSY_UNMANAGED pids=$pids"
+    return 1
+  fi
+}
+
+reap_managed() {
+  [[ -f "$LEASE" ]] || return 0
+  if ! read_lease; then
+    rm -f "$LEASE"
+    return 0
+  fi
+  local now
+  now=$(date +%s)
+  if ! screen_pid_valid "$LEASE_PID"; then
+    rm -f "$LEASE"
+    return 0
+  fi
+  if (( now < LEASE_EXPIRES )); then
+    return 0
+  fi
+  if close_pid "$LEASE_PID"; then
+    rm -f "$LEASE"
+    echo "REAPED managed target=$LEASE_TARGET pid=$LEASE_PID"
+  else
+    echo "CLEANUP_FAILED managed target=$LEASE_TARGET pid=$LEASE_PID" >&2
+    return 1
+  fi
+}
+reap_prompts() {
+  local now pid state marker first exempt expiry
+  now=$(date +%s)
+  for pid in $(screen_pids); do
+    marker="$PROMPT_DIR/$pid"
+    exempt="$ENROLL_DIR/$pid"
+    if [[ -f "$exempt" ]]; then
+      expiry=$(cat "$exempt" 2>/dev/null || echo 0)
+      if is_uint "$expiry" && (( now < expiry )); then
+        rm -f "$marker"
+        continue
+      fi
+      rm -f "$exempt"
+    fi
+    state=$(pid_prompt_state "$pid")
+    if [[ "$state" != "yes" ]]; then
+      [[ "$state" == "no" || "$state" == "gone" ]] && rm -f "$marker"
+      continue
+    fi
+    if [[ ! -f "$marker" ]]; then
+      printf '%s\n' "$now" > "$marker"
+      continue
+    fi
+    first=$(cat "$marker" 2>/dev/null || echo "$now")
+    is_uint "$first" || first="$now"
+    if (( now - first >= PROMPT_GRACE )); then
+      if cancel_pid_prompts "$pid"; then
+        rm -f "$marker"
+        echo "CANCELLED stale auth prompt pid=$pid"
+      fi
+    fi
+  done
+  for marker in "$PROMPT_DIR"/*; do
+    pid=$(/usr/bin/basename "$marker")
+    screen_pid_valid "$pid" || rm -f "$marker" "$ENROLL_DIR/$pid"
+  done
+}
+
+active_tunnel_alias() {
+  /bin/ps -axo command= | /usr/bin/awk '/\/usr\/bin\/ssh -N mmx-home/ {print $NF; exit}'
+}
+
+route_pinned() {
+  local alias="$1" label="$2" vncport="$3" sshport="$4" rendered
+  [[ -n "$alias" ]] || return 1
+  rendered=$(/usr/bin/ssh -G "$alias" 2>/dev/null || true)
+  echo "$rendered" | /usr/bin/grep -Fq "localforward $vncport [$label.local]:5900" || return 1
+  echo "$rendered" | /usr/bin/grep -Fq "localforward $sshport [$label.local]:22" || return 1
+}
+
+ssh_hostkey_identity() {
+  local port="$1" pin_alias="$2" pin scan
+  pin=$(/usr/bin/ssh-keygen -F "$pin_alias" -f "$HOME/.ssh/known_hosts" 2>/dev/null \
+    | /usr/bin/awk '$2=="ssh-ed25519"{print $2" "$3; exit}')
+  [[ -n "$pin" ]] || { echo UNPINNED; return 0; }
+  scan=$(/usr/bin/ssh-keyscan -T 3 -p "$port" 127.0.0.1 2>/dev/null \
+    | /usr/bin/awk '$2=="ssh-ed25519"{print $2" "$3; exit}')
+  [[ -n "$scan" ]] || { echo UNKNOWN; return 0; }
+  if [[ "$scan" == "$pin" ]]; then echo VERIFIED; else echo MISMATCH; fi
+}
+
+doctor_one() {
+  local target="$1" cfg label port user sshport pin_alias tunnel keychain identity route alias
+  cfg=$(target_config "$target") || return 2
+  read -r label port user sshport pin_alias <<< "$cfg"
+  if port_ready "$port"; then tunnel=READY; else tunnel=DOWN; fi
+  if keychain_seeded "$port" "$user"; then keychain=SEEDED; else keychain=MISSING; fi
+  alias=$(active_tunnel_alias)
+  if route_pinned "$alias" "$label" "$port" "$sshport"; then route=PINNED; else route=MISMATCH; fi
+  identity=$(ssh_hostkey_identity "$sshport" "$pin_alias")
+  printf '%-10s vnc=%-5s tunnel=%-5s route=%-8s identity=%-8s keychain=%-7s account=%s\n' \
+    "$label" "$port" "$tunnel" "$route" "$identity" "$keychain" "$user"
+}
+
+cmd=""
+(( $# > 0 )) && cmd="$1"
+case "$cmd" in
+  reap)
+    reap_managed
+    reap_prompts
+    exit 0
+    ;;
+  status)
+    reap_managed
+    if read_lease; then
+      echo "ACTIVE target=$LEASE_TARGET pid=$LEASE_PID expires_at_epoch=$LEASE_EXPIRES"
+    else
+      echo "IDLE"
+    fi
+    prompt_count=0
+    for marker in "$PROMPT_DIR"/*; do prompt_count=$((prompt_count + 1)); done
+    pids=$(screen_pids | tr '\n' ',' | sed 's/,$//')
+    [[ -n "$pids" ]] || pids=none
+    echo "screen_pids=$pids tracked_auth_prompts=$prompt_count"
+    exit 0
+    ;;
+  doctor)
+    reap_managed
+    if (( $# > 1 )); then
+      doctor_one "$2"
+    else
+      for t in $(targets); do doctor_one "$t"; done
+    fi
+    if launchctl print "gui/$(id -u)/com.mastermind.screen-share-janitor" >/dev/null 2>&1; then
+      echo "janitor=LOADED"
+    else
+      echo "janitor=NOT_LOADED"
+    fi
+    exit 0
+    ;;
+  close)
+    acquire_lock || exit 3
+    trap release_lock EXIT
+    reap_managed
+    if ! read_lease; then
+      echo "IDLE"
+      exit 0
+    fi
+    if (( $# > 1 )) && [[ "$2" != "$LEASE_TARGET" ]]; then
+      echo "TARGET_MISMATCH active_target=$LEASE_TARGET requested=$2"
+      exit 6
+    fi
+    if close_pid "$LEASE_PID"; then
+      old_target="$LEASE_TARGET"
+      old_pid="$LEASE_PID"
+      rm -f "$LEASE"
+      echo "CLOSED target=$old_target pid=$old_pid"
+      exit 0
+    fi
+    echo "CLEANUP_FAILED target=$LEASE_TARGET pid=$LEASE_PID" >&2
+    exit 7
+    ;;
+  enroll)
+    (( $# > 1 )) || { usage; exit 2; }
+    target="$2"
+    cfg=$(target_config "$target") || { usage; exit 2; }
+    read -r label port user sshport pin_alias <<< "$cfg"
+    port_ready "$port" || { echo "TUNNEL_DOWN target=$label endpoint=127.0.0.1:$port"; exit 8; }
+    acquire_lock || exit 3
+    trap release_lock EXIT
+    reap_managed
+    if read_lease; then
+      echo "BUSY active_target=$LEASE_TARGET pid=$LEASE_PID expires_at_epoch=$LEASE_EXPIRES"
+      exit 3
+    fi
+    ensure_screen_idle || exit 11
+    newpid=$(launch_new_instance "vnc://$user@127.0.0.1:$port") || { echo "LAUNCH_FAILED target=$label"; exit 9; }
+    printf '%s\n' "$(( $(date +%s) + 900 ))" > "$ENROLL_DIR/$newpid"
+    echo "ENROLLMENT_OPEN target=$label pid=$newpid endpoint=127.0.0.1:$port account=$user"
+    echo "Enter that Mac account password once, check Remember password, then Sign In."
+    echo "Afterward run: mmx-screen-share doctor $label"
+    exit 0
+    ;;
+  open)
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
+
+(( $# > 1 )) || { usage; exit 2; }
+target="$2"
+ttl="$DEFAULT_TTL"
+(( $# > 2 )) && ttl="$3"
+cfg=$(target_config "$target") || { usage; exit 2; }
+read -r label port user sshport pin_alias <<< "$cfg"
+
+is_uint "$ttl" || { echo "INVALID_TTL"; exit 2; }
+(( ttl >= 60 && ttl <= MAX_TTL )) || { echo "INVALID_TTL range=60-$MAX_TTL"; exit 2; }
+
+acquire_lock || exit 3
+trap release_lock EXIT
+reap_managed
+if read_lease; then
+  echo "BUSY active_target=$LEASE_TARGET pid=$LEASE_PID expires_at_epoch=$LEASE_EXPIRES"
+  exit 3
+fi
+ensure_screen_idle || exit 11
+
+port_ready "$port" || { echo "TUNNEL_DOWN target=$label endpoint=127.0.0.1:$port"; exit 8; }
+if ! keychain_seeded "$port" "$user"; then
+  echo "AUTH_NOT_SEEDED target=$label endpoint=127.0.0.1:$port account=$user"
+  echo "Run: mmx-screen-share enroll $label"
+  exit 4
+fi
+
+newpid=$(launch_new_instance "vnc://$user@127.0.0.1:$port") || { echo "LAUNCH_FAILED target=$label"; exit 9; }
+expires=$(( $(date +%s) + ttl ))
+write_lease "$label" "$port" "$user" "$newpid" "$expires"
+
+sleep 2
+if ! screen_pid_valid "$newpid"; then
+  rm -f "$LEASE"
+  echo "CONNECT_FAILED target=$label process_exited"
+  exit 10
+fi
+
+prompt=$(pid_prompt_state "$newpid")
+if [[ "$prompt" == "yes" ]]; then
+  close_pid "$newpid" || true
+  rm -f "$LEASE"
+  echo "AUTH_PROMPT_BLOCKED target=$label; cached credential was not accepted"
+  echo "Run: mmx-screen-share enroll $label"
+  exit 5
+fi
+if [[ "$prompt" == "unknown" ]]; then
+  echo "WARNING prompt-state could not be inspected; managed PID/TTL cleanup remains armed"
+fi
+
+echo "OPEN target=$label pid=$newpid endpoint=127.0.0.1:$port account=$user ttl_seconds=$ttl"
+echo "Cleanup: mmx-screen-share close $label"
