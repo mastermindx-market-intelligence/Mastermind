@@ -89,9 +89,17 @@ from control_plane.executive_runtime import (
 INTENT_SCHEMA = "mastermind.ceo_intent.v1"
 INTENT_SCHEMA_V2 = "mastermind.ceo_intent.v2"
 
+#: Schema of the strict NON-CEO service-principal intent.  Same sink, same
+#: adapter, same Job path — a second *principal class*, never a second control
+#: plane.  Deliberately NOT a member of the ``mastermind.ceo_intent.`` family:
+#: no CEO reader may classify a bounded service audit as CEO provenance
+#: (``executive_inbox.py:118`` keeps its CEO-only pin unchanged).
+INTENT_SCHEMA_SERVICE = "mastermind.executive_service_intent.v1"
+
 #: Schema of the receipt this module returns.
 RECEIPT_SCHEMA = "mastermind.ceo_intent_receipt.v1"
 RECEIPT_SCHEMA_V2 = "mastermind.ceo_intent_receipt.v2"
+RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
 _DIALOGUE_SOURCE_UNSET = object()
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
@@ -136,6 +144,36 @@ _V2_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"intent_kind", "business_impact"
 _V2_OPTIONAL_KEYS = _OPTIONAL_KEYS
 _V2_INTENT_KIND = "executive_coo_cycle"
 _V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
+
+#: The strict service-principal envelope: the v1 key set plus exactly two typed
+#: evidence keys.  ``principal_id`` names the bounded service identity;
+#: ``task_kind`` names the reviewed work class.  The grant still lives in
+#: ``execution_contract.requested_authorities`` — this branch adds no authority
+#: carrier, it only pins the class and constrains the contract.
+_SERVICE_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"principal_id", "task_kind"})
+_SERVICE_OPTIONAL_KEYS = _OPTIONAL_KEYS
+_SERVICE_TASK_KINDS = frozenset({"research"})
+_SERVICE_PRINCIPAL_RE = re.compile(r"^svc-[a-z0-9-]{3,63}$")
+_SERVICE_INTENT_ID_PREFIX = "svc-"
+_SERVICE_ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH"})
+#: Canonical sink-owned enrollment contract for the current non-CEO service
+#: principal tier. A syntactically valid svc-* identifier is not enrollment.
+#: Future principals require a reviewed source change here; upstream emitters
+#: must prove their registry remains identical to this closed set.
+SERVICE_PRINCIPAL_BINDINGS = frozenset(
+    {("svc-site-maintenance", "svc-site-maintenance")}
+)
+#: The READ level of the A0-A7 effect ladder is its weakest rung, ``A0`` — the
+#: same default v1 already rides (``create_job(authority_level="A0")`` and
+#: ``ceo_request.AUTHORITY_LEVEL``).  Not an invented value.
+_SERVICE_AUTHORITY_LEVEL = "A0"
+#: Identities the service schema may never claim, mirrored from the emitter
+#: (``executive_service_principal.py:168``) because the sink may not import the
+#: emitter: the CEO stamp, the human seats, and the runtime's unattributed
+#: ``operator`` default are outside any service principal.
+_RESERVED_ACTOR_RE = re.compile(
+    r"^(ceo[-_.]?sol|ceo$|chairman|chris|operator)", re.IGNORECASE
+)
 
 _GROUNDING_REQUIRED = frozenset({"mastermind_sha", "macro_sha"})
 _GROUNDING_OPTIONAL = frozenset({"boot_packet_schema"})
@@ -544,6 +582,42 @@ def _execution_contract(value: Any) -> dict[str, Any]:
     return result
 
 
+def _require_service_ceiling(contract: Mapping[str, Any]) -> None:
+    """The READ/RESEARCH-only ceiling for the non-CEO service schema.
+
+    The downstream :class:`ExecutiveAuthorityPolicy` GRANTS
+    ``WRITE_BRANCH``/``RUN_TESTS`` when they arrive (``executive_authority.py:21``),
+    so a per-schema read-only ceiling cannot live in the policy file or in the
+    runtime.  It lives here, at the service discriminator: the sink is what
+    stops a service intent from ever REQUESTING a write.
+
+    Called from :func:`validate_intent` and again as a belt immediately before
+    ``create_job`` in :func:`submit_intent`.
+    """
+
+    requested = set(contract["requested_authorities"])
+    if not requested:
+        raise CeoIntentError(
+            "service execution_contract.requested_authorities must not be empty"
+        )
+    outside = sorted(requested - _SERVICE_ALLOWED_AUTHORITIES)
+    if outside:
+        raise CeoIntentError(
+            "service execution_contract.requested_authorities is READ/RESEARCH "
+            f"only; refused {outside}"
+        )
+    if contract.get("allowed_write_paths"):
+        raise CeoIntentError(
+            "a READ/RESEARCH service intent may not declare allowed_write_paths"
+        )
+    level = contract.get("authority_level")
+    if level is not None and level != _SERVICE_AUTHORITY_LEVEL:
+        raise CeoIntentError(
+            "service execution_contract.authority_level must be the READ level "
+            f"{_SERVICE_AUTHORITY_LEVEL!r}; got {level!r}"
+        )
+
+
 def validate_intent(payload: Any) -> dict[str, Any]:
     """Return the canonical form of one closed CEO intent envelope.
 
@@ -562,10 +636,12 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         _exact_keys(raw, "intent", _REQUIRED_KEYS, _OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_V2:
         _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
+    elif schema == INTENT_SCHEMA_SERVICE:
+        _exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)
     else:
         raise CeoIntentError(
-            f"intent.schema must be {INTENT_SCHEMA!r} or {INTENT_SCHEMA_V2!r}; "
-            f"got {schema!r}"
+            f"intent.schema must be {INTENT_SCHEMA!r}, {INTENT_SCHEMA_V2!r}, or "
+            f"{INTENT_SCHEMA_SERVICE!r}; got {schema!r}"
         )
     intent: dict[str, Any] = {
         "schema": schema,
@@ -611,6 +687,48 @@ def validate_intent(payload: Any) -> dict[str, Any]:
             )
         intent["intent_kind"] = intent_kind
         intent["business_impact"] = impact
+    if schema == INTENT_SCHEMA_SERVICE:
+        # Closed values first, then the read-only ceiling.  Every refusal here is
+        # service-schema-only: v1/v2 validation above is untouched.
+        principal_id = _text(
+            raw["principal_id"], "intent.principal_id", pattern=_SERVICE_PRINCIPAL_RE
+        )
+        task_kind = _text(raw["task_kind"], "intent.task_kind", max_chars=32)
+        if task_kind not in _SERVICE_TASK_KINDS:
+            raise CeoIntentError(
+                f"intent.task_kind must be {sorted(_SERVICE_TASK_KINDS)!r}; the "
+                "service principal tier admits no other task kind"
+            )
+        if not intent["intent_id"].startswith(_SERVICE_INTENT_ID_PREFIX):
+            raise CeoIntentError(
+                "service intent.intent_id must start with "
+                f"{_SERVICE_INTENT_ID_PREFIX!r} (the service id domain); got "
+                f"{intent['intent_id']!r}"
+            )
+        if _RESERVED_ACTOR_RE.match(intent["actor"]) is not None:
+            raise CeoIntentError(
+                f"service intent.actor {intent['actor']!r} claims a reserved "
+                "identity; the CEO stamp, the chairman/chris seats, and the "
+                "unattributed 'operator' default are outside any service principal"
+            )
+        matching_actors = sorted(
+            actor
+            for enrolled_principal_id, actor in SERVICE_PRINCIPAL_BINDINGS
+            if enrolled_principal_id == principal_id
+        )
+        if len(matching_actors) != 1:
+            raise CeoIntentError(
+                f"service intent.principal_id {principal_id!r} is not a reviewed "
+                "service principal"
+            )
+        if intent["actor"] != matching_actors[0]:
+            raise CeoIntentError(
+                f"service intent.actor {intent['actor']!r} does not match the "
+                f"reviewed principal {principal_id!r}"
+            )
+        _require_service_ceiling(intent["execution_contract"])
+        intent["principal_id"] = principal_id
+        intent["task_kind"] = task_kind
     if "workstream" in raw:
         # A pointer into the Agent OS knowledge plane, recorded for provenance.
         # Nothing in this path opens, resolves, or writes that store.
@@ -711,7 +829,7 @@ def build_receipt(
     duplicate: bool,
     created_at_ms: int,
 ) -> dict[str, Any]:
-    """Assemble the ``mastermind.ceo_intent_receipt.v1`` envelope."""
+    """Assemble the receipt envelope matching the intent schema."""
 
     return _receipt(
         job,
@@ -720,12 +838,23 @@ def build_receipt(
         grounding=intent["grounding"],
         duplicate=duplicate,
         created_at_ms=created_at_ms,
-        receipt_schema=(
-            RECEIPT_SCHEMA_V2
-            if intent.get("schema") == INTENT_SCHEMA_V2
-            else RECEIPT_SCHEMA
-        ),
+        receipt_schema=_receipt_schema_for(intent.get("schema")),
     )
+
+
+def _receipt_schema_for(intent_schema: Any) -> str:
+    """The receipt schema for an intent schema, one-to-one and closed.
+
+    The service receipt is deliberately a distinct string so a receipt reader
+    (``autonomy_first_stratum.py:176`` pins the CEO receipt family) cannot
+    mistake a bounded service audit for a CEO submission.
+    """
+
+    if intent_schema == INTENT_SCHEMA_V2:
+        return RECEIPT_SCHEMA_V2
+    if intent_schema == INTENT_SCHEMA_SERVICE:
+        return RECEIPT_SCHEMA_SERVICE
+    return RECEIPT_SCHEMA
 
 
 def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
@@ -740,6 +869,16 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
     }
     if "workstream" in intent:
         value["workstream"] = intent["workstream"]
+    if intent["schema"] == INTENT_SCHEMA_SERVICE:
+        # Typed service evidence, read off the VALIDATED envelope and stamped
+        # beside the shared base fields.  These are EVIDENCE, never a grant: the
+        # grant is adjudicated downstream, unchanged, by the authority policy.
+        requested = list(intent["execution_contract"]["requested_authorities"])
+        value["principal_id"] = intent["principal_id"]
+        value["task_kind"] = intent["task_kind"]
+        value["requested_authorities"] = requested
+        value["effective_authorities"] = list(requested)
+        value["write_authorities"] = []
     return value
 
 
@@ -767,7 +906,11 @@ def _receipt_from_event(
     # under this prefix is a legible refusal, never a receipt for an objective
     # the CEO never sent.
     provenance_schema = provenance.get("schema")
-    if provenance_schema not in {INTENT_SCHEMA, INTENT_SCHEMA_V2}:
+    if provenance_schema not in {
+        INTENT_SCHEMA,
+        INTENT_SCHEMA_V2,
+        INTENT_SCHEMA_SERVICE,
+    }:
         raise CeoIntentError(
             f"intent {intent_id!r} resolves to a record whose provenance schema is "
             f"{provenance_schema!r}, not a closed CEO intent schema"
@@ -894,11 +1037,7 @@ def _receipt_from_event(
         grounding=grounding if isinstance(grounding, Mapping) else {},
         duplicate=True,
         created_at_ms=int(event.get("created_at_ms") or 0),
-        receipt_schema=(
-            RECEIPT_SCHEMA_V2
-            if provenance_schema == INTENT_SCHEMA_V2
-            else RECEIPT_SCHEMA
-        ),
+        receipt_schema=_receipt_schema_for(provenance_schema),
     )
 
 
@@ -1014,23 +1153,51 @@ def submit_intent(
                 raise StateConflict("v1 CEO intent cannot carry a host execution binding")
             if effective_dialogue_source is not None:
                 raise StateConflict("v1 CEO intent cannot carry a host dialogue source")
-            job = runtime.jobs.create_job(
-                intent["objective"],
-                department=intent["department"],
-                priority=intent["priority"],
-                authority_level=contract.get("authority_level", "A0"),
-                branch=contract.get("branch"),
-                worktree=contract.get("worktree"),
-                constraints=contract.get("constraints"),
-                attempt_limit=contract.get("attempt_limit", 10),
-                # The REQUEST's authorities travel unchanged; the policy inside
-                # create_job is the adjudicator.
-                requested_authorities=contract["requested_authorities"],
-                allowed_write_paths=contract.get("allowed_write_paths"),
-                validation_commands=contract.get("validation_commands"),
-                command_id=command_id,
-                provenance=_provenance(intent, fingerprint),
-            )
+            if intent["schema"] == INTENT_SCHEMA_SERVICE:
+                # Belt: the ceiling was enforced at validation, and is re-checked
+                # here so no future caller can reach create_job with a service
+                # envelope that skipped the discriminator.  The seat is EXPLICIT:
+                # ``coo`` is the one seat that skips the typed-executive-
+                # provenance gate, and a service intent must never be seated
+                # above it.  No role, no host binding, no dialogue source.
+                _require_service_ceiling(contract)
+                job = runtime.jobs.create_job(
+                    intent["objective"],
+                    department=intent["department"],
+                    priority=intent["priority"],
+                    authority_level=contract.get("authority_level", "A0"),
+                    branch=contract.get("branch"),
+                    worktree=contract.get("worktree"),
+                    constraints=contract.get("constraints"),
+                    attempt_limit=contract.get("attempt_limit", 10),
+                    # The REQUEST's authorities travel unchanged; the policy
+                    # inside create_job is the adjudicator.
+                    requested_authorities=contract["requested_authorities"],
+                    allowed_write_paths=contract.get("allowed_write_paths"),
+                    validation_commands=contract.get("validation_commands"),
+                    command_id=command_id,
+                    provenance=_provenance(intent, fingerprint),
+                    owner_seat="coo",
+                    escalation_target="coo",
+                )
+            else:
+                job = runtime.jobs.create_job(
+                    intent["objective"],
+                    department=intent["department"],
+                    priority=intent["priority"],
+                    authority_level=contract.get("authority_level", "A0"),
+                    branch=contract.get("branch"),
+                    worktree=contract.get("worktree"),
+                    constraints=contract.get("constraints"),
+                    attempt_limit=contract.get("attempt_limit", 10),
+                    # The REQUEST's authorities travel unchanged; the policy inside
+                    # create_job is the adjudicator.
+                    requested_authorities=contract["requested_authorities"],
+                    allowed_write_paths=contract.get("allowed_write_paths"),
+                    validation_commands=contract.get("validation_commands"),
+                    command_id=command_id,
+                    provenance=_provenance(intent, fingerprint),
+                )
     except StateConflict as exc:
         # ``RuntimeStore.transaction`` converts the UNIQUE-index rejection into
         # StateConflict, so a lost concurrency race and an authority denial
@@ -1087,9 +1254,11 @@ __all__ = [
     "FORBIDDEN_PROGRAMS",
     "INTENT_ID_RE",
     "INTENT_SCHEMA",
+    "INTENT_SCHEMA_SERVICE",
     "INTENT_SCHEMA_V2",
     "MAX_ENVELOPE_BYTES",
     "RECEIPT_SCHEMA",
+    "RECEIPT_SCHEMA_SERVICE",
     "RECEIPT_SCHEMA_V2",
     "SHA_RE",
     "build_receipt",

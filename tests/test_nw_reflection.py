@@ -373,8 +373,7 @@ def test_derive_nudges_only_dead_or_partial_drift_emits(tmp_path):
 
 
 def test_derive_nudges_coverage_and_staleness_folds(tmp_path):
-    cov = {"state": "ok", "coverage_rate": 0.25, "open_theses_n": 4, "resolved_recent_n": 3,
-           "with_context_row_n": 2}
+    cov = _cov(0.25)
     quality = {"state": "ok", "current_streak": {"status": "stale", "runs": 5},
                "gap_notes_latest": 4}
     nudges = nwr.derive_nudges([], cov, quality, "2026-07-13")
@@ -513,8 +512,11 @@ def test_same_asof_rerun_does_not_double_increment(monkeypatch):
 
 
 def _cov(rate: float) -> dict:
-    return {"state": "ok", "coverage_rate": rate, "open_theses_n": 4, "resolved_recent_n": 3,
-            "with_context_row_n": 2}
+    return {"state": "ok", "inputs_complete": True, "coverage_rate": rate,
+            "open_theses_n": 100, "resolved_recent_n": 0, "subjects_n": 100,
+            "with_context_row_n": round(rate * 100), "context_rows_n": 100,
+            "sample_scope": nwr._COVERAGE_SAMPLE_SCOPE,
+            "input_status": {"context": "COMPLETE", "theses": "COMPLETE", "outcomes": "COMPLETE"}}
 
 
 def test_coverage_hysteresis_band(tmp_path):

@@ -29,6 +29,10 @@ from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
+
+# Headless reasoning must never open a permission prompt. Keep this adapter-level
+# invariant independent of user/project Claude settings and config drift.
+_HEADLESS_PERMISSION_MODE = "dontAsk"
 _CLAUDE_AGENT_NAMES = (
     "deep-reasoner", "narrative-analyst", "quant-coder", "signal-scout",
 )
@@ -441,7 +445,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             try:
                 result = await _via_sdk(
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                    rc.get("permission_mode", "default"), mcp_servers, resume, arm,
+                    _HEADLESS_PERMISSION_MODE, mcp_servers, resume, arm,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
                 )
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
@@ -544,7 +548,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     _think_box.clear()
                     result = await _via_subprocess(
                         prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                        rc.get("permission_mode", "default"), base, env_name=_env_name,
+                        _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
                     )
                     # Classify subprocess result for key failure too
                     _classified2 = None
@@ -581,7 +585,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 break
             result = await _via_subprocess(
                 prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                rc.get("permission_mode", "default"), base, env_name=_env_name,
+                _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
             )
             _classified3 = None
             if _pool and _key_id is not None:
@@ -989,7 +993,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         add_dirs=_abs_dirs(rc.get("add_dirs", [])),
         cwd=str(_ROOT),
         max_turns=max_turns or rc.get("research_max_turns", 16),
-        permission_mode=rc.get("permission_mode", "default"),
+        permission_mode=_HEADLESS_PERMISSION_MODE,
         env=_subscription_env(_stream_env_name),
         setting_sources=["project"],
     )

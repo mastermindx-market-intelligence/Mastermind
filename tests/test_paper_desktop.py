@@ -158,10 +158,27 @@ class CoreTests(unittest.TestCase):
             self.call(expected_snapshot=b.digest(self.client.info), arguments={"fileId": "file-a"}, _catalog_pin="0" * 64)
         self.assertNotIn("create_artboard", self.client.calls)
 
-    def test_write_refuses_unreviewed_server_before_dispatch(self):
+    def test_current_server_pin_accepts_0512_and_refuses_0511(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
+        self.client.server = {"name": "paper-desktop", "version": "0.5.12"}
+        catalog_pin = b.digest(self.client.catalog())
+        result = self.call(
+            expected_snapshot=b.digest(self.client.info),
+            arguments={"fileId": "file-a"},
+            _server_pin=b.SUPPORTED_SERVER,
+            _catalog_pin=catalog_pin,
+        )
+        self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.client.info = {"fileId": "file-a", "artboards": []}
+        self.client.calls.clear()
+        self.client.server = {"name": "paper-desktop", "version": "0.5.11"}
         with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-            self.call(expected_snapshot=b.digest(self.client.info), arguments={"fileId": "file-a"}, _server_pin=("paper-desktop", "0.5.11"))
+            self.call(
+                expected_snapshot=b.digest(self.client.info),
+                arguments={"fileId": "file-a"},
+                _server_pin=b.SUPPORTED_SERVER,
+                _catalog_pin=catalog_pin,
+            )
         self.assertNotIn("create_artboard", self.client.calls)
 
     def test_current_safe_tool_classes(self):
@@ -173,8 +190,12 @@ class CoreTests(unittest.TestCase):
                      "set_comment_thread_status"]:
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
-                     "export_combined_pdf"]:
+                     "export_combined_pdf", "rename_pages"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
+        self.assertEqual(
+            b.SUPPORTED_CATALOG_SHA256,
+            "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+        )
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}

@@ -200,3 +200,41 @@ def test_absent_coo_block_preserves_existing_install_behavior(tmp_path, monkeypa
     monkeypatch.setattr(entry.os, "geteuid", lambda: 458)
     assert entry.validate_document(raw) == raw
     assert entry.build_coo_principal_authorizer(raw, source, config) is None
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_personal_read_profile_refuses_optional_coo_binding(enabled):
+    """Adding a new mount cannot widen the current read-only profile."""
+    from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
+
+    raw = base_document()
+    raw["executive_mcp_profile"] = PERSONAL_READ_PROFILE
+    raw["coo"] = coo_block(binding=coo_binding(enabled=enabled))
+    with pytest.raises(ValueError, match="Personal read profile refuses optional mounts"):
+        entry.validate_document(raw)
+
+
+@pytest.mark.parametrize("field", ["port", "clock_skew", "subjects"])
+def test_valid_install_policy_change_is_not_a_binding_rotation(tmp_path, monkeypatch, field):
+    """The freeze check must reject changes that pass document validation."""
+    source = tmp_path / ("a" * 40)
+    source.mkdir()
+    config = tmp_path / "executive-mcp.json"
+    raw = base_document()
+    raw["coo"] = coo_block()
+    config.write_text(json.dumps(raw))
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(entry.os, "geteuid", lambda: raw["service_uid"])
+    loader = entry.current_projection_loader(config, source, raw, "coo", "binding")
+    assert loader() == raw["coo"]["binding"]
+    changed = json.loads(json.dumps(raw))
+    if field == "port":
+        changed["port"] += 1
+    elif field == "clock_skew":
+        changed["coo"]["policy"]["clock_skew_seconds"] += 1
+    else:
+        changed["coo"]["policy"]["allowed_subject_digests"].append("f" * 64)
+    assert entry.validate_document(changed) == changed
+    config.write_text(json.dumps(changed))
+    with pytest.raises(ValueError, match="installed policy or configuration changed"):
+        loader()
