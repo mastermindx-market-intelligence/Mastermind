@@ -581,7 +581,7 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 
-def test_v3_ratified_generation_and_schema_constants_remain_exact():
+def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     """Freeze the explicitly ratified V3 Browser B1 runtime generation.
 
     CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
@@ -597,6 +597,14 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert registry.capability_packages == {}
+    # Preserve the previous ratified generation's identity independently of
+    # the new inert declaration, which necessarily rotates the policy digest.
+    raw = _raw_policy()
+    del raw["profiles"]["operator.browser.isolated.v1"]
+    del raw["resources"]["worker-browser-isolated"]
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+    assert registry.policy_digest != previous.policy_digest
+    registry = previous
     assert registry.policy_digest == (
         "daac5b9a290156b2b96bf562ed69ffd79d93ba753d3017799bef303aac2b38ed"
     )
