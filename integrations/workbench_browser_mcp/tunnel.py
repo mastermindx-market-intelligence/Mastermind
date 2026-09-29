@@ -24,6 +24,10 @@ from mcp.types import CallToolResult, ServerResult, TextContent
 
 from common.bounded_sync_executor import SyncExecutionTimeout
 from control_plane.browser_resource_contract import READ_ONLY_BROWSER_TOOLS
+from control_plane.executive_agent_capabilities import (
+    McpServerGrant,
+    observed_mcp_tool_schema_digest,
+)
 from integrations.business_mcp_auth.audit import AuditSinkPoisoned
 from integrations.business_mcp_auth.contracts import CHANNEL_AUDIT_SCHEMA, ChannelAuditEvent
 from integrations.workbench_action_mcp.runtime import (
@@ -64,7 +68,7 @@ from .app import (
     build_browser_tool_surface,
 )
 from .browser_port import BrowserPortRefused
-from .contracts import BrowserContractError
+from .contracts import BrowserContractError, BrowserRefCodec
 from .deployment import BrowserPorts, create_browser_ports
 from .resource_port import (
     BrowserHostConfig,
@@ -209,6 +213,9 @@ async def _run_existing(runtime: WorkbenchActionRuntime, operation):
 def create_browser_tunnel_server(
     runtime: WorkbenchActionRuntime,
     browser_config: BrowserServiceConfig,
+    *,
+    mcp_grant: McpServerGrant | None = None,
+    resolve_binding=None,
 ) -> Server:
     if not isinstance(runtime, WorkbenchActionRuntime):
         raise ValueError("WORKBENCH_ACTION_RUNTIME_REQUIRED")
@@ -224,10 +231,43 @@ def create_browser_tunnel_server(
     )
     surface = build_browser_tool_surface(catalog)
     allowed_names = frozenset(surface.validators)
+    if mcp_grant is not None:
+        if (
+            type(mcp_grant) is not McpServerGrant
+            or mcp_grant.transport != "stdio"
+            or mcp_grant.url is not None
+            or mcp_grant.server_identity != SERVER_NAME
+            or mcp_grant.server_version != SERVER_VERSION
+            or type(mcp_grant.enabled_tools) is not tuple
+            or not mcp_grant.enabled_tools
+            or any(type(name) is not str for name in mcp_grant.enabled_tools)
+            or len(set(mcp_grant.enabled_tools)) != len(mcp_grant.enabled_tools)
+            or not set(mcp_grant.enabled_tools) <= allowed_names
+        ):
+            raise ValueError("BROWSER_WORKER_GRANT_REFUSED")
+        allowed_names = frozenset(mcp_grant.enabled_tools)
+        projected = {tool.name: tool.model_dump(mode="json")
+                     for tool in surface.tools if tool.name in allowed_names}
+        if observed_mcp_tool_schema_digest({"tools": projected}) != mcp_grant.tool_schema_digest:
+            raise ValueError("BROWSER_WORKER_GRANT_REFUSED")
+    if resolve_binding is not None and not callable(resolve_binding):
+        raise ValueError("BROWSER_WORKER_BINDING_REQUIRED")
+
+    def current_binding(caller, project_ref):
+        # A worker fence may only narrow the existing Workbench lease. Pass
+        # this same check into the ports so queued work is fenced at dispatch.
+        binding = runtime.resolve_binding(caller, project_ref)
+        if binding is None or resolve_binding is None:
+            return binding
+        try:
+            return binding if resolve_binding(caller, project_ref) == binding else None
+        except Exception:
+            return None
+
     caller = services.caller
     project_ref = services.project_ref
     ports: BrowserPorts = create_browser_ports(
-        resolve_binding=runtime.resolve_binding,
+        resolve_binding=current_binding,
         clock_ms=services.clock_ms,
         action_token_key=services.action_token_key,
         artifact_store=services.artifact_store,
@@ -274,7 +314,9 @@ def create_browser_tunnel_server(
 
     @server.list_tools()
     async def list_tools():
-        return list(surface.tools)
+        # Discovery precedes launch attestation. Metadata conveys no authority;
+        # every call (and queued port operation) still requires live admission.
+        return [tool for tool in surface.tools if tool.name in allowed_names]
 
     @server.call_tool(validate_input=False)
     async def call_tool(
@@ -298,7 +340,7 @@ def create_browser_tunnel_server(
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
             return _error("INVALID_REQUEST")
 
-        if runtime.resolve_binding(caller, project_ref) is None:
+        if current_binding(caller, project_ref) is None:
             try:
                 await emit_channel_audit(
                     code="channel_refused",
@@ -309,6 +351,29 @@ def create_browser_tunnel_server(
             except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
                 return _error("CHANNEL_AUDIT_UNAVAILABLE")
             return _error("CHANNEL_ADMISSION_REFUSED")
+        # run_browser_action is a generic dispatcher. Merely filtering its
+        # name would let a token prepared under a broader grant bypass the
+        # worker's native-tool ceiling. Reconciliation remains read-only.
+        if mcp_grant is not None and name == RUN_ACTION_TOOL:
+            try:
+                prepared = BrowserRefCodec(services.action_token_key).decode_action(
+                    request.get("action_ref"), now_ms=services.clock_ms())
+            except BrowserContractError:
+                refusal = "INVALID_REQUEST"
+            else:
+                granted_native = {
+                    native for prepare, native in surface.prepare_tool_to_native.items()
+                    if prepare in allowed_names
+                }
+                refusal = (None if prepared.tool_name in granted_native
+                           else "BROWSER_TOOL_NOT_GRANTED")
+            if refusal is not None:
+                try:
+                    await emit_channel_audit(code="request_refused", accepted=False,
+                                             tool=name, digest=digest)
+                except (AuditSinkPoisoned, RuntimeClosed, SyncExecutionTimeout):
+                    return _error("CHANNEL_AUDIT_UNAVAILABLE")
+                return _error(refusal)
         try:
             await emit_channel_audit(
                 code="accepted",
@@ -408,7 +473,7 @@ def create_browser_tunnel_server(
                 else "BROWSER_UNAVAILABLE"
             )
 
-        if runtime.resolve_binding(caller, project_ref) is None:
+        if current_binding(caller, project_ref) is None:
             return _error(
                 "BROWSER_EFFECT_UNKNOWN"
                 if effectful
