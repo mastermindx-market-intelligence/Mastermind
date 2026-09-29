@@ -772,10 +772,10 @@ class _ExecutiveReleaseActuatorJournal:
                 created_identity,
                 "RECORD_REPLACED",
             )
-            os.close(descriptor)
-            descriptor = None
             self._fsync_directory(root_descriptor)
             complete = True
+            os.close(descriptor)
+            descriptor = None
         except FileExistsError:
             _fail("RECORD_EXISTS")
         except ExecutiveReleaseActuatorJournalError:
@@ -783,8 +783,6 @@ class _ExecutiveReleaseActuatorJournal:
         except OSError:
             _fail("RECORD_WRITE")
         finally:
-            if descriptor is not None:
-                os.close(descriptor)
             if created and not complete and created_inode is not None:
                 try:
                     observed = os.stat(
@@ -801,6 +799,8 @@ class _ExecutiveReleaseActuatorJournal:
                         self._fsync_directory(root_descriptor)
                     except OSError:
                         pass
+            if descriptor is not None:
+                os.close(descriptor)
         if created_identity is None:
             _fail("RECORD_WRITE")
         return created_identity
@@ -818,7 +818,7 @@ class _ExecutiveReleaseActuatorJournal:
             return
         except OSError:
             _fail(code)
-        if (observed.st_dev, observed.st_ino) != expected_identity[:2]:
+        if _file_identity(observed) != expected_identity:
             _fail(code)
         try:
             os.unlink(name, dir_fd=root_descriptor)
@@ -977,10 +977,23 @@ class _ExecutiveReleaseActuatorJournal:
         except OSError:
             _fail("RECORD_PUBLISH")
         self._fsync_directory(root_descriptor)
+        final_linked_raw, final_linked_identity = self._read_file(
+            root_descriptor, name, required=True, expected_links=2
+        )
+        staged_linked_raw, staged_linked_identity = self._read_file(
+            root_descriptor, staged_name, required=True, expected_links=2
+        )
+        if (
+            final_linked_raw != candidate
+            or staged_linked_raw != candidate
+            or final_linked_identity[:2] != staged_linked_identity[:2]
+            or staged_linked_identity[:2] != staged_identity[:2]
+        ):
+            _fail("START_STAGED_REPLACED")
         self._unlink_owned(
             root_descriptor,
             staged_name,
-            staged_identity,
+            staged_linked_identity,
             "START_STAGED_REPLACED",
         )
 
