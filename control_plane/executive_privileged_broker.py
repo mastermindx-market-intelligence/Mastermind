@@ -984,6 +984,7 @@ class PrivilegedActionBroker:
         require_root: bool = True,
         trust_validator: Callable[[PrivilegedBrokerConfig], None] = verify_production_trust,
         reconciliation_observer: Callable[[], Mapping[str, Any]] = _default_reconciliation_observer,
+        release_owner: Any | None = None,
     ) -> None:
         self.config = config
         self.receipt_root = Path(config.receipt_root)
@@ -992,6 +993,11 @@ class PrivilegedActionBroker:
         self._executor = executor
         self._require_root = require_root
         self._reconciliation_observer = reconciliation_observer
+        if release_owner is not None:
+            from control_plane.executive_release_owner import ReleaseBrokerOwner
+            if type(release_owner) is not ReleaseBrokerOwner:
+                raise TypeError("installed release owner composition required")
+        self._release_owner = release_owner
         if require_root and os.geteuid() != 0:
             raise BrokerTrustError("privileged broker must run as root")
         trust_validator(config)
@@ -1618,12 +1624,23 @@ def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
             if newline != len(buffer) - 1:
                 raise PrivilegedBrokerError("privileged protocol accepts exactly one JSON frame")
             break
+    duplicates = []
+    def release_pairs(items):
+        result = {}
+        for key, item in items:
+            if key in result:
+                duplicates.append(True)
+            result[key] = item
+        return result
     try:
-        value = json.loads(bytes(buffer[:-1]).decode("utf-8", errors="strict"))
+        value = json.loads(bytes(buffer[:-1]).decode("utf-8", errors="strict"),
+                           object_pairs_hook=release_pairs)
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise PrivilegedBrokerError("privileged request frame is invalid JSON") from exc
     if not isinstance(value, dict):
         raise PrivilegedBrokerError("privileged request frame must contain a mapping")
+    if duplicates and value.get("schema") == "mastermind.executive_release_broker/v1":
+        raise PrivilegedBrokerError("release frame has duplicate fields")
     return value
 
 
@@ -1639,7 +1656,23 @@ def serve_connection(
         if peer_uid not in broker.config.allowed_peer_uids:
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
         raw = _read_request_frame(connection)
-        if raw.get("schema") == STATUS_REQUEST_SCHEMA:
+        from control_plane.executive_release_consumer import BROKER_SCHEMA, _qualify_connection
+        if raw.get("schema") == BROKER_SCHEMA:
+            try:
+                _qualify_connection(connection, "control")
+                if raw.get("operation") == "commit_prepared_release_transition":
+                    response = {"schema": BROKER_SCHEMA, "operation": raw.get("operation"),
+                                "ok": False, "error": "RELEASE_COMMIT_DISARMED"}
+                elif broker._release_owner is None:
+                    response = {"schema": BROKER_SCHEMA, "operation": raw.get("operation"),
+                                "ok": False, "error": "RELEASE_OWNER_UNCONFIGURED"}
+                else:
+                    response = broker._release_owner.handle(raw, connection)
+            except Exception:
+                response = {"schema": BROKER_SCHEMA, "operation": raw.get("operation"),
+                            "ok": False, "error": "RELEASE_REFUSED"}
+            _send_wire(connection, response)
+        elif raw.get("schema") == STATUS_REQUEST_SCHEMA:
             projection = broker.query_status(raw, peer_uid=peer_uid)
             _send_wire(connection, _wire_status(projection))
         elif raw.get("schema") == RECONCILE_REQUEST_SCHEMA:
