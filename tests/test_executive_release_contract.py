@@ -1345,3 +1345,82 @@ def test_terminal_legacy_p2_receipt_or_status_does_not_become_p4_history():
         c.validate_release_terminal_receipt(
             legacy, expected_status=status, expected_approval=approval
         )
+
+
+class TerminalSplitState(dict):
+    def __init__(self, value, reported):
+        super().__init__(value)
+        self.reported = reported
+
+    def get(self, key, default=None):
+        return self.reported if key == "state" else super().get(key, default)
+
+
+@pytest.mark.parametrize("reported", ["NOT_FOUND", "STARTED"])
+@pytest.mark.parametrize(
+    "actual", ["SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED", False, "UNRECOGNIZED"]
+)
+def test_terminal_discriminator_uses_the_validated_snapshot(reported, actual):
+    approval, status = terminal_fixture(reported)
+    status["state"] = actual
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(
+            TerminalSplitState(status, reported), expected_approval=approval
+        )
+
+
+@pytest.mark.parametrize("reported", ["NOT_FOUND", "STARTED"])
+@pytest.mark.parametrize("actual", ["SUCCEEDED", False, "UNRECOGNIZED"])
+def test_terminal_receipt_expected_status_rejects_split_mapping(reported, actual):
+    approval, status = terminal_fixture(reported)
+    status["state"] = actual
+    receipt = terminal_fixture()[1]["terminal_receipt"]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_receipt(
+            receipt, expected_status=TerminalSplitState(status, reported),
+            expected_approval=approval,
+        )
+
+
+@pytest.mark.parametrize("api", ["status", "receipt"])
+def test_terminal_caller_discriminator_get_cannot_mutate_snapshot(api):
+    class MutatingGet(dict):
+        calls = 0
+
+        def get(self, key, default=None):
+            self.calls += 1
+            self["state"] = "NOT_FOUND"
+            self.pop("terminal_receipt", None)
+            return super().get(key, default)
+
+    approval, status = terminal_fixture()
+    caller = MutatingGet(status)
+    if api == "status":
+        accepted = c.validate_release_terminal_status(caller, expected_approval=approval)
+        assert accepted == c.validate_release_terminal_status(
+            accepted, expected_approval=approval
+        )
+    else:
+        accepted = c.validate_release_terminal_receipt(
+            status["terminal_receipt"], expected_status=caller,
+            expected_approval=approval,
+        )
+        assert accepted.to_dict() == status["terminal_receipt"]
+    assert caller.calls == 0
+    assert caller["state"] == "SUCCEEDED"
+
+
+def test_terminal_source_mapping_items_is_read_once():
+    class Once(dict):
+        calls = 0
+
+        def items(self):
+            self.calls += 1
+            assert self.calls == 1, "caller mapping re-read after snapshot"
+            return super().items()
+
+    approval, status = terminal_fixture()
+    caller = Once(status)
+    record = c.validate_release_terminal_status(caller, expected_approval=approval)
+    assert caller.calls == 1
+    assert record == c.validate_release_terminal_status(record, expected_approval=approval)

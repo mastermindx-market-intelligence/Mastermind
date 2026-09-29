@@ -816,10 +816,14 @@ def _validated_status_fields(
     approval = validate_approval_evidence(expected_approval)
     if not isinstance(value, Mapping):
         _fail("status", "OBJECT_REQUIRED")
-    state = value.get("state")
+    # Read the caller's mapping once. The discriminator, exact field set and
+    # returned record must describe this same bounded detached snapshot.
+    snapshot = _plain(value)
+    canonical_release_bytes(snapshot)
+    state = snapshot.get("state")
     if type(state) is not str or state not in _STATES:
         _fail("state", "ENUM")
-    v = _object(value, _status_field_set(state), "status", _STATUS_SCHEMA)
+    v = _object(snapshot, _status_field_set(state), "status", _STATUS_SCHEMA)
     effect = approval["normalized_requested_effect"]
     grant = approval["grant"]
     fingerprint = request_fingerprint_for(approval)
