@@ -13,6 +13,11 @@ from prepare import ROOT, CACHE, digest, prepare as prepare_core
 from prepare_mcp import prepare
 
 EXPECTED_RED = {
+    'tool admission does not publish server instructions',
+    'tool admission does not authorize resources/list',
+    'tool admission does not authorize resources/templates/list',
+    'tool admission does not authorize resources/read',
+    'empty admitted tool set does not expose other context channels',
     'exposes only admitted tools and returns a real server nonce',
     'passes immutable complete schemas and actual server identity to admission',
     'refuses revoked permission after an asynchronous wrapper',
@@ -58,7 +63,7 @@ def suite(name: str, source: str, expected: set[str], upstream: bool = False) ->
     (CACHE / f'{name}.log').write_text(output)
     data = json.loads(destination.read_text())
     assertions = [a for s in data['testResults'] for a in s.get('assertionResults', [])]
-    count = 93 if upstream else 25
+    count = 93 if upstream else 32
     failed = {a['title'] for a in assertions if a['status'] == 'failed'}
     assert len(assertions) == data['numTotalTests'] == count, f'{name}: missing cases'
     assert all(a['status'] in {'passed', 'failed'} for a in assertions), f'{name}: skipped cases'
@@ -87,11 +92,20 @@ def typecheck() -> dict:
 
 
 MUTATIONS = {
+    'context': ('connection.ts', 'const toolOnly = admitGeneration !== undefined',
+                'const toolOnly = false', {
+        'tool admission does not publish server instructions',
+        'tool admission does not authorize resources/list',
+        'tool admission does not authorize resources/templates/list',
+        'tool admission does not authorize resources/read',
+        'empty admitted tool set does not expose other context channels',
+    }),
     'filter': ('tools.ts', 'if (strict && allow === undefined) continue',
                'if (false && allow === undefined) continue', {
         'exposes only admitted tools and returns a real server nonce',
         'keeps a completed old-generation call attributable without resending it',
         'threads admission through the actual connection startup owner',
+        'empty admitted tool set does not expose other context channels',
         'allows an explicitly empty selection without inventing a required capability',
         'uses the same admission hook on actual SDK tool-list notifications',
     }),
@@ -106,6 +120,7 @@ MUTATIONS = {
     'connection': ('connection.ts', '...admitGeneration === undefined ? {} : { admitGeneration },',
                    '...{},', {
         'threads admission through the actual connection startup owner',
+        'empty admitted tool set does not expose other context channels',
         'uses the same admission hook on actual SDK tool-list notifications',
     }),
 }
@@ -172,6 +187,7 @@ def main() -> dict:
     report['preparation'] = preparation_checks()
     report['input_sha256'] = {name: digest((ROOT / name).read_bytes()) for name in [
         'mcp-generation-admission.patch', 'mcp-manifest.json', 'mcp-admission.test.mjs',
+        'mcp-context-boundary.test.mjs',
         'prepare_mcp.py', 'verify_mcp.py', 'vitest.mcp.config.mjs', 'tsconfig.mcp.json',
         'mcp-preparation.test.py',
         'package.json', 'package-lock.json', 'donor-manifest.json', 'strict-dispatch-binding.patch']}

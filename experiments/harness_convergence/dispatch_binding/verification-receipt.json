@@ -1,7 +1,7 @@
 {
   "architecture": "arm64",
-  "full_local_report_sha256": "99ffa393ced16ab19a7ab05d40acefefc587e6a16441455b1d4359f1fc773b8b",
-  "generated_at": "2026-09-29T09:07:45.497277+00:00",
+  "full_local_report_sha256": "0faa4f6a8b2b33d2bb21cd0f446f5989761000b0c472d256ba79a777636969fe",
+  "generated_at": "2026-09-29T09:19:56.292258+00:00",
   "independent_review": "NOT_PERFORMED_PLATFORM_REVIEW_PREPARATION_BLOCKED",
   "input_sha256": {
     "dispatch-binding.test.mjs": "62f7d741f2a9072343e2bea0bd299429e8fdd3a9f515aaaa137f15c5728e2299",
@@ -43,7 +43,7 @@
     },
     "exit_code": 0,
     "log": "loaded-preflight.log",
-    "log_sha256": "fd29d7e39f47be9c9bf2f84db2dcdbad900726ab21f40358210af93279dc84e5",
+    "log_sha256": "7c9bc94e549581a3cb7ce6fc5da98b8010bf39342f08851c9abaac8fdf757827",
     "passed": 17,
     "scope": "Actual ToolRuntime instance, in-memory probes, not installed ACP qualification",
     "stderr_empty": true,
@@ -58,7 +58,7 @@
       ],
       "killed": true,
       "log": "mutant-definition.log",
-      "log_sha256": "5eadb1f2f32b813119b23151fb6bad196b89de6d0b5a403e50934f12ad5de501",
+      "log_sha256": "20cd0beaec2fb0d86ff0fd6d1175bb13b1a1b14214fbcdbebd396640838cc5a4",
       "mutant_sha256": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
       "passed": 17,
       "stderr_empty": true,
@@ -73,7 +73,7 @@
       ],
       "killed": true,
       "log": "mutant-guard.log",
-      "log_sha256": "cb9a704c2b458beb07aaff7c1cbb99de7ed32071e5c5e04027e0f90fecd60136",
+      "log_sha256": "fe54b896d2ee606bf11dbe781163b087983e81442f2f445c410e4bc70ebea3a7",
       "mutant_sha256": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
       "passed": 16,
       "stderr_empty": true,
@@ -88,7 +88,7 @@
       ],
       "killed": true,
       "log": "mutant-result.log",
-      "log_sha256": "e196f8ec3c386d84adf35f250f5f76109f6bda086b9de2886a1e8663cb26514e",
+      "log_sha256": "7925233fd3bb2b9a675053fd26a8f0f37010ba74a193eba5bdaf14b8b32007d5",
       "mutant_sha256": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901",
       "passed": 16,
       "stderr_empty": true,
@@ -100,7 +100,7 @@
   "platform": "Darwin",
   "prior_receipt": {
     "head": "b52ab14a2e48436db02b69c250b4a19297148b82",
-    "meaning": "Historical prior proof. Current lock changed for MCP dependencies and was qualified by fresh no-scripts npm ci and full npm test.",
+    "meaning": "Historical prior proof; current MCP lock has separate fresh npm-ci and combined-suite qualification.",
     "sha256": "65b6e8c8aa8afa4db35fab043da982c284b3e5209709f2100850715cda3bb95a"
   },
   "provider_calls": 0,
@@ -119,7 +119,7 @@
       "exit_code": 0,
       "failed_cases": [],
       "log": "patched-targeted.log",
-      "log_sha256": "1d33b2992dd3082d5a49fd16e5d16cc985a9946c702a6d5f37d92eb8f0ea647e",
+      "log_sha256": "213a4528ae08eacdd32e9761a63f8d488680e99f18ba3d157af159e28b87480e",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -234,7 +234,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-npm.log",
-      "log_sha256": "261582de06826b7713333e54cfc8450b4150a071ef50ddfd80b6efe35eae9e45",
+      "log_sha256": "5f80980563aff58e99d0bf9f59905e8b261bd845cd417bc48d6f0b3ce06f199b",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -343,7 +343,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-source.log",
-      "log_sha256": "cb9361c42628c24f4a0a6d0a5959635ecf462f8c25f6ed29bcf2dd7ac1988654",
+      "log_sha256": "44b250548bcce98ffa63966c034eb9374143a0e35bf47d7f71a4a0e1370908cd",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -453,7 +453,7 @@
       "log": "upstream-patched.log",
       "log_sha256": "84e61293e93d7fd493cac1ee05255ebb1cef3074c05b03918439748f3c70f544",
       "passed": 178,
-      "report_sha256": "3d985bf15df89bb17bdcbc4d24778af190148f569d282e7064d4aa34f9f957ae",
+      "report_sha256": "58e4a10c55395fdba6740b10080c082d3bf0945ab01eaf4553e5f1b18f17f170",
       "stderr_empty": true,
       "tests": 178
     },
@@ -463,7 +463,7 @@
       "log": "upstream-pristine.log",
       "log_sha256": "95e53459c5199ef7accdd11a97691f6a1155a00e10ee5b736683360344acbcd4",
       "passed": 178,
-      "report_sha256": "c4506294b1452c2aac3447b5096fb35549b06d4ba0a68cffd6ac711d2bddddef",
+      "report_sha256": "9fc4107da25008fdff595b753cdd82c6c9667ed44fcfe957f8245bdcbbb8b1f0",
       "stderr_empty": true,
       "tests": 178
     }

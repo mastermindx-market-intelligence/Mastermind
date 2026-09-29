@@ -19,7 +19,7 @@ export default defineConfig({
   test: {
     include: process.env.MMX_MCP_UPSTREAM === '1'
       ? ['.cache/mcp-tests/{mcp-client,tool-definition,protocol,reconnect}.spec.ts']
-      : ['mcp-admission.test.mjs'],
+      : ['mcp-admission.test.mjs', 'mcp-context-boundary.test.mjs'],
     fileParallelism: false, maxWorkers: 1, testTimeout: 5000,
   },
 })

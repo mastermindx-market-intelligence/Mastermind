@@ -196,9 +196,9 @@ but is neither exposed nor invoked. Actual SDK notifications exercise the
 connection's re-admission path. This is protocol/source proof, not a production
 repository service, model inference, ACP-worker or original-Executive-parent proof.
 
-Observed: **25/25 new cases pass**, versus **1 pass / 24 expected failures** on
+Observed: **32/32 MCP cases pass**, versus **3 pass / 29 expected failures** on
 unchanged MCP source. All **93 unchanged selected upstream MCP cases pass** on
-both versions. Three independently broken filtering/dispatch/connection variants
+both versions. Four independently broken filtering/dispatch/connection/context variants
 are detected by their exact expected cases. Six source-preparation checks pass:
 exact/repeated patching, source/patch/output drift refusal, no implicit download,
 and source-symlink refusal. Strict MCP TypeScript uses ES2024 for the donor's
@@ -209,14 +209,23 @@ after the core preparation. Then install only this directory's locked test
 packages with the private npm settings above. `npm test` now runs both verifiers;
 `python3 verify_mcp.py` runs just the MCP suite offline after preparation.
 `mcp-manifest.json` pins every input and all three patched-file digests. The
-MCP patch has normal context and the preparer refuses changed inputs/outputs
+MCP patch is zero-context (manual Git application needs --unidiff-zero); the
+preparer verifies exact preimages/postimages and refuses changed inputs/outputs
 instead of overwriting them. `mcp-verification-receipt.json` contains the measured
 suite results and actual nonce/notification observations.
 
 The endpoint/authentication/profile admission callback still belongs to the
-incumbent integration owner. MCP resources and server instructions are separate
-channels and must remain unavailable unless independently admitted; this patch
-neither calls `registerServerContext` nor grants those channels. Actual immutable
+incumbent integration owner. The admitted connection is explicitly **tool-only**:
+`instructions()` returns no server text, and resources/list, templates/list and
+resources/read refuse before sending an SDK request. This remains true even if
+a caller registers the returned connection with the existing context consumer.
+Default legacy connections retain their original instructions/resources behavior.
+A future resource/instruction capability needs its own reviewed admission; the
+tool callback does not authorize it. Seven real-protocol context tests distinguish
+these boundaries. The first tool-only candidate produced five expected failures
+in those seven cases before the two channel checks were added. No tool permission
+was widened and no new policy store was introduced. This patch does not call
+`registerServerContext` or grant additional channels. Actual immutable
 artifact packaging, host confinement, eligible-provider accounting, #825 source
 recovery, startup in the owned ACP process, and useful parent-consumed work are
 not proven by these test results. No default route or production profile changed.
