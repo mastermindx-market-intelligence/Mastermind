@@ -198,6 +198,22 @@ def _json_object(text: str) -> dict[str, Any]:
         raise OpenCodeResultError("OPENCODE_JSON_INVALID") from None
     if type(value) is not dict:
         _refuse("OPENCODE_OBJECT_REQUIRED")
+    # JSON escapes may decode to lone surrogates even when the wire is valid
+    # UTF-8. Require scalar Unicode throughout, including object keys, so the
+    # returned contract can safely cross a UTF-8 transport boundary.
+    pending: list[Any] = [value]
+    while pending:
+        item = pending.pop()
+        if type(item) is dict:
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif type(item) is list:
+            pending.extend(item)
+        elif type(item) is str:
+            try:
+                item.encode("utf-8")
+            except UnicodeError:
+                raise OpenCodeResultError("OPENCODE_UTF8_INVALID") from None
     return value
 
 

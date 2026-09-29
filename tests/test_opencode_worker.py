@@ -186,6 +186,14 @@ class ParserContract(unittest.TestCase):
             with self.subTest(key=key, value=value):
                 self.refuses(wire(rows))
 
+    def test_decoded_strings_and_keys_require_scalar_unicode(self):
+        for value in ('{"x":"\\ud800"}', '{"\\udfff":1}', '{"x":[{"y":"\\ud800"}]}'):
+            rows = frames()
+            rows[1]["part"]["text"] = value
+            self.refuses(wire(rows), "OPENCODE_UTF8_INVALID")
+        rows = frames({"中文": "😀"})
+        self.assertEqual(parse_opencode_result(wire(rows)).structured_output, {"中文": "😀"})
+
     def test_limits_are_enforced_without_large_allocations(self):
         data = wire(frames())
         for constant, limit in (("MAX_EVENT_STREAM_BYTES", len(data) - 1),
