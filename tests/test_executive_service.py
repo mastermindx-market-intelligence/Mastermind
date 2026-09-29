@@ -7535,6 +7535,25 @@ def test_private_unix_service_round_trip_and_fixed_proof_lifecycle(
 
             registered = await _request(service, "register-worker")
             assert registered["result"]["worker_id"] == "codex-01"
+            # Fresh registration must produce the canonical proof + dormant COO
+            # quota set; the proof quota is the only ``codex-native`` row.
+            assert set(registered["result"]["quota_classes"]) == {
+                service.config.quota_class,
+                service.config.coo_quota_class,
+                service.config.coo_default_quota_class,
+            }
+            codex_native = service.runtime.workers.get_quota_class(
+                service.config.worker_id, service.config.quota_class
+            )
+            assert codex_native is not None
+            assert codex_native.model == service.config.model
+            assert (
+                service.runtime.workers.get_quota_class(
+                    service.config.worker_id,
+                    service.config.coo_operator_quota_class,
+                )
+                is None
+            )
             # Registration is idempotent only for the exact configured identity.
             assert (await _request(service, "register-worker"))["ok"] is True
 
@@ -8337,11 +8356,107 @@ def test_unarmed_service_admits_but_cannot_advance_bound_v2_root(
     asyncio.run(exercise())
 
 
+def _seed_existing_worker_with_dormant_coo_quotas(
+    tmp_path: Path,
+    config: ServiceConfig,
+    service: ExecutiveControlService,
+    *,
+    stale: bool = True,
+    drift_codex_native: bool = False,
+) -> dict[str, object]:
+    """Seed one pre-existing worker with the exact codex-native quota plus two
+    dormant COO quota rows.  When ``stale`` is True, the dormant rows carry an
+    older ``capability_policy_digest`` than the current host binding.  When
+    ``drift_codex_native`` is True, the codex-native quota is seeded with a
+    different model so the existing-worker identity check rejects it.
+
+    Returns the seeded metadata snapshot for both dormant quota rows so
+    callers can assert exact equality before/after ``register-worker``.
+    """
+
+    runtime = Runtime.at(config.runtime_root)
+    binding = service._coo_execution_binding
+    coo_capabilities = list(
+        ModelRouter.load().model_aliases[config.coo_model_alias].capabilities
+    )
+    stale_digest = "f" * 64
+    current_digest = str(binding["capability_policy_digest"])
+    effective_digest = (
+        stale_digest
+        if stale and current_digest != stale_digest
+        else (current_digest if not stale else "e" * 64)
+    )
+    coo_metadata = {
+        "service_managed": True,
+        "purpose": "executive-coo-cycle",
+        "model_alias": config.coo_model_alias,
+        "routing_policy_version": str(binding["routing_policy_version"]),
+        "execution_profile_id": str(binding["execution_profile_id"]),
+        "execution_profile_digest": str(binding["execution_profile_digest"]),
+        "capability_policy_version": str(
+            binding["capability_policy_version"]
+        ),
+        "capability_policy_digest": effective_digest,
+    }
+    coo_default_metadata = dict(coo_metadata)
+    coo_default_metadata.pop("model_alias", None)
+    coo_default_metadata["capacity_variant"] = "default"
+    codex_native_model = (
+        "drifted-model"
+        if drift_codex_native
+        else config.model
+    )
+    runtime.workers.register_worker(
+        config.worker_id,
+        provider=config.provider,
+        account_label=config.worker_account_label,
+        worker_type=config.worker_type,
+        capabilities=["code", "research", "tests"],
+        quota_classes={
+            config.quota_class: {
+                "provider": config.provider,
+                "model": codex_native_model,
+                "effort": config.effort,
+                "cost_class": config.cost_class,
+                "capabilities": ["code", "research", "tests"],
+            },
+            config.coo_quota_class: {
+                "provider": str(binding["provider"]),
+                "model": str(binding["model"]),
+                "effort": str(binding["effort"]),
+                "cost_class": str(binding["cost_class"]),
+                "capabilities": coo_capabilities,
+                "metadata": coo_metadata,
+            },
+            config.coo_default_quota_class: {
+                "provider": str(binding["provider"]),
+                "model": str(binding["model"]),
+                "effort": str(binding["effort"]),
+                "cost_class": "default",
+                "capabilities": coo_capabilities,
+                "metadata": coo_default_metadata,
+            },
+        },
+        metadata={"service_managed": True},
+    )
+    seeded = {
+        "coo": runtime.workers.get_quota_class(
+            config.worker_id, config.coo_quota_class
+        ),
+        "coo_default": runtime.workers.get_quota_class(
+            config.worker_id, config.coo_default_quota_class
+        ),
+    }
+    return {"runtime": runtime, "quotas": seeded}
+
+
 def test_service_adds_exact_coo_capacity_to_existing_legacy_worker(
     tmp_path: Path, short_socket_root: Path
 ):
     async def exercise() -> None:
-        config = _config(tmp_path, socket_root=short_socket_root)
+        config = _config(
+            tmp_path, socket_root=short_socket_root, coo_autonomy_armed=True
+        )
         runtime = Runtime.at(config.runtime_root)
         runtime.workers.register_worker(
             config.worker_id,
@@ -8389,6 +8504,116 @@ def test_service_adds_exact_coo_capacity_to_existing_legacy_worker(
                     and event.worker_id == config.worker_id
                 ]
             ) == 2
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_disarmed_register_worker_leaves_stale_dormant_coo_quotas_untouched(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        seeded = _seed_existing_worker_with_dormant_coo_quotas(
+            tmp_path, config, service, stale=True
+        )
+        before_coo = seeded["quotas"]["coo"]
+        before_default = seeded["quotas"]["coo_default"]
+        assert before_coo is not None and before_default is not None
+        await service.start()
+        try:
+            registered = await _request(service, "register-worker")
+            assert registered["ok"] is True
+            assert (
+                registered["result"]["worker_id"]
+                == config.worker_id
+            )
+            runtime = service.runtime
+            assert (
+                runtime.jobs.list_jobs() == []
+            ), "disarmed register-worker must not produce Job effects"
+            quota_events = [
+                event
+                for event in runtime.events.list_events()
+                if event.event_type == "WORKER_QUOTA_REGISTERED"
+                and event.worker_id == config.worker_id
+            ]
+            assert quota_events == []
+            after_coo = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_quota_class
+            )
+            after_default = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_default_quota_class
+            )
+            assert after_coo == before_coo
+            assert after_default == before_default
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_armed_register_worker_refuses_stale_dormant_coo_quotas(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(
+            tmp_path, socket_root=short_socket_root, coo_autonomy_armed=True
+        )
+        service, _holder = _service(tmp_path, config=config)
+        seeded = _seed_existing_worker_with_dormant_coo_quotas(
+            tmp_path, config, service, stale=True
+        )
+        before_coo = seeded["quotas"]["coo"]
+        before_default = seeded["quotas"]["coo_default"]
+        assert before_coo is not None and before_default is not None
+        await service.start()
+        try:
+            refused = await _request(service, "register-worker")
+            assert refused["ok"] is False
+            assert "different policy" in refused["error"]["message"]
+            runtime = service.runtime
+            assert (
+                runtime.jobs.list_jobs() == []
+            ), "armed refusal must not produce Job effects"
+            after_coo = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_quota_class
+            )
+            after_default = runtime.workers.get_quota_class(
+                config.worker_id, config.coo_default_quota_class
+            )
+            assert after_coo == before_coo
+            assert after_default == before_default
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_disarmed_register_worker_refuses_codex_native_quota_drift(
+    tmp_path: Path, short_socket_root: Path
+):
+    async def exercise() -> None:
+        config = _config(tmp_path, socket_root=short_socket_root)
+        service, _holder = _service(tmp_path, config=config)
+        _seed_existing_worker_with_dormant_coo_quotas(
+            tmp_path,
+            config,
+            service,
+            stale=True,
+            drift_codex_native=True,
+        )
+        await service.start()
+        try:
+            refused = await _request(service, "register-worker")
+            assert refused["ok"] is False
+            assert "different policy" in refused["error"]["message"]
+            runtime = service.runtime
+            assert (
+                runtime.jobs.list_jobs() == []
+            ), "refusal must not produce Job effects"
         finally:
             await service.close()
 
@@ -9057,11 +9282,32 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             "control_environment_attestation_path": str(
                 tmp_path / "control-environment-attestation.json"
             ),
+            "python_runtime_provenance_digest": "d" * 64,
         }
         unarmed_path = tmp_path / "control-unarmed.json"
         unarmed_path.write_text(json.dumps(raw), encoding="utf-8")
         unarmed_path.chmod(0o400)
         unarmed = service_cli.load_control_config(unarmed_path)
+        assert unarmed["python_runtime_provenance_digest"] == "d" * 64
+        for index, invalid_digest in enumerate(
+            ("D" * 64, "d" * 63, "g" * 64, 7, None)
+        ):
+            invalid_path = tmp_path / (
+                "control-invalid-python-runtime-provenance-"
+                f"{index}-{type(invalid_digest).__name__}.json"
+            )
+            invalid_path.write_text(
+                json.dumps(
+                    {**raw, "python_runtime_provenance_digest": invalid_digest}
+                ),
+                encoding="utf-8",
+            )
+            invalid_path.chmod(0o400)
+            with pytest.raises(
+                ServiceError,
+                match="python_runtime_provenance_digest must be lowercase 64-hex",
+            ):
+                service_cli.load_control_config(invalid_path)
         assert not (
             {
                 "terminal_return_armed",

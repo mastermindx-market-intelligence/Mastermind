@@ -253,6 +253,7 @@ _CONFIG_OPTIONAL = frozenset(
         "subscription_canary_realm",
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
+        "python_runtime_provenance_digest",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -1052,6 +1053,13 @@ def load_control_config(
         if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise ServiceError(
                 "control config operator_harness_binary_digest must be SHA-256"
+            )
+    if "python_runtime_provenance_digest" in config:
+        digest = config["python_runtime_provenance_digest"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ServiceError(
+                "control config python_runtime_provenance_digest must be lowercase "
+                "64-hex SHA-256"
             )
     if "operator_harness_version" in config:
         version = config["operator_harness_version"]

@@ -3814,6 +3814,13 @@ class RuntimeStore:
     ) -> None:
         self.read_binding = read_binding
         self._bound_connections: set[_BoundReadConnection] = set()
+        # Exact handles currently owned by ``transaction()`` after
+        # ``BEGIN IMMEDIATE``.  ``connection.in_transaction`` alone is not a
+        # write-ownership proof: an ordinary ``read()`` snapshot also has an
+        # active deferred transaction and can otherwise be upgraded by SQLite.
+        self._write_connections: set[sqlite3.Connection] = set()
+        # Exact handles currently owned by an unbound ``read()`` snapshot.
+        self._read_connections: set[sqlite3.Connection] = set()
         self._finite_control_context: FiniteControlContext | None = None
         if read_binding is not None:
             if not isinstance(read_binding, RuntimeReadBinding) or create or existing_writable:
@@ -4448,6 +4455,7 @@ class RuntimeStore:
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared after write lock acquisition"
                 )
+            self._write_connections.add(connection)
             yield connection
             if self._upgrade_barrier_present():
                 raise PersistenceError(
@@ -4473,6 +4481,7 @@ class RuntimeStore:
                 connection.rollback()
             raise
         finally:
+            self._write_connections.discard(connection)
             connection.close()
 
     def _close_read_connection(self, connection: sqlite3.Connection | _BoundReadConnection) -> None:
@@ -4586,6 +4595,7 @@ class RuntimeStore:
         connection = self._open()
         try:
             connection.execute("BEGIN")
+            self._read_connections.add(connection)
             yield connection
             connection.commit()
         except RuntimeProofError:
@@ -4601,6 +4611,7 @@ class RuntimeStore:
                 connection.rollback()
             raise
         finally:
+            self._read_connections.discard(connection)
             connection.close()
 
     def list_events(
@@ -24335,6 +24346,7 @@ class Runtime:
     events: EventRegistry
     operator_harness: OperatorHarnessRegistry
     broker: ResourceBroker
+    release_maintenance: ReleaseMaintenanceRegistry
 
 
 
@@ -24348,6 +24360,7 @@ class Runtime:
             events=EventRegistry(store),
             operator_harness=OperatorHarnessRegistry(store),
             broker=ResourceBroker(store),
+            release_maintenance=ReleaseMaintenanceRegistry(store),
         )
 
     @classmethod
@@ -25511,6 +25524,491 @@ class Runtime:
         )
 
 
+# ---------------------------------------------------------------------------
+# P4 C1 release-maintenance slice — record_approval + read_approval only.
+#
+# Production approval/prepare/commit remain disabled. This slice records the
+# immutable owner-sealed approval Event using RuntimeStore's owner-validated
+# connection, transaction semantics, Events table, and the existing
+# append_event / get_event_by_command_id boundary. No new schema, table,
+# database, scheduler, lease, signing-key access, maintenance fence, host or
+# installer effect is introduced.
+# ---------------------------------------------------------------------------
+
+# Strict envelope constants for the approval Event family.
+EXECUTIVE_RELEASE_APPROVED_EVENT_TYPE = "EXECUTIVE_RELEASE_APPROVED"
+EXECUTIVE_RELEASE_AGGREGATE_TYPE = "executive_release"
+EXECUTIVE_RELEASE_ACTOR_PREFIX = "release-principal:"
+
+# Module-private capability token. ``TrustedReleaseContext`` is gated on this
+# token so ordinary production code paths and direct callers can never mint
+# one. Production disarming: no public mint method exists. Tests use the
+# deliberately private capability fixture ``_release_context_for_test``.
+_RELEASE_MAINTENANCE_CAPABILITY = object()
+
+# Approval payload key set is fully closed; any other key rejects the record.
+_RELEASE_APPROVAL_REQUIRED_KEYS = frozenset({
+    "schema",
+    "operation_key",
+    "request_ref",
+    "approved_transition_ref",
+    "action",
+    "owner_installation_id",
+    "target_ref",
+    "principal_projection",
+    "normalized_requested_effect",
+    "transition_digest",
+    "grant",
+    "effective_grant_digest",
+    "created_at_ms",
+    "expires_at_ms",
+    "owner_seal",
+})
+
+
+class ReleaseMaintenanceError(RuntimeProofError):
+    """Typed diagnostic for release-maintenance refusals.
+
+    The error message carries only a field/code pair, never the rejected
+    payload, principal identity or sealed bytes.
+    """
+
+    def __init__(self, field: str, code: str) -> None:
+        super().__init__(f"{field}:{code}")
+        self.field = field
+        self.code = code
+
+
+def _release_refusal(field: str, code: str) -> ReleaseMaintenanceError:
+    return ReleaseMaintenanceError(field, code)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TrustedReleaseContext:
+    """Typed opaque host-internal release authority.
+
+    A TrustedReleaseContext can ONLY be constructed under the deliberately
+    private module-level capability token. A mapping, structural seal,
+    principal string, ReleaseRecord, Event row, caller-built lookalike or
+    foreign handle carries no authority. Production has no public mint
+    method; this slice never invokes the broker key, never verifies the
+    owner_seal MAC, and never authorises a release. The context binds the
+    sealed-evidence digest, the verified principal digest, target, owner
+    installation id, policy id, and trust generation to this exact store
+    and connection.
+    """
+
+    _store: "RuntimeStore"
+    # Retain the exact object so a closed connection's integer id can never be
+    # reused by a later handle and accidentally satisfy this authority bind.
+    _connection: sqlite3.Connection
+    _sealed_evidence_digest: str
+    _principal_digest: str
+    _target_ref: str
+    _owner_installation_id: str
+    _policy_id: str
+    _policy_generation: int
+    _authority_policy_hash: str
+    _key_id: str
+    _trust_generation: int
+    _capability: object
+
+    def __post_init__(self) -> None:
+        if self._capability is not _RELEASE_MAINTENANCE_CAPABILITY:
+            raise StateConflict(
+                "trusted release context is Runtime-minted only"
+            )
+        if not isinstance(self._principal_digest, str) or len(self._principal_digest) != 64:
+            raise StateConflict(
+                "trusted context principal_digest must be a 64-char hex digest"
+            )
+        if not isinstance(self._target_ref, str) or len(self._target_ref) != 64:
+            raise StateConflict(
+                "trusted context target_ref must be a 64-char hex digest"
+            )
+        if not isinstance(self._owner_installation_id, str) or not self._owner_installation_id:
+            raise StateConflict(
+                "trusted context owner_installation_id is required"
+            )
+        if not isinstance(self._policy_id, str) or not self._policy_id:
+            raise StateConflict(
+                "trusted context policy_id is required"
+            )
+        if not isinstance(self._trust_generation, int) or self._trust_generation < 1:
+            raise StateConflict(
+                "trusted context trust_generation must be a positive integer"
+            )
+
+    @property
+    def store(self) -> "RuntimeStore":
+        return self._store
+
+    @property
+    def principal_digest(self) -> str:
+        return self._principal_digest
+
+    @property
+    def target_ref(self) -> str:
+        return self._target_ref
+
+    @property
+    def owner_installation_id(self) -> str:
+        return self._owner_installation_id
+
+    @property
+    def policy_id(self) -> str:
+        return self._policy_id
+
+    @property
+    def trust_generation(self) -> int:
+        return self._trust_generation
+
+
+def _release_context_for_test(
+    store: "RuntimeStore",
+    connection: sqlite3.Connection,
+    *,
+    sealed_approval: Mapping[str, Any],
+) -> TrustedReleaseContext:
+    """Deliberately private test-only mint for ``TrustedReleaseContext``.
+
+    Production never imports or invokes this fixture. Runtime exposes no
+    public mint method; a production broker integration would mint an
+    analogous context via a separate, separately reviewed commission.
+    The fixture binds the sealed-evidence digest and the actual principal,
+    target, owner, policy and trust identities to this exact store and
+    connection, exactly as a host-internal trusted path would.
+    """
+    from control_plane import executive_release_contract
+    validated = executive_release_contract.validate_approval_evidence(sealed_approval)
+    canonical = executive_release_contract.canonical_release_bytes(validated)
+    sealed_digest = hashlib.sha256(canonical).hexdigest()
+    principal = validated["principal_projection"]
+    principal_digest = hashlib.sha256(
+        executive_release_contract.canonical_release_bytes(principal)
+    ).hexdigest()
+    grant = validated["grant"]
+    if grant["principal_digest"] != principal_digest:
+        raise _release_refusal("trusted_context", "PRINCIPAL_DIGEST_MISMATCH")
+    return TrustedReleaseContext(
+        _store=store,
+        _connection=connection,
+        _sealed_evidence_digest=sealed_digest,
+        _principal_digest=principal_digest,
+        _target_ref=validated["target_ref"],
+        _owner_installation_id=validated["owner_installation_id"],
+        _policy_id=principal["policy_id"],
+        _policy_generation=grant["policy_generation"],
+        _authority_policy_hash=grant["authority_policy_hash"],
+        _key_id=validated["owner_seal"]["key_id"],
+        _trust_generation=validated["owner_seal"]["trust_generation"],
+        _capability=_RELEASE_MAINTENANCE_CAPABILITY,
+    )
+
+
+class ReleaseMaintenanceRegistry:
+    """P4 C1 release-maintenance slice: ``record_approval`` + ``read_approval``.
+
+    Reuses RuntimeStore's owner-validated connection, transaction/read
+    snapshot semantics, current-schema checks, Events table, ``append_event``
+    and ``get_event_by_command_id``. No schema or table migration, no second
+    store, no new scheduler, no maintenance fence, no physical admission,
+    no installer dispatch, no signing-key access, no broker key, no Job or
+    Attempt linkage, no quota, no provider/operator/resource-broker/service
+    behaviour. Production prepare/commit remain disabled.
+    """
+
+    _EVENT_TYPE = EXECUTIVE_RELEASE_APPROVED_EVENT_TYPE
+    _AGGREGATE_TYPE = EXECUTIVE_RELEASE_AGGREGATE_TYPE
+    _ACTOR_PREFIX = EXECUTIVE_RELEASE_ACTOR_PREFIX
+
+    def __init__(self, store: RuntimeStore) -> None:
+        self.store = store
+
+    def _require_owned_write_connection(self, connection: sqlite3.Connection) -> None:
+        if not isinstance(connection, sqlite3.Connection):
+            raise _release_refusal("connection", "CONNECTION_TYPE")
+        if connection.in_transaction is not True:
+            raise _release_refusal(
+                "connection", "WRITE_TRANSACTION_REQUIRED"
+            )
+        if connection not in self.store._write_connections:
+            raise _release_refusal(
+                "connection", "WRITE_TRANSACTION_NOT_OWNER_ISSUED"
+            )
+        # _assert_owned_snapshot_connection demands an active transaction AND
+        # that the supplied connection's main database is this store's stable
+        # file. That is the contract for every write the Runtime accepts from
+        # a caller.
+        self.store._assert_owned_snapshot_connection(connection)
+
+    def _require_owned_snapshot_connection(self, connection: sqlite3.Connection) -> None:
+        if not isinstance(connection, sqlite3.Connection):
+            raise _release_refusal("connection", "CONNECTION_TYPE")
+        if (
+            self.store.read_binding is None
+            and connection not in self.store._read_connections
+        ):
+            raise _release_refusal(
+                "connection", "READ_CONNECTION_NOT_OWNER_ISSUED"
+            )
+        # Read snapshot still requires an active transaction (BEGIN started by
+        # ``RuntimeStore.read()`` or the caller's own bound read), and the main
+        # database identity must be this store's stable file.
+        self.store._assert_owned_snapshot_connection(connection)
+
+    def _require_trusted_context(
+        self,
+        connection: sqlite3.Connection,
+        trusted_context: Any,
+        sealed_bytes_digest: str,
+    ) -> None:
+        if not isinstance(trusted_context, TrustedReleaseContext):
+            raise _release_refusal("trusted_context", "TYPE")
+        if trusted_context.store is not self.store:
+            raise _release_refusal("trusted_context", "FOREIGN_STORE")
+        if trusted_context._connection is not connection:
+            raise _release_refusal("trusted_context", "FOREIGN_CONNECTION")
+        if trusted_context._sealed_evidence_digest != sealed_bytes_digest:
+            raise _release_refusal("trusted_context", "SEALED_EVIDENCE_MISMATCH")
+
+    def _validate_envelope(
+        self,
+        event: Event,
+        *,
+        expected_command_id: str,
+        expected_principal_digest: str,
+        expected_owner_installation_id: str,
+    ) -> None:
+        if event.command_id != expected_command_id:
+            raise _release_refusal("command_id", "MISMATCH")
+        if event.event_type != self._EVENT_TYPE:
+            raise _release_refusal("event_envelope", "FAMILY")
+        if event.aggregate_type != self._AGGREGATE_TYPE:
+            raise _release_refusal("event_envelope", "AGGREGATE")
+        if event.aggregate_id != expected_owner_installation_id:
+            raise _release_refusal("event_envelope", "AGGREGATE_ID")
+        if not event.actor.startswith(self._ACTOR_PREFIX):
+            raise _release_refusal("actor", "PREFIX")
+        actor_principal = event.actor[len(self._ACTOR_PREFIX):]
+        if actor_principal != expected_principal_digest:
+            raise _release_refusal("actor", "PRINCIPAL")
+        if (
+            event.job_id is not None
+            or event.attempt_id is not None
+            or event.worker_id is not None
+            or event.quota_class is not None
+        ):
+            raise _release_refusal("event_envelope", "JOB_LINK")
+
+    def _validate_stored_approval(
+        self,
+        connection: sqlite3.Connection,
+        event: Event,
+        *,
+        expected_command_id: str,
+        expected_principal_digest: str,
+        expected_canonical: bytes | None = None,
+    ) -> Any:
+        from control_plane import executive_release_contract
+        payload = event.payload
+        if set(payload.keys()) != _RELEASE_APPROVAL_REQUIRED_KEYS:
+            raise _release_refusal("payload", "FIELDS")
+        # Structural + cross-field validation refuses malformed persisted
+        # payloads (missing/wrong-typed fields, non-canonical bytes, mismatched
+        # digests, unparseable principal/effect/grant, unparseable owner_seal).
+        validated = executive_release_contract.validate_approval_evidence(payload)
+        principal_projection = validated["principal_projection"]
+        principal_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(principal_projection)
+        ).hexdigest()
+        expected_owner_installation_id = validated["owner_installation_id"]
+        self._validate_envelope(
+            event,
+            expected_command_id=expected_command_id,
+            expected_principal_digest=expected_principal_digest,
+            expected_owner_installation_id=expected_owner_installation_id,
+        )
+        if principal_digest != expected_principal_digest:
+            raise _release_refusal("payload", "PRINCIPAL")
+        if validated["target_ref"] != validated["grant"]["target_ref"]:
+            raise _release_refusal("payload", "TARGET_BIND")
+        if validated["action"] != validated["grant"]["action"]:
+            raise _release_refusal("payload", "ACTION_BIND")
+        if validated["approved_transition_ref"] != expected_command_id:
+            raise _release_refusal("payload", "REF_BIND")
+        # Canonical round-trip: the persisted JSON must equal the canonical
+        # bytes of its parsed form. Any non-canonical encoding (manual edit,
+        # insertion of duplicate keys, reordered keys, etc.) refuses here.
+        raw_row = connection.execute(
+            "SELECT payload_json,created_at_ms FROM events WHERE event_id=?",
+            (int(event.event_id),),
+        ).fetchone()
+        if raw_row is None:
+            raise _release_refusal("payload", "PERSISTED_LOST")
+        stored_raw = str(raw_row["payload_json"])
+        canonical = executive_release_contract.canonical_release_bytes(payload).decode(
+            "utf-8"
+        )
+        if stored_raw != canonical:
+            raise _release_refusal("payload", "NONCANONICAL")
+        if expected_canonical is not None and stored_raw.encode("utf-8") != expected_canonical:
+            raise _release_refusal("payload", "SEMANTIC_MISMATCH")
+        if int(raw_row["created_at_ms"]) != int(validated["created_at_ms"]):
+            raise _release_refusal("event_envelope", "TIMESTAMP")
+        return validated
+
+    def record_approval(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        sealed_approval: Mapping[str, Any],
+        trusted_context: TrustedReleaseContext,
+    ) -> Any:
+        """Persist or reconcile the immutable approval Event.
+
+        Returns the detached, immutable ``ReleaseRecord``. On exact replay
+        the stored original is returned without appending a new Event, a new
+        timestamp, an extended expiry or a new sequence. Same-command foreign
+        family, shortened-reference collision, malformed envelope or payload,
+        caller-context spoof, foreign store, foreign connection, absent write
+        transaction or any semantic mismatch refuses without writes.
+        """
+        from control_plane import executive_release_contract
+        self._require_owned_write_connection(connection)
+        # Revalidate the sealed evidence. The caller-built mapping, the
+        # ReleaseRecord alone, a structural seal, a principal string or a
+        # stored Event row is not authority — the typed trusted_context is.
+        validated = executive_release_contract.validate_approval_evidence(sealed_approval)
+        canonical = executive_release_contract.canonical_release_bytes(validated)
+        sealed_digest = hashlib.sha256(canonical).hexdigest()
+        self._require_trusted_context(connection, trusted_context, sealed_digest)
+        principal_projection = validated["principal_projection"]
+        principal_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(principal_projection)
+        ).hexdigest()
+        # Bind every verified identity from the trusted context to the
+        # accepted sealed evidence. Any mismatch refuses before persistence.
+        if trusted_context.principal_digest != principal_digest:
+            raise _release_refusal("trusted_context", "PRINCIPAL_MISMATCH")
+        if trusted_context.target_ref != validated["target_ref"]:
+            raise _release_refusal("trusted_context", "TARGET_MISMATCH")
+        if (
+            trusted_context.owner_installation_id
+            != validated["owner_installation_id"]
+        ):
+            raise _release_refusal("trusted_context", "OWNER_MISMATCH")
+        if trusted_context.policy_id != principal_projection["policy_id"]:
+            raise _release_refusal("trusted_context", "POLICY_MISMATCH")
+        grant = validated["grant"]
+        owner_seal = validated["owner_seal"]
+        if trusted_context._policy_generation != grant["policy_generation"]:
+            raise _release_refusal("trusted_context", "POLICY_GENERATION_MISMATCH")
+        if trusted_context._authority_policy_hash != grant["authority_policy_hash"]:
+            raise _release_refusal("trusted_context", "POLICY_HASH_MISMATCH")
+        if trusted_context._key_id != owner_seal["key_id"]:
+            raise _release_refusal("trusted_context", "KEY_ID_MISMATCH")
+        if trusted_context.trust_generation != owner_seal["trust_generation"]:
+            raise _release_refusal("trusted_context", "TRUST_GENERATION_MISMATCH")
+        if grant["principal_digest"] != principal_digest:
+            raise _release_refusal("grant", "PRINCIPAL")
+        if grant["target_ref"] != validated["target_ref"]:
+            raise _release_refusal("grant", "TARGET")
+        if grant["action"] != validated["action"]:
+            raise _release_refusal("grant", "ACTION")
+        if grant["transition_digest"] != validated["transition_digest"]:
+            raise _release_refusal("grant", "TRANSITION")
+        command_id = validated["approved_transition_ref"]
+        owner_installation_id = validated["owner_installation_id"]
+        # Same-command lookup inside the active write transaction.
+        existing = self.store.get_event_by_command_id(
+            command_id, connection=connection
+        )
+        if existing is not None:
+            # Exact replay: validate envelope + payload, return immutable
+            # original. No new append, no new timestamp, no expiry extension.
+            return self._validate_stored_approval(
+                connection,
+                existing,
+                expected_command_id=command_id,
+                expected_principal_digest=principal_digest,
+                expected_canonical=canonical,
+            )
+        # First append then read back inside the same write transaction. The
+        # BEGIN IMMEDIATE write lock + the UNIQUE ``command_id`` index
+        # serialise concurrent same-key calls so they leave exactly one Event.
+        actor = self._ACTOR_PREFIX + principal_digest
+        timestamp = int(validated["created_at_ms"])
+        payload_obj = validated.to_dict()
+        self.store.append_event(
+            connection,
+            aggregate_type=self._AGGREGATE_TYPE,
+            aggregate_id=owner_installation_id,
+            event_type=self._EVENT_TYPE,
+            actor=actor,
+            job_id=None,
+            attempt_id=None,
+            worker_id=None,
+            quota_class=None,
+            payload=payload_obj,
+            command_id=command_id,
+            timestamp_ms=timestamp,
+        )
+        written = self.store.get_event_by_command_id(
+            command_id, connection=connection
+        )
+        if written is None:  # pragma: no cover - same-transaction invariant
+            raise _release_refusal("event_envelope", "WRITE_LOST")
+        return self._validate_stored_approval(
+            connection,
+            written,
+            expected_command_id=command_id,
+            expected_principal_digest=principal_digest,
+            expected_canonical=canonical,
+        )
+
+    def read_approval(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        approved_transition_ref: str,
+    ) -> Any:
+        """Read-only lookup of a previously persisted approval.
+
+        Uses one bounded exact command lookup through the owner snapshot,
+        strict envelope validation and the closed payload schema. It writes
+        nothing, grants no renewed authority, mints no token, re-verifies no
+        seal and revalidates no current policy. Historical expiry or
+        revocation does not erase the original evidence — a stored Event
+        remains readable.
+        """
+        from control_plane import executive_release_contract
+        self._require_owned_snapshot_connection(connection)
+        token = str(approved_transition_ref or "").strip()
+        if not token:
+            raise _release_refusal("approved_transition_ref", "EMPTY")
+        existing = self.store.get_event_by_command_id(token, connection=connection)
+        if existing is None:
+            raise _release_refusal("approval", "NOT_FOUND")
+        payload = existing.payload
+        if set(payload.keys()) != _RELEASE_APPROVAL_REQUIRED_KEYS:
+            raise _release_refusal("payload", "FIELDS")
+        # Validate the parsed payload, then derive the principal digest from
+        # the persisted projection to use as the expected actor identity.
+        validated = executive_release_contract.validate_approval_evidence(payload)
+        principal_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(
+                validated["principal_projection"]
+            )
+        ).hexdigest()
+        return self._validate_stored_approval(
+            connection,
+            existing,
+            expected_command_id=token,
+            expected_principal_digest=principal_digest,
+        )
+
+
 __all__ = [
     "ActiveOperatorBindingFacts",
     "Attempt",
@@ -25523,6 +26021,10 @@ __all__ = [
     "BoundedRuntimeReadObservation",
     "BoundedRoleResultRootMetadata",
     "BoundedRoleResultSnapshot",
+    "EXECUTIVE_RELEASE_ACTOR_PREFIX",
+    "EXECUTIVE_RELEASE_AGGREGATE_TYPE",
+    "EXECUTIVE_RELEASE_APPROVED_EVENT_TYPE",
+    "ReleaseMaintenanceRegistry",
     "RuntimeReadObservationReceipt",
     "RuntimeRoleResultOverBudget",
     "CooRetryMutationOutcome",
@@ -25545,6 +26047,8 @@ __all__ = [
     "RuntimeStore",
     "SCHEMA_VERSION",
     "StateConflict",
+    "TrustedReleaseContext",
+    "ReleaseMaintenanceError",
     "HOST_EXECUTION_BINDING_V2",
     "HOST_EXECUTION_BINDING_V3",
     "HOST_EXECUTION_BINDING_VERSION_KEY",

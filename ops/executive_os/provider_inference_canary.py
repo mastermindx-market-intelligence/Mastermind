@@ -45,7 +45,7 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
     )
 
 
-SCHEMA_VERSION = "mastermind.executive_provider_inference_canary/v1"
+SCHEMA_VERSION = "mastermind.executive_provider_inference_canary/v2"
 PINNED_CODEX_VERSION = "0.147.0"
 PINNED_CODEX_TEAM_ID = "2DC432GLL2"
 PINNED_CODEX_SHA256 = "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
@@ -127,6 +127,59 @@ EVENT_CLASSES = frozenset(
         "isolation_violation",
         "configuration_invalid",
         *PROVIDER_FAILURE_CLASSES,
+    }
+)
+
+# A provider error may contain credentials, account identifiers, email
+# addresses, or other provider payload.  Receipts therefore retain only a
+# digest, a bounded count, and words selected from this closed diagnostic
+# vocabulary.  Raw provider text never crosses the canary boundary.
+PROVIDER_DIAGNOSTIC_TERMS = frozenset(
+    {
+        "account",
+        "auth",
+        "authorization",
+        "billing",
+        "busy",
+        "capacity",
+        "connection",
+        "conversation",
+        "credits",
+        "denied",
+        "disabled",
+        "error",
+        "expired",
+        "failed",
+        "failure",
+        "forbidden",
+        "internal",
+        "invalid",
+        "limit",
+        "model",
+        "network",
+        "output",
+        "overloaded",
+        "permission",
+        "plan",
+        "provider",
+        "quota",
+        "rate",
+        "request",
+        "schema",
+        "service",
+        "session",
+        "stream",
+        "supported",
+        "temporarily",
+        "tier",
+        "timeout",
+        "token",
+        "unauthorized",
+        "unavailable",
+        "unknown",
+        "unsupported",
+        "usage",
+        "workspace",
     }
 )
 
@@ -795,6 +848,49 @@ def _provider_error_message(payload: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _provider_diagnostic(messages: Sequence[str]) -> dict[str, Any]:
+    """Return a secret-free, finite diagnostic projection of provider text."""
+
+    bounded = tuple(message[:2048] for message in messages[:4])
+    if not bounded:
+        return {
+            "provider_error_message_count": 0,
+            "provider_error_message_sha256": None,
+            "provider_error_terms": [],
+        }
+    framed = b"".join(
+        len(message.encode("utf-8", errors="replace")).to_bytes(4, "big")
+        + message.encode("utf-8", errors="replace")
+        for message in bounded
+    )
+    words = {
+        word
+        for message in bounded
+        for word in re.findall(r"[a-z0-9_]+", message.casefold())
+        if word in PROVIDER_DIAGNOSTIC_TERMS
+    }
+    return {
+        "provider_error_message_count": len(bounded),
+        "provider_error_message_sha256": _sha256_bytes(framed),
+        "provider_error_terms": sorted(words),
+    }
+
+
+def _classification(
+    *,
+    passed: bool,
+    terminal_event_class: str,
+    result_valid: bool,
+    messages: Sequence[str] = (),
+) -> dict[str, Any]:
+    return {
+        "passed": passed,
+        "terminal_event_class": terminal_event_class,
+        "result_valid": result_valid,
+        **_provider_diagnostic(messages),
+    }
+
+
 def classify_provider_streams(
     *,
     stdout: bytes,
@@ -805,23 +901,21 @@ def classify_provider_streams(
 ) -> dict[str, Any]:
     combined = stdout + b"\n" + stderr
     if timed_out:
-        return {
-            "passed": False,
-            "terminal_event_class": "timeout",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False, terminal_event_class="timeout", result_valid=False
+        )
     if stdout == b"" and stderr == LOCAL_FS_EACCES_STDERR:
-        return {
-            "passed": False,
-            "terminal_event_class": "isolation_violation",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class="isolation_violation",
+            result_valid=False,
+        )
     if _INVALID_WORKSPACE_MARKER.encode("ascii") in combined:
-        return {
-            "passed": False,
-            "terminal_event_class": "invalid_workspace_selected",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class="invalid_workspace_selected",
+            result_valid=False,
+        )
     events: list[str] = []
     provider_messages: list[str] = []
     malformed = False
@@ -848,43 +942,49 @@ def classify_provider_streams(
         except (UnicodeDecodeError, json.JSONDecodeError):
             malformed = True
     if malformed and "turn.completed" not in events:
-        return {
-            "passed": False,
-            "terminal_event_class": "malformed_provider_response",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class="malformed_provider_response",
+            result_valid=False,
+            messages=provider_messages,
+        )
     provider_failure = _provider_failure_class(
         events=events, messages=provider_messages
     )
     if exit_code != 0:
-        return {
-            "passed": False,
-            "terminal_event_class": provider_failure or "process_failed",
-            "result_valid": False,
-        }
+        return _classification(
+            passed=False,
+            terminal_event_class=provider_failure or "process_failed",
+            result_valid=False,
+            messages=provider_messages,
+        )
     if "turn.completed" not in events:
         if any(event in _JSONL_TERMINAL_EVENTS for event in events):
-            return {
-                "passed": False,
-                "terminal_event_class": provider_failure or "process_failed",
-                "result_valid": False,
-            }
-        return {
-            "passed": False,
-            "terminal_event_class": "malformed_provider_response",
-            "result_valid": False,
-        }
+            return _classification(
+                passed=False,
+                terminal_event_class=provider_failure or "process_failed",
+                result_valid=False,
+                messages=provider_messages,
+            )
+        return _classification(
+            passed=False,
+            terminal_event_class="malformed_provider_response",
+            result_valid=False,
+            messages=provider_messages,
+        )
     if not result_valid:
-        return {
-            "passed": False,
-            "terminal_event_class": "result_invalid",
-            "result_valid": False,
-        }
-    return {
-        "passed": True,
-        "terminal_event_class": "turn_completed",
-        "result_valid": True,
-    }
+        return _classification(
+            passed=False,
+            terminal_event_class="result_invalid",
+            result_valid=False,
+            messages=provider_messages,
+        )
+    return _classification(
+        passed=True,
+        terminal_event_class="turn_completed",
+        result_valid=True,
+        messages=provider_messages,
+    )
 
 
 def evaluate_provider_preflight(
@@ -937,6 +1037,13 @@ def _receipt(
         "result_valid": bool(classification["result_valid"]),
         "stdout_sha256": _sha256_bytes(stdout),
         "stderr_sha256": _sha256_bytes(stderr),
+        "provider_error_message_count": classification[
+            "provider_error_message_count"
+        ],
+        "provider_error_message_sha256": classification[
+            "provider_error_message_sha256"
+        ],
+        "provider_error_terms": classification["provider_error_terms"],
         "workspace_capability_outcome": workspace_capability,
         "workspace_selection_mechanism": "none",
         "forced_chatgpt_workspace_id_applied": False,
