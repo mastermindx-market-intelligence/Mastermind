@@ -1105,7 +1105,15 @@
   "new_integration_cases": 38,
   "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
   "owned_bug_repair": {
-    "actual_head_guard": "PENDING_POSTCOMMIT_VERIFICATION",
+    "actual_head_guard": {
+      "failed": 0,
+      "log_sha256": "ea00a3bc20061f3e1451afe7a511de601c578a7c8543a3ac101e0884a38051e5",
+      "passed": 142,
+      "scope": "Full existing tests/test_ceo_submit_armed_composition.py, including committed-HEAD topology guard; no guard modified",
+      "skipped": 0,
+      "verified_head": "47e2f418ae354e023ac5f0061ce34b947d8f4bbc",
+      "xml_sha256": "77ce8fec5c097353921c550fc8dc761f4cd870cf568eedc5bfc73a35e044559d"
+    },
     "change": "Declare _MAX_BRIEF_BYTES and use it in the bound check.",
     "identity_guard_modified": false,
     "limit_after": 524288,

@@ -47,8 +47,10 @@ The complete gate found the prior inline `512 * 1024` byte bound was classified 
 OS-identity literal by the existing alias-aware guard. The repair names the byte limit
 `_MAX_BRIEF_BYTES` and leaves its value524288 unchanged. The identity guard itself,
 permission rules and topology are unchanged. A failing regression precedes the repair.
-The actual committed-HEAD guard must be checked after commit; its result is separately
-recorded rather than implied by a working-tree test.
+The actual committed-HEAD guard was then checked at47e2f418ae354e023ac5f0061ce34b947d8f4bbc:
+all142 tests in the existing CEO-submit/identity-guard file pass, with zero failures
+or skips. This separate run is not added to the450 related-test campaign. The source
+fix is verified through the existing guard, not merely a working-tree simulation.
 
 ## Full repository limits — not green
 
