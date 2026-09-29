@@ -14,9 +14,6 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Sequence
 
-from common.verified_principal import VerifiedPrincipal
-
-
 _ROOT = Path(__file__).resolve().parent.parent
 _POLICY_PATH = _ROOT / "config" / "authority_map.yml"
 
@@ -572,6 +569,12 @@ def _bind_trusted_release_confirmation(owner_capability: object, *,
 
 def release_principal_projection(principal):
     """Project an existing verified principal; never authenticate one here."""
+    # Resolve the incumbent edge-owned type only when this release-specific
+    # projection is invoked.  The pure Business auth contract does not import
+    # the control plane, so this preserves its exact source and avoids adding
+    # an integration dependency to authority-policy module initialization.
+    from integrations.business_mcp_auth.contracts import VerifiedPrincipal
+
     if type(principal) is not VerifiedPrincipal:
         _release_refuse("RELEASE_VERIFIED_PRINCIPAL_REQUIRED")
     if (type(principal.issuer) is not str or not principal.issuer
