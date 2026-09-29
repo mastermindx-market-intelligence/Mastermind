@@ -830,6 +830,49 @@ def test_failed_write_cleanup_preserves_replacement_inode(tmp_path, monkeypatch)
     assert path.read_bytes() == replacement
 
 
+def test_advance_cleanup_never_adopts_replacement_inode(tmp_path, monkeypatch):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    current = _start(journal)
+    temporary = _record_path(root).with_suffix(".tmp")
+    actual_write_new = journal._write_new
+    held_descriptors = []
+
+    def replace_after_write(root_descriptor, name, raw):
+        created_identity = actual_write_new(root_descriptor, name, raw)
+        if name.endswith(".tmp"):
+            held_descriptors.append(
+                os.open(name, os.O_RDONLY, dir_fd=root_descriptor)
+            )
+            os.unlink(name, dir_fd=root_descriptor)
+            replacement_descriptor = os.open(
+                name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            try:
+                os.write(replacement_descriptor, b"foreign-temp")
+            finally:
+                os.close(replacement_descriptor)
+        return created_identity
+
+    monkeypatch.setattr(journal, "_write_new", replace_after_write)
+    try:
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+            journal.advance(
+                OPERATION_KEY,
+                expected_generation=1,
+                state="PUBLISHED",
+            )
+        assert journal.read(OPERATION_KEY) == current
+        assert temporary.exists()
+        assert temporary.read_bytes() == b"foreign-temp"
+    finally:
+        for descriptor in held_descriptors:
+            os.close(descriptor)
+
+
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="requires process flock semantics")
 def test_held_process_lock_times_out_without_record_effect(tmp_path):
     root = tmp_path / "journal"

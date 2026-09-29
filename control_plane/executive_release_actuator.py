@@ -717,12 +717,15 @@ class _ExecutiveReleaseActuatorJournal:
             _fail("OPERATION_MISMATCH")
         return record
 
-    def _write_new(self, root_descriptor: int, name: str, raw: bytes) -> None:
+    def _write_new(
+        self, root_descriptor: int, name: str, raw: bytes
+    ) -> tuple[Any, ...]:
         if not 0 < len(raw) <= _MAX_RECORD_BYTES:
             _fail("RECORD_SIZE")
         descriptor = None
         created = False
         created_inode = None
+        created_identity = None
         complete = False
         try:
             descriptor = os.open(
@@ -753,6 +756,22 @@ class _ExecutiveReleaseActuatorJournal:
                     _fail("RECORD_WRITE")
                 view = view[written:]
             os.fsync(descriptor)
+            completed_info = os.fstat(descriptor)
+            self._check_descriptor(
+                descriptor,
+                completed_info,
+                directory=False,
+                mode=_FILE_MODE,
+                code="RECORD_METADATA",
+            )
+            created_identity = _file_identity(completed_info)
+            self._assert_file_path(
+                root_descriptor,
+                name,
+                descriptor,
+                created_identity,
+                "RECORD_REPLACED",
+            )
             os.close(descriptor)
             descriptor = None
             self._fsync_directory(root_descriptor)
@@ -782,6 +801,9 @@ class _ExecutiveReleaseActuatorJournal:
                         self._fsync_directory(root_descriptor)
                     except OSError:
                         pass
+        if created_identity is None:
+            _fail("RECORD_WRITE")
+        return created_identity
 
     def _unlink_owned(
         self,
@@ -928,11 +950,13 @@ class _ExecutiveReleaseActuatorJournal:
             if staged_raw != candidate:
                 _fail("START_STAGED_CONFLICT")
         else:
-            self._write_new(root_descriptor, staged_name, candidate)
+            created_identity = self._write_new(
+                root_descriptor, staged_name, candidate
+            )
             staged_raw, staged_identity = self._read_file(
                 root_descriptor, staged_name, required=True
             )
-            if staged_raw != candidate:
+            if staged_raw != candidate or staged_identity != created_identity:
                 _fail("RECORD_REPLACED")
         self._decode(candidate)
         staged_again, staged_identity_again = self._read_file(
@@ -1054,13 +1078,17 @@ class _ExecutiveReleaseActuatorJournal:
         validated = _validate_record(updated)
         replacement = canonical_release_bytes(validated)
         temporary_name = name[:-5] + ".tmp"
-        self._write_new(root_descriptor, temporary_name, replacement)
-        temporary_identity = None
+        temporary_identity = self._write_new(
+            root_descriptor, temporary_name, replacement
+        )
         try:
-            temporary_raw, temporary_identity = self._read_file(
+            temporary_raw, observed_temporary_identity = self._read_file(
                 root_descriptor, temporary_name, required=True
             )
-            if temporary_raw != replacement:
+            if (
+                temporary_raw != replacement
+                or observed_temporary_identity != temporary_identity
+            ):
                 _fail("RECORD_REPLACED")
             observed_raw, observed_identity = self._read_file(
                 root_descriptor, name, required=True
