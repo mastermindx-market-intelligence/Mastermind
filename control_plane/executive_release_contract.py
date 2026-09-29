@@ -36,6 +36,8 @@ __all__ = [
     "parse_release_json",
     "validate_release_terminal_status",
     "validate_release_terminal_receipt",
+    "validate_release_prestart_reservation",
+    "validate_release_prestart_cancellation",
 ]
 
 _MAX_BYTES = 16 * 1024
@@ -977,3 +979,377 @@ def validate_release_terminal_receipt(
     ):
         _fail("receipt", "EMBEDDED_MISMATCH")
     return _freeze(receipt)
+
+
+# ---------------------------------------------------------------------------
+# P4 prestart reservation and cancellation contracts (R1). These are detached
+# structural records only: they neither prove persistence, fresh observation,
+# absence of an effect, cancellation delivery, fence release, dispatch,
+# current authority nor any right to execute.
+# ---------------------------------------------------------------------------
+
+_RESERVATION_SCHEMA = "mastermind.executive_release_prestart_reservation/v1"
+_CANCELLATION_SCHEMA = "mastermind.executive_release_prestart_cancellation/v1"
+_RESERVATION_FIELDS = (
+    "schema request_id request_fingerprint operation_key"
+    " approved_transition_ref approval_evidence_digest"
+    " authenticated_principal_digest effective_grant_digest"
+    " normalized_requested_effect_digest action_family action_target_digest"
+    " owner_installation_id target_ref from_release_commit to_release_commit"
+    " reservation_generation reserved_at_ms reserved_monotonic_ns"
+    " preconditions expected_precondition_digest prepared_payload"
+    " prepared_token_digest before target_observation_digest"
+)
+_CANCELLATION_FIELDS = (
+    "schema request_id request_fingerprint operation_key"
+    " approved_transition_ref approval_evidence_digest"
+    " authenticated_principal_digest effective_grant_digest"
+    " normalized_requested_effect_digest action_family action_target_digest"
+    " owner_installation_id target_ref from_release_commit to_release_commit"
+    " reservation_generation root_qualification_digest admission_digest"
+    " cancellation_generation cancelled_at_ms cancelled_monotonic_ns reason"
+    " before current original_target_observation_digest"
+    " current_target_observation_digest current_precondition_digest"
+    " authority_evidence_digest"
+)
+_CANCELLATION_REASONS = (
+    "PREPARED_TOKEN_EXPIRED",
+    "PRINCIPAL_EXPIRED",
+    "GRANT_EXPIRED",
+    "AUTHORITY_REVOKED",
+    "PRECONDITIONS_CHANGED",
+    "TARGET_OBSERVATION_CHANGED",
+)
+_RESERVATION_COMMON_DIGEST_FIELDS = (
+    "request_fingerprint approval_evidence_digest"
+    " authenticated_principal_digest effective_grant_digest"
+    " normalized_requested_effect_digest action_target_digest target_ref"
+    " prepared_token_digest target_observation_digest"
+)
+_CANCELLATION_COMMON_DIGEST_FIELDS = (
+    "request_fingerprint approval_evidence_digest"
+    " authenticated_principal_digest effective_grant_digest"
+    " normalized_requested_effect_digest action_target_digest target_ref"
+    " root_qualification_digest admission_digest"
+    " original_target_observation_digest current_target_observation_digest"
+    " current_precondition_digest authority_evidence_digest"
+)
+_PREPARED_IDENTITY_FIELDS = (
+    "owner_installation_id operation_key approved_transition_ref target_ref"
+    " effective_grant_digest approval_evidence_digest"
+    " authenticated_principal_digest normalized_requested_effect_digest"
+    " action_target_digest action_family request_fingerprint"
+)
+
+
+def _validate_common_approval_identity(
+    value: Mapping[str, Any], approval: ReleaseRecord
+) -> None:
+    effect = approval["normalized_requested_effect"]
+    fingerprint = request_fingerprint_for(approval)
+    for key in (
+        "request_fingerprint",
+        "approval_evidence_digest",
+        "authenticated_principal_digest",
+        "effective_grant_digest",
+        "normalized_requested_effect_digest",
+        "action_target_digest",
+        "target_ref",
+    ):
+        _digest(value[key], key)
+    _uuid(value["owner_installation_id"], "owner_installation_id")
+    for key in ("from_release_commit", "to_release_commit"):
+        _pattern(value[key], key, _HEX40)
+    _enum(value["action_family"], "action_family", _ACTIONS)
+    _equal(value["request_fingerprint"], fingerprint, "request_fingerprint")
+    _equal(value["request_id"], broker_request_id_for(fingerprint), "request_id")
+    for key in (
+        "operation_key",
+        "approved_transition_ref",
+        "owner_installation_id",
+        "target_ref",
+        "effective_grant_digest",
+    ):
+        _equal(value[key], approval[key], key)
+    _equal(
+        value["approval_evidence_digest"], _hash(approval), "approval_evidence_digest"
+    )
+    _equal(
+        value["authenticated_principal_digest"],
+        _hash(approval["principal_projection"]),
+        "authenticated_principal_digest",
+    )
+    _equal(
+        value["normalized_requested_effect_digest"],
+        _hash(effect),
+        "normalized_requested_effect_digest",
+    )
+    _equal(value["action_family"], approval["action"], "action_family")
+    _equal(
+        value["action_target_digest"],
+        _hash({"action": approval["action"], "target_ref": approval["target_ref"]}),
+        "action_target_digest",
+    )
+    _equal(
+        value["from_release_commit"],
+        effect["from_release_commit"],
+        "from_release_commit",
+    )
+    _equal(value["to_release_commit"], effect["to_release_commit"], "to_release_commit")
+
+
+def _validate_prestart_preconditions(
+    value: Any, approval: ReleaseRecord
+) -> ReleaseRecord:
+    preconditions = validate_precondition_manifest(value)
+    effect = approval["normalized_requested_effect"]
+    grant = approval["grant"]
+    for key in ("owner_installation_id", "target_ref"):
+        _equal(preconditions[key], approval[key], "preconditions." + key)
+    _equal(
+        preconditions["approval_evidence_digest"],
+        _hash(approval),
+        "preconditions.approval_evidence_digest",
+    )
+    _equal(preconditions["grant_digest"], _hash(grant), "preconditions.grant_digest")
+    _equal(
+        preconditions["authority_policy_hash"],
+        grant["authority_policy_hash"],
+        "preconditions.authority_policy_hash",
+    )
+    for key in _PRECONDITION_EFFECT_FIELDS.split():
+        _equal(preconditions[key], effect[key], "preconditions." + key)
+    return preconditions
+
+
+def _validate_prestart_prepared_payload(
+    value: Any,
+    reservation: Mapping[str, Any],
+    approval: ReleaseRecord,
+    preconditions: Mapping[str, Any],
+) -> ReleaseRecord:
+    prepared = validate_prepared_payload(value)
+    grant = approval["grant"]
+    for key in _PREPARED_IDENTITY_FIELDS.split():
+        _equal(prepared[key], reservation[key], "prepared." + key)
+    if canonical_release_bytes(prepared["normalized_requested_effect"]) != (
+        canonical_release_bytes(approval["normalized_requested_effect"])
+    ):
+        _fail("prepared.normalized_requested_effect", "MISMATCH")
+    for key in (
+        "policy_id",
+        "policy_generation",
+        "authority_policy_hash",
+        "confirmation_requirement",
+    ):
+        _equal(prepared[key], grant[key], "prepared." + key)
+    _equal(
+        prepared["trust_generation"],
+        approval["owner_seal"]["trust_generation"],
+        "prepared.trust_generation",
+    )
+    _equal(prepared["key_id"], approval["owner_seal"]["key_id"], "prepared.key_id")
+    _equal(prepared["boot_id"], preconditions["boot_id"], "prepared.boot_id")
+    _equal(
+        prepared["expected_source_and_precondition_digest"],
+        _hash(preconditions),
+        "prepared.expected_source_and_precondition_digest",
+    )
+    _equal(
+        prepared["admission_contract_digest"],
+        preconditions["admission_contract_digest"],
+        "prepared.admission_contract_digest",
+    )
+    if not approval["created_at_ms"] <= prepared["issued_at_ms"]:
+        _fail("prepared.issued_at_ms", "OUTSIDE_APPROVAL_LIFETIME")
+    if not prepared["expires_at_ms"] <= approval["expires_at_ms"]:
+        _fail("prepared.expires_at_ms", "OUTSIDE_APPROVAL_LIFETIME")
+    wall_duration_ns = (
+        prepared["expires_at_ms"] - prepared["issued_at_ms"]
+    ) * 1_000_000
+    if (
+        prepared["expires_monotonic_ns"] - prepared["issued_monotonic_ns"]
+        != wall_duration_ns
+    ):
+        _fail("prepared.expires_monotonic_ns", "LIFETIME")
+    return prepared
+
+
+def _snapshot_exact_object(
+    value: Any, fields: str, label: str, schema: str
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        _fail(label, "OBJECT_REQUIRED")
+    snapshot = _plain(value)
+    canonical_release_bytes(snapshot)
+    return _object(snapshot, fields, label, schema)
+
+
+def validate_release_prestart_reservation(
+    value: Any, *, expected_approval: Any
+) -> ReleaseRecord:
+    """Validate a detached prestart reservation against its canonical approval."""
+    approval = validate_approval_evidence(expected_approval)
+    v = _snapshot_exact_object(
+        value, _RESERVATION_FIELDS, "reservation", _RESERVATION_SCHEMA
+    )
+    _integer(v["reservation_generation"], "reservation_generation", 1, 1)
+    _validate_common_approval_identity(v, approval)
+    for key in _RESERVATION_COMMON_DIGEST_FIELDS.split():
+        _digest(v[key], key)
+    preconditions = _validate_prestart_preconditions(v["preconditions"], approval)
+    _digest(v["expected_precondition_digest"], "expected_precondition_digest")
+    _equal(
+        v["expected_precondition_digest"],
+        _hash(preconditions),
+        "expected_precondition_digest",
+    )
+    prepared = _validate_prestart_prepared_payload(
+        v["prepared_payload"], v, approval, preconditions
+    )
+    reserved_at_ms = _integer(v["reserved_at_ms"], "reserved_at_ms")
+    reserved_monotonic_ns = _integer(
+        v["reserved_monotonic_ns"], "reserved_monotonic_ns"
+    )
+    if not prepared["issued_at_ms"] <= reserved_at_ms < prepared["expires_at_ms"]:
+        _fail("reserved_at_ms", "OUTSIDE_PREPARED_LIFETIME")
+    if not (
+        prepared["issued_monotonic_ns"]
+        <= reserved_monotonic_ns
+        < prepared["expires_monotonic_ns"]
+    ):
+        _fail("reserved_monotonic_ns", "OUTSIDE_PREPARED_LIFETIME")
+    before = _validate_installed_identity(v["before"], "before")
+    effect = approval["normalized_requested_effect"]
+    _equal(
+        before["release_commit"], effect["from_release_commit"], "before.release_commit"
+    )
+    _equal(before["release_tree"], effect["from_release_tree"], "before.release_tree")
+    _equal(
+        before["installed_manifest_digest"],
+        effect["from_installed_manifest_digest"],
+        "before.installed_manifest_digest",
+    )
+    _equal(
+        before["configuration_digest"],
+        preconditions["installed_configuration_digest"],
+        "before.configuration_digest",
+    )
+    _equal(
+        before["broker_source_commit"],
+        before["release_commit"],
+        "before.broker_source_commit",
+    )
+    _equal(
+        before["broker_source_tree"],
+        before["release_tree"],
+        "before.broker_source_tree",
+    )
+    v["preconditions"] = preconditions
+    v["prepared_payload"] = prepared
+    v["before"] = before
+    return _freeze(v)
+
+
+def _validate_cancellation_before_current(
+    cancellation: Mapping[str, Any],
+    reservation: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    before = _validate_installed_identity(cancellation["before"], "before")
+    expected_bytes = canonical_release_bytes(reservation["before"])
+    if canonical_release_bytes(before) != expected_bytes:
+        _fail("before", "CONTENT_CHANGED")
+    current = _validate_installed_identity(cancellation["current"], "current")
+    if canonical_release_bytes(current) != expected_bytes:
+        _fail("current", "CONTENT_CHANGED")
+    return before, current
+
+
+def validate_release_prestart_cancellation(
+    value: Any,
+    *,
+    expected_reservation: Any,
+    expected_admission: Any,
+    expected_approval: Any,
+) -> ReleaseRecord:
+    """Validate a detached prestart cancellation against immutable ancestors."""
+    approval = validate_approval_evidence(expected_approval)
+    reservation = validate_release_prestart_reservation(
+        expected_reservation, expected_approval=approval
+    )
+    admission = validate_admission(expected_admission)
+    for key in (
+        "operation_key",
+        "approved_transition_ref",
+        "target_ref",
+        "owner_installation_id",
+        "effective_grant_digest",
+        "request_fingerprint",
+    ):
+        _equal(admission[key], reservation[key], "admission." + key)
+    _equal(
+        admission["boot_id"],
+        reservation["preconditions"]["boot_id"],
+        "admission.boot_id",
+    )
+    _equal(
+        admission["admission_contract_digest"],
+        reservation["preconditions"]["admission_contract_digest"],
+        "admission.admission_contract_digest",
+    )
+    _equal(
+        admission["target_observation_digest"],
+        reservation["target_observation_digest"],
+        "admission.target_observation_digest",
+    )
+    v = _snapshot_exact_object(
+        value, _CANCELLATION_FIELDS, "cancellation", _CANCELLATION_SCHEMA
+    )
+    _integer(v["reservation_generation"], "reservation_generation", 1, 1)
+    _integer(v["cancellation_generation"], "cancellation_generation", 1, 1)
+    _validate_common_approval_identity(v, approval)
+    for key in _CANCELLATION_COMMON_DIGEST_FIELDS.split():
+        _digest(v[key], key)
+    _equal(
+        v["root_qualification_digest"], _hash(reservation), "root_qualification_digest"
+    )
+    _equal(v["admission_digest"], _hash(admission), "admission_digest")
+    cancelled_at_ms = _integer(v["cancelled_at_ms"], "cancelled_at_ms")
+    cancelled_monotonic_ns = _integer(
+        v["cancelled_monotonic_ns"], "cancelled_monotonic_ns"
+    )
+    if cancelled_at_ms < reservation["reserved_at_ms"]:
+        _fail("cancelled_at_ms", "ORDER")
+    if cancelled_monotonic_ns < reservation["reserved_monotonic_ns"]:
+        _fail("cancelled_monotonic_ns", "ORDER")
+    _enum(v["reason"], "reason", _CANCELLATION_REASONS)
+    v["before"], v["current"] = _validate_cancellation_before_current(v, reservation)
+    _equal(
+        v["original_target_observation_digest"],
+        reservation["target_observation_digest"],
+        "original_target_observation_digest",
+    )
+    prepared = reservation["prepared_payload"]
+    reason = v["reason"]
+    if reason == "PREPARED_TOKEN_EXPIRED":
+        if not (
+            cancelled_at_ms >= prepared["expires_at_ms"]
+            or cancelled_monotonic_ns >= prepared["expires_monotonic_ns"]
+        ):
+            _fail("reason", "PREDICATE")
+    if reason == "GRANT_EXPIRED":
+        if cancelled_at_ms < approval["grant"]["expires_at_ms"]:
+            _fail("reason", "PREDICATE")
+    if reason == "PRECONDITIONS_CHANGED":
+        if (
+            v["current_precondition_digest"]
+            == reservation["expected_precondition_digest"]
+        ):
+            _fail("reason", "PREDICATE")
+    if reason == "TARGET_OBSERVATION_CHANGED":
+        if (
+            v["current_target_observation_digest"]
+            == reservation["target_observation_digest"]
+        ):
+            _fail("reason", "PREDICATE")
+    return _freeze(v)
