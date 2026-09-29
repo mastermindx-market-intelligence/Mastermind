@@ -5,6 +5,7 @@ synthetic. These tests neither activate production nor substitute for A2's
 installed same-UID process-instance proof.
 """
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import os
@@ -12,10 +13,14 @@ import os
 import pytest
 
 from control_plane.executive_authority import ReleaseControllerPolicy
+from control_plane import executive_release_consumer as consumer
 from control_plane.executive_service import ExecutiveControlService, CeoIngressAppBinding
 from integrations.business_mcp_auth.principal_projection import principal_projection
 from integrations.mastermind_executive_app import app as app_module
-from integrations.mastermind_executive_app.gateway import make_jwt_authenticators, CeoIngressClient
+from integrations.mastermind_executive_app import release_admission
+from integrations.mastermind_executive_app.gateway import (
+    make_jwt_authenticators, CeoIngressClient, CeoIngressResponse, TRANSPORT_SENT_OK,
+)
 from tests import test_mastermind_executive_app_asgi as web
 from tests.test_executive_release_consumer import installed, inputs, approve_arguments, counts
 from tests.test_executive_release_controller_policy import source
@@ -135,4 +140,107 @@ def test_existing_web_profile_does_not_acquire_release_routes(rsa_key, tmp_path,
                 assert result.status_code == 404
         finally:
             await app.aclose()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("operation", ["approve_release_transition", "prepare_release_transition",
+                                     "reconcile_release_transition", "commit_prepared_release_transition"])
+def test_closed_responses_preserve_valid_values_and_refuse_leaks(installed, monkeypatch, operation):
+    args = approve_arguments(installed)
+    approved = installed["call"]("approve_release_transition", args)
+    arguments = {
+        "approve_release_transition": args,
+        "prepare_release_transition": {"operation_key": args["operation_key"],
+                                       "approved_transition_ref": approved["approved_transition_ref"]},
+        "reconcile_release_transition": {"operation_key": args["operation_key"]},
+        "commit_prepared_release_transition": {"prepared_token": "inert"},
+    }[operation]
+    original = installed["call"](operation, arguments)
+    monkeypatch.setattr(release_admission, "principal_projection", lambda _: installed["principal"])
+    class Transport:
+        def __init__(self, result):
+            self.result, self.calls = result, 0
+        async def send_frame(self, *args):
+            self.calls += 1
+            return CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=True, result=self.result)
+    def send(value):
+        channel = Transport(value)
+        result = asyncio.run(release_admission.compose_release_admission(operation=operation,
+            arguments=arguments, principal=object(), client=channel, socket_path="unused"))
+        assert channel.calls == 1
+        return result
+    assert send(original) == original
+    variants = [{**original, "private_debug": "PRIVATE_SENTINEL"},
+                {**original, "operation": "wrong"},
+                {"schema": original["schema"], "operation": operation, "ok": False,
+                 "error": {"code": "PRIVATE_SENTINEL"}}]
+    if operation == "approve_release_transition":
+        variants += [{k: v for k, v in original.items() if k != "approved_transition_ref"},
+                     {**original, "approved_transition_ref": "wrong"},
+                     {**original, "approval_evidence_digest": {"secret": "PRIVATE_SENTINEL"}}]
+    elif operation == "prepare_release_transition":
+        variants += [{**original, "prepared_token": {}}, {**original, "expires_at_ms": True},
+                     {**original, "preview": {**original["preview"], "private": "PRIVATE_SENTINEL"}},
+                     {**original, "preview": {**original["preview"], "target_ref": "bad"}}]
+    elif operation == "reconcile_release_transition":
+        foreign = copy.deepcopy(original)
+        foreign["approval"]["principal_projection"]["subject_digest"] = "f" * 64
+        variants += [foreign, {**original, "approval": None},
+                     {**original, "broker_status": {**original["broker_status"], "request_id": "wrong"}},
+                     {**original, "broker_status": {**original["broker_status"], "private": "PRIVATE_SENTINEL"}}]
+    else:
+        variants += [{**original, "ok": True}]
+    for value in variants:
+        answer = send(value)
+        assert answer == {"ok": False, "error": {"code": "RELEASE_RESPONSE_UNKNOWN"},
+                          "effect": "EFFECT_UNKNOWN"}
+
+
+def test_lost_postcommit_readback_reconciles_without_second_event(installed, monkeypatch,
+                                                               tmp_path, short_socket_root):
+    monkeypatch.setattr(release_admission, "principal_projection", lambda _: installed["principal"])
+    original = consumer.ReleaseControlConsumer._read
+    lost = []
+    def lose_first(self, key):
+        record = original(self, key)
+        if record is not None and not lost:
+            lost.append(True)
+            return None
+        return record
+    monkeypatch.setattr(consumer.ReleaseControlConsumer, "_read", lose_first)
+    class NoReads:
+        def observe(self):
+            pytest.fail("unexpected read route")
+        async def call(self, *args):
+            pytest.fail("unexpected read route")
+        async def aclose(self):
+            pass
+    async def exercise():
+        readers = NoReads()
+        path = short_socket_root / "lost.sock"
+        service = ExecutiveControlService(web._service_config(tmp_path, socket_root=short_socket_root),
+            supervisor_factory=lambda _: web._NoExecutionSupervisor(), service_state="READY",
+            ceo_ingress_socket_path=path, ceo_ingress_peer_uid=os.geteuid() + 1000,
+            ceo_ingress_grounding_provider=readers, ceo_ingress_armed=False,
+            ceo_ingress_app_binding=CeoIngressAppBinding(peer_uid=os.geteuid(), armed=False,
+                grounding_provider=readers, read_provider=readers))
+        await service.start()
+        try:
+            before = counts(service.runtime)
+            args = approve_arguments(installed)
+            async def send(operation, arguments):
+                return await release_admission.compose_release_admission(operation=operation,
+                    arguments=arguments, principal=object(), client=CeoIngressClient(), socket_path=path)
+            result = await send("approve_release_transition", args)
+            assert lost and result["effect"] == "EFFECT_UNKNOWN"
+            assert result["error"]["code"] == "RELEASE_APPROVAL_READBACK_UNKNOWN"
+            after = (before[0] + 1, before[1], before[2])
+            assert counts(service.runtime) == after
+            recovered = await send("reconcile_release_transition", {"operation_key": args["operation_key"]})
+            assert recovered["ok"] is True and recovered["approval"]["operation_key"] == args["operation_key"]
+            assert recovered["broker_status"]["status"] == "NOT_FOUND"
+            assert counts(service.runtime) == after
+            assert installed["root_broker"]._executor.calls == []
+        finally:
+            await service.close()
     asyncio.run(exercise())

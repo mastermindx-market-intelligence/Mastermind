@@ -69,6 +69,14 @@ disconnect using the existing owned-task/drain mechanism. The key and staged
 factories are absent from the production broker by default, so approval and
 prepare remain unavailable until the separate installed qualification.
 
+The app validates exact operation-specific response shapes and approval/history
+correlation before returning owner data. Unknown fields or errors become a closed
+`EFFECT_UNKNOWN` response without echoing the body. A lost canonical readback after
+the approval commits retains that classification through Control and the app;
+same-operation reconciliation recovers the original approval without another Event.
+Root refusals expose only the fixed unconfigured/disarmed/refused vocabulary after
+root-peer verification and exact envelope validation.
+
 ## Acceptance boundaries
 
 Tests drive actual signed JWT verification, a real Unix CeoIngress connection,

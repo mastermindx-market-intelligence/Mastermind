@@ -75,7 +75,11 @@ class ReleaseBrokerClient:
                 or type(response.get("ok")) is not bool):
             raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
         if not response["ok"]:
-            raise ReleaseConsumerError("RELEASE_BROKER_REFUSED")
+            if (set(response) != {"schema", "operation", "ok", "error"}
+                    or type(response["error"]) is not str or response["error"] not in {
+                        "RELEASE_OWNER_UNCONFIGURED", "RELEASE_COMMIT_DISARMED", "RELEASE_REFUSED"}):
+                raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
+            raise ReleaseConsumerError(response["error"])
         if set(response) != {"schema", "operation", "ok", "approval", "result"}:
             raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
         validated = contract.validate_approval_evidence(response["approval"])

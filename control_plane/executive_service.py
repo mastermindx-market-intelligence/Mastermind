@@ -4240,7 +4240,14 @@ class ExecutiveControlService:
                         writer, {"ok": True, "result": result},
                         response_ceiling=release_ingress.MAX_RESPONSE_BYTES)
                 except (release_ingress.ReleaseIngressError, ReleaseConsumerError) as exc:
-                    await self._send_ceo_ingress_error(writer, exc.code, "release request refused")
+                    refusal = {"schema": release_ingress.RESPONSE_SCHEMA,
+                        "operation": parsed.get("operation"), "ok": False,
+                        "error": {"code": exc.code}}
+                    if exc.code == "RELEASE_APPROVAL_READBACK_UNKNOWN":
+                        # Persistence already succeeded; this is not proof of
+                        # zero effect. Reconcile the original operation only.
+                        refusal["effect"] = "EFFECT_UNKNOWN"
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": refusal})
                 except Exception:
                     # If an approval transaction may have committed, the
                     # caller must reconcile the same operation, never retry.
