@@ -38,6 +38,7 @@ def _parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--coordination-review", metavar="PATH", help="review a project-scoped candidate from an owner-supplied context JSON file")
     mode.add_argument("--coordination-brief", metavar="PATH", help="render existing compiled Agent OS context for one coordination judgment")
+    mode.add_argument("--coordination-return", metavar="PATH", help="review complete existing harness result evidence, not its shortened summary")
     return parser
 
 
@@ -52,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         raw = _read(args.input)
         if not isinstance(raw, dict):
             raise ChairmanCognitionError("top-level JSON must be an object")
-        coordination_path = args.coordination_review or args.coordination_brief
+        coordination_path = args.coordination_review or args.coordination_brief or args.coordination_return
         if coordination_path:
             if args.input == "-" and coordination_path == "-":
                 raise ChairmanCognitionError("two inputs cannot share stdin")
@@ -64,14 +65,29 @@ def main(argv: list[str] | None = None) -> int:
             if len(review_text.encode("utf-8")) > 1024 * 1024:
                 raise ChairmanCognitionError("coordination review exceeds input bound")
             review = json.loads(review_text, object_pairs_hook=_strict_object)
-            keys = {"context", "candidate"} if args.coordination_review else {"context", "context_bundle", "bundle_source_ref"}
+            if args.coordination_review:
+                keys = {"context", "candidate"}
+            elif args.coordination_brief:
+                keys = {"context", "context_bundle", "bundle_source_ref"}
+            else:
+                keys = {"context", "observation", "candidate_result", "expected_turn", "expected_provider_session_id", "expected_provider_native_turn_id"}
             if not isinstance(review, dict) or set(review) != keys:
                 raise ChairmanCognitionError("invalid coordination input fields")
-            from control_plane.chairman_coordination import evaluate_coordination_candidate, render_coordination_brief
+            from control_plane.chairman_coordination import evaluate_coordination_candidate, render_coordination_brief, evaluate_coordination_return
             if args.coordination_review:
                 packet = evaluate_coordination_candidate(raw, context=review["context"], candidate=review["candidate"])
-            else:
+            elif args.coordination_brief:
                 packet = render_coordination_brief(raw, context=review["context"], context_bundle=review["context_bundle"], bundle_source_ref=review["bundle_source_ref"])
+            else:
+                from control_plane.executive_orchestration_result import RawRoleResultObservation
+                from control_plane.operator_harness_contract import CandidateResult, TurnRef
+                try:
+                    observation = RawRoleResultObservation(**review["observation"])
+                    candidate_result = CandidateResult(**review["candidate_result"])
+                    expected_turn = TurnRef(**review["expected_turn"])
+                except (TypeError, ValueError, RecursionError) as exc:
+                    raise ChairmanCognitionError("invalid existing harness result evidence") from exc
+                packet = evaluate_coordination_return(raw, context=review["context"], observation=observation, candidate_result=candidate_result, expected_turn=expected_turn, expected_provider_session_id=review["expected_provider_session_id"], expected_provider_native_turn_id=review["expected_provider_native_turn_id"])
         else:
             packet = evaluate_document(raw)
     except (

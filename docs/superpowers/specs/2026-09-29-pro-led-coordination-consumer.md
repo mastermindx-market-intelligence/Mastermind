@@ -109,7 +109,7 @@ python3 scripts/chairman_cognition.py \
   --pretty
 ```
 
-The two modes are mutually exclusive. One input may use stdin, never both. Malformed
+The three modes are mutually exclusive. One input may use stdin, never both. Malformed
 or oversized supplemental JSON returns the existing closed INVALID_INPUT error without
 echoing raw content. Exit zero means evaluation succeeded, not that execution is allowed.
 
@@ -127,3 +127,43 @@ No base-builder task is required to continue developing this component. This Web
 principal retains its implementation. Existing admitted model/transport and durable
 return adapters remain the later integration boundary, after source review and release;
 no new immediate assignment to the busy base team is made here.
+
+
+## Complete native-result consumer — implemented follow-through
+
+`evaluate_coordination_return(document, *, context, observation, candidate_result,
+expected_turn, expected_provider_session_id, expected_provider_native_turn_id)` consumes
+existing `RawRoleResultObservation`, `CandidateResult` and `TurnRef` types. It never
+creates or changes their wire format, runtime status or completion seal.
+
+The current native adapters shorten ordinary candidate summaries to4,000 characters.
+For this consumer that summary is navigation only: it is never parsed or treated as
+complete model output. The complete canonical JSON is parsed with the existing raw
+result validator, binding attempt, session epoch, process generation, exact turn,
+provider session/native turn, and the artifact digest previously collected by the
+adapter. Altered bytes/digests, false job-completion permission, dictionaries posing
+as owner instances and excessive content fail closed. Native canonical-result digest
+and coordination-candidate digest are distinct because each retains its owner's
+canonicalization convention; neither is silently substituted for the other.
+
+The result is passed through the existing candidate review without altering the
+source-bound context or overriding the policy verdict. Returned evidence retains
+exact native provenance and `summary_used:false`, but not the private result text.
+The input limit128KiB is local to this consumer, not a provider context-window claim.
+
+The CLI also supports --coordination-return with an explicitly supplied observation,
+collected candidate, expected turn/target and context. Deserializing that document
+is not trusted acquisition or permission; every output still grants zero authority.
+
+```bash
+python3 scripts/chairman_cognition.py \
+  tests/fixtures/chairman_coordination/example_policy.json \
+  --coordination-return tests/fixtures/chairman_coordination/example_return_request.json
+```
+
+Existing provider roles and structured-output profiles are not changed or armed.
+In particular, a fixed plan/work role must not be secretly replaced by this candidate
+schema. This source consumes the existing complete-observation contract; qualified
+model generation, current Runtime binding and an authorized dispatcher remain distinct.
+No shortened summary can stand in for a missing full result. Tests construct the real
+observation types with explicit fixtures; they do not assert a real model ran.

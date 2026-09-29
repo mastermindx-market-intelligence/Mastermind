@@ -11,7 +11,11 @@ import hashlib
 import re
 from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from control_plane.executive_orchestration_result import RawRoleResultObservation
+    from control_plane.operator_harness_contract import CandidateResult, TurnRef
 
 from control_plane.chairman_cognition import (
     ChairmanCognitionError, MODIFYING_ACTIONS, READ_ONLY_ACTIONS, evaluate_document,
@@ -336,3 +340,65 @@ def render_coordination_brief(
             dict(role="system", content=_COORDINATION_INSTRUCTIONS), dict(role="user", content=content)])
     out["brief_digest"] = _digest(out)
     return out
+
+
+
+def evaluate_coordination_return(
+    document: Mapping[str, Any], *, context: Mapping[str, Any],
+    observation: "RawRoleResultObservation", candidate_result: "CandidateResult",
+    expected_turn: "TurnRef", expected_provider_session_id: str,
+    expected_provider_native_turn_id: str,
+) -> dict[str, Any]:
+    """Review complete existing OHF evidence, never the 4,000-character preview.
+
+    This is a pure consumer of already-collected observations. The caller must
+    obtain expected identities from the existing trusted current-turn owner,
+    never from the returned payload or a conversation title. Matching types and
+    hashes do not authenticate the caller or attest a live provider. No new raw
+    result wire, provider request, Runtime write or completion seal is created.
+    Current fixed role/profile admission is unchanged by adding this consumer.
+    """
+    from control_plane.executive_orchestration_result import (
+        OrchestrationResultError, RawRoleResultObservation, parse_canonical_json,
+    )
+    from control_plane.operator_harness_contract import CandidateResult, TurnRef
+
+    if type(observation) is not RawRoleResultObservation or type(candidate_result) is not CandidateResult or type(expected_turn) is not TurnRef:
+        raise ChairmanCognitionError("coordination return requires existing owner observation types")
+    if candidate_result.complete_job_permitted is not False:
+        raise ChairmanCognitionError("harness candidate cannot complete an Executive job")
+    if not isinstance(observation.canonical_result_json, str) or len(observation.canonical_result_json) > 128 * 1024:
+        raise ChairmanCognitionError("coordination return exceeds content limit")
+    try:
+        # Reuse the original observation validator, including canonical JSON,
+        # byte count and raw digest; a type assertion alone is insufficient.
+        checked = RawRoleResultObservation(**observation.to_dict())
+        decoded = parse_canonical_json(checked.canonical_result_json)
+    except (OrchestrationResultError, TypeError, ValueError, RecursionError) as exc:
+        raise ChairmanCognitionError("invalid complete native result observation") from exc
+    if checked.canonical_result_byte_length > 128 * 1024:
+        raise ChairmanCognitionError("coordination return exceeds byte limit")
+    for name in ("attempt_id", "session_epoch_id", "process_generation_id", "turn_id"):
+        expected = _text(getattr(expected_turn, name))
+        if getattr(checked, name) != expected:
+            raise ChairmanCognitionError("native result belongs to a different turn")
+        if name != "turn_id" and getattr(candidate_result, name) != expected:
+            raise ChairmanCognitionError("collected candidate belongs to a different turn scope")
+    if checked.provider_session_id != _text(expected_provider_session_id) or checked.provider_native_turn_id != _text(expected_provider_native_turn_id):
+        raise ChairmanCognitionError("native provider result target mismatch")
+    if candidate_result.artifact_digest != checked.provider_turn_artifact_digest:
+        raise ChairmanCognitionError("native result changed after candidate collection")
+    review = evaluate_coordination_candidate(document, context=context, candidate=decoded)
+    review["harness_result_evidence"] = {
+        "attempt_id": checked.attempt_id, "session_epoch_id": checked.session_epoch_id,
+        "process_generation_id": checked.process_generation_id, "turn_id": checked.turn_id,
+        "provider_session_id": checked.provider_session_id,
+        "provider_native_turn_id": checked.provider_native_turn_id,
+        "provider_turn_artifact_digest": checked.provider_turn_artifact_digest,
+        "canonical_result_digest": checked.canonical_result_digest,
+        "canonical_result_byte_length": checked.canonical_result_byte_length,
+        "summary_used": False,
+    }
+    del review["packet_digest"]
+    review["packet_digest"] = _digest(review)
+    return review

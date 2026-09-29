@@ -64,6 +64,33 @@
       "skipped": 0,
       "tests": 264,
       "xml_sha256": "8601dccf174e07917aa88017ba62fbdbbc9a64d1ea8dd630273f1bb13a90c951"
+    },
+    {
+      "errors": 0,
+      "failures": 25,
+      "log_sha256": "5fceaaa7060acde0ba9c5943a96971c2a1fcaa168f036acb031990f1beb67fd1",
+      "name": "coordination-return-red",
+      "skipped": 0,
+      "tests": 25,
+      "xml_sha256": "ba80292423496e69db814daacddc4d68af02ab88df552d04de3c0ccb982a3779"
+    },
+    {
+      "errors": 0,
+      "failures": 5,
+      "log_sha256": "2812b664e15c0ba5f9555e653fe00484bdde14ce0e209b7358d818fd47b4f161",
+      "name": "coordination-return-cli-red",
+      "skipped": 0,
+      "tests": 5,
+      "xml_sha256": "bbdbf4b6d0b384bec58e3b996e76b733dc31cdb58b2a2b9ca6b0cad17acbfc92"
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "log_sha256": "a453ac9650ec8dea340fa9e2613d3fcd77518cb84b7398ce86b3b9dd411cf102",
+      "name": "coordination-result-final",
+      "skipped": 0,
+      "tests": 295,
+      "xml_sha256": "127d16944da1d371807b75db58e40099b7c43116956796ea0b75a77125127bec"
     }
   ],
   "full_repository": {
@@ -81,11 +108,22 @@
     "Existing source adapters still owe trusted acquisition; fixture receipts are not authority",
     "Base-builder enhancement handoff withdrawn; no new worker or review assignment"
   ],
+  "native_return_consumer": {
+    "existing_contracts": [
+      "RawRoleResultObservation",
+      "CandidateResult",
+      "TurnRef"
+    ],
+    "fixture_helper_correction": "Renamed helper positional observation argument to permit explicit malformed-observation override testing.",
+    "new_case_count": 31,
+    "real_provider_run": false,
+    "summary_used": false
+  },
   "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
   "owning_suite": {
     "failed": 0,
-    "files": 6,
-    "passed": 264,
+    "files": 7,
+    "passed": 295,
     "skipped": 0
   },
   "procedure_pin": "f91847688f8126511c854ab253cd5c3cb67baa4e",
@@ -105,15 +143,15 @@
     "record_tree_unchanged": true,
     "source_records_digest": "sha256:67a8fe129d4228dcbdef6185361044627a630b63c0f159bb33a4a3e806728b35"
   },
-  "recorded_at": "2026-09-29T06:47:06.706097+00:00",
+  "recorded_at": "2026-09-29T07:02:18.934875+00:00",
   "source": [
     {
       "path": "control_plane/chairman_coordination.py",
-      "sha256": "e5e8b49395df659e1a1b5b7bd160a6a49dc92f9bfafad92a01d21f956dcf27b5"
+      "sha256": "80925b4acc6888414cd11986160e78ffd3df518f92ee2961c85376ec5ac3c0e6"
     },
     {
       "path": "scripts/chairman_cognition.py",
-      "sha256": "4775ba39f4ecd4a42db2a80e37a95cd514d03610639f4631c82142369428342e"
+      "sha256": "e34df4743b2ef4434bc67ecd3a071632abebd8f908e222a21a372227cdf93f9f"
     },
     {
       "path": "tests/test_chairman_coordination.py",
@@ -134,6 +172,14 @@
     {
       "path": "tests/fixtures/chairman_coordination/example_review_request.json",
       "sha256": "715f58d943ee0a01552458c00e5f555f74d391546b5b23003cb641b4ca241685"
+    },
+    {
+      "path": "tests/test_chairman_coordination_return.py",
+      "sha256": "b11688993b9131950bd88c76a705dd50fa882e0b629326c658b9dee9778511e2"
+    },
+    {
+      "path": "tests/fixtures/chairman_coordination/example_return_request.json",
+      "sha256": "7b96370a74cfa8bb0f87a3bf5d0d1d9396741f77033d877b5ffd4abfb9f848a8"
     }
   ],
   "source_collision": {

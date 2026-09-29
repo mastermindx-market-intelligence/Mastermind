@@ -4,7 +4,7 @@ This #1056 contribution is implemented in source, not another handoff to the bas
 The initiating Web principal owns the implementation and withdrew the premature native
 assignment. The existing base App/Runtime/installer/source owners remain untouched.
 
-Two functions extend the existing Chairman Cognition consumer:
+Three functions extend the existing Chairman Cognition consumer:
 - `render_coordination_brief`: consumes the complete existing Agent OS compiled bundle,
   binds the actual project/intent/plan/source identities, preserves omissions and
   exclusions, and emits a fixed instruction, evidence and closed model response schema.
@@ -21,12 +21,12 @@ The full contract and trust limitations are in
 
 ## Executed evidence
 
-All six cognition/coordination test files: **264 passed, zero failed or skipped**.
+All seven cognition/coordination test files: **295 passed, zero failed or skipped**.
 The initial new-implementation discriminator had44FAIL/1PASS; briefing14FAIL before
 implementation; source binding4FAIL; timestamp3FAIL; output schema2FAIL. Final suites
 are green. The exact upstream Macro compiler was executed on isolated fixture records;
 its complete output was consumed unchanged and its record tree remained unchanged.
-Both documented CLI examples run successfully. Source compilation passes.
+All three documented CLI examples run successfully. Source compilation passes.
 
 The full repository pytest invocation was attempted. It stopped during collection at
 `tests/mastermind_window_reader/test_mission_association.py` because this interpreter
@@ -51,3 +51,21 @@ This is not a running Meta-CEO or an automatic Web Pro continuation demonstratio
 Model judgment, current authenticated source acquisition and existing runtime/transport
 integration remain separately qualified boundaries. No new lifecycle, memory compiler,
 scheduler, credential store, watcher or worker was created.
+
+
+## Complete-return integration added in the same turn
+
+`evaluate_coordination_return` consumes the existing full raw-observation contract,
+never the adapters' shortened4,000-character summary. It rechecks original attempt,
+epoch, generation, exact turn/provider IDs, previously collected artifact digest,
+canonical bytes and completion boundaries before the candidate is reviewed. No provider
+adapter, runtime seal or role/profile admission was modified.
+
+Thirty-one complete-return/CLI cases were added. Original consumer RED25 and CLI RED5
+preceded implementation; final seven-file owning campaign **295PASS**. A long candidate
+whose preview is invalid truncated JSON is correctly read from its complete observation.
+Wrong target, changed artifact, corrupted dataclass fields, stale Chairman intent,
+malformed wire input and an attempted job-completion claim fail closed.
+The first test helper accidentally named a positional argument observation while also
+passing an observation override; that fixture-only collision was corrected. All final
+checks reran. This is source-contract qualification, not a live native/provider test.
