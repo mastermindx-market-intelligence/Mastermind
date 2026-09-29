@@ -180,10 +180,18 @@ class BrowserActionPort:
         self,
         caller: ActionCaller,
         browser_ref: object,
+        *,
+        require_fresh: bool = True,
     ) -> tuple[BrowserResourceRef, ProjectActionBinding, Path]:
         now_ms = self._now()
+        if type(caller) is not ActionCaller or type(caller.expires_at) is not int:
+            raise BrowserPortRefused("CALLER_INVALID")
+        if now_ms >= caller.expires_at * 1000:
+            raise BrowserPortRefused("BROWSER_BINDING_CHANGED")
         try:
-            browser = self._codec.decode_resource(browser_ref, now_ms=now_ms)
+            browser = self._codec.decode_resource(
+                browser_ref, now_ms=now_ms, require_fresh=require_fresh
+            )
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_REF_INVALID") from error
         binding = self._binding(caller, browser)
@@ -248,7 +256,12 @@ class BrowserActionPort:
             canonical = canonical_browser_arguments(arguments)
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_ARGUMENTS_INVALID") from error
-        browser, _binding, socket_path = self._resource(caller, browser_ref)
+        # A fresh authenticated caller may inspect the exact existing carrier
+        # after its resource lease ends. Process and owner binding stay pinned;
+        # this path has no action claim or mutating tool.
+        browser, _binding, socket_path = self._resource(
+            caller, browser_ref, require_fresh=False
+        )
         request_id = secrets.token_hex(16)
         try:
             response = self._relay(

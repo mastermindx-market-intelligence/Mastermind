@@ -28,6 +28,7 @@ from typing import Any
 
 from control_plane.browser_resource_contract import (
     ALLOWED_BROWSER_TOOLS,
+    READ_ONLY_BROWSER_TOOLS,
     WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
     BrowserMode,
 )
@@ -469,7 +470,9 @@ class BrowserRelayServer:
         if self._expires_at_ms is None:
             return False
         now_ms = self._clock_ms()
-        return type(now_ms) is not int or now_ms < 0 or now_ms >= self._expires_at_ms
+        if type(now_ms) is not int or not 0 <= now_ms < 2**63:
+            raise BrowserRelayError("relay clock is unavailable")
+        return now_ms >= self._expires_at_ms
 
     def _response(
         self,
@@ -532,7 +535,7 @@ class BrowserRelayServer:
             arguments = value.get("arguments")
             if type(tool) is not str or type(arguments) is not dict:
                 raise BrowserRelayError("relay tool request is invalid")
-            if self._lease_expired():
+            if self._lease_expired() and tool not in READ_ONLY_BROWSER_TOOLS:
                 return self._response(
                     request_id=request_id, ok=False, error="REQUEST_REFUSED"
                 )

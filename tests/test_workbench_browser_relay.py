@@ -431,6 +431,35 @@ def test_relay_preserves_carrier_at_lease_expiry_but_refuses_new_calls(tmp_path)
     )
     assert refused["ok"] is False
     assert refused["error"] == "REQUEST_REFUSED"
+    observed = relay_request(
+        socket_path,
+        {
+            "schema": "mastermind.workbench_browser_relay_request.v1",
+            "kind": "tool",
+            "request_id": "c" * 32,
+            "resource_id": "a" * 32,
+            "tool": "browser_snapshot",
+            "arguments": {},
+        },
+        timeout=2,
+    )
+    assert observed["ok"] is True
+    assert observed["result"]["isError"] is False
+    now["value"] = "invalid"
+    uncertain = relay_request(
+        socket_path,
+        {
+            "schema": "mastermind.workbench_browser_relay_request.v1",
+            "kind": "tool",
+            "request_id": "d" * 32,
+            "resource_id": "a" * 32,
+            "tool": "browser_snapshot",
+            "arguments": {},
+        },
+        timeout=2,
+    )
+    assert uncertain["ok"] is False
+    assert uncertain["error"] == "REQUEST_REFUSED"
     assert thread.is_alive()
     assert socket_path.exists()
     relay.stop()

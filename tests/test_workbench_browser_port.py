@@ -313,3 +313,54 @@ def test_expired_unclaimed_action_does_not_dispatch(tmp_path: Path):
         assert list((tmp_path / "artifacts").iterdir()) == []
     finally:
         os.close(fd)
+
+
+def test_unknown_effect_allows_only_bound_read_after_resource_expiry(tmp_path: Path):
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request["tool"])
+        if request["tool"] == "browser_click":
+            raise BrowserRelayError("click reply lost")
+        assert request["tool"] == "browser_snapshot"
+        return {
+            "schema": "mastermind.workbench_browser_relay_response.v1",
+            "request_id": request["request_id"],
+            "resource_id": "c" * 32,
+            "ok": True,
+            "result": {"content": [{"type": "text", "text": "same carrier"}], "isError": False},
+        }
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        action_ref = port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+        assert port.run_action(caller, browser_ref, action_ref)["effect_state"] == "EFFECT_UNKNOWN"
+        port._clock_ms = lambda: 8500  # resource expires at 8000; caller at 10000
+        snapshot = port.call_read_tool(caller, browser_ref, "browser_snapshot", {})
+        assert snapshot["content"][0]["text"] == "same carrier"
+        with pytest.raises(BrowserPortRefused, match="BROWSER_REF_INVALID"):
+            port.prepare_action(caller, browser_ref, "browser_click", {"target": "button"})
+        with pytest.raises(BrowserPortRefused, match="MUTATING_TOOL_REQUIRES_ACTION_REF"):
+            port.call_read_tool(caller, browser_ref, "browser_click", {"target": "button"})
+
+        original_resolver = port._resolve_binding
+        port._resolve_binding = lambda *_: None
+        with pytest.raises(BrowserPortRefused, match="BROWSER_BINDING_CHANGED"):
+            port.call_read_tool(caller, browser_ref, "browser_snapshot", {})
+        port._resolve_binding = original_resolver
+
+        class ChangedInspector:
+            def inspect(self, pid):
+                observed = Inspector().inspect(pid)
+                return type(observed)(**{**observed.__dict__, "start_identity": "changed"})
+
+        port._inspector = ChangedInspector()
+        with pytest.raises(BrowserPortRefused, match="PROCESS_IDENTITY_CHANGED"):
+            port.call_read_tool(caller, browser_ref, "browser_snapshot", {})
+        port._inspector = Inspector()
+        port._clock_ms = lambda: 10000
+        with pytest.raises(BrowserPortRefused, match="BROWSER_BINDING_CHANGED"):
+            port.call_read_tool(caller, browser_ref, "browser_snapshot", {})
+        assert calls == ["browser_click", "browser_snapshot"]
+    finally:
+        os.close(fd)
