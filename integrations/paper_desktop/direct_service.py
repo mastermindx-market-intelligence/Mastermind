@@ -25,6 +25,7 @@ import sys
 
 SCHEMA_V2 = "mastermind.paper_direct_install.v2"
 SCHEMA_V3 = "mastermind.paper_direct_install.v3"
+SCHEMA_V4 = "mastermind.paper_direct_install.v4"
 SCHEMA = SCHEMA_V2  # legacy/default when no seat_id is supplied
 BINDING_SCHEMA_V1 = "mastermind.paper_direct_binding.v1"
 BINDING_SCHEMA_V2 = "mastermind.paper_direct_binding.v2"
@@ -179,8 +180,34 @@ def _seat_id(value: str) -> str:
     return value
 
 
+def _host_ref(value: str) -> str:
+    if type(value) is not str or not re.fullmatch(r"host-[0-9a-f]{64}", value):
+        raise Refusal("HOST_REFERENCE_REQUIRED")
+    return value
+
+
+def execution_binding(receipt: dict) -> dict | None:
+    """Consume a configured fleet ref; create neither host identity nor authority.
+
+    Deployment must reconcile this ref with the existing fleet owner. The service
+    ref is a content-derived snapshot namespace, not a lease or replay token.
+    Never put paths, credentials, or caller-selected destinations in the result.
+    """
+    if receipt.get("schema") != SCHEMA_V4:
+        return None
+    return {
+        "schema": "mastermind.paper_execution_binding.v1",
+        "host_ref": _host_ref(receipt.get("host_ref")),
+        "service_ref": digest(_json_bytes({
+            "root": receipt["root"], "seat_id": receipt["seat_id"],
+            "source_revision": receipt["source_revision"], "files": receipt["files"]})),
+        "runtime_revision": receipt["source_revision"],
+        "bridge_sha256": receipt["files"]["runtime/bridge.py"],
+    }
+
+
 def service_label(receipt: dict) -> str:
-    if receipt.get("schema") == SCHEMA_V3:
+    if receipt.get("schema") in {SCHEMA_V3, SCHEMA_V4}:
         return f"{LABEL}.{_seat_id(receipt.get('seat_id'))}"
     return LABEL
 
@@ -195,7 +222,7 @@ def expected_files(receipt: dict) -> set[str]:
 
 def service_owner(receipt: dict) -> Path:
     base = Path.home() / ".local/state/mastermind-paper/direct-business"
-    if receipt.get("schema") == SCHEMA_V3:
+    if receipt.get("schema") in {SCHEMA_V3, SCHEMA_V4}:
         return base / "seats" / _seat_id(receipt.get("seat_id"))
     return base
 
@@ -206,7 +233,10 @@ def _tools(write: bool, prepare: bool = False) -> list[str]:
 
 
 def _command(root: Path, receipt: dict, action: str) -> list[str]:
-    return [receipt["python"]["path"], "-I", str(root / "runtime/direct_service.py"), action, "--root", str(root)]
+    command = [receipt["python"]["path"], "-I", str(root / "runtime/direct_service.py"), action, "--root", str(root)]
+    if receipt.get("schema") == SCHEMA_V4:
+        command += ["--host-ref", _host_ref(receipt.get("host_ref"))]
+    return command
 
 
 def _plist(root: Path, receipt: dict) -> bytes:
@@ -278,18 +308,22 @@ human/admin boundaries. Source tests and local stdio listing are not PROVEN_LIVE
 
 def stage(destination: Path, *, python: Path, tunnel_client: Path,
           source_revision: str, allow_write: bool = False, allow_prepare: bool = False,
-          seat_id: str | None = None) -> dict:
+          seat_id: str | None = None, host_ref: str | None = None) -> dict:
     if not re.fullmatch(r"[0-9a-f]{40}", source_revision):
         raise Refusal("SOURCE_REVISION_REQUIRED")
     if type(allow_write) is not bool or type(allow_prepare) is not bool:
         raise Refusal("WRITE_FLAG_REQUIRED")
     if seat_id is not None:
         seat_id = _seat_id(seat_id)
+    if host_ref is not None:
+        _host_ref(host_ref)
+        if seat_id is None:
+            raise Refusal("HOST_BINDING_REQUIRES_SEAT")
     root = _path(destination)
     if root.exists() or root.is_symlink():
         raise Refusal("DESTINATION_EXISTS")
     receipt = {
-        "schema": SCHEMA_V3 if seat_id is not None else SCHEMA_V2,
+        "schema": SCHEMA_V4 if host_ref is not None else (SCHEMA_V3 if seat_id is not None else SCHEMA_V2),
         "state": "STAGED_NOT_ENROLLED", "root": str(root),
         "source_revision": source_revision, "target_plan": "Business",
         "allow_write": allow_write, "allow_prepare": allow_prepare,
@@ -301,6 +335,8 @@ def stage(destination: Path, *, python: Path, tunnel_client: Path,
     }
     if seat_id is not None:
         receipt["seat_id"] = seat_id
+    if host_ref is not None:
+        receipt["host_ref"] = host_ref
     source = Path(__file__).resolve().parent
     files = {f"runtime/{name}": (source / name).read_bytes() for name in SOURCE_FILES}
     files[service_file(receipt)] = _plist(root, receipt)
@@ -331,7 +367,7 @@ def verify(root: Path) -> dict:
     _private_dir(root)
     receipt = _json(root / "INSTALLATION.json")
     schema = receipt.get("schema")
-    if (schema not in {SCHEMA_V2, SCHEMA_V3} or receipt.get("root") != str(root)
+    if (schema not in {SCHEMA_V2, SCHEMA_V3, SCHEMA_V4} or receipt.get("root") != str(root)
             or receipt.get("target_plan") != "Business"
             or receipt.get("state") != "STAGED_NOT_ENROLLED"
             or receipt.get("production_acceptance") is not False
@@ -346,8 +382,12 @@ def verify(root: Path) -> dict:
             or not isinstance(receipt.get("files"), dict)
             or set(receipt["files"]) != expected_files(receipt)):
         raise Refusal("INVALID_MANIFEST")
-    if schema == SCHEMA_V3:
+    if schema in {SCHEMA_V3, SCHEMA_V4}:
         _seat_id(receipt.get("seat_id"))
+    if schema == SCHEMA_V4:
+        _host_ref(receipt.get("host_ref"))
+    elif "host_ref" in receipt:
+        raise Refusal("INVALID_MANIFEST")
     for name in ("runtime", "service", "logs", "state", "secrets"):
         _private_dir(root / name)
     for name, expected in receipt["files"].items():
@@ -407,7 +447,7 @@ def bind(root: Path, tunnel_id: str, workspace_id: str | None = None, organizati
         raise Refusal("ORGANIZATION_ID_REQUIRED")
     external_key = None
     if runtime_key_file is not None:
-        if receipt.get("schema") != SCHEMA_V3:
+        if receipt.get("schema") not in {SCHEMA_V3, SCHEMA_V4}:
             raise Refusal("RUNTIME_KEY_REFERENCE_UNSUPPORTED")
         external_key = _verify_runtime_key_path(Path(runtime_key_file))
     profile = profile_text(root, tunnel_id, organization_id, external_key)
@@ -451,7 +491,7 @@ def verify_binding(root: Path) -> dict:
         if receipt.get("schema") != SCHEMA_V2 or not WORKSPACE_RE.fullmatch(str(value.get("workspace_id", ""))):
             raise Refusal("INVALID_BINDING")
     elif schema in {BINDING_SCHEMA_V2, BINDING_SCHEMA_V3}:
-        if receipt.get("schema") != SCHEMA_V3 or value.get("seat_id") != receipt.get("seat_id"):
+        if receipt.get("schema") not in {SCHEMA_V3, SCHEMA_V4} or value.get("seat_id") != receipt.get("seat_id"):
             raise Refusal("INVALID_BINDING")
         workspace_id = value.get("workspace_id")
         if workspace_id is not None and not WORKSPACE_RE.fullmatch(str(workspace_id)):
@@ -531,7 +571,8 @@ def serve(root: Path) -> None:
     os.environ.update(environment)
     sys.path.insert(0, str(root / "runtime"))
     from mcp_server import build_server
-    build_server(receipt["allow_write"], receipt["allow_prepare"]).run(transport="stdio")
+    build_server(receipt["allow_write"], receipt["allow_prepare"],
+                 execution_binding=execution_binding(receipt)).run(transport="stdio")
 
 
 async def probe(root: Path) -> dict:
@@ -575,6 +616,7 @@ def main() -> int:
     parser.add_argument("--allow-write", action="store_true")
     parser.add_argument("--allow-prepare", action="store_true")
     parser.add_argument("--seat-id")
+    parser.add_argument("--host-ref", help="Existing fleet host reference; configuration is not host attestation")
     parser.add_argument("--tunnel-id")
     parser.add_argument("--workspace-id")
     parser.add_argument("--organization-id")
@@ -582,12 +624,17 @@ def main() -> int:
     args = parser.parse_args()
     try:
         root = _path(args.root)
+        if args.action != "stage" and args.host_ref is not None:
+            installed = verify(root)
+            if (installed.get("schema") != SCHEMA_V4
+                    or _host_ref(args.host_ref) != installed.get("host_ref")):
+                raise Refusal("HOST_BINDING_MISMATCH")
         if args.action == "stage":
             if not (args.python and args.tunnel_client and args.source_revision):
                 raise Refusal("STAGE_ARGUMENTS_REQUIRED")
             value = stage(root, python=args.python, tunnel_client=args.tunnel_client,
                           source_revision=args.source_revision, allow_write=args.allow_write,
-                          allow_prepare=args.allow_prepare, seat_id=args.seat_id)
+                          allow_prepare=args.allow_prepare, seat_id=args.seat_id, host_ref=args.host_ref)
         elif args.action == "bind":
             value = bind(root, args.tunnel_id, args.workspace_id, args.organization_id, args.runtime_key_file)
         elif args.action == "serve":

@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
@@ -326,7 +326,31 @@ def document_identity(info):
     return {"kind": "artboard-anchor", "file": name, "page": page, "anchor": ids[0]}
 
 
-def snapshot(client, file_id: str | None = None):
+def validate_execution_binding(value):
+    """Validate installed provenance, never caller permission or a host registry.
+
+    The host ref must come from the existing fleet owner at deployment. This
+    function validates its shape, not physical-host attestation. Legacy unbound
+    runtimes retain their original snapshot contract.
+    """
+    if value is None:
+        return None
+    fields = {"schema", "host_ref", "service_ref", "runtime_revision", "bridge_sha256"}
+    if type(value) is not dict or set(value) != fields:
+        raise Refusal("EXECUTION_BINDING_INVALID")
+    if value.get("schema") != "mastermind.paper_execution_binding.v1":
+        raise Refusal("EXECUTION_BINDING_INVALID")
+    for key, pattern in (("host_ref", r"host-[0-9a-f]{64}"),
+                         ("service_ref", r"[0-9a-f]{64}"),
+                         ("runtime_revision", r"[0-9a-f]{40}"),
+                         ("bridge_sha256", r"[0-9a-f]{64}")):
+        if type(value[key]) is not str or not re.fullmatch(pattern, value[key]):
+            raise Refusal("EXECUTION_BINDING_INVALID")
+    return dict(value)
+
+
+def snapshot(client, file_id: str | None = None, *, execution_binding=None):
+    execution_binding = validate_execution_binding(execution_binding)
     if file_id is not None and (not isinstance(file_id, str) or not file_id):
         raise Refusal("FILE_ID_REQUIRED")
     arguments = {} if file_id is None else {"fileId": file_id}
@@ -341,9 +365,14 @@ def snapshot(client, file_id: str | None = None):
     if file_id is not None and (identity is None or identity.get("kind") != "file-id"
                                 or identity.get("id") != file_id):
         raise Refusal("FILE_ID_MISMATCH", "Paper target read did not return the requested file.")
-    return {"basic_info": info, "identity": identity, "snapshot_sha256": digest(info),
-            "write_binding_ready": identity is not None and identity.get("kind") == "file-id",
-            "binding_error": bind_error}
+    guarded_info = info if execution_binding is None else {
+        "document": info, "execution_binding": execution_binding}
+    result = {"basic_info": info, "identity": identity, "snapshot_sha256": digest(guarded_info),
+              "write_binding_ready": identity is not None and identity.get("kind") == "file-id",
+              "binding_error": bind_error}
+    if execution_binding is not None:
+        result["execution_binding"] = execution_binding
+    return result
 
 
 def same_document(identity, info):
@@ -370,13 +399,14 @@ def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
             expected_snapshot: str | None = None, operation_id: str | None = None,
-            allow_write=False, client=None, lock_root=None,
+            allow_write=False, client=None, lock_root=None, execution_binding=None,
             _server_pin=SUPPORTED_SERVER, _catalog_pin=SUPPORTED_CATALOG_SHA256):
     """One serialized operation. Snapshot hash is a drift guard, NOT authorization.
 
     Local edits outside this adapter can race; no transaction/isolation claim is made.
     No persistent duplicate/retry ledger is introduced. Caller owns effect reconciliation.
     """
+    execution_binding = validate_execution_binding(execution_binding)
     if action not in {"status", "catalog", "read", "edit"}:
         raise Refusal("UNKNOWN_ACTION")
     if arguments is None:
@@ -400,7 +430,8 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         client.initialize()
         if action == "status":
             return {"state": "CONNECTED", "server": client.server, "endpoint": ENDPOINT,
-                    "document": snapshot(client), "quota_remaining": None, "plan": "UNKNOWN"}
+                    "document": snapshot(client, execution_binding=execution_binding),
+                    "quota_remaining": None, "plan": "UNKNOWN"}
         catalog = client.catalog()
         schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
         if action == "catalog":
@@ -412,10 +443,13 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server/catalog changed; inspect read-only and review a new exact pin before editing.")
         if tool not in catalog:
             raise Refusal("TOOL_NOT_AVAILABLE")
-        supplied_file = arguments.get("fileId") if editing else None
+        supplied_file = arguments.get("fileId")
         if editing and (not isinstance(supplied_file, str) or not supplied_file):
             raise Refusal("FILE_ID_REQUIRED", "Pass the exact inspected Paper file ID for every edit.")
-        before = snapshot(client, supplied_file) if editing else (snapshot(client) if expected_snapshot else None)
+        # A guarded background-file read must inspect that same explicit target,
+        # not the unrelated user-active document. Host scope remains out of band.
+        before = (snapshot(client, supplied_file, execution_binding=execution_binding)
+                  if editing or expected_snapshot else None)
         if before and before["snapshot_sha256"] != expected_snapshot:
             raise Refusal("DOCUMENT_CHANGED", "Read the exact target file before deciding on a new edit.")
         if editing and not before["write_binding_ready"]:
@@ -440,7 +474,7 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             return {"state": "EFFECT_UNKNOWN", "operation_id": operation_id, "tool": tool,
                     "result": result, "before": before, "retry_allowed": False, "reason": "UPSTREAM_TOOL_ERROR_MAY_BE_PARTIAL"}
         try:
-            after = snapshot(client, supplied_file)
+            after = snapshot(client, supplied_file, execution_binding=execution_binding)
             matched = same_document(before["identity"], after["basic_info"])
         except Exception:
             after, matched = None, False

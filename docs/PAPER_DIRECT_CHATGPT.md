@@ -200,3 +200,79 @@ accepted merely by running `stage`, `probe` or `doctor`.
 The installed tunnel client's own help and built-in `sample_mcp_stdio_local` are the configuration
 reference for the selected binary. Do not assume a future release retains identical flags; stage
 and validate a new reviewed bundle instead of upgrading an active installation in place.
+
+
+## Host-bound fleet foundation: candidate install v4 / bridge runtime v7
+
+This source adds the first host-affinity prerequisite for a multi-computer pool.
+It does **not** implement remote routing, qualify a computer, enroll a ChatGPT
+account, or deploy a runtime. The current fixed-host route remains the default.
+Do not put a new host into service merely because its app process or port exists.
+
+A newly staged named-seat bundle may opt into schema v4 with `--host-ref` and the
+exact existing `host-<64 lowercase hex>` reference supplied by the fleet owner:
+
+```sh
+"$SDK_PYTHON" -I integrations/paper_desktop/direct_service.py stage \
+  --root "$NEW_BUNDLE" --python "$SDK_PYTHON" --tunnel-client "$TUNNEL_BINARY" \
+  --source-revision "$EXACT_ACCEPTED_COMMIT" --seat-id "$EXISTING_SEAT_ID" \
+  --host-ref "$EXISTING_FLEET_HOST_REF" --allow-prepare --allow-write
+```
+
+The reference is deployment configuration, **not hardware attestation or admission**.
+Reconcile it with the existing fleet identity/placement owner before deploying.
+Never create a new host identity, guess one from a hostname, or copy another host's
+reference to satisfy the syntax check. Source review, actual host identity,
+authorized Paper login/file access, and same-route acceptance remain separate.
+No live fleet reference was fabricated during the source tests.
+
+The immutable bundle consumes that reference and derives a service fingerprint
+from its existing root, named seat, source revision, and staged file digests.
+The fingerprint is an optimistic snapshot namespace, not a lease, authorization
+token, global revision, deduplication ledger, or new identity authority. Public
+results contain only the existing host reference, source revision and digests;
+filesystem paths and credentials are not returned in the execution binding.
+
+Bound `paper_inspect`, `paper_prepare`, `paper_read`, and `paper_edit` use the
+same installed execution binding. The 64-hex snapshot guard incorporates both
+the exact document observation and that binding. A guard from a different host,
+service bundle or source/runtime generation is rejected before an edit, even if
+the two hosts see identical document headers. A guard from an unbound legacy
+runtime is not silently accepted by a bound runtime, or vice versa. Restarting
+the same verified bundle does not invent a new snapshot namespace.
+
+The existing five-tool input surface stays closed: the caller cannot supply a
+host reference, execution binding, arbitrary URL, port, shell command or path.
+Execution provenance is attached to replies, including `EFFECT_UNKNOWN`; it never
+permits replay or transfer of that operation. Install v2/v3 and legacy snapshot
+hashing remain compatible. A changed tool description still requires the same
+app's normal reviewed action-snapshot refresh; no duplicate app is authorized.
+
+### Explicit-file read correction
+
+Previously `execute(read)` could pre-read the user-active file even when the
+caller supplied another `fileId`, making a valid background-target guard fail or
+letting an active-file guard check the wrong read context. Guarded reads now
+observe the explicit target first. This permits prepare -> screenshot/JSX/read
+-> edit verification without moving the user's active file. The upstream read
+still uses the caller's allowed tool and exact arguments. No extra vendor tool,
+raw file-open capability, destructive action or automatic retry is introduced.
+
+`paper_prepare` is an explicit-file binding check, not a UI-focus operation; its
+source description now reflects the implementation. Its conservative existing
+annotation and workspace confirmation policy are unchanged in this source slice.
+
+### Remaining multi-host implementation and acceptance
+
+The next slice must connect host selection to the existing fleet transport owner,
+not invent a free-form SSH/HTTP proxy or reuse an Attempt-owned Worker Broker
+without its corresponding runtime admission. Choose a host only before a new
+operation; preserve same-carrier reconciliation for every uncertain effect.
+Prove a small pool before adding more desktops. All computers can be consumers
+of that pool; they need not each maintain a signed-in Paper desktop.
+
+Required proofs remain: exact existing host identity -> authorized local desktop
+and file -> verified bound bundle -> same-account real MCP inspect/catalog/read
+-> specifically authorized scratch proof where owed -> same-carrier post-read
+and screenshot -> reconnect without duplicate clients. Synthetic protocol tests
+and successful staging do not satisfy these proofs.

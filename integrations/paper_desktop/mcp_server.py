@@ -16,10 +16,11 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bridge import execute, Refusal, READ_TOOLS, EDIT_TOOLS
+from bridge import execute, Refusal, READ_TOOLS, EDIT_TOOLS, validate_execution_binding
 
 
-def build_server(allow_write=False, allow_prepare=False):
+def build_server(allow_write=False, allow_prepare=False, *, execution_binding=None):
+    execution_binding = validate_execution_binding(execution_binding)
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ToolAnnotations, CallToolResult, TextContent, ImageContent
 
@@ -33,6 +34,8 @@ def build_server(allow_write=False, allow_prepare=False):
     ))
 
     def run(action, **kwargs):
+        if execution_binding is not None:
+            kwargs["execution_binding"] = execution_binding
         try:
             if action == "prepare":
                 from prepare import prepare_document
@@ -47,6 +50,8 @@ def build_server(allow_write=False, allow_prepare=False):
                              coordination_scope="BOARD_ARTBOARD_NODE")
         except Refusal as exc:
             value = {"state": exc.code, "detail": exc.detail, "retry_allowed": False}
+        if execution_binding is not None:
+            value = dict(value, execution_binding=dict(execution_binding))
         bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
         # Formatting is downstream of effect observation. A missing reply or
         # malformed image must not erase the operation's canonical receipt.
@@ -106,12 +111,12 @@ def build_server(allow_write=False, allow_prepare=False):
         @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False,
                                                 idempotentHint=True, openWorldHint=False))
         async def paper_prepare(file_id: str, expected_snapshot: str, operation_id: str) -> CallToolResult:
-            """Focus one existing Paper file by bare ID, never a URL or path.
+            """Bind one existing Paper file by bare ID, never a URL or path.
 
             Paper must already be running with an inspectable current file. Use
-            paper_inspect first and pass its fresh snapshot. Changes active-file
-            focus, not design content. A lost/error reply is never replayed, even
-            when post-read evidence sees the target. Reconcile on this same app.
+            paper_inspect first and pass its fresh snapshot. Validates the exact
+            target without changing active-file focus or design content. Use the
+            returned target snapshot on this same installed host and service.
             """
             return await asyncio.to_thread(run, "prepare", file_id=file_id,
                                            expected_snapshot=expected_snapshot,

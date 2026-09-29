@@ -25,7 +25,7 @@ def _file_id(observation: dict | None) -> str | None:
 
 
 def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
-                     allow_prepare: bool = False, client=None, lock_root=None,
+                     allow_prepare: bool = False, client=None, lock_root=None, execution_binding=None,
                      _server_pin=bridge.SUPPORTED_SERVER,
                      _catalog_pin=bridge.SUPPORTED_CATALOG_SHA256,
                      _sleep=time.sleep) -> dict:
@@ -35,6 +35,7 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
     The returned snapshot belongs to the exact requested file and is the guard for
     the subsequent explicit-file edit; the user's active Paper file need not switch.
     """
+    execution_binding = bridge.validate_execution_binding(execution_binding)
     if allow_prepare is not True:
         raise bridge.Refusal("PREPARE_DISABLED")
     if not isinstance(file_id, str) or not FILE_ID_RE.fullmatch(file_id):
@@ -48,7 +49,7 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
         client.initialize()
         catalog = client.catalog()
         schema = bridge.schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
-        before = bridge.snapshot(client)
+        before = bridge.snapshot(client, execution_binding=execution_binding)
         if before["snapshot_sha256"] != expected_snapshot:
             raise bridge.Refusal("DOCUMENT_CHANGED", "Inspect the current file before deciding on focus.")
         receipt = {
@@ -71,7 +72,7 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
         # successful response is not a guarantee that the user's active file changes.
         # Prepare therefore performs only a target-specific read/binding check and
         # returns the target snapshot required by the subsequent explicit-file edit.
-        target = bridge.snapshot(client, file_id)
+        target = bridge.snapshot(client, file_id, execution_binding=execution_binding)
         return dict(receipt,
                     state="PAPER_READY" if schema["accepted_for_write"] else "PAPER_READY_READ_ONLY",
                     already_active=False, open_attempted=False, response_observed=True,
