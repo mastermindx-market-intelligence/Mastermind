@@ -25,6 +25,7 @@ from control_plane.wake_events import canonical_json_bytes
 CONTEXT_SCHEMA = "mastermind.chairman_coordination_context.v1"
 CANDIDATE_SCHEMA = "mastermind.chairman_coordination_candidate.v1"
 REVIEW_SCHEMA = "mastermind.chairman_coordination_review.v1"
+_MAX_BRIEF_BYTES = 512 * 1024
 DECISIONS = frozenset({"CONTINUE", "REQUEST_REPAIR", "ASK_PRINCIPAL", "PROPOSE_ACCEPTANCE", "WAIT"})
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _CONTEXT_KEYS = frozenset({
@@ -331,7 +332,7 @@ def render_coordination_brief(
                    policy_preflight=base, candidate_template=template,
                    candidate_json_schema=response_schema)
     content = json.dumps(payload, sort_keys=True, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
-    if len(content.encode("utf-8")) + len(_COORDINATION_INSTRUCTIONS.encode("utf-8")) > 512 * 1024:
+    if len(content.encode("utf-8")) + len(_COORDINATION_INSTRUCTIONS.encode("utf-8")) > _MAX_BRIEF_BYTES:
         raise ChairmanCognitionError("brief exceeds byte limit; recompile through Agent OS")
     out: dict[str, Any] = dict(schema="mastermind.chairman_coordination_brief.v1",
         project_ref=ctx["project_ref"], context_digest=_digest(ctx), bundle_digest=bundle_digest,

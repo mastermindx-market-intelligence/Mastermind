@@ -167,3 +167,80 @@ schema. This source consumes the existing complete-observation contract; qualifi
 model generation, current Runtime binding and an authorized dispatcher remain distinct.
 No shortened summary can stand in for a missing full result. Tests construct the real
 observation types with explicit fixtures; they do not assert a real model ran.
+
+
+## Work-role integration and canonical Runtime acquisition
+
+Implemented in `control_plane/chairman_coordination_work.py` under the same #1056
+operation and #1059 source carrier. The Web principal retains implementation; no
+new task is assigned to the base builders.
+
+### Why this addition is necessary
+
+A correctly typed raw observation does not mean an admitted native role permits a
+standalone coordination-candidate final answer. Current orchestration roles return
+their fixed result envelope; the interactive native supervisor remains plan-oriented
+and read-only. It must not be silently widened by substituting another JSON schema.
+The earlier complete-raw consumer remains a lower-level contract consumer, not proof
+that a supported native generation path can produce that candidate directly.
+
+This implementation instead treats one coordination judgment as an ordinary, already
+admitted work task. The candidate is an ordinary artifact inside an exact write grant.
+The final answer remains the existing work-result envelope, including the candidate
+artifact path and SHA-256. No provider role, adapter, result schema or Runtime seal is
+changed. This does not itself dispatch the task or activate a work-capable native profile.
+
+### Outbound: exact current assignment
+
+`read_coordination_work_request` consumes the existing bound Runtime instance and exact
+root, Job and expected Attempt selectors. It reuses the installed source join's bounded
+root observation and canonical creation-provenance validation. The root's recorded
+workstream must equal the context project; a label or child-provided reference cannot
+substitute. Unbound/invalid namespaces, truncated membership and changed selectors
+refuse before producing a request.
+
+The resulting Job and Attempt go to `render_coordination_work_request`. The original
+pure effective-grant validator checks the same Job's preauthorized authority decision.
+The Job must be the current running work role, on its exact Attempt/worker and accepted
+plan lineage, with WRITE_BRANCH and the exact artifact path already granted. The
+original work-result schema is returned byte-for-byte structurally unchanged.
+
+The prompt contains the existing context briefing and explicit artifact instructions.
+It tells the worker to propose a next step, not execute the proposed step. Source
+admission, model/slot eligibility and all actual effect checks remain with the existing
+owners. The returned request grants no authority and its read receipt does not promise
+freshness after the sampled observation. The host must revalidate at actual dispatch.
+
+### Inbound: one canonical result plus exact artifact bytes
+
+`read_coordination_work_return` uses the existing bounded role-result reader with an
+exact root/Job/Attempt/envelope-digest selector. It waits for the physical read scope
+to close, then invokes the existing shared Fabric result projector. It does not copy
+that validator, open SQLite directly, find a newest result, or retry another selector.
+The canonical root workstream must match the coordination context, and the completed
+result must be the work role without unresolved outer errors.
+
+The supplied artifact path must occur exactly once in the canonical artifact manifest.
+The supplied immutable bytes must match that artifact's SHA-256 and contain complete
+canonical JSON within the consumer's bound. Artifact acquisition itself remains the
+existing authorized artifact owner's responsibility; this module never opens a supplied
+filesystem path. The complete candidate then passes through the original coordination
+review, including the current accepted intent and plan checks.
+
+The output records the canonical result selection, observation generation and artifact
+identity. It still grants zero execution and zero acceptance authority. A completed
+work task is not acceptance of the project, and structural checks are not a judgment
+of the model's reasoning quality.
+
+### Verified level
+
+The integration tests create a real temporary Executive Runtime and pass ordinary
+intent, plan, dispatch, result-seal and bounded-read operations through existing owners.
+An end-to-end test binds an active work request, creates the proposed artifact under
+the granted fixture path, completes the unchanged work result and recovers the exact
+candidate. Model reasoning and native process observations are explicit fixtures; no
+real provider is launched and no production Runtime is mutated.
+
+Negative cases use separate read bindings. A binding invalidated by a failed selection
+is not reset or weakened to keep a test running. The same production guard that closes
+an invalid reader remains unchanged.

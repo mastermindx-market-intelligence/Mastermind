@@ -463,3 +463,15 @@ def test_structured_schema_is_not_an_authority_or_quality_receipt():
     assert schema["properties"]["option_id"]["enum"] == ["OPT-A"]
     assert payload["policy_preflight"]["adjudications"][0]["disposition"] == "CHAIRMAN_REQUIRED"
     assert not subject(p, x, c)["eligible_for_owner_revalidation"]
+
+
+
+def test_brief_byte_bound_is_explicit_without_identity_literal_taint():
+    import difflib
+    from test_ceo_submit_armed_composition import _scan_added_identity_diff
+    path = "control_plane/chairman_coordination.py"
+    source = (ROOT / path).read_text()
+    diff = "".join(difflib.unified_diff([], source.splitlines(keepends=True), fromfile="/dev/null", tofile="b/" + path, n=0))
+    assert _scan_added_identity_diff(diff, source_postimages={path:source}) == []
+    module = importlib.import_module("control_plane.chairman_coordination")
+    assert module._MAX_BRIEF_BYTES == 512 * 1024
