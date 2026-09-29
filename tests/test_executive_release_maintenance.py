@@ -718,6 +718,47 @@ def test_read_approval_returns_not_found_when_absent(store, approval):
             )
 
 
+def test_read_approval_requires_exact_unbound_owner_read_handle(store, approval):
+    """A same-file caller connection is not RuntimeStore.read() custody."""
+    rm = er.ReleaseMaintenanceRegistry(store)
+    with store.transaction() as connection:
+        context = er._release_context_for_test(
+            store, connection, sealed_approval=approval
+        )
+        rm.record_approval(connection, sealed_approval=approval, trusted_context=context)
+
+    foreign_connection = store._open()
+    try:
+        foreign_connection.execute("BEGIN")
+        with pytest.raises(er.ReleaseMaintenanceError) as caught:
+            rm.read_approval(
+                foreign_connection,
+                approved_transition_ref=approval["approved_transition_ref"],
+            )
+        assert caught.value.field == "connection"
+        assert caught.value.code == "READ_CONNECTION_NOT_OWNER_ISSUED"
+    finally:
+        if foreign_connection.in_transaction:
+            foreign_connection.rollback()
+        foreign_connection.close()
+
+    assert store._read_connections == set()
+    with store.read() as owner_connection:
+        result = rm.read_approval(
+            owner_connection,
+            approved_transition_ref=approval["approved_transition_ref"],
+        )
+    assert result["approved_transition_ref"] == approval["approved_transition_ref"]
+    assert store._read_connections == set()
+
+
+def test_unbound_read_handle_tracking_cleans_up_on_exception(store):
+    with pytest.raises(RuntimeError):
+        with store.read():
+            raise RuntimeError("snapshot failed")
+    assert store._read_connections == set()
+
+
 # ---------------------------------------------------------------------------
 # Section 9 — absence of production prepare / commit / token / effect
 # ---------------------------------------------------------------------------

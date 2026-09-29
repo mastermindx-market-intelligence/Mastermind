@@ -3497,6 +3497,8 @@ class RuntimeStore:
         # write-ownership proof: an ordinary ``read()`` snapshot also has an
         # active deferred transaction and can otherwise be upgraded by SQLite.
         self._write_connections: set[sqlite3.Connection] = set()
+        # Exact handles currently owned by an unbound ``read()`` snapshot.
+        self._read_connections: set[sqlite3.Connection] = set()
         self._finite_control_context: FiniteControlContext | None = None
         if read_binding is not None:
             if not isinstance(read_binding, RuntimeReadBinding) or create or existing_writable:
@@ -4271,6 +4273,7 @@ class RuntimeStore:
         connection = self._open()
         try:
             connection.execute("BEGIN")
+            self._read_connections.add(connection)
             yield connection
             connection.commit()
         except RuntimeProofError:
@@ -4286,6 +4289,7 @@ class RuntimeStore:
                 connection.rollback()
             raise
         finally:
+            self._read_connections.discard(connection)
             connection.close()
 
     def list_events(
@@ -24663,6 +24667,13 @@ class ReleaseMaintenanceRegistry:
     def _require_owned_snapshot_connection(self, connection: sqlite3.Connection) -> None:
         if not isinstance(connection, sqlite3.Connection):
             raise _release_refusal("connection", "CONNECTION_TYPE")
+        if (
+            self.store.read_binding is None
+            and connection not in self.store._read_connections
+        ):
+            raise _release_refusal(
+                "connection", "READ_CONNECTION_NOT_OWNER_ISSUED"
+            )
         # Read snapshot still requires an active transaction (BEGIN started by
         # ``RuntimeStore.read()`` or the caller's own bound read), and the main
         # database identity must be this store's stable file.
