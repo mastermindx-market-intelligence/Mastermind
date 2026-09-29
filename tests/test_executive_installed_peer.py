@@ -1170,6 +1170,90 @@ def test_strict_json_preserves_finite_numbers_and_integers():
     }
 
 
+def _installed_config_read(monkeypatch, document):
+    raw = json.dumps(document, sort_keys=True, separators=(',', ':')).encode()
+    identity = SimpleNamespace(
+        st_dev=1, st_ino=2, st_mode=stat.S_IFREG | 0o644,
+        st_uid=0, st_gid=0, st_nlink=1, st_size=len(raw),
+        st_mtime_ns=3, st_ctime_ns=4,
+    )
+    monkeypatch.setattr(m, '_observe_ancestors', lambda *a: ())
+    monkeypatch.setattr(m, '_read_trusted_bytes', lambda *a, **k: (raw, identity))
+
+
+def _gateway_install_document(release, profile='release_control_v1'):
+    return {
+        'schema': 'mastermind.executive_mcp_install.v1',
+        'release_sha': release,
+        'service_uid': 458,
+        'ceo_ingress_socket_path': '/var/run/mastermind-executive/ceo-ingress.sock',
+        'port': 8443,
+        'policies': {},
+        'audit_root': '/var/log/mastermind-executive/mcp-auth',
+        'executive_mcp_profile': profile,
+    }
+
+
+def test_gateway_role_config_accepts_exact_release_control_profile(monkeypatch):
+    from ops.executive_os.executive_mcp_entry import CONFIG_SCHEMA
+
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release))
+    observed = m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+    assert m._GATEWAY_CONFIG_SCHEMA == CONFIG_SCHEMA
+    profile_source = (
+        Path(__file__).parents[1] / 'integrations/executive_mcp/release_control.py'
+    ).read_text()
+    assert 'RELEASE_CONTROL_PROFILE = "release_control_v1"' in profile_source
+    assert m._GATEWAY_MCP_PROFILE == 'release_control_v1'
+    assert observed.release == release
+
+
+@pytest.mark.parametrize('profile,code', [
+    ('web_ceo_v2', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    ('legacy', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    ('release_control_v2', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    (None, 'SERVICE_CONFIG_SCHEMA_DRIFT'),
+    (458, 'SERVICE_CONFIG_SCHEMA_DRIFT'),
+])
+def test_gateway_role_config_refuses_other_profiles(monkeypatch, profile, code):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release, profile))
+    with pytest.raises(peer.PeerIdentityError, match=code):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_gateway_role_config_requires_profile_field(monkeypatch):
+    release = 'a' * 40
+    document = _gateway_install_document(release)
+    del document['executive_mcp_profile']
+    _installed_config_read(monkeypatch, document)
+    with pytest.raises(peer.PeerIdentityError, match='SERVICE_CONFIG_SCHEMA_DRIFT'):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_gateway_role_config_requires_current_schema_field(monkeypatch):
+    release = 'a' * 40
+    document = _gateway_install_document(release)
+    document['schema_version'] = document.pop('schema')
+    _installed_config_read(monkeypatch, document)
+    with pytest.raises(peer.PeerIdentityError, match='SERVICE_CONFIG_SCHEMA_DRIFT'):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_control_role_config_is_unchanged(monkeypatch):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, {
+        'proof_base_sha': release,
+        'control_uid': 450,
+        'python_runtime_provenance_digest': 'b' * 64,
+    })
+    observed = m._verify_role_config(m._role_topology('control'), release, m._Budget(25))
+    assert observed.release == release
+    assert observed.provenance_digest == ''
+
+
 @pytest.mark.parametrize('changed_field', [None, 'st_ino', 'st_mtime_ns', 'st_ctime_ns'])
 def test_release_recheck_retains_manifest_descriptor_identity(monkeypatch, changed_field):
     """An unchanged content digest must not hide replacement or metadata drift."""
