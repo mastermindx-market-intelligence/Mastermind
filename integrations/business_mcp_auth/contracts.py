@@ -15,6 +15,8 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 from urllib.parse import SplitResult, urlsplit
 
+from common.verified_principal import VerifiedPrincipal
+
 
 AUTH_POLICY_SCHEMA = "mastermind.business_mcp_auth_policy.v1"
 AUTH_AUDIT_SCHEMA = "mastermind.business_mcp_auth_audit.v1"
@@ -108,22 +110,6 @@ class ResourcePolicy:
     jwks_cache_ttl_seconds: int
     unknown_kid_refresh_cooldown_seconds: int
     fetch_failure_backoff_seconds: int
-
-
-@dataclasses.dataclass(frozen=True)
-class VerifiedPrincipal:
-    """Signature-verified, policy-authorized, pseudonymous caller projection."""
-
-    policy_id: str
-    issuer: str
-    issuer_digest: str
-    resource: str
-    subject_digest: str
-    client_ref: str
-    scopes: tuple[str, ...]
-    issued_at: int
-    expires_at: int
-    jti_digest: str | None
 
 
 @dataclasses.dataclass(frozen=True)
