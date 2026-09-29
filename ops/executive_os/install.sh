@@ -172,9 +172,33 @@ if [ -n "$(/usr/bin/find "$PYTHON_RUNTIME_ROOT" -exec /usr/bin/stat -f '%Sp' {} 
   exit 65
 fi
 /usr/bin/codesign --verify --deep --strict "$PYTHON_RUNTIME_ROOT" >/dev/null 2>&1 || {
-  /bin/echo "Python runtime signature/sealed resources are invalid" >&2
+  /bin/echo "Python runtime root signature/sealed resources are invalid" >&2
   exit 65
 }
+for python_signature_resource in \
+  "$PYTHON_RUNTIME_ROOT/_CodeSignature/CodeResources" \
+  "$PYTHON_RUNTIME_ROOT/Resources/Python.app/Contents/_CodeSignature/CodeResources"; do
+  [ -f "$python_signature_resource" ] && [ ! -L "$python_signature_resource" ] || {
+    /bin/echo "Python signature resource is not a direct regular file: $python_signature_resource" >&2
+    exit 65
+  }
+  [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$python_signature_resource")" = "0:0:644:1" ] || {
+    /bin/echo "Python signature resource is not root:wheel single-link mode 0644: $python_signature_resource" >&2
+    exit 65
+  }
+  case "$(/usr/bin/stat -f '%Sp' "$python_signature_resource")" in
+    *+) /bin/echo "Python signature resource has a filesystem ACL: $python_signature_resource" >&2; exit 65 ;;
+  esac
+done
+[ "$(/usr/bin/id -u _mastermind_exec)" = "450" ] || {
+  /bin/echo "_mastermind_exec must resolve to UID 450" >&2
+  exit 65
+}
+/usr/bin/sudo -n -u _mastermind_exec \
+  /usr/bin/codesign --verify --deep --strict "$PYTHON_RUNTIME_ROOT" >/dev/null 2>&1 || {
+    /bin/echo "UID 450 cannot verify the Python runtime root" >&2
+    exit 65
+  }
 OBSERVED_PYTHON_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PYTHON_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
 [ "$OBSERVED_PYTHON_TEAM" = "$PYTHON_TEAM_ID" ] || {
   /bin/echo "Python runtime signer team is not the explicit allowlist" >&2
@@ -314,6 +338,41 @@ for path, expected_sha in (
         raise RuntimeError("Python runtime receipt hash differs from installed bytes")
 PY
   /bin/echo "Python runtime provenance receipt validation failed" >&2
+  exit 65
+}
+PYTHON_RUNTIME_PROVENANCE_DIGEST="$("$PYTHON_BINARY" -I -S -B - \
+  "$PYTHON_RUNTIME_ROOT" "$PYTHON_BINARY" "$PYTHON_VERSION" "$PYTHON_TEAM_ID" \
+  "$PYTHON_PACKAGE_SHA256" "$PYTHON_BINARY_SHA256" "$PYTHON_FRAMEWORK_SHA256" <<'PY'
+import hashlib
+import json
+import sys
+
+(
+    runtime_root, python_binary, version, team, package_sha,
+    binary_sha, framework_sha,
+) = sys.argv[1:]
+identity = {
+    "schema_version": "mastermind.executive_python_runtime/v1",
+    "python_version": version,
+    "runtime_root": runtime_root,
+    "python_binary": python_binary,
+    "team_identifier": team,
+    "package_sha256": package_sha,
+    "python_binary_sha256": binary_sha,
+    "python_framework_sha256": framework_sha,
+}
+print(hashlib.sha256(
+    b"mastermind.executive_python_runtime_provenance/v1\x00"
+    + json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+).hexdigest())
+PY
+)" || {
+  /bin/echo "Python runtime provenance digest projection failed" >&2
   exit 65
 }
 # --- BEGIN Codex package component validation ---
@@ -983,7 +1042,8 @@ fi
     "$CONTROL_RUNTIME_ROOT" "$ADMIN_CHECKOUT" "$WORKSPACE_ROOT" "$EXPECTED_SHA" \
     "$BACKUP_ROOT" "$RECEIPTS_ROOT" "$PROVIDER_HOME" "$RUN_ROOT" \
     "$CANARY_RECEIPT" "$CONTROL_ENV_ATTESTATION" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
-    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" "$ARM_PRIVILEGED_BROKER" <<'PY'
+    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" "$ARM_PRIVILEGED_BROKER" \
+    "$PYTHON_RUNTIME_PROVENANCE_DIGEST" <<'PY'
 import json, os, pathlib, re, sys
 release_root = sys.argv.pop(1)
 sys.path.insert(0, release_root)
@@ -1013,6 +1073,7 @@ from scripts.executive_os_phase1c import (
     operator_harness_binary_digest,
     operator_harness_version,
     arm_privileged_broker,
+    python_runtime_provenance_digest,
 ) = sys.argv[1:]
 
 ceo_ingress_expected = {
@@ -1077,6 +1138,7 @@ expected = {
     "control_environment_attestation_path": control_environment_attestation,
     "operator_harness_binary_digest": operator_harness_binary_digest,
     "operator_harness_version": operator_harness_version,
+    "python_runtime_provenance_digest": python_runtime_provenance_digest,
 }
 expected.update(readiness_expected)
 if ceo_ingress_schema_keys:
@@ -1108,6 +1170,12 @@ if source:
     value = json.loads(source_path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise SystemExit("control config source must contain an object")
+    if value.get("python_runtime_provenance_digest") not in (None, python_runtime_provenance_digest):
+        raise SystemExit(
+            "control config python_runtime_provenance_digest conflicts with "
+            "the validated Python runtime receipt"
+        )
+    value["python_runtime_provenance_digest"] = python_runtime_provenance_digest
 else:
     value = {**expected, **defaults}
 

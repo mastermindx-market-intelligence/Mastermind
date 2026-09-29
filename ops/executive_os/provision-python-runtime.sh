@@ -96,6 +96,37 @@ runtime_tree_static_checks() {
   done < <(/usr/bin/find "$root" -type f -print0)
 }
 
+verify_consumer_readability() {
+  local root="$1"
+  [ "$(/usr/bin/id -u _mastermind_exec)" = "450" ] || return 1
+  /usr/bin/sudo -n -u _mastermind_exec \
+    /usr/bin/codesign --verify --deep --strict "$root" >/dev/null 2>&1
+}
+
+verify_signature_resources() {
+  local root="$1" path
+  for path in \
+    "$root/_CodeSignature/CodeResources" \
+    "$root/Resources/Python.app/Contents/_CodeSignature/CodeResources"; do
+    [ -f "$path" ] && [ ! -L "$path" ] || return 1
+    [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$path")" = "0:0:644:1" ] || return 1
+    case "$(/usr/bin/stat -f '%Sp' "$path")" in *+) return 1 ;; esac
+  done
+}
+
+normalize_signature_resources() {
+  local root="$1" path
+  for path in \
+    "$root/_CodeSignature/CodeResources" \
+    "$root/Resources/Python.app/Contents/_CodeSignature/CodeResources"; do
+    [ -f "$path" ] && [ ! -L "$path" ] || return 1
+    [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$path")" = "0:0:640:1" ] || return 1
+    case "$(/usr/bin/stat -f '%Sp' "$path")" in *+) return 1 ;; esac
+    /bin/chmod 0644 "$path"
+  done
+  verify_signature_resources "$root" || return 1
+}
+
 runtime_ancestor_checks() {
   local ancestor
   for ancestor in /Library /Library/Frameworks "$FRAMEWORK_PARENT" "$VERSIONS_ROOT"; do
@@ -236,6 +267,8 @@ PY
 
 verify_installed_runtime() {
   verify_installed_runtime_bytes || return 1
+  verify_signature_resources "$RUNTIME_ROOT" || return 1
+  verify_consumer_readability "$RUNTIME_ROOT" || return 1
   verify_runtime_receipt || return 1
 }
 
@@ -431,6 +464,14 @@ runtime_tree_static_checks "$CANDIDATE" || {
   /bin/echo "extracted Python framework failed static trust checks" >&2
   exit 65
 }
+normalize_signature_resources "$CANDIDATE" || {
+  /bin/echo "Python signature resources could not be bounded-normalized" >&2
+  exit 65
+}
+runtime_tree_static_checks "$CANDIDATE" || {
+  /bin/echo "normalized Python framework failed static trust checks" >&2
+  exit 65
+}
 
 # Cross the mutation boundary only after download, package signing, notarization,
 # pinned digest, payload signing, ownership, modes, ACL, and symlink checks pass.
@@ -456,6 +497,14 @@ INSTALL_STAGE="$VERSIONS_ROOT/.executive-$PYTHON_SERIES-$(/usr/bin/uuidgen)"
 /bin/chmod 0755 "$INSTALL_STAGE" "$INSTALL_STAGE/bin" "$INSTALL_STAGE/bin/python3.12"
 runtime_tree_static_checks "$INSTALL_STAGE" || {
   /bin/echo "staged Python framework failed post-copy trust checks" >&2
+  exit 65
+}
+verify_signature_resources "$INSTALL_STAGE" || {
+  /bin/echo "staged Python signature resources have unsafe metadata" >&2
+  exit 65
+}
+verify_consumer_readability "$INSTALL_STAGE" || {
+  /bin/echo "UID 450 staged Python signature readability check failed" >&2
   exit 65
 }
 
@@ -485,6 +534,14 @@ INSTALL_STAGE=""
 
 verify_installed_runtime_bytes || {
   /bin/echo "installed Python framework failed live origin attestation" >&2
+  exit 65
+}
+verify_signature_resources "$RUNTIME_ROOT" || {
+  /bin/echo "installed Python signature resources have unsafe metadata" >&2
+  exit 65
+}
+verify_consumer_readability "$RUNTIME_ROOT" || {
+  /bin/echo "UID 450 installed Python signature readability check failed" >&2
   exit 65
 }
 
