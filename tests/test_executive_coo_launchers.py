@@ -84,3 +84,26 @@ def test_control_factory_wires_existing_workspace_into_guard(tmp_path, monkeypat
     assert type(provider) is CooHostProvider and provider.source is host.source
     assert provider.workspace.runtime is actual_runtime
     assert callable(binding.principal_admission_guard)
+
+
+def test_control_policy_and_grant_projection_are_stdlib_only(tmp_path):
+    import subprocess
+    import sys
+    _, coo, _, registry = helpers.setup(tmp_path)
+    raw = install.base_document(); raw.update(coo=coo, executive_mcp_profile=WEB_CEO_V2_PROFILE)
+    root = str(Path(__file__).resolve().parents[1])
+    code = (
+        "import sys,json;sys.path.insert(0," + repr(root) + ");"
+        "from ops.executive_os import executive_mcp_entry as e;"
+        "from ops.executive_os.coo_principal_host import CooInstalledSource;"
+        "from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry;"
+        "raw=json.loads(sys.stdin.read());e.validate_document(raw);"
+        "source=CooInstalledSource(lambda:raw['coo'],lambda:ExecutionCapabilityRegistry.load("
+        + repr(str(registry)) + ",source_root=" + repr(root) + "));"
+        "source.snapshot('WS:EXECUTIVE-CAPACITY-FABRIC');"
+        "assert not {'mcp','httpx','jwt'}.intersection(sys.modules);print('STDLIB_CONTROL_OK')"
+    )
+    run = subprocess.run([sys.executable, "-I", "-S", "-B", "-c", code],
+        input=json.dumps(raw), capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "STDLIB_CONTROL_OK"
