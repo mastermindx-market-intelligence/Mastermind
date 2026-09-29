@@ -142,7 +142,8 @@ def test_real_attempt_prepares_browser_resource_without_oauth(tmp_path):
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("invalidation", ["cancel", "fence", "generation", "attestation", "workspace"])
+@pytest.mark.parametrize("invalidation", ["cancel", "fence", "generation", "attestation",
+                                          "workspace", "expiry"])
 def test_durable_owner_changes_refuse_before_browser_effect(tmp_path, invalidation):
     (api, executive, lease, epoch, generation, profile, requested, config,
      run_root) = _setup(tmp_path)
@@ -162,6 +163,14 @@ def test_durable_owner_changes_refuse_before_browser_effect(tmp_path, invalidati
             elif invalidation == "generation":
                 with executive.store.transaction() as connection:
                     connection.execute("UPDATE process_generations SET executive_writer_held=0")
+            elif invalidation == "expiry":
+                # Expired authority must refuse. The expiry law lives upstream in
+                # _leased_row; this pins that the browser path actually reaches it
+                # rather than admitting on a lease the Runtime would reject.
+                with executive.store.transaction() as connection:
+                    connection.execute(
+                        "UPDATE attempts SET lease_expires_at_ms=?",
+                        (executive.store.now_ms() - 1,))
             elif invalidation == "attestation":
                 with executive.store.transaction() as connection:
                     connection.execute("UPDATE process_generations SET observed_attestation_digest=?", ("0" * 64,))
