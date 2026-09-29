@@ -205,6 +205,12 @@ class WorkerBrowserAdmission:
                 receipt = read_operator_materialization_receipt(
                     self._run_root, self._command_id,
                     expected_owner_uid=self._expected_owner_uid)
+                runtime_process = {
+                    "pid": current["pid"],
+                    "pgid": current["pgid"],
+                    "process_start_identity": current["process_start_identity"],
+                    "boot_id": current["boot_id"],
+                }
                 if receipt is None or (
                     receipt.attempt_id != self._epoch.attempt_id
                     or receipt.worker_id != self._epoch.worker_id
@@ -216,6 +222,7 @@ class WorkerBrowserAdmission:
                     or receipt.requested_profile_digest
                         != self._materialization_digest
                     or receipt.provider_session_id != current["provider_session_id"]
+                    or receipt.process_identity != runtime_process
                     or observed_harness_attestation(receipt.observed_attestation)
                         != observed
                 ):
