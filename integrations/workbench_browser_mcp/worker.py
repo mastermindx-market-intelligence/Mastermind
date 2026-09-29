@@ -24,7 +24,13 @@ from control_plane.operator_harness_contract import (
     LaunchDecision, ProcessGenerationRef, RequestedExecutionProfile, SessionEpochRef,
     compare_launch,
 )
-from control_plane.operator_harness_wire import observed_harness_attestation
+from control_plane.operator_harness_wire import (
+    observed_harness_attestation, to_wire,
+)
+from control_plane.operator_materialization_receipt import (
+    read_operator_materialization_receipt,
+    requested_profile_digest as materialization_profile_digest,
+)
 from integrations.workbench_action_mcp.runtime import (
     StableWorkbenchActionLease, WorkbenchActionRuntime,
 )
@@ -34,6 +40,19 @@ from .tunnel import create_browser_tunnel_server
 
 def _refuse():
     raise ValueError("BROWSER_WORKER_ADMISSION_REFUSED")
+
+
+def _materialization_command_id(attempt_id: str, generation_number: int) -> str:
+    """Derive the frozen G1-start/G2-resume command, not a second identity plane.
+
+    Any other generation number has no Control-authorized materialization
+    command under the existing law, so admission refuses rather than invent one.
+    """
+    if generation_number == 1:
+        return f"ohf-op:start:{attempt_id}"
+    if generation_number == 2:
+        return f"ohf-op:recover-resume:{attempt_id}"
+    _refuse()
 
 
 def _references(attempt, epoch, generation, profile):
@@ -95,10 +114,15 @@ class WorkerBrowserAdmission:
     def __init__(self, store: RuntimeStore, lease: AttemptLease, epoch: SessionEpochRef,
                  generation: ProcessGenerationRef, requested: RequestedExecutionProfile,
                  profile: ExecutionCapabilityProfile, capability_id: str,
-                 workbench: WorkbenchActionRuntime):
+                 workbench: WorkbenchActionRuntime, *, run_root: str | Path,
+                 expected_owner_uid: int):
         if (type(store) is not RuntimeStore or type(lease) is not AttemptLease
                 or type(requested) is not RequestedExecutionProfile
-                or not isinstance(workbench, WorkbenchActionRuntime)):
+                or not isinstance(workbench, WorkbenchActionRuntime)
+                or isinstance(expected_owner_uid, bool)
+                or type(expected_owner_uid) is not int
+                or not isinstance(run_root, (str, Path))
+                or not Path(run_root).is_absolute()):
             _refuse()
         refs = _references(lease.attempt, epoch, generation, profile)
         grants = [g for g in profile.mcp_server_grants if g.capability_id == capability_id]
@@ -122,6 +146,14 @@ class WorkerBrowserAdmission:
         self._requested_json, self._requested_digest = _ohf_json_digest(requested)
         self._refs = refs
         self._workbench = workbench
+        # Supervisor-side launch-custody policy. These never reach the Worker,
+        # which receives only the far end of the served stdio pair.
+        self._run_root = Path(run_root)
+        self._expected_owner_uid = expected_owner_uid
+        self._command_id = _materialization_command_id(
+            epoch.attempt_id, generation.generation_number)
+        self._materialization_digest = materialization_profile_digest(
+            to_wire(requested))
         self.grant = grants[0]
 
     def resolve_binding(self, caller, project_ref):
@@ -165,6 +197,28 @@ class WorkerBrowserAdmission:
                     return None
                 observed = observed_harness_attestation(json.loads(raw))
                 if compare_launch(self._requested, observed).decision is not LaunchDecision.ALLOW:
+                    return None
+                # Bind the exact Control-authorized launch. The generation row
+                # proves a live owned process; only the materialization receipt
+                # proves it is the launch Control actually admitted. Absent,
+                # unreadable or mismatched is absence of authority, never retry.
+                receipt = read_operator_materialization_receipt(
+                    self._run_root, self._command_id,
+                    expected_owner_uid=self._expected_owner_uid)
+                if receipt is None or (
+                    receipt.attempt_id != self._epoch.attempt_id
+                    or receipt.worker_id != self._epoch.worker_id
+                    or receipt.session_epoch_id != self._epoch.session_epoch_id
+                    or receipt.process_generation_id
+                        != self._generation.process_generation_id
+                    or receipt.generation_number
+                        != self._generation.generation_number
+                    or receipt.requested_profile_digest
+                        != self._materialization_digest
+                    or receipt.provider_session_id != current["provider_session_id"]
+                    or observed_harness_attestation(receipt.observed_attestation)
+                        != observed
+                ):
                     return None
                 # Preserve the stronger current role/placement/active-work law
                 # for orchestrators; do not turn a valid flat lease into it.
