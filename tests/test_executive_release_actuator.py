@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import errno
+import fcntl
 import hashlib
 import json
 import multiprocessing
@@ -559,9 +560,9 @@ def test_temporary_path_replacement_before_publish_refuses(tmp_path, monkeypatch
     monkeypatch.setattr(journal, "_read_file", replace_temporary_after_first_read)
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLISHED")
-    assert caught.value.code == "RECORD_REPLACED"
+    assert caught.value.code == "TEMP_REPLACED"
     assert journal.read(OPERATION_KEY) == original
-    assert not list(root.glob("*.tmp"))
+    assert len(list(root.glob("*.tmp"))) == 1
 
 
 def test_stale_temporary_file_refuses_without_changing_record(tmp_path):
@@ -635,6 +636,238 @@ def test_multiple_operation_families_share_one_root(tmp_path):
     assert _journal(root).read("second-operation") == second
     assert len(list(root.glob("*.json"))) == 2
     assert len(list(root.glob("*.lock"))) == 2
+
+
+@pytest.mark.parametrize("method", ["read", "advance"])
+def test_record_bytes_are_bound_to_requested_operation(tmp_path, method):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    _start(journal, "operation-a")
+    _start(journal, "operation-b")
+    path_a = _record_path(root, "operation-a")
+    path_b = _record_path(root, "operation-b")
+    path_a.write_bytes(path_b.read_bytes())
+    original = path_a.read_bytes()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        if method == "read":
+            journal.read("operation-a")
+        else:
+            journal.advance(
+                "operation-a", expected_generation=1, state="PUBLISHED"
+            )
+    assert caught.value.code == "OPERATION_MISMATCH"
+    assert path_a.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        "PUBLISHED",
+        "BROKER_RESTART_PENDING",
+        "RECOVERING",
+        "SUCCEEDED",
+        "ROLLED_BACK",
+        "FAILED_NOT_APPLIED",
+    ],
+)
+def test_exact_start_replay_after_progress_returns_current_record(tmp_path, state):
+    root = tmp_path / state
+    journal = _journal(root)
+    current = _start(journal)
+    for next_state in ("PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"):
+        current = journal.advance(
+            OPERATION_KEY,
+            expected_generation=current["journal_generation"],
+            state=next_state,
+        )
+        if next_state == state:
+            break
+    if state in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+        current = _terminal(journal, current, state)
+    path = _record_path(root)
+    raw = path.read_bytes()
+    modified = path.stat().st_mtime_ns
+    assert _start(_journal(root)) == current
+    assert path.read_bytes() == raw
+    assert path.stat().st_mtime_ns == modified
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires abrupt child exit")
+def test_start_crash_never_exposes_partial_final_record(tmp_path):
+    root = tmp_path / "journal"
+
+    def crash_after_partial_write():
+        original_write = os.write
+
+        def partial(descriptor, data):
+            original_write(descriptor, data[:31])
+            os.fsync(descriptor)
+            os._exit(71)
+
+        actuator.os.write = partial
+        _start(_journal(root))
+
+    child = multiprocessing.get_context("fork").Process(
+        target=crash_after_partial_write
+    )
+    child.start()
+    child.join(2)
+    if child.is_alive():
+        child.terminate()
+        child.join(2)
+    assert child.exitcode == 71
+    final_path = _record_path(root)
+    assert not final_path.exists()
+    staged_path = final_path.with_suffix(".start")
+    assert staged_path.exists()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        _start(_journal(root))
+    assert caught.value.code == "START_STAGED_CONFLICT"
+    assert not final_path.exists()
+
+
+def test_linked_start_crash_state_is_recovered_only_for_exact_candidate(tmp_path):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    identity, preconditions, admission = _inputs()
+    candidate = actuator._validate_record(
+        {
+            "schema": actuator._SCHEMA,
+            "state": "STARTED",
+            **identity,
+            "preconditions": preconditions,
+            "admission": admission,
+            "actuator_generation": 7,
+            "journal_generation": 1,
+            "started_at_ms": 1_000,
+        }
+    )
+    raw = contract.canonical_release_bytes(candidate)
+    root.mkdir(mode=0o700)
+    final_path = _record_path(root)
+    staged_path = final_path.with_suffix(".start")
+    staged_path.write_bytes(raw)
+    os.chmod(staged_path, 0o600)
+    os.link(staged_path, final_path)
+    assert final_path.stat().st_nlink == 2
+    recovered = _start(journal)
+    assert recovered == candidate
+    assert final_path.stat().st_nlink == 1
+    assert not staged_path.exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires FIFO race probe")
+def test_regular_to_fifo_race_returns_finite_error(tmp_path):
+    root = tmp_path / "journal"
+    _start(_journal(root))
+    path = _record_path(root)
+
+    def race():
+        original_open = os.open
+        switched = False
+
+        def switch(name, flags, *args, **kwargs):
+            nonlocal switched
+            if (
+                str(name) == path.name
+                and not switched
+                and flags & os.O_ACCMODE == os.O_RDONLY
+            ):
+                switched = True
+                os.unlink(name, dir_fd=kwargs["dir_fd"])
+                os.mkfifo(name, 0o600, dir_fd=kwargs["dir_fd"])
+            return original_open(name, flags, *args, **kwargs)
+
+        actuator.os.open = switch
+        try:
+            _journal(root, lock_timeout=0.15).read(OPERATION_KEY)
+        except actuator.ExecutiveReleaseActuatorJournalError:
+            os._exit(0)
+        os._exit(72)
+
+    child = multiprocessing.get_context("fork").Process(target=race)
+    child.start()
+    child.join(2)
+    if child.is_alive():
+        child.terminate()
+        child.join(2)
+        pytest.fail("record open blocked on FIFO")
+    assert child.exitcode == 0
+
+
+def test_failed_write_cleanup_preserves_replacement_inode(tmp_path, monkeypatch):
+    root = tmp_path / "journal"
+    root.mkdir(mode=0o700)
+    journal = _journal(root)
+    replacement = b"foreign-replacement"
+    actual_open = os.open
+    actual_write = os.write
+    target = "owned.tmp"
+
+    def replace_and_fail(descriptor, data):
+        os.unlink(target, dir_fd=root_descriptor)
+        new_descriptor = actual_open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+            dir_fd=root_descriptor,
+        )
+        try:
+            actual_write(new_descriptor, replacement)
+        finally:
+            os.close(new_descriptor)
+        raise OSError(errno.EIO, "injected")
+
+    root_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        monkeypatch.setattr(actuator.os, "write", replace_and_fail)
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+            journal._write_new(root_descriptor, target, b"candidate")
+    finally:
+        os.close(root_descriptor)
+    path = root / target
+    assert path.exists()
+    assert path.read_bytes() == replacement
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires process flock semantics")
+def test_held_process_lock_times_out_without_record_effect(tmp_path):
+    root = tmp_path / "journal"
+    journal = _journal(root)
+    record = _start(journal)
+    path = _record_path(root)
+    raw = path.read_bytes()
+    context = multiprocessing.get_context("fork")
+    ready = context.Event()
+    release = context.Event()
+
+    def holder():
+        descriptor = os.open(path.with_suffix(".lock"), os.O_RDWR)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            ready.set()
+            release.wait(4)
+        finally:
+            os.close(descriptor)
+
+    child = context.Process(target=holder)
+    child.start()
+    try:
+        assert ready.wait(2)
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+            _journal(root, lock_timeout=0.1).advance(
+                OPERATION_KEY, expected_generation=1, state="PUBLISHED"
+            )
+        assert caught.value.code == "LOCK_TIMEOUT"
+        assert path.read_bytes() == raw
+    finally:
+        release.set()
+        child.join(2)
+        if child.is_alive():
+            child.terminate()
+            child.join(2)
+    assert child.exitcode == 0
+    assert journal.read(OPERATION_KEY) == record
 
 
 def test_missing_root_or_record_is_not_found_without_replay(tmp_path):

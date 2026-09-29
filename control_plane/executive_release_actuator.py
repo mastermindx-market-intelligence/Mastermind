@@ -106,7 +106,7 @@ _FILE_MODE = 0o600
 _LOCK_TIMEOUT_SECONDS = 5.0
 _LOCK_POLL_SECONDS = 0.01
 _OPEN_DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_OPEN_RECORD = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+_OPEN_RECORD = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 _LOCAL_LOCK = threading.Lock()
 
 
@@ -176,6 +176,16 @@ def _before_identity(record: Mapping[str, Any]) -> dict[str, Any]:
         "release_tree": record["before_release_tree"],
         "installed_manifest_digest": record["before_installed_manifest_digest"],
         "configuration_digest": record["before_configuration_digest"],
+    }
+
+
+def _start_identity(record: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        **{field: record[field] for field in _IDENTITY_FIELDS},
+        "preconditions": record["preconditions"],
+        "admission": record["admission"],
+        "actuator_generation": record["actuator_generation"],
+        "started_at_ms": record["started_at_ms"],
     }
 
 
@@ -388,13 +398,14 @@ class _ExecutiveReleaseActuatorJournal:
         directory: bool,
         mode: int,
         code: str,
+        expected_links: int = 1,
     ) -> None:
         expected_type = stat.S_IFDIR if directory else stat.S_IFREG
         if (
             stat.S_IFMT(info.st_mode) != expected_type
             or stat.S_IMODE(info.st_mode) != mode
             or info.st_uid != self._expected_uid
-            or (not directory and info.st_nlink != 1)
+            or (not directory and info.st_nlink != expected_links)
         ):
             _fail(code)
         try:
@@ -507,7 +518,7 @@ class _ExecutiveReleaseActuatorJournal:
             try:
                 descriptor = os.open(
                     lock_name,
-                    os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
                     dir_fd=root_descriptor,
                 )
             except OSError:
@@ -617,7 +628,12 @@ class _ExecutiveReleaseActuatorJournal:
             _LOCAL_LOCK.release()
 
     def _read_file(
-        self, root_descriptor: int, name: str, *, required: bool
+        self,
+        root_descriptor: int,
+        name: str,
+        *,
+        required: bool,
+        expected_links: int = 1,
     ) -> tuple[bytes, tuple[Any, ...]]:
         try:
             before = os.stat(name, dir_fd=root_descriptor, follow_symlinks=False)
@@ -644,6 +660,7 @@ class _ExecutiveReleaseActuatorJournal:
                 directory=False,
                 mode=_FILE_MODE,
                 code="RECORD_METADATA",
+                expected_links=expected_links,
             )
             if opened.st_size > _MAX_RECORD_BYTES:
                 _fail("RECORD_SIZE")
@@ -691,11 +708,22 @@ class _ExecutiveReleaseActuatorJournal:
         except (ReleaseContractError, ExecutiveReleaseActuatorJournalError):
             _fail("RECORD_BYTES")
 
+    @classmethod
+    def _decode_for_operation(
+        cls, raw: bytes, operation_key: str
+    ) -> ReleaseRecord:
+        record = cls._decode(raw)
+        if record["operation_key"] != operation_key:
+            _fail("OPERATION_MISMATCH")
+        return record
+
     def _write_new(self, root_descriptor: int, name: str, raw: bytes) -> None:
         if not 0 < len(raw) <= _MAX_RECORD_BYTES:
             _fail("RECORD_SIZE")
         descriptor = None
         created = False
+        created_inode = None
+        complete = False
         try:
             descriptor = os.open(
                 name,
@@ -710,6 +738,7 @@ class _ExecutiveReleaseActuatorJournal:
             created = True
             os.fchmod(descriptor, _FILE_MODE)
             info = os.fstat(descriptor)
+            created_inode = (info.st_dev, info.st_ino)
             self._check_descriptor(
                 descriptor,
                 info,
@@ -727,6 +756,7 @@ class _ExecutiveReleaseActuatorJournal:
             os.close(descriptor)
             descriptor = None
             self._fsync_directory(root_descriptor)
+            complete = True
         except FileExistsError:
             _fail("RECORD_EXISTS")
         except ExecutiveReleaseActuatorJournalError:
@@ -736,19 +766,43 @@ class _ExecutiveReleaseActuatorJournal:
         finally:
             if descriptor is not None:
                 os.close(descriptor)
-            if created:
+            if created and not complete and created_inode is not None:
                 try:
                     observed = os.stat(
                         name, dir_fd=root_descriptor, follow_symlinks=False
                     )
                 except OSError:
                     observed = None
-                if observed is not None and observed.st_size != len(raw):
+                if (
+                    observed is not None
+                    and (observed.st_dev, observed.st_ino) == created_inode
+                ):
                     try:
                         os.unlink(name, dir_fd=root_descriptor)
                         self._fsync_directory(root_descriptor)
                     except OSError:
                         pass
+
+    def _unlink_owned(
+        self,
+        root_descriptor: int,
+        name: str,
+        expected_identity: tuple[Any, ...],
+        code: str,
+    ) -> None:
+        try:
+            observed = os.stat(name, dir_fd=root_descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError:
+            _fail(code)
+        if (observed.st_dev, observed.st_ino) != expected_identity[:2]:
+            _fail(code)
+        try:
+            os.unlink(name, dir_fd=root_descriptor)
+            self._fsync_directory(root_descriptor)
+        except OSError:
+            _fail(code)
 
     def create(
         self,
@@ -776,32 +830,144 @@ class _ExecutiveReleaseActuatorJournal:
         return self._locked(
             name,
             lambda root, record_name: self._create_locked(
-                root, record_name, raw
+                root, record_name, raw, validated
             ),
             create_root=True,
         )
 
     def _create_locked(
-        self, root_descriptor: int, name: str, candidate: bytes
+        self,
+        root_descriptor: int,
+        name: str,
+        candidate: bytes,
+        candidate_record: ReleaseRecord,
     ) -> ReleaseRecord:
+        recovered = self._recover_linked_start(
+            root_descriptor, name, candidate, candidate_record["operation_key"]
+        )
+        if recovered is not None:
+            return recovered
         current, _ = self._read_file(root_descriptor, name, required=False)
         if current:
-            existing = self._decode(current)
-            if current == candidate:
+            existing = self._decode_for_operation(
+                current, candidate_record["operation_key"]
+            )
+            if _start_identity(existing) == _start_identity(candidate_record):
                 return existing
             _fail("CONFLICT")
-        self._write_new(root_descriptor, name, candidate)
+        self._publish_start(root_descriptor, name, candidate)
         written, _ = self._read_file(root_descriptor, name, required=True)
         if written != candidate:
             _fail("RECORD_REPLACED")
-        return self._decode(written)
+        return self._decode_for_operation(
+            written, candidate_record["operation_key"]
+        )
+
+    def _recover_linked_start(
+        self,
+        root_descriptor: int,
+        name: str,
+        candidate: bytes,
+        operation_key: str,
+    ) -> ReleaseRecord | None:
+        staged_name = name[:-5] + ".start"
+        try:
+            final_info = os.stat(
+                name, dir_fd=root_descriptor, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            return None
+        except OSError:
+            _fail("RECORD_OPEN")
+        if final_info.st_nlink != 2:
+            return None
+        try:
+            staged_info = os.stat(
+                staged_name, dir_fd=root_descriptor, follow_symlinks=False
+            )
+        except OSError:
+            _fail("RECORD_METADATA")
+        if (
+            (final_info.st_dev, final_info.st_ino)
+            != (staged_info.st_dev, staged_info.st_ino)
+            or staged_info.st_nlink != 2
+        ):
+            _fail("RECORD_METADATA")
+        final_raw, final_identity = self._read_file(
+            root_descriptor, name, required=True, expected_links=2
+        )
+        staged_raw, staged_identity = self._read_file(
+            root_descriptor, staged_name, required=True, expected_links=2
+        )
+        if (
+            final_raw != candidate
+            or staged_raw != candidate
+            or final_identity[:2] != staged_identity[:2]
+        ):
+            _fail("START_STAGED_CONFLICT")
+        self._decode_for_operation(final_raw, operation_key)
+        self._unlink_owned(
+            root_descriptor,
+            staged_name,
+            staged_identity,
+            "START_STAGED_REPLACED",
+        )
+        published, _ = self._read_file(root_descriptor, name, required=True)
+        if published != candidate:
+            _fail("RECORD_REPLACED")
+        return self._decode_for_operation(published, operation_key)
+
+    def _publish_start(
+        self, root_descriptor: int, name: str, candidate: bytes
+    ) -> None:
+        staged_name = name[:-5] + ".start"
+        staged_raw, staged_identity = self._read_file(
+            root_descriptor, staged_name, required=False
+        )
+        if staged_raw:
+            if staged_raw != candidate:
+                _fail("START_STAGED_CONFLICT")
+        else:
+            self._write_new(root_descriptor, staged_name, candidate)
+            staged_raw, staged_identity = self._read_file(
+                root_descriptor, staged_name, required=True
+            )
+            if staged_raw != candidate:
+                _fail("RECORD_REPLACED")
+        self._decode(candidate)
+        staged_again, staged_identity_again = self._read_file(
+            root_descriptor, staged_name, required=True
+        )
+        if staged_again != candidate or staged_identity_again != staged_identity:
+            _fail("START_STAGED_REPLACED")
+        try:
+            os.link(
+                staged_name,
+                name,
+                src_dir_fd=root_descriptor,
+                dst_dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            _fail("RECORD_EXISTS")
+        except OSError:
+            _fail("RECORD_PUBLISH")
+        self._fsync_directory(root_descriptor)
+        self._unlink_owned(
+            root_descriptor,
+            staged_name,
+            staged_identity,
+            "START_STAGED_REPLACED",
+        )
 
     def read(self, operation_key: str) -> ReleaseRecord:
-        name = self._name(operation_key)
+        validated_operation_key = _operation_key(operation_key)
+        name = self._name(validated_operation_key)
         return self._locked(
             name,
-            lambda root, record_name: self._decode(
-                self._read_file(root, record_name, required=True)[0]
+            lambda root, record_name: self._decode_for_operation(
+                self._read_file(root, record_name, required=True)[0],
+                validated_operation_key,
             ),
             create_root=False,
         )
@@ -831,7 +997,8 @@ class _ExecutiveReleaseActuatorJournal:
                 _fail("TERMINAL_ARGUMENTS")
         elif any(value is not None for value in terminal_arguments):
             _fail("TERMINAL_ARGUMENTS")
-        name = self._name(operation_key)
+        validated_operation_key = _operation_key(operation_key)
+        name = self._name(validated_operation_key)
         return self._locked(
             name,
             lambda root, record_name: self._advance_locked(
@@ -843,6 +1010,7 @@ class _ExecutiveReleaseActuatorJournal:
                 postcondition_digest=postcondition_digest,
                 after=after,
                 rollback=rollback,
+                operation_key=validated_operation_key,
             ),
             create_root=False,
         )
@@ -858,11 +1026,12 @@ class _ExecutiveReleaseActuatorJournal:
         postcondition_digest: str | None,
         after: Mapping[str, Any] | None,
         rollback: Mapping[str, Any] | None,
+        operation_key: str,
     ) -> ReleaseRecord:
         current_raw, current_identity = self._read_file(
             root_descriptor, name, required=True
         )
-        current = self._decode(current_raw)
+        current = self._decode_for_operation(current_raw, operation_key)
         if current["state"] in _TERMINAL_STATES:
             _fail("TERMINAL_IMMUTABLE")
         if current["journal_generation"] != expected_generation:
@@ -886,6 +1055,7 @@ class _ExecutiveReleaseActuatorJournal:
         replacement = canonical_release_bytes(validated)
         temporary_name = name[:-5] + ".tmp"
         self._write_new(root_descriptor, temporary_name, replacement)
+        temporary_identity = None
         try:
             temporary_raw, temporary_identity = self._read_file(
                 root_descriptor, temporary_name, required=True
@@ -918,15 +1088,15 @@ class _ExecutiveReleaseActuatorJournal:
             final, _ = self._read_file(root_descriptor, name, required=True)
             if final != replacement:
                 _fail("RECORD_REPLACED")
-            return self._decode(final)
+            return self._decode_for_operation(final, operation_key)
         finally:
-            try:
-                os.unlink(temporary_name, dir_fd=root_descriptor)
-                self._fsync_directory(root_descriptor)
-            except FileNotFoundError:
-                pass
-            except OSError:
-                _fail("TEMP_CLEANUP")
+            if temporary_identity is not None:
+                self._unlink_owned(
+                    root_descriptor,
+                    temporary_name,
+                    temporary_identity,
+                    "TEMP_REPLACED",
+                )
 
 
 ExecutiveReleaseActuatorJournal = _ExecutiveReleaseActuatorJournal
