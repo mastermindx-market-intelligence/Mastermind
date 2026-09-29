@@ -151,3 +151,24 @@ def test_unrelated_ascii_comments_and_whitespace_preserve_approved_ast():
     changed = '# unrelated comment\n\n' + SOURCE.replace('_CONTROL_SOCKETS = {', '_CONTROL_SOCKETS  =  {\n    # spacing only', 1)
     assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 33
     assert _scan(changed) == []
+
+
+@pytest.mark.parametrize("separator", list("\v\f\x1c\x1d\x1e\x85\u2028\u2029"))
+@pytest.mark.parametrize("position", ["prefix", "anchor"])
+def test_non_python_line_separators_refuse_all_projection(separator, position):
+    if position == "prefix":
+        changed = f"# prefix{separator}\n" + SOURCE
+    else:
+        changed = SOURCE.replace("_CONTROL_SOCKETS = {", f"_CONTROL_SOCKETS = {{ # note{separator}", 1)
+    assert reviewed_literal_spans(REVIEWED_PATH, changed) == ()
+    assert mask_reviewed_identity_literals(REVIEWED_PATH, changed) == changed
+
+
+@pytest.mark.parametrize("newline", ["\r\n", "\r"])
+def test_python_universal_newlines_preserve_exact_tokens(newline):
+    changed = SOURCE.replace("\n", newline)
+    assert len(reviewed_literal_spans(REVIEWED_PATH, changed)) == 33
+    masked = mask_reviewed_identity_literals(REVIEWED_PATH, changed)
+    assert len(masked) == len(changed)
+    ast.parse(masked)
+    assert _scan(changed) == []

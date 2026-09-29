@@ -157,6 +157,10 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if path != REVIEWED_PATH or type(source) is not str:
         return ()
+    # str.splitlines recognizes these separators, while Python source/AST
+    # coordinates do not. Never project across incompatible line models.
+    if any(separator in source for separator in "\v\f\x1c\x1d\x1e\x85\u2028\u2029"):
+        return ()
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
@@ -190,7 +194,8 @@ def reviewed_literal_spans(path: str, source: str):
             if (not isinstance(literal, ast.Constant)
                     or type(literal.value).__name__ != value_type or literal.value != value
                     or literal.lineno != literal.end_lineno
-                    or ast.get_source_segment(source, literal) != spelling):
+                    or ast.get_source_segment(source, literal) != spelling
+                    or lines[literal.lineno - 1][literal.col_offset:literal.end_col_offset] != spelling):
                 qualified = []
                 break
             qualified.append((literal.lineno, literal.col_offset, literal.end_col_offset, value_type))
