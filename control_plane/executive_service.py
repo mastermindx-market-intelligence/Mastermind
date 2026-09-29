@@ -1373,6 +1373,20 @@ class ServiceConfig:
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     shutdown_grace_seconds: float = 10.0
+    # Optional root-owned subscription-canary realm.  When present the primary
+    # ``quota_class`` is locked READ-only and carries
+    # ``metadata.subscription_canary_realm == <exact object>``.  Ordinary
+    # configs leave every field ``None`` and the realm is not advertised.
+    subscription_canary_realm_binding_id: str | None = None
+    subscription_canary_realm_generation: int | None = None
+    subscription_canary_realm_config_sha256: str | None = None
+    # Closed default-off Job-bound login-check composition.  The root-installed
+    # control config is the only arm.  ``privileged_broker_socket_path`` is
+    # present only when ``privileged_readiness_armed`` is True and must then be
+    # exactly the canonical privileged socket path reviewed for the protected
+    # broker.  See §6 / Task 5.
+    privileged_readiness_armed: bool = False
+    privileged_broker_socket_path: Path | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -1467,6 +1481,117 @@ class ServiceConfig:
             raise ValueError("max_response_bytes must be between 4 KiB and 16 MiB")
         if not 0.1 <= float(self.shutdown_grace_seconds) <= 60:
             raise ValueError("shutdown_grace_seconds must be between 0.1 and 60 seconds")
+        if not isinstance(self.privileged_readiness_armed, bool):
+            raise ValueError("privileged_readiness_armed must be boolean")
+        if self.privileged_readiness_armed:
+            if self.privileged_broker_socket_path is None:
+                raise ValueError(
+                    "privileged_readiness_armed requires privileged_broker_socket_path"
+                )
+            broker_socket = Path(self.privileged_broker_socket_path)
+            if not broker_socket.is_absolute():
+                raise ValueError("privileged_broker_socket_path must be absolute")
+            canonical = Path("/var/run/mastermind-executive/privileged.sock")
+            if broker_socket != canonical:
+                raise ValueError(
+                    "privileged_broker_socket_path must equal the canonical "
+                    f"{canonical} privileged broker socket"
+                )
+            object.__setattr__(self, "privileged_broker_socket_path", broker_socket)
+            if broker_socket == self.socket_path:
+                raise ValueError(
+                    "privileged_broker_socket_path must differ from the control socket"
+                )
+        elif self.privileged_broker_socket_path is not None:
+            raise ValueError(
+                "privileged_broker_socket_path is forbidden while privileged_readiness_armed is False"
+            )
+        self._validate_subscription_canary_realm()
+
+    # -- subscription_canary_realm validation ---------------------------------
+
+    def _validate_subscription_canary_realm(self) -> None:
+        binding_id = self.subscription_canary_realm_binding_id
+        generation = self.subscription_canary_realm_generation
+        config_sha = self.subscription_canary_realm_config_sha256
+        if binding_id is None and generation is None and config_sha is None:
+            return
+        if (
+            not isinstance(binding_id, str)
+            or not binding_id
+            or binding_id != binding_id.strip()
+        ):
+            raise ValueError("subscription_canary_realm binding_id is invalid")
+        if (
+            type(generation) is not int
+            or isinstance(generation, bool)
+            or generation < 1
+            or generation >= 2 ** 63
+        ):
+            raise ValueError("subscription_canary_realm generation is invalid")
+        if (
+            not isinstance(config_sha, str)
+            or config_sha != config_sha.lower()
+            or re.fullmatch(r"[0-9a-f]{64}", config_sha) is None
+        ):
+            raise ValueError("subscription_canary_realm config_sha256 is invalid")
+        try:
+            from control_plane.subscription_harness_bindings import (
+                HarnessBindingError,
+                get_binding,
+            )
+            binding = get_binding(binding_id)
+        except (HarnessBindingError, ValueError) as exc:
+            raise ValueError(
+                "subscription_canary_realm binding is not reviewed"
+            ) from exc
+        if (
+            binding.adapter_id != "codex-cli"
+            or binding.implementation_state == "SPEC_ONLY"
+            or binding.autonomous_allowed is not False
+        ):
+            raise ValueError(
+                "subscription_canary_realm binding is not a reviewed codex-cli "
+                "attended-only implementation"
+            )
+        if (
+            self.provider != binding.provider
+            or self.worker_type != binding.adapter_id
+        ):
+            raise ValueError(
+                "subscription_canary_realm worker provider/worker_type disagrees "
+                "with the reviewed binding"
+            )
+        from control_plane.subscription_provider_profiles import get_profile
+
+        profile = get_profile(binding.profile_id)
+        expected_model = binding.model_for(profile)
+        if (
+            not isinstance(self.model, str)
+            or self.model.casefold() != expected_model.casefold()
+        ):
+            raise ValueError(
+                "subscription_canary_realm worker model disagrees with the "
+                "reviewed binding"
+            )
+
+    def subscription_canary_realm(self) -> Mapping[str, Any] | None:
+        """Return the frozen exact subscription-canary realm object or ``None``.
+
+        The dict is built from the validated scalar fields only; no other
+        source may widen the advertised realm.  The returned mapping is the
+        same object the supervisor carries on the enriched ``WorkerLaunchSpec``
+        and the same object the worker side re-validates against its disk
+        config SHA.  Callers must treat the result as read-only.
+        """
+
+        if self.subscription_canary_realm_binding_id is None:
+            return None
+        return _FROZEN_REALM(
+            binding_id=str(self.subscription_canary_realm_binding_id),
+            generation=int(self.subscription_canary_realm_generation),
+            config_sha256=str(self.subscription_canary_realm_config_sha256),
+        )
 
 
 def _jsonable(value: Any) -> Any:
@@ -1483,6 +1608,56 @@ def _jsonable(value: Any) -> Any:
     if hasattr(value, "value") and isinstance(getattr(value, "value"), str):
         return value.value
     return value
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubscriptionCanaryRealm(Mapping[str, Any]):
+    """Immutable, secret-free subscription-canary realm record.
+
+    The exact field set is enforced by ``__post_init__`` so any caller that
+    bypasses the dataclass validation (e.g. ``dataclasses.replace``) cannot
+    widen or rename the advertised object.  This is the single shape that
+    crosses the Control-to-Worker boundary and the metadata boundary.
+    """
+
+    binding_id: str
+    generation: int
+    config_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding_id, str) or not self.binding_id.strip():
+            raise ValueError("subscription_canary_realm binding_id is invalid")
+        if (
+            type(self.generation) is not int
+            or isinstance(self.generation, bool)
+            or self.generation < 1
+            or self.generation >= 2 ** 63
+        ):
+            raise ValueError("subscription_canary_realm generation is invalid")
+        if (
+            not isinstance(self.config_sha256, str)
+            or self.config_sha256 != self.config_sha256.lower()
+            or re.fullmatch(r"[0-9a-f]{64}", self.config_sha256) is None
+        ):
+            raise ValueError("subscription_canary_realm config_sha256 is invalid")
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "binding_id":
+            return self.binding_id
+        if key == "generation":
+            return self.generation
+        if key == "config_sha256":
+            return self.config_sha256
+        raise KeyError(key)
+
+    def __iter__(self):
+        return iter(("binding_id", "generation", "config_sha256"))
+
+    def __len__(self) -> int:
+        return 3
+
+
+_FROZEN_REALM = _SubscriptionCanaryRealm
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -1712,6 +1887,9 @@ class ExecutiveControlService:
         ) = None,
         dialogue_wake_handler: DialogueWakeHandler | None = None,
         dialogue_observation_activated_socket: socket.socket | None = None,
+        privileged_readiness_controller_factory: (
+            Callable[[Any], Any] | None
+        ) = None,
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
@@ -1821,6 +1999,27 @@ class ExecutiveControlService:
         self._service_state = service_state
         self._canary_loader = canary_loader
         self.instance_id = f"executive-service-{uuid4().hex}"
+
+        # --- Task 5: closed default-off Job-bound login-check composition ----
+        # The factory is the existing composition seam: it receives the same
+        # Runtime the supervisor factory receives, after the single Runtime
+        # has opened.  No second Runtime is created; no privileged socket is
+        # reachable without an injected factory on an armed ServiceConfig.
+        if self.config.privileged_readiness_armed:
+            if not callable(privileged_readiness_controller_factory):
+                raise ValueError(
+                    "armed privileged_readiness composition requires "
+                    "privileged_readiness_controller_factory"
+                )
+        elif privileged_readiness_controller_factory is not None:
+            raise ValueError(
+                "privileged_readiness_controller_factory requires "
+                "privileged_readiness_armed=True"
+            )
+        self._privileged_readiness_controller_factory = (
+            privileged_readiness_controller_factory
+        )
+        self._privileged_readiness_controller: Any | None = None
 
         # --- MAS-75 PR-A: optional dedicated CeoIngress composition --------
         #
@@ -2197,6 +2396,46 @@ class ExecutiveControlService:
         if self.runtime is None:
             raise ServiceError("Executive control service is not started")
         return self.runtime
+
+    def _primary_quota_descriptor(
+        self, *, default_capabilities: Sequence[str],
+    ) -> tuple[dict[str, Any], tuple[str, ...]]:
+        """Return the primary quota-class descriptor used for the worker.
+
+        When the configured Control advertises a reviewed subscription-canary
+        realm, the primary quota class becomes strictly READ-only, carries the
+        realm object in its metadata, and the provider/model/effort/cost_class
+        are derived from the reviewed binding/profile rather than trusted
+        booleans on the Control config.  An ordinary (no realm) configuration
+        preserves the exact historical descriptor.
+        """
+
+        realm = self.config.subscription_canary_realm()
+        if realm is None:
+            capabilities = tuple(default_capabilities)
+            descriptor: dict[str, Any] = {
+                "provider": self.config.provider,
+                "model": self.config.model,
+                "effort": self.config.effort,
+                "cost_class": self.config.cost_class,
+                "capabilities": list(capabilities),
+            }
+            return descriptor, capabilities
+        from control_plane.subscription_harness_bindings import get_binding
+        from control_plane.subscription_provider_profiles import get_profile
+
+        binding = get_binding(self.config.subscription_canary_realm_binding_id)
+        profile = get_profile(binding.profile_id)
+        realm_model = binding.model_for(profile, None)
+        descriptor = {
+            "provider": str(binding.provider),
+            "model": str(realm_model),
+            "effort": self.config.effort,
+            "cost_class": self.config.cost_class,
+            "capabilities": ["read"],
+            "metadata": {"subscription_canary_realm": dict(realm)},
+        }
+        return descriptor, ("read",)
 
     def _require_supervisor(self) -> SupervisorProtocol:
         if self.supervisor is None:
@@ -2671,6 +2910,13 @@ class ExecutiveControlService:
             if self._supervisor_factory is None:
                 raise ServiceError("supervisor_factory is required for startup reconciliation")
             self.supervisor = self._supervisor_factory(self.runtime)
+            # Task 5: instantiate the default-off Job-bound login-check
+            # controller after the single Runtime has opened; the factory is
+            # the existing composition pattern, never an open socket.
+            if self._privileged_readiness_controller_factory is not None:
+                self._privileged_readiness_controller = (
+                    self._privileged_readiness_controller_factory(self.runtime)
+                )
             if self.config.coo_operator_harness_armed:
                 if self._operator_supervisor_factory is None:
                     raise ServiceError(
@@ -2791,6 +3037,8 @@ class ExecutiveControlService:
         for writer in tuple(self._operator_writers):
             writer.close()
         await self._drain_service_tasks(self._operator_handlers)
+        if self._privileged_readiness_controller is not None:
+            await self._privileged_readiness_controller.aclose()
         await self._drain_service_tasks(self._physical_workers)
 
         coo_tick = self._coo_tick_task
@@ -4146,6 +4394,9 @@ class ExecutiveControlService:
         return value
 
     def _proof_contract(self, *, workspace: Path, branch: str) -> dict[str, Any]:
+        authorities = ["READ", "RESEARCH", "RUN_TESTS", "WRITE_BRANCH"]
+        if self.config.privileged_readiness_armed:
+            authorities.append("REQUEST_WORKER_LOGIN_CHECK")
         return {
             "objective": _PROOF_OBJECTIVE,
             "department": "executive-infrastructure",
@@ -4163,7 +4414,7 @@ class ExecutiveControlService:
                 "eligible_quota_classes": [self.config.quota_class],
             },
             "attempt_limit": 3,
-            "requested_authorities": ["READ", "RESEARCH", "RUN_TESTS", "WRITE_BRANCH"],
+            "requested_authorities": sorted(authorities),
             "allowed_write_paths": [_PROOF_ARTIFACT],
             "validation_commands": [list(_PROOF_VALIDATION)],
         }
@@ -4197,6 +4448,46 @@ class ExecutiveControlService:
 
     def _register_worker(self) -> Any:
         runtime = self._require_runtime()
+        realm = self.config.subscription_canary_realm()
+        if realm is not None:
+            descriptor, capabilities = self._primary_quota_descriptor(
+                default_capabilities=("read",),
+            )
+            expected_capabilities = list(capabilities)
+            expected_metadata = dict(descriptor.get("metadata", {}))
+            existing = runtime.workers.get_worker(self.config.worker_id)
+            if existing is not None:
+                quota = runtime.workers.get_quota_class(
+                    self.config.worker_id, self.config.quota_class
+                )
+                if (
+                    existing.provider != self.config.provider
+                    or existing.account_label != self.config.worker_account_label
+                    or existing.worker_type != self.config.worker_type
+                    or existing.capabilities != expected_capabilities
+                    or quota is None
+                    or quota.provider != descriptor["provider"]
+                    or quota.model != descriptor["model"]
+                    or quota.effort != descriptor["effort"]
+                    or quota.cost_class != descriptor["cost_class"]
+                    or quota.capabilities != expected_capabilities
+                    or quota.metadata != expected_metadata
+                ):
+                    raise StateConflict(
+                        "configured subscription-canary worker identity already "
+                        "exists with different policy"
+                    )
+                return existing
+            return runtime.workers.register_worker(
+                self.config.worker_id,
+                provider=self.config.provider,
+                account_label=self.config.worker_account_label,
+                worker_type=self.config.worker_type,
+                capabilities=expected_capabilities,
+                quota_classes={self.config.quota_class: descriptor},
+                metadata={"service_managed": True},
+            )
+
         binding = self._require_current_coo_binding()
         router = ModelRouter.load()
         alias = router.model_aliases[self.config.coo_model_alias]
@@ -4256,37 +4547,38 @@ class ExecutiveControlService:
                 or quota.capabilities != proof_capabilities
             ):
                 raise StateConflict("configured worker identity already exists with different policy")
-            runtime.workers.register_quota_class(
-                self.config.worker_id,
-                self.config.coo_quota_class,
-                provider=str(binding["provider"]),
-                model=str(binding["model"]),
-                effort=str(binding["effort"]),
-                cost_class=str(binding["cost_class"]),
-                capabilities=coo_capabilities,
-                metadata=coo_metadata,
-            )
-            runtime.workers.register_quota_class(
-                self.config.worker_id,
-                self.config.coo_default_quota_class,
-                provider=str(binding["provider"]),
-                model=str(binding["model"]),
-                effort=str(binding["effort"]),
-                cost_class="default",
-                capabilities=coo_capabilities,
-                metadata=coo_default_metadata,
-            )
-            if self.config.coo_operator_harness_armed:
+            if self.config.coo_autonomy_armed:
                 runtime.workers.register_quota_class(
                     self.config.worker_id,
-                    self.config.coo_operator_quota_class,
-                    provider=str(binding["operator_provider"]),
-                    model=str(binding["operator_model"]),
-                    effort=str(binding["operator_effort"]),
-                    cost_class=str(binding["operator_cost_class"]),
-                    capabilities=operator_capabilities,
-                    metadata=operator_metadata,
+                    self.config.coo_quota_class,
+                    provider=str(binding["provider"]),
+                    model=str(binding["model"]),
+                    effort=str(binding["effort"]),
+                    cost_class=str(binding["cost_class"]),
+                    capabilities=coo_capabilities,
+                    metadata=coo_metadata,
                 )
+                runtime.workers.register_quota_class(
+                    self.config.worker_id,
+                    self.config.coo_default_quota_class,
+                    provider=str(binding["provider"]),
+                    model=str(binding["model"]),
+                    effort=str(binding["effort"]),
+                    cost_class="default",
+                    capabilities=coo_capabilities,
+                    metadata=coo_default_metadata,
+                )
+                if self.config.coo_operator_harness_armed:
+                    runtime.workers.register_quota_class(
+                        self.config.worker_id,
+                        self.config.coo_operator_quota_class,
+                        provider=str(binding["operator_provider"]),
+                        model=str(binding["operator_model"]),
+                        effort=str(binding["operator_effort"]),
+                        cost_class=str(binding["operator_cost_class"]),
+                        capabilities=operator_capabilities,
+                        metadata=operator_metadata,
+                    )
             refreshed = runtime.workers.get_worker(self.config.worker_id)
             assert refreshed is not None
             return refreshed
@@ -6507,6 +6799,41 @@ class ExecutiveControlService:
                     self._backup_backend.verify_backup,
                     database_path,
                     manifest_path,
+                )
+            )
+        if command == "check-current-worker-login":
+            # Closed READY-only Job-bound login-check dispatch (Task 5).
+            # Exactly three caller fields; no caller can supply an action,
+            # worker, slot, executable, path, host, release, request id,
+            # credential kind, expiry, retry instruction or force flag.
+            self._exact_args(args, {"job_id", "attempt_id", "fence_generation"})
+            if not self.config.privileged_readiness_armed:
+                raise ServiceError(
+                    "check-current-worker-login is not armed in this ServiceConfig"
+                )
+            controller = self._privileged_readiness_controller
+            if controller is None:
+                raise ServiceError(
+                    "check-current-worker-login has no privileged readiness controller"
+                )
+            job_id = self._id(args["job_id"], "job_id")
+            attempt_id = self._id(args["attempt_id"], "attempt_id")
+            fence = args["fence_generation"]
+            if (
+                type(fence) is not int
+                or isinstance(fence, bool)
+                or fence <= 0
+            ):
+                raise ServiceError(
+                    "fence_generation must be a positive integer"
+                )
+            return _jsonable(
+                await controller.check(
+                    {
+                        "job_id": job_id,
+                        "attempt_id": attempt_id,
+                        "fence_generation": fence,
+                    }
                 )
             )
         raise ValueError(f"unknown control command {command!r}")

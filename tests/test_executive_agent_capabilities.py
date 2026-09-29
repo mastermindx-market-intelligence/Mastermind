@@ -14,6 +14,8 @@ from control_plane.executive_agent_capabilities import (
     app_server_security_config_digest,
     app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
+    claude_security_config_digest,
+    claude_security_config_projection,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
 from integrations.mastermind_company_mcp.schemas import (
@@ -33,6 +35,75 @@ def _write(tmp_path: Path, value: dict) -> Path:
     path = tmp_path / "capabilities.json"
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+def _claude_candidate_policy():
+    raw = _raw_policy()
+    raw["profiles"]["operator.claude.readonly.v1"] = {
+        **raw["profiles"]["operator.appserver.readonly.v1"],
+        "enabled": False, "execution_surface": "claude-agent-sdk"}
+    return raw
+
+
+def test_claude_policy_is_a_distinct_disabled_projection_not_an_attestation(tmp_path):
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy()))
+    profile = registry.profiles["operator.claude.readonly.v1"]
+    assert profile.enabled is False
+    assert profile.execution_surface == "claude-agent-sdk"
+    requested = profile.claude_sdk_config_projection()
+    assert requested["tools"] == ["Read", "Glob", "Grep"]
+    manifest = profile.capability_manifest(harness_binary_digest="a" * 64)
+    assert {(item.kind, item.name) for item in manifest.required} == {
+        ("tool", name) for name in ("Read", "Glob", "Grep", "StructuredOutput")}
+    assert all(item.harness_binary_digest == "a" * 64 for item in manifest.required)
+    assert manifest.allowed_ambient == ()
+    assert requested["sandbox"]["failIfUnavailable"] is True
+    assert requested["sandbox"]["allowUnsandboxedCommands"] is False
+    assert requested["sandbox"]["excludedCommands"] == []
+    assert requested["mcp_servers"] == {}
+    assert "observed" not in json.dumps(requested)
+    assert profile.expected_config_digest != registry.profiles["operator.appserver.readonly.v1"].expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="Claude policy cannot use"):
+        profile.app_server_config_projection()
+    with pytest.raises(CapabilityPolicyError, match="not an App Server profile"):
+        profile.app_server_config_overrides()
+
+
+def test_claude_cannot_be_enabled_by_a_config_flag_before_policy_observation(tmp_path):
+    raw = _claude_candidate_policy()
+    raw["profiles"]["operator.claude.readonly.v1"]["enabled"] = True
+    with pytest.raises(CapabilityPolicyError, match="policy observation is not admitted"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_claude_cannot_inherit_codex_capability_or_write_authority(tmp_path):
+    import dataclasses
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    for overrides in ({"write_capable": True}, {"skills": ("arbitrary",)},
+                      {"network_policy": "loopback-browser-only"}):
+        changed = dataclasses.replace(profile, **overrides)
+        with pytest.raises(CapabilityPolicyError, match="exceeds its unadmitted first profile"):
+            changed.claude_sdk_config_projection()
+
+
+def test_claude_digest_uses_actual_security_state_and_detects_drift(tmp_path):
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    sandbox = profile.claude_sdk_config_projection()["sandbox"]
+    provenance = {"setting_sources": [], "strict_mcp_config": True, "skills": []}
+    observed = {"sandbox": sandbox, "model": "irrelevant-model-field"}
+    assert claude_security_config_digest(observed, launch_provenance=provenance) == profile.expected_config_digest
+    assert claude_security_config_digest(observed, launch_provenance={**provenance, "skills": ["unexpected"]}) != profile.expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="launch provenance"):
+        claude_security_config_digest(observed, launch_provenance={})
+    assert claude_security_config_digest({"sandbox": {**sandbox, "allowUnsandboxedCommands": True}}, launch_provenance=provenance) != profile.expected_config_digest
+    assert claude_security_config_digest({"sandbox": sandbox, "permissions": {"allow": ["Bash"]}}, launch_provenance=provenance) != profile.expected_config_digest
+    for bad in ({}, {"sandbox": None}, {"sandbox": sandbox, "permissions": None},
+                {"sandbox": {**sandbox, "enabled": 1}}, {"sandbox": {**sandbox, "unexpected": float("nan")}}):
+        with pytest.raises(CapabilityPolicyError):
+            claude_security_config_digest(bad, launch_provenance=provenance)
+    snapshot = claude_security_config_projection(observed, launch_provenance=provenance)
+    sandbox["enabled"] = False
+    assert snapshot["sandbox"]["enabled"] is True
 
 
 def _company_dialogue_fixture_policy() -> dict:

@@ -1294,6 +1294,14 @@ class BoundedAttemptPage:
 
 
 @dataclasses.dataclass(frozen=True)
+class CurrentAttemptAuthoritySnapshot:
+    """Public authority facts from one current transaction; no lease token."""
+
+    job: Job
+    attempt: Attempt
+
+
+@dataclasses.dataclass(frozen=True)
 class AttemptLease:
     attempt: Attempt
     lease_token: str = dataclasses.field(repr=False)
@@ -4272,6 +4280,48 @@ class RuntimeStore:
             raise
         finally:
             connection.close()
+
+    def list_events(
+        self,
+        *,
+        job_id: str | None = None,
+        attempt_id: str | None = None,
+        aggregate_type: str | None = None,
+        aggregate_id: str | None = None,
+        command_id_prefix: str | None = None,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[Event]:
+        clauses: list[str] = []
+        params: list[str] = []
+        if job_id:
+            clauses.append("job_id=?")
+            params.append(job_id)
+        if attempt_id:
+            clauses.append("attempt_id=?")
+            params.append(attempt_id)
+        if aggregate_type:
+            clauses.append("aggregate_type=?")
+            params.append(str(aggregate_type).strip())
+        if aggregate_id:
+            clauses.append("aggregate_id=?")
+            params.append(str(aggregate_id).strip())
+        if command_id_prefix:
+            token = str(command_id_prefix).strip()
+            if not token or any(ch in token for ch in "%_"):
+                raise StateConflict("command_id_prefix must be a literal namespace")
+            clauses.append("command_id LIKE ?")
+            params.append(token + "%")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        def _load(conn: sqlite3.Connection) -> list[Event]:
+            rows = conn.execute(
+                f"SELECT * FROM events{where} ORDER BY event_id", params
+            ).fetchall()
+            return [_event_from_row(row) for row in rows]
+
+        if connection is not None:
+            return _load(connection)
+        with self.read() as conn:
+            return _load(conn)
 
     def append_event(
         self,
@@ -15666,13 +15716,12 @@ class AttemptRegistry:
             claimed_now=True,
         )
 
-    def _leased_row(
+    def _current_row(
         self,
         connection: sqlite3.Connection,
         *,
         attempt_id: str,
         fence_generation: int,
-        lease_token: str,
         timestamp: int,
         statuses: set[AttemptStatus],
     ) -> sqlite3.Row:
@@ -15707,11 +15756,6 @@ class AttemptRegistry:
             raise PersistenceError(
                 f"attempt {attempt_id} and quota class have inconsistent fences"
             )
-        persisted_token = row["lease_token"]
-        if persisted_token is None or not hmac.compare_digest(
-            str(persisted_token), str(lease_token)
-        ):
-            raise StateConflict(f"attempt {attempt_id} has an invalid lease token")
         if timestamp >= int(row["lease_expires_at_ms"]):
             raise StateConflict(f"attempt {attempt_id} lease has expired")
         if (
@@ -15720,6 +15764,66 @@ class AttemptRegistry:
         ):
             raise StateConflict(f"attempt {attempt_id} is no longer current")
         return row
+
+    def _leased_row(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        attempt_id: str,
+        fence_generation: int,
+        lease_token: str,
+        timestamp: int,
+        statuses: set[AttemptStatus],
+    ) -> sqlite3.Row:
+        row = self._current_row(
+            connection, attempt_id=attempt_id, fence_generation=fence_generation,
+            timestamp=timestamp, statuses=statuses,
+        )
+        persisted_token = row["lease_token"]
+        if persisted_token is None or not hmac.compare_digest(
+            str(persisted_token), str(lease_token)
+        ):
+            raise StateConflict(f"attempt {attempt_id} has an invalid lease token")
+        return row
+
+    def current_authority_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        job_id: str,
+        attempt_id: str,
+        fence_generation: int,
+        timestamp: int,
+        statuses: set[AttemptStatus],
+    ) -> CurrentAttemptAuthoritySnapshot:
+        """Admit token-free P2 authority on the existing current Attempt owner.
+
+        The caller owns the transaction. Shared currentness stays identical to
+        lease mutation, while the sealed-worker and identity gates apply only
+        to this controller capability. No persisted token leaves this method.
+        """
+        if type(fence_generation) is not int or fence_generation <= 0:
+            raise StateConflict("fence_generation must be a positive integer")
+        active = {AttemptStatus.CLAIMED, AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED}
+        row = self._current_row(
+            connection, attempt_id=attempt_id, fence_generation=fence_generation,
+            timestamp=timestamp, statuses=statuses & active,
+        )
+        if row["job_id"] != job_id:
+            raise StateConflict("attempt does not belong to the requested job")
+        if row["execution_mode"] not in (None, AttemptExecutionMode.SEALED_WORKER.value):
+            raise StateConflict("privileged readiness requires a SEALED_WORKER attempt")
+        if not row["lease_token"]:
+            raise StateConflict(f"attempt {attempt_id} has no persisted lease token")
+        job_row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        worker_row = connection.execute(
+            "SELECT identity_status FROM workers WHERE worker_id=?", (row["worker_id"],)
+        ).fetchone()
+        if (job_row is None or job_row["assigned_worker_id"] != row["worker_id"]
+                or job_row["assigned_quota_class"] != row["quota_class"]
+                or worker_row is None or worker_row["identity_status"] != "ONLINE"):
+            raise StateConflict("attempt worker identity or assignment is not current")
+        return CurrentAttemptAuthoritySnapshot(_job_from_row(job_row), _attempt_from_row(row))
 
     def adopt_attempt(
         self,
@@ -20865,33 +20969,13 @@ class EventRegistry:
         aggregate_type: str | None = None,
         aggregate_id: str | None = None,
         command_id_prefix: str | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> list[Event]:
-        clauses: list[str] = []
-        params: list[str] = []
-        if job_id:
-            clauses.append("job_id=?")
-            params.append(job_id)
-        if attempt_id:
-            clauses.append("attempt_id=?")
-            params.append(attempt_id)
-        if aggregate_type:
-            clauses.append("aggregate_type=?")
-            params.append(str(aggregate_type).strip())
-        if aggregate_id:
-            clauses.append("aggregate_id=?")
-            params.append(str(aggregate_id).strip())
-        if command_id_prefix:
-            token = str(command_id_prefix).strip()
-            if not token or any(ch in token for ch in "%_"):
-                raise StateConflict("command_id_prefix must be a literal namespace")
-            clauses.append("command_id LIKE ?")
-            params.append(token + "%")
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        with self.store.read() as connection:
-            rows = connection.execute(
-                f"SELECT * FROM events{where} ORDER BY event_id", params
-            ).fetchall()
-            return [_event_from_row(row) for row in rows]
+        return self.store.list_events(
+            job_id=job_id, attempt_id=attempt_id, aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id, command_id_prefix=command_id_prefix,
+            connection=connection,
+        )
 
 
 class ResourceBroker:

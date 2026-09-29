@@ -159,6 +159,21 @@ The request vocabulary is intentionally small:
 - additional required capabilities;
 - worker IDs to exclude, primarily for review separation.
 
+Signal semantics are intentionally narrower than business priority:
+
+- `risk` means **execution risk** (authority, reversibility, security, destructive or operational
+  effect), not business importance or review importance;
+- `ambiguity` means unresolved requirements/architecture/acceptance or materially contradictory
+  evidence, not prompt length, repository size, number of files, or the fact that the work is delegated;
+- business impact remains the Job/review concern already carried by Executive runtime and must not
+  be copied into `risk` merely to obtain a stronger model;
+- topology (`worker`, `subagent`, `reviewer`, coordinator) is not a difficulty signal.
+
+A signal producer must decompose first and classify the exact bounded mission. If it selects
+`critical` risk or `high` ambiguity solely because the parent program is important, large,
+production-facing, or delegated, it is misclassifying the request and can force an unnecessary
+`frontier_lead` result before Capacity has any opportunity to choose an economical worker.
+
 Routing law:
 
 1. Planning, judgment, escalation, critical work, or high-ambiguity work returns

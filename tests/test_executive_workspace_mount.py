@@ -30,13 +30,18 @@ def test_actual_outer_dispatch_and_path_fence(settings):
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=entry.PUBLIC_ORIGIN) as client:
             assert (await client.get('/workspace/programs/current')).status_code == 200
+            assert (await client.get('/workspace/work/current')).status_code == 200
+            assert any(call[0] == '/workspace/work/current' for call in workspace.calls)
             assert (await client.get('/workspace/mission/current?work_ref=WS:ONE&root_job_id=JOB-001')).status_code == 200
             assert (await client.get('/workspace/window/current')).status_code == 200
             assert workspace.calls[-1][1] == b'work_ref=WS:ONE&root_job_id=JOB-001'
             calls = len(workspace.calls) + len(content.calls)
-            for url, method in [('/workspace/programs/current?x=1','GET'),('/workspace/window/current?x=1','GET'),
-                                ('/workspace/programs/current/','GET'),('/workspace%2Fprograms/current','GET'),
-                                ('/workspace/programs/current','POST'),('/workspace/window/current','HEAD'),
+            for url, method in [('/workspace/programs/current?x=1','GET'),('/workspace/work/current?x=1','GET'),
+                                ('/workspace/window/current?x=1','GET'),
+                                ('/workspace/programs/current/','GET'),('/workspace/work/current/','GET'),
+                                ('/workspace%2Fprograms/current','GET'),
+                                ('/workspace/programs/current','POST'),('/workspace/work/current','POST'),
+                                ('/workspace/window/current','HEAD'),
                                 ('/mcp?x=1','POST')]:
                 assert (await client.request(method,url)).status_code == 404
             assert (await client.get('/workspace/programs/current',headers=[('Authorization','Bearer a'),('Authorization','Bearer b')])).status_code in (400,401)
@@ -49,7 +54,7 @@ def test_absent_mounts_keep_legacy_closed(settings):
     app = server.build_executive_mcp_app(settings, audit_sink=existing.Sink())
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=entry.PUBLIC_ORIGIN) as client:
-            for path in ('/workspace/programs/current','/workspace/mission/current','/workspace/window/current','/os/'):
+            for path in ('/workspace/programs/current','/workspace/work/current','/workspace/mission/current','/workspace/window/current','/os/'):
                 assert (await client.get(path)).status_code==404
     asyncio.run(check())
 
