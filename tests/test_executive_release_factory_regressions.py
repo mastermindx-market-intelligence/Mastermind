@@ -285,7 +285,11 @@ def test_socket_restart_history_and_effect_counts(image, installed, delta):
                                     expires_at=image['now'][0]+1000)
     recovered = installed['call']('reconcile_release_transition', {'operation_key': args['operation_key']},
                                  as_principal=principal)
-    assert recovered['approval']['approved_transition_ref'] == approved['approved_transition_ref']
+    # Seal-qualified original history remains durable, but the uncomposed
+    # factory result cannot attest a P4 outcome after restart or expiry.
+    assert recovered['ok'] is False and recovered['effect'] == 'EFFECT_UNKNOWN'
+    assert recovered['error']['code'] == 'RELEASE_HISTORY_FAMILY_UNQUALIFIED'
+    assert installed['control']._read(args['operation_key'])['approved_transition_ref'] == approved['approved_transition_ref']
     assert counts(installed['runtime']) == (before[0]+1, before[1], before[2])
     assert installed['root_broker']._executor.calls == []
 

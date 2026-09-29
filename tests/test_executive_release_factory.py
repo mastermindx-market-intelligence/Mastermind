@@ -249,8 +249,11 @@ def test_factory_composes_existing_socket_and_runtime_owner(image, installed):
         "prepared_token": prepared["prepared_token"]})
     assert blocked["error"]["code"] == "RELEASE_COMMIT_DISARMED"
     history = installed["call"]("reconcile_release_transition", {"operation_key": args["operation_key"]})
-    assert history["ok"] is True
-    assert history["approval"]["approved_transition_ref"] == result["approved_transition_ref"]
+    # This factory has no typed journal producer yet: a verified approval
+    # alone cannot establish the release outcome or authorize a retry.
+    assert history["ok"] is False and history["effect"] == "EFFECT_UNKNOWN"
+    assert history["error"]["code"] == "RELEASE_HISTORY_FAMILY_UNQUALIFIED"
+    assert installed["control"]._read(args["operation_key"])["approved_transition_ref"] == result["approved_transition_ref"]
     assert counts(installed["runtime"]) == (before[0] + 1, before[1], before[2])
     assert {role for role, _pid in installed["peer_calls"]} == {"control", "gateway"}
 
