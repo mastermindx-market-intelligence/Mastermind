@@ -118,3 +118,16 @@ def test_existing_profiles_and_b1_grants_are_unchanged(tmp_path):
     for key, profile in previous.profiles.items():
         assert registry.profiles[key] == profile
     assert registry.policy_digest != previous.policy_digest
+
+
+@pytest.mark.parametrize("field,choice_set,alternate", [
+    ("auth_realm", "_AUTH_REALMS", "future-account"),
+    ("approval_policy", "_APPROVAL_POLICIES", "future-approval"),
+])
+def test_pending_ceiling_survives_future_registry_choices(tmp_path, monkeypatch, field, choice_set, alternate):
+    from control_plane import executive_agent_capabilities as policy
+    monkeypatch.setattr(policy, choice_set, getattr(policy, choice_set) | {alternate})
+    raw = _raw()
+    raw["profiles"][PROFILE][field] = alternate
+    with pytest.raises(CapabilityPolicyError, match="pending fabric browser profile"):
+        _load(tmp_path, raw)

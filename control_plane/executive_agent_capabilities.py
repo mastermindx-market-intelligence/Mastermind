@@ -1572,6 +1572,8 @@ class ExecutionCapabilityRegistry:
                 skill_grants = ()
             if profile_id == _PENDING_BROWSER_PROFILE_ID:
                 if (enabled or execution_surface != "codex-app-server"
+                        or auth_realm != "dedicated-worker-account"
+                        or approval_policy != "never"
                         or resource_ids != (_PENDING_BROWSER_RESOURCE_ID,)
                         or not isinstance(resolved_resources[0], PendingBrowserResource)
                         or network_policy != "disabled" or sandbox_policy != "read-only"
