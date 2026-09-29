@@ -7,6 +7,12 @@ starts the pinned Codex App Server as the disabled worker principal and requests
 returned by :func:`evaluate_identity` may leave this process; email, account
 identifiers, raw JSON-RPC frames, and unreviewed stderr are never emitted or
 persisted.
+
+``--compare-seat-stdin`` is a separate opt-in diagnostic.  It reads exactly
+one expected account email from a private bounded pipe and prints only
+``MATCH``, ``MISMATCH`` or ``UNKNOWN``.  That expected email is never taken
+from argv, environment, or a file, is never forwarded to a child process,
+and is never persisted or echoed back.
 """
 from __future__ import annotations
 
@@ -16,6 +22,7 @@ import json
 import os
 import queue
 import re
+import select
 import stat
 import subprocess
 import sys
@@ -23,7 +30,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, NoReturn, Sequence
 
 _RELEASE_ROOT = Path(__file__).resolve().parents[2]
 if os.fspath(_RELEASE_ROOT) not in sys.path:
@@ -73,6 +80,24 @@ _FORCED_CONFIG_KEYS = frozenset(
     {"forced_chatgpt_workspace_id", "forced_login_method"}
 )
 _AUTH_STORE_KEY = "cli_auth_credentials_store"
+
+# Opt-in, secret-free seat equality diagnostic.  The complete stdout contract in
+# that mode is one of these three uppercase words; nothing else may be emitted.
+COMPARE_SEAT_FLAG = "--compare-seat-stdin"
+SEAT_MATCH = "MATCH"
+SEAT_MISMATCH = "MISMATCH"
+SEAT_UNKNOWN = "UNKNOWN"
+# A 254-byte canonical email plus one optional trailing LF is the only accepted
+# stdin shape.  Anything longer, or any read still open at the deadline, is
+# refused without inspection.
+_SEAT_EMAIL_MAX_BYTES = 254
+_SEAT_LOCAL_PART_MAX_BYTES = 64
+_SEAT_DOMAIN_LABEL_MAX_BYTES = 63
+_SEAT_INPUT_MAX_BYTES = _SEAT_EMAIL_MAX_BYTES + 1
+_SEAT_INPUT_TIMEOUT_SECONDS = 5.0
+_SEAT_ATEXT = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+_SEAT_LOCAL_PART_RE = re.compile(rf"{_SEAT_ATEXT}(?:\.{_SEAT_ATEXT})*")
+_SEAT_DOMAIN_LABEL_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 
 
 class IdentityProbeError(RuntimeError):
@@ -336,6 +361,144 @@ def evaluate_identity(
     return safe
 
 
+class _SeatArgumentRefusal(IdentityProbeError):
+    """A bounded comparison-mode argument refusal that prints nothing."""
+
+
+class _SeatArgumentParser(argparse.ArgumentParser):
+    """Parser for comparison mode: no help, usage, argv, or error details."""
+
+    def error(self, message: str) -> NoReturn:
+        raise _SeatArgumentRefusal("seat_arguments_invalid")
+
+    def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
+        raise _SeatArgumentRefusal("seat_arguments_invalid")
+
+
+def _seat_canonical_email(value: Any) -> str | None:
+    """Return an exact ASCII dot-atom email, or ``None`` when unsupported.
+
+    There is deliberately no normalization, case folding, alias stripping,
+    substring matching, or seat-label inference.  Display names, quoted forms,
+    comments, Unicode, whitespace, control characters, empty dot atoms, and
+    over-long local parts, labels, or totals are all unsupported.
+    """
+
+    if not isinstance(value, str) or not value.isascii():
+        return None
+    if len(value) > _SEAT_EMAIL_MAX_BYTES or value.count("@") != 1:
+        return None
+    local, _, domain = value.partition("@")
+    if not local or len(local) > _SEAT_LOCAL_PART_MAX_BYTES:
+        return None
+    if _SEAT_LOCAL_PART_RE.fullmatch(local) is None:
+        return None
+    labels = domain.split(".")
+    if len(labels) < 2:
+        return None
+    for label in labels:
+        if not label or len(label) > _SEAT_DOMAIN_LABEL_MAX_BYTES:
+            return None
+        if _SEAT_DOMAIN_LABEL_RE.fullmatch(label) is None:
+            return None
+    return value
+
+
+def _decode_seat_input(raw: bytes) -> str | None:
+    """Validate one optional trailing-LF stdin payload without persisting it."""
+
+    data = bytes(raw)
+    if data.endswith(b"\n"):
+        data = data[:-1]
+    if not data or b"\n" in data or b"\r" in data:
+        return None
+    try:
+        text = data.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    return _seat_canonical_email(text)
+
+
+def _read_expected_seat_email(
+    stdin: Any = None,
+    *,
+    timeout_seconds: float = _SEAT_INPUT_TIMEOUT_SECONDS,
+) -> str | None:
+    """Read the expected seat email from bounded private pipe stdin only.
+
+    A TTY, a regular file, any non-pipe descriptor, an oversized payload,
+    a second line, and a still-open pipe at the finite
+    deadline all yield ``None``, which the caller reports as ``UNKNOWN``.
+    """
+
+    stream = sys.stdin if stdin is None else stdin
+    try:
+        if stream.isatty():
+            return None
+        descriptor = int(stream.fileno())
+        info = os.fstat(descriptor)
+    except (AttributeError, OSError, ValueError, TypeError):
+        return None
+    if not stat.S_ISFIFO(info.st_mode):
+        return None
+    payload = bytearray()
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while len(payload) < _SEAT_INPUT_MAX_BYTES + 1:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            ready, _, _ = select.select([descriptor], [], [], remaining)
+        except (OSError, ValueError):
+            return None
+        if not ready:
+            return None
+        try:
+            chunk = os.read(descriptor, _SEAT_INPUT_MAX_BYTES + 1 - len(payload))
+        except OSError:
+            return None
+        if not chunk:
+            break
+        payload.extend(chunk)
+    if len(payload) > _SEAT_INPUT_MAX_BYTES:
+        return None
+    return _decode_seat_input(payload)
+
+
+def _compare_expected_seat(*, account_read: Any, expected_email: Any) -> str:
+    """Classify observed-versus-expected seat equality as a bounded enum.
+
+    Both sides must be independently valid canonical emails.  Anything missing,
+    malformed, unsupported, or unavailable is conservative ``UNKNOWN``; a verdict
+    is never a success claim on its own.
+    """
+
+    expected = _seat_canonical_email(expected_email)
+    if expected is None:
+        return SEAT_UNKNOWN
+    if isinstance(_account_read(account_read), str):
+        return SEAT_UNKNOWN
+    account = account_read.get("account")
+    if not isinstance(account, Mapping):
+        return SEAT_UNKNOWN
+    observed = _seat_canonical_email(account.get("email"))
+    if observed is None:
+        return SEAT_UNKNOWN
+    if observed == expected:
+        return SEAT_MATCH
+    return SEAT_MISMATCH
+
+
+def _seat_verdict(value: Any) -> str:
+    """Collapse any non-enum comparison value to ``UNKNOWN``."""
+
+    if value == SEAT_MATCH:
+        return SEAT_MATCH
+    if value == SEAT_MISMATCH:
+        return SEAT_MISMATCH
+    return SEAT_UNKNOWN
+
+
 class _Client:
     """Minimal line-delimited JSON-RPC client that never records stderr."""
 
@@ -409,7 +572,8 @@ def live_probe(
     worker_group: str = WORKER_GROUP,
     worker_uid: int = WORKER_UID,
     worker_gid: int = WORKER_GID,
-) -> dict[str, Any]:
+    expected_seat_email: str | None = None,
+) -> dict[str, Any] | str:
     before_binary = binary_identity(binary)
     auth_path = provider_home / "auth.json"
     if (
@@ -513,13 +677,32 @@ def live_probe(
                 "forced_chatgpt_workspace_id_applied": False,
             }
         )
+        if expected_seat_email is not None:
+            # Return only the bounded enum after every existing policy,
+            # config, login, binary, and credential guard has completed, and it
+            # still cannot leave this function before ``client.close()`` below.
+            # Candidate equality is never a success claim on its own.
+            verdict = SEAT_UNKNOWN
+            if result.get("passed") is True:
+                verdict = _compare_expected_seat(
+                    account_read=account,
+                    expected_email=expected_seat_email,
+                )
+            return verdict
         return result
     finally:
         client.close()
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Probe sanitized Executive provider identity")
+def _parser(*, compare_seat: bool = False) -> argparse.ArgumentParser:
+    parser_class: Any = argparse.ArgumentParser
+    keywords: dict[str, Any] = {
+        "description": "Probe sanitized Executive provider identity"
+    }
+    if compare_seat:
+        parser_class = _SeatArgumentParser
+        keywords.update({"allow_abbrev": False, "add_help": False})
+    parser = parser_class(**keywords)
     parser.add_argument("--binary", type=Path, default=INSTALLED_CODEX_BINARY)
     parser.add_argument("--provider-home", type=Path, default=PROVIDER_HOME)
     parser.add_argument("--worker-user", default=WORKER_USER)
@@ -528,11 +711,66 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--worker-gid", type=int, default=WORKER_GID)
     parser.add_argument("--expected-kind", choices=sorted(EXPECTED_AUTH_MODE), required=True)
     parser.add_argument("--workspace-binding-class", required=True)
+    parser.add_argument(
+        COMPARE_SEAT_FLAG,
+        dest="compare_seat_stdin",
+        action="store_true",
+        help="Compare a private pipe-supplied account email and print MATCH, "
+        "MISMATCH, or UNKNOWN only",
+    )
     return parser
 
 
+def _seat_compare_main(tokens: Sequence[str]) -> int:
+    """Run the opt-in seat equality diagnostic with an exact three-word stdout."""
+
+    verdict = SEAT_UNKNOWN
+    try:
+        if list(tokens).count(COMPARE_SEAT_FLAG) != 1:
+            raise _SeatArgumentRefusal("seat_flag_invalid")
+        args = _parser(compare_seat=True).parse_args(list(tokens))
+        expected_email = _read_expected_seat_email()
+        if expected_email is None:
+            raise IdentityProbeError("seat_expected_email_unavailable")
+        if sys.platform != "darwin" or os.geteuid() != 0:
+            raise IdentityProbeError("live_probe_requires_darwin_root")
+        result = live_probe(
+            binary=args.binary,
+            provider_home=args.provider_home,
+            expected_kind=args.expected_kind,
+            workspace_binding_class=args.workspace_binding_class,
+            worker_user=args.worker_user,
+            worker_group=args.worker_group,
+            worker_uid=args.worker_uid,
+            worker_gid=args.worker_gid,
+            expected_seat_email=expected_email,
+        )
+        verdict = _seat_verdict(result)
+    except (Exception, SystemExit, KeyboardInterrupt):  # never echo untrusted errors
+        verdict = SEAT_UNKNOWN
+    try:
+        sys.stdout.write(verdict + "\n")
+        sys.stdout.flush()
+    except (OSError, ValueError):  # a failed delivery cannot report success
+        return 2
+    return 0 if verdict == SEAT_MATCH else 2
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    if any(
+        token.startswith("--")
+        and (
+            COMPARE_SEAT_FLAG.startswith(token.split("=", 1)[0])
+            or token.split("=", 1)[0].startswith(COMPARE_SEAT_FLAG)
+        )
+        for token in tokens
+    ):
+        return _seat_compare_main(tokens)
+    args = _parser().parse_args(tokens)
+    if args.compare_seat_stdin is True:
+        # Only an abbreviation can reach here; comparison mode never abbreviates.
+        return _seat_compare_main(tokens)
     if sys.platform != "darwin" or os.geteuid() != 0:
         result = _refusal("live_probe_requires_darwin_root", expected_kind=args.expected_kind)
     else:
