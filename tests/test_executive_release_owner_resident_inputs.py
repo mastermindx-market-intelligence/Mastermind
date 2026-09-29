@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+import traceback
 
 import pytest
 
@@ -404,6 +405,17 @@ def test_installed_evidence_requires_complete_installed_broker_contract(case):
         changed["extra"] = 1
     with pytest.raises(r.ReleaseOwnerInputError, match="^BROKER_CONFIG_MISMATCH$"):
         _installed(broker_config_bytes=json.dumps(changed).encode())
+
+
+@pytest.mark.parametrize("prefix", ["/synthetic-private-marker", "synthetic-private-marker"])
+def test_broker_refusal_traceback_does_not_echo_rejected_path(prefix):
+    _, broker = _configs()
+    changed = json.loads(broker)
+    changed["release_root"] = prefix + "/releases/" + COMMIT
+    with pytest.raises(r.ReleaseOwnerInputError) as caught:
+        _installed(broker_config_bytes=json.dumps(changed).encode())
+    assert str(caught.value) == "BROKER_CONFIG_MISMATCH"
+    assert prefix not in "".join(traceback.format_exception(caught.value))
 
 
 def test_installed_evidence_refuses_issuer_and_timestamp_mismatch():

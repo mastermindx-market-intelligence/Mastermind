@@ -401,7 +401,7 @@ def compile_installed_evidence(
     try:
         broker_config = PrivilegedBrokerConfig.from_mapping(broker_document)
     except (TypeError, ValueError):
-        _fail("BROKER_CONFIG_MISMATCH")
+        raise ReleaseOwnerInputError("BROKER_CONFIG_MISMATCH") from None
     expected_release_root = (
         "/Library/Application Support/MastermindExecutive/releases/" + release_commit
     )
