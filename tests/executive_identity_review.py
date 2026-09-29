@@ -1,8 +1,8 @@
 """Test-only, source-review-bound literals for the existing installed topology.
 
-Accepted preimage: 6f42a0db7fcb35b39dc6cd666945c552f6791720.
-Factory SHA256: 6e38fa8c82bdc2457e8e13e34e97806da4d4f283c7b2dd381c3ebc40ce0fe3fb.
-Independent review: 30f715b2e7bb81f549e20fff5d74eb6514ab35262b7993a7a7771fc31d96d15a.
+Accepted preimage: 5544887bdb3de349eba97910f3d1047c21cc52b0.
+Factory SHA256: 2b9c4402a44907c829f8a4ae099fac7c938dd3658325784e1b1d2a748e0cf513.
+Independent review: cfd5a5f1909b56f00240a370890f0df0adaceab2f98fada30bc43df47febccaa.
 These STATIC pins acknowledge existing accounts, UIDs, socket groups/modes,
 permission modes and the 512 MiB inventory bound, not new runtime authority.
 A source change requires review; tests never learn replacement pins from source.
@@ -94,7 +94,7 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                                 'sites': ((('body', 2, 'value', 'keywords', 3, 'value'), 'int', 450, '450'),
                                           (('body', 5, 'test', 'comparators', 0), 'int', 450, '450'))},
  '_verify_role_config': {'node_type': 'FunctionDef',
-                         'ast_sha256': 'c46afa84416318a536109f713e764d00db497560cb2a7340898391613410e1e6',
+                         'ast_sha256': 'a3bb7fc6ebd683223932950d85bb7d15a9de2e5ccabacd79419a562c64bccab6',
                          'sites': ((('body', 3, 'body', 1, 'test', 'comparators', 0), 'int', 450, '450'),
                                    (('body', 3, 'orelse', 1, 'test', 'comparators', 0), 'int', 458, '458'))},
  '_inventory_python_base': {'node_type': 'FunctionDef',
