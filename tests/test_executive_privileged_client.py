@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import threading
@@ -7,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from control_plane.executive_privileged_action import REQUEST_SCHEMA, STATUS_REQUEST_SCHEMA
+from control_plane.executive_privileged_action import (
+    REQUEST_SCHEMA,
+    STATUS_REQUEST_SCHEMA,
+    canonical_request_bytes,
+    validate_request,
+)
 from control_plane.executive_privileged_broker import BrokerTrustError, WIRE_RESPONSE_SCHEMA
 
 
@@ -327,3 +333,64 @@ def test_transport_failure_never_reconnects_or_resends(monkeypatch, operation, f
     if failed_stage == "receive":
         expected.append("receive")
     assert calls == expected + ["close"]
+
+
+def _correlated_receipt(**overrides: object) -> dict:
+    request = _effect_request()
+    digest = hashlib.sha256(canonical_request_bytes(validate_request(request))).hexdigest()
+    receipt = _receipt(request_sha256=digest)
+    receipt.update(overrides)
+    return receipt
+
+
+def test_client_validates_bounded_excerpts_and_rejects_nonlegacy_oversize() -> None:
+    from control_plane import executive_privileged_client as client
+
+    marker = "...[truncated]"
+    valid_receipt = _correlated_receipt(stdout_excerpt="s" * 286 + marker)
+    valid_response = {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": True,
+        "replayed": False,
+        "receipt": valid_receipt,
+    }
+    validated = client.validate_effect_response(valid_response, _effect_request())
+    assert validated["receipt"]["stdout_excerpt"] == "s" * 286 + marker
+
+    invalid_receipts = [
+        _correlated_receipt(stdout_excerpt="s" * 301),
+        _correlated_receipt(stdout_excerpt="s" * 313 + marker),
+        _correlated_receipt(stdout_excerpt="s" * 314 + marker),
+        _correlated_receipt(stdout_excerpt="s" * 300 + "...[truncatex]"),
+        _correlated_receipt(stdout_excerpt="s" * 315 + marker),
+    ]
+    for receipt in invalid_receipts:
+        response = {**valid_response, "receipt": receipt}
+        with pytest.raises(BrokerTrustError, match="stdout_excerpt is invalid"):
+            client.validate_effect_response(response, _effect_request())
+
+
+def test_client_status_accepts_exact_legacy_314_receipt_across_release() -> None:
+    from control_plane import executive_privileged_client as client
+
+    marker = "...[truncated]"
+    receipt = _correlated_receipt(
+        release_sha="f" * 40,
+        stdout_excerpt="o" * 300 + marker,
+        stderr_excerpt="e" * 300 + marker,
+    )
+    response = {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": True,
+        "query": True,
+        "status": "TERMINAL",
+        "request_id": "req-001",
+        "installed_release_sha": "a" * 40,
+        "receipt": receipt,
+    }
+
+    validated = client.validate_status_response(response, expected_request_id="req-001")
+
+    assert validated["receipt"]["release_sha"] == "f" * 40
+    assert validated["receipt"]["stdout_excerpt"] == "o" * 300 + marker
+    assert validated["receipt"]["stderr_excerpt"] == "e" * 300 + marker
