@@ -14,25 +14,44 @@ Receiver-safety invariants (each has a pinned test):
   ``sessionId`` record agrees; there is no title, newest, picker, or sibling
   fallback and no session registry of any kind;
 * ``claude agents --json`` is an exclusion check only: any listed row for the
-  handle refuses delivery so a nudge can never land inside an in-flight turn;
-  an unreadable or unrecognised listing refuses because absence is unproven;
-* the resume runs from the receiver's most recently recorded cwd, which must
-  lie inside a constructor-supplied allowed root; ``--safe-mode`` disables
-  directory-scoped customisation (CLAUDE.md, hooks, plugins, MCP) there;
+  handle refuses delivery; an unreadable or unrecognised listing refuses
+  because absence is unproven.  Measured on the installed CLI (2.1.275,
+  2026-09-29): the listing is host-wide and identical from unrelated cwds, and
+  a headless ``-p --resume`` process is listed for its whole lifetime, so both
+  interactive and headless writers are excluded.  The window between the
+  listing and the resume is the discovery-to-launch latency; the adapter adds
+  no lock because the fabric issues at most one attempt per nudge;
+* the resume runs from the receiver's most recently recorded cwd, resolved,
+  which must lie inside a constructor-supplied allowed root; ``--safe-mode``
+  disables directory-scoped customisation (CLAUDE.md, hooks, plugins, MCP)
+  there.  ``--resume <uuid>`` locates the transcript store-wide and appends to
+  that same file whatever cwd it is launched from (measured, same host);
 * the delivery argv never carries ``--continue``, ``--fork-session``,
   ``--session-id`` or ``--from-pr`` (each can select or create a different
   receiver) and ``--resume`` is always given a canonical UUID because its value
   is optional and an empty value opens an interactive picker;
+* the adapter's own submission is recognised structurally, never by substring:
+  the CLI records a ``-p`` prompt as a ``type:"user"`` record whose
+  ``message.content`` is the prompt string itself, while tool results are user
+  records carrying ``toolUseResult`` with list content and CLI-inserted notes
+  carry ``isMeta``.  Only a user record equal to this nudge's exact prompt is
+  the marker; the marker inside a tool result, a quoted human prompt, or a
+  meta note is not;
+* DELIVERED requires that marker followed directly by a model-authored reply
+  (provider-synthesised error or refusal records do not count, and any
+  intervening user-authored record breaks the attribution), observed in the
+  receiver's own transcript, in addition to the provider's structured sentinel
+  naming the same session;
 * failure classification is deterministic: only a non-zero provider exit whose
-  transcript is byte-identical afterwards, whose project directory holds the
-  same file names, and whose handle still resolves to that single file is a
-  typed pre-effect refusal (the receiver observed nothing).  A zero exit, a
-  provider envelope naming another session, or any store delta is
-  effect-unknown and is reconciled by the fabric, never retried here;
-* ``reconcile`` is read-only: it closes a late attempt as DELIVERED only when
-  the exact nudge marker is recorded in the receiver's own transcript followed
-  by a model-authored reply (provider-synthesised error or refusal records do
-  not count), and it never submits.
+  transcript is byte-identical, whose project directory holds the same file
+  names, and whose handle still resolves to that single file — observed twice,
+  with a settle interval between the observations so a late flush is not
+  mistaken for silence — is a typed pre-effect refusal (the receiver observed
+  nothing).  A zero exit, a provider envelope naming another session, or any
+  store delta is effect-unknown and is reconciled by the fabric, never retried
+  here;
+* ``reconcile`` is read-only: it closes a late attempt as DELIVERED only under
+  the same marker-and-reply rule and it never submits.
 
 Pre-effect refusals reach the fabric as ``TARGET_UNAVAILABLE`` receipts (the
 sibling idiom, valid on both fabric entry points).  Their closed refusal class
@@ -41,6 +60,7 @@ detail and never names a session, path, or provider text.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import json
@@ -97,6 +117,8 @@ _DISCOVERY_STDOUT_MAX = 256 * 1024
 _DELIVERY_STDOUT_MAX = 64 * 1024
 _DEFAULT_DISCOVERY_TIMEOUT_SECONDS = 10.0
 _DEFAULT_DELIVERY_TIMEOUT_SECONDS = 90.0
+#: Pause between the two post-exit store observations that a pre-effect claim requires.
+_DEFAULT_SETTLE_SECONDS = 1.0
 _STORE_PROJECTS_DIRNAME = "projects"
 _STORE_FILE_MAX_BYTES = 256 * 1024 * 1024
 _EMPTY_MCP_CONFIG = '{"mcpServers":{}}'
@@ -133,7 +155,12 @@ class ClaudeWakeCommandResult:
 
 @runtime_checkable
 class ClaudeCodeWakeRunner(Protocol):
-    """Narrow process seam; callers cannot author argv, prompt, or environment."""
+    """Narrow process seam; callers cannot author argv, prompt, or environment.
+
+    Host contract: ``run`` returns only after the child has exited, and on
+    ``timeout_seconds`` it terminates the child before raising.  The adapter's
+    post-exit store observations assume no writer of its own is still running.
+    """
 
     async def run(
         self,
@@ -146,7 +173,12 @@ class ClaudeCodeWakeRunner(Protocol):
 
 @dataclasses.dataclass(frozen=True)
 class _TranscriptScan:
-    """One full pass over the exact transcript; never persisted."""
+    """One full pass over the exact transcript; never persisted.
+
+    ``marker_seen``: the adapter's own prompt record for this nudge is recorded.
+    ``marker_replied``: a model-authored assistant record directly followed the
+    latest such prompt record, with no intervening user-authored record.
+    """
 
     digest: str
     last_cwd: Path | None
@@ -164,6 +196,18 @@ class _StoreObservation:
     siblings: frozenset[str]
 
 
+@dataclasses.dataclass(frozen=True)
+class _AfterObservation:
+    """Post-exit facts about the same transcript; never persisted."""
+
+    scan: _TranscriptScan
+    siblings: frozenset[str]
+    still_unique: bool
+
+    def unchanged_from(self, before: _StoreObservation) -> bool:
+        return self.scan.digest == before.digest and self.siblings == before.siblings and self.still_unique
+
+
 def _genuine_reply(record: dict) -> bool:
     """A model-authored assistant record; provider-synthesised error/refusal records do not count."""
 
@@ -172,6 +216,23 @@ def _genuine_reply(record: dict) -> bool:
     message = record.get("message")
     model = message.get("model") if isinstance(message, dict) else None
     return isinstance(model, str) and bool(model) and model != _SYNTHETIC_MODEL
+
+
+def _is_wake_prompt_record(record: dict, prompt: str) -> bool:
+    """The CLI's record of exactly this ``-p`` prompt (shape measured on the installed CLI).
+
+    A tool result is a user record too, but carries ``toolUseResult`` and list
+    content; a CLI-inserted note carries ``isMeta``.  Neither is the marker,
+    and neither is a quoted copy inside a longer human prompt.
+    """
+
+    if record.get("isMeta") is True or "toolUseResult" in record:
+        return False
+    message = record.get("message")
+    if not isinstance(message, dict) or message.get("role") != "user":
+        return False
+    content = message.get("content")
+    return isinstance(content, str) and content == prompt
 
 
 def _refuse(refusal_class: str) -> WakePreSubmitError:
@@ -200,6 +261,7 @@ class ClaudeCodeWakeDispatcher:
         receiver_cwd_roots: Sequence[Path],
         discovery_timeout_seconds: float = _DEFAULT_DISCOVERY_TIMEOUT_SECONDS,
         delivery_timeout_seconds: float = _DEFAULT_DELIVERY_TIMEOUT_SECONDS,
+        settle_seconds: float = _DEFAULT_SETTLE_SECONDS,
         refusal_observer: Callable[[str], None] | None = None,
     ) -> None:
         if runner is None or not hasattr(runner, "run") or not callable(runner.run):
@@ -218,6 +280,8 @@ class ClaudeCodeWakeDispatcher:
             raise ValueError("receiver_cwd_roots must be a non-empty tuple of absolute paths")
         if discovery_timeout_seconds <= 0 or delivery_timeout_seconds <= 0:
             raise ValueError("Claude Wake timeouts must be positive")
+        if settle_seconds < 0:
+            raise ValueError("settle_seconds must be non-negative")
         if refusal_observer is not None and not callable(refusal_observer):
             raise ValueError("refusal_observer must be callable")
         self._runner = runner
@@ -227,6 +291,7 @@ class ClaudeCodeWakeDispatcher:
         self._roots = roots
         self._discovery_timeout_seconds = float(discovery_timeout_seconds)
         self._delivery_timeout_seconds = float(delivery_timeout_seconds)
+        self._settle_seconds = float(settle_seconds)
         self._refusal_observer = refusal_observer
 
     # -- receipts --------------------------------------------------------------
@@ -303,13 +368,13 @@ class ClaudeCodeWakeDispatcher:
 
     @staticmethod
     def _scan_transcript(transcript: Path, native_handle: str, *, marker: str | None = None) -> _TranscriptScan:
-        """Single full pass: digest, identity agreement, last cwd, optional marker."""
+        """Single full pass: digest, identity agreement, last cwd, optional marker attribution."""
 
         digest = hashlib.sha256()
         last_cwd: Path | None = None
-        marker_bytes = marker.encode("utf-8") if marker else None
         marker_seen = False
         marker_replied = False
+        awaiting_reply = False
         with transcript.open("rb") as handle:
             for raw in handle:
                 digest.update(raw)
@@ -327,14 +392,19 @@ class ClaudeCodeWakeDispatcher:
                 value = record.get("cwd")
                 if isinstance(value, str) and value.strip():
                     last_cwd = Path(value)
-                if marker_bytes is None:
+                if marker is None:
                     continue
                 record_type = record.get("type")
-                if record_type == "user" and marker_bytes in raw:
-                    marker_seen = True
-                    marker_replied = False
-                elif record_type == "assistant" and marker_seen and _genuine_reply(record):
+                if record_type == "user":
+                    if _is_wake_prompt_record(record, marker):
+                        marker_seen = True
+                        marker_replied = False
+                        awaiting_reply = True
+                    elif record.get("isMeta") is not True:
+                        awaiting_reply = False
+                elif record_type == "assistant" and awaiting_reply and _genuine_reply(record):
                     marker_replied = True
+                    awaiting_reply = False
         return _TranscriptScan(
             digest=digest.hexdigest(),
             last_cwd=last_cwd,
@@ -353,7 +423,7 @@ class ClaudeCodeWakeDispatcher:
         for root in self._roots:
             try:
                 if resolved == root.resolve() or resolved.is_relative_to(root.resolve()):
-                    return cwd
+                    return resolved
             except OSError:
                 continue
         raise _refuse("cwd_outside_roots")
@@ -385,18 +455,16 @@ class ClaudeCodeWakeDispatcher:
         cwd = self._receiver_cwd(scan)
         return _StoreObservation(transcript=transcript, cwd=cwd, digest=scan.digest, siblings=siblings)
 
-    def _observe_after(self, before: _StoreObservation, native_handle: str) -> tuple[str, frozenset[str], bool] | None:
-        """(digest, sibling names, handle still resolves to exactly this file) or None."""
-
+    def _observe_after(self, before: _StoreObservation, native_handle: str, *, marker: str) -> _AfterObservation | None:
         try:
             if before.transcript.is_symlink() or not before.transcript.is_file():
                 return None
             candidates = self._transcript_candidates(native_handle)
-            scan = self._scan_transcript(before.transcript, native_handle)
+            scan = self._scan_transcript(before.transcript, native_handle, marker=marker)
             siblings = self._sibling_names(before.transcript)
         except (OSError, WakePreSubmitError):
             return None
-        return scan.digest, siblings, candidates == [before.transcript]
+        return _AfterObservation(scan=scan, siblings=siblings, still_unique=candidates == [before.transcript])
 
     # -- exclusion: any listed writer for the handle refuses delivery ----------
 
@@ -433,7 +501,7 @@ class ClaudeCodeWakeDispatcher:
         opaque_ids = (wake.nudge_id,) + tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
         return CLAUDE_WAKE_INSTRUCTION + "\nOpaque Wake identities:\n" + "\n".join(opaque_ids)
 
-    def _delivery_argv(self, wake: WakeNudge, native_handle: str) -> tuple[str, ...]:
+    def _delivery_argv(self, prompt: str, native_handle: str) -> tuple[str, ...]:
         return (
             self._binary,
             "--resume",
@@ -460,7 +528,7 @@ class ClaudeCodeWakeDispatcher:
             _EMPTY_MCP_CONFIG,
             "--setting-sources",
             "",
-            self._prompt(wake),
+            prompt,
         )
 
     @staticmethod
@@ -502,9 +570,10 @@ class ClaudeCodeWakeDispatcher:
             await self._refuse_live_writer(native_handle)
         except WakePreSubmitError as exc:
             return self._refused(exc, nudge_id=nudge_id)
+        prompt = self._prompt(wake)
         try:
             result = await self._runner.run(
-                argv=self._delivery_argv(wake, native_handle),
+                argv=self._delivery_argv(prompt, native_handle),
                 cwd=before.cwd,
                 timeout_seconds=self._delivery_timeout_seconds,
             )
@@ -512,24 +581,32 @@ class ClaudeCodeWakeDispatcher:
             raise WakeEffectUnknownError(
                 "Claude exact-session resume effect is unknown after provider submission may have begun"
             ) from None
-        after = self._observe_after(before, native_handle)
+        after = self._observe_after(before, native_handle, marker=prompt)
         if after is None:
             raise WakeEffectUnknownError("Claude exact-session transcript is unobservable after resume")
-        digest_after, siblings_after, still_unique = after
-        store_unchanged = digest_after == before.digest and siblings_after == before.siblings and still_unique
         if not isinstance(result, ClaudeWakeCommandResult):
             raise WakeEffectUnknownError("Claude exact-session resume returned an untyped result")
         if self._validate_delivery(result, native_handle):
-            if digest_after == before.digest or siblings_after != before.siblings or not still_unique:
+            if (
+                after.scan.digest == before.digest
+                or after.siblings != before.siblings
+                or not after.still_unique
+                or not (after.scan.marker_seen and after.scan.marker_replied)
+            ):
                 raise WakeEffectUnknownError(
-                    "Claude exact-session resume reported delivery without a same-session-only transcript change"
+                    "Claude exact-session resume reported delivery without the marker turn recorded in the same session only"
                 )
             return self._receipt(TransportOutcome.DELIVERED, "delivered", nudge_id=wake.nudge_id)
-        if result.returncode != 0 and store_unchanged:
-            envelope = self._envelope(result)
-            reported = envelope.get("session_id") if envelope is not None else None
-            if reported is None or reported == native_handle:
-                return self._refused(_refuse(self._failure_class(result)), nudge_id=wake.nudge_id)
+        if result.returncode != 0 and after.unchanged_from(before):
+            # A pre-effect claim is positive: observe silence twice, across a settle interval,
+            # so a transcript flushed after the exit status is not mistaken for no effect.
+            await asyncio.sleep(self._settle_seconds)
+            settled = self._observe_after(before, native_handle, marker=prompt)
+            if settled is not None and settled.unchanged_from(before):
+                envelope = self._envelope(result)
+                reported = envelope.get("session_id") if envelope is not None else None
+                if reported is None or reported == native_handle:
+                    return self._refused(_refuse(self._failure_class(result)), nudge_id=wake.nudge_id)
         raise WakeEffectUnknownError("Claude exact-session resume completion is effect-unknown")
 
     # -- late reconciliation: read-only, never submits ---------------------------
@@ -540,13 +617,13 @@ class ClaudeCodeWakeDispatcher:
             raise WakeEffectUnknownError("Claude late reconciliation identity is not the bound transport")
         try:
             transcript = self._resolve_transcript(native_handle)
-            scan = self._scan_transcript(transcript, native_handle, marker=wake.nudge_id)
+            scan = self._scan_transcript(transcript, native_handle, marker=self._prompt(wake))
         except (OSError, WakePreSubmitError):
             raise WakeEffectUnknownError("Claude late reconciliation cannot observe the exact transcript") from None
         if scan.marker_seen and scan.marker_replied:
             return self._receipt(TransportOutcome.DELIVERED, "delivered", nudge_id=wake.nudge_id)
         if scan.marker_seen:
-            raise WakeEffectUnknownError("Claude exact-session reply to the Wake marker is not yet recorded")
+            raise WakeEffectUnknownError("Claude exact-session reply to the Wake marker is not recorded")
         try:
             await self._refuse_live_writer(native_handle)
         except WakePreSubmitError:

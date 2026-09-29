@@ -138,11 +138,30 @@ def _append(store: _Store, *lines: str) -> None:
             handle.write(line + "\n")
 
 
-def _marker_turn(store: _Store, *, nudge_id: str = NUDGE_ID, reply: bool = True) -> None:
-    prompt = CLAUDE_WAKE_INSTRUCTION + "\nOpaque Wake identities:\n" + nudge_id
-    _append(store, _record(cwd=str(store.receiver_cwd), message={"role": "user", "content": prompt}))
+def _prompt_for(wake: WakeNudge | None = None) -> str:
+    wake = wake or _wake()
+    ids = (wake.nudge_id,) + tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+    return CLAUDE_WAKE_INSTRUCTION + "\nOpaque Wake identities:\n" + "\n".join(ids)
+
+
+def _prompt_record(content, **fields) -> str:
+    """Shape the installed CLI (2.1.275) records for a `-p --resume` prompt: `message.content` is the prompt string."""
+
+    value = {"cwd": "/tmp/receiver", "promptId": "prompt-1", "promptSource": "cli", "message": {"role": "user", "content": content}}
+    value.update(fields)
+    return _record(**value)
+
+
+def _genuine(**fields) -> str:
+    value = {"type": "assistant", "message": {"role": "assistant", "model": "claude-opus-5", "content": [{"type": "text", "text": "ack"}]}}
+    value.update(fields)
+    return _record(**value)
+
+
+def _marker_turn(store: _Store, *, wake: WakeNudge | None = None, reply: bool = True) -> None:
+    _append(store, _prompt_record(_prompt_for(wake), cwd=str(store.receiver_cwd)))
     if reply:
-        _append(store, _record(cwd=str(store.receiver_cwd), type="assistant", message={"role": "assistant", "model": "claude-opus-5"}))
+        _append(store, _genuine(cwd=str(store.receiver_cwd)))
 
 
 def _synthetic_refusal(store: _Store) -> None:
@@ -170,6 +189,7 @@ def _dispatcher(runner, store: _Store, **overrides):
         "claude_config_dir": store.config_dir,
         "working_directory": Path("/private/tmp/mmx-h1-canary"),
         "receiver_cwd_roots": (store.root,),
+        "settle_seconds": 0.0,
     }
     kwargs.update(overrides)
     return ClaudeCodeWakeDispatcher(runner, **kwargs)
@@ -207,7 +227,7 @@ def test_exact_stored_session_delivers_once_with_closed_cli_surface(tmp_path):
     delivery_argv, delivery_cwd, _ = runner.calls[1]
     assert discovery_argv == ("/opt/mastermind/bin/claude", "agents", "--json")
     assert discovery_cwd == Path("/private/tmp/mmx-h1-canary")
-    assert delivery_cwd == store.receiver_cwd
+    assert delivery_cwd == store.receiver_cwd.resolve()
     assert delivery_argv[:3] == ("/opt/mastermind/bin/claude", "--resume", SESSION_ID)
     for flag in FORBIDDEN_RECEIVER_FLAGS:
         assert flag not in delivery_argv
@@ -254,10 +274,59 @@ def test_resume_launches_from_the_most_recent_recorded_cwd(tmp_path):
     _append(store, _record(cwd=str(later)), _record(cwd=str(later), type="assistant"))
     runner = _FakeRunner([_discovery(), _append_turn(store)])
     assert _nudge(_dispatcher(runner, store)).outcome is TransportOutcome.DELIVERED
-    assert runner.calls[1][1] == later
+    assert runner.calls[1][1] == later.resolve()
+
+
+def test_resume_launches_from_the_resolved_receiver_cwd_not_the_recorded_alias(tmp_path):
+    store = _store(tmp_path)
+    real = store.root / "real-cwd"
+    real.mkdir()
+    alias = store.root / "alias-cwd"
+    os.symlink(real, alias)
+    _append(store, _record(cwd=str(alias)))
+    runner = _FakeRunner([_discovery(), _append_turn(store)])
+    assert _nudge(_dispatcher(runner, store)).outcome is TransportOutcome.DELIVERED
+    assert runner.calls[1][1] == real.resolve()
+    assert not runner.calls[1][1].is_symlink()
+
+
+@pytest.mark.parametrize(
+    "growth",
+    [
+        lambda store: _append(store, _record(cwd=str(store.receiver_cwd), type="progress")),
+        lambda store: _append(store, _prompt_record("unrelated human prompt", cwd=str(store.receiver_cwd)), _genuine()),
+        lambda store: _marker_turn(store, reply=False),
+        lambda store: (_marker_turn(store, reply=False), _synthetic_refusal(store)),
+        lambda store: _marker_turn(store, wake=_wake(nudge_id="NUDGE-" + "c" * 32)),
+        lambda store: _append(store, _record(cwd=str(store.receiver_cwd), toolUseResult={"x": 1},
+                                             message={"role": "user", "content": [{"type": "tool_result", "content": _prompt_for()}]}), _genuine()),
+    ],
+)
+def test_claimed_delivery_whose_transcript_growth_is_not_this_markers_turn_is_effect_unknown(tmp_path, growth):
+    store = _store(tmp_path)
+
+    def _effect():
+        growth(store)
+        return _delivery()
+
+    runner = _FakeRunner([_discovery(), _effect])
+    with pytest.raises(WakeEffectUnknownError):
+        _nudge(_dispatcher(runner, store))
+    assert len(runner.calls) == 2
 
 
 # --- identity: the exact handle is the only inclusion evidence ------------------
+
+
+def test_non_wake_nudge_objects_are_unbound_on_both_entry_points(tmp_path):
+    store = _store(tmp_path)
+    seen: list[str] = []
+    dispatcher = _dispatcher(_FakeRunner([]), store, refusal_observer=seen.append)
+    receipt = asyncio.run(dispatcher.nudge(object()))
+    assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
+    assert seen == ["identity_unbound"]
+    with pytest.raises(WakeEffectUnknownError):
+        asyncio.run(dispatcher.reconcile(object()))
 
 
 @pytest.mark.parametrize(
@@ -334,6 +403,16 @@ def test_empty_transcript_is_refused(tmp_path):
     store = _store(tmp_path, lines=[])
     store.transcript.write_bytes(b"")
     assert _refused(_FakeRunner([]), store) == "store_empty"
+
+
+def test_oversized_transcript_is_refused_before_any_read(tmp_path, monkeypatch):
+    import integrations.executive_wake.claude_code as module
+
+    store = _store(tmp_path)
+    monkeypatch.setattr(module, "_STORE_FILE_MAX_BYTES", store.transcript.stat().st_size - 1)
+    runner = _FakeRunner([])
+    assert _refused(runner, store) == "store_oversized"
+    assert runner.calls == []
 
 
 def test_foreign_session_identity_anywhere_in_the_transcript_is_refused(tmp_path):
@@ -497,6 +576,41 @@ def test_failure_after_the_transcript_changed_is_effect_unknown_without_retry(tm
     assert len(runner.calls) == 2
 
 
+@pytest.mark.parametrize("failure", [_delivery(returncode=1), _contention()])
+def test_transcript_flushed_after_a_nonzero_exit_is_effect_unknown_not_pre_effect(tmp_path, failure):
+    store = _store(tmp_path)
+
+    def _late_flush():
+        asyncio.get_running_loop().call_later(0.05, _marker_turn, store)
+        return failure
+
+    runner = _FakeRunner([_discovery(), _late_flush])
+    seen: list[str] = []
+    with pytest.raises(WakeEffectUnknownError):
+        _nudge(_dispatcher(runner, store, settle_seconds=0.3, refusal_observer=seen.append))
+    assert seen == []
+    assert len(runner.calls) == 2
+
+
+def test_pre_effect_refusal_requires_two_agreeing_observations_across_the_settle(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    runner = _FakeRunner([_discovery(), _delivery(returncode=1)])
+    dispatcher = _dispatcher(runner, store, settle_seconds=0.01)
+    observations: list[str] = []
+    original = dispatcher._observe_after
+
+    def _counting(before, native_handle, *, marker):
+        observations.append(marker)
+        return original(before, native_handle, marker=marker)
+
+    monkeypatch.setattr(dispatcher, "_observe_after", _counting)
+    seen: list[str] = []
+    dispatcher._refusal_observer = seen.append
+    assert _nudge(dispatcher).outcome is TransportOutcome.TARGET_UNAVAILABLE
+    assert seen == ["pre_effect_failure"]
+    assert observations == [_prompt_for(), _prompt_for()]
+
+
 def test_runner_exception_during_resume_is_effect_unknown_even_if_store_unchanged(tmp_path):
     store = _store(tmp_path)
     runner = _FakeRunner([_discovery(), TimeoutError("provider timeout /private/leak")])
@@ -606,7 +720,7 @@ def test_reconcile_closes_delivered_when_the_exact_marker_and_reply_are_recorded
 
 def test_reconcile_never_closes_on_another_nudges_marker(tmp_path):
     store = _store(tmp_path)
-    _marker_turn(store, nudge_id="NUDGE-" + "c" * 32)
+    _marker_turn(store, wake=_wake(nudge_id="NUDGE-" + "c" * 32))
     runner = _FakeRunner([_discovery()])
     receipt = _reconcile(_dispatcher(runner, store))
     assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
@@ -640,7 +754,7 @@ def test_reconcile_closes_when_a_genuine_reply_follows_a_synthesised_record(tmp_
     store = _store(tmp_path)
     _marker_turn(store, reply=False)
     _synthetic_refusal(store)
-    _append(store, _record(cwd=str(store.receiver_cwd), type="assistant", message={"role": "assistant", "model": "claude-opus-5"}))
+    _append(store, _genuine(cwd=str(store.receiver_cwd)))
     assert _reconcile(_dispatcher(_FakeRunner([]), store)).outcome is TransportOutcome.DELIVERED
 
 
@@ -648,10 +762,82 @@ def test_reconcile_without_marker_is_unavailable_only_when_no_writer_is_listed(t
     store = _store(tmp_path)
     receipt = _reconcile(_dispatcher(_FakeRunner([_discovery()]), store))
     assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
+    assert receipt.reason_code == "target_unavailable"
+    assert dict(receipt.details) == {"nudge_id": NUDGE_ID}
+    assert SESSION_ID not in repr(receipt) and str(store.config_dir) not in repr(receipt)
     with pytest.raises(WakeEffectUnknownError):
         _reconcile(_dispatcher(_FakeRunner([_discovery([_agent()])]), store))
     with pytest.raises(WakeEffectUnknownError):
         _reconcile(_dispatcher(_FakeRunner([TimeoutError("discovery")]), store))
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        # the exact prompt text inside a tool result (shape: toolUseResult + list content) is not a submission
+        [_record(toolUseResult={"stdout": _prompt_for()}, sourceToolAssistantUUID="u1",
+                 message={"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": _prompt_for()}]}), _genuine()],
+        # the exact prompt text inside a CLI-inserted meta note is not a submission
+        [_prompt_record(_prompt_for(), isMeta=True), _genuine()],
+        # a human prompt that quotes the marker is not the adapter's submission
+        [_prompt_record("please look at this ledger entry:\n" + _prompt_for()), _genuine()],
+        [_prompt_record(_prompt_for() + "\n"), _genuine()],
+        # list-shaped content equal to the prompt text is not the recorded `-p` shape
+        [_record(message={"role": "user", "content": [{"type": "text", "text": _prompt_for()}]}), _genuine()],
+        # a user record whose role is not user
+        [_record(message={"role": "assistant", "content": _prompt_for()}), _genuine()],
+    ],
+)
+def test_reconcile_recognises_only_the_adapters_own_prompt_record(tmp_path, lines):
+    store = _store(tmp_path)
+    _append(store, *lines)
+    runner = _FakeRunner([_discovery()])
+    receipt = _reconcile(_dispatcher(runner, store))
+    assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
+    assert len(runner.calls) == 1
+
+
+def test_reconcile_does_not_attribute_a_reply_that_follows_an_intervening_user_turn(tmp_path):
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    _synthetic_refusal(store)
+    _append(store, _prompt_record("hello, what happened here?", cwd=str(store.receiver_cwd)), _genuine())
+    runner = _FakeRunner([])
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(runner, store))
+    assert runner.calls == []
+
+
+def test_reconcile_does_not_attribute_a_reply_that_follows_a_tool_result(tmp_path):
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    _append(store, _record(toolUseResult={"stdout": ""}, message={"role": "user", "content": [{"type": "tool_result", "content": ""}]}), _genuine())
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
+def test_reconcile_attributes_a_reply_across_cli_meta_notes_only(tmp_path):
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    _append(store, _record(type="attachment"), _record(type="system", isMeta=True),
+            _prompt_record("Continue from where you left off.", isMeta=True), _genuine())
+    assert _reconcile(_dispatcher(_FakeRunner([]), store)).outcome is TransportOutcome.DELIVERED
+
+
+def test_reconcile_keeps_delivered_when_later_turns_follow_the_reply(tmp_path):
+    store = _store(tmp_path)
+    _marker_turn(store)
+    _append(store, _prompt_record("later human prompt", cwd=str(store.receiver_cwd)), _genuine())
+    assert _reconcile(_dispatcher(_FakeRunner([]), store)).outcome is TransportOutcome.DELIVERED
+
+
+def test_reconcile_uses_the_latest_marker_record_for_attribution(tmp_path):
+    store = _store(tmp_path)
+    _marker_turn(store)
+    _marker_turn(store, reply=False)
+    _synthetic_refusal(store)
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
 
 
 @pytest.mark.parametrize("overrides", [{"native_handle": OTHER_SESSION_ID}, {"reasoning_surface": "codex"}])
@@ -690,6 +876,11 @@ def test_constructor_refuses_nonabsolute_paths_and_empty_roots(tmp_path):
     ):
         with pytest.raises(ValueError, match="absolute"):
             ClaudeCodeWakeDispatcher(runner, **{**base, key: bad})
+
+
+def test_constructor_refuses_a_negative_settle(tmp_path):
+    with pytest.raises(ValueError, match="settle"):
+        _dispatcher(_FakeRunner([]), _store(tmp_path), settle_seconds=-0.1)
 
 
 def test_refusal_vocabulary_is_closed_and_never_names_a_session():
