@@ -8,6 +8,10 @@ import pytest
 from control_plane import executive_authority as a
 from control_plane import executive_release_contract as c
 from integrations.business_mcp_auth.contracts import VerifiedPrincipal
+from integrations.business_mcp_auth.principal_projection import (
+    PrincipalProjectionError,
+    principal_projection,
+)
 
 
 def digest(value):
@@ -31,12 +35,13 @@ def source(policy):
 def inputs():
     issuer = "https://identity.example.test/"
     resource = "https://executive.example.test/"
-    principal = VerifiedPrincipal(
+    verified = VerifiedPrincipal(
         policy_id="release-policy", issuer=issuer,
         issuer_digest=hashlib.sha256(issuer.encode()).hexdigest(), resource=resource,
         subject_digest="a" * 64, client_ref="b" * 64,
         scopes=("mastermind.executive.intent.submit", "mastermind.executive.read"),
         issued_at=100, expires_at=1000, jti_digest=None)
+    principal = principal_projection(verified)
     effect = {
         "schema": "mastermind.executive_release_effect/v1",
         "repository": "mastermindx-market-intelligence/Mastermind",
@@ -82,6 +87,14 @@ def test_existing_installed_map_is_unconfigured_and_worker_behavior_unchanged():
     assert worker.authorize(["READ"]).requested == ("READ",)
     with pytest.raises(a.AuthorityDenied):
         worker.authorize(["executive.release.upgrade"])
+
+
+def test_business_auth_edge_projects_only_its_exact_verified_contract(inputs):
+    principal, _, _ = inputs
+    verified = VerifiedPrincipal(**dataclasses.asdict(principal))
+    assert principal_projection(verified) == principal
+    with pytest.raises(PrincipalProjectionError, match="^verified principal required$"):
+        principal_projection(principal)
 
 
 @pytest.mark.parametrize("raw,state,code", [

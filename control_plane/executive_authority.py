@@ -568,14 +568,10 @@ def _bind_trusted_release_confirmation(owner_capability: object, *,
 
 
 def release_principal_projection(principal):
-    """Project an existing verified principal; never authenticate one here."""
-    # Resolve the incumbent edge-owned type only when this release-specific
-    # projection is invoked.  The pure Business auth contract does not import
-    # the control plane, so this preserves its exact source and avoids adding
-    # an integration dependency to authority-policy module initialization.
-    from integrations.business_mcp_auth.contracts import VerifiedPrincipal
+    """Validate a neutral edge projection; never authenticate a caller here."""
+    from control_plane.principal_projection import NeutralPrincipalProjection
 
-    if type(principal) is not VerifiedPrincipal:
+    if type(principal) is not NeutralPrincipalProjection:
         _release_refuse("RELEASE_VERIFIED_PRINCIPAL_REQUIRED")
     if (type(principal.issuer) is not str or not principal.issuer
             or type(principal.resource) is not str or not principal.resource
