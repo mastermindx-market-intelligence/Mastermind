@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import platform
 import shutil
 import subprocess
@@ -50,21 +51,23 @@ ENV = {'PATH': str(Path(NODE).parent) + ':/usr/bin:/bin',
        'HOME': str(CACHE / 'home'), 'TMPDIR': str(CACHE / 'tmp'), 'CI': '1'}
 
 
-def suite(name: str, source: str, expected: set[str], upstream: bool = False, stdio: bool = False) -> dict:
+def suite(name: str, source: str, expected: set[str], upstream: bool = False, stdio: bool = False,
+          profile: bool = False, profile_source: str = 'runtime') -> dict:
     destination = CACHE / f'{name}.json'
     start = time.monotonic()
     result = subprocess.run(
         [NODE, 'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.mcp.config.mjs',
          '--reporter=json', f'--outputFile={destination}'], cwd=ROOT,
         env={**ENV, 'MMX_MCP_SOURCE': source, 'MMX_MCP_UPSTREAM': '1' if upstream else '0',
-             'MMX_MCP_STDIO': '1' if stdio else '0'},
+             'MMX_MCP_STDIO': '1' if stdio else '0',
+             'MMX_MCP_PROFILE': '1' if profile else '0', 'MMX_PROFILE_SOURCE': profile_source},
         capture_output=True, text=True, timeout=60, check=False,
     )
     output = result.stdout + result.stderr
     (CACHE / f'{name}.log').write_text(output)
     data = json.loads(destination.read_text())
     assertions = [a for s in data['testResults'] for a in s.get('assertionResults', [])]
-    count = 12 if stdio else 93 if upstream else 32
+    count = 19 if profile else 12 if stdio else 121 if upstream else 32
     failed = {a['title'] for a in assertions if a['status'] == 'failed'}
     assert len(assertions) == data['numTotalTests'] == count, f'{name}: missing cases'
     assert all(a['status'] in {'passed', 'failed'} for a in assertions), f'{name}: skipped cases'
@@ -192,6 +195,126 @@ def preparation_checks() -> dict:
     return {'tests': 6, 'passed': 6, 'exit_code': 0, 'log_sha256': digest(output.encode())}
 
 
+def profile_observations() -> dict:
+    raw = (CACHE / 'profile-observations.json').read_bytes()
+    observed = json.loads(raw)
+    assert observed and all(x['childrenAbsent'] and x['inputsUnchanged'] for x in observed)
+    pids = [pid for x in observed for pid in x['pids']]
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            raise AssertionError(f'Profile fixture process remains: {pid}')
+    useful = [x for x in observed if x.get('workload', {}).get('search')]
+    assert len(useful) == 1
+    assert useful[0]['workload']['read']['nonce'] == useful[0]['nonce']
+    assert useful[0]['workload']['search']['nonce'] == useful[0]['nonce']
+    return {'observations_sha256': digest(raw), 'fixture_pids': pids,
+            'all_recorded_children_absent': True, 'inputs_unchanged': True,
+            'useful_workload': useful[0]}
+
+
+PROFILE_MUTATIONS = {
+    'startup_policy': ('index.ts',
+        'if (fixedConfig.failOnStartupError !== true || fixedConfig.reconnect?.enabled !== false)',
+        'if (false)', {
+            'admitted plugin refuses permissive startup before process creation',
+            'admitted plugin refuses implicit reconnect before process creation',
+            'admitted plugin refuses enabled reconnect before process creation',
+        }),
+    'admission_wiring': ('index.ts',
+        'const connection = startConnection(ctx, config, reconnect, admitGeneration)',
+        'const connection = startConnection(ctx, config, reconnect, undefined)', {
+            'public admitted plugin activates the real read path with only selected tools',
+            'Mastermind runtime profile performs preflight then activates the actual read process',
+            'admission refusal rolls back namespace so a later explicit instance can activate',
+        }),
+    'required_preflight': ('dsh_tool_profile.mjs',
+        'await qualifyLoadedDispatchRuntime(ctx, { signal })',
+        'void ctx // deliberately skipped preflight', {
+            'Mastermind runtime profile rejects disabled dispatch enforcement before spawning',
+            'Mastermind runtime profile rejects deny-all false readiness before spawning',
+            'Mastermind runtime profile cancellation during preflight never starts a process',
+            'Mastermind runtime profile snapshots startup config before asynchronous preflight',
+        }),
+    'startup_snapshot': ('dsh_tool_profile.mjs',
+        'const snapshot = structuredClone(config)', 'const snapshot = config', {
+            'Mastermind runtime profile snapshots startup config before asynchronous preflight',
+        }),
+}
+
+
+def profile_checks() -> dict:
+    owner = ROOT.parents[2] / 'integrations/acp_worker'
+    originals = {name: (owner / name).read_bytes() for name in [
+        'dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs']}
+    donor = {p.name: p.read_bytes() for p in (CACHE / 'mcp-donor').glob('*.ts')}
+    positive = {**suite('profile-final', 'donor', set(), profile=True),
+                **profile_observations()}
+    mutants = {}
+    for name, (file, old, new, expected) in PROFILE_MUTATIONS.items():
+        is_donor = file.endswith('.ts')
+        originals_for_mutant = donor if is_donor else originals
+        dest = CACHE / ('mcp-mutant' if is_donor else 'profile-mutant')
+        dest.mkdir(exist_ok=True)
+        for key, data in originals_for_mutant.items():
+            (dest / key).write_bytes(data)
+        text = originals_for_mutant[file].decode()
+        assert text.count(old) == 1, f'{name}: ambiguous mutation target'
+        changed = text.replace(old, new).encode(); (dest / file).write_bytes(changed)
+        mutants[name] = {**suite('profile-mutant-' + name,
+            'mutant' if is_donor else 'donor', expected, profile=True,
+            profile_source='runtime' if is_donor else 'mutant'),
+            **profile_observations(), 'mutant_sha256': digest(changed), 'killed': True}
+    assert originals == {name: (owner / name).read_bytes() for name in originals}
+    assert donor == {p.name: p.read_bytes() for p in (CACHE / 'mcp-donor').glob('*.ts')}
+    return {'positive': positive, 'mutants': mutants,
+            'scope': 'Real Cordis plugin and Mastermind source profile + synthetic MCP process; not installed ACP or Executive acceptance'}
+
+
+def artifact_node(name: str, argv: list[str]) -> dict:
+    result = subprocess.run([NODE, *argv], cwd=ROOT, env=ENV,
+                            capture_output=True, text=True, timeout=60, check=False)
+    raw = result.stdout + result.stderr
+    (CACHE / (name + '.log')).write_text(raw)
+    assert result.returncode == 0 and not result.stderr, f'{name}: native artifact execution failed'
+    return {'exit_code': result.returncode, 'stderr_empty': True, 'log_sha256': digest(raw.encode())}
+
+
+def native_artifact_checks() -> dict:
+    first = artifact_node('profile-artifact-build', ['build-profile.mjs'])
+    before = json.loads((CACHE / 'profile-build-result.json').read_text())
+    second = artifact_node('profile-artifact-rebuild', ['build-profile.mjs'])
+    built = json.loads((CACHE / 'profile-build-result.json').read_text())
+    assert before['files'] == built['files'] and before['input_sha256'] == built['input_sha256']
+    for name, expected in built['input_sha256'].items():
+        assert digest((ROOT / name).read_bytes()) == expected, name
+    path = Path(built['artifact'])
+    assert not path.is_absolute() and '..' not in path.parts
+    assert digest((CACHE / path).read_bytes()) == built['artifact_sha256']
+    results = {}
+    for scenario in ['normal', 'disabled-core', 'startup-refused', 'pre-aborted']:
+        run = artifact_node('native-profile-' + scenario, ['native-profile-canary.mjs', scenario])
+        raw = (CACHE / ('native-profile-' + scenario + '.json')).read_bytes()
+        observed = json.loads(raw)
+        assert observed['success'] and observed['scenario'] == scenario
+        assert observed['artifact_sha256'] == built['artifact_sha256']
+        assert observed['fixture_children_absent'] and observed['inputs_unchanged']
+        for pid in observed['fixture_pids']:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise AssertionError(f'Native artifact fixture remains: {pid}')
+        results[scenario] = {**run, 'receipt_sha256': digest(raw), 'observation': observed}
+    return {'build': built, 'build_run': first, 'rebuild_run': second,
+            'repeat_build_identical': True, 'scenarios': results,
+            'scope': 'Actual built module imported by plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP'}
+
+
 def main() -> dict:
     core_supply = prepare_core(download=False)
     mcp_supply = prepare(download=False)
@@ -220,6 +343,8 @@ def main() -> dict:
     assert notification['exposedAfterRevocation'] == []
     report['upstream'] = {mode: suite(f'mcp-upstream-final-{mode}', mode, set(), upstream=True)
                           for mode in ['pristine', 'donor']}
+    report['worker_profile'] = profile_checks()
+    report['native_artifact'] = native_artifact_checks()
     report['typecheck'] = typecheck()
     report['mutations'] = mutations()
     report['stdio'] = stdio_checks()
@@ -229,6 +354,9 @@ def main() -> dict:
         'mcp-context-boundary.test.mjs', 'mcp-stdio.test.mjs', 'stdio-fixture-server.mjs',
         'prepare_mcp.py', 'verify_mcp.py', 'vitest.mcp.config.mjs', 'tsconfig.mcp.json',
         'mcp-preparation.test.py',
+        'profile-startup.test.mjs', 'build-profile.mjs', 'native-profile-canary.mjs',
+        '../../../integrations/acp_worker/dsh_tool_profile.mjs',
+        '../../../integrations/acp_worker/dsh_dispatch_preflight.mjs',
         'package.json', 'package-lock.json', 'donor-manifest.json', 'strict-dispatch-binding.patch']}
     report['success'] = True
     return report
@@ -241,4 +369,6 @@ if __name__ == '__main__':
     print(json.dumps({'success': True, 'mcp_tests': report['targeted']['patched']['passed'],
                       'upstream_tests': report['upstream']['donor']['passed'],
                       'stdio_tests': report['stdio']['patched']['passed'],
+                      'profile_tests': report['worker_profile']['positive']['passed'],
+                      'native_artifact_scenarios': len(report['native_artifact']['scenarios']),
                       'report': str(destination)}, indent=2))

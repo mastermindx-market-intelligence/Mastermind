@@ -151,7 +151,8 @@ def main() -> dict:
     report["input_sha256"] = {name: digest((ROOT / name).read_bytes()) for name in [
         "dispatch-binding.test.mjs", "strict-dispatch-binding.patch", "package-lock.json",
         "donor-manifest.json", "prepare.py", "verify.py", "vitest.config.mjs", "tsconfig.json", "package.json",
-        "qualify-loaded-runtime.mjs", "loaded-runtime-preflight.test.mjs"]}
+        "qualify-loaded-runtime.mjs", "loaded-runtime-preflight.test.mjs",
+        "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs"]}
     report["success"] = True
     return report
 

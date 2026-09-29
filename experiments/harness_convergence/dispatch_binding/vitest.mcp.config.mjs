@@ -6,6 +6,9 @@ const root = name => fileURLToPath(new URL(name, import.meta.url))
 const source = root(`./.cache/mcp-${mode}/`)
 export default defineConfig({
   resolve: { alias: [
+    { find: 'mmx-worker-profile', replacement: process.env.MMX_PROFILE_SOURCE === 'mutant'
+      ? root('./.cache/profile-mutant/dsh_tool_profile.mjs')
+      : root('../../../integrations/acp_worker/dsh_tool_profile.mjs') },
     { find: 'mmx-mcp-tools', replacement: `${source}tools.ts` },
     { find: 'mmx-mcp-connection', replacement: `${source}connection.ts` },
     { find: 'mmx-mcp-transport', replacement: `${source}transport.ts` },
@@ -14,12 +17,14 @@ export default defineConfig({
     { find: '../src/connection.ts', replacement: `${source}connection.ts` },
     { find: '../src/transport.ts', replacement: `${source}transport.ts` },
     { find: '../src/index.ts', replacement: `${source}index.ts` },
+    { find: '../src/server-context.ts', replacement: `${source}server-context.ts` },
     { find: '@deepseek-ai/dsh-tools', replacement: root('./.cache/donor/index.ts') },
   ] },
   test: {
-    include: process.env.MMX_MCP_STDIO === '1' ? ['mcp-stdio.test.mjs']
+    include: process.env.MMX_MCP_PROFILE === '1' ? ['profile-startup.test.mjs']
+      : process.env.MMX_MCP_STDIO === '1' ? ['mcp-stdio.test.mjs']
       : process.env.MMX_MCP_UPSTREAM === '1'
-      ? ['.cache/mcp-tests/{mcp-client,tool-definition,protocol,reconnect}.spec.ts']
+      ? ['.cache/mcp-tests/{mcp-client,tool-definition,protocol,reconnect,apply,server-context}.spec.ts']
       : ['mcp-admission.test.mjs', 'mcp-context-boundary.test.mjs'],
     fileParallelism: false, maxWorkers: 1, testTimeout: 5000,
   },

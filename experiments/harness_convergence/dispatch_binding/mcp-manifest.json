@@ -73,14 +73,30 @@
       "bytes": 27080,
       "git_blob": "f41670178cd5b980f708d61b4d369be12bdf0e60",
       "sha256": "4685d6a15e47168cc560db934cff2ce40e530e2cf9ecff37d6423542618ec13a"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/apply.spec.ts",
+      "name": "apply.spec.ts",
+      "folder": "mcp-tests",
+      "git_blob": "fff238923f178a9f33469fd8c57bdaa11f6e05e7",
+      "bytes": 17203,
+      "sha256": "b84714d412e566129258a466d617758e287986adacec345978240d0ae30c0129"
+    },
+    {
+      "path": "packages/mcp/mcp-client/tests/server-context.spec.ts",
+      "name": "server-context.spec.ts",
+      "folder": "mcp-tests",
+      "git_blob": "8c3d2a7371480dc2ca915b85517ac4e09e556ee3",
+      "bytes": 2506,
+      "sha256": "aa0dae086d2d3a0cc548d4f14a51a135cfc0cb1817c9c92bde1a9bb5a120e648"
     }
   ],
   "patch_file": "mcp-generation-admission.patch",
-  "patch_sha256": "97276dc5e828234bca653e627ceb06e7925926f157e4941619d7c22f2dfe6100",
+  "patch_sha256": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
   "patched_source_sha256": {
     "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
     "connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
-    "index.ts": "6598367775528afef19d816b8531a2b1d297e9c296b23842a4cc4770b7830f04",
+    "index.ts": "26f90f0c34660d24058e19e8683d3f191e3752ce3a90129f7e7cf8d1b0790638",
     "transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f"
   },
   "proof_scope": "Real MCP SDK and existing donor connection/ToolRuntime; not installed worker, model, endpoint entitlement, instruction/resource or original-parent qualification.",

@@ -10,7 +10,7 @@ const [rootArgument, mode = 'normal'] = process.argv.slice(2)
 if (!rootArgument || !isAbsolute(rootArgument)) throw new Error('Fixture root required')
 const root = realpathSync(rootArgument)
 if (lstatSync(rootArgument).isSymbolicLink()) throw new Error('Fixture root link refused')
-if (!['normal', 'lost-reply', 'wait-cancel', 'reject-list'].includes(mode)) throw new Error('Unknown mode')
+if (!['normal', 'lost-reply', 'wait-cancel', 'reject-list', 'hold-list'].includes(mode)) throw new Error('Unknown mode')
 const marker = JSON.parse(readFileSync(resolve(root, 'fixture.json'), 'utf8'))
 if (marker.kind !== 'mmx-synthetic-stdio-test' || typeof marker.nonce !== 'string') throw new Error('Wrong fixture')
 const files = ['memo.txt', 'signals.txt']
@@ -55,5 +55,8 @@ server.registerResource('synthetic', 'fixture://secret', {}, async () => {
   log({ event: 'resource-read' }); return { contents: [{ uri: 'fixture://secret', text: 'synthetic' }] }
 })
 if (mode === 'reject-list') server.server.setRequestHandler('tools/list', async () => { throw new Error('Fixture discovery refused') })
+if (mode === 'hold-list') server.server.setRequestHandler('tools/list', async () => {
+  log({ event: 'discovery-entered' }); return await new Promise(() => {})
+})
 const handle = serveStdio(() => server)
 process.stdin.once('end', () => { void handle.close() })

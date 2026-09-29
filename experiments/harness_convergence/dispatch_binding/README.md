@@ -197,8 +197,8 @@ connection's re-admission path. This is protocol/source proof, not a production
 repository service, model inference, ACP-worker or original-Executive-parent proof.
 
 Observed: **32/32 MCP cases pass**, versus **3 pass / 29 expected failures** on
-unchanged MCP source. All **93 unchanged selected upstream MCP cases pass** on
-both versions. Four independently broken filtering/dispatch/connection/context variants
+unchanged MCP source. All **121 unchanged selected upstream MCP cases pass** on
+both versions (six files, expanded from the earlier 93-case selection). Four independently broken filtering/dispatch/connection/context variants
 are detected by their exact expected cases. Six source-preparation checks pass:
 exact/repeated patching, source/patch/output drift refusal, no implicit download,
 and source-symlink refusal. Strict MCP TypeScript uses ES2024 for the donor's
@@ -282,6 +282,86 @@ retains the exact measured scope and hashes. No new model/provider, ACP adapter,
 credential, production service, dependency installation, source-custody transfer
 or Executive Job is part of this continuation. These real MCP subprocess tests
 still do not prove an installed DSH ACP worker or original-parent consumption.
+
+## Mastermind runtime profile and admitted plugin activation
+
+Runtime implementation now lives under the existing ACP integration:
+`integrations/acp_worker/dsh_tool_profile.mjs` and
+`integrations/acp_worker/dsh_dispatch_preflight.mjs`. The experiment's old
+`qualify-loaded-runtime.mjs` is only a compatibility re-export of that one
+preflight implementation. No Python ACP adapter, turn, native-process owner or
+result collector has been copied or changed.
+
+The immutable host bootstrap can load the concrete profile through Cordis:
+
+```js
+import { createDshToolProfile } from './dsh_tool_profile.mjs'
+const toolFiber = ctx.plugin(createDshToolProfile({
+  admitGeneration,
+  signal: ownerAbortSignal,
+}), fixedConfig)
+await toolFiber
+// Only after activation succeeds may the existing host expose ACP/model work.
+// The existing host later awaits toolFiber.dispose() during its normal teardown.
+```
+
+`fixedConfig` must explicitly specify `failOnStartupError: true` and
+`reconnect: { enabled: false }`. The profile snapshots configuration before its
+asynchronous dispatch preflight, then uses the donor's `createAdmittedPlugin`.
+That new trusted-code factory shares the ORIGINAL plugin's namespace reservation,
+activation, startup rollback and connection-disposal implementation. Its owner
+signal uses the existing plugin-disposal edge, not a new process lifecycle.
+The ordinary donor `apply` path retains its previous behavior. A stock package
+without the admitted export must fail loading rather than fall back to an
+unrestricted plugin. The host/package owner still installs the exact patched
+artifact; neither runtime module installs software or authenticates admission.
+
+This is exclusive provider-free, pre-prompt composition. Existing host policy
+must bind endpoint, transport, realm, full schemas and capabilities. Never derive
+rights from server labels, annotations, model arguments or YAML. Tool admission
+continues to exclude server instructions/resources. Preflight probes are not
+safe to inject into a running worker and do not themselves grant admission.
+
+Nineteen new real-plugin/process cases pass: useful source-profile read/search,
+false-readiness refusals, strict startup/no implicit reconnect, config binding,
+namespace collision/release, startup failure, pre-abort, cancellation during
+held discovery or an in-flight tool, and exact cleanup. Four separately broken
+profile variants are detected by exact expected cases. Six unchanged upstream
+MCP suites now provide **121/121 passing cases on both versions**, including
+public plugin activation and context lifecycle. The prior 93-case selection is
+preserved inside that expanded set, not an additional 93 cases.
+
+### Built module, ordinary Node execution
+
+`build-profile.mjs` qualifies a TEST-LOCAL artifact using the already-locked
+Vite builder with config/env discovery disabled. It validates source/patch/lock
+inputs, builds the actual Mastermind profile and patched core/MCP modules into
+one module, and retains its output/input digests. Two builds must produce
+identical output hashes. This is not a new release installer or deploy path.
+
+`native-profile-canary.mjs` then imports that compiled module in ordinary Node,
+without Vitest aliases or a test-runner module loader. Four scenarios qualify a
+useful real subprocess read/search, refusal of disabled core enforcement,
+startup discovery failure, and pre-aborted startup. Normal work returns the
+fresh disk nonce, file hash and correct line matches; refused work makes no
+read call. Every original fixture process is checked absent after teardown.
+The full `npm test` runs these checks and records them in the existing MCP
+verification receipt.
+
+The artifact still uses pinned test-local external dependencies. Repeatable
+local output is NOT a signed/installed immutable production closure. There has
+been no production package installation, ACP worker admission, provider call,
+#825 source transfer, or original Executive-parent result consumption. Those
+remain distinct integration/release obligations. The module is ready to be
+consumed through the existing host factory after those applicable gates, not
+an independently live worker.
+
+The initial absent factory and runtime-module tests describe missing source;
+behavioral discrimination comes from the enabled/disabled and mutation cases.
+Two test-fixture corrections are retained honestly: rejection diagnostics now
+project a fulfilled Cordis proxy to a primitive; config mutation targets the
+actual object passed to profile activation rather than Cordis's copied input.
+Neither issue was a production defect or accepted as security proof.
 
 ## License
 

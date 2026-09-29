@@ -6,38 +6,43 @@
     "runtime_started": false,
     "source_files": 14
   },
-  "full_local_report_sha256": "155bc212de8c4e627ef9d9a203f1e5b44da4349c50e5f8a7475833ffd00dfab2",
-  "generated_at": "2026-09-29T09:57:41.032371+00:00",
+  "full_local_report_sha256": "cf18019e3631f53790137f33a5d9669b1b14fe7916a8ed1365ef1dbc22b4a3e2",
+  "generated_at": "2026-09-29T10:54:43.313194+00:00",
   "independent_review": "NOT_PERFORMED",
   "input_sha256": {
+    "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
+    "../../../integrations/acp_worker/dsh_tool_profile.mjs": "ea2b80dd28fe6b22584919d02b7998f4c356efaafaf34dc7aad1fa4f071bb57e",
+    "build-profile.mjs": "d966267f285463a2d6a9a7c10391c175848523df0feb27f16ab91c77a3dc3132",
     "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
     "mcp-admission.test.mjs": "b2a507738f38a833f237b2cf1b718882f2515962644208425e049e2e8c0407ce",
     "mcp-context-boundary.test.mjs": "db2fd87b4c3271260486b8e10933719073ec6edfda9e5675036aefc473ade9fe",
-    "mcp-generation-admission.patch": "97276dc5e828234bca653e627ceb06e7925926f157e4941619d7c22f2dfe6100",
-    "mcp-manifest.json": "64ab273621e7a35c5335f91c16a744689d9c3f4b2a6f898398a80cab8226e1fa",
+    "mcp-generation-admission.patch": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
+    "mcp-manifest.json": "9ee81858dbb77fe0698751007d99ea822b8e6a72700fca35d30d1b1c794be594",
     "mcp-preparation.test.py": "6cac00c59fd4a719cc2aba5222fb3468bb8fa3e33e35268e7320d191ff0047f4",
     "mcp-stdio.test.mjs": "cd213490be050c6f4af4cf36bfb537873f73a17beee1c6b89ac7d22a448c2270",
+    "native-profile-canary.mjs": "f33dbb82d24d65f801d17bdad7bab9b735572322d6adbbcd6803501db53ffaad",
     "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
     "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
     "prepare_mcp.py": "4e6c5b5a4a7f0a2e9eb5002efb16624c84467f36955ac2ccc26133b95d183184",
-    "stdio-fixture-server.mjs": "a62592eb6e132ac5e40c16d33cac9abb9bf78c263a7c309f3e5b36c282cb1c6a",
+    "profile-startup.test.mjs": "d33d96c65fbe480438319f994fc9cebb2337cdb0070c9c28b80e2ccdf96f0679",
+    "stdio-fixture-server.mjs": "7e947f424918be0764aee1e3f7e449849b9ccb9bba0fa540447c7e6c0b9e0d58",
     "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
     "tsconfig.mcp.json": "a12bb6b96171409d82854d1e6f4d10fb9ec1640941032ffa7f68a641b2b52f6c",
-    "verify_mcp.py": "0cf3804dd410133e06d7f41ef5d75da87f0da5ba3a0611604a7ab61ebd719aa1",
-    "vitest.mcp.config.mjs": "bb931d3ac8d549b82be863035e3e1da7447db12a4f444b7d0000e16970dd1ee7"
+    "verify_mcp.py": "24c09a27d1ea2066b767cd28303cd3ba30f3628a1db8042e28133407c56754ac",
+    "vitest.mcp.config.mjs": "0966dae260c8c320381c36c5dd6af5f9bc626bb1d6459655abb9d9b02f14db1a"
   },
   "installed": false,
   "mcp_supply": {
     "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
-    "patch_sha256": "97276dc5e828234bca653e627ceb06e7925926f157e4941619d7c22f2dfe6100",
+    "patch_sha256": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
     "patched_source_sha256": {
       "connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
-      "index.ts": "6598367775528afef19d816b8531a2b1d297e9c296b23842a4cc4770b7830f04",
+      "index.ts": "26f90f0c34660d24058e19e8683d3f191e3752ce3a90129f7e7cf8d1b0790638",
       "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
       "transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f"
     },
     "runtime_started": false,
-    "source_files": 9
+    "source_files": 11
   },
   "model_requests": 0,
   "mutations": {
@@ -52,8 +57,8 @@
       "log_sha256": "2571499f4a902945ae391396552bebf56fbbd50dd2e8fed214908bb063a7f539",
       "mutant_sha256": "b30dcd38fa6c2d4adb75f4d4a11512fd62ae628e62295da6ddb805ddb09aadf3",
       "passed": 29,
-      "report_sha256": "9ee29762a933c1eec5f8ad24c8655c631baf48d10c5a629e8bb1bf04735d1f6c",
-      "seconds": 1.845,
+      "report_sha256": "4e5ef5e5af00ef99aaefa369bb2982bc9e07ac0fe9eadff11fb05411fc854ff6",
+      "seconds": 1.855,
       "stderr_empty": true,
       "tests": 32
     },
@@ -70,8 +75,8 @@
       "log_sha256": "c5752cd538de9a583100ad6b55da5bfe2361b925557c4c1e6508cabf4155e19b",
       "mutant_sha256": "a291bc888d54e022e6adeee051b6519f12715ff3dda8969f1c4c9d7b31d1f7b2",
       "passed": 27,
-      "report_sha256": "0f02a77b4688e930fdc692f51ea980489c70687ae3031b3c93ed7a691946a0f0",
-      "seconds": 0.876,
+      "report_sha256": "a0b8b80fbe8ed25efed712f9234503b0ad50c76a416ebf851e682a6865deb6e6",
+      "seconds": 0.897,
       "stderr_empty": true,
       "tests": 32
     },
@@ -88,8 +93,8 @@
       "log_sha256": "e5b3dea08b2e69d112ace974d0bfcc968dbad056c6ffd1d43b97473a8c4add88",
       "mutant_sha256": "1d3e3006ee9637a924a085e2cbf6851cec98cbeeecc0fc194a957109f246f32b",
       "passed": 27,
-      "report_sha256": "a6890538397b1698009cf1935dfd05d7c37f67c6292e598c0cf9885c1619de9f",
-      "seconds": 0.871,
+      "report_sha256": "bbfb3f496f4388906b365bad1d4466bbcd250022500eedd4f081bd4af9fa8e94",
+      "seconds": 0.935,
       "stderr_empty": true,
       "tests": 32
     },
@@ -107,11 +112,191 @@
       "log_sha256": "fd19eb186471bd36c2fb986591822192cc17b54d2948c01b307c2d1a442cfe16",
       "mutant_sha256": "e3ab861c002909128d7bcd143eec8ce351c2da0179ed448bfc265c245a76841e",
       "passed": 26,
-      "report_sha256": "657418520a9183b6c7ac0fed7b7b28e6c3565564de2c8fbfcf69fb62d00755af",
-      "seconds": 0.882,
+      "report_sha256": "67b07bc536ea8a2aa85f4e728e835c8ae1b44d69865bd5ec49503b1f0605371d",
+      "seconds": 0.911,
       "stderr_empty": true,
       "tests": 32
     }
+  },
+  "native_artifact": {
+    "build": {
+      "artifact": "profile-build-ystdp9/index.mjs",
+      "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+      "compiler": "8.3.1",
+      "files": {
+        "index.mjs": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb"
+      },
+      "input_sha256": {
+        "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
+        "../../../integrations/acp_worker/dsh_tool_profile.mjs": "ea2b80dd28fe6b22584919d02b7998f4c356efaafaf34dc7aad1fa4f071bb57e",
+        ".cache/donor/index.ts": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
+        ".cache/donor/invariant.ts": "919744eaa6c1e6489a68a4ea3be9831e1e6c576a4a2fce96801d0a3a33ac2a79",
+        ".cache/donor/json-schema.ts": "13deffdfd34539e23706b0fde235991da45b2f07c5c18dbbf3ca734c1da0c788",
+        ".cache/donor/presentation.ts": "2e729538403ef924430187df13ec5e140de95e0ea41a8225093dba644c1f2b6a",
+        ".cache/donor/ptc.ts": "a0569c4600191c4395e669ceb20f6bd279cc898d3ba506bd8e6a188e80ed8dfb",
+        ".cache/donor/py-types.ts": "aa912e3f9e5ea1024600f0598f29de46c9308fd2774886576ba1f07ce81488ec",
+        ".cache/donor/schema.ts": "d54459d0ad535ff3375138d40f3b37b39c6994703f1ea6a331df9a97c7e3cd23",
+        ".cache/donor/testing.ts": "8b7bf72750d885c1acb52e99ccac9e42542cc5efcb581098ad3507e83ca0a651",
+        ".cache/donor/ts-types.ts": "473562e67f2282579b2abb451acee759e2d2af681a051690c4980af4459016e1",
+        ".cache/donor/types.ts": "2b2bfa5da56f7ebb67236a33329fff47064bcc8d2658ce24a4cdedc7668e6fe9",
+        ".cache/mcp-donor/connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
+        ".cache/mcp-donor/index.ts": "26f90f0c34660d24058e19e8683d3f191e3752ce3a90129f7e7cf8d1b0790638",
+        ".cache/mcp-donor/server-context.ts": "02ca9fe759891788572385a00f0cc7b6e92d6e98e103c1d00dd99ccec0d6319a",
+        ".cache/mcp-donor/tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
+        ".cache/mcp-donor/transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f",
+        "build-profile.mjs": "d966267f285463a2d6a9a7c10391c175848523df0feb27f16ab91c77a3dc3132",
+        "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98"
+      },
+      "installed": false,
+      "kind": "TEST_LOCAL_PROFILE_BUILD",
+      "lock_sha256": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
+      "mcp_patch_sha256": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
+      "model_requests": 0
+    },
+    "build_run": {
+      "exit_code": 0,
+      "log_sha256": "8f2ff88007a7194fe5211e71b75a44acba8d8f07caf61f117924fbe6908d7ed0",
+      "stderr_empty": true
+    },
+    "rebuild_run": {
+      "exit_code": 0,
+      "log_sha256": "6f0814e0b834800a95f0838ce35ae73de35b485bad90960d0026494e6e38d818",
+      "stderr_empty": true
+    },
+    "repeat_build_identical": true,
+    "scenarios": {
+      "disabled-core": {
+        "exit_code": 0,
+        "log_sha256": "00b89ab6711b6b481cf228f3694c6a9f030c87bc5a777003b924b8a09c381c38",
+        "observation": {
+          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "fixture_children_absent": true,
+          "fixture_pids": [],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.8.2",
+          "nonce": "cd1f9162-7094-4e68-91a7-44fb3864e406",
+          "parent_pid": 74945,
+          "read_calls": 0,
+          "refusal": {
+            "code": "DSH_DISPATCH_PREFLIGHT_REFUSED",
+            "message": "Loaded DSH dispatch policy failed: revocation",
+            "name": "Error"
+          },
+          "scenario": "disabled-core",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 0,
+          "success": true
+        },
+        "receipt_sha256": "9a0513f83b94bc4d1a6a044cb0570601aad664f1ecf34c7a5c2962b2da48851a",
+        "stderr_empty": true
+      },
+      "normal": {
+        "exit_code": 0,
+        "log_sha256": "4d959fbac42c8339c75f367b98e2c10c9d4926adc127125f5ecceb74c0611c8c",
+        "observation": {
+          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "fixture_children_absent": true,
+          "fixture_pids": [
+            74929,
+            74939
+          ],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.8.2",
+          "nonce": "f585e728-6f91-488f-8a45-f4605c4428fc",
+          "parent_pid": 74928,
+          "read_calls": 1,
+          "scenario": "normal",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 1,
+          "success": true,
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "f585e728-6f91-488f-8a45-f4605c4428fc",
+              "pid": 74939,
+              "sha256": "7f8fd663efbb77f7eff7c8c9339864b5b296ea9d010eb64d6487382804e8a649",
+              "text": "artifact\nneedle f585e728-6f91-488f-8a45-f4605c4428fc\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle f585e728-6f91-488f-8a45-f4605c4428fc"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 1,
+                  "text": "needle f585e728-6f91-488f-8a45-f4605c4428fc"
+                }
+              ],
+              "nonce": "f585e728-6f91-488f-8a45-f4605c4428fc",
+              "pid": 74939
+            }
+          }
+        },
+        "receipt_sha256": "829a02c9c4a5e105c0de95b87fed00eb949f8ccbc30c762db2fd2a87847fd134",
+        "stderr_empty": true
+      },
+      "pre-aborted": {
+        "exit_code": 0,
+        "log_sha256": "668dcbb32f8cbe953874dede55a117d7f99dc37ff82fe7bc4f6bf479b2c9d304",
+        "observation": {
+          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "fixture_children_absent": true,
+          "fixture_pids": [],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.8.2",
+          "nonce": "e4e054a4-f5da-44b0-ada1-930372bca6ff",
+          "parent_pid": 74961,
+          "read_calls": 0,
+          "refusal": {
+            "code": 20,
+            "message": "This operation was aborted",
+            "name": "AbortError"
+          },
+          "scenario": "pre-aborted",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 0,
+          "success": true
+        },
+        "receipt_sha256": "41a8ff1b3f7d2415913f55238aed5df55d2ac65f52212cf2f76e4d1723de9f4d",
+        "stderr_empty": true
+      },
+      "startup-refused": {
+        "exit_code": 0,
+        "log_sha256": "aa77d892b6e9cf7eb53b2ae948814dccd5596ee74f43cc579b2d5ee91e17f59a",
+        "observation": {
+          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "fixture_children_absent": true,
+          "fixture_pids": [
+            74953,
+            74957
+          ],
+          "inputs_unchanged": true,
+          "model_requests": 0,
+          "node": "v26.8.2",
+          "nonce": "0b4373e5-d7c1-4cc3-b511-cf317a4916ae",
+          "parent_pid": 74949,
+          "read_calls": 0,
+          "refusal": {
+            "code": null,
+            "message": "mcp-client(artifact): initial connection or tool synchronization failed",
+            "name": "Error"
+          },
+          "scenario": "startup-refused",
+          "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
+          "search_calls": 0,
+          "success": true
+        },
+        "receipt_sha256": "45d947544aed6c1cff2b18293afa64ace692d4b8c8028e2f8f92b1bf2c0c80af",
+        "stderr_empty": true
+      }
+    },
+    "scope": "Actual built module imported by plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP"
   },
   "network_transport": "OFFICIAL_IN_MEMORY_MCP_AND_REAL_LOCAL_STDIO",
   "node": "v26.8.2",
@@ -131,12 +316,12 @@
       "result": {
         "content": [
           {
-            "text": "fa1ec819-52f1-4c15-8977-86e697199f4d",
+            "text": "fe2ddbb8-7306-4d11-b444-f4e641f63802",
             "type": "text"
           }
         ]
       },
-      "sourceNonce": "fa1ec819-52f1-4c15-8977-86e697199f4d"
+      "sourceNonce": "fe2ddbb8-7306-4d11-b444-f4e641f63802"
     },
     {
       "calls": 1,
@@ -146,70 +331,176 @@
     }
   ],
   "platform": "Darwin",
+  "postrun_census": {
+    "live": [],
+    "observed_at": "2026-09-29T10:57:53.487767+00:00",
+    "scope": "only recorded owned fixture probe/session processes, not arbitrary descendants or fleet health",
+    "unique_pids_checked": 182
+  },
   "preparation": {
     "exit_code": 0,
-    "log_sha256": "bc9afa04848b36ece54cac3aaed24279d6c9089c12267c199b7174291e0ceab0",
+    "log_sha256": "f892db62adefc727d7e04e7affbac6a49504b8788e6d8e2691bd0c4e44e87d89",
     "passed": 6,
     "tests": 6
+  },
+  "repository_test": {
+    "command": "/opt/homebrew/bin/python3 -B -m pytest -q",
+    "diagnostic": "No module named pytest",
+    "exit_code": 1,
+    "log_sha256": "c99d342a1664b93a03868ad56a22451965948da811503ce3b0d29ae5123b9dbb",
+    "result": "NOT_RUN_NO_PYTEST"
   },
   "schema": "mastermind.dsh_mcp_admission_verification.v1",
   "scope": "Real MCP SDK protocol and donor bridge; no model/installed-worker/Executive-parent proof",
   "stdio": {
     "environment_mutant": {
-      "all_children_fixture_cwd": true,
-      "all_children_private_home": true,
       "all_observed_children_settled": true,
-      "all_preflights_verified": true,
-      "environment_proof": {
-        "explicit private home and cwd reach the actual child": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            null,
-            null
+      "environment_proof": [
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
           ],
-          "node_options": [
-            null,
-            null
-          ]
+          "mode": "normal",
+          "strict": true
         },
-        "host-admitted stdio excludes ambient Node startup options": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            null,
-            null
+        {
+          "environment": [
+            {
+              "ambient": "fixture-ambient",
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": "fixture-ambient",
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
           ],
-          "node_options": [
-            "--no-warnings",
-            "--no-warnings"
-          ]
+          "mode": "normal",
+          "strict": true
         },
-        "host-admitted stdio excludes unapproved ambient configuration": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            "fixture-ambient",
-            "fixture-ambient"
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": "--no-warnings"
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": "--no-warnings"
+            }
           ],
-          "node_options": [
-            null,
-            null
-          ]
+          "mode": "normal",
+          "strict": true
         },
-        "legacy transport retains its existing scrubbed ambient behavior": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            "fixture-ambient",
-            "fixture-ambient"
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
           ],
-          "node_options": [
-            null,
-            null
-          ]
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": "fixture-ambient",
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": "fixture-ambient",
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": false
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
         }
-      },
+      ],
       "exit_code": 1,
       "failed_cases": [
         "host-admitted stdio excludes ambient Node startup options",
@@ -218,439 +509,488 @@
       "killed": true,
       "log_sha256": "d160a48e802cf8715a9688bc8a86f5c54f20c62a5f0b59ea0a1ea3663004e602",
       "mutant_sha256": "83520c0cb0e6dde5f96072feb9b729308485300b2a47b2e75470288f4bfb67e9",
-      "observations_sha256": "4435ca288595c88acbe66615b6cc5fd0f579c4a29d616be00ea9a12028055619",
+      "observations_sha256": "a991b8f73cb885ef6add35f83ccce7cf47701b48894a0cf679ecec470d20ecea",
       "passed": 10,
       "process_summary": [
         {
-          "all_children_absent": true,
-          "case": "real stdio subprocess reads and searches two synthetic files through admitted tools",
-          "event_counts": {
-            "read": 1,
-            "search": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76231,
-            76232
-          ]
+            76539,
+            76585
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "host-admitted stdio excludes unapproved ambient configuration",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76236,
-            76238
-          ]
+            76633,
+            76677
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "host-admitted stdio excludes ambient Node startup options",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76249,
-            76262
-          ]
+            76725,
+            76792
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "explicit private home and cwd reach the actual child",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76266,
-            76275
-          ]
+            76836,
+            76874
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "legacy transport retains its existing scrubbed ambient behavior",
-          "event_counts": {
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76297,
-            76302
-          ]
+            76918,
+            76957
+          ],
+          "strict": false
         },
         {
-          "all_children_absent": true,
-          "case": "revoked live grant prevents an actual child request",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76303,
-            76304
-          ]
+            77002,
+            77040
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "instruction and resource channels remain closed over real stdio",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76306,
-            76307
-          ]
+            77080,
+            77115
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "startup discovery rejection settles the real child",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "reject-list",
           "pids": [
-            76310,
-            76312
-          ]
+            77161,
+            77198
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "lost response never resends the already-read request",
-          "event_counts": {
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "lost-reply",
           "pids": [
-            76315,
-            76316
-          ]
+            77235,
+            77274
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "in-flight cancellation reaches the real server and settles without a second call",
-          "event_counts": {
-            "cancelled": 1,
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "wait-cancel",
           "pids": [
-            76317,
-            76318
-          ]
+            77315,
+            77350
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "the synthetic fixture never reads a caller-selected outside path",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76323,
-            76331
-          ]
+            77399,
+            77440
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "SDK negotiation probe is reaped before the useful session is ready",
-          "event_counts": {
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76335,
-            76338
-          ]
+            77490,
+            77528
+          ],
+          "strict": true
         }
       ],
-      "report_sha256": "568831ba7275c5d74de84b54f7fc2b517e2d8f1315f5f0c5a48ff163d68bac8a",
-      "seconds": 3.568,
+      "report_sha256": "488e777da49ba903fa07ef830175f0f6cdf22545964ca91f9ab0aea0d68e3f36",
+      "seconds": 3.463,
       "stderr_empty": true,
       "tests": 12,
       "workload_result": {
         "read": {
           "file": "memo.txt",
-          "nonce": "e2ebc621-e2d4-45e3-9838-f92ee223574d",
-          "pid": 76232,
-          "sha256": "751460721200abe2e9733f964ac1779dd2a633eff40c1a0da35105bb830dc19f",
-          "text": "Research fixture\nneedle e2ebc621-e2d4-45e3-9838-f92ee223574d\n"
+          "nonce": "0d5d2015-b47c-44bc-92bd-01656ca109ed",
+          "pid": 76585,
+          "sha256": "9069d3f63071c8b62a5970d4a7a85d24a035f51ff8e0fe658a7453a191cc1381",
+          "text": "Research fixture\nneedle 0d5d2015-b47c-44bc-92bd-01656ca109ed\n"
         },
         "search": {
           "matches": [
             {
               "file": "memo.txt",
               "line": 2,
-              "text": "needle e2ebc621-e2d4-45e3-9838-f92ee223574d"
+              "text": "needle 0d5d2015-b47c-44bc-92bd-01656ca109ed"
             },
             {
               "file": "signals.txt",
               "line": 3,
-              "text": "needle e2ebc621-e2d4-45e3-9838-f92ee223574d"
+              "text": "needle 0d5d2015-b47c-44bc-92bd-01656ca109ed"
             }
           ],
-          "nonce": "e2ebc621-e2d4-45e3-9838-f92ee223574d",
-          "pid": 76232
+          "nonce": "0d5d2015-b47c-44bc-92bd-01656ca109ed",
+          "pid": 76585
         }
       }
     },
     "patched": {
-      "all_children_fixture_cwd": true,
-      "all_children_private_home": true,
       "all_observed_children_settled": true,
-      "all_preflights_verified": true,
-      "environment_proof": {
-        "explicit private home and cwd reach the actual child": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            null,
-            null
+      "environment_proof": [
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
           ],
-          "node_options": [
-            null,
-            null
-          ]
+          "mode": "normal",
+          "strict": true
         },
-        "host-admitted stdio excludes ambient Node startup options": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            null,
-            null
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
           ],
-          "node_options": [
-            null,
-            null
-          ]
+          "mode": "normal",
+          "strict": true
         },
-        "host-admitted stdio excludes unapproved ambient configuration": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            null,
-            null
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
           ],
-          "node_options": [
-            null,
-            null
-          ]
+          "mode": "normal",
+          "strict": true
         },
-        "legacy transport retains its existing scrubbed ambient behavior": {
-          "all_children_fixture_cwd": true,
-          "all_children_private_home": true,
-          "ambient": [
-            "fixture-ambient",
-            "fixture-ambient"
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
           ],
-          "node_options": [
-            null,
-            null
-          ]
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": "fixture-ambient",
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": "fixture-ambient",
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": false
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
+        },
+        {
+          "environment": [
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            },
+            {
+              "ambient": null,
+              "explicit": "fixture-explicit",
+              "nodeOptions": null
+            }
+          ],
+          "mode": "normal",
+          "strict": true
         }
-      },
+      ],
       "exit_code": 0,
       "failed_cases": [],
       "log_sha256": "331f129c70ddecedf94a0061c250d85440fdbc3f4b797468bd9088ddbc86b563",
-      "observations_sha256": "01d22869266a5e9a1bede57b202f1d8986f33e6181922c3426620acf34b79113",
+      "observations_sha256": "f9e53e39df76944b7fb4fb052396ccc249cfd50d8a126ac81130d3c621efd211",
       "passed": 12,
       "process_summary": [
         {
-          "all_children_absent": true,
-          "case": "real stdio subprocess reads and searches two synthetic files through admitted tools",
-          "event_counts": {
-            "read": 1,
-            "search": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76109,
-            76112
-          ]
+            75288,
+            75355
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "host-admitted stdio excludes unapproved ambient configuration",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76117,
-            76120
-          ]
+            75409,
+            75445
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "host-admitted stdio excludes ambient Node startup options",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76124,
-            76128
-          ]
+            75487,
+            75524
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "explicit private home and cwd reach the actual child",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76129,
-            76130
-          ]
+            75562,
+            75600
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "legacy transport retains its existing scrubbed ambient behavior",
-          "event_counts": {
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76132,
-            76133
-          ]
+            75642,
+            75685
+          ],
+          "strict": false
         },
         {
-          "all_children_absent": true,
-          "case": "revoked live grant prevents an actual child request",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76137,
-            76138
-          ]
+            75728,
+            75767
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "instruction and resource channels remain closed over real stdio",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76141,
-            76142
-          ]
+            75819,
+            75866
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "startup discovery rejection settles the real child",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "reject-list",
           "pids": [
-            76143,
-            76144
-          ]
+            75906,
+            75944
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "lost response never resends the already-read request",
-          "event_counts": {
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "lost-reply",
           "pids": [
-            76149,
-            76154
-          ]
+            75985,
+            76025
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "in-flight cancellation reaches the real server and settles without a second call",
-          "event_counts": {
-            "cancelled": 1,
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "wait-cancel",
           "pids": [
-            76164,
-            76168
-          ]
+            76074,
+            76113
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "the synthetic fixture never reads a caller-selected outside path",
-          "event_counts": {
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76173,
-            76177
-          ]
+            76174,
+            76214
+          ],
+          "strict": true
         },
         {
-          "all_children_absent": true,
-          "case": "SDK negotiation probe is reaped before the useful session is ready",
-          "event_counts": {
-            "read": 1,
-            "start": 2
-          },
-          "inputs_unchanged": true,
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "inputsUnchanged": true,
+          "mode": "normal",
           "pids": [
-            76182,
-            76184
-          ]
+            76260,
+            76311
+          ],
+          "strict": true
         }
       ],
-      "report_sha256": "407b75540fb34a3ee518c087df6438e2846db397a7271891e31431b8622e5547",
-      "seconds": 4.42,
+      "report_sha256": "ed6283fcde19f2238561f16232e3367ca5ef9b147b74a4c4ce5076185c13fd51",
+      "seconds": 3.564,
       "stderr_empty": true,
       "tests": 12,
       "workload_result": {
         "read": {
           "file": "memo.txt",
-          "nonce": "4c047f61-2fb7-4e34-9f98-2f3b51fff300",
-          "pid": 76112,
-          "sha256": "1141ca51b0227b387ecb4cc41c80a429b36cbe4c9b4efa361659724a4940a6e3",
-          "text": "Research fixture\nneedle 4c047f61-2fb7-4e34-9f98-2f3b51fff300\n"
+          "nonce": "36abd20c-745d-4d90-bed4-25469260e585",
+          "pid": 75355,
+          "sha256": "b7e8e900999a61e9902dd87b4787223122a9aa10bcc9fa117efa5c61aa0b6864",
+          "text": "Research fixture\nneedle 36abd20c-745d-4d90-bed4-25469260e585\n"
         },
         "search": {
           "matches": [
             {
               "file": "memo.txt",
               "line": 2,
-              "text": "needle 4c047f61-2fb7-4e34-9f98-2f3b51fff300"
+              "text": "needle 36abd20c-745d-4d90-bed4-25469260e585"
             },
             {
               "file": "signals.txt",
               "line": 3,
-              "text": "needle 4c047f61-2fb7-4e34-9f98-2f3b51fff300"
+              "text": "needle 36abd20c-745d-4d90-bed4-25469260e585"
             }
           ],
-          "nonce": "4c047f61-2fb7-4e34-9f98-2f3b51fff300",
-          "pid": 76112
+          "nonce": "36abd20c-745d-4d90-bed4-25469260e585",
+          "pid": 75355
         }
       }
-    },
-    "postrun_census": {
-      "live": [],
-      "observed_at": "2026-09-29T10:01:00.800822+00:00",
-      "scope": "Only fixture-receipted PIDs; no fleet census or process termination",
-      "unique_pids_checked": 48
     },
     "scope": "Synthetic disk inputs, SDK probe plus session; no model, ACP parent or OS confinement",
     "sdk_executable_sha256": {
@@ -699,8 +1039,8 @@
       "failed_cases": [],
       "log_sha256": "9f393e69c33f1e9a1b50c6d8c412df7f2d41a26a3df2f20d7503c23a3671fa5c",
       "passed": 32,
-      "report_sha256": "4d2f9fda3a8a2bd8f6247c1d2e24cef8bcae0ff78c6e80499c2b1b5d9372c908",
-      "seconds": 0.888,
+      "report_sha256": "af4c630b763054b0948f5c2a439923950402412e923a9057633fb8b062301960",
+      "seconds": 0.976,
       "stderr_empty": true,
       "tests": 32
     },
@@ -739,8 +1079,8 @@
       ],
       "log_sha256": "5862bd1eb21b809b078688edcef8ad1d3f62c13777ad031df7b1037c7fc8ea2c",
       "passed": 3,
-      "report_sha256": "f88a6f059e837cbeb68e65052b8fc4169517748fbbdd4aa16fa36b2ac8253746",
-      "seconds": 1.871,
+      "report_sha256": "31d7d7a1e650b28b7fd264f5efffa0e27be0fec161aba74282cb9f529ea9689c",
+      "seconds": 1.981,
       "stderr_empty": true,
       "tests": 32
     }
@@ -754,21 +1094,344 @@
       "exit_code": 0,
       "failed_cases": [],
       "log_sha256": "3b36b7291c2d7ec995404baf7ba0f4e49cfddd0b4182cfe81c8817a555b7a02e",
-      "passed": 93,
-      "report_sha256": "072703bfba24e237beb1ede4667821d66214b2b18669b0a7a8c35d1b09a340e1",
-      "seconds": 2.807,
+      "passed": 121,
+      "report_sha256": "7b7e96814b19813c9d39a3f52b2656d092ad326a6ea1c41c26d25bcfa0beb208",
+      "seconds": 3.555,
       "stderr_empty": true,
-      "tests": 93
+      "tests": 121
     },
     "pristine": {
       "exit_code": 0,
       "failed_cases": [],
       "log_sha256": "a77d8b1109901a64c8e6d60e6372a6829d46cc5e2a34457f46858e596a9576e8",
-      "passed": 93,
-      "report_sha256": "539288e787e93f4bf0eaf723555e273913330e4b7f80d56105ed50c3e4f5a894",
-      "seconds": 2.795,
+      "passed": 121,
+      "report_sha256": "e0f46b78ade8f1843383ea9a354f2fc5fd5398dd19cc114b0698e00234eec438",
+      "seconds": 3.675,
       "stderr_empty": true,
-      "tests": 93
+      "tests": 121
     }
+  },
+  "worker_profile": {
+    "mutants": {
+      "admission_wiring": {
+        "all_recorded_children_absent": true,
+        "exit_code": 1,
+        "failed_cases": [
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "admission refusal rolls back namespace so a later explicit instance can activate",
+          "public admitted plugin activates the real read path with only selected tools"
+        ],
+        "fixture_pids": [
+          71461,
+          71505,
+          71557,
+          71612,
+          71661,
+          71702,
+          71757,
+          71802,
+          71849,
+          71889,
+          71945,
+          71988,
+          72043,
+          72083,
+          72139,
+          72180,
+          72235,
+          72291,
+          72359,
+          72403,
+          72452,
+          72495
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "9b2b224866c866d67fe302fe66221cd0ce3eb2489549262d5f6010d69a419533",
+        "mutant_sha256": "1ea7b40144e05be69277f3d4110b709badadebec312ebc462fc4f3d734da2e6a",
+        "observations_sha256": "9dd0a44590c65e151289054e47556946048c4a8d0ecde76aa88566755a02c225",
+        "passed": 16,
+        "report_sha256": "6da2dc577a0f98cbf1d14a241a46df93589458f9a15f8a457b008e758c44a2f4",
+        "seconds": 3.416,
+        "stderr_empty": true,
+        "tests": 19
+      },
+      "required_preflight": {
+        "all_recorded_children_absent": true,
+        "exit_code": 1,
+        "failed_cases": [
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight"
+        ],
+        "fixture_pids": [
+          72735,
+          72785,
+          72839,
+          72882,
+          72927,
+          72970,
+          73014,
+          73050,
+          73105,
+          73155,
+          73208,
+          73257,
+          73318,
+          73363,
+          73417,
+          73464,
+          73517,
+          73559,
+          73609,
+          73666,
+          73723,
+          73769,
+          73814,
+          73868,
+          73919,
+          73971,
+          74023,
+          74061,
+          74107,
+          74172
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "70e0e9650d258716bc4780162c3196a8183367e225a9067e3ddeebf66870f98a",
+        "mutant_sha256": "ef1704e446553f0ef36e48e7f66b7a46e74d65dec4acaa5a74a26e1ecd0fef44",
+        "observations_sha256": "afcb380ac555adad2259ec6d49de3e0cef3b1dd65d17c5c8ed6c2bb796ff3bd5",
+        "passed": 15,
+        "report_sha256": "0a96fba857e184333d2d92ab5b659d230eecf837b92d5bfd56481430c3bd2002",
+        "seconds": 4.274,
+        "stderr_empty": true,
+        "tests": 19
+      },
+      "startup_policy": {
+        "all_recorded_children_absent": true,
+        "exit_code": 1,
+        "failed_cases": [
+          "admitted plugin refuses enabled reconnect before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses permissive startup before process creation"
+        ],
+        "fixture_pids": [
+          70029,
+          70079,
+          70138,
+          70185,
+          70235,
+          70286,
+          70337,
+          70386,
+          70441,
+          70484,
+          70525,
+          70566,
+          70621,
+          70679,
+          70706,
+          70736,
+          70767,
+          70797,
+          70826,
+          70853,
+          70889,
+          70916,
+          70948,
+          70972,
+          71003,
+          71042,
+          71087,
+          71124,
+          71167,
+          71210
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "6f7e829db88b7d5a9a9e5711ccb64db8af67b66ac0a3384c547d01e345d40101",
+        "mutant_sha256": "f39a76eaea8c8e9dc90a0b1acac249dfcbe43515dc0a6b696b6a96d9cbbe2752",
+        "observations_sha256": "04e26e44d5777cc73a659ec21877d1d5177b5e698c76d60407b2c5ae88d6576e",
+        "passed": 16,
+        "report_sha256": "54eeda3c41b4903b9947dfc8696af6f0ee5c6aebe88ae417ab5b44917573692a",
+        "seconds": 4.265,
+        "stderr_empty": true,
+        "tests": 19
+      },
+      "startup_snapshot": {
+        "all_recorded_children_absent": true,
+        "exit_code": 1,
+        "failed_cases": [
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight"
+        ],
+        "fixture_pids": [
+          74424,
+          74474,
+          74533,
+          74582,
+          74630,
+          74673,
+          74726,
+          74767,
+          74812,
+          74854,
+          74856,
+          74857,
+          74858,
+          74861,
+          74864,
+          74866,
+          74867,
+          74871,
+          74876,
+          74877,
+          74878,
+          74892,
+          74904,
+          74905
+        ],
+        "inputs_unchanged": true,
+        "killed": true,
+        "log_sha256": "397ac039f9cad6794a8ebbaca63fe01d7c8169760a74b8ffb0703f750243bdfa",
+        "mutant_sha256": "2034d7300e4975f849ace4715bd4d436170f1ae8c4c33f473639e5e18bfc9a15",
+        "observations_sha256": "e970a9b9e702c66cbf2e64e7b34bc953eb84208e3bbd5548aacf1452bb8e6190",
+        "passed": 18,
+        "report_sha256": "a53927ee5578fe9843307c830c412a75d2757c9a4f00b65b074c6d9f4a675e55",
+        "seconds": 3.519,
+        "stderr_empty": true,
+        "tests": 19
+      }
+    },
+    "positive": {
+      "all_recorded_children_absent": true,
+      "cases": [
+        "public admitted plugin activates the real read path with only selected tools",
+        "admitted plugin refuses permissive startup before process creation",
+        "admitted plugin refuses implicit reconnect before process creation",
+        "admitted plugin refuses enabled reconnect before process creation",
+        "public admitted factory rejects missing host permission or cancellation binding",
+        "pre-aborted admitted startup creates no process",
+        "public admitted startup failure rolls back tools and settles all child processes",
+        "public admitted plugin shares namespace ownership with the original plugin",
+        "plugin disposal releases the original namespace for another admitted instance",
+        "owner abort uses existing plugin teardown and removes admitted tools",
+        "Mastermind runtime profile performs preflight then activates the actual read process",
+        "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+        "Mastermind runtime profile rejects deny-all false readiness before spawning",
+        "Mastermind runtime profile cancellation during preflight never starts a process",
+        "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+        "legacy experiment import resolves the same runtime preflight implementation",
+        "owner abort during real discovery prevents activation and settles startup processes",
+        "owner abort during an actual profile tool call settles without replay",
+        "admission refusal rolls back namespace so a later explicit instance can activate"
+      ],
+      "exit_code": 0,
+      "failed_cases": [],
+      "fixture_pids": [
+        68710,
+        68737,
+        68767,
+        68783,
+        68810,
+        68855,
+        68924,
+        68971,
+        69030,
+        69084,
+        69138,
+        69182,
+        69237,
+        69281,
+        69337,
+        69380,
+        69437,
+        69479,
+        69533,
+        69574,
+        69627,
+        69672,
+        69721,
+        69768
+      ],
+      "inputs_unchanged": true,
+      "log_sha256": "d65ef89ab495de2c5137b0e95733ed1281c92d62466a748d1194c8a44f762d97",
+      "observations_sha256": "e0be0f2e1d62307f4aaf86cf4df5b4115eb9804b5caec10c4c66cbc29da5c044",
+      "passed": 19,
+      "report_sha256": "f7387a7b316fbf546c50d9a1eaad8cd8aa81627d9d1f8368526483e654fae19b",
+      "seconds": 3.591,
+      "stderr_empty": true,
+      "tests": 19,
+      "useful_workload": {
+        "childrenAbsent": true,
+        "events": [
+          {
+            "ambient": null,
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du",
+            "event": "start",
+            "explicit": null,
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du/home",
+            "nodeOptions": null,
+            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+            "pid": 69237
+          },
+          {
+            "ambient": null,
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du",
+            "event": "start",
+            "explicit": null,
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du/home",
+            "nodeOptions": null,
+            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+            "pid": 69281
+          },
+          {
+            "event": "read",
+            "file": "memo.txt",
+            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+            "pid": 69281
+          },
+          {
+            "event": "search",
+            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+            "pid": 69281,
+            "query": "91705698-3f26-4bd8-b40a-e53f8869a642"
+          }
+        ],
+        "inputsUnchanged": true,
+        "mode": "normal",
+        "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+        "pids": [
+          69237,
+          69281
+        ],
+        "workload": {
+          "read": {
+            "file": "memo.txt",
+            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+            "pid": 69281,
+            "sha256": "be4bfdba20bc6a5b790bbde3665b245307c9a0fac5fea9adb0a46968be5600ab",
+            "text": "profile\nneedle 91705698-3f26-4bd8-b40a-e53f8869a642\n"
+          },
+          "search": {
+            "matches": [
+              {
+                "file": "memo.txt",
+                "line": 2,
+                "text": "needle 91705698-3f26-4bd8-b40a-e53f8869a642"
+              },
+              {
+                "file": "signals.txt",
+                "line": 2,
+                "text": "needle 91705698-3f26-4bd8-b40a-e53f8869a642"
+              }
+            ],
+            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+            "pid": 69281
+          }
+        }
+      }
+    },
+    "scope": "Real Cordis plugin and Mastermind source profile + synthetic MCP process; not installed ACP or Executive acceptance"
   }
 }
