@@ -1,56 +1,51 @@
-# Paper host-routing prototype - quarantined, not integrated
+# Paper host-routing prototype: repaired in isolation, not integrated
 
-This directory preserves an unfinished prototype and its negative test evidence.
-It is not imported or staged by the live Paper service. Do not install or enable it.
-The production candidate remains the host-bound-snapshot implementation at
-`cf6e9c954fc34d3b7f3f0dfffef6a022652afab2` in PR #1017; that candidate's full CI passed.
+This research directory is not imported or staged by the Paper service. Do not
+install or enable it. The production-source changes remain those published at
+`cf6e9c954fc34d3b7f3f0dfffef6a022652afab2` in PR #1017. Their full CI passed.
 
-## What happened
+## Original findings and repairs
 
-Seven structural configuration/SSH-command tests passed. Eleven additional
-in-memory, no-network adversarial probes found nine passes, one failure and one
-error. The two release-blocking defects are:
+Commit `c071d6cf9486ec02ebdc94185950db60521ac091` preserves the original
+prototype and its negative evidence. Seven structural checks passed, but eleven
+adversarial checks found two defects: the real MCP SDK could not resolve a
+function-local postponed return annotation, and lost local edit replies were
+incorrectly labeled EFFECT_NONE. Both defects are repaired in this research copy.
 
-1. Actual mcp==1.30.0 tool registration raises InvalidSignature because the
-   postponed CallToolResult return annotation cannot resolve the function-local import.
-2. A lost local modifying-call response is incorrectly labeled EFFECT_NONE by
-   the prototype router; it must retain EFFECT_UNKNOWN and original target identity.
+The repair also removes the known Python-3.11-only asyncio.timeout dependency,
+using the installed SDK's AnyIO cancellation scope instead. Python 3.10 syntax
+validation passes; runtime execution on Python 3.10 has NOT been demonstrated.
+Known-host paths with spaces are quoted for SSH configuration parsing. Refusal
+codes remain typed, and successful/uncertain modifying replies must preserve the
+requested operation identity. Successful prepare replies must match the file ID.
 
-Static compatibility finding: asyncio.timeout requires Python 3.11+, while the
-existing service documents Python 3.10+. Compatibility was not tested on 3.10.
+## Validation limits
 
-The platform blocked the attempted integration patch before tool execution.
-Readback proved mcp_server.py and direct_service.py remained byte-identical to
-cf6e9c9. The blocked patch was not retried, split, rephrased, or delegated.
-Quarantining this unconnected prototype is containment and evidence preservation,
-not another route for performing the denied integration.
+- Seven structural checks: PASS.
+- Eleven adversarial checks: PASS.
+- Fourteen real SDK stdio checks with synthetic backends: PASS.
+- No SSH, Paper application, tunnel, key, login, or fleet endpoint was contacted.
+- The stdio checks prove message registration/serialization, not fleet operation.
+- New evidence is repair_evidence.json; original evidence.json remains historical.
 
-## Design under evaluation
+## Integration remains blocked
 
-One stdio tunnel client per seat; host selection inside the existing Paper service.
-Only configured opaque fleet host references are public inputs. Proposed remote
-calls use existing SSH key/known-host references, strict host verification and a
-pinned guarded backend. No new public listener, auth store, queue, retry ledger,
-worker Job, automatic failover or duplicate tunnel is introduced.
+The platform blocked the earlier production integration patch before execution.
+It was not retried, split, rephrased, delegated, or moved to another account.
+The repairs above affect only this unconnected research directory. Production
+mcp_server.py and direct_service.py remain unchanged. A passing prototype does
+not clear the platform restriction, confer access, or authorize deployment.
 
-This is a proposed transport binding, not proof of an accepted fleet interface,
-actual host qualification, native worker admission, account access or production readiness.
-Native worker Paper grants are a separate integration from attended interactive routing;
-they must not become an invented prerequisite for ordinary ChatGPT Paper calls.
+## Architecture still requiring acceptance
 
-## Validation
+One active stdio tunnel client per seat; controlled host selection inside the
+existing Paper service; configured opaque fleet references only. Any adopted
+remote path must consume existing authorized host/SSH bindings, enforce backend
+identity and schema, preserve original-host effects, and never auto-failover an
+uncertain write. The proposed configuration is not an authorization registry or
+proof that an existing fleet interface accepts it. Native-worker Paper grants are
+separate from attended ChatGPT routing and must not be invented as its prerequisite.
 
-`validation_basic.py` contains the seven structural tests. The eleven additional probes are preserved in validation_adversarial.py;
-their observed outcomes are recorded in evidence.json and the existing PR checkpoint.
-They used synthetic hosts and fake client sessions only. No real SSH, Paper document,
-credential or tunnel was contacted. Passing structural tests do not offset the
-observed protocol/effect failures. These prototype files are deliberately outside
-the production source and ordinary test-collection paths; they are not a CI acceptance gate.
-
-## Continuation
-
-Preserve the platform restriction on the denied integration action. A future
-permitted continuation must reconcile current access, custody and effects first;
-neither this file nor a new account/session is permission to bypass the restriction.
-Any later implementation must resolve the named failures, pass real SDK wire tests,
-receive independent review, and prove qualified-host/per-account operation before rollout.
+Next: independent architecture/security review and permitted integration recovery,
+then qualified-host/per-account real-path acceptance. Do not roll out this module
+or copy one seat's live tunnel across hosts. Live Ryan/M1/Mini 1 gates remain separate.

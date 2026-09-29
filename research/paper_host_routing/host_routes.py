@@ -6,7 +6,6 @@ session, credential copy, retry, implicit placement, or automatic failover exist
 Only a configured host reference crosses the public MCP interface. SSH launches
 that host's verified direct_service serve command; it never starts a second tunnel.
 """
-from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
@@ -127,6 +126,8 @@ def _private_file(path, expected_sha256=None):
                 _require(hashlib.sha256(data).hexdigest() == expected_sha256, "SSH_BINDING_CHANGED")
         finally:
             os.close(fd)
+    except RouteError:
+        raise
     except (OSError, ValueError):
         raise RouteError("SSH_BINDING_UNAVAILABLE") from None
 
@@ -143,7 +144,7 @@ def ssh_command(route, *, verify_files=True):
                "CanonicalizeHostname=no", "UpdateHostKeys=no", "ConnectionAttempts=1",
                "ConnectTimeout=5", "NumberOfPasswordPrompts=0", "PasswordAuthentication=no",
                "KbdInteractiveAuthentication=no", "GlobalKnownHostsFile=/dev/null",
-               "UserKnownHostsFile=" + ssh["known_hosts_file"]]
+               "UserKnownHostsFile=" + json.dumps(ssh["known_hosts_file"])]
     remote = shlex.join([ssh["python_path"], "-I", ssh["runtime_root"] + "/runtime/direct_service.py",
                         "serve", "--root", ssh["runtime_root"], "--host-ref", route["host_ref"]])
     argv = ["/usr/bin/ssh", "-T", "-F", "/dev/null"]
@@ -182,13 +183,21 @@ def _json(text):
                       parse_constant=lambda _: (_ for _ in ()).throw(RouteError("BACKEND_RECEIPT_INVALID")))
 
 
-def checked_result(result, route):
+def checked_result(result, route, *, name=None, arguments=None):
     try:
         _require(len(result.model_dump_json().encode()) <= MAX_RESPONSE, "BACKEND_RESULT_TOO_LARGE")
         _require(result.content and result.content[0].type == "text", "BACKEND_RECEIPT_INVALID")
         payload = _json(result.content[0].text)
         _require(type(payload) is dict and payload.get("execution_binding") == route["execution_binding"],
                  "BACKEND_IDENTITY_MISMATCH")
+        if name in MODIFYING and payload.get("state") in {
+                "APPLIED_RESPONSE_OBSERVED", "EFFECT_UNKNOWN", "PAPER_READY", "PAPER_READY_READ_ONLY"}:
+            _require(type(arguments) is dict and payload.get("operation_id") == arguments.get("operation_id")
+                     and isinstance(payload.get("operation_id"), str), "BACKEND_OPERATION_MISMATCH")
+        if name == "paper_prepare" and payload.get("state") in {"PAPER_READY", "PAPER_READY_READ_ONLY"}:
+            _require(payload.get("file_id") == arguments.get("file_id"), "BACKEND_FILE_MISMATCH")
+    except RouteError:
+        raise
     except (AttributeError, TypeError, ValueError, RecursionError):
         raise RouteError("BACKEND_RECEIPT_INVALID") from None
     return payload
@@ -228,10 +237,18 @@ class HostRouter:
                      "INVALID_ARGUMENTS")
             _require(type(selected) is str and HOST.fullmatch(selected) is not None, "HOST_NOT_CONFIGURED")
             if selected == self.local_binding["host_ref"]:
-                return await self.local_call(name, copy.deepcopy(arguments))
+                route = {"host_ref": selected, "execution_binding": self.local_binding}
+                # The local backend may have dispatched an edit before it raises.
+                # Conservative classification is required on a missing reply.
+                dispatched = True
+                result = await self.local_call(name, copy.deepcopy(arguments))
+                checked_result(result, route, name=name, arguments=arguments)
+                observed = result
+                return observed
             _require(selected in self.routes, "HOST_NOT_CONFIGURED")
             route = self.routes[selected]
-            async with asyncio.timeout(60):
+            from anyio import fail_after
+            with fail_after(60):
                 async with self.connect(copy.deepcopy(route)) as client:
                     hello = await client.initialize()
                     _require(hello.serverInfo.name == "mastermind-paper", "BACKEND_SERVER_MISMATCH")
@@ -248,7 +265,7 @@ class HostRouter:
                     # Set before the await: a broken reply never licenses another send.
                     dispatched = True
                     result = await client.call_tool(name, copy.deepcopy(arguments))
-                    checked_result(result, route)
+                    checked_result(result, route, name=name, arguments=arguments)
                     observed = result
             return observed
         except (Exception, asyncio.CancelledError) as exc:

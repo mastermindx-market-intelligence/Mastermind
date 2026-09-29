@@ -1,4 +1,4 @@
-"""Reproduce known prototype failures. Fake sessions only; exit 1 is expected until repaired.
+"""Reproduce host-routing regressions. Fake sessions only; the original failures are retained in Git history.
 Run using the dedicated mcp==1.30.0 interpreter. This is not a production test gate.
 """
 import asyncio
