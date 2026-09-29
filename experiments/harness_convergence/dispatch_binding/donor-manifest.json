@@ -120,7 +120,7 @@
   "patch_file": "strict-dispatch-binding.patch",
   "patch_sha256": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
   "patched_index_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
-  "npm_lock_sha256": "b22359bf374d9743f3bdf5a9ee950d5702bca7ac899ac07f3c83bc597ee0c729",
+  "npm_lock_sha256": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
   "proof_scope": "Real core ToolRuntime with published support dependencies; not a whole DSH executable/profile qualification.",
   "patch_format": "unified-zero-context; exact source preimage hash required"
 }

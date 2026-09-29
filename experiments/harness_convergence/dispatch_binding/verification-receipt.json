@@ -1,14 +1,14 @@
 {
   "architecture": "arm64",
-  "full_local_report_sha256": "0e088d0af9047df49dd7c8440578526e99cec432a8589577d3107f9ee31927b1",
-  "generated_at": "2026-09-29T08:18:36.296467+00:00",
-  "independent_review": "NOT_PERFORMED",
+  "full_local_report_sha256": "99ffa393ced16ab19a7ab05d40acefefc587e6a16441455b1d4359f1fc773b8b",
+  "generated_at": "2026-09-29T09:07:45.497277+00:00",
+  "independent_review": "NOT_PERFORMED_PLATFORM_REVIEW_PREPARATION_BLOCKED",
   "input_sha256": {
     "dispatch-binding.test.mjs": "62f7d741f2a9072343e2bea0bd299429e8fdd3a9f515aaaa137f15c5728e2299",
-    "donor-manifest.json": "9d0dbfac060dfdbc293c455012ba75cdfca55ff74daaea206cb89431db4ba54f",
+    "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
     "loaded-runtime-preflight.test.mjs": "f30fa03a9a9f715916a10fd9ec59ce2ad3ca2ef3e362150afd5f9ef46571fd77",
-    "package-lock.json": "b22359bf374d9743f3bdf5a9ee950d5702bca7ac899ac07f3c83bc597ee0c729",
-    "package.json": "8203dbf76e0b9730c846b66086202873c80047487dc6abbeada5fc7231909daa",
+    "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
+    "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
     "prepare.py": "3dca0cec77bb068d9d7b7a3d386e0193da89c726150347d95f9e127e5fb6f42d",
     "qualify-loaded-runtime.mjs": "02ad2a21c291d27d64fbe43f9905885803f8c1317e2781879c73bee193037bb1",
     "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
@@ -43,7 +43,7 @@
     },
     "exit_code": 0,
     "log": "loaded-preflight.log",
-    "log_sha256": "e8730e06dc7a58b5fc8aac424c521b6682d8384ca37125cb48b9ddc4432e796a",
+    "log_sha256": "fd29d7e39f47be9c9bf2f84db2dcdbad900726ab21f40358210af93279dc84e5",
     "passed": 17,
     "scope": "Actual ToolRuntime instance, in-memory probes, not installed ACP qualification",
     "stderr_empty": true,
@@ -58,7 +58,7 @@
       ],
       "killed": true,
       "log": "mutant-definition.log",
-      "log_sha256": "bfa7c19cc92caae949526cd9e8813bb8ca0dc5570947cedbe9f768e1b2bd0e4c",
+      "log_sha256": "5eadb1f2f32b813119b23151fb6bad196b89de6d0b5a403e50934f12ad5de501",
       "mutant_sha256": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
       "passed": 17,
       "stderr_empty": true,
@@ -73,7 +73,7 @@
       ],
       "killed": true,
       "log": "mutant-guard.log",
-      "log_sha256": "b81505c23dca20cf0d20b38374fdcde754f16cf3157dc5a8a06f7d791f9e7e2c",
+      "log_sha256": "cb9a704c2b458beb07aaff7c1cbb99de7ed32071e5c5e04027e0f90fecd60136",
       "mutant_sha256": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
       "passed": 16,
       "stderr_empty": true,
@@ -88,7 +88,7 @@
       ],
       "killed": true,
       "log": "mutant-result.log",
-      "log_sha256": "2ea8c06b316e30c6bae9b3b9e52184ef56b7f41627442b743049a14ff2434085",
+      "log_sha256": "e196f8ec3c386d84adf35f250f5f76109f6bda086b9de2886a1e8663cb26514e",
       "mutant_sha256": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901",
       "passed": 16,
       "stderr_empty": true,
@@ -98,21 +98,10 @@
   "node": "v26.8.2",
   "node_sha256": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
   "platform": "Darwin",
-  "preserved_prior_evidence": {
-    "basis": "Historical receipt retained; donor patch, input manifest, lockfile and prepare.py unchanged. No fresh install claimed.",
-    "candidate_head": "3af62e91492dbf0a93e127533f263831561b7a63",
-    "clean_input_preparation": {
-      "checks": {
-        "clean_download_and_patch": true,
-        "drift_not_overwritten": true,
-        "drift_refused": true
-      },
-      "donor_commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
-      "network": "public pinned source fetch only; no providers",
-      "note": "Clean network-source fetch and drift refusal used the equivalent prior context-bearing patch; current zero-context patch is separately applied/hashed in every final verify run.",
-      "source_files": 14,
-      "temporary_tree_removed": true
-    }
+  "prior_receipt": {
+    "head": "b52ab14a2e48436db02b69c250b4a19297148b82",
+    "meaning": "Historical prior proof. Current lock changed for MCP dependencies and was qualified by fresh no-scripts npm ci and full npm test.",
+    "sha256": "65b6e8c8aa8afa4db35fab043da982c284b3e5209709f2100850715cda3bb95a"
   },
   "provider_calls": 0,
   "publication_state": "SOURCE_CANDIDATE_NOT_INSTALLED",
@@ -130,7 +119,7 @@
       "exit_code": 0,
       "failed_cases": [],
       "log": "patched-targeted.log",
-      "log_sha256": "3903486941759d47eba2287ef39834efac6f1e37ee8b077c7ae817c83c98f6a9",
+      "log_sha256": "1d33b2992dd3082d5a49fd16e5d16cc985a9946c702a6d5f37d92eb8f0ea647e",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -245,7 +234,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-npm.log",
-      "log_sha256": "232c0ddd4a84429e973b6c56a605e30a6d26456be810db1b706283072abda3ed",
+      "log_sha256": "261582de06826b7713333e54cfc8450b4150a071ef50ddfd80b6efe35eae9e45",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -354,7 +343,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-source.log",
-      "log_sha256": "aded05e2940e92be926a17157ce80cba83baa24bd565b67259ecf08ff8c23b07",
+      "log_sha256": "cb9361c42628c24f4a0a6d0a5959635ecf462f8c25f6ed29bcf2dd7ac1988654",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -464,7 +453,7 @@
       "log": "upstream-patched.log",
       "log_sha256": "84e61293e93d7fd493cac1ee05255ebb1cef3074c05b03918439748f3c70f544",
       "passed": 178,
-      "report_sha256": "d95dc0415179fa24e7696bc6a8cb66d60b4df98c5e337368154c7c2d72d1d474",
+      "report_sha256": "3d985bf15df89bb17bdcbc4d24778af190148f569d282e7064d4aa34f9f957ae",
       "stderr_empty": true,
       "tests": 178
     },
@@ -474,7 +463,7 @@
       "log": "upstream-pristine.log",
       "log_sha256": "95e53459c5199ef7accdd11a97691f6a1155a00e10ee5b736683360344acbcd4",
       "passed": 178,
-      "report_sha256": "07ff5a5f2a18cfd318fbc0dd26f2e5eeabf455458775631c0656336b8548209e",
+      "report_sha256": "c4506294b1452c2aac3447b5096fb35549b06d4ba0a68cffd6ac711d2bddddef",
       "stderr_empty": true,
       "tests": 178
     }

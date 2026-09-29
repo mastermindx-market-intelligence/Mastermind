@@ -4,7 +4,7 @@ Operation: `deepseek-os-foundation-support-20260929-sol-001`.
 Parent: Mastermind #600 / #1037, `WS:EXECUTIVE-CAPACITY-FABRIC`.
 Status: **TESTED PATCH CANDIDATE / NOT INSTALLED / MISSION_COMPLETE:false**.
 
-This implements the previously unexecuted counterexample in
+This implements the dispatch counterexample and MCP admission seam from
 [`2026-09-27-builder-support-r2.md`](../../../research/harness_reuse/2026-09-27-builder-support-r2.md).
 It does not replace the existing ACP worker, take #825's source custody, or add
 DSH to the native Mastermind OS release's critical path.
@@ -150,6 +150,80 @@ preservation of unrelated tools, pipeline draining and cleanup failure.
 The new helper's initial absent implementation produced 12 failing tests;
 behavioral enforcement proof comes from the actual stock/disabled/defect cases,
 not from that missing-module failure.
+
+## MCP tool-generation admission (Task 3 source continuation)
+
+`mcp-generation-admission.patch` extends the existing donor MCP client, not a new
+proxy or capability registry. It adds a trusted synchronous admission callback to
+`syncTools` and threads it through the existing `startConnection` synchronization
+and reconnect owner. No host callback is accepted from a model argument or YAML.
+The unconfigured plugin retains its original behavior; installing bytes alone is
+not proof that the host selected or invoked the admitted path.
+
+The incumbent immutable profile can use the exported factory:
+
+```js
+const connection = startConnection(ctx, fixedConfig, reconnectPolicy, admitGeneration)
+const readiness = await connection.ready
+// The existing factory owns startup failure and awaits connection.dispose() on close.
+```
+
+The callback receives a detached, deeply frozen snapshot containing the actual
+server's reported name/version, the local server namespace, and every discovered
+raw tool with its full input/output schemas and annotations. It returns an array
+of `{ rawName, allow(execution) }` entries. The raw names must be unique members of
+the discovered generation; displayed names are never parsed into wire identities.
+Each `allow` is synchronous, repeatable, and must return literal `true`. Promise
+or truthy-object returns never authorize dispatch.
+
+The host must compare that snapshot with its already-admitted exact endpoint,
+transport, authentication realm, capability/profile and full-schema bindings.
+A server's self-reported identity and `readOnlyHint` are not permission. The
+callback is an integration seam for the existing owner, not a new policy store.
+Empty selection is permitted but does not prove any required capability exists.
+
+An admitted old generation is retired before refreshed discovery can await or
+fail. Permission/current-connection checks run again immediately before the
+actual SDK `callTool`; old retained definitions cannot reuse a retired binding.
+A call already sent is drained and its original result retained; revocation
+never becomes evidence that the remote effect did not happen or can be replayed.
+Existing connection serialization and disposal retain ownership throughout.
+
+Verification uses the real MCP 2.0 Client/Server and linked in-memory transport,
+with the actual donor bridge and patched ToolRuntime. The permitted server call
+returns a new nonce; the ungranted tool advertises a misleading read-only hint
+but is neither exposed nor invoked. Actual SDK notifications exercise the
+connection's re-admission path. This is protocol/source proof, not a production
+repository service, model inference, ACP-worker or original-Executive-parent proof.
+
+Observed: **25/25 new cases pass**, versus **1 pass / 24 expected failures** on
+unchanged MCP source. All **93 unchanged selected upstream MCP cases pass** on
+both versions. Three independently broken filtering/dispatch/connection variants
+are detected by their exact expected cases. Six source-preparation checks pass:
+exact/repeated patching, source/patch/output drift refusal, no implicit download,
+and source-symlink refusal. Strict MCP TypeScript uses ES2024 for the donor's
+existing `Promise.withResolvers`; no donor workaround or skipped check is used.
+
+To prepare the additional exact public inputs, run `python3 prepare_mcp.py --download`
+after the core preparation. Then install only this directory's locked test
+packages with the private npm settings above. `npm test` now runs both verifiers;
+`python3 verify_mcp.py` runs just the MCP suite offline after preparation.
+`mcp-manifest.json` pins every input and all three patched-file digests. The
+MCP patch has normal context and the preparer refuses changed inputs/outputs
+instead of overwriting them. `mcp-verification-receipt.json` contains the measured
+suite results and actual nonce/notification observations.
+
+The endpoint/authentication/profile admission callback still belongs to the
+incumbent integration owner. MCP resources and server instructions are separate
+channels and must remain unavailable unless independently admitted; this patch
+neither calls `registerServerContext` nor grants those channels. Actual immutable
+artifact packaging, host confinement, eligible-provider accounting, #825 source
+recovery, startup in the owned ACP process, and useful parent-consumed work are
+not proven by these test results. No default route or production profile changed.
+
+Independent review remains outstanding. The attempted review-task preparation
+was platform-blocked and was not retried or routed elsewhere. This source is an
+unreviewed integration candidate, not a release or installed acceptance.
 
 ## License
 

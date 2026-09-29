@@ -1,0 +1,269 @@
+{
+  "architecture": "arm64",
+  "core_supply": {
+    "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+    "patched_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
+    "runtime_started": false,
+    "source_files": 14
+  },
+  "full_local_report_sha256": "b0a593533c2d85f0f63fc5ccda62466b30a5312b2d8a34b6ab78d79ec228572f",
+  "generated_at": "2026-09-29T09:07:50.453911+00:00",
+  "independent_review": "NOT_PERFORMED",
+  "input_sha256": {
+    "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
+    "mcp-admission.test.mjs": "b2a507738f38a833f237b2cf1b718882f2515962644208425e049e2e8c0407ce",
+    "mcp-generation-admission.patch": "f69c8937f0a37666080f1809e643141665b1cf72c95019835ce660f9e156c0f5",
+    "mcp-manifest.json": "0cf086fa45b343eb9543ce7251a607023f9c6dd9ef9287edd520dbbda0b9a088",
+    "mcp-preparation.test.py": "6cac00c59fd4a719cc2aba5222fb3468bb8fa3e33e35268e7320d191ff0047f4",
+    "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
+    "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
+    "prepare_mcp.py": "4e6c5b5a4a7f0a2e9eb5002efb16624c84467f36955ac2ccc26133b95d183184",
+    "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
+    "tsconfig.mcp.json": "a12bb6b96171409d82854d1e6f4d10fb9ec1640941032ffa7f68a641b2b52f6c",
+    "verify_mcp.py": "c9332b652decdeff42ea61f2f0d7e38ff7291b0d501a290ecc5ff4de02846364",
+    "vitest.mcp.config.mjs": "65a07ba6e77b0880bb16a0aed2639e5090013e004e5f1bbfe0b9fd81fad97049"
+  },
+  "installed": false,
+  "mcp_supply": {
+    "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+    "patch_sha256": "f69c8937f0a37666080f1809e643141665b1cf72c95019835ce660f9e156c0f5",
+    "patched_source_sha256": {
+      "connection.ts": "76792ab02dc76731a29a7b996ede08b650f2498cbaea413c35648f7b9232cc3e",
+      "index.ts": "6598367775528afef19d816b8531a2b1d297e9c296b23842a4cc4770b7830f04",
+      "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82"
+    },
+    "runtime_started": false,
+    "source_files": 9
+  },
+  "model_requests": 0,
+  "mutations": {
+    "connection": {
+      "exit_code": 1,
+      "failed_cases": [
+        "threads admission through the actual connection startup owner",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "killed": true,
+      "log_sha256": "2571499f4a902945ae391396552bebf56fbbd50dd2e8fed214908bb063a7f539",
+      "mutant_sha256": "773d2d9371a899070e29c96da7e9ecc1aadfd332907b15432876f99080a8e3c3",
+      "passed": 23,
+      "report_sha256": "487494c5064764d62573052d5d833abf4e52c81f29623a532fa7c7f4e3d73014",
+      "seconds": 1.631,
+      "stderr_empty": true,
+      "tests": 25
+    },
+    "dispatch": {
+      "exit_code": 1,
+      "failed_cases": [
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "refuses a disconnected connection generation before sending",
+        "refuses revoked permission after an asynchronous wrapper",
+        "requires a literal true from the final execution guard",
+        "retained old definition cannot send after a successful replacement sync"
+      ],
+      "killed": true,
+      "log_sha256": "e5b3dea08b2e69d112ace974d0bfcc968dbad056c6ffd1d43b97473a8c4add88",
+      "mutant_sha256": "1d3e3006ee9637a924a085e2cbf6851cec98cbeeecc0fc194a957109f246f32b",
+      "passed": 20,
+      "report_sha256": "d5ee80ef747511f34829d7538f6e7299a4ec7e0549666e4fe46b4f0b4b5effa4",
+      "seconds": 0.751,
+      "stderr_empty": true,
+      "tests": 25
+    },
+    "filter": {
+      "exit_code": 1,
+      "failed_cases": [
+        "allows an explicitly empty selection without inventing a required capability",
+        "exposes only admitted tools and returns a real server nonce",
+        "keeps a completed old-generation call attributable without resending it",
+        "threads admission through the actual connection startup owner",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "killed": true,
+      "log_sha256": "fd19eb186471bd36c2fb986591822192cc17b54d2948c01b307c2d1a442cfe16",
+      "mutant_sha256": "e3ab861c002909128d7bcd143eec8ce351c2da0179ed448bfc265c245a76841e",
+      "passed": 20,
+      "report_sha256": "eaa15eab30471983ca1ce718dcef5c8c40cc94221fe21ebd7cfc8da42c77da0e",
+      "seconds": 0.962,
+      "stderr_empty": true,
+      "tests": 25
+    }
+  },
+  "network_transport": "OFFICIAL_IN_MEMORY_MCP",
+  "node": "v26.8.2",
+  "node_sha256": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+  "observations": [
+    {
+      "calls": {
+        "read": 1,
+        "write": 0
+      },
+      "exposed": [
+        "mcp__fixture__read_memo_717e74314675"
+      ],
+      "journey": "permitted-real-mcp-call",
+      "publicName": "mcp__fixture__read_memo_717e74314675",
+      "rawName": "read.memo",
+      "result": {
+        "content": [
+          {
+            "text": "77f9b519-f22b-47b6-a144-146246e527b3",
+            "type": "text"
+          }
+        ]
+      },
+      "sourceNonce": "77f9b519-f22b-47b6-a144-146246e527b3"
+    },
+    {
+      "calls": 1,
+      "exposedAfterRevocation": [],
+      "generationsObserved": 2,
+      "journey": "connection-notification-readmission"
+    }
+  ],
+  "platform": "Darwin",
+  "preparation": {
+    "exit_code": 0,
+    "log_sha256": "14c98d60f0b9586f196adf459f01a5b7c317ec892937ad789f399f223adb4d81",
+    "passed": 6,
+    "tests": 6
+  },
+  "review_gate": "PLATFORM_REVIEW_PREPARATION_BLOCKED_NO_RETRY",
+  "schema": "mastermind.dsh_mcp_admission_verification.v1",
+  "scope": "Real MCP SDK protocol and donor bridge; no model/installed-worker/Executive-parent proof",
+  "success": true,
+  "targeted": {
+    "patched": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "9f393e69c33f1e9a1b50c6d8c412df7f2d41a26a3df2f20d7503c23a3671fa5c",
+      "passed": 25,
+      "report_sha256": "babd72c532d91ee593a0c4f5ea869d7e48b44531fcb49825a940d424a91e6ec6",
+      "seconds": 0.67,
+      "stderr_empty": true,
+      "tests": 25
+    },
+    "pristine": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "exit_code": 1,
+      "failed_cases": [
+        "allows an explicitly empty selection without inventing a required capability",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "checks currentness again after the admission callback",
+        "exposes only admitted tools and returns a real server nonce",
+        "keeps a completed old-generation call attributable without resending it",
+        "lets the owner reject changed output schemas from real tools/list",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses a disconnected connection generation before sending",
+        "refuses async admission without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses unlisted tool without exposure or execution",
+        "rejects a generation that disconnects while discovery is suspended",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "requires a literal true from the final execution guard",
+        "requires live connection binding when admission is enabled",
+        "retained old definition cannot send after a successful replacement sync",
+        "retires the old generation before a failing list request",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the previous generation while refreshed discovery is pending",
+        "threads admission through the actual connection startup owner",
+        "uses the same admission hook on actual SDK tool-list notifications"
+      ],
+      "log_sha256": "5862bd1eb21b809b078688edcef8ad1d3f62c13777ad031df7b1037c7fc8ea2c",
+      "passed": 1,
+      "report_sha256": "abcbd74b4d312b79fe0a21dff33509c8d492fad29234fb31b0c692e5074fca89",
+      "seconds": 1.606,
+      "stderr_empty": true,
+      "tests": 25
+    }
+  },
+  "test_local_install": {
+    "lifecycle_scripts": false,
+    "npm_ci_exit": 0,
+    "npm_ci_log_sha256": "95bc0f5afdb462337496b953bfcd32a5bc0e01e3b2313b662b436388953f1f94",
+    "npm_test_exit": 0,
+    "npm_test_log_sha256": "390808e2cf8fd5312fa0a92bf8a8dfbfb2d632d5891c4120a2c96d0c295f4a9a"
+  },
+  "typecheck": {
+    "exit_code": 0,
+    "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "upstream": {
+    "donor": {
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "3b36b7291c2d7ec995404baf7ba0f4e49cfddd0b4182cfe81c8817a555b7a02e",
+      "passed": 93,
+      "report_sha256": "201e52f3fadbcd52315704d485e7c4fba04fa832fde6dee18dd52d86059852a1",
+      "seconds": 2.664,
+      "stderr_empty": true,
+      "tests": 93
+    },
+    "pristine": {
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "a77d8b1109901a64c8e6d60e6372a6829d46cc5e2a34457f46858e596a9576e8",
+      "passed": 93,
+      "report_sha256": "e20f0e5be7262c6f7cb109aa46dc8616455b873fd25c74376b9a86e3ce7ff5c6",
+      "seconds": 2.631,
+      "stderr_empty": true,
+      "tests": 93
+    }
+  }
+}
