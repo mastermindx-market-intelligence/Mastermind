@@ -180,9 +180,9 @@ def test_uid450_codesign_is_required_after_root_verification() -> None:
     source = _source()
     install = INSTALL.read_text(encoding="utf-8")
     assert 'verify_consumer_readability() {' in source
-    assert '[ "$(/usr/bin/id -u _mastermind_exec)" = "450" ] || return 1' in source
+    assert '[ "$(/usr/bin/id -u 450)" = "450" ] || return 1' in source
     assert (
-        '/usr/bin/sudo -n -u _mastermind_exec \\\n'
+        "/usr/bin/sudo -n -u '#450' \\\n"
         '    /usr/bin/codesign --verify --deep --strict "$root" >/dev/null 2>&1'
     ) in source
 
@@ -198,7 +198,7 @@ def test_uid450_codesign_is_required_after_root_verification() -> None:
     install_root_check = install.index(
         '/usr/bin/codesign --verify --deep --strict "$PYTHON_RUNTIME_ROOT"'
     )
-    uid450_check = install.index("/usr/bin/sudo -n -u _mastermind_exec")
+    uid450_check = install.index('/usr/bin/sudo -n -u "$CONTROL_USER"')
     assert install_root_check < install.index(
         '"$PYTHON_RUNTIME_ROOT/_CodeSignature/CodeResources"'
     )

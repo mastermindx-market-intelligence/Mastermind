@@ -190,13 +190,13 @@ for python_signature_resource in \
     *+) /bin/echo "Python signature resource has a filesystem ACL: $python_signature_resource" >&2; exit 65 ;;
   esac
 done
-[ "$(/usr/bin/id -u _mastermind_exec)" = "450" ] || {
-  /bin/echo "_mastermind_exec must resolve to UID 450" >&2
+[ "$(/usr/bin/id -u "$CONTROL_USER")" = "$CONTROL_UID" ] || {
+  /bin/echo "$CONTROL_USER must resolve to UID $CONTROL_UID" >&2
   exit 65
 }
-/usr/bin/sudo -n -u _mastermind_exec \
+/usr/bin/sudo -n -u "$CONTROL_USER" \
   /usr/bin/codesign --verify --deep --strict "$PYTHON_RUNTIME_ROOT" >/dev/null 2>&1 || {
-    /bin/echo "UID 450 cannot verify the Python runtime root" >&2
+    /bin/echo "UID $CONTROL_UID cannot verify the Python runtime root" >&2
     exit 65
   }
 OBSERVED_PYTHON_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PYTHON_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"

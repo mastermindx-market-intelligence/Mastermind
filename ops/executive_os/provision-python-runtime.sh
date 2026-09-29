@@ -98,8 +98,8 @@ runtime_tree_static_checks() {
 
 verify_consumer_readability() {
   local root="$1"
-  [ "$(/usr/bin/id -u _mastermind_exec)" = "450" ] || return 1
-  /usr/bin/sudo -n -u _mastermind_exec \
+  [ "$(/usr/bin/id -u 450)" = "450" ] || return 1
+  /usr/bin/sudo -n -u '#450' \
     /usr/bin/codesign --verify --deep --strict "$root" >/dev/null 2>&1
 }
 
