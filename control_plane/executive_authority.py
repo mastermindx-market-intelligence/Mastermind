@@ -367,6 +367,22 @@ def _parse_release_controller_policy(raw: bytes):
     if "\r" in text:
         _release_refuse("RELEASE_POLICY_INVALID")
     lines = text.split("\n")
+    # Validate the entire root mapping before selecting an authority section.
+    # Plain block keys have one spelling; quoted/complex keys, aliases, root
+    # flow values and document boundaries cannot hide a second policy. Nested
+    # contents of other ordinary sections remain their existing owners' data.
+    root_keys: set[str] = set()
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.startswith(" "):
+            if not root_keys:
+                _release_refuse("RELEASE_POLICY_INVALID")
+            continue
+        root = re.fullmatch(r"([a-z][a-z0-9_]*): *(?:#.*)?", line)
+        if root is None or root.group(1) in root_keys:
+            _release_refuse("RELEASE_POLICY_INVALID")
+        root_keys.add(root.group(1))
     starts = [index for index, line in enumerate(lines)
               if re.match(r"^\s*['\"]?executive_release_controller_policy['\"]?\s*:", line)]
     if not starts:

@@ -338,3 +338,39 @@ def test_source_limits_are_bounded(inputs):
     for raw in (b"", "not bytes", b"#" * (a._RELEASE_MAX_SOURCE_BYTES + 1)):
         with pytest.raises(a.ReleaseAuthorityDenied, match="^RELEASE_POLICY_INVALID$"):
             a.ReleaseControllerPolicy.from_bytes(raw)
+
+
+@pytest.mark.parametrize("outside", [
+    b'"executive_release_controller_polic\\u0079":\n  enabled: false\n',
+    b'? executive_release_controller_policy\n:\n  enabled: false\n',
+    b'---\nother_document:\n  enabled: false\n',
+    b'...\n',
+    b'%YAML 1.2\n',
+    b'*alias:\n  enabled: false\n',
+    b'<<: *alias\n',
+    b'other_policy: &root_alias\n  enabled: false\n',
+    b'"different_escaped_root":\n  enabled: false\n',
+])
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_whole_document_root_shape_refuses_ambiguity(inputs, outside, position):
+    valid = source(inputs[2])
+    raw = outside + valid if position == "before" else valid + outside
+    with pytest.raises(a.ReleaseAuthorityDenied, match="^RELEASE_POLICY_INVALID$"):
+        a.ReleaseControllerPolicy.from_bytes(raw)
+
+
+def test_ordinary_authority_sections_survive_on_either_side(inputs):
+    installed = a._POLICY_PATH.read_bytes()
+    release = source(inputs[2])
+    for raw in (installed + b"\n" + release, release + b"\n" + installed):
+        policy = a.ReleaseControllerPolicy.from_bytes(raw)
+        assert policy.configuration_state is a.ReleasePolicyState.CONFIGURED
+        assert policy.sha256 == hashlib.sha256(raw).hexdigest()
+    for raw in (b'# comment only\n', b'ordinary_section:\n  text: >\n    quoted "prose" remains other-owner data\n'):
+        assert a.ReleaseControllerPolicy.from_bytes(raw).configuration_state is a.ReleasePolicyState.UNCONFIGURED
+
+
+def test_duplicate_ordinary_root_is_ambiguous_before_authority(inputs):
+    raw = source(inputs[2]) + b'other_policy:\n  enabled: false\n'
+    with pytest.raises(a.ReleaseAuthorityDenied, match="^RELEASE_POLICY_INVALID$"):
+        a.ReleaseControllerPolicy.from_bytes(raw)
