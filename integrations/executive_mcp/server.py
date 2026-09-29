@@ -763,6 +763,7 @@ def _build_profile_mcp_app(
     workspace_app=None,
     content_app=None,
     os_app=None,
+    release_profile: bool = False,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -784,6 +785,8 @@ def _build_profile_mcp_app(
 
     if settings.read_only:
         raise ValueError("authenticated Executive MCP refuses read-only app settings")
+    if release_profile and any(app is not None for app in (workspace_app, content_app, os_app)):
+        raise ValueError("release control profile refuses optional mounts")
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
@@ -825,7 +828,7 @@ def _build_profile_mcp_app(
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
             configured.policies.submit
-            if tool.name == "submit_ceo_intent"
+            if release_profile or tool.name == "submit_ceo_intent"
             else configured.policies.read
         )
         schemes = oauth_security_schemes(policy.required_scopes)
@@ -841,6 +844,9 @@ def _build_profile_mcp_app(
         return list(tools)
 
     def unknown(request_ref: str) -> dict[str, Any]:
+        if release_profile:
+            from integrations.executive_mcp.release_control import unknown_release_result
+            return unknown_release_result()
         response = _outcome_response(AdmissionOutcome(
             status=STATUS_EFFECT_UNKNOWN, request_ref=request_ref, code="effect_unknown",
             message="the Executive response is unavailable; reconcile the same request_ref before any further submission",
@@ -882,7 +888,19 @@ def _build_profile_mcp_app(
             canonical_json(payload)
             challenge = response.headers.get("www-authenticate")
             if response.status_code in (401, 403) and challenge:
-                if is_submit and payload.get("error", {}).get("code") == "scope_refused":
+                if release_profile:
+                    # Only the existing fixed auth refusal may cross this
+                    # boundary. Rebuild the challenge; never relay arbitrary
+                    # inner diagnostic text or a header carrying private data.
+                    auth_error = AuthError(AuthErrorCode(payload["error"]["code"]))
+                    expected = {"ok": False, "error": {"code": auth_error.code.value,
+                                                      "message": auth_error.public_message}}
+                    expected_status = 403 if auth_error.code == AuthErrorCode.SCOPE_REFUSED else 401
+                    if payload != expected or response.status_code != expected_status:
+                        return result(unknown(request_ref))
+                    challenge = mcp_auth_error_result(configured.policies.submit,
+                        auth_error)["_meta"]["mcp/www_authenticate"][0]
+                if (is_submit or release_profile) and payload.get("error", {}).get("code") == "scope_refused":
                     # The direct App's challenge intentionally omits requested
                     # scopes. Use its existing A1 helper for the MCP upgrade.
                     challenge = mcp_auth_error_result(configured.policies.submit,
@@ -890,7 +908,11 @@ def _build_profile_mcp_app(
                         required_scopes=configured.policies.submit.required_scopes,
                     )["_meta"]["mcp/www_authenticate"][0]
                 return result(payload, challenge=challenge)
-            if is_submit:
+            if release_profile:
+                from integrations.executive_mcp.release_control import valid_release_result
+                if not valid_release_result(payload, name, validated, response.status_code):
+                    payload = unknown(request_ref)
+            elif is_submit:
                 # These closed errors are raised before the App's socket send.
                 preflight_error = (
                     response.status_code in (400, 403)
@@ -907,13 +929,13 @@ def _build_profile_mcp_app(
             ):
                 payload = profile_error(name, "backend_unavailable", "Executive response is unavailable")
         except Exception:
-            payload = unknown(request_ref) if is_submit else profile_error(
+            payload = unknown(request_ref) if is_submit or release_profile else profile_error(
                 name, "backend_unavailable", "Executive response is unavailable")
         reply = result(payload)
         # Bound the actual escaped MCP result, reserving room for the maximum
         # admitted request id and JSON-RPC envelope, not only the inner JSON.
         if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
-            reply = result(unknown(request_ref) if is_submit else profile_error(
+            reply = result(unknown(request_ref) if is_submit or release_profile else profile_error(
                 name, "output_too_large", "Executive response exceeds the transport budget"))
         return reply
 
@@ -925,7 +947,7 @@ def _build_profile_mcp_app(
     authenticated = PreAuthMcpBodyApp(
         AuthenticationMiddleware(
             RequireAuthMiddleware(BoundedRequestApp(manager.handle_request),
-                required_scopes=list(configured.policies.read.required_scopes),
+                required_scopes=list((configured.policies.submit if release_profile else configured.policies.read).required_scopes),
                 resource_metadata_url=configured.policies.read.resource_metadata_url),
             backend=BearerAuthBackend(verifier),
         )
@@ -950,8 +972,9 @@ def _build_profile_mcp_app(
     outer_routes = [
         Route(metadata_path, metadata, methods=["GET"]),
         Route("/mcp", authenticated, methods=["POST"]),
-        Route("/v1/tools/submit_ceo_intent/reconcile", inner_app, methods=["POST"]),
     ]
+    if not release_profile:
+        outer_routes.append(Route("/v1/tools/submit_ceo_intent/reconcile", inner_app, methods=["POST"]))
     if workspace_app is not None:
         outer_routes.extend(Route(path, workspace_app, methods=["GET"]) for path in
                             ("/workspace/programs/current",
@@ -970,6 +993,22 @@ def _build_profile_mcp_app(
     return _DuplicateAuthorizationGuard(outer_app,
         fenced_app=_ExecutivePathFence(outer_app, metadata_path, workspace_app=workspace_app,
                                       content_app=content_app, os_app=os_app))
+
+
+def build_release_control_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Four explicit release tools; existing App and root owner retain authority."""
+    from integrations.executive_mcp.release_control import (
+        RELEASE_CONTROL_SERVER_VERSION, RELEASE_CONTROL_TOOL_SPECS,
+        validate_release_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_release_control_app
+    tools = tuple(mcp_types.Tool(name=spec.name, description=spec.description,
+        inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations))
+        for spec in RELEASE_CONTROL_TOOL_SPECS)
+    return _build_profile_mcp_app(settings, audit_sink=audit_sink,
+        profile_server_name=SERVER_NAME, profile_server_version=RELEASE_CONTROL_SERVER_VERSION,
+        profile_tools=tools, profile_validator=validate_release_tool_arguments,
+        profile_create_app=create_release_control_app, release_profile=True)
 
 
 def build_executive_mcp_app(settings: Any, *, audit_sink: Any,

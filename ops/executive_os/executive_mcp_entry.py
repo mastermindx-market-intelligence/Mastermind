@@ -48,8 +48,11 @@ def validate_document(raw):
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
+    from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
     if profile == PERSONAL_READ_PROFILE and ({'workspace', 'steward'} & set(raw)):
         raise ValueError('Personal read profile refuses optional mounts')
+    if profile == RELEASE_CONTROL_PROFILE and ({'workspace', 'steward'} & set(raw)):
+        raise ValueError('Release control profile refuses optional mounts')
     if raw['schema'] != CONFIG_SCHEMA:
         raise ValueError('installed MCP schema differs')
     if not isinstance(raw['release_sha'], str) or re.fullmatch('[0-9a-f]{40}', raw['release_sha']) is None:
@@ -301,9 +304,11 @@ def main(argv=None):
     from integrations.executive_mcp.server import (
         build_executive_mcp_app, build_personal_read_mcp_app,
         build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app,
+        build_release_control_mcp_app,
     )
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import (
         WEB_CEO_V3_PROFILE, validate_installed_mcp_profile_current,
     )
@@ -338,10 +343,12 @@ def main(argv=None):
     sink = PolicyAuditSink(policies, Path(raw['audit_root']), optional=optional_policies(raw))
     try:
         mounts = (
-            {} if profile == PERSONAL_READ_PROFILE
+            {} if profile in (PERSONAL_READ_PROFILE, RELEASE_CONTROL_PROFILE)
             else build_optional_apps(raw, source, args.config, sink)
         )
-        if profile == PERSONAL_READ_PROFILE:
+        if profile == RELEASE_CONTROL_PROFILE:
+            app = build_release_control_mcp_app(settings, audit_sink=sink)
+        elif profile == PERSONAL_READ_PROFILE:
             app = build_personal_read_mcp_app(settings, audit_sink=sink)
         elif profile == WEB_CEO_V3_PROFILE:
             from integrations.mosyle_mdm.client import MosyleInventoryClient
