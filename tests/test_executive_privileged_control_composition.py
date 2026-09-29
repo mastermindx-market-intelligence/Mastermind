@@ -132,7 +132,7 @@ def render_config(tmp_path, arm, source=''):
     destination = tmp_path/'control.json'
     args = [str(ROOT),str(destination),str(source),'/private/runtime','/private/admin','/private/workspaces',
         'a'*40,'/private/backups','/private/receipts','/private/home','/private/runs','/private/canary.json',
-        '/private/attestation.json','450','451','451','501','b'*64,'0.147.0',arm]
+        '/private/attestation.json','450','451','451','501','b'*64,'0.147.0',arm,'c'*64]
     result = subprocess.run([sys.executable,'-c',_embedded_control_config_generator(),*args], capture_output=True,text=True)
     return result, destination
 

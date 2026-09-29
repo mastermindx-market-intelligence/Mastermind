@@ -9282,11 +9282,32 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             "control_environment_attestation_path": str(
                 tmp_path / "control-environment-attestation.json"
             ),
+            "python_runtime_provenance_digest": "d" * 64,
         }
         unarmed_path = tmp_path / "control-unarmed.json"
         unarmed_path.write_text(json.dumps(raw), encoding="utf-8")
         unarmed_path.chmod(0o400)
         unarmed = service_cli.load_control_config(unarmed_path)
+        assert unarmed["python_runtime_provenance_digest"] == "d" * 64
+        for index, invalid_digest in enumerate(
+            ("D" * 64, "d" * 63, "g" * 64, 7, None)
+        ):
+            invalid_path = tmp_path / (
+                "control-invalid-python-runtime-provenance-"
+                f"{index}-{type(invalid_digest).__name__}.json"
+            )
+            invalid_path.write_text(
+                json.dumps(
+                    {**raw, "python_runtime_provenance_digest": invalid_digest}
+                ),
+                encoding="utf-8",
+            )
+            invalid_path.chmod(0o400)
+            with pytest.raises(
+                ServiceError,
+                match="python_runtime_provenance_digest must be lowercase 64-hex",
+            ):
+                service_cli.load_control_config(invalid_path)
         assert not (
             {
                 "terminal_return_armed",
