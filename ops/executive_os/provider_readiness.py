@@ -55,7 +55,7 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
 
 SCHEMA_VERSION = "mastermind.executive_provider_readiness/v2"
 IDENTITY_SCHEMA = "mastermind.executive_provider_identity/v1"
-CANARY_SCHEMA = "mastermind.executive_provider_inference_canary/v1"
+CANARY_SCHEMA = "mastermind.executive_provider_inference_canary/v2"
 RECEIPT_PATH = Path(
     "/Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json"
 )
@@ -76,6 +76,18 @@ EXPECTED_KINDS = frozenset(
 WORKSPACE_BINDING_CLASS = COMPANY_WORKSPACE_BINDING_CLASS
 CANARY_ID_RE = re.compile(r"^canary-[0-9a-f]{12}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+PROVIDER_DIAGNOSTIC_TERMS = frozenset(
+    {
+        "account", "auth", "authorization", "billing", "busy", "capacity",
+        "connection", "conversation", "credits", "denied", "disabled",
+        "error", "expired", "failed", "failure", "forbidden", "internal",
+        "invalid", "limit", "model", "network", "output", "overloaded",
+        "permission", "plan", "provider", "quota", "rate", "request",
+        "schema", "service", "session", "stream", "supported",
+        "temporarily", "tier", "timeout", "token", "unauthorized",
+        "unavailable", "unknown", "unsupported", "usage", "workspace",
+    }
+)
 PRODUCTION_MODEL = "gpt-5.6-sol"
 MAX_READINESS_AGE = timedelta(hours=24)
 MIN_ACCEPTANCE_MARGIN = timedelta(minutes=30)
@@ -328,6 +340,9 @@ def _safe_canary(value: Mapping[str, Any]) -> dict[str, Any]:
         "result_valid",
         "stdout_sha256",
         "stderr_sha256",
+        "provider_error_message_count",
+        "provider_error_message_sha256",
+        "provider_error_terms",
         "workspace_capability_outcome",
         "workspace_selection_mechanism",
         "forced_chatgpt_workspace_id_applied",
@@ -350,6 +365,39 @@ def _safe_canary(value: Mapping[str, Any]) -> dict[str, Any]:
         raise ReadinessError("canary_stdout_digest_malformed")
     if not isinstance(result["stderr_sha256"], str) or SHA256_RE.fullmatch(result["stderr_sha256"]) is None:
         raise ReadinessError("canary_stderr_digest_malformed")
+    if (
+        isinstance(result["provider_error_message_count"], bool)
+        or not isinstance(result["provider_error_message_count"], int)
+        or not 0 <= result["provider_error_message_count"] <= 4
+    ):
+        raise ReadinessError("canary_provider_error_count_malformed")
+    provider_message_digest = result["provider_error_message_sha256"]
+    if (
+        provider_message_digest is not None
+        and (
+            not isinstance(provider_message_digest, str)
+            or SHA256_RE.fullmatch(provider_message_digest) is None
+        )
+    ):
+        raise ReadinessError("canary_provider_error_digest_malformed")
+    if (result["provider_error_message_count"] == 0) is not (
+        provider_message_digest is None
+    ):
+        raise ReadinessError("canary_provider_error_digest_conflict")
+    provider_error_terms = result["provider_error_terms"]
+    if (
+        not isinstance(provider_error_terms, list)
+        or len(provider_error_terms) > len(PROVIDER_DIAGNOSTIC_TERMS)
+        or any(
+            not isinstance(term, str) or term not in PROVIDER_DIAGNOSTIC_TERMS
+            for term in provider_error_terms
+        )
+    ):
+        raise ReadinessError("canary_provider_error_terms_malformed")
+    if provider_error_terms != sorted(set(provider_error_terms)):
+        raise ReadinessError("canary_provider_error_terms_malformed")
+    if result["provider_error_message_count"] == 0 and provider_error_terms:
+        raise ReadinessError("canary_provider_error_terms_conflict")
     if result["workspace_capability_outcome"] != "inert_untrusted_workspace":
         raise ReadinessError("canary_workspace_capability_mismatch")
     if result["workspace_selection_mechanism"] != "none":
