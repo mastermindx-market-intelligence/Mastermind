@@ -62,7 +62,7 @@ def test_signed_mcp_request_reaches_real_socket_and_one_durable_job(rsa_key, tmp
     host_fixture = runpy.run_path(str(Path(__file__).with_name("test_executive_principal_ingress.py")))
     _, token, current, settings = fixture.setup(rsa_key, tmp_path)
     async def exercise():
-        with tempfile.TemporaryDirectory(prefix="mmx-coo-api-", dir="/private/tmp") as directory:
+        with tempfile.TemporaryDirectory(prefix="mmx-coo-api-", dir="/tmp") as directory:
             socket_root = Path(directory)
             host = host_fixture["service"](tmp_path, socket_root)
             base = dataclasses.replace(settings.executive, ceo_ingress_socket_path=socket_root / "principal.sock")
