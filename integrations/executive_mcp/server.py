@@ -764,6 +764,7 @@ def _build_profile_mcp_app(
     content_app=None,
     os_app=None,
     release_profile: bool = False,
+    release_tool_names: tuple[str, ...] = (),
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -787,6 +788,20 @@ def _build_profile_mcp_app(
         raise ValueError("authenticated Executive MCP refuses read-only app settings")
     if release_profile and any(app is not None for app in (workspace_app, content_app, os_app)):
         raise ValueError("release control profile refuses optional mounts")
+    # This tuple is fixed by the builder, never selected by an MCP argument.
+    # The historical four-tool release profile keeps its existing behavior.
+    if type(release_tool_names) is not tuple or any(
+        type(name) is not str for name in release_tool_names
+    ):
+        raise ValueError("release tool names must be a static tuple")
+    if release_tool_names:
+        from control_plane.executive_release_ingress import OPERATIONS
+        names = tuple(tool.name for tool in profile_tools)
+        if (len(release_tool_names) != len(set(release_tool_names))
+                or set(release_tool_names) != set(OPERATIONS)
+                or len(names) != len(set(names))
+                or not set(release_tool_names) <= set(names)):
+            raise ValueError("release tool names must match the fixed operation inventory")
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
@@ -828,7 +843,7 @@ def _build_profile_mcp_app(
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
             configured.policies.submit
-            if release_profile or tool.name == "submit_ceo_intent"
+            if release_profile or tool.name in release_tool_names or tool.name == "submit_ceo_intent"
             else configured.policies.read
         )
         schemes = oauth_security_schemes(policy.required_scopes)
@@ -843,8 +858,8 @@ def _build_profile_mcp_app(
     async def list_tools() -> list[mcp_types.Tool]:
         return list(tools)
 
-    def unknown(request_ref: str) -> dict[str, Any]:
-        if release_profile:
+    def unknown(request_ref: str | None, *, is_release: bool) -> dict[str, Any]:
+        if is_release:
             from integrations.executive_mcp.release_control import unknown_release_result
             return unknown_release_result()
         response = _outcome_response(AdmissionOutcome(
@@ -875,6 +890,7 @@ def _build_profile_mcp_app(
         except GatewayError as exc:
             return result(profile_error(name, exc.code, exc.message))
         is_submit = name == "submit_ceo_intent"
+        is_release = release_profile or name in release_tool_names
         request_ref = app_request_ref(validated["operation_key"]) if is_submit else None
         try:
             async with httpx.AsyncClient(
@@ -888,7 +904,7 @@ def _build_profile_mcp_app(
             canonical_json(payload)
             challenge = response.headers.get("www-authenticate")
             if response.status_code in (401, 403) and challenge:
-                if release_profile:
+                if is_release:
                     # Only the existing fixed auth refusal may cross this
                     # boundary. Rebuild the challenge; never relay arbitrary
                     # inner diagnostic text or a header carrying private data.
@@ -897,10 +913,10 @@ def _build_profile_mcp_app(
                                                       "message": auth_error.public_message}}
                     expected_status = 403 if auth_error.code == AuthErrorCode.SCOPE_REFUSED else 401
                     if payload != expected or response.status_code != expected_status:
-                        return result(unknown(request_ref))
+                        return result(unknown(request_ref, is_release=is_release))
                     challenge = mcp_auth_error_result(configured.policies.submit,
                         auth_error)["_meta"]["mcp/www_authenticate"][0]
-                if (is_submit or release_profile) and payload.get("error", {}).get("code") == "scope_refused":
+                if (is_submit or is_release) and payload.get("error", {}).get("code") == "scope_refused":
                     # The direct App's challenge intentionally omits requested
                     # scopes. Use its existing A1 helper for the MCP upgrade.
                     challenge = mcp_auth_error_result(configured.policies.submit,
@@ -908,10 +924,10 @@ def _build_profile_mcp_app(
                         required_scopes=configured.policies.submit.required_scopes,
                     )["_meta"]["mcp/www_authenticate"][0]
                 return result(payload, challenge=challenge)
-            if release_profile:
+            if is_release:
                 from integrations.executive_mcp.release_control import valid_release_result
                 if not valid_release_result(payload, name, validated, response.status_code):
-                    payload = unknown(request_ref)
+                    payload = unknown(request_ref, is_release=is_release)
             elif is_submit:
                 # These closed errors are raised before the App's socket send.
                 preflight_error = (
@@ -923,19 +939,19 @@ def _build_profile_mcp_app(
                     }
                 )
                 if not preflight_error and not _executive_outcome(payload, request_ref, response.status_code):
-                    payload = unknown(request_ref)
+                    payload = unknown(request_ref, is_release=is_release)
             elif response.status_code != 200 or not _is_e1_envelope(
                 payload, name, profile_server_version
             ):
                 payload = profile_error(name, "backend_unavailable", "Executive response is unavailable")
         except Exception:
-            payload = unknown(request_ref) if is_submit or release_profile else profile_error(
+            payload = unknown(request_ref, is_release=is_release) if is_submit or is_release else profile_error(
                 name, "backend_unavailable", "Executive response is unavailable")
         reply = result(payload)
         # Bound the actual escaped MCP result, reserving room for the maximum
         # admitted request id and JSON-RPC envelope, not only the inner JSON.
         if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
-            reply = result(unknown(request_ref) if is_submit or release_profile else profile_error(
+            reply = result(unknown(request_ref, is_release=is_release) if is_submit or is_release else profile_error(
                 name, "output_too_large", "Executive response exceeds the transport budget"))
         return reply
 
@@ -1049,6 +1065,37 @@ def build_web_ceo_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
         profile_tools=tuple(build_web_ceo_tools()),
         profile_validator=validate_web_ceo_tool_arguments,
         profile_create_app=create_web_ceo_app,
+    )
+
+
+def build_web_ceo_release_mcp_app(
+    settings: Any,
+    *,
+    audit_sink: Any,
+    workspace_app=None,
+    content_app=None,
+    os_app=None,
+) -> Any:
+    """One v2 listener with the existing four separately authorized release tools."""
+    from integrations.executive_mcp.release_control import RELEASE_CONTROL_TOOL_SPECS
+    from integrations.executive_mcp.web_ceo_release import (
+        WEB_CEO_RELEASE_SERVER_NAME, WEB_CEO_RELEASE_SERVER_VERSION,
+        WEB_CEO_RELEASE_TOOL_SPECS, validate_web_ceo_release_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_release_control_app
+
+    tools = tuple(mcp_types.Tool(
+        name=spec.name, description=spec.description, inputSchema=spec.input_schema,
+        annotations=mcp_types.ToolAnnotations(**spec.annotations),
+    ) for spec in WEB_CEO_RELEASE_TOOL_SPECS)
+    return _build_profile_mcp_app(
+        settings, audit_sink=audit_sink,
+        profile_server_name=WEB_CEO_RELEASE_SERVER_NAME,
+        profile_server_version=WEB_CEO_RELEASE_SERVER_VERSION,
+        profile_tools=tools, profile_validator=validate_web_ceo_release_tool_arguments,
+        profile_create_app=create_release_control_app,
+        workspace_app=workspace_app, content_app=content_app, os_app=os_app,
+        release_tool_names=tuple(spec.name for spec in RELEASE_CONTROL_TOOL_SPECS),
     )
 
 

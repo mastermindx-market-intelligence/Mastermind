@@ -192,3 +192,96 @@ def test_app_acl_respects_bootstrap_root_owned_socket_directory(
         assert service.ceo_ingress_socket_path.stat().st_mode & 0o777 == 0o660
     finally:
         listener.close()
+
+
+@pytest.mark.parametrize('profile,builder_name,mounted', [
+    ('legacy', 'build_executive_mcp_app', True),
+    ('web_ceo_v2', 'build_web_ceo_v2_mcp_app', True),
+    ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True),
+    ('release_control_v1', 'build_release_control_mcp_app', False),
+    ('personal_read', 'build_personal_read_mcp_app', False),
+    ('web_ceo_release_v1', 'build_web_ceo_release_mcp_app', True),
+])
+def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
+    tmp_path, monkeypatch, profile, builder_name, mounted,
+):
+    from types import SimpleNamespace
+    from integrations.executive_mcp import server
+    from integrations.mastermind_executive_app import gateway
+    import uvicorn
+
+    module = _module()
+    release = 'a' * 40
+    source = tmp_path / release
+    module.__file__ = str(source / 'ops/executive_os/executive_mcp_entry.py')
+    # Test the installed dispatch function without root files, sockets or a listener.
+    monkeypatch.setattr(module, 'sys', SimpleNamespace(
+        flags=SimpleNamespace(isolated=True), dont_write_bytecode=True, path=[]))
+    monkeypatch.setattr(module, 'require_sealed_path', lambda *a, **k: None)
+    monkeypatch.setattr(module.os, 'geteuid', lambda: 458)
+    raw = {
+        'schema': module.CONFIG_SCHEMA, 'release_sha': release, 'service_uid': 458,
+        'ceo_ingress_socket_path': '/var/run/mastermind-executive/ceo-ingress.sock',
+        'port': 8443, 'policies': {},
+        'audit_root': '/var/log/mastermind-executive/mcp-auth',
+        'executive_mcp_profile': profile,
+    }
+    config = tmp_path / 'installed.json'
+    config.write_text(json.dumps(raw))
+    from tests.test_executive_mcp_app_composition import fixture
+    policies = gateway.AppPolicies(read=fixture._read_policy(), submit=fixture._submit_policy())
+    monkeypatch.setattr(gateway, 'load_app_policies', lambda supplied: policies)
+    mounts = {'workspace_app': object(), 'content_app': object(), 'os_app': object()}
+    mount_calls = []
+    def optional(*args):
+        mount_calls.append(args)
+        return mounts
+    monkeypatch.setattr(module, 'build_optional_apps', optional)
+    closed = []
+    sink = SimpleNamespace(close=lambda: closed.append(True))
+    monkeypatch.setattr(module, 'PolicyAuditSink', lambda *a, **k: sink)
+    calls = []
+    app = object()
+    def selected(settings, **kwargs):
+        calls.append((settings, kwargs))
+        return app
+    def wrong(*a, **k):
+        pytest.fail('wrong MCP builder selected')
+    for name in ('build_executive_mcp_app', 'build_web_ceo_v2_mcp_app',
+                 'build_web_ceo_v3_mcp_app', 'build_personal_read_mcp_app',
+                 'build_release_control_mcp_app', 'build_web_ceo_release_mcp_app'):
+        monkeypatch.setattr(server, name, selected if name == builder_name else wrong)
+    launches = []
+    monkeypatch.setattr(uvicorn, 'run', lambda *a, **k: launches.append((a, k)))
+
+    assert module.main(['--config', str(config)]) == 0
+    assert len(calls) == len(launches) == 1
+    settings, kwargs = calls[0]
+    assert settings.policies is policies
+    assert settings.mastermind_root == source
+    assert settings.read_from_ceo_ingress is True
+    assert settings.ceo_ingress_socket_path == raw['ceo_ingress_socket_path']
+    if profile == 'web_ceo_v3':
+        from integrations.mosyle_mdm.client import MosyleInventoryClient
+        assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
+    assert kwargs == {'audit_sink': sink, **(mounts if mounted else {})}
+    assert len(mount_calls) == int(mounted)
+    assert launches == [((app,), dict(host='127.0.0.1', port=8443, access_log=False,
+                                      proxy_headers=True, forwarded_allow_ips='127.0.0.1'))]
+    assert closed == [True]
+
+
+@pytest.mark.parametrize('value', [None, True, [], {}, 'web_ceo_release_v2',
+                                  'web_ceo_release_v1 ', 'WEB_CEO_RELEASE_V1'])
+def test_combined_profile_selector_is_closed(value):
+    from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
+    with pytest.raises(ValueError):
+        validate_installed_mcp_profile_current(value)
+
+
+def test_combined_profile_does_not_expand_frozen_v2_selector():
+    from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
+    from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
+    assert validate_installed_mcp_profile_current('web_ceo_release_v1') == 'web_ceo_release_v1'
+    with pytest.raises(ValueError):
+        validate_installed_mcp_profile('web_ceo_release_v1')
