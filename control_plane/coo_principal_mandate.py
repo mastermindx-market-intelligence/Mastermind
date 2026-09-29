@@ -171,6 +171,61 @@ class _MissionState:
     reason_codes: tuple[str, ...]
 
 
+def _owner_identifier(value: object) -> bool:
+    return (
+        type(value) is str and bool(value) and value == value.strip()
+        and value.isprintable() and mw._safe_identifier(value) == value
+    )
+
+
+def _observation_identity(value: object) -> bool:
+    # Use the owner's existing opaque-identity grammar, not a second schema.
+    return type(value) is str and mw._OPAQUE_REF.fullmatch(value) is not None
+
+
+def _equal_counter_pair(row: Mapping[str, Any], before: str, after: str, minimum: int) -> bool:
+    left, right = row.get(before), row.get(after)
+    return type(left) is int and type(right) is int and left >= minimum and left == right
+
+
+def _coherent_runtime_observation(value: object) -> bool:
+    return (
+        isinstance(value, Mapping) and set(value) == mw.OWNER_OBSERVATION_RUNTIME_KEYS
+        and value.get("schema") == mw.RUNTIME_OBSERVATION_SCHEMA
+        and value.get("state") == "SAME"
+        and _observation_identity(value.get("source_identity"))
+        and _equal_counter_pair(value, "before", "after", 0)
+        and type(value.get("snapshot_digest")) is str
+        and _DIGEST_RE.fullmatch(value["snapshot_digest"]) is not None
+    )
+
+
+def _coherent_control_observation(value: object) -> bool:
+    return (
+        isinstance(value, Mapping) and set(value) == mw.OWNER_OBSERVATION_CONTROL_ROOM_KEYS
+        and _observation_identity(value.get("instance_before"))
+        and value.get("instance_before") == value.get("instance_after")
+        and _equal_counter_pair(value, "publication_before", "publication_after", 1)
+        and all(type(value.get(key)) is str and _DIGEST_RE.fullmatch(value[key]) is not None
+                for key in ("document_digest", "source_validity_digest", "cache_currentness_digest"))
+    )
+
+
+def _coherent_owner_observation(row: Mapping[str, Any], work_ref: str, root_job_id: str | None) -> bool:
+    """Check internal joins, not freshness or authenticity of owner evidence.
+
+    The existing owner supplies CURRENT/SAME. Never mint a receipt, reconstruct
+    its source digests, use a clock, or treat caller-constructed data as authority.
+    """
+    return (
+        row.get("schema") == mw.OWNER_OBSERVATION_SCHEMA
+        and isinstance(row.get("selection"), Mapping)
+        and dict(row["selection"]) == {"work_ref": work_ref, "root_job_id": root_job_id}
+        and _coherent_runtime_observation(row.get("runtime"))
+        and _coherent_control_observation(row.get("control_room"))
+    )
+
+
 def _mission_state(document: object, *, expected_work_ref: str) -> _MissionState:
     top = _mapping(document, field="mission_workspace", keys=mw.OUTPUT_KEYS_V3)
     if top.get("schema") != mw.SCHEMA_V3:
@@ -276,10 +331,24 @@ def _mission_state(document: object, *, expected_work_ref: str) -> _MissionState
         reasons.append("owner_observation_not_same")
     if root_state == "CONFLICT" or root_ambiguous is True:
         reasons.append("mission_root_conflict")
-    if generation_state != "CURRENT":
+    # Mission Workspace owns currentness through its bound owner receipt.
+    # Its legacy generation diagnostic may remain UNKNOWN on a CURRENT/SAME
+    # result; never manufacture CURRENT or let UNKNOWN replace those checks.
+    if generation_state not in {"CURRENT", "UNKNOWN"}:
         reasons.append("source_generation_not_current")
-    if root_job_id is None:
+    if (root_state != "RESOLVED" or root_ambiguous is not False
+            or not _owner_identifier(root_job_id)
+            or type(mission.get("root_job_candidates")) is not list
+            or mission["root_job_candidates"] != [root_job_id]):
         reasons.append("mission_root_unresolved")
+    if observation_state == "SAME" and not _coherent_owner_observation(
+        owner_observation, expected_work_ref, root_job_id
+    ):
+        reasons.append("owner_observation_inconsistent")
+
+    if (not _owner_identifier(posture_value)
+            or dispatch_state not in mw.PROJECTED_DISPATCH_STATES):
+        reasons.append("mission_effect_posture_unqualified")
 
     effect_unknown = (
         posture_value == "EFFECT_UNKNOWN" or dispatch_state == "EFFECT_UNKNOWN"

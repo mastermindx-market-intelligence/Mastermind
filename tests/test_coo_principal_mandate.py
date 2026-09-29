@@ -91,9 +91,17 @@ def mission_doc(
         mw.OWNER_OBSERVATION_KEYS,
         schema=mw.OWNER_OBSERVATION_SCHEMA,
         state=owner_state,
-        selection={},
-        control_room={},
-        runtime={},
+        selection={"work_ref": work_ref, "root_job_id": "JOB-100"},
+        control_room={
+            "instance_before": "control_fixture_123456", "instance_after": "control_fixture_123456",
+            "publication_before": 1, "publication_after": 1,
+            "document_digest": D0, "source_validity_digest": D1, "cache_currentness_digest": D2,
+        },
+        runtime={
+            "schema": mw.RUNTIME_OBSERVATION_SCHEMA, "state": owner_state,
+            "source_identity": "runtime_fixture_123456", "before": 0, "after": 0,
+            "snapshot_digest": D3,
+        },
     )
     source = _closed(
         mw.SOURCE_KEYS_V2,
@@ -256,7 +264,6 @@ def test_owner_observation_must_be_same_for_modifying_mandate():
         ({"root_ambiguous": True}, "mission_root_conflict"),
         ({"source_generation_state": "CONFLICT"}, "source_generation_not_current"),
         ({"source_generation_state": "STALE"}, "source_generation_not_current"),
-        ({"source_generation_state": "UNKNOWN"}, "source_generation_not_current"),
     ],
 )
 def test_root_or_generation_conflict_refuses_modifying_mandate(changes, reason):
@@ -426,3 +433,235 @@ def test_scope_order_is_canonical():
             ),
             principal_binding_digest=D3,
         )
+
+
+def _real_owner_mission(*, generation_state="UNKNOWN", observation_state="SAME"):
+    """Consume the real v3 reducer, not a hand-authored CURRENT document."""
+    import runpy
+    from pathlib import Path
+
+    fixtures = runpy.run_path(str(Path(__file__).with_name("test_mission_workspace.py")))
+    wrapper = fixtures["_v3_inputs"]()["fabric_view"]
+    args = fixtures["_current_args_for_wrapper"](wrapper)
+    responsibility = args["control_room"]["autonomy"]["responsibilities"][0]
+    responsibility["accountable_seat"] = "coo"
+    responsibility["owed_turn"]["seat"] = "coo"
+    args["source_generation"] = {
+        "state": generation_state, "version": None, "generation": None,
+    }
+    fixtures["_refresh_observation_digests"](args)
+    if observation_state != "SAME":
+        args["owner_observation"]["state"] = observation_state
+        args["owner_observation"]["runtime"]["state"] = observation_state
+    return mw.compose_mission_workspace_v3(**args)
+
+
+@pytest.mark.parametrize("generation_state", ["CURRENT", "UNKNOWN"])
+def test_real_current_owner_receipt_does_not_require_legacy_generation_diagnostics(generation_state):
+    document = _real_owner_mission(generation_state=generation_state)
+    assert document["read_state"]["state"] == "CURRENT"
+    assert document["source"]["owner_observation"]["state"] == "SAME"
+    assert document["source"]["source_generation"]["state"] == generation_state
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"),
+        mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.OPEN.value
+    assert result["decision_posture"] == DecisionPosture.DECIDE_CONTINUE.value
+    assert result["mission"]["source_generation_state"] == generation_state
+
+
+@pytest.mark.parametrize("generation_state", ["STALE", "CONFLICT"])
+def test_real_owner_stale_or_conflicting_generation_still_fences(generation_state):
+    document = _real_owner_mission(generation_state=generation_state)
+    assert document["read_state"]["state"] != "CURRENT"
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"),
+        mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+
+
+@pytest.mark.parametrize("observation_state", ["UNKNOWN", "CHANGED", "CONFLICT"])
+def test_real_owner_unqualified_observation_cannot_use_unknown_diagnostics(observation_state):
+    document = _real_owner_mission(observation_state=observation_state)
+    assert document["read_state"]["state"] != "CURRENT"
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"),
+        mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+
+
+@pytest.mark.parametrize("generation_state", [None, "NOT_A_GENERATION_STATE", 0])
+def test_malformed_diagnostic_state_is_not_legitimate_unknown(generation_state):
+    document = mission_doc()
+    document["source"]["source_generation"]["state"] = generation_state
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(), mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+
+
+@pytest.mark.parametrize("path,value", [
+    (("mission", "root_job_id"), ""),
+    (("mission", "root_job_id"), " JOB-1"),
+    (("mission", "root_job_id"), "JOB-1\n"),
+    (("mission", "root_job_id"), None),
+    (("mission", "runtime_root_state"), "UNKNOWN"),
+    (("mission", "runtime_root_state"), None),
+    (("mission", "runtime_root_state"), "FUTURE_STATE"),
+    (("mission", "root_job_ambiguous"), None),
+    (("mission", "root_job_ambiguous"), 0),
+    (("mission", "root_job_candidates"), []),
+    (("mission", "root_job_candidates"), ["JOB-2"]),
+    (("mission", "root_job_candidates"), ["JOB-1", "JOB-1"]),
+    (("mission", "root_job_candidates"), ["JOB-1", "JOB-2"]),
+    (("mission", "root_job_candidates"), "JOB-1"),
+    (("source", "owner_observation", "schema"), "unsupported"),
+    (("source", "owner_observation", "selection"), None),
+    (("source", "owner_observation", "selection"), {}),
+    (("source", "owner_observation", "selection", "work_ref"), "WS:OTHER"),
+    (("source", "owner_observation", "selection", "root_job_id"), "JOB-2"),
+    (("source", "owner_observation", "selection", "extra"), True),
+    (("source", "owner_observation", "runtime", "schema"), "unsupported"),
+    (("source", "owner_observation", "runtime", "state"), "CHANGED"),
+    (("source", "owner_observation", "runtime", "after"), 2),
+    (("source", "owner_observation", "runtime", "before"), True),
+    (("source", "owner_observation", "runtime", "source_identity"), ""),
+    (("source", "owner_observation", "runtime", "snapshot_digest"), "bad"),
+    (("source", "owner_observation", "runtime", "extra"), True),
+    (("source", "owner_observation", "control_room", "instance_after"), "different-instance"),
+    (("source", "owner_observation", "control_room", "publication_after"), 2),
+    (("source", "owner_observation", "control_room", "publication_before"), True),
+    (("source", "owner_observation", "control_room", "document_digest"), None),
+    (("source", "owner_observation", "control_room", "source_validity_digest"), "bad"),
+    (("source", "owner_observation", "control_room", "cache_currentness_digest"), "bad"),
+    (("source", "owner_observation", "control_room", "extra"), True),
+])
+def test_inconsistent_owner_output_cannot_open_a_modifying_mandate(path, value):
+    document = _real_owner_mission()
+    selected = document
+    for key in path[:-1]:
+        selected = selected[key]
+    selected[path[-1]] = value
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"),
+        mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+    assert result["decision_posture"] == DecisionPosture.READ_RECOMMEND_ONLY.value
+    assert result["reason_codes"]
+
+
+@pytest.mark.parametrize("identity", ["short", "a" * 129, "runtime/owner/12345", " runtime_owner_12345"])
+@pytest.mark.parametrize("section", ["runtime", "control_room"])
+def test_equal_but_malformed_owner_identity_is_not_a_qualified_receipt(identity, section):
+    document = _real_owner_mission()
+    row = document["source"]["owner_observation"][section]
+    if section == "runtime":
+        row["source_identity"] = identity
+    else:
+        row["instance_before"] = row["instance_after"] = identity
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"),
+        mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+
+
+@pytest.mark.parametrize("identity", ["a" * 16, "Z_0-" * 32])
+def test_owner_identity_bounds_and_zero_runtime_generation_remain_valid(identity):
+    document = _real_owner_mission()
+    receipt = document["source"]["owner_observation"]
+    receipt["runtime"].update(source_identity=identity, before=0, after=0)
+    receipt["control_room"].update(instance_before=identity, instance_after=identity)
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"), mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.OPEN.value
+
+
+@pytest.mark.parametrize("root_id", ["", " ", " JOB-1", "JOB-1\n", "JOB-1\x00", "J" * 513])
+def test_matching_copies_cannot_make_a_malformed_root_identifier_valid(root_id):
+    document = _real_owner_mission()
+    document["mission"].update(root_job_id=root_id, root_job_candidates=[root_id])
+    document["source"]["owner_observation"]["selection"]["root_job_id"] = root_id
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"), mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+
+
+@pytest.mark.parametrize("generation_state", ["CURRENT", "UNKNOWN", "STALE", "CONFLICT"])
+def test_projection_does_not_mutate_evidence_or_depend_on_json_key_order(generation_state):
+    import json
+    document = _real_owner_mission(generation_state=generation_state)
+    before = copy.deepcopy(document)
+    kwargs = {"principal": principal(), "authority": authority(work_ref="WS:ONE")}
+    result = project_coo_principal_mandate(**kwargs, mission_workspace=document)
+    reordered = json.loads(json.dumps(document, sort_keys=True))
+    assert project_coo_principal_mandate(**kwargs, mission_workspace=reordered) == result
+    assert document == before
+    result["mission"]["source_generation_state"] = "CALLER_MUTATION"
+    assert document == before
+
+
+def test_all_existing_effect_fences_compose_with_owner_consistency():
+    from itertools import product
+    base = _real_owner_mission()
+    checked = 0
+    axes = (
+        ("CURRENT", "PARTIAL", "HISTORICAL", "UNAVAILABLE"),
+        ("SAME", "UNKNOWN", "CONFLICT"),
+        ("CURRENT", "UNKNOWN", "STALE", "CONFLICT", None),
+        ("coo", "ceo", "chairman", "worker"),
+        (False, True), (False, True),
+        ("RETURNED_UNREVIEWED", "EFFECT_UNKNOWN", "RECONCILIATION_REQUIRED"),
+        ("RETURNED", "EFFECT_UNKNOWN", "RUNTIME_BINDING_RECONCILIATION_REQUIRED"),
+    )
+    for read, owner, generation, seat, conflict, wrong_root, posture, dispatch in product(*axes):
+        document = copy.deepcopy(base)
+        document["read_state"]["state"] = read
+        document["source"]["owner_observation"]["state"] = owner
+        document["source"]["source_generation"]["state"] = generation
+        document["principal"]["accountable_seat"] = seat
+        document["posture"]["value"] = posture
+        document["transport"]["dispatch_state"] = dispatch
+        if wrong_root:
+            document["source"]["owner_observation"]["selection"]["root_job_id"] = "JOB-OTHER"
+        result = project_coo_principal_mandate(
+            principal=principal(), authority=authority(work_ref="WS:ONE", source_conflict=conflict),
+            mission_workspace=document,
+        )
+        should_open = (
+            read == "CURRENT" and owner == "SAME" and generation in {"CURRENT", "UNKNOWN"}
+            and seat == "coo" and not conflict and not wrong_root
+            and posture == "RETURNED_UNREVIEWED" and dispatch == "RETURNED"
+        )
+        assert (result["new_effect_gate"] == NewEffectGate.OPEN.value) is should_open, (
+            read, owner, generation, seat, conflict, wrong_root, posture, dispatch, result
+        )
+        checked += 1
+    assert checked == 8640
+
+
+@pytest.mark.parametrize("value", [None, "", False, [], {}])
+@pytest.mark.parametrize("section,field", [("posture", "value"), ("transport", "dispatch_state")])
+def test_malformed_effect_state_cannot_be_interpreted_as_clear(section, field, value):
+    document = _real_owner_mission()
+    document[section][field] = value
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"), mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+
+
+@pytest.mark.parametrize("dispatch", ["UNKNOWN", "WAITING_CAPACITY"])
+def test_valid_transport_missingness_does_not_block_independent_coo_work(dispatch):
+    document = _real_owner_mission()
+    document["transport"]["dispatch_state"] = dispatch
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"), mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.OPEN.value
