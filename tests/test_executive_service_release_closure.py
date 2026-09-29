@@ -410,3 +410,106 @@ def test_native_gateway_uses_same_consumer_only_after_canary(
             await service.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("route", ["method", "socket"])
+@pytest.mark.parametrize("failure", ["finalizer", "reconciliation", "cancel", "none"])
+def test_overlapping_activation_cannot_retry_or_clear_quarantine(
+    config, monkeypatch, route, failure
+):
+    from tests.test_executive_service import _request
+
+    entered = threading.Event()
+    release = threading.Event()
+    reconciled = []
+    finalized = []
+
+    class Supervisor(_FakeSupervisor):
+        secret_canary_verdict = {}
+        require_complete_launch_attestation = False
+
+        def reconcile_restart(self, **kwargs):
+            reconciled.append(self)
+            entered.set()
+            assert release.wait(5)
+            if failure == "reconciliation":
+                raise StateConflict("synthetic reconciliation failure")
+            return []
+
+    def finalize(self):
+        finalized.append(self)
+        if failure == "finalizer":
+            raise ReleaseConsumerError("RELEASE_EFFECT_IN_PROGRESS")
+
+    monkeypatch.setattr(
+        ReleaseControlConsumer, "finalize_unresolved_admission", finalize, raising=False
+    )
+    monkeypatch.setattr(
+        "control_plane.codex_worker.validate_secret_canary_verdict",
+        lambda value, **kwargs: value,
+    )
+    service = _armed(
+        config,
+        release_control_consumer_factory=ReleaseControlConsumer,
+        service_state="AWAITING_CANARY",
+        canary_loader=lambda: {},
+    )
+    service._supervisor_factory = Supervisor
+
+    async def activate():
+        if route == "socket":
+            return await _request(service, "activate-canary")
+        return await service.activate_canary({})
+
+    async def run():
+        await service.start()
+        tasks = []
+        try:
+            tasks.append(asyncio.create_task(activate()))
+            assert await asyncio.to_thread(entered.wait, 3)
+            tasks.append(asyncio.create_task(activate()))
+            # The sibling must refuse while the first physical reconciliation
+            # is still blocked, not wait and retry after it fails.
+            sibling = await asyncio.wait_for(
+                asyncio.gather(tasks[1], return_exceptions=True), 2
+            )
+            assert (
+                isinstance(sibling[0], ServiceError)
+                if route == "method"
+                else sibling[0]["ok"] is False
+            )
+            assert len(reconciled) == 1
+            assert not finalized
+            if failure == "cancel":
+                if route == "method":
+                    tasks[0].cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await tasks[0]
+                    assert service.service_state == "QUARANTINED"
+                else:
+                    # Cancel the owned handler itself, not merely the client.
+                    handlers = [
+                        task for task in service._operator_handlers if not task.done()
+                    ]
+                    assert len(handlers) == 1
+                    handlers[0].cancel()
+                    await asyncio.gather(handlers[0], return_exceptions=True)
+                    assert service.service_state == "QUARANTINED"
+            release.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(
+                *list(service._physical_workers), return_exceptions=True
+            )
+            expected = "READY" if failure == "none" else "QUARANTINED"
+            assert service.service_state == expected
+            assert len(finalized) == (1 if failure in {"finalizer", "none"} else 0)
+            assert not service.runtime.events.list_events()
+        finally:
+            release.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(
+                *list(service._physical_workers), return_exceptions=True
+            )
+            await service.close()
+
+    asyncio.run(run())
