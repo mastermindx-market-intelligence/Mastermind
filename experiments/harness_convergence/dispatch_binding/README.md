@@ -208,7 +208,7 @@ To prepare the additional exact public inputs, run `python3 prepare_mcp.py --dow
 after the core preparation. Then install only this directory's locked test
 packages with the private npm settings above. `npm test` now runs both verifiers;
 `python3 verify_mcp.py` runs just the MCP suite offline after preparation.
-`mcp-manifest.json` pins every input and all three patched-file digests. The
+`mcp-manifest.json` pins every input and all four patched-file digests. The
 MCP patch is zero-context (manual Git application needs --unidiff-zero); the
 preparer verifies exact preimages/postimages and refuses changed inputs/outputs
 instead of overwriting them. `mcp-verification-receipt.json` contains the measured
@@ -234,9 +234,58 @@ Independent review remains outstanding. The attempted review-task preparation
 was platform-blocked and was not retried or routed elsewhere. This source is an
 unreviewed integration candidate, not a release or installed acceptance.
 
+## Actual stdio child and startup environment
+
+`mcp-stdio.test.mjs` now composes the patched ToolRuntime and loaded-runtime
+preflight with the real `startConnection` and `createTransport`. No transport
+mock or `InMemoryTransport` is used in this group. The SDK launches the fixed
+`stdio-fixture-server.mjs` in a unique synthetic test directory. Its only file
+inputs are two small named fixture files; it is not a production filesystem
+service. A real read and literal search return the fresh disk nonce, content
+hash and line matches. The ungranted write tool never executes; the two input
+files remain unchanged. Cancellation, discovery failure and a lost reply are
+also exercised through actual process/stdio boundaries.
+
+These tests exposed a startup gap: the admitted path still inherited the
+full scrubbed parent environment, including harmless test values for an
+unapproved configuration variable and `NODE_OPTIONS`. The smallest repair
+threads the existing tool-only host decision into `createTransport`:
+admitted stdio uses explicit `config.env`, not `scrubbedParentEnv()`.
+Legacy/default behavior is unchanged, and HTTP transport is not changed.
+The SDK still adds its own platform bootstrap allowlist; this is NOT an empty
+environment or an OS sandbox. The immutable host profile must explicitly pin
+HOME, PATH, cwd, executable and any required approved proxy/startup settings.
+A tool/model cannot supply this trusted factory argument.
+
+**Process-accounting finding:** MCP Client 2.0 auto negotiation starts a
+short-lived disposable sibling before starting the actual session process.
+The official SDK owns and reaps the probe. Do not mistake it for replay, but
+do not omit it from process evidence either. The pinned test observes two
+distinct PIDs, proves the probe absent before useful readiness, attributes the
+read to the session PID, and proves both absent after disposal. A lost reply
+performs exactly one read and creates no process beyond the startup census.
+Startup must therefore be side-effect-free for both the probe and session;
+this is not proof of every possible descendant or installed worker confinement.
+
+Observed before environment repair: **10 PASS / 2 expected failures** in the
+12-case real-stdio group. After repair: **12/12 PASS**, including useful read/
+search, denied tools/context, private configured home/cwd, revoked grants,
+in-flight cancellation, startup failure, lost reply, probe and session cleanup,
+and unchanged legacy behavior. A separate environment-wiring mutation must
+reproduce exactly the two failures. The original initial test incorrectly
+expected one process; SDK source inspection corrected that assertion before
+RED was frozen. No duplicate tool request was observed in that initial run.
+
+The full `npm test` includes this group and its mutation. Raw fixture logs and
+source/result evidence remain in the ignored cache; the verification receipt
+retains the exact measured scope and hashes. No new model/provider, ACP adapter,
+credential, production service, dependency installation, source-custody transfer
+or Executive Job is part of this continuation. These real MCP subprocess tests
+still do not prove an installed DSH ACP worker or original-parent consumption.
+
 ## License
 
-The one-file donor patch and fetched test references derive from DeepSeek's MIT
+The donor patches and fetched test references derive from DeepSeek's MIT
 source; `UPSTREAM_LICENSE` retains that notice. Donor sources and third-party
 packages stay in ignored caches/node_modules. This work grants no rights to
 optional proprietary products, and none were installed by this experiment.

@@ -159,6 +159,9 @@
 +      const currentOpts = admitGeneration === undefined ? syncOpts
 +        : { ...syncOpts, isCurrentGeneration: () => isCurrent(generation) }
 +      disposers = await syncTools(generation, ctx, currentOpts, disposers)
+@@ -307 +315 @@
+-      transport = createTransport(config)
++      transport = createTransport(config, toolOnly)
 @@ -365 +373 @@
 -    instructions: () => serverInstructions,
 +    instructions: () => toolOnly ? '' : serverInstructions,
@@ -169,3 +172,15 @@
 @@ -26,0 +27,2 @@
 +export { startConnection, resolveReconnectPolicy } from './connection.ts'
 +export type { McpGenerationAdmission, McpToolAdmission, McpToolGeneration } from './tools.ts'
+--- a/packages/mcp/mcp-client/src/transport.ts
++++ b/packages/mcp/mcp-client/src/transport.ts
+@@ -28,0 +29,3 @@
++ * @param explicitEnvironment - Trusted host-admitted path: explicit env plus the
++ *   SDK's fixed bootstrap allowlist only. The host must pin HOME/PATH in config.env.
++ *   Omission preserves the legacy scrubbed-ambient environment.
+@@ -31 +34 @@
+-export function createTransport(config: Config): Transport {
++export function createTransport(config: Config, explicitEnvironment = false): Transport {
+@@ -37 +40 @@
+-        env: buildChildEnv(config.env),
++        env: explicitEnvironment ? { ...config.env } : buildChildEnv(config.env),

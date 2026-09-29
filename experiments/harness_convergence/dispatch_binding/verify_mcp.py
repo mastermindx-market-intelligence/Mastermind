@@ -50,20 +50,21 @@ ENV = {'PATH': str(Path(NODE).parent) + ':/usr/bin:/bin',
        'HOME': str(CACHE / 'home'), 'TMPDIR': str(CACHE / 'tmp'), 'CI': '1'}
 
 
-def suite(name: str, source: str, expected: set[str], upstream: bool = False) -> dict:
+def suite(name: str, source: str, expected: set[str], upstream: bool = False, stdio: bool = False) -> dict:
     destination = CACHE / f'{name}.json'
     start = time.monotonic()
     result = subprocess.run(
         [NODE, 'node_modules/vitest/vitest.mjs', 'run', '--config', 'vitest.mcp.config.mjs',
          '--reporter=json', f'--outputFile={destination}'], cwd=ROOT,
-        env={**ENV, 'MMX_MCP_SOURCE': source, 'MMX_MCP_UPSTREAM': '1' if upstream else '0'},
+        env={**ENV, 'MMX_MCP_SOURCE': source, 'MMX_MCP_UPSTREAM': '1' if upstream else '0',
+             'MMX_MCP_STDIO': '1' if stdio else '0'},
         capture_output=True, text=True, timeout=60, check=False,
     )
     output = result.stdout + result.stderr
     (CACHE / f'{name}.log').write_text(output)
     data = json.loads(destination.read_text())
     assertions = [a for s in data['testResults'] for a in s.get('assertionResults', [])]
-    count = 93 if upstream else 32
+    count = 12 if stdio else 93 if upstream else 32
     failed = {a['title'] for a in assertions if a['status'] == 'failed'}
     assert len(assertions) == data['numTotalTests'] == count, f'{name}: missing cases'
     assert all(a['status'] in {'passed', 'failed'} for a in assertions), f'{name}: skipped cases'
@@ -145,6 +146,43 @@ def mutations() -> dict:
     return results
 
 
+def stdio_checks() -> dict:
+    """Real SDK subprocess checks, preserving sibling-probe and session settlement."""
+    def collect(name: str, source: str, expected: set[str]) -> dict:
+        result = suite(name, source, expected, stdio=True)
+        raw = (CACHE / 'stdio-observations.json').read_bytes()
+        rows = json.loads(raw)
+        assert len(rows) == 12, 'Missing stdio cleanup evidence'
+        assert all(row['childCount'] == 2 and row['childAbsentAfterDispose']
+                   and row['inputsUnchanged'] for row in rows)
+        (CACHE / f'{name}-observations.json').write_bytes(raw)
+        return {**result, 'observations_sha256': digest(raw), 'observations': rows,
+                'all_observed_children_settled': True}
+
+    patched = collect('mcp-stdio-patched', 'donor', set())
+    source = CACHE / 'mcp-donor'
+    before = {p.name: p.read_bytes() for p in source.glob('*.ts')}
+    destination = CACHE / 'mcp-mutant'
+    destination.mkdir(exist_ok=True)
+    for name, data in before.items():
+        (destination / name).write_bytes(data)
+    text = before['connection.ts'].decode()
+    old = 'transport = createTransport(config, toolOnly)'
+    assert text.count(old) == 1
+    mutant = text.replace(old, 'transport = createTransport(config)').encode()
+    (destination / 'connection.ts').write_bytes(mutant)
+    expected = {'host-admitted stdio excludes unapproved ambient configuration',
+                'host-admitted stdio excludes ambient Node startup options'}
+    rejected = collect('mcp-stdio-environment-mutant', 'mutant', expected)
+    assert before == {p.name: p.read_bytes() for p in source.glob('*.ts')}
+    sdk_root = ROOT / 'node_modules/@modelcontextprotocol/client/dist'
+    return {'patched': patched, 'environment_mutant': {**rejected, 'killed': True,
+             'mutant_sha256': digest(mutant)},
+            'sdk_executable_sha256': {name: digest((sdk_root / name).read_bytes())
+                                      for name in ['index.mjs', 'stdio.mjs']},
+            'scope': 'Synthetic disk inputs, SDK probe plus session; no model, ACP parent or OS confinement'}
+
+
 def preparation_checks() -> dict:
     result = subprocess.run([sys.executable, '-B', 'mcp-preparation.test.py'],
                             cwd=ROOT, env=ENV, capture_output=True, text=True, timeout=30)
@@ -166,7 +204,7 @@ def main() -> dict:
         'platform': platform.system(), 'architecture': platform.machine(),
         'scope': 'Real MCP SDK protocol and donor bridge; no model/installed-worker/Executive-parent proof',
         'core_supply': core_supply, 'mcp_supply': mcp_supply,
-        'model_requests': 0, 'network_transport': 'OFFICIAL_IN_MEMORY_MCP',
+        'model_requests': 0, 'network_transport': 'OFFICIAL_IN_MEMORY_MCP_AND_REAL_LOCAL_STDIO',
         'independent_review': 'NOT_PERFORMED', 'installed': False,
     }
     report['targeted'] = {
@@ -184,10 +222,11 @@ def main() -> dict:
                           for mode in ['pristine', 'donor']}
     report['typecheck'] = typecheck()
     report['mutations'] = mutations()
+    report['stdio'] = stdio_checks()
     report['preparation'] = preparation_checks()
     report['input_sha256'] = {name: digest((ROOT / name).read_bytes()) for name in [
         'mcp-generation-admission.patch', 'mcp-manifest.json', 'mcp-admission.test.mjs',
-        'mcp-context-boundary.test.mjs',
+        'mcp-context-boundary.test.mjs', 'mcp-stdio.test.mjs', 'stdio-fixture-server.mjs',
         'prepare_mcp.py', 'verify_mcp.py', 'vitest.mcp.config.mjs', 'tsconfig.mcp.json',
         'mcp-preparation.test.py',
         'package.json', 'package-lock.json', 'donor-manifest.json', 'strict-dispatch-binding.patch']}
@@ -201,4 +240,5 @@ if __name__ == '__main__':
     destination.write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
     print(json.dumps({'success': True, 'mcp_tests': report['targeted']['patched']['passed'],
                       'upstream_tests': report['upstream']['donor']['passed'],
+                      'stdio_tests': report['stdio']['patched']['passed'],
                       'report': str(destination)}, indent=2))

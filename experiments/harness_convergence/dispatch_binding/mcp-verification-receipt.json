@@ -1,46 +1,40 @@
 {
   "architecture": "arm64",
-  "context_feature_red": {
-    "failed": 5,
-    "log_sha256": "ae271c614c00b0da483916069569fd3eba0d90ed9d472c3866b2e923de22b7b4",
-    "passed": 2,
-    "report_sha256": "108e31796fae57baf8b3d5464a35cf3f37cc62863f00a5646d0644cff05c22af",
-    "source_head": "7f194565407a98688990aceb07888a3091c3b035",
-    "tests": 7
-  },
-  "context_scope": "Host-admitted connection is tool-only; server instructions suppressed and resources denied before request; legacy context unchanged",
   "core_supply": {
     "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
     "patched_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
     "runtime_started": false,
     "source_files": 14
   },
-  "full_local_report_sha256": "87840614569ea5e89b32e3369c4569bbc7fa4329ab93d9ab5c0658f757fa00a1",
-  "generated_at": "2026-09-29T09:20:01.523255+00:00",
+  "full_local_report_sha256": "155bc212de8c4e627ef9d9a203f1e5b44da4349c50e5f8a7475833ffd00dfab2",
+  "generated_at": "2026-09-29T09:57:41.032371+00:00",
   "independent_review": "NOT_PERFORMED",
   "input_sha256": {
     "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
     "mcp-admission.test.mjs": "b2a507738f38a833f237b2cf1b718882f2515962644208425e049e2e8c0407ce",
     "mcp-context-boundary.test.mjs": "db2fd87b4c3271260486b8e10933719073ec6edfda9e5675036aefc473ade9fe",
-    "mcp-generation-admission.patch": "055915253ce9f969beae1c426c1efb559fbc47e85bee5c2d5e026d733ac5c95b",
-    "mcp-manifest.json": "5bcd27801cc6ecf5f5bb682e3d1defdb3889e71a813515104f211b4dfe2d4020",
+    "mcp-generation-admission.patch": "97276dc5e828234bca653e627ceb06e7925926f157e4941619d7c22f2dfe6100",
+    "mcp-manifest.json": "64ab273621e7a35c5335f91c16a744689d9c3f4b2a6f898398a80cab8226e1fa",
     "mcp-preparation.test.py": "6cac00c59fd4a719cc2aba5222fb3468bb8fa3e33e35268e7320d191ff0047f4",
+    "mcp-stdio.test.mjs": "cd213490be050c6f4af4cf36bfb537873f73a17beee1c6b89ac7d22a448c2270",
     "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
     "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
     "prepare_mcp.py": "4e6c5b5a4a7f0a2e9eb5002efb16624c84467f36955ac2ccc26133b95d183184",
+    "stdio-fixture-server.mjs": "a62592eb6e132ac5e40c16d33cac9abb9bf78c263a7c309f3e5b36c282cb1c6a",
     "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
     "tsconfig.mcp.json": "a12bb6b96171409d82854d1e6f4d10fb9ec1640941032ffa7f68a641b2b52f6c",
-    "verify_mcp.py": "80ce360ed1f6fcf8ae6cafb4f408c93bd4db98627c410423ffda64be587772c9",
-    "vitest.mcp.config.mjs": "c4ef80d355d67dacdc605aa7e138363c1c6d2cd00c25c635bc7cf234e95bacaf"
+    "verify_mcp.py": "0cf3804dd410133e06d7f41ef5d75da87f0da5ba3a0611604a7ab61ebd719aa1",
+    "vitest.mcp.config.mjs": "bb931d3ac8d549b82be863035e3e1da7447db12a4f444b7d0000e16970dd1ee7"
   },
   "installed": false,
   "mcp_supply": {
     "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
-    "patch_sha256": "055915253ce9f969beae1c426c1efb559fbc47e85bee5c2d5e026d733ac5c95b",
+    "patch_sha256": "97276dc5e828234bca653e627ceb06e7925926f157e4941619d7c22f2dfe6100",
     "patched_source_sha256": {
-      "connection.ts": "83520c0cb0e6dde5f96072feb9b729308485300b2a47b2e75470288f4bfb67e9",
+      "connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
       "index.ts": "6598367775528afef19d816b8531a2b1d297e9c296b23842a4cc4770b7830f04",
-      "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82"
+      "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
+      "transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f"
     },
     "runtime_started": false,
     "source_files": 9
@@ -56,10 +50,10 @@
       ],
       "killed": true,
       "log_sha256": "2571499f4a902945ae391396552bebf56fbbd50dd2e8fed214908bb063a7f539",
-      "mutant_sha256": "6026f2766db6b8f6a7d2800c3061792226df8d48d67ba77a0c4c45893004f3b5",
+      "mutant_sha256": "b30dcd38fa6c2d4adb75f4d4a11512fd62ae628e62295da6ddb805ddb09aadf3",
       "passed": 29,
-      "report_sha256": "febd7e6186633e9d883224fee26137cc7778a33c62bfd272b02b00835f3114e7",
-      "seconds": 2.09,
+      "report_sha256": "9ee29762a933c1eec5f8ad24c8655c631baf48d10c5a629e8bb1bf04735d1f6c",
+      "seconds": 1.845,
       "stderr_empty": true,
       "tests": 32
     },
@@ -74,10 +68,10 @@
       ],
       "killed": true,
       "log_sha256": "c5752cd538de9a583100ad6b55da5bfe2361b925557c4c1e6508cabf4155e19b",
-      "mutant_sha256": "69921f1e542f5fac71ca70104ac06ca6f0dce22e407402288b844f915b940240",
+      "mutant_sha256": "a291bc888d54e022e6adeee051b6519f12715ff3dda8969f1c4c9d7b31d1f7b2",
       "passed": 27,
-      "report_sha256": "a8475d15b90ef8d424d7394873decf2f865ba57a16307d305aec2b2fb7a83234",
-      "seconds": 0.889,
+      "report_sha256": "0f02a77b4688e930fdc692f51ea980489c70687ae3031b3c93ed7a691946a0f0",
+      "seconds": 0.876,
       "stderr_empty": true,
       "tests": 32
     },
@@ -94,8 +88,8 @@
       "log_sha256": "e5b3dea08b2e69d112ace974d0bfcc968dbad056c6ffd1d43b97473a8c4add88",
       "mutant_sha256": "1d3e3006ee9637a924a085e2cbf6851cec98cbeeecc0fc194a957109f246f32b",
       "passed": 27,
-      "report_sha256": "77409c8e02a6c547d98c2b7b4b2e97fa4935576921e09b40218de74bab324ae6",
-      "seconds": 0.929,
+      "report_sha256": "a6890538397b1698009cf1935dfd05d7c37f67c6292e598c0cf9885c1619de9f",
+      "seconds": 0.871,
       "stderr_empty": true,
       "tests": 32
     },
@@ -113,13 +107,13 @@
       "log_sha256": "fd19eb186471bd36c2fb986591822192cc17b54d2948c01b307c2d1a442cfe16",
       "mutant_sha256": "e3ab861c002909128d7bcd143eec8ce351c2da0179ed448bfc265c245a76841e",
       "passed": 26,
-      "report_sha256": "7a91059ffcb8844e779a0f9e6f2766f145110698e2b2659ce6debe74b387d871",
-      "seconds": 0.91,
+      "report_sha256": "657418520a9183b6c7ac0fed7b7b28e6c3565564de2c8fbfcf69fb62d00755af",
+      "seconds": 0.882,
       "stderr_empty": true,
       "tests": 32
     }
   },
-  "network_transport": "OFFICIAL_IN_MEMORY_MCP",
+  "network_transport": "OFFICIAL_IN_MEMORY_MCP_AND_REAL_LOCAL_STDIO",
   "node": "v26.8.2",
   "node_sha256": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
   "observations": [
@@ -137,12 +131,12 @@
       "result": {
         "content": [
           {
-            "text": "d6bf7fc4-4c3e-4f47-ba96-da0ce09bfb6a",
+            "text": "fa1ec819-52f1-4c15-8977-86e697199f4d",
             "type": "text"
           }
         ]
       },
-      "sourceNonce": "d6bf7fc4-4c3e-4f47-ba96-da0ce09bfb6a"
+      "sourceNonce": "fa1ec819-52f1-4c15-8977-86e697199f4d"
     },
     {
       "calls": 1,
@@ -151,17 +145,519 @@
       "journey": "connection-notification-readmission"
     }
   ],
-  "packaging_correction": "Normal-context patch encoded a blank context line as trailing whitespace. Zero-context form now passes whitespace and six exact patch/preimage/postimage tests; runtime source bytes unchanged by formatting.",
   "platform": "Darwin",
   "preparation": {
     "exit_code": 0,
-    "log_sha256": "f9f51dbe8fb9fe0959d994cc84646e00e32e90eb369e53e14b00324fb4ffb1cc",
+    "log_sha256": "bc9afa04848b36ece54cac3aaed24279d6c9089c12267c199b7174291e0ceab0",
     "passed": 6,
     "tests": 6
   },
-  "review_gate": "PLATFORM_REVIEW_PREPARATION_BLOCKED_NO_RETRY",
   "schema": "mastermind.dsh_mcp_admission_verification.v1",
   "scope": "Real MCP SDK protocol and donor bridge; no model/installed-worker/Executive-parent proof",
+  "stdio": {
+    "environment_mutant": {
+      "all_children_fixture_cwd": true,
+      "all_children_private_home": true,
+      "all_observed_children_settled": true,
+      "all_preflights_verified": true,
+      "environment_proof": {
+        "explicit private home and cwd reach the actual child": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            null,
+            null
+          ],
+          "node_options": [
+            null,
+            null
+          ]
+        },
+        "host-admitted stdio excludes ambient Node startup options": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            null,
+            null
+          ],
+          "node_options": [
+            "--no-warnings",
+            "--no-warnings"
+          ]
+        },
+        "host-admitted stdio excludes unapproved ambient configuration": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            "fixture-ambient",
+            "fixture-ambient"
+          ],
+          "node_options": [
+            null,
+            null
+          ]
+        },
+        "legacy transport retains its existing scrubbed ambient behavior": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            "fixture-ambient",
+            "fixture-ambient"
+          ],
+          "node_options": [
+            null,
+            null
+          ]
+        }
+      },
+      "exit_code": 1,
+      "failed_cases": [
+        "host-admitted stdio excludes ambient Node startup options",
+        "host-admitted stdio excludes unapproved ambient configuration"
+      ],
+      "killed": true,
+      "log_sha256": "d160a48e802cf8715a9688bc8a86f5c54f20c62a5f0b59ea0a1ea3663004e602",
+      "mutant_sha256": "83520c0cb0e6dde5f96072feb9b729308485300b2a47b2e75470288f4bfb67e9",
+      "observations_sha256": "4435ca288595c88acbe66615b6cc5fd0f579c4a29d616be00ea9a12028055619",
+      "passed": 10,
+      "process_summary": [
+        {
+          "all_children_absent": true,
+          "case": "real stdio subprocess reads and searches two synthetic files through admitted tools",
+          "event_counts": {
+            "read": 1,
+            "search": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76231,
+            76232
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "host-admitted stdio excludes unapproved ambient configuration",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76236,
+            76238
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "host-admitted stdio excludes ambient Node startup options",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76249,
+            76262
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "explicit private home and cwd reach the actual child",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76266,
+            76275
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "legacy transport retains its existing scrubbed ambient behavior",
+          "event_counts": {
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76297,
+            76302
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "revoked live grant prevents an actual child request",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76303,
+            76304
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "instruction and resource channels remain closed over real stdio",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76306,
+            76307
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "startup discovery rejection settles the real child",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76310,
+            76312
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "lost response never resends the already-read request",
+          "event_counts": {
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76315,
+            76316
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "in-flight cancellation reaches the real server and settles without a second call",
+          "event_counts": {
+            "cancelled": 1,
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76317,
+            76318
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "the synthetic fixture never reads a caller-selected outside path",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76323,
+            76331
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "SDK negotiation probe is reaped before the useful session is ready",
+          "event_counts": {
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76335,
+            76338
+          ]
+        }
+      ],
+      "report_sha256": "568831ba7275c5d74de84b54f7fc2b517e2d8f1315f5f0c5a48ff163d68bac8a",
+      "seconds": 3.568,
+      "stderr_empty": true,
+      "tests": 12,
+      "workload_result": {
+        "read": {
+          "file": "memo.txt",
+          "nonce": "e2ebc621-e2d4-45e3-9838-f92ee223574d",
+          "pid": 76232,
+          "sha256": "751460721200abe2e9733f964ac1779dd2a633eff40c1a0da35105bb830dc19f",
+          "text": "Research fixture\nneedle e2ebc621-e2d4-45e3-9838-f92ee223574d\n"
+        },
+        "search": {
+          "matches": [
+            {
+              "file": "memo.txt",
+              "line": 2,
+              "text": "needle e2ebc621-e2d4-45e3-9838-f92ee223574d"
+            },
+            {
+              "file": "signals.txt",
+              "line": 3,
+              "text": "needle e2ebc621-e2d4-45e3-9838-f92ee223574d"
+            }
+          ],
+          "nonce": "e2ebc621-e2d4-45e3-9838-f92ee223574d",
+          "pid": 76232
+        }
+      }
+    },
+    "patched": {
+      "all_children_fixture_cwd": true,
+      "all_children_private_home": true,
+      "all_observed_children_settled": true,
+      "all_preflights_verified": true,
+      "environment_proof": {
+        "explicit private home and cwd reach the actual child": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            null,
+            null
+          ],
+          "node_options": [
+            null,
+            null
+          ]
+        },
+        "host-admitted stdio excludes ambient Node startup options": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            null,
+            null
+          ],
+          "node_options": [
+            null,
+            null
+          ]
+        },
+        "host-admitted stdio excludes unapproved ambient configuration": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            null,
+            null
+          ],
+          "node_options": [
+            null,
+            null
+          ]
+        },
+        "legacy transport retains its existing scrubbed ambient behavior": {
+          "all_children_fixture_cwd": true,
+          "all_children_private_home": true,
+          "ambient": [
+            "fixture-ambient",
+            "fixture-ambient"
+          ],
+          "node_options": [
+            null,
+            null
+          ]
+        }
+      },
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "331f129c70ddecedf94a0061c250d85440fdbc3f4b797468bd9088ddbc86b563",
+      "observations_sha256": "01d22869266a5e9a1bede57b202f1d8986f33e6181922c3426620acf34b79113",
+      "passed": 12,
+      "process_summary": [
+        {
+          "all_children_absent": true,
+          "case": "real stdio subprocess reads and searches two synthetic files through admitted tools",
+          "event_counts": {
+            "read": 1,
+            "search": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76109,
+            76112
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "host-admitted stdio excludes unapproved ambient configuration",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76117,
+            76120
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "host-admitted stdio excludes ambient Node startup options",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76124,
+            76128
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "explicit private home and cwd reach the actual child",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76129,
+            76130
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "legacy transport retains its existing scrubbed ambient behavior",
+          "event_counts": {
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76132,
+            76133
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "revoked live grant prevents an actual child request",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76137,
+            76138
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "instruction and resource channels remain closed over real stdio",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76141,
+            76142
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "startup discovery rejection settles the real child",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76143,
+            76144
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "lost response never resends the already-read request",
+          "event_counts": {
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76149,
+            76154
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "in-flight cancellation reaches the real server and settles without a second call",
+          "event_counts": {
+            "cancelled": 1,
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76164,
+            76168
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "the synthetic fixture never reads a caller-selected outside path",
+          "event_counts": {
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76173,
+            76177
+          ]
+        },
+        {
+          "all_children_absent": true,
+          "case": "SDK negotiation probe is reaped before the useful session is ready",
+          "event_counts": {
+            "read": 1,
+            "start": 2
+          },
+          "inputs_unchanged": true,
+          "pids": [
+            76182,
+            76184
+          ]
+        }
+      ],
+      "report_sha256": "407b75540fb34a3ee518c087df6438e2846db397a7271891e31431b8622e5547",
+      "seconds": 4.42,
+      "stderr_empty": true,
+      "tests": 12,
+      "workload_result": {
+        "read": {
+          "file": "memo.txt",
+          "nonce": "4c047f61-2fb7-4e34-9f98-2f3b51fff300",
+          "pid": 76112,
+          "sha256": "1141ca51b0227b387ecb4cc41c80a429b36cbe4c9b4efa361659724a4940a6e3",
+          "text": "Research fixture\nneedle 4c047f61-2fb7-4e34-9f98-2f3b51fff300\n"
+        },
+        "search": {
+          "matches": [
+            {
+              "file": "memo.txt",
+              "line": 2,
+              "text": "needle 4c047f61-2fb7-4e34-9f98-2f3b51fff300"
+            },
+            {
+              "file": "signals.txt",
+              "line": 3,
+              "text": "needle 4c047f61-2fb7-4e34-9f98-2f3b51fff300"
+            }
+          ],
+          "nonce": "4c047f61-2fb7-4e34-9f98-2f3b51fff300",
+          "pid": 76112
+        }
+      }
+    },
+    "postrun_census": {
+      "live": [],
+      "observed_at": "2026-09-29T10:01:00.800822+00:00",
+      "scope": "Only fixture-receipted PIDs; no fleet census or process termination",
+      "unique_pids_checked": 48
+    },
+    "scope": "Synthetic disk inputs, SDK probe plus session; no model, ACP parent or OS confinement",
+    "sdk_executable_sha256": {
+      "index.mjs": "af3ec9fcf3a70fb4681e9b3c11aa18a7ce9aca36fed9f138a6e704043695d414",
+      "stdio.mjs": "f1917f032946bb4855130aaea2f4eb0b549eabc15ccc5c094f16545fb58fc138"
+    }
+  },
   "success": true,
   "targeted": {
     "patched": {
@@ -203,46 +699,12 @@
       "failed_cases": [],
       "log_sha256": "9f393e69c33f1e9a1b50c6d8c412df7f2d41a26a3df2f20d7503c23a3671fa5c",
       "passed": 32,
-      "report_sha256": "b002b0ec9de677f61c1bb15fd16d6bc022da121e428fbab7e70a6a7753395782",
-      "seconds": 0.909,
+      "report_sha256": "4d2f9fda3a8a2bd8f6247c1d2e24cef8bcae0ff78c6e80499c2b1b5d9372c908",
+      "seconds": 0.888,
       "stderr_empty": true,
       "tests": 32
     },
     "pristine": {
-      "cases": [
-        "exposes only admitted tools and returns a real server nonce",
-        "passes immutable complete schemas and actual server identity to admission",
-        "refuses revoked permission after an asynchronous wrapper",
-        "refuses a disconnected connection generation before sending",
-        "retires the old generation when re-admission refuses schema drift",
-        "retires the old generation before a failing list request",
-        "retires the previous generation while refreshed discovery is pending",
-        "retained old definition cannot send after a successful replacement sync",
-        "refuses unlisted tool without exposure or execution",
-        "refuses duplicate selection without exposure or execution",
-        "refuses nonfunction guard without exposure or execution",
-        "refuses async admission without exposure or execution",
-        "requires live connection binding when admission is enabled",
-        "requires a literal true from the final execution guard",
-        "keeps a completed old-generation call attributable without resending it",
-        "preserves the unconfigured legacy bridge behavior",
-        "threads admission through the actual connection startup owner",
-        "rejects a server-identity mismatch before exposing tools",
-        "rejects public display names supplied as raw grant identities",
-        "captures the selected guard instead of a mutable grant-property lookup",
-        "rejects a generation that disconnects while discovery is suspended",
-        "checks currentness again after the admission callback",
-        "lets the owner reject changed output schemas from real tools/list",
-        "allows an explicitly empty selection without inventing a required capability",
-        "uses the same admission hook on actual SDK tool-list notifications",
-        "tool admission does not publish server instructions",
-        "tool admission does not authorize resources/list",
-        "tool admission does not authorize resources/templates/list",
-        "tool admission does not authorize resources/read",
-        "tool-only context restriction preserves a permitted real tool call",
-        "empty admitted tool set does not expose other context channels",
-        "legacy context publication and resource requests stay unchanged"
-      ],
       "exit_code": 1,
       "failed_cases": [
         "allows an explicitly empty selection without inventing a required capability",
@@ -277,19 +739,11 @@
       ],
       "log_sha256": "5862bd1eb21b809b078688edcef8ad1d3f62c13777ad031df7b1037c7fc8ea2c",
       "passed": 3,
-      "report_sha256": "d46851434f925f0ec97f32d6be9089eb355e5da02d68e20c3c1343f20ce38cc1",
-      "seconds": 1.938,
+      "report_sha256": "f88a6f059e837cbeb68e65052b8fc4169517748fbbdd4aa16fa36b2ac8253746",
+      "seconds": 1.871,
       "stderr_empty": true,
       "tests": 32
     }
-  },
-  "test_local_install": {
-    "lifecycle_scripts": false,
-    "lock_unchanged_since_fresh_install": true,
-    "npm_ci_exit": 0,
-    "npm_ci_log_sha256": "95bc0f5afdb462337496b953bfcd32a5bc0e01e3b2313b662b436388953f1f94",
-    "npm_test_exit": 0,
-    "npm_test_log_sha256": "647fe3683054de63f59c0d7d241a117d4f79af46e76d04d91ddd56d793a41db3"
   },
   "typecheck": {
     "exit_code": 0,
@@ -301,8 +755,8 @@
       "failed_cases": [],
       "log_sha256": "3b36b7291c2d7ec995404baf7ba0f4e49cfddd0b4182cfe81c8817a555b7a02e",
       "passed": 93,
-      "report_sha256": "0f5ea1fd7248be168e94caacb8d74d200904f2b232dd148433bea41550ac661c",
-      "seconds": 2.915,
+      "report_sha256": "072703bfba24e237beb1ede4667821d66214b2b18669b0a7a8c35d1b09a340e1",
+      "seconds": 2.807,
       "stderr_empty": true,
       "tests": 93
     },
@@ -311,8 +765,8 @@
       "failed_cases": [],
       "log_sha256": "a77d8b1109901a64c8e6d60e6372a6829d46cc5e2a34457f46858e596a9576e8",
       "passed": 93,
-      "report_sha256": "d01e55bffb9927e1656c7935441a277ffa543159ec4b0eaaaa034a836aadff0f",
-      "seconds": 2.766,
+      "report_sha256": "539288e787e93f4bf0eaf723555e273913330e4b7f80d56105ed50c3e4f5a894",
+      "seconds": 2.795,
       "stderr_empty": true,
       "tests": 93
     }

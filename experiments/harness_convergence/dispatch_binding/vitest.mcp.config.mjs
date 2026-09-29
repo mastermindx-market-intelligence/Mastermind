@@ -17,7 +17,8 @@ export default defineConfig({
     { find: '@deepseek-ai/dsh-tools', replacement: root('./.cache/donor/index.ts') },
   ] },
   test: {
-    include: process.env.MMX_MCP_UPSTREAM === '1'
+    include: process.env.MMX_MCP_STDIO === '1' ? ['mcp-stdio.test.mjs']
+      : process.env.MMX_MCP_UPSTREAM === '1'
       ? ['.cache/mcp-tests/{mcp-client,tool-definition,protocol,reconnect}.spec.ts']
       : ['mcp-admission.test.mjs', 'mcp-context-boundary.test.mjs'],
     fileParallelism: false, maxWorkers: 1, testTimeout: 5000,

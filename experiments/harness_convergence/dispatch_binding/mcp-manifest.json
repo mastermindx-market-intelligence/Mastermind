@@ -76,11 +76,12 @@
     }
   ],
   "patch_file": "mcp-generation-admission.patch",
-  "patch_sha256": "055915253ce9f969beae1c426c1efb559fbc47e85bee5c2d5e026d733ac5c95b",
+  "patch_sha256": "97276dc5e828234bca653e627ceb06e7925926f157e4941619d7c22f2dfe6100",
   "patched_source_sha256": {
     "tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
-    "connection.ts": "83520c0cb0e6dde5f96072feb9b729308485300b2a47b2e75470288f4bfb67e9",
-    "index.ts": "6598367775528afef19d816b8531a2b1d297e9c296b23842a4cc4770b7830f04"
+    "connection.ts": "a030f9d245e5c5fb3a1f606b21eb5e707e096a62cdd8d9d1e5fbed550822618c",
+    "index.ts": "6598367775528afef19d816b8531a2b1d297e9c296b23842a4cc4770b7830f04",
+    "transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f"
   },
   "proof_scope": "Real MCP SDK and existing donor connection/ToolRuntime; not installed worker, model, endpoint entitlement, instruction/resource or original-parent qualification.",
   "patch_format": "unified-zero-context; exact source preimage and postimage hashes required"
