@@ -4547,37 +4547,38 @@ class ExecutiveControlService:
                 or quota.capabilities != proof_capabilities
             ):
                 raise StateConflict("configured worker identity already exists with different policy")
-            runtime.workers.register_quota_class(
-                self.config.worker_id,
-                self.config.coo_quota_class,
-                provider=str(binding["provider"]),
-                model=str(binding["model"]),
-                effort=str(binding["effort"]),
-                cost_class=str(binding["cost_class"]),
-                capabilities=coo_capabilities,
-                metadata=coo_metadata,
-            )
-            runtime.workers.register_quota_class(
-                self.config.worker_id,
-                self.config.coo_default_quota_class,
-                provider=str(binding["provider"]),
-                model=str(binding["model"]),
-                effort=str(binding["effort"]),
-                cost_class="default",
-                capabilities=coo_capabilities,
-                metadata=coo_default_metadata,
-            )
-            if self.config.coo_operator_harness_armed:
+            if self.config.coo_autonomy_armed:
                 runtime.workers.register_quota_class(
                     self.config.worker_id,
-                    self.config.coo_operator_quota_class,
-                    provider=str(binding["operator_provider"]),
-                    model=str(binding["operator_model"]),
-                    effort=str(binding["operator_effort"]),
-                    cost_class=str(binding["operator_cost_class"]),
-                    capabilities=operator_capabilities,
-                    metadata=operator_metadata,
+                    self.config.coo_quota_class,
+                    provider=str(binding["provider"]),
+                    model=str(binding["model"]),
+                    effort=str(binding["effort"]),
+                    cost_class=str(binding["cost_class"]),
+                    capabilities=coo_capabilities,
+                    metadata=coo_metadata,
                 )
+                runtime.workers.register_quota_class(
+                    self.config.worker_id,
+                    self.config.coo_default_quota_class,
+                    provider=str(binding["provider"]),
+                    model=str(binding["model"]),
+                    effort=str(binding["effort"]),
+                    cost_class="default",
+                    capabilities=coo_capabilities,
+                    metadata=coo_default_metadata,
+                )
+                if self.config.coo_operator_harness_armed:
+                    runtime.workers.register_quota_class(
+                        self.config.worker_id,
+                        self.config.coo_operator_quota_class,
+                        provider=str(binding["operator_provider"]),
+                        model=str(binding["operator_model"]),
+                        effort=str(binding["operator_effort"]),
+                        cost_class=str(binding["operator_cost_class"]),
+                        capabilities=operator_capabilities,
+                        metadata=operator_metadata,
+                    )
             refreshed = runtime.workers.get_worker(self.config.worker_id)
             assert refreshed is not None
             return refreshed
