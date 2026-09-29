@@ -48,7 +48,7 @@ def validate_document(raw):
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
-    if profile == PERSONAL_READ_PROFILE and ({'workspace', 'steward'} & set(raw)):
+    if profile == PERSONAL_READ_PROFILE and ({'workspace', 'steward', 'coo'} & set(raw)):
         raise ValueError('Personal read profile refuses optional mounts')
     if raw['schema'] != CONFIG_SCHEMA:
         raise ValueError('installed MCP schema differs')
