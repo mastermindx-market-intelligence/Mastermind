@@ -44,6 +44,10 @@ def _embedded_control_config_generator() -> str:
     return source[start:end]
 
 
+def _projected_digest() -> str:
+    return "d" * 64
+
+
 def _run_default_control_config(
     tmp_path: Path,
     *,
@@ -77,6 +81,7 @@ def _run_default_control_config(
             "b" * 64,
             "0.147.0",
             "0",
+            _projected_digest(),
         ],
         cwd=ROOT,
         check=False,
@@ -111,7 +116,12 @@ def _synthetic_release_schema(
     (scripts / "__init__.py").write_text("", encoding="utf-8")
     template_keys = set(json.loads(TEMPLATE.read_text(encoding="utf-8")))
     base_keys = template_keys - set(C1_FIELDS) - set(BRIDGE_FIELDS)
-    optional_keys = sorted(base_keys | c1_keys | (bridge_keys or set()))
+    optional_keys = sorted(
+        base_keys
+        | c1_keys
+        | (bridge_keys or set())
+        | {"python_runtime_provenance_digest"}
+    )
     (scripts / "executive_os_phase1c.py").write_text(
         "CONTROL_CONFIG_SCHEMA_VERSION = 'mastermind.executive_control_config/v1'\n"
         "_CONFIG_REQUIRED = frozenset()\n"
@@ -137,6 +147,7 @@ def test_default_installer_control_config_matches_c1_unarmed_composition(tmp_pat
 
     assert "ceo_ingress_armed" not in generated
     assert "ceo_ingress_armed" not in template
+    assert generated["python_runtime_provenance_digest"] == _projected_digest()
 
 
 def test_installer_does_not_inject_c1_fields_into_pre_c1_release_schema(tmp_path: Path) -> None:
@@ -150,6 +161,7 @@ def test_installer_does_not_inject_c1_fields_into_pre_c1_release_schema(tmp_path
     assert set(C1_FIELDS).isdisjoint(generated)
     assert set(BRIDGE_FIELDS).isdisjoint(generated)
     assert "ceo_ingress_armed" not in generated
+    assert generated["python_runtime_provenance_digest"] == _projected_digest()
 
 
 def test_installer_refuses_partial_c1_release_schema(tmp_path: Path) -> None:
@@ -205,14 +217,36 @@ def test_old_source_migrates_only_missing_safe_fields(tmp_path: Path) -> None:
     value = _render_default_control_config(tmp_path)
     for key in SAFE_OPTIONAL_DEFAULTS:
         value.pop(key, None)
+    value.pop("python_runtime_provenance_digest")
     value["model"] = "preserve-existing-model"
     source = tmp_path / "old-control.json"
     source.write_text(json.dumps(value))
     original = source.read_bytes()
     completed, destination = _run_default_control_config(tmp_path, source=source)
     assert completed.returncode == 0, completed.stderr
-    assert json.loads(destination.read_text()) == {**value, **SAFE_OPTIONAL_DEFAULTS}
+    assert json.loads(destination.read_text()) == {
+        **value,
+        **SAFE_OPTIONAL_DEFAULTS,
+        "python_runtime_provenance_digest": _projected_digest(),
+    }
     assert source.read_bytes() == original
+
+
+def test_existing_source_conflicting_runtime_provenance_refuses_before_write(
+    tmp_path: Path,
+) -> None:
+    value = _render_default_control_config(tmp_path)
+    value["python_runtime_provenance_digest"] = "e" * 64
+    source = tmp_path / "conflicting-control.json"
+    source.write_text(json.dumps(value))
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+
+    completed, _ = _run_default_control_config(tmp_path, source=source)
+
+    assert completed.returncode != 0
+    assert "conflicts with the validated Python runtime receipt" in completed.stderr
+    assert destination.read_bytes() == before
 
 
 def test_existing_optional_values_are_not_replaced(tmp_path: Path) -> None:
