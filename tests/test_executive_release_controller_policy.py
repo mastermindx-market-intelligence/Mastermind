@@ -374,3 +374,31 @@ def test_duplicate_ordinary_root_is_ambiguous_before_authority(inputs):
     raw = source(inputs[2]) + b'other_policy:\n  enabled: false\n'
     with pytest.raises(a.ReleaseAuthorityDenied, match="^RELEASE_POLICY_INVALID$"):
         a.ReleaseControllerPolicy.from_bytes(raw)
+
+
+@pytest.mark.parametrize("opener,closer", [
+    (b'ordinary_section:\n  note: "start\n', b'  end"\n'),
+    (b"ordinary_section:\n  note: 'start\n", b"  end'\n"),
+    (b'ordinary_section:\n  note: ["start\n', b'  end"]\n'),
+    (b'ordinary_section:\n  note: {nested: "start\n', b'  end"}\n'),
+    (b'ordinary_section:\n  note: &anchor "start\n', b'  end"\n'),
+    (b'ordinary_section:\n  note: !!str "start\n', b'  end"\n'),
+])
+def test_other_section_multiline_content_cannot_become_authority(inputs, opener, closer):
+    raw = opener + source(inputs[2]) + closer
+    with pytest.raises(a.ReleaseAuthorityDenied, match="^RELEASE_POLICY_INVALID$"):
+        a.ReleaseControllerPolicy.from_bytes(raw)
+
+
+def test_other_section_single_line_values_and_block_prose_remain_supported(inputs):
+    ordinary = b'''ordinary_data:
+  quoted: "single line"
+  apostrophe: 'it''s one value'
+  flow: {nested: ["one", 'two']}
+  plain: owner's description
+  note: >
+    Unbalanced "quotes and {brackets are plain block text.
+    A mentioned executive_release_controller_policy: is text.
+'''
+    for raw in (ordinary + source(inputs[2]), source(inputs[2]) + ordinary):
+        assert a.ReleaseControllerPolicy.from_bytes(raw).configuration_state is a.ReleasePolicyState.CONFIGURED

@@ -349,6 +349,44 @@ def _release_refuse(code: str) -> None:
     raise ReleaseAuthorityDenied(code)
 
 
+def _release_require_closed_line(line: str) -> None:
+    """Refuse multiline quote/flow contexts in the accepted YAML subset.
+
+    Ordinary sections may use single-line quotes/collections or indented
+    literal/folded block prose. A quote or collection cannot carry lexical
+    context across a line and make later column-zero data look like authority.
+    This is a conservative source-language fence, not a general YAML parser.
+    """
+    quote: str | None = None
+    flow: list[str] = []
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote is not None:
+            if quote == '"' and char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                if quote == "'" and line[index:index + 2] == "''":
+                    index += 2
+                    continue
+                quote = None
+        elif char == "#" and (index == 0 or line[index - 1].isspace()):
+            break
+        elif char in ("'", '"'):
+            # An apostrophe embedded in a plain word does not open a scalar.
+            if not (char == "'" and index and line[index - 1].isalnum()):
+                quote = char
+        elif char in "[{":
+            flow.append(char)
+        elif char in "]}":
+            if not flow or flow.pop() != {"]": "[", "}": "{"}[char]:
+                _release_refuse("RELEASE_POLICY_INVALID")
+        index += 1
+    if quote is not None or flow:
+        _release_refuse("RELEASE_POLICY_INVALID")
+
+
 def _parse_release_controller_policy(raw: bytes):
     """Closed, plain YAML block; no aliases, tags, flow values or coercion.
 
@@ -372,12 +410,25 @@ def _parse_release_controller_policy(raw: bytes):
     # flow values and document boundaries cannot hide a second policy. Nested
     # contents of other ordinary sections remain their existing owners' data.
     root_keys: set[str] = set()
+    block_indent: int | None = None
     for line in lines:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
+        indent = len(line) - len(line.lstrip(" "))
+        if block_indent is not None:
+            if indent > block_indent:
+                continue
+            block_indent = None
         if line.startswith(" "):
             if not root_keys:
                 _release_refuse("RELEASE_POLICY_INVALID")
+            _release_require_closed_line(line)
+            if re.fullmatch(
+                r"(?:[A-Za-z_][A-Za-z0-9_-]*: +|- +)[|>]"
+                r"(?:[1-9][+-]?|[+-][1-9]?)?(?: +#.*)? *",
+                line.lstrip(" "),
+            ):
+                block_indent = indent
             continue
         root = re.fullmatch(r"([a-z][a-z0-9_]*): *(?:#.*)?", line)
         if root is None or root.group(1) in root_keys:
