@@ -34,6 +34,7 @@ def records(kind="terminal", state="SUCCEEDED", reason="PREPARED_TOKEN_EXPIRED")
         approval=contract.validate_approval_evidence(approval),
         result=result,
         capability=c._BROKER_RESPONSE_CAPABILITY,
+        operation="read_release_closure",
     )
     return evidence, response
 
@@ -105,6 +106,7 @@ def test_missing_or_nonterminal_history_cannot_close(state):
         "changed_reservation",
         "foreign_pid",
         "foreign_capability",
+        "wrong_operation",
         "extra_evidence",
         "missing_evidence",
     ],
@@ -140,6 +142,8 @@ def test_closure_rejects_unqualified_or_drifting_evidence(kind, mutation):
         response.receiver_pid = os.getpid() + 1
     elif mutation == "foreign_capability":
         response._capability = object()
+    elif mutation == "wrong_operation":
+        response.operation = "approve_release_transition"
     elif mutation == "extra_evidence":
         evidence["force"] = True
     elif mutation == "missing_evidence":

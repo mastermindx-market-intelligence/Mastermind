@@ -55,11 +55,12 @@ def _qualify_connection(connection, role):
 
 
 class _RootReleaseResponse:
-    __slots__ = ("approval", "result", "receiver_pid", "_capability")
-    def __init__(self, *, approval, result, capability):
+    __slots__ = ("approval", "result", "operation", "receiver_pid", "_capability")
+    def __init__(self, *, approval, result, capability, operation=None):
         if capability is not _BROKER_RESPONSE_CAPABILITY:
             raise ReleaseConsumerError("RELEASE_BROKER_PROVENANCE_REQUIRED")
         self.approval, self.result = approval, result
+        self.operation = operation
         self.receiver_pid, self._capability = os.getpid(), capability
 
 
@@ -104,7 +105,7 @@ class ReleaseBrokerClient:
             raise ReleaseConsumerError("RELEASE_BROKER_RESPONSE_UNKNOWN")
         return _RootReleaseResponse(
             approval=validated, result=response["result"],
-            capability=_BROKER_RESPONSE_CAPABILITY,
+            capability=_BROKER_RESPONSE_CAPABILITY, operation=operation,
         )
 
     def exchange(self, frame: ingress.ReleaseFrame, *, approval=None) -> _RootReleaseResponse:
@@ -141,7 +142,8 @@ class ReleaseBrokerClient:
         if approval is not None and contract.canonical_release_bytes(validated) != contract.canonical_release_bytes(approval):
             raise ReleaseConsumerError("RELEASE_BROKER_APPROVAL_CHANGED")
         return _RootReleaseResponse(approval=validated, result=response["result"],
-                                    capability=_BROKER_RESPONSE_CAPABILITY)
+                                    capability=_BROKER_RESPONSE_CAPABILITY,
+                                    operation=frame.operation)
 
 
 def _validated_release_closure(response, evidence):
@@ -154,7 +156,8 @@ def _validated_release_closure(response, evidence):
     code = "RELEASE_CLOSURE_UNQUALIFIED"
     if (type(response) is not _RootReleaseResponse
             or response._capability is not _BROKER_RESPONSE_CAPABILITY
-            or response.receiver_pid != os.getpid()):
+            or response.receiver_pid != os.getpid()
+            or response.operation != "read_release_closure"):
         raise ReleaseConsumerError("RELEASE_BROKER_PROVENANCE_REQUIRED")
     if (not isinstance(evidence, Mapping) or set(evidence) != {
             "approval", "admission", "preconditions", "root_qualification_digest"}):
