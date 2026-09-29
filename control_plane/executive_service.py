@@ -1836,6 +1836,7 @@ class CeoIngressAppBinding:
     read_schema: str = CEO_APP_READ_SCHEMA
     # Separate principal capability; the incumbent CEO armed bit grants none.
     # Existing launchers omit these fields, so this route is dormant by default.
+    principal_facts_factory: Callable[[Runtime], Any] | None = None
     principal_admission_armed: bool = False
     principal_admission_guard: Callable[[Mapping[str, Any]], None] | None = None
 
@@ -1848,6 +1849,8 @@ class CeoIngressAppBinding:
             raise ValueError("App binding requires a grounding provider")
         if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
             raise ValueError("App binding read schema is not an admitted profile")
+        if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
+            raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
             raise ValueError("principal admission arming must be boolean")
         if self.principal_admission_guard is not None and not callable(self.principal_admission_guard):
@@ -2743,13 +2746,14 @@ class ExecutiveControlService:
     async def _bind_ceo_ingress_server(self, *, start_serving: bool) -> None:
         """Construct (bind) the dedicated CeoIngress listener; see ``_bind_operator_server``."""
 
+        from control_plane import executive_release_ingress as release_ingress
         assert self._ceo_ingress_socket_path is not None
         if self._ceo_ingress_activated_socket is None:
             self._prepare_ceo_ingress_socket_path()
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 path=str(self._ceo_ingress_socket_path),
-                limit=ceo_ingress.MAX_REQUEST_BYTES + 1,
+                limit=release_ingress.MAX_FRAME_BYTES + 1,
                 start_serving=start_serving,
             )
             self._ceo_ingress_socket_path.chmod(0o600)
@@ -2764,7 +2768,7 @@ class ExecutiveControlService:
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 sock=activated,
-                limit=ceo_ingress.MAX_REQUEST_BYTES + 1,
+                limit=release_ingress.MAX_FRAME_BYTES + 1,
                 start_serving=start_serving,
                 **activated_options,
             )
@@ -4198,7 +4202,8 @@ class ExecutiveControlService:
             # at least the separator byte.  ``not raw`` is therefore
             # unreachable here and is intentionally omitted (verified by
             # grepping both except clauses above: neither falls through).
-            if len(raw) > ceo_ingress.MAX_REQUEST_BYTES:
+            from control_plane import executive_release_ingress as release_ingress
+            if len(raw) > release_ingress.MAX_FRAME_BYTES:
                 await self._send_ceo_ingress_error(
                     writer, "request_too_large", "request exceeds byte limit"
                 )
@@ -4207,15 +4212,63 @@ class ExecutiveControlService:
                 text = raw.decode("utf-8", errors="strict")
             except UnicodeDecodeError:
                 await self._send_ceo_ingress_error(
-                    writer, "invalid_json", "request is not valid UTF-8"
+                    writer,
+                    "request_too_large" if len(raw) > ceo_ingress.MAX_REQUEST_BYTES else "invalid_json",
+                    "request frame refused",
                 )
                 return
             try:
                 parsed = json.loads(text)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
                 await self._send_ceo_ingress_error(
-                    writer, "invalid_json", "request is not valid JSON"
+                    writer,
+                    "request_too_large" if len(raw) > ceo_ingress.MAX_REQUEST_BYTES else "invalid_json",
+                    "request frame refused",
                 )
+                return
+            is_release = isinstance(parsed, dict) and parsed.get("schema") == release_ingress.FRAME_SCHEMA
+            if not is_release and len(raw) > ceo_ingress.MAX_REQUEST_BYTES:
+                await self._send_ceo_ingress_error(writer, "request_too_large", "request exceeds byte limit")
+                return
+            if is_release:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "release frame requires the installed gateway")
+                    return
+                if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    await self._send_ceo_ingress_error(writer, "RELEASE_UNAVAILABLE", "release controls are unavailable")
+                    return
+                from control_plane.executive_release_consumer import ReleaseControlConsumer, ReleaseConsumerError
+                try:
+                    # Run in the serving process, retaining this accepted
+                    # socket. No helper serializes or fabricates its capture.
+                    consumer = ReleaseControlConsumer(self._require_runtime())
+                    release_socket = connection.dup()
+                    def consume_release():
+                        # asyncio exposes a TransportSocket wrapper. Its
+                        # in-process duplicate is a real socket with the same
+                        # connected kernel peer, owned until this call settles.
+                        with release_socket:
+                            return consumer.handle(raw, release_socket)
+                    result = await self._run_physical(consume_release)
+                    await self._send_ceo_ingress_response(
+                        writer, {"ok": True, "result": result},
+                        response_ceiling=release_ingress.MAX_RESPONSE_BYTES)
+                except (release_ingress.ReleaseIngressError, ReleaseConsumerError) as exc:
+                    refusal = {"schema": release_ingress.RESPONSE_SCHEMA,
+                        "operation": parsed.get("operation"), "ok": False,
+                        "error": {"code": exc.code}}
+                    if exc.code == "RELEASE_APPROVAL_READBACK_UNKNOWN":
+                        # Persistence already succeeded; this is not proof of
+                        # zero effect. Reconcile the original operation only.
+                        refusal["effect"] = "EFFECT_UNKNOWN"
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": refusal})
+                except Exception:
+                    # If an approval transaction may have committed, the
+                    # caller must reconcile the same operation, never retry.
+                    await self._send_ceo_ingress_response(writer, {
+                        "ok": True, "result": {"schema": release_ingress.RESPONSE_SCHEMA,
+                        "operation": parsed.get("operation"), "ok": False,
+                        "effect": "EFFECT_UNKNOWN", "error": {"code": "RELEASE_RESPONSE_UNKNOWN"}}})
                 return
             from common.executive_workspace_contract import (
                 FRAME_SCHEMA, FRAME_SCHEMA_V2,
@@ -4301,6 +4354,30 @@ class ExecutiveControlService:
                     await self._send_ceo_ingress_error(
                         writer, "invalid_input", "installed read was refused"
                     )
+                return
+            from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            if isinstance(parsed, dict) and parsed.get("schema") == FACT_SCHEMA:
+                if not app_peer or not callable(app_binding.principal_facts_factory):
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "COO facts require the installed App peer")
+                    return
+                try:
+                    if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        raise ValueError("source_unavailable")
+                    if parsed.get("operation") == "mission" and not app_binding.principal_admission_armed:
+                        raise ValueError("source_unavailable")
+                    provider = app_binding.principal_facts_factory(self._require_runtime())
+                    if type(provider) is not CooHostProvider:
+                        raise ValueError("source_unavailable")
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(provider.facts, parsed)))
+                    if (self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}
+                            or self._ceo_ingress_app_binding is not app_binding):
+                        raise ValueError("source_unavailable")
+                    response = {"ok": True, "result": result}
+                    workspace_encode(response, limit=WORKSPACE_MAX_RESPONSE_BYTES - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=WORKSPACE_MAX_RESPONSE_BYTES)
+                except Exception:
+                    await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503))
                 return
             principal_frame = (
                 isinstance(parsed, Mapping) and isinstance(parsed.get("schema"), str)

@@ -189,6 +189,9 @@ def test_provider_failure_is_allowlisted_without_retaining_raw_message(
     assert raw_marker not in encoded
     assert "sk-" not in encoded
     assert "example.com" not in encoded
+    assert classified["provider_error_message_count"] == 1
+    assert len(classified["provider_error_message_sha256"]) == 64
+    assert set(classified["provider_error_terms"]) <= canary.PROVIDER_DIAGNOSTIC_TERMS
 
 
 def test_successful_terminal_turn_and_valid_inert_result_passes(tmp_path: Path) -> None:
@@ -227,6 +230,9 @@ def test_successful_terminal_turn_and_valid_inert_result_passes(tmp_path: Path) 
     assert receipt["result_valid"] is True
     assert receipt["forced_chatgpt_workspace_id_applied"] is False
     assert receipt["workspace_selection_mechanism"] == "none"
+    assert receipt["provider_error_message_count"] == 0
+    assert receipt["provider_error_message_sha256"] is None
+    assert receipt["provider_error_terms"] == []
     payload = {key: value for key, value in receipt.items() if key != "result_valid"}
     assert '"ok"' not in json.dumps(payload)
     assert not (config.probe_root / config.canary_id / "workspace").exists()
@@ -310,6 +316,38 @@ def test_failure_output_is_bounded_and_redacted() -> None:
     assert "example.com" not in encoded
     assert "sk-" not in encoded
     assert encoded.count("invalid_workspace_selected") == 1
+
+
+def test_provider_diagnostic_retains_only_digest_count_and_allowlisted_terms() -> None:
+    marker = "short-secret-123"
+    message = (
+        "Workspace authorization failed for user@example.com token="
+        "sk-abcdefghijklmnopqrstuvwxyz012345 " + marker
+    )
+    stdout = (
+        json.dumps({"type": "turn.failed", "error": {"message": message}})
+        .encode("utf-8")
+        + b"\n"
+    )
+    classified = canary.classify_provider_streams(
+        stdout=stdout,
+        stderr=b"",
+        result=None,
+        exit_code=1,
+        timed_out=False,
+    )
+    encoded = json.dumps(classified, sort_keys=True)
+    assert classified["provider_error_message_count"] == 1
+    assert classified["provider_error_terms"] == [
+        "authorization",
+        "failed",
+        "token",
+        "workspace",
+    ]
+    assert len(classified["provider_error_message_sha256"]) == 64
+    assert marker not in encoded
+    assert "example.com" not in encoded
+    assert "sk-" not in encoded
 
 
 def test_canary_script_is_executable_and_syntax_valid() -> None:
