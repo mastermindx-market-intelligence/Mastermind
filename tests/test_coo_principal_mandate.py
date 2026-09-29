@@ -644,3 +644,24 @@ def test_all_existing_effect_fences_compose_with_owner_consistency():
         )
         checked += 1
     assert checked == 8640
+
+
+@pytest.mark.parametrize("value", [None, "", False, [], {}])
+@pytest.mark.parametrize("section,field", [("posture", "value"), ("transport", "dispatch_state")])
+def test_malformed_effect_state_cannot_be_interpreted_as_clear(section, field, value):
+    document = _real_owner_mission()
+    document[section][field] = value
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"), mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.FENCED_UNQUALIFIED_MISSION.value
+
+
+@pytest.mark.parametrize("dispatch", ["UNKNOWN", "WAITING_CAPACITY"])
+def test_valid_transport_missingness_does_not_block_independent_coo_work(dispatch):
+    document = _real_owner_mission()
+    document["transport"]["dispatch_state"] = dispatch
+    result = project_coo_principal_mandate(
+        principal=principal(), authority=authority(work_ref="WS:ONE"), mission_workspace=document,
+    )
+    assert result["new_effect_gate"] == NewEffectGate.OPEN.value

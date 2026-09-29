@@ -346,6 +346,10 @@ def _mission_state(document: object, *, expected_work_ref: str) -> _MissionState
     ):
         reasons.append("owner_observation_inconsistent")
 
+    if (not _owner_identifier(posture_value)
+            or dispatch_state not in mw.PROJECTED_DISPATCH_STATES):
+        reasons.append("mission_effect_posture_unqualified")
+
     effect_unknown = (
         posture_value == "EFFECT_UNKNOWN" or dispatch_state == "EFFECT_UNKNOWN"
     )
