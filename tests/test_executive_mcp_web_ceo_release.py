@@ -104,12 +104,16 @@ def test_combined_release_ambiguity_retains_unknown(settings, rsa_key, monkeypat
     release.test_transport_rejects_bad_inner_app_results(settings, rsa_key, monkeypatch, operation)
 
 
+@pytest.mark.parametrize("history_state", [
+    "NOT_FOUND", "STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
+    "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED",
+])
 def test_combined_approval_recovers_once_and_commit_stays_disarmed(
-    installed, rsa_key, tmp_path, short_socket_root, monkeypatch,
+    installed, rsa_key, tmp_path, short_socket_root, monkeypatch, history_state,
 ):
     monkeypatch.setattr(release, "connection", connection)
-    release.test_durable_approval_lost_readback_recovers_once_over_native_mcp(
-        installed, rsa_key, tmp_path, short_socket_root, monkeypatch)
+    release.test_durable_approval_lost_readback_and_typed_history_over_native_mcp(
+        installed, rsa_key, tmp_path, short_socket_root, monkeypatch, history_state)
 
 
 @pytest.mark.parametrize("lost_reply", ["malformed", "oversized", "exception", "wrong_identity"])

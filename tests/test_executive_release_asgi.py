@@ -117,7 +117,7 @@ def test_authenticated_vertical_and_rotated_token_replay(installed, rsa_key, oth
                 history = await http.post("/v1/tools/reconcile_release_transition", headers=headers,
                     json={"arguments": {"operation_key": args["operation_key"]}})
                 assert history.json()["approval"]["approved_transition_ref"] == approved["approved_transition_ref"]
-                assert history.json()["broker_status"]["status"] == "NOT_FOUND"
+                assert history.json()["broker_status"]["state"] == "NOT_FOUND"
             assert counts(service.runtime) == (before[0]+1, before[1], before[2])
             assert installed["root_broker"]._executor.calls == []
             assert all(pid == os.getpid() for _, pid in installed["peer_calls"])
@@ -238,9 +238,63 @@ def test_lost_postcommit_readback_reconciles_without_second_event(installed, mon
             assert counts(service.runtime) == after
             recovered = await send("reconcile_release_transition", {"operation_key": args["operation_key"]})
             assert recovered["ok"] is True and recovered["approval"]["operation_key"] == args["operation_key"]
-            assert recovered["broker_status"]["status"] == "NOT_FOUND"
+            assert recovered["broker_status"]["state"] == "NOT_FOUND"
             assert counts(service.runtime) == after
             assert installed["root_broker"]._executor.calls == []
         finally:
             await service.close()
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("state", [
+    "NOT_FOUND", "STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
+    "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED",
+])
+def test_both_transport_validators_admit_only_qualified_terminal_or_absent_shapes(installed, state):
+    from tests.test_executive_release_consumer import typed_history
+    from control_plane import executive_release_ingress as ingress
+    from integrations.executive_mcp import release_control
+    args = approve_arguments(installed)
+    installed["call"]("approve_release_transition", args)
+    approval = installed["control"]._read(args["operation_key"])
+    value = {"schema": ingress.RESPONSE_SCHEMA, "operation": "reconcile_release_transition", "ok": True,
+             "approval": approval.to_dict(), "broker_status": typed_history(approval, state)}
+    kwargs = {"operation": value["operation"], "arguments": {"operation_key": args["operation_key"]},
+              "principal": installed["principal"]}
+    before = counts(installed["runtime"])
+    if state in {"NOT_FOUND", "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+        assert release_admission._closed_result(value, **kwargs) == value
+        assert release_control.valid_release_result(value, value["operation"], kwargs["arguments"], 200)
+    else:
+        with pytest.raises(ValueError):
+            release_admission._closed_result(value, **kwargs)
+        assert not release_control.valid_release_result(value, value["operation"], kwargs["arguments"], 200)
+    assert counts(installed["runtime"]) == before
+
+
+@pytest.mark.parametrize("mutation", ["p2", "full_fingerprint", "admission", "receipt", "extra"])
+def test_both_transport_validators_reject_unqualified_terminal_evidence(installed, mutation):
+    from tests.test_executive_release_consumer import typed_history
+    from control_plane import executive_release_ingress as ingress
+    from integrations.executive_mcp import release_control
+    args = approve_arguments(installed)
+    installed["call"]("approve_release_transition", args)
+    approval = installed["control"]._read(args["operation_key"])
+    status = typed_history(approval, "SUCCEEDED")
+    if mutation == "p2":
+        status = {"request_id": status["request_id"], "status": "SUCCEEDED", "exit_code": 0}
+    elif mutation == "full_fingerprint":
+        status["request_fingerprint"] = status["request_fingerprint"][:48] + "f" * 16
+    elif mutation == "admission":
+        status["admission"]["maintenance_sequence"] += 1
+    elif mutation == "receipt":
+        status["terminal_receipt"]["after"]["release_commit"] = "f" * 40
+    else:
+        status["private_debug"] = "PRIVATE_SENTINEL"
+    value = {"schema": ingress.RESPONSE_SCHEMA, "operation": "reconcile_release_transition", "ok": True,
+             "approval": approval.to_dict(), "broker_status": status}
+    arguments = {"operation_key": args["operation_key"]}
+    with pytest.raises(ValueError):
+        release_admission._closed_result(value, operation=value["operation"], arguments=arguments,
+                                         principal=installed["principal"])
+    assert not release_control.valid_release_result(value, value["operation"], arguments, 200)

@@ -6,7 +6,6 @@ from typing import Any
 
 from control_plane import executive_release_contract as contract
 from control_plane import executive_release_ingress as ingress
-from control_plane.executive_privileged_client import validate_status_response
 from integrations.executive_mcp import schemas
 from integrations.mastermind_executive_app.release_admission import (
     _PUBLIC_CODES, _UNCERTAIN_CODES,
@@ -117,9 +116,9 @@ def valid_release_result(value, operation, arguments, status_code) -> bool:
             approval = contract.validate_approval_evidence(value["approval"])
             if approval["operation_key"] != arguments["operation_key"]:
                 return False
-            status = validate_status_response(value["broker_status"], expected_request_id=
-                contract.broker_request_id_for(contract.request_fingerprint_for(approval)))
-            return status["status"] == "NOT_FOUND"
+            status = contract.validate_release_terminal_status(
+                value["broker_status"], expected_approval=approval)
+            return status["state"] in {"NOT_FOUND", "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}
         # No commit-success shape is admitted while production is disarmed.
         return False
     except (KeyError, TypeError, ValueError, RuntimeError, RecursionError):
