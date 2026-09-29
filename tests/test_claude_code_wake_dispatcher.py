@@ -20,6 +20,7 @@ from integrations.executive_wake.claude_code import (
     CLAUDE_WAKE_DELIVERY_SENTINEL,
     CLAUDE_WAKE_INSTRUCTION,
     CLAUDE_WAKE_PRE_SUBMIT_PREFIX,
+    CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS,
     CLAUDE_WAKE_REFUSAL_CLASSES,
     ClaudeCodeWakeDispatcher,
     ClaudeWakeCommandResult,
@@ -29,6 +30,8 @@ SESSION_ID = "550e8400-e29b-41d4-a716-446655440000"
 OTHER_SESSION_ID = "11111111-1111-4111-8111-111111111111"
 NUDGE_ID = "NUDGE-" + "b" * 32
 FORBIDDEN_RECEIVER_FLAGS = ("--continue", "-c", "--fork-session", "--session-id", "--from-pr", "--model")
+#: Exact stdout of `claude --version` on the qualified build (measured 2026-09-29).
+QUALIFIED_VERSION_STDOUT = "2.1.275 (Claude Code)\n"
 
 
 def _wake(**overrides) -> WakeNudge:
@@ -81,18 +84,37 @@ def _delivery(*, session_id=SESSION_ID, sentinel=CLAUDE_WAKE_DELIVERY_SENTINEL, 
     return ClaudeWakeCommandResult(returncode=returncode, stdout=json.dumps(payload), stderr="")
 
 
+def _version(stdout=QUALIFIED_VERSION_STDOUT, *, returncode=0):
+    return ClaudeWakeCommandResult(returncode=returncode, stdout=stdout, stderr="")
+
+
 @dataclasses.dataclass
 class _FakeRunner:
-    """Scripted host runner.  A callable result runs a side effect then returns its value."""
+    """Scripted host runner.  A callable result runs a side effect then returns its value.
+
+    ``--version`` probes are answered from ``version`` (qualified build by default) and recorded
+    in ``version_calls``; every other argv consumes ``results`` in order and lands in ``calls``.
+    ``order`` records the interleaving of both kinds.
+    """
 
     results: list[object]
+    version: object = dataclasses.field(default_factory=_version)
     calls: list[tuple[tuple[str, ...], Path, float]] = dataclasses.field(default_factory=list)
+    version_calls: list[tuple[tuple[str, ...], Path, float]] = dataclasses.field(default_factory=list)
+    order: list[str] = dataclasses.field(default_factory=list)
 
     async def run(self, *, argv, cwd, timeout_seconds):
-        self.calls.append((tuple(argv), Path(cwd), timeout_seconds))
-        if not self.results:
-            raise AssertionError("unexpected runner call")
-        value = self.results.pop(0)
+        call = (tuple(argv), Path(cwd), timeout_seconds)
+        if tuple(argv)[1:] == ("--version",):
+            self.version_calls.append(call)
+            self.order.append("version")
+            value = self.version
+        else:
+            self.calls.append(call)
+            self.order.append(tuple(argv)[1] if len(argv) > 1 else "?")
+            if not self.results:
+                raise AssertionError("unexpected runner call")
+            value = self.results.pop(0)
         if callable(value):
             value = value()
         if isinstance(value, BaseException):
@@ -132,15 +154,46 @@ def _store(tmp_path: Path, *, session_id: str = SESSION_ID, lines=None, project:
     return _Store(config_dir=config_dir, transcript=transcript, receiver_cwd=receiver_cwd, root=root)
 
 
+_UUIDS = iter(f"00000000-0000-4000-8000-{n:012d}" for n in range(1, 10**6))
+
+
+def _last_uuid(store: _Store) -> str | None:
+    try:
+        lines = store.transcript.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and isinstance(record.get("uuid"), str):
+            return record["uuid"]
+    return None
+
+
 def _append(store: _Store, *lines: str) -> None:
+    """Append records as the CLI does: each carries a ``uuid`` and links to the previous one.
+
+    A line that already sets ``uuid`` or ``parentUuid`` (``"parentUuid": null`` included) keeps it,
+    so a test can break or redirect the chain deliberately.
+    """
+
+    previous = _last_uuid(store)
     with store.transcript.open("a", encoding="utf-8") as handle:
         for line in lines:
+            record = json.loads(line)
+            if isinstance(record, dict):
+                record.setdefault("uuid", next(_UUIDS))
+                record.setdefault("parentUuid", previous)
+                previous = record["uuid"]
+                line = json.dumps(record)
             handle.write(line + "\n")
 
 
 def _prompt_for(wake: WakeNudge | None = None) -> str:
     wake = wake or _wake()
-    ids = (wake.nudge_id,) + tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+    ids = (wake.nudge_id,) + tuple(sorted(wake.obligation_ids)) + tuple(sorted(wake.attempt_command_ids))
     return CLAUDE_WAKE_INSTRUCTION + "\nOpaque Wake identities:\n" + "\n".join(ids)
 
 
@@ -175,9 +228,9 @@ def _synthetic_refusal(store: _Store) -> None:
     )
 
 
-def _append_turn(store: _Store, result=None):
+def _append_turn(store: _Store, result=None, *, wake: WakeNudge | None = None):
     def _effect():
-        _marker_turn(store)
+        _marker_turn(store, wake=wake)
         return _delivery() if result is None else result
 
     return _effect
@@ -223,6 +276,10 @@ def test_exact_stored_session_delivers_once_with_closed_cli_surface(tmp_path):
     assert receipt.reason_code == "delivered"
     assert dict(receipt.details) == {"nudge_id": NUDGE_ID}
     assert len(runner.calls) == 2
+    assert runner.order == ["version", "agents", "--resume"]
+    version_argv, version_cwd, _ = runner.version_calls[0]
+    assert version_argv == ("/opt/mastermind/bin/claude", "--version")
+    assert version_cwd == Path("/private/tmp/mmx-h1-canary")
     discovery_argv, discovery_cwd, _ = runner.calls[0]
     delivery_argv, delivery_cwd, _ = runner.calls[1]
     assert discovery_argv == ("/opt/mastermind/bin/claude", "agents", "--json")
@@ -789,12 +846,24 @@ def test_reconcile_without_marker_is_unavailable_only_when_no_writer_is_listed(t
     ],
 )
 def test_reconcile_recognises_only_the_adapters_own_prompt_record(tmp_path, lines):
+    """None of these shapes is a marker, and each carries the nudge id: effect-unknown, never DELIVERED,
+    never the strong negative, and no discovery call is made."""
+
     store = _store(tmp_path)
     _append(store, *lines)
     runner = _FakeRunner([_discovery()])
-    receipt = _reconcile(_dispatcher(runner, store))
-    assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
-    assert len(runner.calls) == 1
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(runner, store))
+    assert runner.calls == []
+
+
+def test_reconcile_with_the_nudge_id_present_but_no_marker_is_effect_unknown_not_unavailable(tmp_path):
+    store = _store(tmp_path)
+    _append(store, _prompt_record("the fabric mentioned " + NUDGE_ID + " earlier, what is it?", cwd=str(store.receiver_cwd)), _genuine())
+    runner = _FakeRunner([_discovery()])
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(runner, store))
+    assert runner.calls == []
 
 
 def test_reconcile_does_not_attribute_a_reply_that_follows_an_intervening_user_turn(tmp_path):
@@ -816,12 +885,67 @@ def test_reconcile_does_not_attribute_a_reply_that_follows_a_tool_result(tmp_pat
         _reconcile(_dispatcher(_FakeRunner([]), store))
 
 
-def test_reconcile_attributes_a_reply_across_cli_meta_notes_only(tmp_path):
+def test_reconcile_attributes_a_reply_linked_through_non_user_records_only(tmp_path):
+    """Measured DELIVERED ordering (2026-09-29): user marker -> attachment -> assistant, linked by parentUuid."""
+
     store = _store(tmp_path)
     _marker_turn(store, reply=False)
-    _append(store, _record(type="attachment"), _record(type="system", isMeta=True),
-            _prompt_record("Continue from where you left off.", isMeta=True), _genuine())
+    _append(store, _record(type="attachment"), _record(type="system", isMeta=True), _genuine())
     assert _reconcile(_dispatcher(_FakeRunner([]), store)).outcome is TransportOutcome.DELIVERED
+
+
+def test_reconcile_does_not_attribute_a_reply_across_a_cli_meta_user_record(tmp_path):
+    """A `type:"user"` record of any kind between marker and reply breaks attribution, isMeta included:
+    the reply answers the operator-restart note, not the Wake prompt."""
+
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    _append(store, _prompt_record("Continue from where you left off.", isMeta=True), _genuine())
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
+@pytest.mark.parametrize(
+    "reply_fields",
+    [
+        {"parentUuid": None},  # a root record adjacent to the marker is not linked to it
+        {"parentUuid": "00000000-0000-4000-8000-999999999999"},  # linked to a record that is not in the store
+        {"uuid": None},  # a reply without an identity of its own cannot be linked
+    ],
+)
+def test_reconcile_requires_the_reply_to_link_to_the_marker_not_merely_follow_it(tmp_path, reply_fields):
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    _append(store, _genuine(cwd=str(store.receiver_cwd), **reply_fields))
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
+def test_reconcile_links_to_an_older_marker_through_a_newer_marker_only_if_the_newer_one_is_the_parent(tmp_path):
+    """The reply's chain reaches the OLD marker through the new marker (a user record): not attributed."""
+
+    store = _store(tmp_path)
+    _marker_turn(store, reply=False)
+    old_marker = _last_uuid(store)
+    _marker_turn(store, reply=False)
+    _append(store, _genuine(cwd=str(store.receiver_cwd), parentUuid=old_marker))
+    with pytest.raises(WakeEffectUnknownError):
+        _reconcile(_dispatcher(_FakeRunner([]), store))
+
+
+def test_reconcile_round_trips_obligation_order_through_the_canonical_prompt(tmp_path):
+    """The marker is written from one id order and reconciled from the reverse order (N3)."""
+
+    forward = _wake(obligation_ids=("WAKE-" + "a" * 32, "WAKE-" + "b" * 32),
+                    attempt_command_ids=("WAKE-" + "a" * 32 + ":delivery:1", "WAKE-" + "b" * 32 + ":delivery:1"))
+    reverse = _wake(obligation_ids=tuple(reversed(forward.obligation_ids)),
+                    attempt_command_ids=tuple(reversed(forward.attempt_command_ids)))
+    store = _store(tmp_path)
+    runner = _FakeRunner([_discovery(), _append_turn(store, wake=forward)])
+    dispatcher = _dispatcher(runner, store)
+    assert _nudge(dispatcher, forward).outcome is TransportOutcome.DELIVERED
+    assert _reconcile(dispatcher, reverse).outcome is TransportOutcome.DELIVERED
+    assert runner.calls[1][0][-1] == _prompt_for(reverse) == _prompt_for(forward)
 
 
 def test_reconcile_keeps_delivered_when_later_turns_follow_the_reply(tmp_path):
@@ -854,6 +978,91 @@ def test_reconcile_never_submits_a_resume(tmp_path):
     runner = _FakeRunner([_discovery()])
     _reconcile(_dispatcher(runner, store))
     assert all(argv[1:] == ("agents", "--json") for argv, _, _ in runner.calls)
+
+
+# --- CLI qualification: the argv is proven only on listed builds ---------------
+
+
+def test_qualified_cli_version_set_is_exactly_the_measured_build():
+    assert CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS == frozenset({"2.1.275"})
+    assert QUALIFIED_VERSION_STDOUT.split()[0] in CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        _version("2.1.276 (Claude Code)\n"),
+        _version("2.2.0 (Claude Code)\n"),
+        _version(""),
+        _version("(Claude Code)\n"),
+        _version(QUALIFIED_VERSION_STDOUT, returncode=1),
+        _version("x" * 5000),
+        ClaudeWakeCommandResult(returncode=0, stdout=json.dumps([]), stderr=""),
+        TimeoutError("version probe"),
+        OSError("no such binary"),
+    ],
+)
+def test_unqualified_or_unprovable_cli_version_refuses_before_discovery(tmp_path, version):
+    store = _store(tmp_path)
+    before = store.transcript.read_bytes()
+    runner = _FakeRunner([_discovery(), _append_turn(store)], version=version)
+    assert _refused(runner, store) == "cli_unqualified"
+    assert runner.calls == []
+    assert runner.order == ["version"]
+    assert store.transcript.read_bytes() == before
+
+
+def test_version_probe_runs_from_the_working_directory_with_the_discovery_timeout(tmp_path):
+    store = _store(tmp_path)
+    runner = _FakeRunner([_discovery(), _append_turn(store)])
+    _nudge(_dispatcher(runner, store, discovery_timeout_seconds=7.5))
+    assert runner.version_calls == [(("/opt/mastermind/bin/claude", "--version"), Path("/private/tmp/mmx-h1-canary"), 7.5)]
+
+
+def test_reconcile_never_probes_the_version(tmp_path):
+    store = _store(tmp_path)
+    runner = _FakeRunner([_discovery()], version=TimeoutError("must not be called"))
+    _reconcile(_dispatcher(runner, store))
+    assert runner.version_calls == []
+
+
+# --- diagnostics never change a receipt ---------------------------------------
+
+
+def test_raising_refusal_observer_does_not_change_the_refusal_receipt(tmp_path):
+    store = _store(tmp_path)
+
+    def _explode(refusal_class: str) -> None:
+        raise RuntimeError("observer failed on " + refusal_class)
+
+    runner = _FakeRunner([_discovery([_agent()])])
+    receipt = _nudge(_dispatcher(runner, store, refusal_observer=_explode))
+    assert receipt.outcome is TransportOutcome.TARGET_UNAVAILABLE
+    assert dict(receipt.details) == {"nudge_id": NUDGE_ID}
+
+
+def test_settled_observation_that_cannot_be_made_is_effect_unknown(tmp_path, monkeypatch):
+    """First post-run observation agrees with `before`; the settle re-observation fails (store vanished)."""
+
+    store = _store(tmp_path)
+    runner = _FakeRunner([_discovery(), _delivery(returncode=1)])
+    dispatcher = _dispatcher(runner, store, settle_seconds=0.01)
+    original = dispatcher._observe_after
+    observations: list[object] = []
+
+    def _second_fails(before, native_handle, *, marker):
+        observations.append(marker)
+        if len(observations) == 2:
+            return None
+        return original(before, native_handle, marker=marker)
+
+    monkeypatch.setattr(dispatcher, "_observe_after", _second_fails)
+    seen: list[str] = []
+    dispatcher._refusal_observer = seen.append
+    with pytest.raises(WakeEffectUnknownError):
+        _nudge(dispatcher)
+    assert seen == []
+    assert len(observations) == 2
 
 
 # --- constructor ---------------------------------------------------------------

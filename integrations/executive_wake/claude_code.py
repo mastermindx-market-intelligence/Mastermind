@@ -16,11 +16,19 @@ Receiver-safety invariants (each has a pinned test):
 * ``claude agents --json`` is an exclusion check only: any listed row for the
   handle refuses delivery; an unreadable or unrecognised listing refuses
   because absence is unproven.  Measured on the installed CLI (2.1.275,
-  2026-09-29): the listing is host-wide and identical from unrelated cwds, and
-  a headless ``-p --resume`` process is listed for its whole lifetime, so both
-  interactive and headless writers are excluded.  The window between the
-  listing and the resume is the discovery-to-launch latency; the adapter adds
-  no lock because the fabric issues at most one attempt per nudge;
+  2026-09-29, one host, one OS user, one ``CLAUDE_CONFIG_DIR``): the listing
+  is identical from unrelated cwds and lists both an interactive session and a
+  headless ``-p --resume`` process for its whole lifetime.  Writers under
+  another OS user, another config dir, or an IDE-embedded host are unmeasured.
+  RESIDUAL RISK, stated not mitigated: a human may start a turn in the receiver
+  between the listing and the resume launch (the discovery-to-launch latency);
+  the adapter has no lock the interactive CLI also honours.  Accepting that
+  window is a receiver-safety ruling that precedes any descriptor flip; the
+  adapter never widens it (the fabric issues at most one attempt per nudge);
+* the delivery argv is qualified against an explicit CLI version set: the
+  adapter reads ``claude --version`` before every submission and refuses an
+  unlisted version, because one delivery flag (``--max-turns``) is hidden on
+  the qualified build and no flag may be guessed on another;
 * the resume runs from the receiver's most recently recorded cwd, resolved,
   which must lie inside a constructor-supplied allowed root; ``--safe-mode``
   disables directory-scoped customisation (CLAUDE.md, hooks, plugins, MCP)
@@ -37,11 +45,14 @@ Receiver-safety invariants (each has a pinned test):
   carry ``isMeta``.  Only a user record equal to this nudge's exact prompt is
   the marker; the marker inside a tool result, a quoted human prompt, or a
   meta note is not;
-* DELIVERED requires that marker followed directly by a model-authored reply
-  (provider-synthesised error or refusal records do not count, and any
-  intervening user-authored record breaks the attribution), observed in the
-  receiver's own transcript, in addition to the provider's structured sentinel
-  naming the same session;
+* DELIVERED requires a model-authored reply linked to the latest such marker
+  by the transcript's own ``parentUuid`` chain through no ``type:"user"``
+  record of any kind (provider-synthesised error or refusal records do not
+  count; a human prompt, a tool result, or a CLI meta note in the chain breaks
+  the attribution), observed in the receiver's own transcript, in addition to
+  the provider's structured sentinel naming the same session.  DELIVERED is
+  this transport's terminal rung: Wake is attention-only and no
+  acknowledgement projection is ever produced here;
 * failure classification is deterministic: only a non-zero provider exit whose
   transcript is byte-identical, whose project directory holds the same file
   names, and whose handle still resolves to that single file — observed twice,
@@ -51,7 +62,10 @@ Receiver-safety invariants (each has a pinned test):
   store delta is effect-unknown and is reconciled by the fabric, never retried
   here;
 * ``reconcile`` is read-only: it closes a late attempt as DELIVERED only under
-  the same marker-and-reply rule and it never submits.
+  the same marker-and-reply rule and it never submits.  It asserts the strong
+  negative (``TARGET_UNAVAILABLE``, the receiver observed nothing) only when
+  no same-session record carries the nudge id at all; a nudge id present
+  without an exactly recognised marker is effect-unknown.
 
 Pre-effect refusals reach the fabric as ``TARGET_UNAVAILABLE`` receipts (the
 sibling idiom, valid on both fabric entry points).  Their closed refusal class
@@ -92,6 +106,7 @@ CLAUDE_WAKE_PRE_SUBMIT_PREFIX = "claude_wake_pre_submit:"
 CLAUDE_WAKE_REFUSAL_CLASSES = frozenset(
     {
         "identity_unbound",
+        "cli_unqualified",
         "store_root_absent",
         "store_absent",
         "store_ambiguous",
@@ -112,6 +127,11 @@ CLAUDE_WAKE_REFUSAL_CLASSES = frozenset(
 #: concurrent Claude Code processes on one host.  Matching it only refines the
 #: refusal class; the pre-effect proof itself is the unchanged store.
 CLAUDE_WAKE_AUTH_REFRESH_CONTENTION_TEXT = "Failed to refresh OAuth token"
+#: CLI builds whose delivery argv, record shapes and listing semantics were measured on a real host.
+CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS = frozenset({"2.1.275"})
+_VERSION_STDOUT_MAX = 4 * 1024
+#: Longest ``parentUuid`` chain walked when linking a reply to the marker.
+_CHAIN_MAX_DEPTH = 4096
 
 _DISCOVERY_STDOUT_MAX = 256 * 1024
 _DELIVERY_STDOUT_MAX = 64 * 1024
@@ -176,14 +196,18 @@ class _TranscriptScan:
     """One full pass over the exact transcript; never persisted.
 
     ``marker_seen``: the adapter's own prompt record for this nudge is recorded.
-    ``marker_replied``: a model-authored assistant record directly followed the
-    latest such prompt record, with no intervening user-authored record.
+    ``marker_replied``: a model-authored assistant record links to the latest
+    such prompt record through its ``parentUuid`` chain with no ``type:"user"``
+    record of any kind in between.
+    ``hint_seen``: some same-session record carries the nudge id bytes, whether
+    or not an exact marker was recognised.
     """
 
     digest: str
     last_cwd: Path | None
     marker_seen: bool
     marker_replied: bool
+    hint_seen: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -309,7 +333,10 @@ class ClaudeCodeWakeDispatcher:
         if self._refusal_observer is not None:
             message = str(exc)
             if message.startswith(CLAUDE_WAKE_PRE_SUBMIT_PREFIX):
-                self._refusal_observer(message[len(CLAUDE_WAKE_PRE_SUBMIT_PREFIX) :])
+                try:
+                    self._refusal_observer(message[len(CLAUDE_WAKE_PRE_SUBMIT_PREFIX) :])
+                except Exception:
+                    pass  # a diagnostic side channel never changes a correct receipt
         return self._receipt(exc.outcome, exc.reason_code, nudge_id=nudge_id)
 
     # -- identity --------------------------------------------------------------
@@ -367,14 +394,20 @@ class ClaudeCodeWakeDispatcher:
         )
 
     @staticmethod
-    def _scan_transcript(transcript: Path, native_handle: str, *, marker: str | None = None) -> _TranscriptScan:
+    def _scan_transcript(
+        transcript: Path, native_handle: str, *, marker: str | None = None, hint: str | None = None
+    ) -> _TranscriptScan:
         """Single full pass: digest, identity agreement, last cwd, optional marker attribution."""
 
         digest = hashlib.sha256()
         last_cwd: Path | None = None
+        hint_bytes = hint.encode("utf-8") if hint else None
+        hint_seen = False
+        latest_marker_uuid: str | None = None
         marker_seen = False
-        marker_replied = False
-        awaiting_reply = False
+        # uuid -> (is a user record, parentUuid); replies are linked after the pass.
+        nodes: dict[str, tuple[bool, str | None]] = {}
+        genuine_parents: list[str] = []
         with transcript.open("rb") as handle:
             for raw in handle:
                 digest.update(raw)
@@ -394,23 +427,50 @@ class ClaudeCodeWakeDispatcher:
                     last_cwd = Path(value)
                 if marker is None:
                     continue
+                if hint_bytes is not None and hint_bytes in raw:
+                    hint_seen = True
                 record_type = record.get("type")
+                record_uuid = record.get("uuid")
+                parent_uuid = record.get("parentUuid")
+                if record_type == "user" and _is_wake_prompt_record(record, marker):
+                    marker_seen = True
+                    # A marker without a uuid is present but unlinkable: nothing can be attributed to it.
+                    latest_marker_uuid = record_uuid if isinstance(record_uuid, str) else None
+                if not isinstance(record_uuid, str):
+                    continue
+                parent = parent_uuid if isinstance(parent_uuid, str) else None
                 if record_type == "user":
-                    if _is_wake_prompt_record(record, marker):
-                        marker_seen = True
-                        marker_replied = False
-                        awaiting_reply = True
-                    elif record.get("isMeta") is not True:
-                        awaiting_reply = False
-                elif record_type == "assistant" and awaiting_reply and _genuine_reply(record):
-                    marker_replied = True
-                    awaiting_reply = False
+                    nodes[record_uuid] = (True, parent)
+                    continue
+                nodes[record_uuid] = (False, parent)
+                if record_type == "assistant" and parent is not None and _genuine_reply(record):
+                    genuine_parents.append(parent)
+        marker_replied = latest_marker_uuid is not None and any(
+            ClaudeCodeWakeDispatcher._chains_to_marker(parent, latest_marker_uuid, nodes) for parent in genuine_parents
+        )
         return _TranscriptScan(
             digest=digest.hexdigest(),
             last_cwd=last_cwd,
             marker_seen=marker_seen,
             marker_replied=marker_replied,
+            hint_seen=hint_seen,
         )
+
+    @staticmethod
+    def _chains_to_marker(start: str, marker_uuid: str, nodes: dict[str, tuple[bool, str | None]]) -> bool:
+        """Walk ``parentUuid`` upward; reach the marker through no user record of any kind."""
+
+        current: str | None = start
+        for _ in range(_CHAIN_MAX_DEPTH):
+            if current is None:
+                return False
+            if current == marker_uuid:
+                return True
+            node = nodes.get(current)
+            if node is None or node[0]:
+                return False
+            current = node[1]
+        return False
 
     def _receiver_cwd(self, scan: _TranscriptScan) -> Path:
         cwd = scan.last_cwd
@@ -460,11 +520,31 @@ class ClaudeCodeWakeDispatcher:
             if before.transcript.is_symlink() or not before.transcript.is_file():
                 return None
             candidates = self._transcript_candidates(native_handle)
-            scan = self._scan_transcript(before.transcript, native_handle, marker=marker)
+            scan = self._scan_transcript(before.transcript, native_handle, marker=marker, hint=None)
             siblings = self._sibling_names(before.transcript)
         except (OSError, WakePreSubmitError):
             return None
         return _AfterObservation(scan=scan, siblings=siblings, still_unique=candidates == [before.transcript])
+
+    # -- qualification: the delivery argv is proven only against listed CLI builds --
+
+    async def _refuse_unqualified_cli(self) -> None:
+        argv = (self._binary, "--version")
+        try:
+            result = await self._runner.run(
+                argv=argv,
+                cwd=self._cwd,
+                timeout_seconds=self._discovery_timeout_seconds,
+            )
+        except Exception:
+            raise _refuse("cli_unqualified") from None
+        if not isinstance(result, ClaudeWakeCommandResult) or result.returncode != 0:
+            raise _refuse("cli_unqualified")
+        if len(result.stdout.encode("utf-8")) > _VERSION_STDOUT_MAX:
+            raise _refuse("cli_unqualified")
+        version = result.stdout.strip().split(maxsplit=1)[0] if result.stdout.strip() else ""
+        if version not in CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS:
+            raise _refuse("cli_unqualified")
 
     # -- exclusion: any listed writer for the handle refuses delivery ----------
 
@@ -498,7 +578,10 @@ class ClaudeCodeWakeDispatcher:
 
     @staticmethod
     def _prompt(wake: WakeNudge) -> str:
-        opaque_ids = (wake.nudge_id,) + tuple(wake.obligation_ids) + tuple(wake.attempt_command_ids)
+        # Canonical order: reconcile callers may present the same ids in another order.
+        opaque_ids = (str(wake.nudge_id),) + tuple(sorted(map(str, wake.obligation_ids))) + tuple(
+            sorted(map(str, wake.attempt_command_ids))
+        )
         return CLAUDE_WAKE_INSTRUCTION + "\nOpaque Wake identities:\n" + "\n".join(opaque_ids)
 
     def _delivery_argv(self, prompt: str, native_handle: str) -> tuple[str, ...]:
@@ -567,6 +650,7 @@ class ClaudeCodeWakeDispatcher:
             if native_handle is None:
                 raise _refuse("identity_unbound")
             before = self._resolve_store(native_handle)
+            await self._refuse_unqualified_cli()
             await self._refuse_live_writer(native_handle)
         except WakePreSubmitError as exc:
             return self._refused(exc, nudge_id=nudge_id)
@@ -617,13 +701,17 @@ class ClaudeCodeWakeDispatcher:
             raise WakeEffectUnknownError("Claude late reconciliation identity is not the bound transport")
         try:
             transcript = self._resolve_transcript(native_handle)
-            scan = self._scan_transcript(transcript, native_handle, marker=self._prompt(wake))
+            scan = self._scan_transcript(
+                transcript, native_handle, marker=self._prompt(wake), hint=str(wake.nudge_id)
+            )
         except (OSError, WakePreSubmitError):
             raise WakeEffectUnknownError("Claude late reconciliation cannot observe the exact transcript") from None
         if scan.marker_seen and scan.marker_replied:
             return self._receipt(TransportOutcome.DELIVERED, "delivered", nudge_id=wake.nudge_id)
         if scan.marker_seen:
             raise WakeEffectUnknownError("Claude exact-session reply to the Wake marker is not recorded")
+        if scan.hint_seen:
+            raise WakeEffectUnknownError("Claude exact-session transcript carries the nudge id without a recognised marker")
         try:
             await self._refuse_live_writer(native_handle)
         except WakePreSubmitError:
@@ -636,6 +724,7 @@ __all__ = [
     "CLAUDE_WAKE_DELIVERY_SENTINEL",
     "CLAUDE_WAKE_INSTRUCTION",
     "CLAUDE_WAKE_PRE_SUBMIT_PREFIX",
+    "CLAUDE_WAKE_QUALIFIED_CLI_VERSIONS",
     "CLAUDE_WAKE_REFUSAL_CLASSES",
     "ClaudeCodeWakeDispatcher",
     "ClaudeCodeWakeRunner",
