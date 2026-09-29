@@ -202,6 +202,54 @@ def test_terminal_closure_requires_original_admission_and_releases_once(tmp_path
     assert successor["maintenance_sequence"] > admission["maintenance_sequence"]
 
 
+def test_owner_admission_evidence_reads_original_root_digest_after_closure(tmp_path):
+    store = er.RuntimeStore(tmp_path)
+    registry = er.ReleaseMaintenanceRegistry(store)
+    approval = make_approval()
+    fingerprint = rc.request_fingerprint_for(approval)
+    with store.read() as connection:
+        assert registry.read_admission_evidence(
+            connection, approved_transition_ref=approval["approved_transition_ref"],
+            request_fingerprint=fingerprint,
+        ) is None
+
+    registry, approval, admission, _, _, status = _admit_contract_vector(store)
+    fingerprint = rc.request_fingerprint_for(approval)
+    with store.read() as connection:
+        evidence = registry.read_admission_evidence(
+            connection, approved_transition_ref=approval["approved_transition_ref"],
+            request_fingerprint=fingerprint,
+        )
+        assert evidence is not None
+        assert set(evidence) == {
+            "approval", "admission", "preconditions", "root_qualification_digest"
+        }
+        assert evidence["root_qualification_digest"] == _digest(
+            prestart_fixture()[1]
+        )
+        assert _canonical(evidence["admission"]) == _canonical(admission)
+        with pytest.raises(TypeError):
+            evidence["root_qualification_digest"] = _hex(0)
+
+    with store.transaction() as connection:
+        registry.record_terminal(
+            connection, approved_transition_ref=approval["approved_transition_ref"],
+            request_fingerprint=fingerprint, terminal_status=status,
+            trusted_context=registry._release_closing_context_for_test(
+                store, connection, approval=approval, admission=admission,
+                terminal_status=status, journal_observation_digest=_hex(64),
+            ),
+        )
+    with store.read() as connection:
+        assert registry.read_unresolved_admission(connection) is None
+        evidence = registry.read_admission_evidence(
+            connection, approved_transition_ref=approval["approved_transition_ref"],
+            request_fingerprint=fingerprint,
+        )
+        assert evidence is not None
+        assert evidence["root_qualification_digest"] == _digest(prestart_fixture()[1])
+
+
 def test_prestart_cancellation_is_distinct_and_releases_once(tmp_path):
     store = er.RuntimeStore(tmp_path)
     registry, approval, admission, reservation, cancellation, _ = _admit_contract_vector(store)

@@ -27,6 +27,7 @@ import re
 import secrets
 import sqlite3
 import threading
+from types import MappingProxyType
 from abc import ABC, abstractmethod
 from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
 from contextlib import ExitStack, contextmanager
@@ -26042,6 +26043,34 @@ class ReleaseMaintenanceRegistry:
             "root_qualification_digest": wrapper["root_qualification_digest"],
             "event": event,
         }
+
+    def read_admission_evidence(
+        self, connection: sqlite3.Connection, *, approved_transition_ref: str,
+        request_fingerprint: str,
+    ) -> Mapping[str, Any] | None:
+        """Read the original admission evidence on an owned Runtime snapshot.
+
+        Unlike the public admission projection, this owner-consumer seam
+        includes the opaque root reservation digest. It remains available
+        after terminal closure, so START and closure callers can compare
+        their root observation with the original persisted admission. It
+        mints no capability and does not grant release authority.
+        """
+        self._require_owned_snapshot_connection(connection, allow_write=True)
+        if self.read_admission(
+            connection, approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        ) is None:
+            return None
+        material = self._read_admission_material(
+            connection, approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        )
+        return MappingProxyType({
+            key: material[key] for key in (
+                "approval", "admission", "preconditions", "root_qualification_digest"
+            )
+        })
 
     def _closure_history(
         self, connection: sqlite3.Connection,
