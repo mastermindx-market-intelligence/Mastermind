@@ -107,6 +107,50 @@ passed, prove full MCP/server authorization, alter the current launch capability
 registry, or transfer #825's old proof to a new donor release. Adoption,
 installation and useful end-to-end acceptance remain with the incumbent owners.
 
+## Executable loaded-runtime preflight (continuation)
+
+`qualify-loaded-runtime.mjs` closes the config-only false-green gap without
+changing the donor patch or inventing another ACP adapter. The incumbent fixed
+profile bootstrap can call it on its **actual, already-created ToolRuntime**:
+
+```js
+import { qualifyLoadedDispatchRuntime } from './qualify-loaded-runtime.mjs'
+const dispatchEvidence = await qualifyLoadedDispatchRuntime(ctx, {
+  signal: ownerAbortSignal,
+})
+```
+
+This must occur in the host-owned exclusive, provider-free pre-prompt phase,
+before any model session/workload is exposed. It is not safe to inject probes
+into a running admitted worker. The supplied context's middleware must itself
+be reviewed/provider-free for this phase; the helper makes no direct provider
+call but is not a sandbox around arbitrary plugin callbacks. Existing guards
+are never disabled: if they prevent the positive probe, preflight refuses.
+
+The helper executes four temporary **in-memory** probes: permitted call,
+revocation while awaiting a wrapper, same-name definition replacement, and
+original-result ownership after a body starts. It disposes its exact tools,
+guards and wrappers on success or failure. All errors, cancellation, or cleanup
+uncertainty block further startup; they are not replay/alternate-provider
+permission. A caller deadline does not prove cleanup: the existing process
+owner must reconcile a pipeline that has not settled.
+
+The frozen return is behavioral evidence only. Bind it to the existing exact
+artifact/profile/process generation and final tool census before the existing
+owner admits work. It is not source authentication, a cached admission grant,
+a replacement tool registry, or proof of MCP server/schema/generation rights.
+Do not claim it is installed or called by #825 merely because the helper exists.
+
+Seventeen new real-runtime tests cover stock/ignored config, default/explicit
+legacy mode, each independently broken guard/definition/result patch, deny-all
+false positives, cancellation, middleware failure, repeated probes, and
+preservation of unrelated tools, pipeline draining and cleanup failure.
+`verify.py` runs these alongside the unchanged
+19 race cases, 178 upstream regressions and original three mutation falsifiers.
+The new helper's initial absent implementation produced 12 failing tests;
+behavioral enforcement proof comes from the actual stock/disabled/defect cases,
+not from that missing-module failure.
+
 ## License
 
 The one-file donor patch and fetched test references derive from DeepSeek's MIT

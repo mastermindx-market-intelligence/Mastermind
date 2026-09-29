@@ -1,30 +1,53 @@
 {
   "architecture": "arm64",
-  "clean_input_preparation": {
-    "checks": {
-      "clean_download_and_patch": true,
-      "drift_not_overwritten": true,
-      "drift_refused": true
-    },
-    "donor_commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
-    "network": "public pinned source fetch only; no providers",
-    "note": "Clean network-source fetch and drift refusal used the equivalent prior context-bearing patch; current zero-context patch is separately applied/hashed in every final verify run.",
-    "source_files": 14,
-    "temporary_tree_removed": true
-  },
-  "full_local_report_sha256": "7ee07f01f6ed127251fb2a7c2fadeefcb1d0f13250a94fe460cb222e4c83d05c",
-  "generated_at": "2026-09-29T06:50:21.355988+00:00",
+  "full_local_report_sha256": "0e088d0af9047df49dd7c8440578526e99cec432a8589577d3107f9ee31927b1",
+  "generated_at": "2026-09-29T08:18:36.296467+00:00",
   "independent_review": "NOT_PERFORMED",
   "input_sha256": {
     "dispatch-binding.test.mjs": "62f7d741f2a9072343e2bea0bd299429e8fdd3a9f515aaaa137f15c5728e2299",
     "donor-manifest.json": "9d0dbfac060dfdbc293c455012ba75cdfca55ff74daaea206cb89431db4ba54f",
+    "loaded-runtime-preflight.test.mjs": "f30fa03a9a9f715916a10fd9ec59ce2ad3ca2ef3e362150afd5f9ef46571fd77",
     "package-lock.json": "b22359bf374d9743f3bdf5a9ee950d5702bca7ac899ac07f3c83bc597ee0c729",
     "package.json": "8203dbf76e0b9730c846b66086202873c80047487dc6abbeada5fc7231909daa",
     "prepare.py": "3dca0cec77bb068d9d7b7a3d386e0193da89c726150347d95f9e127e5fb6f42d",
+    "qualify-loaded-runtime.mjs": "02ad2a21c291d27d64fbe43f9905885803f8c1317e2781879c73bee193037bb1",
     "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
     "tsconfig.json": "001f949bce3428d8071a11c99e90cb7451b7989265e140251df147b1cb6881ad",
-    "verify.py": "c6a76008aff93204559690c73f6481c1415ce4cbc741dd00c47d01f660f8f47a",
+    "verify.py": "bce45b74b950bb891c0f884902831584e12fa23e9ffe8b3e15f327594ed7dd92",
     "vitest.config.mjs": "ba36a3ec8059072999908f2e9989b079988d774924e95b59dd863c80ec025718"
+  },
+  "loaded_runtime_preflight": {
+    "cases": [
+      "actual patched and enabled runtime qualifies before any model call",
+      "published ignores requested option",
+      "pristine ignores requested option",
+      "patched default remains disabled",
+      "patched explicitly disabled",
+      "denying everything cannot fake qualification",
+      "unrelated tool definitions and callbacks survive the preflight",
+      "preflight can run twice without leaked guards or wrappers",
+      "throwing existing middleware refuses and leaves no probe tools",
+      "already-aborted owner signal prevents all probe registration",
+      "owner cancellation during middleware prevents qualification",
+      "missing deadline signal fails closed before touching runtime",
+      "partial patch without guard enforcement is refused",
+      "partial patch without definition enforcement is refused",
+      "partial patch without result enforcement is refused",
+      "cancellation does not abandon an unsettled tool pipeline",
+      "cleanup failure blocks qualification after draining all own disposers"
+    ],
+    "defect_source_sha256": {
+      "definition": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
+      "guard": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
+      "result": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901"
+    },
+    "exit_code": 0,
+    "log": "loaded-preflight.log",
+    "log_sha256": "e8730e06dc7a58b5fc8aac424c521b6682d8384ca37125cb48b9ddc4432e796a",
+    "passed": 17,
+    "scope": "Actual ToolRuntime instance, in-memory probes, not installed ACP qualification",
+    "stderr_empty": true,
+    "tests": 17
   },
   "mutants": {
     "remove_definition_check": {
@@ -35,7 +58,7 @@
       ],
       "killed": true,
       "log": "mutant-definition.log",
-      "log_sha256": "63a787775b44817beb16ccc065ae12fe6cab8f6bd7e23ef2eca82b43b5f80c6e",
+      "log_sha256": "bfa7c19cc92caae949526cd9e8813bb8ca0dc5570947cedbe9f768e1b2bd0e4c",
       "mutant_sha256": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
       "passed": 17,
       "stderr_empty": true,
@@ -50,7 +73,7 @@
       ],
       "killed": true,
       "log": "mutant-guard.log",
-      "log_sha256": "73d5e946fcd5e92eb1d307beb0b8a3e1207db434c1354965cab87d31cc89d914",
+      "log_sha256": "b81505c23dca20cf0d20b38374fdcde754f16cf3157dc5a8a06f7d791f9e7e2c",
       "mutant_sha256": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
       "passed": 16,
       "stderr_empty": true,
@@ -65,7 +88,7 @@
       ],
       "killed": true,
       "log": "mutant-result.log",
-      "log_sha256": "d173acd35abf7ad9904e060eeeb8036141d22ae43451632d915b0155efd72ed0",
+      "log_sha256": "2ea8c06b316e30c6bae9b3b9e52184ef56b7f41627442b743049a14ff2434085",
       "mutant_sha256": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901",
       "passed": 16,
       "stderr_empty": true,
@@ -75,6 +98,22 @@
   "node": "v26.8.2",
   "node_sha256": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
   "platform": "Darwin",
+  "preserved_prior_evidence": {
+    "basis": "Historical receipt retained; donor patch, input manifest, lockfile and prepare.py unchanged. No fresh install claimed.",
+    "candidate_head": "3af62e91492dbf0a93e127533f263831561b7a63",
+    "clean_input_preparation": {
+      "checks": {
+        "clean_download_and_patch": true,
+        "drift_not_overwritten": true,
+        "drift_refused": true
+      },
+      "donor_commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+      "network": "public pinned source fetch only; no providers",
+      "note": "Clean network-source fetch and drift refusal used the equivalent prior context-bearing patch; current zero-context patch is separately applied/hashed in every final verify run.",
+      "source_files": 14,
+      "temporary_tree_removed": true
+    }
+  },
   "provider_calls": 0,
   "publication_state": "SOURCE_CANDIDATE_NOT_INSTALLED",
   "python": "3.14.7",
@@ -91,7 +130,7 @@
       "exit_code": 0,
       "failed_cases": [],
       "log": "patched-targeted.log",
-      "log_sha256": "72df3209788682a96e435380738cdace37c4696e834a4c188d6fcf304aac49bb",
+      "log_sha256": "3903486941759d47eba2287ef39834efac6f1e37ee8b077c7ae817c83c98f6a9",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -206,7 +245,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-npm.log",
-      "log_sha256": "c7a3a27a797f7feddf2e0b65b7bfcb6d92e71b96d6be1cafbc074f785c4e4e64",
+      "log_sha256": "232c0ddd4a84429e973b6c56a605e30a6d26456be810db1b706283072abda3ed",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -315,7 +354,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-source.log",
-      "log_sha256": "5850cad14336410a20f1641cc47b48abebed8bb26c09b7ce6951874e52750bf9",
+      "log_sha256": "aded05e2940e92be926a17157ce80cba83baa24bd565b67259ecf08ff8c23b07",
       "observations": {
         "replace-before-body": {
           "counts": {
@@ -425,7 +464,7 @@
       "log": "upstream-patched.log",
       "log_sha256": "84e61293e93d7fd493cac1ee05255ebb1cef3074c05b03918439748f3c70f544",
       "passed": 178,
-      "report_sha256": "086bfde4ce5989ec38b8c69e23993712788ffdd336d3abcfb17b1c99389e494f",
+      "report_sha256": "d95dc0415179fa24e7696bc6a8cb66d60b4df98c5e337368154c7c2d72d1d474",
       "stderr_empty": true,
       "tests": 178
     },
@@ -435,7 +474,7 @@
       "log": "upstream-pristine.log",
       "log_sha256": "95e53459c5199ef7accdd11a97691f6a1155a00e10ee5b736683360344acbcd4",
       "passed": 178,
-      "report_sha256": "c09921cd33f10a593646256cd56a75ed6f7a927c4f1d2154c8e6250231e3032b",
+      "report_sha256": "07ff5a5f2a18cfd318fbc0dd26f2e5eeabf455458775631c0656336b8548209e",
       "stderr_empty": true,
       "tests": 178
     }

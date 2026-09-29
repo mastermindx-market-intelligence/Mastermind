@@ -81,6 +81,39 @@ def mutation(name: str, old: str, new: str, expected: set[str]) -> dict:
     return {**result, "mutant_sha256": digest(mutant.encode()), "killed": True}
 
 
+def loaded_preflight() -> dict:
+    """Exercise the actual runtime instance, including three partially broken patches."""
+    original = (CACHE / "donor/index.ts").read_text()
+    defects = {
+        "guard": ("const reason = this.guardReason(exec)",
+                  "const reason: string | undefined = undefined"),
+        "definition": ("this.strictDispatchBinding && tool !== this.preparedDefinitions.get(exec)",
+                       "false && tool !== this.preparedDefinitions.get(exec)"),
+        "result": ("? this.preparedDefinitions.get(exec)",
+                   "? this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)"),
+    }
+    hashes = {}
+    for name, (old, new) in defects.items():
+        assert original.count(old) == 1, f"Preflight defect target is not unique: {name}"
+        destination = CACHE / "preflight-defects" / name
+        destination.mkdir(parents=True, exist_ok=True)
+        for path in (CACHE / "donor").glob("*.ts"):
+            (destination / path.name).write_bytes(path.read_bytes())
+        changed = original.replace(old, new).encode()
+        (destination / "index.ts").write_bytes(changed)
+        hashes[name] = digest(changed)
+    result, receipt = run("loaded-preflight", ["--test", "--test-reporter=tap",
+                                              "loaded-runtime-preflight.test.mjs"])
+    cases = re.findall(r"^(ok|not ok) \d+ - (.+)$", result.stdout, re.MULTILINE)
+    assert len(cases) == 17 and all(state == "ok" for state, _ in cases), "Loaded preflight failed"
+    assert result.returncode == 0 and not result.stderr
+    assert "# skipped 0" in result.stdout and "# cancelled 0" in result.stdout
+    assert (CACHE / "donor/index.ts").read_text() == original
+    return {**receipt, "tests": 17, "passed": 17, "defect_source_sha256": hashes,
+            "cases": [name for _, name in cases],
+            "scope": "Actual ToolRuntime instance, in-memory probes, not installed ACP qualification"}
+
+
 def main() -> dict:
     supply = prepare(download=False)
     assert digest((ROOT / "package-lock.json").read_bytes()) == MANIFEST["npm_lock_sha256"]
@@ -95,6 +128,7 @@ def main() -> dict:
         "source_baseline": targeted("baseline-source", "pristine", EXPECTED_RED),
         "patched": targeted("patched-targeted", "1", set()),
     }
+    report["loaded_runtime_preflight"] = loaded_preflight()
     report["upstream"] = {mode: upstream(f"upstream-{mode}", source)
                           for mode, source in [("pristine", "pristine"), ("patched", "1")]}
     result, receipt = run("typecheck", ["node_modules/typescript/bin/tsc", "-p", "tsconfig.json"])
@@ -116,7 +150,8 @@ def main() -> dict:
     assert digest((CACHE / "donor/index.ts").read_bytes()) == MANIFEST["patched_index_sha256"]
     report["input_sha256"] = {name: digest((ROOT / name).read_bytes()) for name in [
         "dispatch-binding.test.mjs", "strict-dispatch-binding.patch", "package-lock.json",
-        "donor-manifest.json", "prepare.py", "verify.py", "vitest.config.mjs", "tsconfig.json", "package.json"]}
+        "donor-manifest.json", "prepare.py", "verify.py", "vitest.config.mjs", "tsconfig.json", "package.json",
+        "qualify-loaded-runtime.mjs", "loaded-runtime-preflight.test.mjs"]}
     report["success"] = True
     return report
 
@@ -127,4 +162,5 @@ if __name__ == "__main__":
     destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps({"success": True, "targeted_passed": report["targeted"]["patched"]["passed"],
                       "upstream_passed": report["upstream"]["patched"]["passed"],
+                      "loaded_preflight_passed": report["loaded_runtime_preflight"]["passed"],
                       "mutants_killed": len(report["mutants"]), "report": str(destination)}, indent=2))
