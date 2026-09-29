@@ -47,6 +47,7 @@ class ReleaseOwnerSnapshot:
     admission_contract_digest: str
     effect: contract.ReleaseRecord
     preconditions: Mapping
+    input_identity_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class ReleaseHistoryTrust:
     codec: _OwnerReleaseCodec
     owner_installation_id: str
     target_ref: str
+    input_identity_digest: str = ""
 
 
 _APPROVAL_PRECONDITIONS = frozenset({"approval_evidence_digest", "grant_digest"})
@@ -94,10 +96,15 @@ class ReleaseBrokerOwner:
     def _history(self, approval, principal, connection):
         if self._history_trust is None:
             raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
+        original_identity = None
         for _ in range(2):
             trust = self._history_trust()
             if type(trust) is not ReleaseHistoryTrust or type(trust.codec) is not _OwnerReleaseCodec:
                 raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
+            identity = (trust.owner_installation_id, trust.target_ref, trust.input_identity_digest)
+            if original_identity is not None and identity != original_identity:
+                raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
+            original_identity = identity
             verified = trust.codec.verify_approval(approval)
             if (verified["principal_projection"] != principal
                     or verified["owner_installation_id"] != trust.owner_installation_id
