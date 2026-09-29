@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import inspect
 
 REVIEWED_PATH = "control_plane/executive_installed_peer.py"
 REVIEWED_LITERAL_COUNT = 33
 REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
-                    'ast_sha256': 'd39da759d56fc748cf8a26ea18323d56542f0ac1fd2f7a30f321a37a3b6a93f0',
+                    'ast_sha256': 'caa7c22754197370bf93733aec4cbcb1bc12ee23ef8cc30898be5327cfe8e49c',
                     'sites': ((('value', 'values', 0, 'keywords', 3, 'value'),
                                'str',
                                '_mastermind_exec',
@@ -35,7 +36,7 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                                '_mastermind_executive_mcp',
                                '"_mastermind_executive_mcp"'))},
  '_ROLE_TOPOLOGIES': {'node_type': 'Assign',
-                      'ast_sha256': 'd724eeb306ba8fb27449c3e4268a29edc55920d936cc163e400dcf7e398d5de3',
+                      'ast_sha256': 'db8c0d3a78c34ed573cc43ecfd2e28fe02218611db9078902f853547d8a89634',
                       'sites': ((('value', 'values', 0, 'keywords', 1, 'value'), 'int', 450, '450'),
                                 (('value', 'values', 0, 'keywords', 2, 'value'),
                                  'str',
@@ -86,18 +87,18 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                                          '_mastermind_executive_mcp',
                                          '"_mastermind_executive_mcp"'))},
  '_verify_role_plist': {'node_type': 'FunctionDef',
-                        'ast_sha256': 'c1ee469b6a858ed6dde6fbff737c895641532d835c4b7db0e0de89cf06761254',
+                        'ast_sha256': 'b6ae4e618fbd7a678ff7cc558882de291e9420c75661613f1b1d270fba4cebf3',
                         'sites': ((('body', 4, 'value', 'keywords', 2, 'value'), 'int', 420, '0o644'),)},
  '_verify_control_projection': {'node_type': 'FunctionDef',
-                                'ast_sha256': '0fa6d3cab2505182be5702325f19434989c8df1603c6d9ec88dce26fb273d69e',
+                                'ast_sha256': '3a834919a6a967ef9bb612b9d57502cbe524b8052639b583cb703f0934310b52',
                                 'sites': ((('body', 2, 'value', 'keywords', 3, 'value'), 'int', 450, '450'),
                                           (('body', 5, 'test', 'comparators', 0), 'int', 450, '450'))},
  '_verify_role_config': {'node_type': 'FunctionDef',
-                         'ast_sha256': '7bf72f6613d54840245aa682e5097bd0bc73e83ae88b1df42d3b39b7b97d805c',
+                         'ast_sha256': 'c46afa84416318a536109f713e764d00db497560cb2a7340898391613410e1e6',
                          'sites': ((('body', 3, 'body', 1, 'test', 'comparators', 0), 'int', 450, '450'),
                                    (('body', 3, 'orelse', 1, 'test', 'comparators', 0), 'int', 458, '458'))},
  '_inventory_python_base': {'node_type': 'FunctionDef',
-                            'ast_sha256': '302a0806ca41a7ff3a8042330a9200a887a86a04c516f3a7fecbdc702861a135',
+                            'ast_sha256': '596652feb54da86955aedf19d7d4e313205963daaf3d0f2f272c2e0a5269a1b1',
                             'sites': ((('body',
                                         5,
                                         'body',
@@ -119,17 +120,30 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                                        512,
                                        '512'),)},
  '_verify_python_runtime': {'node_type': 'FunctionDef',
-                            'ast_sha256': '07a6dd1b1b1a20e7718dd4dfaf2001130f11ce24c54c4f5741c099de23fd7eb9',
+                            'ast_sha256': '0675122e35792a7b805fdaef8ebddeba9c55f528fa8b9eaf5d1d22d85e0d59a2',
                             'sites': ((('body', 3, 'body', 0, 'value', 'keywords', 2, 'value'),
                                        'int',
                                        493,
                                        '0o755'),)},
  '_recheck_python_runtime': {'node_type': 'FunctionDef',
-                             'ast_sha256': '75b75f2b561df45a58e276351c0fe334d5e4743cd3dcdedcf2a3fbd46ec172da',
+                             'ast_sha256': '0ebe50cb8368f4e79e9fd9ce7fea0bfc86eba264a434a5958c52956174f2359b',
                              'sites': ((('body', 3, 'body', 0, 'value', 'keywords', 2, 'value'),
                                         'int',
                                         493,
                                         '0o755'),)}}
+
+
+def _reviewed_ast_dump(node):
+    """Pin full AST structure across Python 3.12 and 3.13+ dump defaults.
+
+    Python 3.13 added show_empty and 3.14 omits empty list fields by default.
+    Empty fields stay explicit in this review digest; no source is normalized
+    away and the literal pins still come only from the frozen reviewed preimage.
+    """
+    options = {"include_attributes": False}
+    if "show_empty" in inspect.signature(ast.dump).parameters:
+        options["show_empty"] = True
+    return ast.dump(node, **options)
 
 
 def _anchor_name(node):
@@ -181,7 +195,7 @@ def reviewed_literal_spans(path: str, source: str):
             continue
         if not all(line.isascii() for line in lines[node.lineno - 1:node.end_lineno]):
             continue
-        digest = hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
+        digest = hashlib.sha256(_reviewed_ast_dump(node).encode()).hexdigest()
         if digest != expected["ast_sha256"]:
             continue
         qualified = []

@@ -8,12 +8,21 @@ import pytest
 
 from tests.executive_identity_review import (
     REVIEWED_LITERAL_COUNT, REVIEWED_PATH, mask_reviewed_identity_literals,
-    reviewed_literal_spans,
+    reviewed_literal_spans, _reviewed_ast_dump,
 )
 from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
 
 ROOT = Path(__file__).parents[1]
 SOURCE = (ROOT / REVIEWED_PATH).read_text(encoding="utf-8")
+
+
+def test_review_digest_keeps_empty_fields_in_cross_version_format():
+    # Python 3.14's default dump drops these lists; 3.12 keeps them. The
+    # reviewed representation must retain them on both real interpreters.
+    node = ast.parse("invoke()", mode="eval").body
+    assert _reviewed_ast_dump(node) == (
+        "Call(func=Name(id='invoke', ctx=Load()), args=[], keywords=[])"
+    )
 
 
 def _diff(source, path=REVIEWED_PATH):
