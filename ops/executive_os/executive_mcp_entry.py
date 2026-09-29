@@ -115,7 +115,8 @@ def validate_optional_mounts(raw):
         'coo': {'policy', 'binding'},
     }
     for name, keys in shapes.items():
-        if name in raw and (type(raw[name]) is not dict or set(raw[name]) != keys):
+        if name in raw and (type(raw[name]) is not dict or not keys <= set(raw[name])
+                or set(raw[name]) - keys - ({'missions'} if name == 'coo' else set())):
             raise ValueError('optional mount configuration differs')
     policies = optional_policies(raw)
     if 'workspace' in raw:
@@ -153,18 +154,27 @@ def validate_optional_mounts(raw):
         if coo.policy_id in {base.read.policy_id, base.submit.policy_id}:
             raise ValueError('COO policy ID must be distinct from CEO policies')
         validate_coo_binding(raw['coo']['binding'], coo)
+        if 'missions' in raw['coo']:
+            from control_plane.coo_principal_host import validate_missions
+            validate_missions(raw['coo']['missions'])
+            from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+            if raw['coo']['missions'] and raw.get('executive_mcp_profile') != WEB_CEO_V2_PROFILE:
+                raise ValueError('COO mission activation requires the explicit Web-CEO v2 profile')
     if len({p.policy_id for p in policies.values()}) != len(policies):
         raise ValueError('optional policy IDs must be distinct')
 
 
-def current_projection_loader(config_path, source, initial, block, field):
+def current_projection_loader(config_path, source, initial, block, field, *, expected_uid=None):
     """Recheck the same sealed installation, allowing only projection rotation."""
     frozen = copy.deepcopy(initial)
+    uid = frozen['service_uid'] if expected_uid is None else expected_uid
+    if type(uid) is not int or uid < 0:
+        raise ValueError('invalid installed reader identity')
     def load():
         require_sealed_path(source, directory=True)
         require_sealed_path(config_path)
         current = validate_document(json.loads(config_path.read_text()))
-        if source.name != current['release_sha'] or os.geteuid() != current['service_uid']:
+        if source.name != current['release_sha'] or os.geteuid() != uid:
             raise ValueError('installed process or release changed')
         if block not in current:
             raise ValueError('optional mount withdrawn')
@@ -178,9 +188,13 @@ def current_projection_loader(config_path, source, initial, block, field):
             for value in (left, right):
                 if name in value:
                     value[name][projection] = None
+        # Disarming an exact delegation is dynamic; its immutable scope cannot rotate.
+        for value in (left, right):
+            for mission in value.get('coo', {}).get('missions', []):
+                mission['enabled'] = None
         if left != right:
             raise ValueError('installed policy or configuration changed')
-        return current[block][field]
+        return current[block] if field is None else current[block][field]
     return load
 
 
@@ -328,6 +342,19 @@ class PolicyAuditSink:
             sink.close()
 
 
+def build_installed_coo_settings(raw, source, config_path, executive):
+    """Use the canonical App-peer fact transport; never open Runtime in MCP."""
+    if not raw.get('coo', {}).get('missions'):
+        return None
+    validate_document(raw)
+    from integrations.mastermind_executive_app.coo import CooAppSettings
+    from integrations.mastermind_executive_app.coo_installed import CooFactsClient
+    client = CooFactsClient(raw['ceo_ingress_socket_path'])
+    return CooAppSettings(executive=executive, policy=optional_policies(raw)['coo'],
+        load_binding=current_projection_loader(config_path, source, raw, 'coo', 'binding'),
+        authority_provider=client.authority, mission_provider=client.mission)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
@@ -346,7 +373,7 @@ def main(argv=None):
     from integrations.mastermind_executive_app.gateway import AppPolicies, load_app_policies
     from integrations.executive_mcp.server import (
         build_executive_mcp_app, build_personal_read_mcp_app,
-        build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app,
+        build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app, build_web_ceo_v2_with_coo_mcp_app,
     )
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
@@ -401,7 +428,12 @@ def main(argv=None):
                 settings, audit_sink=sink, mdm_reader=mdm_reader, **mounts
             )
         elif profile == WEB_CEO_V2_PROFILE:
-            app = build_web_ceo_v2_mcp_app(settings, audit_sink=sink, **mounts)
+            coo_settings = build_installed_coo_settings(raw, source, args.config, settings)
+            if coo_settings is None:
+                app = build_web_ceo_v2_mcp_app(settings, audit_sink=sink, **mounts)
+            else:
+                app = build_web_ceo_v2_with_coo_mcp_app(settings, coo_settings=coo_settings,
+                    audit_sink=sink, **mounts)
         else:
             app = build_executive_mcp_app(settings, audit_sink=sink, **mounts)
         uvicorn.run(app, host='127.0.0.1', port=raw['port'], access_log=False,
