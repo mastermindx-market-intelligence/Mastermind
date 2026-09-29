@@ -1035,7 +1035,7 @@ _NETWORK_CLOSURE_TOTAL_BYTES = 46298728
 _NETWORK_MANIFEST_NAME = ".executive-release-manifest.json"
 _RELEASE_MANIFEST_SCHEMA = "mastermind.executive_release_manifest/v1"
 _GATEWAY_CONFIG_SCHEMA = "mastermind.executive_mcp_install.v1"
-_GATEWAY_MCP_PROFILE = "web_ceo_v2"
+_GATEWAY_MCP_PROFILE = "release_control_v1"
 _RELEASE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 _RELEASE_PLACEHOLDER = "{release}"
@@ -1751,7 +1751,7 @@ def _verify_role_config(
         if _require_document_int(document, "control_uid", code="SERVICE_CONFIG_SCHEMA_DRIFT") != 450:
             raise _refuse("SERVICE_CONFIG_UID_DRIFT")
     else:
-        if _require_document_text(document, "schema_version", code="SERVICE_CONFIG_SCHEMA_DRIFT") != _GATEWAY_CONFIG_SCHEMA:
+        if _require_document_text(document, "schema", code="SERVICE_CONFIG_SCHEMA_DRIFT") != _GATEWAY_CONFIG_SCHEMA:
             raise _refuse("SERVICE_CONFIG_SCHEMA_DRIFT")
         if _require_document_int(document, "service_uid", code="SERVICE_CONFIG_SCHEMA_DRIFT") != 458:
             raise _refuse("SERVICE_CONFIG_UID_DRIFT")
