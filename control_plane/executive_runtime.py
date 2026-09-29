@@ -25005,7 +25005,7 @@ class ReleaseMaintenanceRegistry:
         try:
             shadows = connection.execute(
                 "SELECT name FROM temp.sqlite_master WHERE type IN ('table','view')"
-                " AND name IN ('events','attempts') LIMIT 1"
+                " AND name COLLATE NOCASE IN ('events','attempts') LIMIT 1"
             ).fetchone()
         except sqlite3.Error as exc:
             raise _release_refusal("connection", "TEMP_NAMESPACE_UNVERIFIABLE") from exc

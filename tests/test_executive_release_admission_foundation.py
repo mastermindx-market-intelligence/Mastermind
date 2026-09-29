@@ -122,12 +122,23 @@ def test_second_admission_refuses_while_first_unresolved(tmp_path):
         _admit(store, second)
 
 
-def test_temp_event_shadow_cannot_hide_or_falsely_persist_admission(tmp_path):
+@pytest.mark.parametrize("shadow_kind,shadow_name", [
+    ("TABLE", "events"),
+    ("TABLE", "Events"),
+    ("TABLE", "EVENTS"),
+    ("VIEW", "Events"),
+])
+def test_temp_event_shadow_cannot_hide_or_falsely_persist_admission(
+    tmp_path, shadow_kind, shadow_name,
+):
     store = er.RuntimeStore(tmp_path / "real-admission")
     registry = er.ReleaseMaintenanceRegistry(store)
     _admit(store, make_approval())
     with store.transaction() as connection:
-        connection.execute("CREATE TEMP TABLE events AS SELECT * FROM main.events WHERE 0")
+        connection.execute(
+            f"CREATE TEMP {shadow_kind} {shadow_name} "
+            "AS SELECT * FROM main.events WHERE 0"
+        )
         with pytest.raises(er.ReleaseMaintenanceError, match="TEMP_SHADOW"):
             registry.read_unresolved_admission(connection)
     with store.read() as connection:
@@ -150,7 +161,9 @@ def test_temp_event_shadow_cannot_hide_or_falsely_persist_admission(tmp_path):
             target_observation_digest=_hex(31), prepared_deadline_ms=300_000,
             root_qualification_digest=_hex(30),
         )
-        connection.execute("CREATE TEMP TABLE events AS SELECT * FROM main.events")
+        connection.execute(
+            f"CREATE TEMP {shadow_kind} {shadow_name} AS SELECT * FROM main.events"
+        )
         with pytest.raises(er.ReleaseMaintenanceError, match="TEMP_SHADOW"):
             registry.record_admission(
                 connection, sealed_approval=approval,
@@ -158,6 +171,57 @@ def test_temp_event_shadow_cannot_hide_or_falsely_persist_admission(tmp_path):
                 preconditions=preconditions, target_observation_digest=_hex(31),
                 trusted_context=context,
             )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM main.events WHERE event_type='EXECUTIVE_RELEASE_ADMITTED'"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("shadow_kind,shadow_name", [
+    ("TABLE", "Attempts"),
+    ("TABLE", "ATTEMPTS"),
+    ("VIEW", "Attempts"),
+])
+def test_temp_attempt_shadow_cannot_hide_active_attempt(
+    tmp_path, shadow_kind, shadow_name,
+):
+    store = er.RuntimeStore(tmp_path)
+    store.now_ms = lambda: 2_000
+    runtime = er.Runtime.from_store(store)
+    runtime.workers.register_worker(
+        "worker-01", provider="codex", account_label="one", worker_type="test"
+    )
+    job = runtime.jobs.create_job("running during release admission")
+    assert runtime.attempts.claim_job(job.job_id) is not None
+    registry = er.ReleaseMaintenanceRegistry(store)
+    approval = make_approval()
+    preconditions = _context_preconditions(approval)
+    with store.transaction() as connection:
+        registry.record_approval(
+            connection, sealed_approval=approval,
+            trusted_context=er._release_context_for_test(
+                store, connection, sealed_approval=approval
+            ),
+        )
+        context = registry._release_admission_context_for_test(
+            store, connection, approval=approval, preconditions=preconditions,
+            target_observation_digest=_hex(31), prepared_deadline_ms=300_000,
+            root_qualification_digest=_hex(30),
+        )
+        connection.execute(
+            f"CREATE TEMP {shadow_kind} {shadow_name} "
+            "AS SELECT * FROM main.attempts WHERE 0"
+        )
+        with pytest.raises(er.ReleaseMaintenanceError, match="TEMP_SHADOW"):
+            registry.record_admission(
+                connection, sealed_approval=approval,
+                request_fingerprint=rc.request_fingerprint_for(approval),
+                preconditions=preconditions, target_observation_digest=_hex(31),
+                trusted_context=context,
+            )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM main.attempts WHERE status IN "
+            "('CLAIMED','RUNNING','CHECKPOINTED','CANCEL_REQUESTED')"
+        ).fetchone()[0] == 1
         assert connection.execute(
             "SELECT COUNT(*) FROM main.events WHERE event_type='EXECUTIVE_RELEASE_ADMITTED'"
         ).fetchone()[0] == 0
