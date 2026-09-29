@@ -771,6 +771,7 @@ def _reap_bounded_exit_code(process, deadline: float):
 
 def _discard_bounded_child(process) -> bool:
     """Kill, reap, and release every descriptor of an owned bounded child."""
+    closed = False
     try:
         if process.poll() is None:
             process.kill()
@@ -780,13 +781,14 @@ def _discard_bounded_child(process) -> bool:
     if stream is not None:
         try:
             stream.close()
+            closed = True
         except Exception:
             pass
     try:
         process.wait(timeout=_LAUNCHD_REAP_GRACE_SECONDS)
     except Exception:
         return False
-    return True
+    return closed
 
 
 def _run_bounded(argv: object, *, max_bytes: object) -> bytes:

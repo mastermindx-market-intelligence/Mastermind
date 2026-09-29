@@ -923,3 +923,34 @@ def test_child_cleanup_failure_never_returns_positive_observation(monkeypatch):
     with pytest.raises(peer.PeerIdentityError, match='SERVICE_LAUNCHCTL_CLEANUP_UNPROVEN'):
         installed._run_bounded(installed._SYSCTL_BOOT_ID_ARGV, max_bytes=128)
     assert children[0].poll() is not None
+
+
+def test_stdout_close_failure_is_reported_even_when_child_exits(monkeypatch):
+    children = _observer_test_child(monkeypatch, 'import os;os.write(1,b"ok\\n")')
+    launch_child = installed.subprocess.Popen
+    original_streams = []
+    class FailingClose:
+        def __init__(self, stream):
+            self.stream = stream
+        def fileno(self):
+            return self.stream.fileno()
+        def close(self):
+            raise OSError('test-only private diagnostic must not escape')
+    def launch(*args, **kwargs):
+        child = launch_child(*args, **kwargs)
+        original_streams.append(child.stdout)
+        child.stdout = FailingClose(child.stdout)
+        return child
+    monkeypatch.setattr(installed.subprocess, 'Popen', launch)
+    try:
+        with pytest.raises(peer.PeerIdentityError) as failure:
+            installed._run_bounded(installed._SYSCTL_BOOT_ID_ARGV, max_bytes=128)
+        assert failure.value.code == 'SERVICE_LAUNCHCTL_CLEANUP_UNPROVEN'
+        assert children[0].poll() is not None
+    finally:
+        for stream in original_streams:
+            stream.close()
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=1)
