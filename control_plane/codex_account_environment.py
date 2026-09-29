@@ -17,6 +17,7 @@ import math
 import os
 from pathlib import Path
 import stat
+import sys
 import time
 from typing import Any, Iterator, Mapping
 import uuid
@@ -54,6 +55,16 @@ def _private_file(path: Path) -> bytes:
         raise CodexAccountError("AUTH_FILE_UNAVAILABLE") from None
 
 
+def _is_macos_var_alias(path: Path, canonical: Path) -> bool:
+    """Admit only macOS's OS-owned ``/var`` spelling of ``/private/var``."""
+
+    return (
+        sys.platform == "darwin"
+        and path.parts[:2] == ("/", "var")
+        and canonical == Path("/private") / path.relative_to("/")
+    )
+
+
 def _managed_auth(raw: bytes) -> Mapping[str, Any]:
     try:
         value = json.loads(raw)
@@ -77,10 +88,12 @@ def _home(path: Path, *, principal_home_admitted: bool = False) -> Path:
         info = path.lstat()
     except OSError:
         raise CodexAccountError("PROVIDER_HOME_UNAVAILABLE") from None
-    if (not path.is_absolute() or path != canonical or not stat.S_ISDIR(info.st_mode)
+    if (not path.is_absolute()
+            or (path != canonical and not _is_macos_var_alias(path, canonical))
+            or not stat.S_ISDIR(info.st_mode)
             or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077
-            or path == (Path.home() / ".codex").resolve()
-            or (path == Path.home().resolve() and not principal_home_admitted)):
+            or canonical == (Path.home() / ".codex").resolve()
+            or (canonical == Path.home().resolve() and not principal_home_admitted)):
         raise CodexAccountError("PROVIDER_HOME_NOT_PRIVATE_DEDICATED")
     _require_no_acl(path, info)
     return path
