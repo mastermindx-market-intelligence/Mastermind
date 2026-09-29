@@ -1419,7 +1419,7 @@ class _ExecutiveReleaseActuatorJournal:
             )
             # 4. Explicit admission join to reservation, preconditions, etc.
             self._validate_admission_joins(
-                admission,
+                validated["admission"],
                 stored_reservation,
                 operation_key,
             )

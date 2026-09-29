@@ -2135,3 +2135,56 @@ def test_any_cancellation_inode_blocks_start(tmp_path, content):
         journal.create(**arguments)
     assert path.read_bytes() == content
     assert not _record_path(root).exists()
+
+
+def test_start_joins_persisted_admission_snapshot_not_second_mapping(tmp_path):
+    journal, root, arguments = _coherent_prestart_context(tmp_path)
+    good = copy.deepcopy(arguments["admission"])
+    bad = {**good, "target_observation_digest": "f" * 64}
+
+    class SwitchingAdmission(dict):
+        reads = 0
+
+        def items(self):
+            self.reads += 1
+            return (bad if self.reads == 1 else good).items()
+
+    arguments["admission"] = SwitchingAdmission(good)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.create(**arguments)
+    assert not _record_path(root).exists()
+
+
+def test_start_joins_persisted_admission_after_plain_dict_change(
+    tmp_path, monkeypatch
+):
+    journal, root, arguments = _coherent_prestart_context(tmp_path)
+    good = copy.deepcopy(arguments["admission"])
+    arguments["admission"]["target_observation_digest"] = "f" * 64
+    original = journal._decode_approval
+
+    def change_after_start_snapshot(raw):
+        arguments["admission"].update(good)
+        return original(raw)
+
+    monkeypatch.setattr(journal, "_decode_approval", change_after_start_snapshot)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.create(**arguments)
+    assert not _record_path(root).exists()
+
+
+@pytest.mark.parametrize("boundary", ["reserve", "last_valid", "expiry"])
+def test_start_time_half_open_boundary(tmp_path, boundary):
+    journal, _root, arguments = _coherent_prestart_context(tmp_path)
+    reservation = arguments["reservation"]
+    expiry = reservation["prepared_payload"]["expires_at_ms"]
+    arguments["started_at_ms"] = {
+        "reserve": reservation["reserved_at_ms"],
+        "last_valid": expiry - 1,
+        "expiry": expiry,
+    }[boundary]
+    if boundary == "expiry":
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+            journal.create(**arguments)
+    else:
+        assert journal.create(**arguments)["state"] == "STARTED"
