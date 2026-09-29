@@ -23,6 +23,7 @@ from control_plane.browser_resource_contract import (
 from control_plane.codex_worker import ProcessIdentityError, ProcessInspector
 from integrations.workbench_action_mcp.action_artifacts import (
     ACTION_PURPOSE_BROWSER_ACTION,
+    ACTION_PURPOSE_BROWSER_RESOURCE,
     ActionArtifactBusy,
     ActionArtifactError,
     ActionArtifactIdentity,
@@ -33,6 +34,7 @@ from integrations.workbench_action_mcp.action_artifacts import (
     claim_action,
     classify_action,
     finalize_action,
+    read_action_process,
     revalidate_artifact_store,
 )
 from integrations.workbench_action_mcp.contracts import (
@@ -91,6 +93,7 @@ class BrowserActionPort:
         self,
         *,
         resolve_binding: ResolveBinding,
+        resolve_recovery_binding: ResolveBinding | None = None,
         clock_ms: ClockMs,
         codec: BrowserRefCodec,
         artifact_store: ActionArtifactStore,
@@ -103,6 +106,8 @@ class BrowserActionPort:
     ) -> None:
         if not callable(resolve_binding) or not callable(clock_ms) or not callable(relay_requester):
             raise TypeError("browser port callbacks must be callable")
+        if resolve_recovery_binding is not None and not callable(resolve_recovery_binding):
+            raise TypeError("browser recovery binding must be callable")
         if not isinstance(codec, BrowserRefCodec):
             raise TypeError("browser codec is required")
         if not isinstance(artifact_store, ActionArtifactStore):
@@ -129,6 +134,7 @@ class BrowserActionPort:
         if not isinstance(relay_timeout_seconds, (int, float)) or not 0 < relay_timeout_seconds <= 120:
             raise TypeError("browser relay timeout is invalid")
         self._resolve_binding = resolve_binding
+        self._resolve_recovery_binding = resolve_recovery_binding
         self._clock_ms = clock_ms
         self._codec = codec
         self._store = artifact_store
@@ -153,10 +159,17 @@ class BrowserActionPort:
         self,
         caller: ActionCaller,
         browser: BrowserResourceRef,
+        *,
+        recovery: bool = False,
     ) -> ProjectActionBinding:
         if type(caller) is not ActionCaller:
             raise BrowserPortRefused("CALLER_INVALID")
-        value = self._resolve_binding(caller, browser.project_ref)
+        resolver = (
+            self._resolve_recovery_binding
+            if recovery and self._resolve_recovery_binding is not None
+            else self._resolve_binding
+        )
+        value = resolver(caller, browser.project_ref)
         if type(value) is not ProjectActionBinding:
             raise BrowserPortRefused("BROWSER_BINDING_CHANGED")
         scope = value.scope
@@ -194,7 +207,50 @@ class BrowserActionPort:
             )
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_REF_INVALID") from error
-        binding = self._binding(caller, browser)
+        binding = self._binding(caller, browser, recovery=not require_fresh)
+        if not require_fresh and self._resolve_recovery_binding is not None:
+            # The signed browser ref omits the project root's device/inode.
+            # Join it to the original durable resource-start claim and process
+            # under this runtime's current root before recovering across expiry.
+            store = revalidate_artifact_store(self._store)
+            identity = ActionArtifactIdentity(
+                action_id=browser.start_action_id,
+                purpose=ACTION_PURPOSE_BROWSER_RESOURCE,
+                subject_digest=browser.subject_digest,
+                client_ref=browser.client_ref,
+                resource=browser.resource,
+                project_ref=browser.project_ref,
+                context_ref=browser.context_ref,
+                responsibility_ref=browser.responsibility_ref,
+                operation_ref=browser.operation_ref,
+                owner_ref=browser.owner_ref,
+                generation=browser.generation,
+                root_device=binding.scope.root_device,
+                root_inode=binding.scope.root_inode,
+                store_device=store.device,
+                store_inode=store.inode,
+                host_id=browser.host_id,
+                boot_session_id=browser.boot_session_id,
+                relative_path=f"browser:{browser.start_action_id}",
+                source_identity=browser.tool_schema_digest,
+            )
+            classified = classify_action(self._store, identity)
+            if classified.evidence_status != "qualified" or classified.effect_state != "APPLIED":
+                raise BrowserPortRefused("BROWSER_RECOVERY_BINDING_CHANGED")
+            try:
+                process = read_action_process(self._store, identity)
+            except ActionArtifactError as error:
+                raise BrowserPortRefused("BROWSER_RECOVERY_BINDING_CHANGED") from error
+            if (
+                process is None
+                or process.pid != browser.relay_pid
+                or process.process_start_identity != browser.relay_start_identity
+                or process.pgid != browser.relay_pgid
+                or process.session_id != browser.relay_session_id
+                or process.host_id != browser.host_id
+                or process.boot_session_id != browser.boot_session_id
+            ):
+                raise BrowserPortRefused("BROWSER_RECOVERY_BINDING_CHANGED")
         try:
             observed = self._inspector.inspect(browser.relay_pid)
         except (ProcessIdentityError, OSError, ValueError) as error:

@@ -204,7 +204,7 @@ class _CountingSession(McpStdioSession):
         super().__init__(
             argv=("/usr/bin/true",),
             env={},
-            allowed_tools=frozenset({"browser_click"}),
+            allowed_tools=frozenset({"browser_click", "browser_snapshot"}),
             expected_tool_schema_digest="d" * 64,
         )
         self.calls = 0
@@ -213,13 +213,13 @@ class _CountingSession(McpStdioSession):
         self._receipt = McpSessionReceipt(
             child_pid=os.getpid(),
             tool_schema_digest="d" * 64,
-            allowed_tools=("browser_click",),
+            allowed_tools=("browser_click", "browser_snapshot"),
         )
         return self._receipt
 
     def call(self, tool, arguments):
-        assert tool == "browser_click"
-        assert arguments == {"target": "button"}
+        assert tool in {"browser_click", "browser_snapshot"}
+        assert arguments == ({"target": "button"} if tool == "browser_click" else {})
         self.calls += 1
         return {
             "content": [{"type": "text", "text": "AUTHORIZED"}],
@@ -238,12 +238,15 @@ class _CountingSession(McpStdioSession):
 def test_relay_refuses_same_uid_sibling_before_browser_dispatch(tmp_path):
     socket_path = tmp_path / "relay-peer-pid.sock"
     session = _CountingSession()
+    now = {"value": 1000}
     relay = BrowserRelayServer(
         resource_id="a" * 32,
         socket_path=socket_path,
         session=session,
         owner_pid=os.getpid(),
         parent_pid=os.getppid(),
+        expires_at_ms=2000,
+        clock_ms=lambda: now["value"],
     )
     thread = threading.Thread(target=relay.serve_forever, daemon=True)
     thread.start()
@@ -297,6 +300,23 @@ print(data.split(b"\n",1)[0].decode())
     assert authorized["ok"] is True
     assert authorized["result"]["isError"] is False
     assert session.calls == 1
+
+    now["value"] = 2000
+    snapshot_request = {
+        **bypass_request,
+        "request_id": "d" * 32,
+        "tool": "browser_snapshot",
+        "arguments": {},
+    }
+    sibling = subprocess.run(
+        [sys.executable, "-c", child_program, str(socket_path), json.dumps(snapshot_request)],
+        capture_output=True, text=True, timeout=3, check=True,
+    )
+    assert json.loads(sibling.stdout)["error"] == "REQUEST_REFUSED"
+    retained = relay_request(socket_path, {**snapshot_request, "request_id": "e" * 32}, timeout=2)
+    assert retained["ok"] is True
+    assert retained["result"]["isError"] is False
+    assert session.calls == 2
 
     relay.stop()
     thread.join(timeout=3)
