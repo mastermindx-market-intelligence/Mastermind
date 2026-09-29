@@ -453,9 +453,28 @@ class BrowserActionPort:
 
             # Revalidate the owner and exact relay process immediately before
             # crossing the browser-effect boundary.
-            current_browser, current_binding, current_socket = self._resource(
-                caller, browser_ref
-            )
+            try:
+                current_browser, current_binding, current_socket = self._resource(
+                    caller, browser_ref
+                )
+            except BrowserPortRefused:
+                # Only this invocation's new claim, before any relay dispatch.
+                # Clock or persistence failures must remain observable.
+                finalize_action(
+                    self._store,
+                    identity,
+                    effect_state="NOT_APPLIED",
+                    observed_sha256=None,
+                    completed_at_ms=self._now(),
+                    durability="durable",
+                    details={"reason": "binding_refused_before_dispatch"},
+                )
+                return {
+                    "status": "OK",
+                    "effect_state": "NOT_APPLIED",
+                    "observed_sha256": None,
+                    "reconciled": False,
+                }
             if (
                 _binding_key(current_binding) != original_binding
                 or current_browser != browser
