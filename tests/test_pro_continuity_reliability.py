@@ -43,7 +43,8 @@ def test_continuation_gate_preserves_required_guards(clause):
 def test_no_boundary_means_continue_not_checkpoint_as_excuse():
     active = section("ACTIVE_EXECUTION.md", "Step 8 — Final-response gate")
     assert "checkpoint is not itself a reason to stop" in active
-    assert "If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**" in active
+    assert "If the truthful classification is `MORE_WORK_EXISTS` or the current lane census is" in active
+    assert "`ALL_SCOPED_LANES_BLOCKED`, **do not finalize**" in active
     assert "completed plan or arbitrary time target" in active
 
 def test_checkpoint_precedes_risky_work_and_is_cumulative():
@@ -125,16 +126,16 @@ def test_negative_capability_claim_requires_current_action_family_evidence():
         assert clause in step6
 
 
-def test_terminal_capability_blockers_are_evidence_gated():
+def test_terminal_capability_blockers_are_evidence_gated_and_internal_blocks_are_nonterminal():
     gate = section("ACTIVE_EXECUTION.md", "Step 8 — Final-response gate")
     for clause in (
         "capability-based `EXACT_HUMAN_GATE`",
         "`PLATFORM_FAILURE`",
-        "`ALL_SCOPED_LANES_BLOCKED`",
         "current discovery result",
         "exhausted safe probes",
         "exact human/admin ceremony",
-        "truthful classification is `MORE_WORK_EXISTS`",
+        "`ALL_SCOPED_LANES_BLOCKED`, **do not finalize**",
+        "demolish/route an internal blocker",
     ):
         assert clause in gate
 
