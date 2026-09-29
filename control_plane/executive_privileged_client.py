@@ -66,12 +66,19 @@ def _send_one_frame(
     *,
     socket_path: Path,
     timeout_seconds: int,
+    require_root_peer: bool = False,
 ) -> dict[str, object]:
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         connection.settimeout(timeout_seconds)
         connection.connect(str(socket_path))
+        if require_root_peer:
+            # P4's Control caller verifies the root end before sending any
+            # principal/approval bytes. There is no UID fallback on platforms
+            # without the Darwin connected-peer primitive.
+            if not hasattr(connection, "getpeereid") or connection.getpeereid()[0] != 0:
+                raise RuntimeError("release broker root peer unavailable")
         connection.sendall(encoded)
         return _read_response(connection)
     finally:
@@ -94,9 +101,13 @@ def send_status(
     *,
     socket_path: Path = DEFAULT_SOCKET,
     timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+    require_root_peer: bool = False,
 ) -> dict[str, object]:
     """Send one validated status request over one bounded connection; no retry."""
     validated = validate_status_request(request)
+    if require_root_peer:
+        return _send_one_frame(validated.to_dict(), socket_path=socket_path,
+                               timeout_seconds=timeout_seconds, require_root_peer=True)
     return _send_one_frame(validated.to_dict(), socket_path=socket_path, timeout_seconds=timeout_seconds)
 
 

@@ -368,6 +368,22 @@ class CeoIngressClient:
     ) -> CeoIngressResponse:
         """Send exactly one JSON frame; never retries internally."""
 
+        request_ceiling = MAX_REQUEST_BYTES
+        response_ceiling = MAX_RESPONSE_BYTES
+        stream_limit = _STREAM_LIMIT
+        # Only the separately versioned, closed release frame can use the
+        # larger token envelope; every historical schema retains its limits.
+        from control_plane import executive_release_ingress as release_ingress
+        if isinstance(frame, Mapping) and frame.get("schema") == release_ingress.FRAME_SCHEMA:
+            try:
+                release_ingress.validate_frame(frame)
+            except release_ingress.ReleaseIngressError:
+                return CeoIngressResponse(
+                    transport=TRANSPORT_NOT_SENT, detail="release frame is invalid"
+                )
+            request_ceiling = release_ingress.MAX_FRAME_BYTES
+            response_ceiling = release_ingress.MAX_RESPONSE_BYTES
+            stream_limit = response_ceiling + 4096
         try:
             encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
                 "utf-8"
@@ -377,16 +393,16 @@ class CeoIngressClient:
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
             )
         line = encoded + b"\n"
-        if len(line) > MAX_REQUEST_BYTES:
+        if len(line) > request_ceiling:
             # Refuse locally; never put an oversized frame on the wire.
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT,
-                detail=f"frame is {len(line)} bytes, over the {MAX_REQUEST_BYTES}-byte ceiling",
+                detail=f"frame is {len(line)} bytes, over the {request_ceiling}-byte ceiling",
             )
 
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_unix_connection(str(socket_path), limit=_STREAM_LIMIT),
+                asyncio.open_unix_connection(str(socket_path), limit=stream_limit),
                 timeout=self._connect_timeout,
             )
         except (OSError, asyncio.TimeoutError) as exc:
@@ -436,7 +452,7 @@ class CeoIngressClient:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="connection closed with no response"
                 )
-            if len(raw) > MAX_RESPONSE_BYTES:
+            if len(raw) > response_ceiling:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
