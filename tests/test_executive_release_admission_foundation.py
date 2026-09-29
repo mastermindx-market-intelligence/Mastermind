@@ -122,11 +122,129 @@ def test_second_admission_refuses_while_first_unresolved(tmp_path):
         _admit(store, second)
 
 
+def test_temp_event_shadow_cannot_hide_or_falsely_persist_admission(tmp_path):
+    store = er.RuntimeStore(tmp_path / "real-admission")
+    registry = er.ReleaseMaintenanceRegistry(store)
+    _admit(store, make_approval())
+    with store.transaction() as connection:
+        connection.execute("CREATE TEMP TABLE events AS SELECT * FROM main.events WHERE 0")
+        with pytest.raises(er.ReleaseMaintenanceError, match="TEMP_SHADOW"):
+            registry.read_unresolved_admission(connection)
+    with store.read() as connection:
+        assert registry.read_unresolved_admission(connection) is not None
+
+    other = er.RuntimeStore(tmp_path / "false-durable")
+    other.now_ms = lambda: 2_000
+    registry = er.ReleaseMaintenanceRegistry(other)
+    approval = make_approval(op="temp-shadow-admission")
+    preconditions = _context_preconditions(approval)
+    with other.transaction() as connection:
+        registry.record_approval(
+            connection, sealed_approval=approval,
+            trusted_context=er._release_context_for_test(
+                other, connection, sealed_approval=approval
+            ),
+        )
+        context = registry._release_admission_context_for_test(
+            other, connection, approval=approval, preconditions=preconditions,
+            target_observation_digest=_hex(31), prepared_deadline_ms=300_000,
+            root_qualification_digest=_hex(30),
+        )
+        connection.execute("CREATE TEMP TABLE events AS SELECT * FROM main.events")
+        with pytest.raises(er.ReleaseMaintenanceError, match="TEMP_SHADOW"):
+            registry.record_admission(
+                connection, sealed_approval=approval,
+                request_fingerprint=rc.request_fingerprint_for(approval),
+                preconditions=preconditions, target_observation_digest=_hex(31),
+                trusted_context=context,
+            )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM main.events WHERE event_type='EXECUTIVE_RELEASE_ADMITTED'"
+        ).fetchone()[0] == 0
+
+
+def test_caught_post_append_refusal_cannot_commit_admission(tmp_path, monkeypatch):
+    store = er.RuntimeStore(tmp_path)
+    store.now_ms = lambda: 2_000
+    registry = er.ReleaseMaintenanceRegistry(store)
+    approval = make_approval()
+    preconditions = _context_preconditions(approval)
+    with store.transaction() as connection:
+        registry.record_approval(
+            connection, sealed_approval=approval,
+            trusted_context=er._release_context_for_test(
+                store, connection, sealed_approval=approval
+            ),
+        )
+        context = registry._release_admission_context_for_test(
+            store, connection, approval=approval, preconditions=preconditions,
+            target_observation_digest=_hex(31), prepared_deadline_ms=300_000,
+            root_qualification_digest=_hex(30),
+        )
+        def late_refusal(*_args, **_kwargs):
+            raise er.ReleaseMaintenanceError("payload", "LATE_REFUSAL")
+        monkeypatch.setattr(registry, "_validate_canonical_admission", late_refusal)
+        with pytest.raises(er.ReleaseMaintenanceError, match="LATE_REFUSAL"):
+            registry.record_admission(
+                connection, sealed_approval=approval,
+                request_fingerprint=rc.request_fingerprint_for(approval),
+                preconditions=preconditions, target_observation_digest=_hex(31),
+                trusted_context=context,
+            )
+    with store.read() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='EXECUTIVE_RELEASE_ADMITTED'"
+        ).fetchone()[0] == 0
+
+
+def test_approval_context_captures_issuing_process(tmp_path, monkeypatch):
+    store = er.RuntimeStore(tmp_path)
+    approval = make_approval()
+    registry = er.ReleaseMaintenanceRegistry(store)
+    with store.transaction() as connection:
+        context = er._release_context_for_test(
+            store, connection, sealed_approval=approval
+        )
+        issuing_pid = context.created_process_id
+        with monkeypatch.context() as patch:
+            patch.setattr(er.os, "getpid", lambda: issuing_pid + 1)
+            assert context.created_process_id == issuing_pid
+            with pytest.raises(er.ReleaseMaintenanceError, match="FOREIGN_PROCESS"):
+                registry._require_trusted_context(
+                    connection, context, context.evidence_digest
+                )
+
+
 def test_expired_prepared_deadline_refuses(tmp_path):
     store = er.RuntimeStore(tmp_path)
     approval = make_approval()
     with pytest.raises(er.ReleaseMaintenanceError):
         _admit(store, approval, deadline=1)
+
+
+@pytest.mark.parametrize("root_digest", ["invalid", "DEADBEEF" * 8])
+def test_malformed_root_digest_refuses_before_admission_append(tmp_path, root_digest):
+    store = er.RuntimeStore(tmp_path)
+    approval = make_approval()
+    registry = er.ReleaseMaintenanceRegistry(store)
+    with store.transaction() as connection:
+        registry.record_approval(
+            connection, sealed_approval=approval,
+            trusted_context=er._release_context_for_test(
+                store, connection, sealed_approval=approval
+            ),
+        )
+        with pytest.raises(er.ReleaseMaintenanceError, match="root_qualification_digest"):
+            registry._release_admission_context_for_test(
+                store, connection, approval=approval,
+                preconditions=_context_preconditions(approval),
+                target_observation_digest=_hex(31),
+                prepared_deadline_ms=300_000,
+                root_qualification_digest=root_digest,
+            )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM main.events WHERE event_type='EXECUTIVE_RELEASE_ADMITTED'"
+        ).fetchone()[0] == 0
 
 
 def _admit_contract_vector(store):
@@ -357,6 +475,53 @@ def test_mutated_closure_header_never_releases_fence(tmp_path):
         raw.close()
     with store.read() as connection:
         with pytest.raises(er.ReleaseMaintenanceError):
+            registry.read_unresolved_admission(connection)
+
+
+@pytest.mark.parametrize("kind", ["terminal", "cancellation"])
+@pytest.mark.parametrize("created_at_ms", [-1, 1_999])
+def test_corrupt_closure_timestamp_never_releases_fence(tmp_path, kind, created_at_ms):
+    store = er.RuntimeStore(tmp_path)
+    registry, approval, admission, reservation, cancellation, status = (
+        _admit_contract_vector(store)
+    )
+    with store.transaction() as connection:
+        if kind == "terminal":
+            registry.record_terminal(
+                connection, approved_transition_ref=approval["approved_transition_ref"],
+                request_fingerprint=rc.request_fingerprint_for(approval),
+                terminal_status=status,
+                trusted_context=registry._release_closing_context_for_test(
+                    store, connection, approval=approval, admission=admission,
+                    terminal_status=status, journal_observation_digest=_hex(64),
+                ),
+            )
+            event_type = "EXECUTIVE_RELEASE_CLOSED"
+        else:
+            registry.record_cancellation(
+                connection, approved_transition_ref=approval["approved_transition_ref"],
+                request_fingerprint=rc.request_fingerprint_for(approval),
+                reservation=reservation, cancellation=cancellation,
+                trusted_context=registry._release_cancellation_context_for_test(
+                    store, connection, approval=approval, admission=admission,
+                    reservation=reservation, cancellation=cancellation,
+                    journal_observation_digest=_hex(65),
+                ),
+            )
+            event_type = "EXECUTIVE_RELEASE_PRESTART_CANCELLED"
+    raw = sqlite3.connect(str(store.path))
+    try:
+        raw.execute("DROP TRIGGER IF EXISTS events_are_immutable_update")
+        raw.execute("DROP TRIGGER IF EXISTS events_are_immutable_delete")
+        raw.execute(
+            "UPDATE events SET created_at_ms=? WHERE event_type=?",
+            (created_at_ms, event_type),
+        )
+        raw.commit()
+    finally:
+        raw.close()
+    with store.read() as connection:
+        with pytest.raises(er.ReleaseMaintenanceError, match="closure:TIMESTAMP"):
             registry.read_unresolved_admission(connection)
 
 

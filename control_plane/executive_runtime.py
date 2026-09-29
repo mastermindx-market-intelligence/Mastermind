@@ -24614,6 +24614,7 @@ class TrustedReleaseContext:
     _key_id: str
     _trust_generation: int
     _capability: object
+    _process_id: int = dataclasses.field(default_factory=os.getpid)
 
     @property
     def purpose(self) -> str:
@@ -24629,13 +24630,15 @@ class TrustedReleaseContext:
 
     @property
     def created_process_id(self) -> int:
-        return os.getpid()
+        return self._process_id
 
     def __post_init__(self) -> None:
         if self._capability is not _RELEASE_MAINTENANCE_CAPABILITY:
             raise StateConflict(
                 "trusted release context is Runtime-minted only"
             )
+        if type(self._process_id) is not int or self._process_id != os.getpid():
+            raise StateConflict("trusted release context has a foreign issuing process")
         if not isinstance(self._principal_digest, str) or len(self._principal_digest) != 64:
             raise StateConflict(
                 "trusted context principal_digest must be a 64-char hex digest"
@@ -24990,6 +24993,44 @@ class ReleaseMaintenanceRegistry:
             _record=record,
         )
 
+    @staticmethod
+    def _reject_release_temp_shadow(connection: sqlite3.Connection) -> None:
+        """Keep release evidence and the quiescence fence on the durable DB.
+
+        SQLite resolves TEMP names before main, including for the shared
+        RuntimeStore Event helpers. A caller-owned TEMP table or view named
+        ``events`` or ``attempts`` must therefore refuse before a release
+        read or write can interpret it as durable evidence.
+        """
+        try:
+            shadows = connection.execute(
+                "SELECT name FROM temp.sqlite_master WHERE type IN ('table','view')"
+                " AND name IN ('events','attempts') LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise _release_refusal("connection", "TEMP_NAMESPACE_UNVERIFIABLE") from exc
+        if shadows is not None:
+            raise _release_refusal("connection", "TEMP_SHADOW")
+
+    @staticmethod
+    @contextmanager
+    def _atomic_release_event(connection: sqlite3.Connection) -> Iterator[None]:
+        """Undo a refused Event write even when its caller catches the error.
+
+        The owner supplied the surrounding write transaction. A post-append
+        readback refusal must not leave an invalid release Event in that
+        transaction for the caller to commit after catching the exception.
+        """
+        connection.execute("SAVEPOINT release_event_append")
+        try:
+            yield
+        except BaseException:
+            connection.execute("ROLLBACK TO SAVEPOINT release_event_append")
+            connection.execute("RELEASE SAVEPOINT release_event_append")
+            raise
+        else:
+            connection.execute("RELEASE SAVEPOINT release_event_append")
+
     def _require_owned_write_connection(self, connection: sqlite3.Connection) -> None:
         if not isinstance(connection, sqlite3.Connection):
             raise _release_refusal("connection", "CONNECTION_TYPE")
@@ -25006,6 +25047,7 @@ class ReleaseMaintenanceRegistry:
         # file. That is the contract for every write the Runtime accepts from
         # a caller.
         self.store._assert_owned_snapshot_connection(connection)
+        self._reject_release_temp_shadow(connection)
 
     def _require_owned_snapshot_connection(
         self, connection: sqlite3.Connection, *, allow_write: bool = False
@@ -25018,6 +25060,7 @@ class ReleaseMaintenanceRegistry:
                     "connection", "WRITE_TRANSACTION_REQUIRED"
                 )
             self.store._assert_owned_snapshot_connection(connection)
+            self._reject_release_temp_shadow(connection)
             return
         if (
             self.store.read_binding is None
@@ -25030,6 +25073,7 @@ class ReleaseMaintenanceRegistry:
         # ``RuntimeStore.read()`` or the caller's own bound read), and the main
         # database identity must be this store's stable file.
         self.store._assert_owned_snapshot_connection(connection)
+        self._reject_release_temp_shadow(connection)
 
     def _require_trusted_context(
         self,
@@ -25509,6 +25553,12 @@ class ReleaseMaintenanceRegistry:
         root_qualification_digest: str,
     ) -> dict[str, Any]:
         from control_plane import executive_release_contract
+        if not cls._is_hex64(root_qualification_digest):
+            raise _release_refusal("root_qualification_digest", "FORMAT")
+        if root_qualification_digest != root_qualification_digest.lower():
+            raise _release_refusal("root_qualification_digest", "LOWERCASE")
+        if type(prepared_deadline_ms) is not int or prepared_deadline_ms <= 0:
+            raise _release_refusal("prepared_deadline_ms", "FORMAT")
         approval_evidence_digest = hashlib.sha256(
             executive_release_contract.canonical_release_bytes(approval)
         ).hexdigest()
@@ -25968,30 +26018,31 @@ class ReleaseMaintenanceRegistry:
         payload = dict(wrapper)
         payload["admission_context"] = expected_context
         payload["evidence_digest"] = expected_digest
-        self.store.append_event(
-            connection,
-            aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
-            aggregate_id=approval["owner_installation_id"],
-            event_type=EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE,
-            actor=EXECUTIVE_RELEASE_ACTOR_PREFIX
-            + self._principal_digest_from_approval(approval),
-            payload=payload,
-            command_id=admission_command_id,
-            timestamp_ms=now,
-        )
-        written = self.store.get_event_by_command_id(
-            admission_command_id, connection=connection
-        )
-        if written is None:
-            raise _release_refusal("event_envelope", "WRITE_LOST")
-        stored = self._validate_canonical_admission(
-            connection,
-            written,
-            approved_transition_ref=approval["approved_transition_ref"],
-            request_fingerprint=canonical_fingerprint,
-        )
-        if stored["maintenance_sequence"] != sequence:
-            raise _release_refusal("maintenance_sequence", "WRITE_LOST")
+        with self._atomic_release_event(connection):
+            self.store.append_event(
+                connection,
+                aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
+                aggregate_id=approval["owner_installation_id"],
+                event_type=EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE,
+                actor=EXECUTIVE_RELEASE_ACTOR_PREFIX
+                + self._principal_digest_from_approval(approval),
+                payload=payload,
+                command_id=admission_command_id,
+                timestamp_ms=now,
+            )
+            written = self.store.get_event_by_command_id(
+                admission_command_id, connection=connection
+            )
+            if written is None:
+                raise _release_refusal("event_envelope", "WRITE_LOST")
+            stored = self._validate_canonical_admission(
+                connection,
+                written,
+                approved_transition_ref=approval["approved_transition_ref"],
+                request_fingerprint=canonical_fingerprint,
+            )
+            if stored["maintenance_sequence"] != sequence:
+                raise _release_refusal("maintenance_sequence", "WRITE_LOST")
         return stored
 
     def _blocking_unresolved_admission(
@@ -26125,6 +26176,10 @@ class ReleaseMaintenanceRegistry:
             ).fetchone()
             if admitted_at is None:
                 raise _release_refusal("admission", "TIMESTAMP_LOST")
+            closure_at = row["created_at_ms"]
+            if (type(closure_at) is not int or closure_at <= 0
+                    or closure_at < int(admitted_at[0])):
+                raise _release_refusal("closure", "TIMESTAMP")
             if kind == "terminal":
                 expected_command = "p4-close:" + ref
                 expected_family = "EXECUTIVE_RELEASE_CLOSED"
@@ -26287,18 +26342,19 @@ class ReleaseMaintenanceRegistry:
             "evidence_digest": digest,
         }
         command = "p4-close:" + ref
-        self.store.append_event(
-            connection,
-            aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
-            aggregate_id=admission["owner_installation_id"],
-            event_type="EXECUTIVE_RELEASE_CLOSED",
-            actor=EXECUTIVE_RELEASE_ACTOR_PREFIX + self._principal_digest_from_approval(approval),
-            payload=payload,
-            command_id=command,
-        )
-        checked = self._closure_history(connection).get(ref)
-        if checked is None or checked[0] != "terminal":
-            raise _release_refusal("closure", "WRITE_LOST")
+        with self._atomic_release_event(connection):
+            self.store.append_event(
+                connection,
+                aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
+                aggregate_id=admission["owner_installation_id"],
+                event_type="EXECUTIVE_RELEASE_CLOSED",
+                actor=EXECUTIVE_RELEASE_ACTOR_PREFIX + self._principal_digest_from_approval(approval),
+                payload=payload,
+                command_id=command,
+            )
+            checked = self._closure_history(connection).get(ref)
+            if checked is None or checked[0] != "terminal":
+                raise _release_refusal("closure", "WRITE_LOST")
         return status
 
     def record_cancellation(
@@ -26377,18 +26433,19 @@ class ReleaseMaintenanceRegistry:
             "cancellation_context": expected_context,
             "evidence_digest": digest,
         }
-        self.store.append_event(
-            connection,
-            aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
-            aggregate_id=admission["owner_installation_id"],
-            event_type="EXECUTIVE_RELEASE_PRESTART_CANCELLED",
-            actor=EXECUTIVE_RELEASE_ACTOR_PREFIX + self._principal_digest_from_approval(approval),
-            payload=payload,
-            command_id="p4-cancel:" + ref,
-        )
-        checked = self._closure_history(connection).get(ref)
-        if checked is None or checked[0] != "cancellation":
-            raise _release_refusal("closure", "WRITE_LOST")
+        with self._atomic_release_event(connection):
+            self.store.append_event(
+                connection,
+                aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
+                aggregate_id=admission["owner_installation_id"],
+                event_type="EXECUTIVE_RELEASE_PRESTART_CANCELLED",
+                actor=EXECUTIVE_RELEASE_ACTOR_PREFIX + self._principal_digest_from_approval(approval),
+                payload=payload,
+                command_id="p4-cancel:" + ref,
+            )
+            checked = self._closure_history(connection).get(ref)
+            if checked is None or checked[0] != "cancellation":
+                raise _release_refusal("closure", "WRITE_LOST")
         return valid_cancellation
 
 
