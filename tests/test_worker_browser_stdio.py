@@ -12,16 +12,19 @@ from tests.test_mcp_stdio_boundary import child, initialize
 SERVER = '''
 import asyncio, sys
 from pathlib import Path
+import os
 from tests.test_worker_browser_admission import _setup
 from integrations.workbench_action_mcp.tunnel import create_runtime_channel
 from integrations.workbench_browser_mcp.worker import serve_worker_browser_stdio
 root = Path(sys.argv[1])
 root.mkdir(mode=0o700)
-api, executive, lease, epoch, generation, profile, requested, config = _setup(root)
+(api, executive, lease, epoch, generation, profile, requested, config,
+ run_root) = _setup(root)
 async def main():
     runtime = await create_runtime_channel(config.action)
     admission = api.WorkerBrowserAdmission(executive.store, lease, epoch,
-        generation, requested, profile, "worker-browser-isolated", runtime)
+        generation, requested, profile, "worker-browser-isolated", runtime,
+        run_root=run_root, expected_owner_uid=os.getuid())
     await serve_worker_browser_stdio(runtime, config.browser, admission,
         close_timeout_seconds=config.action.close_timeout_seconds)
 asyncio.run(main())
