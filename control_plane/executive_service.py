@@ -1828,8 +1828,9 @@ CEO_APP_READ_TOOLS_BY_SCHEMA = {
 class CeoIngressAppBinding:
     """Host-owned capability for one App peer on the existing ingress.
 
-    It neither changes C1's peer nor arms C1. The App can send v2 frames
-    only; the existing admission owner still validates every request.
+    It neither changes C1's peer nor arms C1. Existing App v2 behavior stays
+    unchanged; optional principal frames require a separate dormant-by-default
+    guard/arming capability. The existing admission owner validates every request.
     """
 
     peer_uid: int
@@ -1840,6 +1841,11 @@ class CeoIngressAppBinding:
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
+    # Separate principal capability; the incumbent CEO armed bit grants none.
+    # Existing launchers omit these fields, so this route is dormant by default.
+    principal_facts_factory: Callable[[Runtime], Any] | None = None
+    principal_admission_armed: bool = False
+    principal_admission_guard: Callable[[Mapping[str, Any]], None] | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -1850,6 +1856,14 @@ class CeoIngressAppBinding:
             raise ValueError("App binding requires a grounding provider")
         if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
             raise ValueError("App binding read schema is not an admitted profile")
+        if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
+            raise ValueError("principal facts require a host provider")
+        if type(self.principal_admission_armed) is not bool:
+            raise ValueError("principal admission arming must be boolean")
+        if self.principal_admission_guard is not None and not callable(self.principal_admission_guard):
+            raise ValueError("principal admission requires a host guard")
+        if self.principal_admission_armed and self.principal_admission_guard is None:
+            raise ValueError("armed principal admission requires a host guard")
 
 
 class ExecutiveControlService:
@@ -4427,17 +4441,53 @@ class ExecutiveControlService:
                         writer, "invalid_input", "installed read was refused"
                     )
                 return
+            from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            if isinstance(parsed, dict) and parsed.get("schema") == FACT_SCHEMA:
+                if not app_peer or not callable(app_binding.principal_facts_factory):
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "COO facts require the installed App peer")
+                    return
+                try:
+                    if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        raise ValueError("source_unavailable")
+                    if parsed.get("operation") == "mission" and not app_binding.principal_admission_armed:
+                        raise ValueError("source_unavailable")
+                    provider = app_binding.principal_facts_factory(self._require_runtime())
+                    if type(provider) is not CooHostProvider:
+                        raise ValueError("source_unavailable")
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(provider.facts, parsed)))
+                    if (self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}
+                            or self._ceo_ingress_app_binding is not app_binding):
+                        raise ValueError("source_unavailable")
+                    response = {"ok": True, "result": result}
+                    workspace_encode(response, limit=WORKSPACE_MAX_RESPONSE_BYTES - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=WORKSPACE_MAX_RESPONSE_BYTES)
+                except Exception:
+                    await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503))
+                return
+            principal_frame = (
+                isinstance(parsed, Mapping) and isinstance(parsed.get("schema"), str)
+                and parsed["schema"] in ceo_ingress.PRINCIPAL_SCHEMAS
+            )
+            if principal_frame and (
+                not app_peer or not callable(app_binding.principal_admission_guard)
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "peer_denied", "principal frame is not authorized for this peer"
+                )
+                return
             if app_peer and (
                 not isinstance(parsed, Mapping)
                 or parsed.get("schema") not in {
                     ceo_ingress.SUBMIT_SCHEMA_V2, ceo_ingress.STATUS_SCHEMA_V2,
+                    *ceo_ingress.PRINCIPAL_SCHEMAS,
                 }
             ):
                 await self._send_ceo_ingress_error(
                     writer, "peer_denied", "frame is not authorized for this peer"
                 )
                 return
-            if app_peer and (
+            if app_peer and not principal_frame and (
                 not app_binding.armed
                 or self._service_state not in {"READY", "AWAITING_CANARY"}
             ):
@@ -4458,6 +4508,21 @@ class ExecutiveControlService:
                     "Executive CEO ingress is not currently admitting requests",
                 )
                 return
+            def principal_guard(envelope):
+                # Executed by the sink only on a fresh effect, off the event
+                # loop. Recheck binding/arming/state around the host fact read.
+                # Neither the frame nor the model supplies this function.
+                def require_current():
+                    if (not app_peer or app_binding is not self._ceo_ingress_app_binding
+                            or not app_binding.principal_admission_armed
+                            or self._closing or not self._ceo_ingress_ready
+                            or self._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise ValueError("principal admission unavailable")
+                require_current()
+                result = app_binding.principal_admission_guard(envelope)
+                require_current()
+                return result
+
             try:
                 result = await ceo_ingress.handle_frame(
                     parsed,
@@ -4468,6 +4533,8 @@ class ExecutiveControlService:
                     service_state=self._service_state,
                     ceo_ingress_armed=(app_binding.armed if app_peer
                                        else self._ceo_ingress_armed),
+                    principal_peer_authorized=app_peer and principal_frame,
+                    principal_admission_guard=principal_guard if principal_frame else None,
                     # Strict-v2 selection is trusted host composition.  The
                     # source-free public frame cannot opt itself into (or out
                     # of) the terminal-return admission path.
