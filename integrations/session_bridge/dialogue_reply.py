@@ -87,7 +87,11 @@ class AgentDialogueContinueWriter:
                 session_ref=binding.session_ref,
                 operation_key=binding.dialogue_operation_key,
                 watch_mode=binding.watch_mode,
-                actor_ref={"kind": "executive_surface", "seat": "ceo"},
+                actor_ref={
+                    "kind": "executive_surface",
+                    "seat": "ceo",
+                    "reasoning_surface": "chatgpt",
+                },
                 applies_to=dict(binding.applies_to),
             ).normalized()
         except (DialogueEngineError, TypeError, ValueError):
