@@ -394,3 +394,195 @@ def test_client_status_accepts_exact_legacy_314_receipt_across_release() -> None
     assert validated["receipt"]["release_sha"] == "f" * 40
     assert validated["receipt"]["stdout_excerpt"] == "o" * 300 + marker
     assert validated["receipt"]["stderr_excerpt"] == "e" * 300 + marker
+
+
+# Aggregate deadline regression probes use deterministic clocks and sockets.
+from types import SimpleNamespace
+import json
+import pytest
+from control_plane import executive_privileged_client as client
+
+@pytest.fixture
+def rig(monkeypatch):
+    now = [1_000_000_000]
+    events = []
+    steps = {}
+    chunks = [b'{"ok":true}\n']
+    errors = {}
+    class Connection:
+        timeout = 15
+        def gettimeout(self):
+            return self.timeout
+        def step(self, name):
+            events.append(name)
+            now[0] += steps.get(name, 0)
+            if name in errors:
+                raise errors[name]
+        def settimeout(self, value):
+            if value < 0:
+                raise ValueError("Timeout value out of range")
+            self.timeout = value
+            events.append(('timeout', value))
+        def connect(self, path):
+            assert path == str(client.DEFAULT_SOCKET)
+            self.step('connect')
+        def getpeereid(self):
+            self.step('peer')
+            return (0, 0)
+        def sendall(self, raw):
+            assert raw == b'{"operation":"fixture"}\n'
+            self.step('send')
+        def recv(self, size):
+            assert 0 < size <= 4096
+            self.step('recv')
+            return chunks.pop(0)
+        def close(self):
+            self.step('close')
+    connection = Connection()
+    def make_socket(*args):
+        events.append('socket')
+        return connection
+    monkeypatch.setattr(client.socket, 'socket', make_socket)
+    monkeypatch.setattr(client, 'time', SimpleNamespace(monotonic_ns=lambda: now[0]), raising=False)
+    def send(**kw):
+        return client._send_one_frame({'operation':'fixture'}, socket_path=client.DEFAULT_SOCKET,
+                                      timeout_seconds=15, require_root_peer=True, **kw)
+    return SimpleNamespace(now=now, events=events, steps=steps, chunks=chunks,
+                           errors=errors, send=send, connection=connection,
+                           end=now[0]+15_000_000_000)
+
+@pytest.mark.parametrize('bad', [True,False,0,-1,1.0,'2',[],type('IntSubclass',(int,),{})(3)])
+def test_invalid_endpoint_before_socket(rig,bad):
+    with pytest.raises((TypeError,ValueError)):
+        rig.send(deadline_monotonic_ns=bad)
+    assert rig.events == []
+
+@pytest.mark.parametrize('delta', [0,-1])
+def test_expired_endpoint_before_socket(rig,delta):
+    with pytest.raises(TimeoutError):
+        rig.send(deadline_monotonic_ns=rig.now[0]+delta)
+    assert rig.events == []
+
+
+def test_slow_drip_does_not_replenish_budget(rig):
+    rig.chunks[:] = [b'{',b'"ok"',b':',b'true',b'}\n']
+    rig.steps['recv'] = 4_000_000_000
+    with pytest.raises(TimeoutError):rig.send(deadline_monotonic_ns=rig.end)
+    assert rig.events.count('socket') == rig.events.count('connect') == rig.events.count('send') == 1
+    assert rig.events.count('recv') == 4
+    assert rig.events.count('close') == 1
+    waits=[x[1] for x in rig.events if isinstance(x,tuple)]
+    assert waits == sorted(waits,reverse=True)
+    assert waits[-1] <= 3
+
+
+def test_cumulative_phases_refuse_late_response(rig):
+    rig.steps.update(connect=3_000_000_000,peer=4_000_000_000,send=4_000_000_000,recv=5_000_000_000)
+    with pytest.raises(TimeoutError):rig.send(deadline_monotonic_ns=rig.end)
+    assert rig.events.count('socket') == rig.events.count('connect') == rig.events.count('send') == 1
+    assert rig.events.count('close') == 1
+
+
+def test_peer_observation_expiry_prevents_send(rig):
+    rig.steps['peer']=15_000_000_000
+    with pytest.raises(TimeoutError):rig.send(deadline_monotonic_ns=rig.end)
+    assert 'send' not in rig.events
+    assert rig.events.count('close') == 1
+
+
+@pytest.mark.parametrize('stage',['close','parse'])
+def test_success_crossing_final_boundary_is_rejected(rig,monkeypatch,stage):
+    if stage=='close':rig.steps['close']=15_000_000_000
+    else:
+        def late_parse(raw):
+            value=json.loads(raw)
+            rig.now[0]=rig.end
+            return value
+        monkeypatch.setattr(client,'json',SimpleNamespace(loads=late_parse,dumps=json.dumps))
+    with pytest.raises(TimeoutError):rig.send(deadline_monotonic_ns=rig.end)
+    assert rig.events.count('send') == rig.events.count('close') == 1
+
+
+@pytest.mark.parametrize('stage',['connect','peer','send','recv'])
+def test_primary_error_identity_survives_close_failure_and_expiry(rig,stage):
+    error=RuntimeError('primary '+stage)
+    rig.errors[stage]=error
+    rig.errors['close']=OSError('secondary close failure')
+    rig.steps['close']=15_000_000_000
+    with pytest.raises(RuntimeError) as caught:rig.send(deadline_monotonic_ns=rig.end)
+    assert caught.value is error
+    assert rig.events.count('close') == 1
+    assert rig.events.count('socket') == 1
+
+
+def test_direct_response_expiry_before_receive(rig):
+    with pytest.raises(TimeoutError):
+        client._read_response(rig.connection,deadline_monotonic_ns=rig.now[0])
+    assert 'recv' not in rig.events
+
+
+def test_success_and_legacy_without_clock(rig,monkeypatch):
+    assert rig.send(deadline_monotonic_ns=rig.end)=={'ok':True}
+    assert rig.events.count('send')==rig.events.count('close')==1
+    for options in ({},{'deadline_monotonic_ns':None}):
+        rig.events.clear();rig.chunks[:]=[b'{"ok":true}\n']
+        def no_clock():raise AssertionError('legacy clock read')
+        monkeypatch.setattr(client,'time',SimpleNamespace(monotonic_ns=no_clock))
+        assert rig.send(**options)=={'ok':True}
+        assert rig.events==['socket',('timeout',15),'connect','peer','send','recv','close']
+
+
+def test_successful_close_failure_is_not_retried(rig):
+    error = OSError("close failed")
+    rig.errors["close"] = error
+    with pytest.raises(OSError) as caught:
+        rig.send(deadline_monotonic_ns=rig.end)
+    assert caught.value is error
+    assert rig.events.count("close") == 1
+
+
+@pytest.mark.parametrize("local_limit", [0, 0.25, 2])
+def test_aggregate_deadline_never_enlarges_existing_socket_timeout(rig, local_limit):
+    result = client._send_one_frame(
+        {"operation": "fixture"}, socket_path=client.DEFAULT_SOCKET,
+        timeout_seconds=local_limit, require_root_peer=True,
+        deadline_monotonic_ns=rig.end)
+    assert result == {"ok": True}
+    waits = [event[1] for event in rig.events if isinstance(event, tuple)]
+    assert waits and all(wait == local_limit for wait in waits)
+    assert rig.events.count("send") == 1
+
+
+def test_invalid_local_socket_limit_refuses_before_connect(rig):
+    with pytest.raises(ValueError):
+        client._send_one_frame(
+            {"operation": "fixture"}, socket_path=client.DEFAULT_SOCKET,
+            timeout_seconds=-1, deadline_monotonic_ns=rig.end)
+    assert "connect" not in rig.events and "send" not in rig.events
+    assert rig.events.count("close") == 1
+
+
+def test_large_positive_endpoint_is_clamped_before_float_conversion(rig):
+    assert rig.send(deadline_monotonic_ns=10 ** 1000) == {"ok": True}
+    waits = [event[1] for event in rig.events if isinstance(event, tuple)]
+    assert waits and all(wait == 15 for wait in waits)
+
+
+def test_serialization_consumes_aggregate_budget_before_socket(rig, monkeypatch):
+    def late_encode(*args, **kwargs):
+        result = json.dumps(*args, **kwargs)
+        rig.now[0] = rig.end
+        return result
+    monkeypatch.setattr(client, "json", SimpleNamespace(dumps=late_encode, loads=json.loads))
+    with pytest.raises(TimeoutError):
+        rig.send(deadline_monotonic_ns=rig.end)
+    assert rig.events == []
+
+
+def test_deadline_validated_before_serialization(rig, monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid endpoint reached serialization")
+    monkeypatch.setattr(client, "json", SimpleNamespace(dumps=unexpected))
+    with pytest.raises(TypeError):
+        rig.send(deadline_monotonic_ns=True)
+    assert rig.events == []
