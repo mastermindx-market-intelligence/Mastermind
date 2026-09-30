@@ -438,7 +438,9 @@ class CeoIngressClient:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="read timed out after send"
                 )
-            except asyncio.LimitOverrunError:
+            except (asyncio.LimitOverrunError, ValueError):
+                # StreamReader.readline converts an over-limit readuntil
+                # failure to ValueError. Bytes were sent: never report absence.
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
@@ -489,11 +491,29 @@ class CeoIngressClient:
             # closed vocabulary, that no Job was created. Zero effect, safe.
             return CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=False, error=error)
         finally:
-            writer.close()
             try:
-                await writer.wait_closed()
-            except (OSError, asyncio.TimeoutError):
-                pass
+                writer.close()
+                # A reply/read timeout must not acquire an unbounded teardown
+                # wait. Reuse this connection's existing transport budget.
+                await asyncio.wait_for(
+                    writer.wait_closed(), timeout=self._connect_timeout
+                )
+            except asyncio.CancelledError:
+                self._abort_transport(writer)
+                raise
+            except Exception:
+                # Teardown cannot erase an already classified backend receipt
+                # or mask the original error. Never reconnect or resend here.
+                self._abort_transport(writer)
+
+    @staticmethod
+    def _abort_transport(writer: asyncio.StreamWriter) -> None:
+        try:
+            writer.transport.abort()
+        except Exception:
+            # Preserve the original result/cancellation even if local abort
+            # fails. This is a close attempt, not proof of backend nonexecution.
+            pass
 
 
 class CeoIngressReadGateway:
