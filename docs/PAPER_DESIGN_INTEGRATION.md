@@ -14,7 +14,57 @@ No production lifecycle, queue, identity, credential or authentication store is 
 The only shared runtime file is a per-OS-user advisory mutex for the Paper desktop.
 It is not an ownership lease, Job state, deduplication ledger or authorization token.
 
-## Architecture
+## Direct Business migration — issue #1011
+
+Chairman direction, 2026-09-26: build the private **Mastermind Paper** direct route first, reuse one
+existing tunnel, and leave credentials, Business workspace enrollment, activation and live canary
+until the final attended setup. See `docs/PAPER_DIRECT_CHATGPT.md` for installation and acceptance.
+
+Target normal Business path: private Mastermind Paper app -> OpenAI Secure MCP Tunnel -> existing
+guarded stdio `mcp_server.py` -> the same `bridge.py` -> fixed Paper loopback. The direct app exposes
+no generic workstation tools and does not depend on Studio Direct/DC for normal Paper calls.
+The previous blanket dedicated-app prohibition is superseded for this commissioned migration.
+It does not authorize public publication, duplicate tunnels, unattended account changes, or a second
+Paper guard/auth/retry owner. The direct build uses Paper's explicit-file contract: `paper_prepare`
+validates one target by bare `fileId` and returns that target's snapshot without requiring the
+user-active file to switch or exposing arbitrary host/raw `open_file` control. Subsequent direct
+edits validate and post-read the same explicit target file.
+
+Staging and local stdio proof are not enrollment or cutover. After the actual Business app and
+scratch-file path are accepted, retire Studio Direct's primary Paper-Web requirement for that
+workspace. Other seats retain their legacy route until separately migrated. No denial or unknown
+effect ever authorizes a carrier/account/model switch. A migration canary is an explicit single-carrier operation. That carrier/effect fence is scoped to
+that logical canary; it is not a file-wide writer lease for unrelated Paper edits.
+
+Direct target-binding qualification — 2026-09-27: live Paper 0.5.12 evidence showed that raw vendor
+`open_file` can return the requested file's `get_basic_info` while the user-active file remains
+unchanged. A separate read-only probe proved `get_basic_info(fileId=...)` succeeds for a recent file
+that is not open, without changing the active file. All 12 guarded edit schemas require `fileId`.
+Therefore UI focus is not a write-safety prerequisite for the direct route; exact target identity and
+target snapshot are. Legacy Studio `paper_prepare` publication behavior remains a separate client path.
+The resulting target-aware bridge is immutable runtime generation **v6**, SHA-256
+`938c45356f95f3a57df2290e2da045eae9a6c4a0c3507dfff81c40a87e85b72a`. Legacy Studio Direct
+remains pinned to runtime v5 until separately selected for upgrade; the Business direct canary may
+stage v6 without moving that legacy carrier.
+
+### Direct Business multi-seat transport — 2026-09-27
+
+The direct route may serve multiple ChatGPT accounts/workspaces concurrently without multiplying the
+Paper control plane. Each Business seat owns one exact tunnel-client process, loopback health endpoint,
+private bundle state and seat-specific transport singleton/launchd label. Every seat's MCP child still
+loads the same guarded bridge implementation and all Paper calls contend on the existing per-OS-user
+`desktop.lock`. Ordinary same-host overlap waits on that local mutex for at most 30 seconds before any
+Paper call is sent; prolonged contention fails closed as `DESKTOP_BUSY`. This preserves one Paper Desktop
+execution plane and one shared safety/effect contract while allowing C1/C2/C3/C4/admin ChatGPT transports
+to remain connected simultaneously. The bounded lock wait is not a retry owner or persistent queue, and no
+transport seat creates a Paper user identity, document lease or second auth plane.
+
+Seat-aware install schema v3 requires a safe stable `seat_id`; legacy v2 bundles remain backward
+compatible. v3 local binding requires the exact tunnel ID but does not require a guessed backend
+workspace ID. When an exact workspace ID is independently observed it may be recorded; otherwise the
+OpenAI tunnel/workspace association is proven through attended account setup and direct app discovery.
+
+## Architecture — shared adapter and legacy/non-migrated clients
 
 Local Claude/Codex/Cursor/OpenCode/VS Code client -> approved project-scoped MCP
 configuration -> `mcp_server.py` (official MCP SDK, stdio) -> `bridge.py` ->
@@ -26,9 +76,9 @@ gateway-owned `paper_inspect` / `paper_catalog` / `paper_read` / `paper_prepare`
 Screenshots remain native MCP image blocks. The Web caller cannot provide an
 arbitrary host path, Paper endpoint, account or credential.
 
-Studio Direct is the existing Web gateway/auth/transport owner; Paper does not get a
-second public gateway. It is the preferred attended-Web carrier when the Paper tool
-family is actually exposed. Remote Desktop Commander is also a direct-host client of the
+Studio Direct is the existing legacy Web gateway/auth/transport owner; Paper does not get a
+second public gateway. It is the preferred attended-Web carrier for non-migrated seats when the
+Paper tool family is actually exposed. Remote Desktop Commander is also a direct-host client of the
 **same guarded bridge**, but Studio Direct absence grants it no authority. RDC may be
 selected for a Paper effect only when the current Chairman assignment/delegation or
 accepted canonical placement independently authorizes that exact host carrier and
@@ -102,24 +152,32 @@ measured per editor; keep quota scope UNKNOWN until Paper exposes it authoritati
 
 Paper 0.5.11 supports multiple desktop tabs, and Paper's August 2026 build log says
 agents may work across multiple open files, including background tabs. That makes a
-single real execution seat compatible with multiple governed agent workflows without
-credential sharing between fake Paper members. Our bridge still serializes modifying
-calls on one desktop until stronger multi-file isolation is explicitly proven.
+single real Paper editor identity/seat compatible with multiple governed agent workflows without
+credential sharing between fake Paper members. Our bridge serializes individual calls
+from one OS user through `desktop.lock`; that local call mutex is not a document lease
+and does not make one designer the owner of a Paper file.
 
-### Dual-Studio concurrency boundary - 2026-09-22
+### Multi-writer collaboration boundary - 2026-09-27
 
-The same real Paper editor identity may back the governed Paper Desktop processes on
-both M1 and M2; do not buy or fabricate a separate Paper member merely because another
-agent session runs on another owned Mac. Each host remains a separate local MCP process
-and may work on a different Paper file in parallel.
+The same real Paper editor identity may back governed Paper Desktop processes on M1, M2,
+and other admitted hosts; do not buy or fabricate separate Paper members merely because
+another agent session runs on another owned Mac. Each host remains a separate local MCP
+process and may work on the same or a different Paper file in parallel.
 
-Concurrency is bounded by **file identity**, not by Paper account identity. Until a
-stronger accepted isolation mechanism exists, exactly one modifying session may own a
-given `fileId` across all hosts. Another session may inspect/review that same file
-read-only. Different `fileId` values may have independent modifying owners. The local
-per-OS-user mutex does not provide a distributed lock, and `paper_prepare` does not
-mint ownership or replace the existing Capacity/routing owner. Never infer that two
-successful host-local preflights make same-file concurrent edits serializable.
+Concurrency is **target-scoped, not file-scoped**. Multiple modifying sessions/hosts may
+work on the same exact `fileId`, including the same Paper page. Prefer disjoint
+board/artboard/node target sets. Same-board editing is allowed when target sets are
+partitioned; if overlap is known or suspected, re-read the current target and coordinate
+or re-plan the next operation rather than acquiring a file-wide or page-wide lease.
+This contract is advertised as `MULTI_WRITER_PER_FILE_TARGET_SCOPED`.
+
+The local per-OS-user mutex remains only a bridge-call serialization primitive. Its
+bounded acquisition wait absorbs transient same-host session overlap before dispatch; it
+does not provide a distributed lock, effect retry, or persistent queue. `paper_prepare`
+does not mint ownership or replace the existing Capacity/routing owner. A fresh exact-target
+snapshot is optimistic evidence for one bounded edit, not a global revision or collaboration lock. Every logical mutation still
+binds to one carrier + operation identity until its effect is reconciled; `EFFECT_UNKNOWN`
+remains original-carrier sticky.
 
 ## Existing harness integration boundary
 
@@ -205,8 +263,10 @@ hash. `get_basic_info` may not change after an inner text/style edit. It cannot
 prove serializable isolation. The mutex serializes bridge calls from one OS user,
 not manual UI edits, raw Paper clients, other OS users or whole multi-call tasks.
 The artboard anchor is an observed guard, not globally proven file identity.
-Keep ONE assigned designer per desktop document; other agents can research or
-review artifacts concurrently. Do not advertise arbitrary concurrent canvas writers.
+Multiple designers may be assigned to the same Paper file across hosts, including the
+same page. Partition work by board/artboard/node where practical; for known same-board
+overlap, use disjoint node targets and fresh re-read/re-plan before the next bounded edit.
+Do not advertise a file-wide or page-wide modifying lease.
 
 Reads and edits are bounded, with no proxy environment, arbitrary URL, redirects,
 background polling, automatic replay or resumable mutation transport. A missing
@@ -313,9 +373,9 @@ Installed SHA-256 after hardening:
 wrapper/server and requirement pins are unchanged. This proves the local
 read/write/screenshot/JSX substrate, not fleet production or visual product quality.
 
-ChatGPT Web now reuses the existing Studio Direct Secure MCP Tunnel and
-gateway-owned Paper tools. Do not enroll a second direct Paper ChatGPT app merely
-because the underlying stdio projection exists. Remote Desktop Commander remains
+At this historical native-proof checkpoint, ChatGPT Web reused the Studio Direct Secure MCP
+Tunnel and gateway-owned Paper tools. The former blanket dedicated-app prohibition is superseded
+only by the explicit Business migration above, not merely by existence of the stdio projection. Remote Desktop Commander remains
 an authorized host-diagnostic/local-ops carrier, not the normal design product path.
 
 ### Observed local-client enrollment
