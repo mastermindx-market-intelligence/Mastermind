@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
@@ -28,6 +28,7 @@ PRIVATE_DIR_MODE = 0o700
 DESKTOP_LOCK_WAIT_SECONDS = 30.0
 DESKTOP_LOCK_POLL_SECONDS = 0.05
 SUPPORTED_SERVER = ("paper-desktop", "0.5.12")
+SUPPORTED_SERVERS = frozenset({SUPPORTED_SERVER, ("paper-desktop", "0.5.14")})
 SUPPORTED_CATALOG_SHA256 = "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb"
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
@@ -402,22 +403,38 @@ def same_document(identity, info):
     return (info.get("fileName") == identity["file"] and info.get("pageName") == identity["page"]
             and any(isinstance(b, dict) and b.get("id") == identity["anchor"] for b in info.get("artboards", [])))
 
-def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
+def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVERS,
                    catalog_pin=SUPPORTED_CATALOG_SHA256):
     server = client.server if isinstance(client.server, dict) else {}
     actual = {"server_name": server.get("name"), "server_version": server.get("version"),
               "catalog_sha256": digest(catalog)}
-    server_ok = server_pin is None or (actual["server_name"] == server_pin[0] and actual["server_version"] == server_pin[1])
+    if server_pin is None:
+        expected_servers = None
+        server_ok = True
+    elif (isinstance(server_pin, tuple) and len(server_pin) == 2
+          and all(isinstance(value, str) for value in server_pin)):
+        expected_servers = (server_pin,)
+        server_ok = (actual["server_name"], actual["server_version"]) == server_pin
+    else:
+        try:
+            expected_servers = tuple(sorted(tuple(value) for value in server_pin))
+        except (TypeError, ValueError) as exc:
+            raise Refusal("INVALID_SERVER_PIN") from exc
+        if not expected_servers or any(len(value) != 2 or not all(isinstance(item, str) for item in value)
+                                       for value in expected_servers):
+            raise Refusal("INVALID_SERVER_PIN")
+        server_ok = (actual["server_name"], actual["server_version"]) in expected_servers
     catalog_ok = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
     return {**actual, "accepted_for_write": bool(server_ok and catalog_ok),
-            "expected_server": list(server_pin) if server_pin else None,
+            "expected_server": list(expected_servers[0]) if expected_servers and len(expected_servers) == 1 else None,
+            "expected_servers": [list(value) for value in expected_servers] if expected_servers else None,
             "expected_catalog_sha256": catalog_pin}
 
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
             expected_snapshot: str | None = None, operation_id: str | None = None,
             allow_write=False, client=None, lock_root=None, execution_binding=None,
-            _server_pin=SUPPORTED_SERVER, _catalog_pin=SUPPORTED_CATALOG_SHA256):
+            _server_pin=SUPPORTED_SERVERS, _catalog_pin=SUPPORTED_CATALOG_SHA256):
     """One serialized operation. Snapshot hash is a drift guard, NOT authorization.
 
     Local edits outside this adapter can race; no transaction/isolation claim is made.
