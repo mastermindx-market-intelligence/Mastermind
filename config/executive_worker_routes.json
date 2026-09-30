@@ -23,6 +23,11 @@
       "adapter_id": "openai-compatible",
       "enabled": false,
       "autonomous_allowed": false
+    },
+    "minimax": {
+      "adapter_id": "codex-cli",
+      "enabled": false,
+      "autonomous_allowed": false
     }
   },
   "model_aliases": {
@@ -34,6 +39,15 @@
       "cost_class": "small",
       "capabilities": ["code", "planning", "research", "review", "tests"],
       "worker_eligible": true
+    },
+    "coo.sealed.minimax": {
+      "provider_alias": "minimax",
+      "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+      "model": "MiniMax-M3",
+      "effort": "xhigh",
+      "cost_class": "small",
+      "capabilities": ["code", "planning", "research", "review", "tests"],
+      "worker_eligible": false
     },
     "frontier.orchestrator": {
       "provider_alias": "codex",
