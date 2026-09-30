@@ -442,6 +442,9 @@ def _canary(passed: bool = True):
         "result_valid": passed,
         "stdout_sha256": "a" * 64,
         "stderr_sha256": "b" * 64,
+        "provider_error_message_count": 0,
+        "provider_error_message_sha256": None,
+        "provider_error_terms": [],
         "workspace_capability_outcome": "inert_untrusted_workspace",
         "workspace_selection_mechanism": "none",
         "forced_chatgpt_workspace_id_applied": False,
@@ -628,6 +631,32 @@ def test_forced_workspace_and_wrong_binary_canary_are_rejected() -> None:
         readiness.compose_receipt(
             identity=_identity(), canary=wrong, auth_identity=_auth_meta(),
             binary_identity=_binary_meta(), expected_kind="service-account",
+            workspace_binding_class=readiness.WORKSPACE_BINDING_CLASS,
+            credential_expires_at=_credential_expiry(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("terms", "error"),
+    [
+        ([{}], "canary_provider_error_terms_malformed"),
+        ([1, "stream"], "canary_provider_error_terms_malformed"),
+        (["stream", "stream"], "canary_provider_error_terms_malformed"),
+        (["not-in-the-vocabulary"], "canary_provider_error_terms_malformed"),
+        (["stream"], "canary_provider_error_terms_conflict"),
+    ],
+)
+def test_provider_error_terms_fail_closed_without_type_errors(
+    terms: list[object], error: str
+) -> None:
+    malformed = {**_canary(), "provider_error_terms": terms}
+    with pytest.raises(readiness.ReadinessError, match=error):
+        readiness.compose_receipt(
+            identity=_identity(),
+            canary=malformed,
+            auth_identity=_auth_meta(),
+            binary_identity=_binary_meta(),
+            expected_kind="service-account",
             workspace_binding_class=readiness.WORKSPACE_BINDING_CLASS,
             credential_expires_at=_credential_expiry(),
         )

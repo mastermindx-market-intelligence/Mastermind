@@ -32,7 +32,11 @@ class CeoIngressWorkspaceClient:
         # schema name and selection grammar differ.  Operation-driven response
         # ceiling selection happens BEFORE the socket is opened so a misrouted
         # result frame can never widen into the larger Mission ceiling.
-        if isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
+        from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
+        if isinstance(frame, dict) and frame.get("schema") == FACT_SCHEMA:
+            validate_facts_frame(frame)
+            ceiling = MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
             validate_v2_frame(frame)
             ceiling = response_ceiling_for(frame.get("operation"))
         else:

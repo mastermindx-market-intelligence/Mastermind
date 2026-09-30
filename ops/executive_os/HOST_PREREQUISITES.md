@@ -1292,3 +1292,107 @@ census—not this preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Eve
 then, CF2-I-A is the next separate carrier. OAuth/device ceremonies,
 credentials, provider calls, service start, runtime composition, routing,
 fan-out and failover remain held.
+
+
+## Job-bound worker login check (P2-1)
+
+The current-attempt controller adds the `REQUEST_WORKER_LOGIN_CHECK` policy
+capability with scope `current_attempt_assigned_worker_slot`. It can perform only
+`executive.worker_auth.verify_only` for the real Attempt's assigned reviewed
+worker slot. A successful terminal observation is login-status evidence; it is
+never a READY claim or permission to dispatch another Job.
+
+Source acceptance and installed acceptance are separate. Before this policy
+transition, reconcile the installed Runtime and prove **zero living Attempts**,
+or settle them explicitly using the existing lifecycle. Do not replace the
+policy under living Attempts that carry the previous policy digest. Preserve the
+single installed Control/Runtime owner and its existing receipt/custody protocol.
+
+After independent exact-head review and required CI, merge through protected
+master and prepare that exact immutable release for the existing administrator
+bootstrap. The existing `install.sh --arm-privileged-broker` ceremony is the sole
+arm: it derives `privileged_readiness_armed=true` and the canonical privileged
+socket in root-owned Control configuration. A caller-supplied configuration that
+conflicts with the ceremony refuses. Without that flag the arm is false and the
+socket field is null; a retained older wrapper grants no command authority.
+
+Only after the broker's registration, socket ownership and mode are verified does
+the installer publish root-owned mode0555 `mmx-control`. The wrapper fixes the
+release, canonical Control socket, and `check-current-worker-login` subcommand.
+It accepts exactly three positional arguments and rejects option-prefixed values:
+
+```bash
+"/Library/Application Support/MastermindExecutive/bin/mmx-control" \
+  JOB_ID ATTEMPT_ID FENCE_GENERATION
+```
+
+Use the installed Control's existing `register-worker`, `create-proof-job`, and
+`dispatch` commands as the non-root approved operator. When the installer-derived
+readiness arm is true, the fixed proof contract adds `REQUEST_WORKER_LOGIN_CHECK`
+to its existing four authorities; the existing Supervisor/Runtime claims that
+real Job for `codex-01`. No caller supplies authorities and no direct Runtime or
+database write substitutes for admission. Creation and dispatch alone perform no
+privileged broker action. Prove the returned current Job/Attempt/fence, policy
+digest and installed release, then explicitly invoke `mmx-control`. It requires
+the existing Control service to be READY. If the worker already finished, first
+admission refuses with zero effect: record that result, never hold the worker or
+automatically redispatch just to obtain a proof window.
+Verify the observed login status independently of the broker child's exit code,
+and retain the exact Runtime Event family plus broker request/receipt IDs,
+installed release, host boot identity and no-password-prompt evidence.
+
+Interrupt only the client and read the same logical family again. A terminal
+receipt replays without an effect; an uncertain effect performs at most one
+status read. `NOT_FOUND`, a broker marker, timeout, and malformed evidence remain
+`EFFECT_UNKNOWN`. None authorizes a resend. Prove exactly one effect, wrong Job
+and stale-fence refusals, and denial of a dedicated worker's direct broker
+socket access. Read back the existing broker peer policy: the operator UID
+retains its inherited direct `mmx-admin` grant; this wrapper does not contain that
+principal. No credentials, lease tokens or arbitrary child output belong in the
+acceptance record.
+
+P2-1 remains `BUILT_NOT_PROVEN` until that real installed path and fresh native
+orchestrator consumption are observed. Provider renewal, readiness canaries,
+service-control request authority and multi-host admission remain separately
+owned later slices; do not infer full autonomy from this login-check capability.
+# Optional private account-email comparison
+
+The existing `provider_identity_probe.py` has an opt-in `--compare-seat-stdin`
+diagnostic. Its entire output is one line: `MATCH`, `MISMATCH`, or `UNKNOWN`.
+Exit status is zero only for `MATCH`, and two otherwise. In this mode argument,
+input, policy, observation, and cleanup failures produce `UNKNOWN` without
+printing usage, identifiers, or raw error details. The default v1 identity JSON
+and the readiness receipt schema are unchanged.
+
+Supply the expected **account email** from an approved in-memory producer through
+private pipe stdin. The producer must close the pipe after the value; EOF is
+required, including when the value ends with a newline. The diagnostic reads at
+most 256 bytes and waits at most five seconds for this input. It rejects terminals,
+regular files, socket descriptors, extra lines, and oversized input. Never put a
+real expected identifier in command arguments, environment variables, shell
+history, temporary files, logs, receipts, or a persisted hash. Do not derive an
+email from a slot label or create a seat-to-account registry for this diagnostic.
+
+Comparison is exact and case-sensitive, with no alias stripping or normalization.
+Both values must be ASCII dot-atom emails: at most 254 bytes total, a local part
+of at most 64 bytes, and at least two nonempty domain labels of at most 63 bytes
+each. Display names, quoted local parts, Unicode, whitespace, controls, and other
+unsupported forms yield `UNKNOWN`. `MISMATCH` means two supported values differ;
+`UNKNOWN` includes absent email, an unmapped seat label, and any failed guard.
+
+The existing Darwin/root, approved worker principal and provider-home, credential
+kind, plan, workspace-binding-class, and host/auth-transaction requirements still
+apply. This mode uses the same pinned binary and existing
+`account/read(refreshToken:false)` observation. The existing forced-auth absence,
+login status, binary, and credential-metadata checks must all succeed, and the
+app-server must be closed, before `MATCH` or `MISMATCH` can leave the probe. The
+expected value is not sent to the app-server. Credential contents remain opaque.
+
+A match establishes only in-memory account-email equality under those checks.
+It establishes no workspace ID, independent quota domain, spend entitlement,
+readiness, routing eligibility, installation, or production acceptance. Source
+review, installation, and a later authorized diagnostic invocation are separate
+steps; this documentation authorizes none of those host effects. Do not use
+`provision-worker-auth.sh --verify-ready` as a comparison shortcut: that path may
+reserve and run inference. Existing canary reservations and adverse receipts
+remain unchanged and grant no retry.

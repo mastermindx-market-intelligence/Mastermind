@@ -11,9 +11,12 @@ from control_plane.executive_agent_capabilities import (
     CAPABILITY_POLICY_SCHEMA_V4,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
     app_server_security_config_digest,
     app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
+    claude_security_config_digest,
+    claude_security_config_projection,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
 from integrations.mastermind_company_mcp.schemas import (
@@ -33,6 +36,75 @@ def _write(tmp_path: Path, value: dict) -> Path:
     path = tmp_path / "capabilities.json"
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+def _claude_candidate_policy():
+    raw = _raw_policy()
+    raw["profiles"]["operator.claude.readonly.v1"] = {
+        **raw["profiles"]["operator.appserver.readonly.v1"],
+        "enabled": False, "execution_surface": "claude-agent-sdk"}
+    return raw
+
+
+def test_claude_policy_is_a_distinct_disabled_projection_not_an_attestation(tmp_path):
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy()))
+    profile = registry.profiles["operator.claude.readonly.v1"]
+    assert profile.enabled is False
+    assert profile.execution_surface == "claude-agent-sdk"
+    requested = profile.claude_sdk_config_projection()
+    assert requested["tools"] == ["Read", "Glob", "Grep"]
+    manifest = profile.capability_manifest(harness_binary_digest="a" * 64)
+    assert {(item.kind, item.name) for item in manifest.required} == {
+        ("tool", name) for name in ("Read", "Glob", "Grep", "StructuredOutput")}
+    assert all(item.harness_binary_digest == "a" * 64 for item in manifest.required)
+    assert manifest.allowed_ambient == ()
+    assert requested["sandbox"]["failIfUnavailable"] is True
+    assert requested["sandbox"]["allowUnsandboxedCommands"] is False
+    assert requested["sandbox"]["excludedCommands"] == []
+    assert requested["mcp_servers"] == {}
+    assert "observed" not in json.dumps(requested)
+    assert profile.expected_config_digest != registry.profiles["operator.appserver.readonly.v1"].expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="Claude policy cannot use"):
+        profile.app_server_config_projection()
+    with pytest.raises(CapabilityPolicyError, match="not an App Server profile"):
+        profile.app_server_config_overrides()
+
+
+def test_claude_cannot_be_enabled_by_a_config_flag_before_policy_observation(tmp_path):
+    raw = _claude_candidate_policy()
+    raw["profiles"]["operator.claude.readonly.v1"]["enabled"] = True
+    with pytest.raises(CapabilityPolicyError, match="policy observation is not admitted"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_claude_cannot_inherit_codex_capability_or_write_authority(tmp_path):
+    import dataclasses
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    for overrides in ({"write_capable": True}, {"skills": ("arbitrary",)},
+                      {"network_policy": "loopback-browser-only"}):
+        changed = dataclasses.replace(profile, **overrides)
+        with pytest.raises(CapabilityPolicyError, match="exceeds its unadmitted first profile"):
+            changed.claude_sdk_config_projection()
+
+
+def test_claude_digest_uses_actual_security_state_and_detects_drift(tmp_path):
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    sandbox = profile.claude_sdk_config_projection()["sandbox"]
+    provenance = {"setting_sources": [], "strict_mcp_config": True, "skills": []}
+    observed = {"sandbox": sandbox, "model": "irrelevant-model-field"}
+    assert claude_security_config_digest(observed, launch_provenance=provenance) == profile.expected_config_digest
+    assert claude_security_config_digest(observed, launch_provenance={**provenance, "skills": ["unexpected"]}) != profile.expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="launch provenance"):
+        claude_security_config_digest(observed, launch_provenance={})
+    assert claude_security_config_digest({"sandbox": {**sandbox, "allowUnsandboxedCommands": True}}, launch_provenance=provenance) != profile.expected_config_digest
+    assert claude_security_config_digest({"sandbox": sandbox, "permissions": {"allow": ["Bash"]}}, launch_provenance=provenance) != profile.expected_config_digest
+    for bad in ({}, {"sandbox": None}, {"sandbox": sandbox, "permissions": None},
+                {"sandbox": {**sandbox, "enabled": 1}}, {"sandbox": {**sandbox, "unexpected": float("nan")}}):
+        with pytest.raises(CapabilityPolicyError):
+            claude_security_config_digest(bad, launch_provenance=provenance)
+    snapshot = claude_security_config_projection(observed, launch_provenance=provenance)
+    sandbox["enabled"] = False
+    assert snapshot["sandbox"]["enabled"] is True
 
 
 def _company_dialogue_fixture_policy() -> dict:
@@ -64,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-09-18.browser-b1-runtime-r2"
+    assert registry.policy_version == "2026-09-22.native-claude-admission-p0"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -72,6 +144,23 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert sealed.write_capable is True
     assert sealed.native_helper_policy is NativeHelperPolicy.DISABLED
     assert sealed.required_capability_names == ()
+
+    claude_read = registry.resolve("sealed.worker.claude.readonly.no-extensions.v1")
+    assert claude_read.execution_surface == "claude-code"
+    assert claude_read.write_capable is False
+    assert claude_read.required_capability_names == ()
+
+    claude_write = registry.resolve("sealed.worker.claude.write.no-extensions.v1")
+    assert claude_write.execution_surface == "claude-code"
+    assert claude_write.write_capable is True
+    assert claude_write.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert claude_write.required_capability_names == ()
+
+    assert adapter_supports_execution_surface("codex-cli", "codex-exec")
+    assert adapter_supports_execution_surface("codex-cli", "codex-app-server")
+    assert not adapter_supports_execution_surface("codex-cli", "claude-code")
+    assert adapter_supports_execution_surface("claude-code", "claude-code")
+    assert not adapter_supports_execution_surface("claude-code", "codex-exec")
 
     operator = registry.resolve("operator.appserver.readonly.v1")
     assert operator.execution_surface == "codex-app-server"
@@ -96,6 +185,18 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert helper.native_helper.hide_spawn_agent_metadata is True
     assert helper.mcp_servers == ("openai-developer-docs-v1",)
 
+
+
+def test_native_claude_sealed_surface_refuses_extension_capabilities(tmp_path):
+    raw = _raw_policy()
+    profile = raw["profiles"]["sealed.worker.claude.readonly.no-extensions.v1"]
+    profile["mcp_servers"] = ["openai-developer-docs-v1"]
+
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="sealed worker execution surface",
+    ):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 def test_profile_compiles_exact_mcp_manifest_and_secret_free_config():
     profile = ExecutionCapabilityRegistry.load().resolve(
@@ -598,7 +699,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact():
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert registry.capability_packages == {}
     assert registry.policy_digest == (
-        "daac5b9a290156b2b96bf562ed69ffd79d93ba753d3017799bef303aac2b38ed"
+        "c2f74c244464bee6d8bbc9d38d430aec362835234ae798b42c045da86c3bdd7a"
     )
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"

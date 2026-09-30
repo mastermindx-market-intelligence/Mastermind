@@ -1,4 +1,4 @@
-"""Executive-owned composition for one read-only App Server planning Attempt.
+"""Executive-owned composition for one read-only operator planning Attempt.
 
 This is not a scheduler and owns no durable state.  It claims one exact
 command-bound planner through Executive Runtime, delegates provider effects to
@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from control_plane.executive_agent_capabilities import (
+    CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    CLAUDE_OPERATOR_HARNESS_KIND,
+    CLAUDE_OPERATOR_PROVIDER,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
 )
@@ -26,6 +29,7 @@ from control_plane.executive_orchestration_result import (
     parse_canonical_json,
 )
 from control_plane.executive_runtime import (
+    INTERACTIVE_TX5_EXECUTION_PROFILE,
     AttemptLease,
     AttemptStatus,
     Job,
@@ -153,6 +157,13 @@ class ExecutiveOperatorSupervisor:
     def _requested_profile(
         self, job: Job, lease: AttemptLease
     ) -> RequestedExecutionProfile:
+        constraints = job.constraints
+        if constraints.get("execution_profile_id") == (
+            "operator.appserver.interactive.v1"
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "App Server supervisor refuses the interactive profile before claim"
+            )
         if job.orchestration_role != "plan":
             raise ExecutiveOperatorSupervisorError(
                 "App Server composition accepts only the read-only planner role"
@@ -212,7 +223,6 @@ class ExecutiveOperatorSupervisor:
             == job.constraints.get("capability_policy_digest")
             and profile.profile_digest
             == job.constraints.get("execution_profile_digest")
-            and profile.execution_surface == "codex-app-server"
             and profile.auth_realm == "dedicated-worker-account"
             and profile.sandbox_policy == "read-only"
             and profile.approval_policy == "never"
@@ -223,6 +233,7 @@ class ExecutiveOperatorSupervisor:
         docs_profile_ok = (
             profile.profile_id
             == "operator.appserver.readonly.docs-mcp.native-helper.v1"
+            and profile.execution_surface == "codex-app-server"
             and profile.network_policy == "disabled"
             and profile.native_helper_policy.value == "PARENT_READ_ONLY_CEILING"
             and profile.native_helper is not None
@@ -231,6 +242,7 @@ class ExecutiveOperatorSupervisor:
         )
         browser_profile_ok = (
             profile.profile_id == "operator.browser.local-review.v1"
+            and profile.execution_surface == "codex-app-server"
             and profile.network_policy == "loopback-browser-only"
             and profile.native_helper_policy.value == "DISABLED"
             and profile.native_helper is None
@@ -242,9 +254,29 @@ class ExecutiveOperatorSupervisor:
             and tuple(grant.resource_id for grant in profile.resource_grants)
             == ("worker-browser-b1-local",)
         )
-        if not common_profile_ok or not (docs_profile_ok or browser_profile_ok):
+        native_claude_profile_ok = (
+            profile.profile_id == "operator.claude.readonly.v1"
+            and profile.enabled is True
+            and profile.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE
+            and profile.network_policy == "disabled"
+            and profile.native_helper_policy.value == "DISABLED"
+            and profile.native_helper is None
+            and not profile.skill_grants
+            and not profile.mcp_server_grants
+            and not profile.resource_grants
+        )
+        if not common_profile_ok or not (
+            docs_profile_ok or browser_profile_ok or native_claude_profile_ok
+        ):
             raise ExecutiveOperatorSupervisorError(
                 "operator planner profile is not one reviewed rich read-only lane"
+            )
+        if native_claude_profile_ok and (
+            quota.provider != CLAUDE_OPERATOR_PROVIDER
+            or job.constraints.get("provider") != CLAUDE_OPERATOR_PROVIDER
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "native Claude planner provider drifted after claim"
             )
         if quota.model != job.constraints.get("model") or quota.effort != job.constraints.get(
             "effort"
@@ -254,9 +286,14 @@ class ExecutiveOperatorSupervisor:
             )
         return RequestedExecutionProfile(
             worker_id=lease.attempt.worker_id,
-            provider="openai-codex",
+            provider=(
+                CLAUDE_OPERATOR_PROVIDER if native_claude_profile_ok else "openai-codex"
+            ),
             requested_model=str(quota.model),
-            harness_kind="codex-app-server",
+            harness_kind=(
+                CLAUDE_OPERATOR_HARNESS_KIND
+                if native_claude_profile_ok else "codex-app-server"
+            ),
             harness_binary_digest=harness_digest,
             harness_version=harness_version,
             workspace=self._workspace_identity(job),
@@ -843,6 +880,16 @@ class ExecutiveOperatorSupervisor:
         if previous is None:
             raise ExecutiveOperatorSupervisorError(
                 "operator recovery Attempt disappeared"
+            )
+        previous_job = self.runtime.jobs.get_job(previous.job_id)
+        if previous_job is not None and previous_job.constraints.get(
+            "execution_profile_id"
+        ) == INTERACTIVE_TX5_EXECUTION_PROFILE:
+            return ReconcileReceipt(
+                attempt_id=attempt_id,
+                job_id=previous.job_id,
+                status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                process_was_live=False,
             )
         try:
             lease = self.runtime.attempts.takeover_expired_operator_harness(
