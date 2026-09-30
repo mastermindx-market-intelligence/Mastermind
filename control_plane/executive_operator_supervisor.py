@@ -442,7 +442,11 @@ class ExecutiveOperatorSupervisor:
             ),
             harness_binary_digest=harness_digest,
             harness_version=harness_version,
-            workspace=self._workspace_identity(job, lease.attempt),
+            workspace=(
+                self._workspace_identity(job, lease.attempt)
+                if self._workspace_identity_source is not None
+                else self._workspace_identity(job)
+            ),
             sandbox_policy="read-only",
             approval_policy="never",
             network_policy=profile.network_policy,
