@@ -1034,7 +1034,9 @@ def test_v3_placement_stays_closed_and_cannot_smuggle_model_override(tmp_path):
     runtime = Runtime.at(tmp_path)
     _register_placement_union(runtime)
 
-    with pytest.raises(OrchestrationResultError, match="placement"):
+    with pytest.raises(
+        StateConflict, match="raw orchestration result failed closed validation"
+    ):
         _admit_v2_plan(
             runtime,
             plan_schema_version="mastermind.execution_plan/v3",

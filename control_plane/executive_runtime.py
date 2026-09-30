@@ -959,6 +959,7 @@ def _project_work_placement(
     placement: Mapping[str, Any],
     *,
     raw_root_constraints: Mapping[str, Any],
+    plan_schema_version: str | None = None,
 ) -> dict[str, Any]:
     provider_realm = str(placement.get("provider_realm") or "").strip().lower()
     quota_class = str(placement.get("quota_class") or "").strip().lower()
@@ -990,10 +991,11 @@ def _project_work_placement(
     projected = dict(constraints)
     projected["provider"] = provider_realm
     projected["eligible_quota_classes"] = [quota_class]
-    reasons = list(projected.get("routing_reason_codes") or [])
-    if "manual_pool_override" not in reasons:
-        reasons.append("manual_pool_override")
-    projected["routing_reason_codes"] = reasons
+    if plan_schema_version == "mastermind.execution_plan/v4":
+        reasons = list(projected.get("routing_reason_codes") or [])
+        if "manual_pool_override" not in reasons:
+            reasons.append("manual_pool_override")
+        projected["routing_reason_codes"] = reasons
 
     # V4 may add an exact model inside the already-admitted pool. This is a
     # hard narrowing constraint, not provider/account/host selection. Runtime
@@ -1001,6 +1003,8 @@ def _project_work_placement(
     # currently eligible quota row serves the requested model, claim returns
     # no capacity and the caller must not silently fall back.
     if "model" in placement:
+        if plan_schema_version != "mastermind.execution_plan/v4":
+            raise StateConflict("plan step model override requires execution plan v4")
         model = str(placement.get("model") or "").strip().lower()
         if (
             not model
@@ -9030,6 +9034,7 @@ def _validated_plan_admission(
             plan_step_id=str(step["step_id"]),
             repair_round=0,
             placement=step.get("placement"),
+            plan_schema_version=str(plan_body["schema_version"]),
             dependency_manifest=dependency_manifest,
         )
     try:
@@ -10453,6 +10458,7 @@ def _insert_cycle_child(
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
     placement: dict[str, Any] | None = None,
+    plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
     allow_active_interactive_plan: bool = False,
 ) -> sqlite3.Row:
@@ -10478,6 +10484,7 @@ def _insert_cycle_child(
             raw_root_constraints=_strict_canonical_json_loads(
                 str(root_row["constraints_json"]), name="root constraints"
             ),
+            plan_schema_version=plan_schema_version,
         )
     constraints = _normalise_constraints(constraints)
     try:
@@ -10705,6 +10712,7 @@ def _reconcile_cycle_child_creation(
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
     placement: dict[str, Any] | None = None,
+    plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
@@ -10739,6 +10747,7 @@ def _reconcile_cycle_child_creation(
             raw_root_constraints=_strict_canonical_json_loads(
                 str(root_row["constraints_json"]), name="root constraints"
             ),
+            plan_schema_version=plan_schema_version,
         )
     expected_constraints = _normalise_constraints(expected_constraints)
     stored_authorities = _strict_canonical_json_loads(
@@ -12487,6 +12496,7 @@ class JobRegistry:
                     plan_step_id=str(step["step_id"]),
                     repair_round=0,
                     placement=step.get("placement"),
+                    plan_schema_version=str(plan_body["schema_version"]),
                     allow_active_interactive_plan=interactive,
                 )
                 created_ids.append(str(member["job_id"]))
@@ -12550,6 +12560,7 @@ class JobRegistry:
                         plan_step_id=str(step["step_id"]),
                         repair_round=0,
                         placement=step.get("placement"),
+                        plan_schema_version=str(plan_body["schema_version"]),
                         dependency_manifest=manifest,
                         allow_active_interactive_plan=interactive,
                     )
@@ -12728,6 +12739,7 @@ class JobRegistry:
                     plan_step_id=step_token,
                     repair_round=0,
                     placement=step.get("placement"),
+                    plan_schema_version=str(plan_body["schema_version"]),
                     dependency_manifest=expected_manifest,
                 )
                 return _job_from_row(row)
@@ -12771,6 +12783,7 @@ class JobRegistry:
                 plan_step_id=step_token,
                 repair_round=0,
                 placement=step.get("placement"),
+                plan_schema_version=str(plan_body["schema_version"]),
                 dependency_manifest=expected_manifest,
             )
             created_id = str(row["job_id"])
