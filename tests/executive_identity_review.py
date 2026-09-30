@@ -181,6 +181,11 @@ def reviewed_literal_spans(path: str, source: str):
             REVIEWED_ANCHORS as release_owner_anchors,
         )
         reviewed_anchors = release_owner_anchors
+    elif path == "control_plane/executive_release_observation.py":
+        from tests.executive_release_observation_identity_review import (
+            REVIEWED_ANCHORS as release_observation_anchors,
+        )
+        reviewed_anchors = release_observation_anchors
     else:
         return ()
     # str.splitlines recognizes these separators, while Python source/AST
