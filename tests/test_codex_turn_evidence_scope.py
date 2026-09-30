@@ -7,6 +7,7 @@ import copy
 
 import pytest
 
+from scripts.ohf.laboratory import PrivateRawTurnPage
 from control_plane.codex_operator_adapter import CodexAdapterError
 from control_plane.operator_harness_contract import EventCursor, TurnRef
 from tests.test_codex_operator_adapter import _make_harness, _op, _start
@@ -181,9 +182,10 @@ def test_candidate_identity_failure_preserves_the_original_receipt(tmp_path, def
                 "status_container": []}[defect]
         else:
             selected["items"] = [{"type": "agentMessage", "text": "changed output"}]
-        def substituted(method, params, **kwargs):
-            return document if method == "thread/turns/list" else request(method, params, **kwargs)
-        state.client.request = substituted
+        # Collection shares the existing private full-page reader with the
+        # canonical-result path. Repeated unfinished pages remain a refusal.
+        state.client.request_raw_turn_page = lambda **kwargs: PrivateRawTurnPage(
+            copy.deepcopy(document), 100)
         with pytest.raises(CodexAdapterError) as failure:
             harness.adapter.collect_candidate_result(turn)
         assert failure.value.effect_unknown is True
@@ -227,9 +229,10 @@ def test_first_candidate_must_be_unique_complete_and_consistent(tmp_path, defect
             selected["status"] = {
                 "in_progress": "inProgress", "failed": "failed",
                 "status_container": []}[defect]
-        def substituted(method, params, **kwargs):
-            return document if method == "thread/turns/list" else request(method, params, **kwargs)
-        state.client.request = substituted
+        # Collection shares the existing private full-page reader with the
+        # canonical-result path. Repeated unfinished pages remain a refusal.
+        state.client.request_raw_turn_page = lambda **kwargs: PrivateRawTurnPage(
+            copy.deepcopy(document), 100)
         with pytest.raises(CodexAdapterError) as failure:
             harness.adapter.collect_candidate_result(turn)
         assert failure.value.effect_unknown is True
