@@ -924,6 +924,32 @@ def test_closure_refuses_inode_only_reservation_replacement_during_runtime_read(
     ).read_bytes() == original_journal_raw
 
 
+@pytest.mark.parametrize("with_cancellation", [False, True])
+@pytest.mark.parametrize("raw", [b"", b"{", b"{}", b"null"])
+def test_present_invalid_journal_never_becomes_absence(
+        tmp_path, monkeypatch, inputs, raw, with_cancellation):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    if with_cancellation:
+        composition.journal.cancel_prestart(
+            cancellation=cancellation_fixture(composition),
+            reservation=composition.reservation,
+            admission=composition.admission.to_dict(),
+            approval=composition.approval.to_dict(),
+        )
+    stem = actuator._operation_stem(composition.approval["operation_key"])
+    journal_path = Path(composition.journal._root) / (stem + ".json")
+    journal_path.write_bytes(raw)
+    journal_path.chmod(0o600)
+    before = _snapshot_files(Path(composition.journal._root))
+
+    with pytest.raises(consumer.ReleaseConsumerError) as caught:
+        composition.read()
+
+    assert "NOT_FOUND" not in str(caught.value)
+    assert _snapshot_files(Path(composition.journal._root)) == before
+
+
 @pytest.mark.parametrize("state", TERMINAL_STATES + NONTERMINAL_STATES)
 def test_read_invariants_no_mutation(
         tmp_path, monkeypatch, inputs, state):

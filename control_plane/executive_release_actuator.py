@@ -1405,11 +1405,14 @@ class _ExecutiveReleaseActuatorJournal:
         # 4. Read the journal record under the same lock; refuse on
         # root-digest drift, START/reservation drift, or terminal full-before
         # drift.
-        journal_raw, _ = self._read_file(
+        journal_raw, journal_identity = self._read_file(
             root_descriptor, stem + ".json", required=False
         )
         journal_record: ReleaseRecord | None = None
-        if journal_raw:
+        # Presence is established by the descriptor-derived identity, not by
+        # truthiness of the bytes. A zero-byte journal is malformed history
+        # and must reach the decoder rather than becoming false absence.
+        if journal_identity:
             journal_record = self._decode_for_operation(journal_raw, operation_key)
             if journal_record["root_qualification_digest"] != reservation_digest:
                 _fail("ROOT_QUALIFICATION_MISMATCH")
