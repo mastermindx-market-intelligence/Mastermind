@@ -148,6 +148,33 @@ class PrepareTests(unittest.TestCase):
             self.prepare()
         self.assertEqual(self.calls, [])
 
+    def test_default_server_set_accepts_0512_and_0514_but_not_unreviewed_identity(self):
+        catalog_pin = self.b.digest(self.client.catalog())
+        base = dict(
+            file_id=TARGET,
+            expected_snapshot=self.expected,
+            operation_id="prepare-server-pin-test",
+            allow_prepare=True,
+            client=self.client,
+            lock_root=self.root,
+            _catalog_pin=catalog_pin,
+            _sleep=lambda _: None,
+        )
+        for version in ("0.5.12", "0.5.14"):
+            with self.subTest(version=version):
+                self.client.server = {"name": "paper-desktop", "version": version}
+                result = self.p.prepare_document(**base)
+                self.assertEqual(result["state"], "PAPER_READY")
+                self.assertTrue(result["write_qualified"])
+                self.assertEqual(
+                    result["write_schema"]["expected_servers"],
+                    [["paper-desktop", "0.5.12"], ["paper-desktop", "0.5.14"]],
+                )
+        self.client.server = {"name": "paper-desktop", "version": "0.5.13"}
+        result = self.p.prepare_document(**base)
+        self.assertEqual(result["state"], "PAPER_READY_READ_ONLY")
+        self.assertFalse(result["write_qualified"])
+
     def test_background_target_schema_drift_is_readonly_ready(self):
         result = self.prepare(_catalog_pin="0" * 64)
         self.assertEqual(result["state"], "PAPER_READY_READ_ONLY")
