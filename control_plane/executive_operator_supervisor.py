@@ -9,11 +9,12 @@ abandoned.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 from control_plane.executive_agent_capabilities import (
     CLAUDE_OPERATOR_EXECUTION_SURFACE,
@@ -30,6 +31,7 @@ from control_plane.executive_orchestration_result import (
 )
 from control_plane.executive_runtime import (
     INTERACTIVE_TX5_EXECUTION_PROFILE,
+    Attempt,
     AttemptLease,
     AttemptStatus,
     Job,
@@ -46,6 +48,7 @@ from control_plane.executive_supervisor import (
 )
 from control_plane.operator_harness_contract import (
     AuthRealmRequirement,
+    OperatorHarnessAdapter,
     EventCursor,
     LaunchDecision,
     OperationId,
@@ -87,6 +90,14 @@ RemoteAdapterFactory = Callable[
 ]
 
 
+class ClaimedOperatorAdapterFactory(Protocol):
+    """Host-owned construction, not placement or permission to perform I/O."""
+
+    def __call__(self, attempt: Attempt, requested: RequestedExecutionProfile,
+                 turn_input_loader: Callable[[Any], str], *,
+                 recovery: bool) -> OperatorHarnessAdapter: ...
+
+
 class ExecutiveOperatorSupervisor:
     """Run only ``plan`` roles through the Runtime-owned OHF lifecycle."""
 
@@ -94,14 +105,68 @@ class ExecutiveOperatorSupervisor:
         self,
         runtime: Runtime,
         *,
-        adapter_factory: RemoteAdapterFactory,
+        adapter_factory: RemoteAdapterFactory | None = None,
         prompt_source: ExecutiveSupervisor,
         instance_id: str = "executive-coo-operator",
+        claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
     ) -> None:
+        if ((adapter_factory is None) == (claimed_adapter_factory is None)
+                or (adapter_factory is not None and not callable(adapter_factory))
+                or (claimed_adapter_factory is not None and not callable(claimed_adapter_factory))):
+            raise ExecutiveOperatorSupervisorError("exactly one callable operator factory is required")
         self.runtime = runtime
         self.adapter_factory = adapter_factory
+        self._claimed_adapter_factory = claimed_adapter_factory
         self.prompt_source = prompt_source
         self.instance_id = instance_id
+
+    def _adapter_for_attempt(
+        self, lease: AttemptLease, requested: RequestedExecutionProfile,
+        loader: Callable[[Any], str], *, recovery: bool,
+    ) -> OperatorHarnessAdapter:
+        factory = self._claimed_adapter_factory
+        if factory is None:
+            assert self.adapter_factory is not None
+            return self.adapter_factory(loader)
+
+        # Construction must not start a provider. Runtime retains the lease and
+        # final effect admission; the callback receives no lease token or new authority.
+        def current_binding() -> tuple[Attempt, tuple[Any, ...]]:
+            current = self.runtime.attempts.get_attempt(lease.attempt.attempt_id)
+            allowed = ({AttemptStatus.CLAIMED, AttemptStatus.RUNNING,
+                        AttemptStatus.CHECKPOINTED, AttemptStatus.CANCEL_REQUESTED}
+                       if recovery else {AttemptStatus.CLAIMED})
+            identity = ("attempt_id", "job_id", "worker_id", "quota_class",
+                        "fence_generation", "lease_owner", "authority_policy_hash")
+            if (not isinstance(current, Attempt) or current.status not in allowed
+                    or any(getattr(current, key) != getattr(lease.attempt, key)
+                           for key in identity)
+                    or requested.worker_id != current.worker_id
+                    or requested.authority_policy_hash != current.authority_policy_hash):
+                raise ExecutiveOperatorSupervisorError("claimed operator identity is no longer current")
+            job = self.runtime.jobs.get_job(current.job_id)
+            if (job is None or job.current_attempt_id != current.attempt_id
+                    or job.assigned_worker_id != current.worker_id
+                    or job.assigned_quota_class != current.quota_class):
+                raise ExecutiveOperatorSupervisorError("claimed operator Job binding moved")
+            signature = tuple(getattr(current, key) for key in identity) + (
+                current.status, current.execution_mode,
+                current.requested_execution_profile_digest,
+                current.effective_grant_digest, current.placement_snapshot_digest,
+                current.execution_principal_snapshot_digest, job.status,
+            )
+            return current, signature
+
+        current, before = current_binding()
+        try:
+            adapter = factory(copy.deepcopy(current), copy.deepcopy(requested),
+                              loader, recovery=recovery)
+        except Exception:
+            raise ExecutiveOperatorSupervisorError("claimed operator construction refused") from None
+        _, after = current_binding()
+        if before != after:
+            raise ExecutiveOperatorSupervisorError("claimed operator binding changed during construction")
+        return adapter
 
     @staticmethod
     def _git_head(workspace: Path) -> str:
@@ -758,7 +823,7 @@ class ExecutiveOperatorSupervisor:
                     "operator turn prompt is not bound to the Runtime turn"
                 ) from exc
 
-        adapter = self.adapter_factory(load_turn)
+        adapter = self._adapter_for_attempt(lease, requested, load_turn, recovery=False)
         orchestrator = self._orchestrator(lease, adapter)
         attempt_id = lease.attempt.attempt_id
         start_operation = OperationId(f"ohf-op:start:{attempt_id}")
@@ -967,7 +1032,9 @@ class ExecutiveOperatorSupervisor:
                 require_turn=False,
             )
             prompt = self._prompt(job, lease)
-            adapter = self.adapter_factory(lambda _turn: prompt)
+            adapter = self._adapter_for_attempt(
+                lease, session.launch.requested, lambda _turn: prompt, recovery=True
+            )
             orchestrator = self._orchestrator(lease, adapter)
             port = ExecutiveOperatorHarnessPort(self.runtime, lease)
             try:
