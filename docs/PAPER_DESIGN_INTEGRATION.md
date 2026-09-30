@@ -134,6 +134,27 @@ No MCP tool is disguised as read-only to bypass client write permissions.
 `paper_edit` is explicitly modifying/destructive/non-idempotent; it exists only
 when the local server is started with `--allow-write`.
 
+### Paper 0.5.14 server-identity qualification — 2026-09-30
+
+A live Ryan Business exact-file read now reports `paper-desktop 0.5.14`.
+Its canonical full-catalog digest remains exactly
+`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb`,
+the same digest already accepted for Paper 0.5.12. The guarded bridge still exposes the
+same 17 read + 12 edit allowlists and continues to block `create_file`, `delete_nodes`,
+native exports, raw `open_file`, and `rename_pages`.
+
+The server-version string was therefore the only write-qualification mismatch. Bridge
+0.1.3 admits exactly the two reviewed server identities `paper-desktop 0.5.12` and
+`paper-desktop 0.5.14` while retaining the exact full-catalog hash as a separate required
+gate. Unknown versions and any catalog-digest change still fail closed. The write-schema
+receipt now exposes `expected_servers` when more than one reviewed identity is accepted.
+This is a compatibility qualification, not a Paper design mutation or production canary.
+
+Candidate bridge SHA-256:
+`6125fdad9299e92c144442916ea82e8c277e89459e9c23ebfc82a23e4b64d3e0`,
+runtime generation **v9**. Evidence:
+`docs/evidence/paper_desktop/20260930_0514_server_identity_compatibility.json`.
+
 ## Team/account and seat model - 2026-09-18
 
 Use **one real signed-in Paper editor identity as the agent execution seat**, not
