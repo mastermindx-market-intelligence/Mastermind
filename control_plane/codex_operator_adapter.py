@@ -3048,17 +3048,41 @@ class CodexOperatorAdapter:
             )
         except Exception as exc:
             raise _rpc_failure(exc, effect_unknown=True) from exc
-        rows = [row for row in result.get("data", []) if isinstance(row, Mapping)]
-        matching = [row for row in rows if str(row.get("id") or "") == native_turn]
-        if not matching:
+        rows = result.get("data") if isinstance(result, Mapping) else None
+        if (
+            not isinstance(rows, list)
+            or any(not isinstance(row, Mapping) for row in rows)
+            or result.get("nextCursor") is not None
+        ):
             raise CodexAdapterError(
                 AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                "native turn result is missing",
+                "native turn result page is malformed or incomplete",
+                effect_unknown=True,
+            )
+        matching = [row for row in rows if row.get("id") == native_turn]
+        if len(matching) != 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "native turn result is missing or ambiguous",
+                effect_unknown=True,
+            )
+        result_status = matching[0].get("status")
+        if result_status is not None and result_status != "completed":
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "native turn result contradicts completed-turn evidence",
                 effect_unknown=True,
             )
         texts = turn_texts(matching)
         summary = redact_evidence_text(texts[-1][:4000]) if texts else None
         artifact_digest = _canonical_digest(matching)
+        previous_digest = state.candidate_artifact_digests.get(turn.turn_id)
+        if previous_digest is not None and artifact_digest != previous_digest:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "native turn result changed after candidate collection",
+                effect_unknown=True,
+            )
         if self.skill_canary_binding is not None:
             self._verify_skill_state_after_turn(state, self.skill_canary_binding)
         state.candidate_artifact_digests[turn.turn_id] = artifact_digest

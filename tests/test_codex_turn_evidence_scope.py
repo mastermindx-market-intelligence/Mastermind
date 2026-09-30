@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+import copy
+
 import pytest
 
 from control_plane.codex_operator_adapter import CodexAdapterError
@@ -147,3 +149,88 @@ def test_malformed_or_contradictory_thread_identity_is_typed_refusal(tmp_path, t
             harness.adapter.read_events(_cursor(turn), timeout_seconds=.01)
         assert failure.value.effect_unknown is True
         assert not any(event.kind == "turn/completed" for event in state.events)
+
+
+@pytest.mark.parametrize("defect", [
+    "duplicate", "remaining_page", "non_list_data", "non_mapping_row",
+    "in_progress", "failed", "status_container", "payload_drift",
+])
+def test_candidate_identity_failure_preserves_the_original_receipt(tmp_path, defect):
+    with _fixture(tmp_path) as (harness, launch):
+        turn = _turn(harness, "turn-current")
+        started = _begin(harness, launch, turn)
+        harness.adapter.read_events(_cursor(turn))
+        state = harness.adapter._generations[turn.process_generation_id]
+        first = harness.adapter.collect_candidate_result(turn)
+        request = state.client.request
+        document = copy.deepcopy(request("thread/turns/list", {
+            "threadId": state.provider_session_id}))
+        selected = [row for row in document["data"]
+                    if row.get("id") == started.provider_native_turn_id][0]
+        if defect == "duplicate":
+            document["data"].append(copy.deepcopy(selected))
+        elif defect == "remaining_page":
+            document["nextCursor"] = "unread-next-page"
+        elif defect == "non_list_data":
+            document["data"] = {"id": started.provider_native_turn_id}
+        elif defect == "non_mapping_row":
+            document["data"].append("unclassified-row")
+        elif defect in {"in_progress", "failed", "status_container"}:
+            selected["status"] = {
+                "in_progress": "inProgress", "failed": "failed",
+                "status_container": []}[defect]
+        else:
+            selected["items"] = [{"type": "agentMessage", "text": "changed output"}]
+        def substituted(method, params, **kwargs):
+            return document if method == "thread/turns/list" else request(method, params, **kwargs)
+        state.client.request = substituted
+        with pytest.raises(CodexAdapterError) as failure:
+            harness.adapter.collect_candidate_result(turn)
+        assert failure.value.effect_unknown is True
+        assert state.candidate_artifact_digests[turn.turn_id] == first.artifact_digest
+
+
+def test_same_candidate_recollection_preserves_identity(tmp_path):
+    with _fixture(tmp_path) as (harness, launch):
+        turn = _turn(harness, "turn-current")
+        _begin(harness, launch, turn)
+        harness.adapter.read_events(_cursor(turn))
+        first = harness.adapter.collect_candidate_result(turn)
+        assert harness.adapter.collect_candidate_result(turn) == first
+
+
+@pytest.mark.parametrize("defect", [
+    "duplicate", "remaining_page", "non_mapping_row", "non_list_data",
+    "in_progress", "failed", "status_container",
+])
+def test_first_candidate_must_be_unique_complete_and_consistent(tmp_path, defect):
+    with _fixture(tmp_path) as (harness, launch):
+        turn = _turn(harness, "turn-current")
+        started = _begin(harness, launch, turn)
+        harness.adapter.read_events(_cursor(turn))
+        state = harness.adapter._generations[turn.process_generation_id]
+        assert turn.turn_id not in state.candidate_artifact_digests
+        request = state.client.request
+        document = copy.deepcopy(request("thread/turns/list", {
+            "threadId": state.provider_session_id}))
+        selected = [row for row in document["data"]
+                    if row.get("id") == started.provider_native_turn_id][0]
+        if defect == "duplicate":
+            document["data"].append(copy.deepcopy(selected))
+        elif defect == "remaining_page":
+            document["nextCursor"] = "unread-next-page"
+        elif defect == "non_mapping_row":
+            document["data"].append("unclassified-row")
+        elif defect == "non_list_data":
+            document["data"] = {"id": started.provider_native_turn_id}
+        else:
+            selected["status"] = {
+                "in_progress": "inProgress", "failed": "failed",
+                "status_container": []}[defect]
+        def substituted(method, params, **kwargs):
+            return document if method == "thread/turns/list" else request(method, params, **kwargs)
+        state.client.request = substituted
+        with pytest.raises(CodexAdapterError) as failure:
+            harness.adapter.collect_candidate_result(turn)
+        assert failure.value.effect_unknown is True
+        assert turn.turn_id not in state.candidate_artifact_digests
