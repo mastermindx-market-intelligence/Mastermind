@@ -394,6 +394,34 @@ def test_physical_snapshot_drift_during_runtime_read_prevents_start(
         composition.journal.read(composition.approval["operation_key"])
 
 
+@pytest.mark.parametrize("clock", ["wall", "monotonic"])
+def test_expiry_during_final_journal_lock_prevents_durable_start(
+        tmp_path, monkeypatch, inputs, clock):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    NOW[0] = composition.prepared["expires_at_ms"] - 1
+    MONOTONIC[0] = composition.prepared["expires_monotonic_ns"] - 1_000_000
+    acquire = composition.journal._acquire_flock
+    calls = []
+
+    def delayed(descriptor, deadline):
+        acquire(descriptor, deadline)
+        calls.append(1)
+        if len(calls) == 3:
+            if clock == "wall":
+                NOW[0] = composition.prepared["expires_at_ms"]
+            else:
+                MONOTONIC[0] = composition.prepared["expires_monotonic_ns"]
+
+    monkeypatch.setattr(composition.journal, "_acquire_flock", delayed)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start()
+    assert len(calls) == 3
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="NOT_FOUND"):
+        composition.journal.read(composition.approval["operation_key"])
+
+
 @pytest.mark.parametrize("field", ["reservation", "admission"])
 def test_start_rejects_missing_top_level_field(tmp_path, monkeypatch, inputs, field):
     composition = Composition(tmp_path, monkeypatch, inputs)

@@ -436,29 +436,35 @@ class ReleaseBrokerOwner:
                     "RELEASE_ROOT_JOURNAL_" + exc.code) from None
             existing_start = None
 
-        # Runtime and journal reads are blocking trust boundaries. Re-run the
-        # complete owner qualification and rebuild the frozen reservation from
-        # current physical facts immediately before START. The original token
-        # lifetime is never renewed.
-        state, effect, sealed, payload, current = self._private_inputs(frame, raw)
-        if _state_identity(state) != qualified_state_identity:
-            raise ReleaseConsumerError("RELEASE_PRECONDITIONS_CHANGED")
-        now = time.time_ns() // 1_000_000
-        monotonic = time.monotonic_ns()
-        if not payload["issued_at_ms"] <= now < payload["expires_at_ms"]:
-            raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
-        if not payload["issued_monotonic_ns"] <= monotonic < payload["expires_monotonic_ns"]:
-            raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
-        expected_reservation = self._reservation(
-            state, effect, sealed, payload, current,
-            token=frame.arguments["prepared_token"],
-            now=reservation["reserved_at_ms"],
-            monotonic=reservation["reserved_monotonic_ns"])
-        if (contract.canonical_release_bytes(reservation)
-                != contract.canonical_release_bytes(expected_reservation)
-                or evidence_admission["target_observation_digest"]
-                != state.target_observation_digest):
-            raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
+        # The journal invokes this only after acquiring the final operation
+        # lock and completing every blocking reservation/cancellation read.
+        # It returns the timestamp that is committed under that same lock.
+        def qualify_locked_start():
+            locked_state, locked_effect, locked_sealed, locked_payload, locked_current = (
+                self._private_inputs(frame, raw)
+            )
+            if _state_identity(locked_state) != qualified_state_identity:
+                raise ReleaseConsumerError("RELEASE_PRECONDITIONS_CHANGED")
+            locked_now = time.time_ns() // 1_000_000
+            locked_monotonic = time.monotonic_ns()
+            if not (locked_payload["issued_at_ms"]
+                    <= locked_now < locked_payload["expires_at_ms"]):
+                raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+            if not (locked_payload["issued_monotonic_ns"]
+                    <= locked_monotonic < locked_payload["expires_monotonic_ns"]):
+                raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+            expected_reservation = self._reservation(
+                locked_state, locked_effect, locked_sealed, locked_payload,
+                locked_current, token=frame.arguments["prepared_token"],
+                now=reservation["reserved_at_ms"],
+                monotonic=reservation["reserved_monotonic_ns"])
+            if (contract.canonical_release_bytes(reservation)
+                    != contract.canonical_release_bytes(expected_reservation)
+                    or evidence_admission["target_observation_digest"]
+                    != locked_state.target_observation_digest):
+                raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
+            return (locked_now if existing_start is None
+                    else existing_start["started_at_ms"])
         before = reservation["before"]
         identity = {
             "operation_key": reservation["operation_key"],
@@ -486,9 +492,9 @@ class ReleaseBrokerOwner:
                 approval=evidence_approval,
                 reservation=reservation,
                 root_qualification_digest=reservation_digest,
-                started_at_ms=(
-                    now if existing_start is None else existing_start["started_at_ms"]
-                ),
+                started_at_ms=(now if existing_start is None
+                               else existing_start["started_at_ms"]),
+                commit_qualifier=qualify_locked_start,
             )
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(

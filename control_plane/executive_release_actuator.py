@@ -1361,7 +1361,10 @@ class _ExecutiveReleaseActuatorJournal:
         reservation: Mapping[str, Any],
         root_qualification_digest: str,
         started_at_ms: int,
+        commit_qualifier: Callable[[], int] | None = None,
     ) -> ReleaseRecord:
+        if commit_qualifier is not None and not callable(commit_qualifier):
+            raise TypeError("commit qualifier must be callable")
         supplied = _exact_mapping(identity, _IDENTITY_FIELDS, "INVALID_IDENTITY")
         candidate = {
             "schema": _SCHEMA,
@@ -1435,12 +1438,34 @@ class _ExecutiveReleaseActuatorJournal:
             )
             if cancellation_identity:
                 _fail("RESERVATION_CONFLICT")
-            # 6. Delegate exact-replay/recovery to the protected _create_locked.
+            # 6. A composed owner may requalify current authority and time
+            # after every blocking journal read, while this operation lock is
+            # still held. Existing callers retain the original fixed timestamp.
+            locked_validated = validated
+            locked_raw = raw
+            if commit_qualifier is not None:
+                locked_candidate = {
+                    **candidate,
+                    "started_at_ms": commit_qualifier(),
+                }
+                locked_validated = _validate_record(locked_candidate)
+                locked_raw = canonical_release_bytes(locked_validated)
+                self._validate_start_reservation_joins(
+                    locked_validated,
+                    stored_reservation,
+                    validated_approval,
+                )
+                self._validate_admission_joins(
+                    locked_validated["admission"],
+                    stored_reservation,
+                    operation_key,
+                )
+            # 7. Delegate exact-replay/recovery to the protected _create_locked.
             return self._create_locked(
                 root_descriptor,
                 record_name,
-                raw,
-                validated,
+                locked_raw,
+                locked_validated,
             )
 
         return self._locked(
