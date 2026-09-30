@@ -2596,3 +2596,69 @@ describe("host-composition repair regressions (R4)", () => {
     expect(replacement.readOperation).not.toHaveBeenCalled();
   });
 });
+
+describe("Pro/native command recovery integration", () => {
+  it("Check status recovers a synchronous transport failure without resubmitting or reloading", async () => {
+    const made = makeCommandBinding({
+      submit: vi.fn(() => { throw new Error("transport setup failed synchronously"); }),
+    });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await launchFromWork(user);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
+    expect(made.binding.store.read("owner-a")?.operationKey).toBe("op-1");
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"));
+    expect(window.location.search).toContain("root_job_id=JOB-L");
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    expect(made.readOperation).toHaveBeenCalledWith(expect.objectContaining({ operationKey: "op-1", kind: "launch", targetKey: "opaque-launch" }), expect.any(AbortSignal));
+    expect(made.binding.store.read("owner-a")).toBeNull();
+  });
+});
+
+describe("Pro/native Conversation recovery", () => {
+  it("recovers an uncertain message by exact readback, clearing only its draft", async () => {
+    const made = makeCommandBinding({ submit: vi.fn(() => { throw new Error("synchronous message transport loss"); }) });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "Preserve accepted scope A and report the native result.");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("Preserve accepted scope A and report the native result.");
+    expect(made.binding.store.read("owner-a")).toMatchObject({ operationKey: "op-1", kind: "message", targetKey: "opaque-session" });
+    expect(screen.getByRole("button", { name: "Sending…" }).hasAttribute("disabled")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe(""));
+    expect(made.prepare).toHaveBeenCalledTimes(1);
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    expect(made.readOperation).toHaveBeenCalledWith(expect.objectContaining({ operationKey: "op-1", kind: "message", targetKey: "opaque-session" }), expect.any(AbortSignal));
+    expect(made.binding.store.read("owner-a")).toBeNull();
+    expect(window.location.search).not.toContain("JOB-L");
+  });
+
+  it("keeps message recovery usable after its first read throws synchronously", async () => {
+    const readOperation = vi.fn().mockImplementationOnce(() => { throw new Error("synchronous read failure"); }).mockImplementation(async (pointer: OperationPointer): Promise<EffectReceipt> => ({ ...pointer, disposition: "accepted" }));
+    const made = makeCommandBinding({ submit: vi.fn(async () => { throw new Error("lost acknowledgement"); }), readOperation });
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Conversation" }));
+    await user.type(screen.getByLabelText("Message"), "Continue the already accepted implementation.");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
+    expect(made.binding.store.read("owner-a")?.operationKey).toBe("op-1");
+    await user.click(screen.getByRole("button", { name: "Check status" }));
+    await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(2));
+    expect(made.submit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(made.binding.store.read("owner-a")).toBeNull());
+  });
+});

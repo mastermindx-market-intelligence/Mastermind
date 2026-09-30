@@ -163,6 +163,12 @@ describe("closed Work document", () => {
     });
   });
 
+  it("accepts an owner-supplied null Runtime root used by installed workspace reads", () => {
+    const value: any = structuredClone(workAvailable());
+    value.lifecycle_source.runtime.root = null;
+    expect(decodeWorkDocument(value)?.lifecycle_source?.runtime.root).toBeNull();
+  });
+
   it("accepts the typed 503 unavailable body but never turns it into an empty healthy queue", () => {
     const decoded = decodeWorkDocument(workUnavailable());
     expect(decoded).toMatchObject({
@@ -217,6 +223,28 @@ describe("closed Work document", () => {
     }],
     ["acceptance promotion", (d: any) => (d.groups.QUEUED[0].acceptance.state = "ACCEPTED")],
     ["count mismatch", (d: any) => (d.coverage.count = 3)],
+    ["coverage completeness drift", (d: any) => {
+      d.coverage.truncated = true;
+      d.coverage.total = 4;
+      d.coverage.completeness = "COMPLETE";
+    }],
+    ["budget shape drift", (d: any) => {
+      d.lifecycle_source.runtime.acquisition.budgets.extra = 1;
+    }],
+    ["truncation shape drift", (d: any) => {
+      d.lifecycle_source.runtime.acquisition.truncation.roots = "yes";
+    }],
+    ["provenance vocabulary drift", (d: any) => {
+      d.lifecycle_source.runtime.acquisition.provenance.state = "MYSTERY";
+    }],
+    ["queue effect reason drift", (d: any) => {
+      d.effect_exception = {
+        value: "UNKNOWN",
+        scope: "RUNTIME_CURRENT_WORKER",
+        observable: false,
+        reason: "no_exception_observed",
+      };
+    }],
     ["runtime drift", (d: any) => (d.source_observation.runtime.after = 10)],
     ["unknown refusal", (d: any) => (d.reason_codes = ["mystery"])],
   ])("refuses %s", (_name, mutate) => {
@@ -266,6 +294,82 @@ describe("closed Work document", () => {
   it("does not coerce unsupported COO ownership into a Work row", () => {
     const value: any = structuredClone(workAvailable());
     value.groups.QUEUED[0].next_actor.value = "NEEDS_COO";
+    expect(decodeWorkDocument(value)).toBeNull();
+  });
+});
+
+
+// Reject JSON containers before any enum membership or precedence calculation.
+// A string-looking array is not a scalar enum; objects must never throw.
+describe("Work source recovery regressions", () => {
+  const malformed = [
+    ["array", (token: string) => [token]],
+    ["object", (_token: string) => ({ toString: "not-a-function" })],
+  ] as const;
+  const enumFields = [
+    ["availability", "AVAILABLE"],
+    ["coverage.completeness", "COMPLETE"],
+    ["effect_exception.value", "NONE"],
+    ["effect_exception.reason", "no_exception_observed"],
+    ["source_observation.state", "SAME"],
+    ["source_observation.runtime.state", "SAME"],
+    ["lifecycle_source.runtime.acquisition.provenance.state", "COMPLETE"],
+    ["lifecycle_source.runtime.acquisition.generation.state", "SAME"],
+    ["groups.QUEUED.0.lifecycle.status", "QUEUED"],
+    ["groups.QUEUED.0.next_actor.reason", "no_producer"],
+    ["groups.QUEUED.0.capacity.reason", "no_producer"],
+    ["groups.QUEUED.0.effect.reason", "no_producer"],
+  ] as const;
+  for (const [kind, wrap] of malformed) {
+    it.each(enumFields)(`rejects ${kind} enum at %s without throwing`, (path, token) => {
+      const value: any = workAvailable();
+      const keys = path.split(".");
+      let target = value;
+      for (const key of keys.slice(0, -1)) target = target[key];
+      target[keys[keys.length - 1]] = wrap(token);
+      expect(() => decodeWorkDocument(value)).not.toThrow();
+      expect(decodeWorkDocument(value)).toBeNull();
+    });
+    it.each(["effect", "next_actor"] as const)(`rejects ${kind} evidence token in %s`, (column) => {
+      const value: any = workAvailable();
+      value.groups.QUEUED[0][column] = {
+        value: wrap(column === "effect" ? "EFFECT_UNKNOWN" : "NEEDS_SOL"),
+        source: column === "effect" ? "EFFECT_PRODUCER" : "AGENT_OS",
+        reason: "evidence_supplied",
+        evidence_ref: digest("f"),
+        observed_at: value.generated_at,
+      };
+      expect(() => decodeWorkDocument(value)).not.toThrow();
+      expect(decodeWorkDocument(value)).toBeNull();
+    });
+    it(`rejects ${kind} evidence reason without throwing`, () => {
+      const value: any = workAvailable();
+      value.groups.QUEUED[0].effect = {
+        value: "NONE", source: "EFFECT_PRODUCER",
+        reason: wrap("evidence_supplied"), evidence_ref: digest("f"),
+        observed_at: value.generated_at,
+      };
+      expect(() => decodeWorkDocument(value)).not.toThrow();
+      expect(decodeWorkDocument(value)).toBeNull();
+    });
+  }
+  it("preserves correctly declared truncated coverage", () => {
+    const value = workAvailable();
+    value.lifecycle_source!.runtime.acquisition.truncation.roots = true;
+    value.coverage = { count: 4, total: null, truncated: true, completeness: "PARTIAL" };
+    expect(decodeWorkDocument(value)?.coverage).toEqual(value.coverage);
+  });
+  it("refuses a complete claim over partial acquisition provenance", () => {
+    const value = workAvailable();
+    value.lifecycle_source!.runtime.acquisition.provenance.state = "PARTIAL";
+    expect(decodeWorkDocument(value)).toBeNull();
+    value.coverage.completeness = "PARTIAL";
+    expect(decodeWorkDocument(value)?.coverage.completeness).toBe("PARTIAL");
+  });
+  it("refuses a known total on truncated coverage", () => {
+    const value = workAvailable();
+    value.lifecycle_source!.runtime.acquisition.truncation.roots = true;
+    value.coverage = { count: 4, total: 4, truncated: true, completeness: "PARTIAL" };
     expect(decodeWorkDocument(value)).toBeNull();
   });
 });

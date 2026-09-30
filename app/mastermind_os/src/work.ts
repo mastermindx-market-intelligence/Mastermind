@@ -131,17 +131,31 @@ export interface WorkSourceObservation {
 export interface WorkLifecycleSource {
   schema: "mastermind.fabric_job_root_list.v2";
   runtime: {
-    root: string;
+    root: string | null;
     db_present: boolean;
     identity: string | null;
     acquisition: {
       schema: "mastermind.fabric_runtime_acquisition.v1";
-      query: Record<string, unknown>;
-      owner: string;
+      query: { kind: "root_discovery"; root_job_id?: null };
+      owner: "executive_runtime";
       snapshot_digest: string | null;
-      budgets: Record<string, unknown>;
-      truncation: Record<string, unknown>;
-      provenance: Record<string, unknown>;
+      budgets: {
+        roots: 64;
+        jobs: 17;
+        attempts_per_job: 20;
+        attempts_total: 340;
+        creation_events_per_job: 1;
+      };
+      truncation: {
+        jobs: boolean;
+        attempt_job_ids: string[];
+        roots: boolean;
+        projection: boolean;
+      };
+      provenance: {
+        state: "COMPLETE" | "PARTIAL";
+        unjoined_job_ids: string[];
+      };
       generation: {
         schema: "mastermind.runtime_read_observation.v1";
         state: "SAME" | "UNKNOWN" | "CONFLICT";
@@ -180,12 +194,17 @@ export interface WorkDocument {
   reason_codes: string[];
 }
 
+// Membership tests must never coerce JSON containers into accepted enum tokens.
+function enumToken(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 function observation(value: unknown): WorkSourceObservation | null {
   if (
     !record(value) ||
     !exact(value, ["schema", "state", "selection", "control_room", "runtime"]) ||
     value.schema !== "mastermind.workspace_source_observation.v1" ||
-    !["SAME", "UNKNOWN", "CONFLICT"].includes(String(value.state)) ||
+    !["SAME", "UNKNOWN", "CONFLICT"].includes(enumToken(value.state)) ||
     value.selection !== null
   )
     return null;
@@ -224,7 +243,7 @@ function observation(value: unknown): WorkSourceObservation | null {
         "snapshot_digest",
       ]) ||
       runtime.schema !== "mastermind.runtime_read_observation.v1" ||
-      !["SAME", "UNKNOWN", "CONFLICT"].includes(String(runtime.state)) ||
+      !["SAME", "UNKNOWN", "CONFLICT"].includes(enumToken(runtime.state)) ||
       !nullable(runtime.source_identity, text) ||
       !nullable(runtime.before, integer) ||
       !nullable(runtime.after, integer) ||
@@ -251,6 +270,77 @@ function observation(value: unknown): WorkSourceObservation | null {
   return value as unknown as WorkSourceObservation;
 }
 
+const WORK_BUDGET_KEYS = [
+  "roots",
+  "jobs",
+  "attempts_per_job",
+  "attempts_total",
+  "creation_events_per_job",
+] as const;
+const WORK_BUDGET_VALUES = {
+  roots: 64,
+  jobs: 17,
+  attempts_per_job: 20,
+  attempts_total: 340,
+  creation_events_per_job: 1,
+} as const;
+const WORK_TRUNCATION_KEYS = [
+  "jobs",
+  "attempt_job_ids",
+  "roots",
+  "projection",
+] as const;
+const WORK_PROVENANCE_KEYS = ["state", "unjoined_job_ids"] as const;
+const JOB_ID = /^JOB-[0-9]{1,9}$/;
+
+function rootDiscoveryQuery(value: unknown): boolean {
+  if (!record(value)) return false;
+  const hasRoot = Object.hasOwn(value, "root_job_id");
+  if (
+    !(exact(value, ["kind"]) || exact(value, ["kind", "root_job_id"])) ||
+    value.kind !== "root_discovery"
+  )
+    return false;
+  return !hasRoot || value.root_job_id === null;
+}
+
+function workBudgets(value: unknown): boolean {
+  if (!record(value) || !exact(value, WORK_BUDGET_KEYS)) return false;
+  return WORK_BUDGET_KEYS.every(
+    (key) => value[key] === WORK_BUDGET_VALUES[key],
+  );
+}
+
+function jobIds(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === "string" && JOB_ID.test(item)) &&
+    new Set(value).size === value.length
+  );
+}
+
+function workTruncation(value: unknown): boolean {
+  return (
+    record(value) &&
+    exact(value, WORK_TRUNCATION_KEYS) &&
+    typeof value.jobs === "boolean" &&
+    jobIds(value.attempt_job_ids) &&
+    typeof value.roots === "boolean" &&
+    typeof value.projection === "boolean"
+  );
+}
+
+function workProvenance(value: unknown): boolean {
+  if (
+    !record(value) ||
+    !exact(value, WORK_PROVENANCE_KEYS) ||
+    !["COMPLETE", "PARTIAL"].includes(enumToken(value.state)) ||
+    !jobIds(value.unjoined_job_ids)
+  )
+    return false;
+  return value.state !== "COMPLETE" || value.unjoined_job_ids.length === 0;
+}
+
 function lifecycleSource(value: unknown): WorkLifecycleSource | null {
   if (
     !record(value) ||
@@ -260,7 +350,7 @@ function lifecycleSource(value: unknown): WorkLifecycleSource | null {
     !value.degraded.every((item) => typeof item === "string") ||
     !record(value.runtime) ||
     !exact(value.runtime, ["root", "db_present", "identity", "acquisition"]) ||
-    !text(value.runtime.root, 4096) ||
+    !nullable(value.runtime.root, (v) => text(v, 4096)) ||
     typeof value.runtime.db_present !== "boolean" ||
     !nullable(value.runtime.identity, text) ||
     !record(value.runtime.acquisition)
@@ -280,12 +370,11 @@ function lifecycleSource(value: unknown): WorkLifecycleSource | null {
     ]) ||
     acquisition.schema !== "mastermind.fabric_runtime_acquisition.v1" ||
     acquisition.owner !== "executive_runtime" ||
-    !record(acquisition.query) ||
-    acquisition.query.kind !== "root_discovery" ||
+    !rootDiscoveryQuery(acquisition.query) ||
     !nullable(acquisition.snapshot_digest, hash) ||
-    !record(acquisition.budgets) ||
-    !record(acquisition.truncation) ||
-    !record(acquisition.provenance) ||
+    !workBudgets(acquisition.budgets) ||
+    !workTruncation(acquisition.truncation) ||
+    !workProvenance(acquisition.provenance) ||
     !record(acquisition.generation)
   )
     return null;
@@ -293,7 +382,7 @@ function lifecycleSource(value: unknown): WorkLifecycleSource | null {
   if (
     !exact(generation, ["schema", "state", "source_identity", "before", "after"]) ||
     generation.schema !== "mastermind.runtime_read_observation.v1" ||
-    !["SAME", "UNKNOWN", "CONFLICT"].includes(String(generation.state)) ||
+    !["SAME", "UNKNOWN", "CONFLICT"].includes(enumToken(generation.state)) ||
     !nullable(generation.source_identity, text) ||
     !nullable(generation.before, integer) ||
     !nullable(generation.after, integer)
@@ -321,10 +410,10 @@ function nextActor(value: unknown): value is WorkColumn {
   if (value.value === "UNKNOWN")
     return (
       value.source === null &&
-      ["no_producer", "evidence_stale"].includes(String(value.reason))
+      ["no_producer", "evidence_stale"].includes(enumToken(value.reason))
     );
   return (
-    ["NEEDS_SOL", "NEEDS_WORKER"].includes(String(value.value)) &&
+    ["NEEDS_SOL", "NEEDS_WORKER"].includes(enumToken(value.value)) &&
     value.source === "AGENT_OS" &&
     value.reason === "evidence_supplied" &&
     value.evidence_ref !== null
@@ -341,7 +430,7 @@ function capacity(value: unknown): value is WorkColumn {
   if (value.value === "UNKNOWN")
     return (
       value.source === null &&
-      ["no_producer", "evidence_stale"].includes(String(value.reason))
+      ["no_producer", "evidence_stale"].includes(enumToken(value.reason))
     );
   if (value.value === "NOT_APPLICABLE")
     return (
@@ -367,14 +456,43 @@ function effect(value: unknown): value is WorkColumn {
   if (value.value === "UNKNOWN")
     return (
       value.source === null &&
-      ["no_producer", "evidence_stale"].includes(String(value.reason))
+      ["no_producer", "evidence_stale"].includes(enumToken(value.reason))
     );
   return (
-    ["NONE", "EFFECT_UNKNOWN"].includes(String(value.value)) &&
+    ["NONE", "EFFECT_UNKNOWN"].includes(enumToken(value.value)) &&
     value.source === "EFFECT_PRODUCER" &&
-    ["evidence_supplied", "evidence_supplied_stale"].includes(String(value.reason)) &&
+    ["evidence_supplied", "evidence_supplied_stale"].includes(enumToken(value.reason)) &&
     value.evidence_ref !== null
   );
+}
+
+function queueEffectConsistent(value: WorkDocument["effect_exception"]): boolean {
+  if (value.value === "NONE")
+    return value.observable === false && value.reason === "no_exception_observed";
+  if (value.value === "EFFECT_UNKNOWN")
+    return value.observable === true && value.reason === "exception_observed";
+  return (
+    value.observable === false &&
+    ["control_room_missing", "autonomy_missing", "read_refused"].includes(
+      value.reason,
+    )
+  );
+}
+
+function coverageConsistent(
+  coverage: WorkDocument["coverage"],
+  source: WorkLifecycleSource,
+): boolean {
+  const { truncation, provenance } = source.runtime.acquisition;
+  const truncated = truncation.roots || truncation.projection;
+  if (coverage.truncated !== truncated) return false;
+  if (truncated && coverage.total !== null) return false;
+  if (coverage.total !== null && coverage.total !== coverage.count) return false;
+  const completeness =
+    truncated || coverage.total === null || provenance.state === "PARTIAL"
+      ? "PARTIAL"
+      : "COMPLETE";
+  return coverage.completeness === completeness;
 }
 
 function expectedGroup(value: WorkRow): WorkGroup {
@@ -419,7 +537,7 @@ function row(value: unknown, group: WorkGroup): WorkRow | null {
     value.group !== group ||
     !record(value.lifecycle) ||
     !exact(value.lifecycle, ["status", "source", "orchestration_role", "depth"]) ||
-    !STATUSES.has(String(value.lifecycle.status)) ||
+    !STATUSES.has(enumToken(value.lifecycle.status)) ||
     value.lifecycle.source !== "EXECUTIVE_RUNTIME" ||
     !nullable(value.lifecycle.orchestration_role, text) ||
     !integer(value.lifecycle.depth) ||
@@ -462,19 +580,19 @@ export function decodeWorkDocument(input: unknown): WorkDocument | null {
     ]) ||
     value.schema !== "mastermind.workspace_work_queue.v1" ||
     !timestamp(value.generated_at) ||
-    !["AVAILABLE", "UNAVAILABLE"].includes(String(value.availability)) ||
+    !["AVAILABLE", "UNAVAILABLE"].includes(enumToken(value.availability)) ||
     !record(value.effect_exception) ||
     !exact(value.effect_exception, ["value", "scope", "observable", "reason"]) ||
-    !["UNKNOWN", "NONE", "EFFECT_UNKNOWN"].includes(String(value.effect_exception.value)) ||
+    !["UNKNOWN", "NONE", "EFFECT_UNKNOWN"].includes(enumToken(value.effect_exception.value)) ||
     value.effect_exception.scope !== "RUNTIME_CURRENT_WORKER" ||
     typeof value.effect_exception.observable !== "boolean" ||
-    !EFFECT_REASONS.has(String(value.effect_exception.reason)) ||
+    !EFFECT_REASONS.has(enumToken(value.effect_exception.reason)) ||
     !record(value.coverage) ||
     !exact(value.coverage, ["count", "total", "truncated", "completeness"]) ||
     !integer(value.coverage.count) ||
     !nullable(value.coverage.total, integer) ||
     typeof value.coverage.truncated !== "boolean" ||
-    !["COMPLETE", "PARTIAL"].includes(String(value.coverage.completeness)) ||
+    !["COMPLETE", "PARTIAL"].includes(enumToken(value.coverage.completeness)) ||
     !record(value.groups) ||
     !exact(value.groups, WORK_GROUP_ORDER) ||
     !Array.isArray(value.reason_codes) ||
@@ -513,6 +631,7 @@ export function decodeWorkDocument(input: unknown): WorkDocument | null {
   const isAvailable = value.availability === "AVAILABLE";
   if (isAvailable) {
     if (!source || observed.state !== "SAME" || !observed.runtime) return null;
+    if (!coverageConsistent(value.coverage as WorkDocument["coverage"], source)) return null;
     const acquisition = source.runtime.acquisition;
     const generation = acquisition.generation;
     if (
@@ -544,22 +663,7 @@ export function decodeWorkDocument(input: unknown): WorkDocument | null {
       return null;
   }
 
-  if (
-    value.effect_exception.value === "EFFECT_UNKNOWN" &&
-    (value.effect_exception.observable !== true ||
-      value.effect_exception.reason !== "exception_observed")
-  )
-    return null;
-  if (
-    value.effect_exception.value === "NONE" &&
-    (value.effect_exception.observable !== false ||
-      value.effect_exception.reason !== "no_exception_observed")
-  )
-    return null;
-  if (
-    value.effect_exception.value === "UNKNOWN" &&
-    value.effect_exception.observable !== false
-  )
+  if (!queueEffectConsistent(value.effect_exception as WorkDocument["effect_exception"]))
     return null;
 
   return {

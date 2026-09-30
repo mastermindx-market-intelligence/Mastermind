@@ -429,8 +429,7 @@ export class OperationController {
         this._releaseInflight(op.epoch);
       }
     };
-    this._inflight = run();
-    return this._inflight;
+    return this._startInflight(run);
   }
 
   /**
@@ -488,8 +487,25 @@ export class OperationController {
         this._releaseInflight(epoch);
       }
     };
-    this._inflight = run();
-    return this._inflight;
+    return this._startInflight(run);
+  }
+
+  /** Register the join before invoking a host that may throw or re-enter. */
+  private _startInflight(
+    run: () => Promise<OperationState>,
+  ): Promise<OperationState> {
+    let resolve!: (state: OperationState) => void;
+    let reject!: (reason: unknown) => void;
+    const inflight = new Promise<OperationState>((done, failed) => {
+      resolve = done;
+      reject = failed;
+    });
+    // Do not defer the host call: install the join first, then preserve the
+    // original immediate-call semantics. A synchronous failure may release
+    // it, and synchronous invalidation must not be overwritten on return.
+    this._inflight = inflight;
+    void run().then(resolve, reject);
+    return inflight;
   }
 
   private _track(
