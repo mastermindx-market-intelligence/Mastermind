@@ -36,7 +36,7 @@ class ReleaseOwnerSnapshot:
     """Owner-verified live inputs, never a request or authority by its type.
 
     The installed factory must pin root-owned descriptors and rehash policy,
-    key, staged bytes and preconditions on every invocation. C1 deliberately
+    key, staged resources and preconditions on every invocation. C1 deliberately
     has no default factory or caller-configurable staging/path resolver.
     """
     policy: ReleaseControllerPolicy
@@ -70,9 +70,12 @@ _APPROVAL_PRECONDITIONS = frozenset({"approval_evidence_digest", "grant_digest"}
 _PRIVATE_OPERATIONS = frozenset({
     "reserve_release_prestart", "start_reserved_release", "read_release_closure"
 })
-_READ_KEYS = frozenset({"schema", "operation", "approval"})
 _RESERVE_KEYS = frozenset({"schema", "operation", "arguments", "principal", "approval"})
-_START_KEYS = _RESERVE_KEYS | {"reservation", "admission"}
+_START_KEYS = frozenset({
+    "schema", "operation", "arguments", "principal", "approval",
+    "reservation", "admission_evidence",
+})
+_CLOSURE_KEYS = frozenset({"schema", "operation", "admission_evidence"})
 _EVIDENCE_KEYS = frozenset({"approval", "admission", "preconditions", "root_qualification_digest"})
 _BEFORE_KEYS = frozenset({
     "release_commit", "release_tree", "installed_manifest_digest",
@@ -95,12 +98,44 @@ def _state_identity(state):
     return contract.canonical_release_bytes(fields)
 
 
+def _validate_evidence(raw_evidence):
+    """Validate the exact four-field strict evidence envelope.
+
+    Root never opens Runtime or calls a reader. The admission evidence is
+    carried over the wire from a qualified installed Control peer and must
+    match the immutable reservation exactly.
+    """
+    if not isinstance(raw_evidence, Mapping):
+        raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
+    try:
+        keys = set(raw_evidence)
+    except TypeError:
+        raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID") from None
+    if keys != _EVIDENCE_KEYS:
+        raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
+    try:
+        evidence_approval = contract.validate_approval_evidence(raw_evidence["approval"])
+        evidence_admission = contract.validate_admission(raw_evidence["admission"])
+        evidence_preconditions = contract.validate_precondition_manifest(raw_evidence["preconditions"])
+    except (TypeError, ValueError, contract.ReleaseContractError):
+        raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID") from None
+    if (type(raw_evidence["root_qualification_digest"]) is not str
+            or len(raw_evidence["root_qualification_digest"]) != 64
+            or any(char not in "0123456789abcdef"
+                   for char in raw_evidence["root_qualification_digest"])):
+        raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
+    return evidence_approval, evidence_admission, evidence_preconditions
+
+
+def _evidence_digest(reservation):
+    return hashlib.sha256(contract.canonical_release_bytes(reservation)).hexdigest()
+
+
 class ReleaseBrokerOwner:
     """Installed private composition for two closed, non-install operations."""
     def __init__(self, snapshot: Callable[[str], ReleaseOwnerSnapshot], *,
                  history_trust: Callable[[], ReleaseHistoryTrust] | None = None,
-                 root_journal: _ExecutiveReleaseActuatorJournal | None = None,
-                 admission_reader: object | None = None):
+                 root_journal: _ExecutiveReleaseActuatorJournal | None = None):
         if not callable(snapshot):
             raise TypeError("installed snapshot factory required")
         self._snapshot = snapshot
@@ -110,10 +145,6 @@ class ReleaseBrokerOwner:
         if root_journal is not None and type(root_journal) is not _ExecutiveReleaseActuatorJournal:
             raise TypeError("installed root journal required")
         self._root_journal = root_journal
-        if admission_reader is not None and not callable(getattr(
-                admission_reader, "read_admission_evidence", None)):
-            raise TypeError("installed admission reader required")
-        self._admission_reader = admission_reader
 
     def _fresh(self, state, transition):
         observed = _state_identity(state)
@@ -142,14 +173,14 @@ class ReleaseBrokerOwner:
             _qualify_connection(connection, "control")
         return verified
 
-    def _history_only(self, approval, connection):
+    def _history_only_identity(self, approval, connection):
         if self._history_trust is None:
             raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
         original_identity = None
         for _ in range(2):
             trust = self._history_trust()
-            if (type(trust) is not ReleaseHistoryTrust
-                    or type(trust.codec) is not _OwnerReleaseCodec):
+            if type(trust) is not ReleaseHistoryTrust \
+                    or type(trust.codec) is not _OwnerReleaseCodec:
                 raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
             identity = (trust.owner_installation_id, trust.target_ref,
                         trust.input_identity_digest)
@@ -161,21 +192,26 @@ class ReleaseBrokerOwner:
                     or verified["target_ref"] != trust.target_ref):
                 raise ReleaseConsumerError("RELEASE_APPROVAL_IDENTITY_MISMATCH")
             _qualify_connection(connection, "control")
+        return verified, original_identity
+
+    def _history_only(self, approval, connection):
+        verified, _identity = self._history_only_identity(approval, connection)
         return verified
 
     def _private_read_frame(self, raw, connection):
-        approval_evidence = None
+        """Closure frame: schema, operation, admission_evidence only.
+
+        The sealed approval is obtained solely from the evidence object.
+        No path, runtime, socket, callback, or selector may be supplied.
+        """
         if (type(raw) is not dict or raw.get("schema") != BROKER_SCHEMA
                 or raw.get("operation") != "read_release_closure"
-                or set(raw) != _READ_KEYS):
+                or set(raw) != _CLOSURE_KEYS):
             raise ReleaseConsumerError("RELEASE_BROKER_FRAME_INVALID")
-        try:
-            approval_evidence = contract.validate_approval_evidence(
-                raw["approval"])
-        except (TypeError, ValueError, contract.ReleaseContractError):
-            raise ReleaseConsumerError("RELEASE_BROKER_FRAME_INVALID") from None
         _qualify_connection(connection, "control")
-        return approval_evidence
+        evidence_approval, _evidence_admission, _evidence_preconditions = (
+            _validate_evidence(raw["admission_evidence"]))
+        return self._history_only_identity(evidence_approval, connection)
 
     def _closure_status(
             self, journal_record, reservation, reservation_digest,
@@ -505,22 +541,34 @@ class ReleaseBrokerOwner:
         frame = self._private_frame(raw, connection)
         state, effect, sealed, payload, current = self._private_inputs(frame, raw)
         qualified_state_identity = _state_identity(state)
-        if self._admission_reader is None:
-            raise ReleaseConsumerError("RELEASE_ROOT_START_UNAVAILABLE")
         now = time.time_ns() // 1_000_000
         if not payload["issued_at_ms"] <= now < payload["expires_at_ms"]:
             raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
         if not payload["issued_monotonic_ns"] <= time.monotonic_ns() < payload["expires_monotonic_ns"]:
             raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+        # The strict private wire carries complete canonical evidence;
+        # admission_evidence replaces the rejected top-level admission and the
+        # Runtime/admission-reader seam. Evidence approval must byte-equal the
+        # sealed approval already validated above.
+        evidence_approval, evidence_admission, evidence_preconditions = (
+            _validate_evidence(raw["admission_evidence"]))
+        if (contract.canonical_release_bytes(evidence_approval)
+                != contract.canonical_release_bytes(sealed)):
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
         try:
             supplied_reservation = contract.validate_release_prestart_reservation(
                 raw["reservation"], expected_approval=sealed)
-            supplied_admission = contract.validate_admission(raw["admission"])
         except (TypeError, ValueError, contract.ReleaseContractError):
             raise ReleaseConsumerError("RELEASE_ROOT_START_EVIDENCE_INVALID") from None
+        if (contract.canonical_release_bytes(evidence_preconditions)
+                != contract.canonical_release_bytes(supplied_reservation["preconditions"])):
+            # Evidence preconditions must match the stored reservation
+            # preconditions exactly; mismatch means caller supplied evidence
+            # that does not join to the on-disk PRESTART.
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
         try:
             self._root_journal._validate_admission_joins(
-                supplied_admission, supplied_reservation,
+                evidence_admission, supplied_reservation,
                 frame.arguments["operation_key"])
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
@@ -531,7 +579,7 @@ class ReleaseBrokerOwner:
             monotonic=supplied_reservation["reserved_monotonic_ns"])
         if (contract.canonical_release_bytes(supplied_reservation)
                 != contract.canonical_release_bytes(expected_reservation)
-                or supplied_admission["target_observation_digest"] != state.target_observation_digest):
+                or evidence_admission["target_observation_digest"] != state.target_observation_digest):
             raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
         try:
             reservation = self._root_journal.read_prestart_reservation(
@@ -541,29 +589,12 @@ class ReleaseBrokerOwner:
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
         if contract.canonical_release_bytes(reservation) != contract.canonical_release_bytes(supplied_reservation):
             raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
-        try:
-            evidence = self._admission_reader.read_admission_evidence(
-                approved_transition_ref=reservation["approved_transition_ref"],
-                request_fingerprint=reservation["request_fingerprint"])
-        except Exception:
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_UNAVAILABLE") from None
-        if not isinstance(evidence, Mapping) or set(evidence) != _EVIDENCE_KEYS:
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
-        try:
-            evidence_approval = contract.validate_approval_evidence(evidence["approval"])
-            evidence_admission = contract.validate_admission(evidence["admission"])
-            evidence_preconditions = contract.validate_precondition_manifest(evidence["preconditions"])
-        except (TypeError, ValueError, contract.ReleaseContractError):
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID") from None
-        if (type(evidence["root_qualification_digest"]) is not str
-                or len(evidence["root_qualification_digest"]) != 64):
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
-        reservation_digest = hashlib.sha256(
-            contract.canonical_release_bytes(reservation)).hexdigest()
-        if (evidence["root_qualification_digest"] != reservation_digest
-                or contract.canonical_release_bytes(evidence_approval) != contract.canonical_release_bytes(sealed)
-                or contract.canonical_release_bytes(evidence_admission) != contract.canonical_release_bytes(supplied_admission)
-                or contract.canonical_release_bytes(evidence_preconditions) != contract.canonical_release_bytes(reservation["preconditions"])):
+        reservation_digest = _evidence_digest(reservation)
+        if (raw["admission_evidence"]["root_qualification_digest"] != reservation_digest
+                or evidence_admission["target_observation_digest"]
+                != reservation["target_observation_digest"]
+                or contract.canonical_release_bytes(evidence_preconditions)
+                != contract.canonical_release_bytes(reservation["preconditions"])):
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
         try:
             existing_start = self._root_journal.read(
@@ -576,7 +607,10 @@ class ReleaseBrokerOwner:
 
         # The journal invokes this only after acquiring the final operation
         # lock and completing every blocking reservation/cancellation read.
-        # It returns the timestamp that is committed under that same lock.
+        # The owner requalifies the installed Control peer after those reads
+        # and immediately before create/replay. State identity, prepared
+        # lifetime, reservation, admission, and peer identity are all
+        # revalidated under the existing final qualifier.
         def qualify_locked_start():
             locked_state, locked_effect, locked_sealed, locked_payload, locked_current = (
                 self._private_inputs(frame, raw)
@@ -601,7 +635,31 @@ class ReleaseBrokerOwner:
                     or evidence_admission["target_observation_digest"]
                     != locked_state.target_observation_digest):
                 raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
-            return (locked_now if existing_start is None
+            # Every owner snapshot and other potentially blocking validation
+            # above has completed. Recheck the serving Control peer at the
+            # last possible point before create/replay persists STARTED.
+            _qualify_connection(connection, "control")
+            final_now = time.time_ns() // 1_000_000
+            final_monotonic = time.monotonic_ns()
+            if not (locked_payload["issued_at_ms"]
+                    <= final_now < locked_payload["expires_at_ms"]):
+                raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+            if not (locked_payload["issued_monotonic_ns"]
+                    <= final_monotonic < locked_payload["expires_monotonic_ns"]):
+                raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+            final_principal = _current_principal(frame.principal, final_now)
+            final_grant = authorize_release_transition(
+                frame.principal, locked_effect, locked_state.policy,
+                target_ref=locked_state.target_ref, now_ms=final_now)
+            if (locked_sealed["principal_projection"] != final_principal
+                    or locked_sealed["grant"]["authority_policy_hash"]
+                    != final_grant["authority_policy_hash"]
+                    or locked_sealed["grant"]["policy_generation"]
+                    != final_grant["policy_generation"]
+                    or not locked_sealed["created_at_ms"]
+                    <= final_now < locked_sealed["expires_at_ms"]):
+                raise ReleaseConsumerError("RELEASE_APPROVAL_NOT_CURRENT")
+            return (final_now if existing_start is None
                     else existing_start["started_at_ms"])
         before = reservation["before"]
         identity = {
@@ -646,8 +704,16 @@ class ReleaseBrokerOwner:
     def _read_release_closure(self, raw, connection):
         if self._root_journal is None:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_UNAVAILABLE")
-        approval_evidence = self._private_read_frame(raw, connection)
-        sealed = self._history_only(approval_evidence, connection)
+        # The closure request carries only schema, operation, and
+        # admission_evidence. The approval is obtained solely from the
+        # evidence object and must pass the installed history-trust proof.
+        sealed, initial_history_identity = self._private_read_frame(raw, connection)
+        evidence_approval, evidence_admission, evidence_preconditions = (
+            _validate_evidence(raw["admission_evidence"]))
+        # Evidence approval must byte-equal the verified sealed approval.
+        if (contract.canonical_release_bytes(evidence_approval)
+                != contract.canonical_release_bytes(sealed)):
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
         operation_key = sealed["operation_key"]
         try:
             (reservation,
@@ -659,45 +725,19 @@ class ReleaseBrokerOwner:
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
-        if self._admission_reader is None:
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_UNAVAILABLE")
-        try:
-            evidence = self._admission_reader.read_admission_evidence(
-                approved_transition_ref=reservation["approved_transition_ref"],
-                request_fingerprint=reservation["request_fingerprint"])
-        except ExecutiveReleaseActuatorJournalError:
-            raise
-        except (TypeError, ValueError, OSError, KeyError, AttributeError):
-            raise ReleaseConsumerError(
-                "RELEASE_ADMISSION_EVIDENCE_UNAVAILABLE") from None
-        if not isinstance(evidence, Mapping) or set(evidence) != _EVIDENCE_KEYS:
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
-        try:
-            evidence_approval = contract.validate_approval_evidence(evidence["approval"])
-            evidence_admission = contract.validate_admission(evidence["admission"])
-            evidence_preconditions = contract.validate_precondition_manifest(
-                evidence["preconditions"])
-        except (TypeError, ValueError, contract.ReleaseContractError):
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID") from None
-        if (type(evidence["root_qualification_digest"]) is not str
-                or len(evidence["root_qualification_digest"]) != 64):
-            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
-        reservation_digest = hashlib.sha256(
-            initial_reservation_bytes).hexdigest()
+        reservation_digest = hashlib.sha256(initial_reservation_bytes).hexdigest()
+        if raw["admission_evidence"]["root_qualification_digest"] != reservation_digest:
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
         try:
             self._root_journal._validate_admission_joins(
                 evidence_admission, reservation, operation_key)
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
-        if (evidence["root_qualification_digest"] != reservation_digest
-                or contract.canonical_release_bytes(evidence_approval)
-                != contract.canonical_release_bytes(sealed)
-                or evidence_admission["target_observation_digest"]
+        if (evidence_admission["target_observation_digest"]
                 != reservation["target_observation_digest"]
                 or contract.canonical_release_bytes(evidence_preconditions)
-                != contract.canonical_release_bytes(
-                    reservation["preconditions"])):
+                != contract.canonical_release_bytes(reservation["preconditions"])):
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
         # Coherent root-history snapshot under the existing operation lock:
         # revalidates the reservation sidecar (canonical bytes must equal
@@ -717,6 +757,15 @@ class ReleaseBrokerOwner:
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+        # After all blocking reads, reverify the signed approval and compare
+        # the resident owner/history identity. Historical closure deliberately
+        # does not restage the expired transition or depend on staging files.
+        current_sealed, current_history_identity = self._history_only_identity(
+            evidence_approval, connection)
+        if (current_history_identity != initial_history_identity
+                or contract.canonical_release_bytes(current_sealed)
+                != contract.canonical_release_bytes(sealed)):
+            raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
         if journal_record is None and cancellation_record is None:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_NOT_FOUND")
         cancellation = (
@@ -737,6 +786,9 @@ class ReleaseBrokerOwner:
                 raise ReleaseConsumerError("RELEASE_ROOT_HISTORY_AMBIGUOUS")
         if (terminal_status is None) == (cancellation is None):
             raise ReleaseConsumerError("RELEASE_ROOT_HISTORY_AMBIGUOUS")
+        # Requalify the installed Control peer immediately before the typed
+        # response returns to the qualified caller.
+        _qualify_connection(connection, "control")
         return {"schema": BROKER_SCHEMA,
                 "operation": "read_release_closure", "ok": True,
                 "approval": sealed.to_dict(),

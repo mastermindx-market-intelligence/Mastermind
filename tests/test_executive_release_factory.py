@@ -278,3 +278,222 @@ def test_original_approval_verifies_after_identical_restart_and_expiry(image):
     assert result["approval"] == approved["approval"]
     with pytest.raises(consumer.ReleaseConsumerError):
         restarted._snapshot(image["transition"])
+
+
+# ---------------------------------------------------------------------------
+# Journal attachment plumbing tests (R10 bounded leaf).
+#
+# The factory attaches the fixed production ExecutiveReleaseActuatorJournal
+# to ReleaseBrokerOwner only when the resident-verified control.json bytes
+# carry literal boolean ``release_control_armed: true``. Missing or literal
+# ``false`` keeps the factory disarmed for the existing template/default;
+# any non-boolean value refuses composition. The actuator module is added
+# to the verified manifest closure so its bytes are bound to the installed
+# source/config identity. The snapshot keeps its fail-closed defaults
+# (actuator_generation=0, target_observation_digest='', before={}) so
+# attaching a journal is plumbing only and cannot constitute START readiness.
+# ---------------------------------------------------------------------------
+
+
+def _set_release_control_armed(image, value):
+    """Rewrite control.json with the given release_control_armed and rebuild evidence.
+
+    Only mutates the resident control + evidence + manifest entry for
+    control.json. Tests that need snapshot re-derivation must rebuild the
+    staged bundle themselves; otherwise build_release_owner alone is enough
+    to exercise the journal attachment plumbing.
+    """
+    raw = json.loads(image["files"][f._CONTROL])
+    if value is _UNSET:
+        raw.pop("release_control_armed", None)
+    else:
+        raw["release_control_armed"] = value
+    image["files"][f._CONTROL] = json.dumps(raw).encode()
+    # Keep the manifest's entry for control.json in lockstep with the bytes
+    # so the file's manifest sha does not falsely drift.
+    manifest_path = image["config"].release_root / ".executive-release-manifest.json"
+    manifest = json.loads(image["files"][manifest_path])
+    for entry in manifest["entries"]:
+        if entry["path"] == "config/control.json":
+            entry["sha256"] = f._hash(image["files"][f._CONTROL])
+            entry["size"] = len(image["files"][f._CONTROL])
+    image["files"][manifest_path] = json.dumps(manifest).encode()
+    # Rebuild the resident evidence's two digests that bind to control.json.
+    evidence = f.file_document(image["files"][f._EVIDENCE])
+    evidence["control_config_digest"] = f._hash(image["files"][f._CONTROL])
+    evidence["installed_configuration_digest"] = f._digest({
+        "schema": "mastermind.executive_installed_configuration_set/v1",
+        "files": [{"path": name, "sha256": f._hash(image["files"][path])}
+                  for name, path in (("config/control.json", f._CONTROL),
+                  ("config/authority_map.yml", image["config"].release_root / "config/authority_map.yml"),
+                  ("config/privileged-broker.json", f._BROKER_CONFIG))]})
+    image["files"][f._EVIDENCE] = wire(evidence)
+
+
+_UNSET = object()
+
+
+def test_factory_default_fixture_attaches_no_root_journal(image):
+    """Missing release_control_armed flag leaves the factory disarmed."""
+    root = f.build_release_owner(image["config"])
+    assert root._root_journal is None
+    # The ReleaseOwnerSnapshot dataclass defaults to the fail-closed
+    # zero/empty values; the factory must not fabricate any of them.
+    from control_plane.executive_release_owner import ReleaseOwnerSnapshot
+    sentinel = ReleaseOwnerSnapshot.__dataclass_fields__
+    assert sentinel["actuator_generation"].default == 0
+    assert sentinel["target_observation_digest"].default == ""
+    assert sentinel["before"].default_factory is dict
+
+
+def test_factory_literal_false_attaches_no_root_journal(image):
+    _set_release_control_armed(image, False)
+    root = f.build_release_owner(image["config"])
+    assert root._root_journal is None
+
+
+def test_factory_literal_true_attaches_fixed_production_journal(image):
+    _set_release_control_armed(image, True)
+    root = f.build_release_owner(image["config"])
+    assert root._root_journal is not None
+    # Exactly one fixed production journal at the production root.
+    assert str(root._root_journal._root) == "/var/db/mastermind-executive/release-actuator/journal"
+    assert root._root_journal._expected_uid == 0
+    assert root._root_journal._lock_timeout > 0
+
+
+@pytest.mark.parametrize("bad", ["true", 1, 0, 1.0, [True], {"x": True}, None, "yes"])
+def test_factory_refuses_nonboolean_control_armed(image, bad):
+    _set_release_control_armed(image, bad)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        f.build_release_owner(image["config"])
+
+
+def test_factory_resident_control_drift_after_composition_refuses(image):
+    """After a successful armed composition, mutating control.json refuses."""
+    _set_release_control_armed(image, True)
+    root = f.build_release_owner(image["config"])
+    assert root._root_journal is not None
+    # Toggle the flag off; resident identity now diverges from baseline.
+    _set_release_control_armed(image, False)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        root._history_trust()
+
+
+def test_factory_actuator_dependency_in_manifest(image):
+    """The actuator module must be present in the verified manifest closure."""
+    manifest = json.loads(
+        image["files"][image["config"].release_root / ".executive-release-manifest.json"]
+    )
+    paths = [entry["path"] for entry in manifest["entries"]]
+    assert "control_plane/executive_release_actuator.py" in paths
+
+
+def test_factory_refuses_when_actuator_dependency_omitted_from_manifest(image):
+    manifest = json.loads(
+        image["files"][image["config"].release_root / ".executive-release-manifest.json"]
+    )
+    manifest["entries"] = [
+        e for e in manifest["entries"]
+        if e["path"] != "control_plane/executive_release_actuator.py"
+    ]
+    image["files"][image["config"].release_root / ".executive-release-manifest.json"] = (
+        json.dumps(manifest).encode()
+    )
+    with pytest.raises(consumer.ReleaseConsumerError):
+        f.build_release_owner(image["config"])
+
+
+def test_factory_refuses_when_actuator_dependency_bytes_tampered(image):
+    """Tampering with the actuator source bytes refuses (manifest sha mismatch)."""
+    actuator_path = image["config"].release_root / "control_plane/executive_release_actuator.py"
+    image["files"][actuator_path] = b"tampered actuator content\n"
+    with pytest.raises(consumer.ReleaseConsumerError):
+        f.build_release_owner(image["config"])
+
+
+def test_factory_no_runtime_or_reader_or_socket_seam():
+    """The factory must not import Runtime, create new readers, or open sockets."""
+    import ast
+    from control_plane import executive_release_actuator as actuator
+    forbidden_roots = {
+        "control_plane.executive_runtime",
+        "control_plane.runtime",
+    }
+    forbidden_runtime_symbols = {
+        "Runtime", "RuntimeStore", "RuntimeReadBinding",
+        "ServiceRuntimeNamespaceCustody",
+    }
+    sources = [
+        ("factory", f.__file__),
+        ("actuator", actuator.__file__),
+    ]
+    for label, path in sources:
+        with open(path, "r", encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), filename=path)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.name
+                    assert name not in forbidden_roots, (
+                        f"{label} imports {name!r}; forbidden runtime root")
+                    for sym in forbidden_runtime_symbols:
+                        assert not (name == sym
+                                     or name.endswith("." + sym)), (
+                            f"{label} imports {name!r}; forbidden runtime symbol")
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                assert module not in forbidden_roots, (
+                    f"{label} imports from {module!r}; forbidden runtime root")
+                for sym in forbidden_runtime_symbols:
+                    assert sym not in {alias.name for alias in node.names}, (
+                        f"{label} imports {sym!r} from {module!r}")
+    # Also ensure the factory source does not construct new sockets or readers.
+    factory_src = open(f.__file__, "r", encoding="utf-8").read()
+    for forbidden in (
+        "socket.socket(",
+        "socket.create_server(",
+        "socket.create_connection(",
+        "RuntimeReadBinding(",
+        "ServiceRuntimeNamespaceCustody(",
+        "RuntimeStore(",
+    ):
+        assert forbidden not in factory_src, (
+            f"factory source must not call {forbidden!r}")
+
+
+def test_factory_armed_journal_keeps_default_snapshot_and_cannot_start(image):
+    """Arming the factory attaches the journal but the default snapshot's
+    zero/empty actuator_generation / target_observation_digest / before={}
+    cannot satisfy the owner-side physical observation requirement, and the
+    journal root is never opened (no composition-time mutation)."""
+    _set_release_control_armed(image, True)
+    root = f.build_release_owner(image["config"])
+    assert root._root_journal is not None
+    # The dataclass defaults are exactly the fail-closed zero/empty values.
+    from control_plane.executive_release_owner import ReleaseOwnerSnapshot
+    sentinel = ReleaseOwnerSnapshot.__dataclass_fields__
+    assert sentinel["actuator_generation"].default == 0
+    assert sentinel["target_observation_digest"].default == ""
+    assert sentinel["before"].default_factory is dict
+    # The attached journal has the fixed production root, expects uid 0,
+    # and was constructed without side effects (no root directory open).
+    journal = root._root_journal
+    assert str(journal._root) == "/var/db/mastermind-executive/release-actuator/journal"
+    assert journal._expected_uid == 0
+    assert journal._lock_timeout > 0
+    # The existing public commit path remains disarmed with the journal
+    # attached; this is the canonical "no unintended side effects" check.
+    with pytest.raises(consumer.ReleaseConsumerError):
+        root.handle(
+            {
+                **ingress.project_frame(
+                    "commit_prepared_release_transition",
+                    {"operation_key": "armed-default-snapshot",
+                     "prepared_token": "synthetic-prepared-token"},
+                    principal=image["principal"]),
+                "schema": consumer.BROKER_SCHEMA,
+                "approval": None,
+            },
+            None,
+        )

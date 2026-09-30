@@ -30,6 +30,7 @@ BROKER_SCHEMA = "mastermind.executive_release_broker/v1"
 _BROKER_RESPONSE_CAPABILITY = object()
 _RESERVATION_RESPONSE_CAPABILITY = object()
 _FRESH_RELEASE_ADMISSION_CAPABILITY = object()
+_CANONICAL_UNRESOLVED_EVIDENCE_CAPABILITY = object()
 _START_RESPONSE_CAPABILITY = object()
 
 
@@ -123,6 +124,10 @@ class _FreshReleaseAdmission(_ProcessLocalReleaseEvidence):
     def _consume(self):
         # The one-shot bit is consumed even when preflight or transport fails.
         # There is no serialization, copy, restore, or public retry selector.
+        # A fork may inherit a locked mutex. Refuse that process before waiting.
+        if (getattr(self, "receiver_pid", None) != os.getpid()
+                or getattr(self, "_capability", None) is not _FRESH_RELEASE_ADMISSION_CAPABILITY):
+            raise ReleaseConsumerError("RELEASE_FRESH_ADMISSION_REQUIRED")
         with self._lock:
             if (self._capability is not _FRESH_RELEASE_ADMISSION_CAPABILITY
                     or self.receiver_pid != os.getpid() or self._consumed):
@@ -133,6 +138,43 @@ class _FreshReleaseAdmission(_ProcessLocalReleaseEvidence):
             evidence = _joined_admission_evidence(
                 self.admission_evidence, approval, reservation)
             return frame, approval, reservation, evidence
+
+
+@dataclasses.dataclass(frozen=True, slots=True, repr=False, init=False)
+class _CanonicalUnresolvedReleaseEvidence(_ProcessLocalReleaseEvidence):
+    __getstate__ = _ProcessLocalReleaseEvidence.__getstate__
+    __setstate__ = _ProcessLocalReleaseEvidence.__setstate__
+
+    evidence_bytes: bytes
+    evidence_digest: str
+    _capability: object
+    receiver_pid: int
+    _consumed: bool
+    _lock: Any
+
+    def __init__(self, *args, **kwargs):
+        raise ReleaseConsumerError("RELEASE_CANONICAL_EVIDENCE_REQUIRED")
+
+    def _consume(self):
+        # Only the canonical unresolved-read path below issues this object.
+        # A child inheriting a held lock must fail without trying to acquire it.
+        code = "RELEASE_CANONICAL_EVIDENCE_REQUIRED"
+        if (getattr(self, "receiver_pid", None) != os.getpid()
+                or getattr(self, "_capability", None) is not _CANONICAL_UNRESOLVED_EVIDENCE_CAPABILITY):
+            raise ReleaseConsumerError(code)
+        with self._lock:
+            if (self.receiver_pid != os.getpid() or self._consumed
+                    or self._capability is not _CANONICAL_UNRESOLVED_EVIDENCE_CAPABILITY):
+                raise ReleaseConsumerError(code)
+            object.__setattr__(self, "_consumed", True)
+            raw = self.evidence_bytes
+            if (type(raw) is not bytes
+                    or hashlib.sha256(raw).hexdigest() != self.evidence_digest):
+                raise ReleaseConsumerError(code)
+            evidence = _validated_admission_evidence(contract.parse_release_json(raw))
+            if contract.canonical_release_bytes(evidence) != raw:
+                raise ReleaseConsumerError(code)
+            return evidence
 
 
 @dataclasses.dataclass(frozen=True, slots=True, repr=False)
@@ -192,7 +234,8 @@ def _validated_reservation_response(response):
     return frame, approval, reservation
 
 
-def _joined_admission_evidence(evidence, approval, reservation):
+def _validated_admission_evidence(evidence):
+    """Validate detached data only; this helper cannot issue a capability."""
     code = "RELEASE_ADMISSION_READBACK_UNKNOWN"
     if not isinstance(evidence, Mapping) or set(evidence) != {
             "approval", "admission", "preconditions", "root_qualification_digest"}:
@@ -200,6 +243,24 @@ def _joined_admission_evidence(evidence, approval, reservation):
     original = contract.validate_approval_evidence(evidence["approval"])
     admission = contract.validate_admission(evidence["admission"])
     preconditions = contract.validate_precondition_manifest(evidence["preconditions"])
+    digest = evidence["root_qualification_digest"]
+    if (type(digest) is not str or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)):
+        raise ReleaseConsumerError(code)
+    validated = MappingProxyType({
+        "approval": original, "admission": admission, "preconditions": preconditions,
+        "root_qualification_digest": digest,
+    })
+    # Keep the existing 16 KiB canonical-record bound for the entire evidence.
+    contract.canonical_release_bytes(validated)
+    return validated
+
+
+def _joined_admission_evidence(evidence, approval, reservation):
+    code = "RELEASE_ADMISSION_READBACK_UNKNOWN"
+    evidence = _validated_admission_evidence(evidence)
+    original, admission, preconditions = (
+        evidence["approval"], evidence["admission"], evidence["preconditions"])
     if (contract.canonical_release_bytes(original) != contract.canonical_release_bytes(approval)
             or contract.canonical_release_bytes(preconditions)
             != contract.canonical_release_bytes(reservation["preconditions"])
@@ -209,10 +270,18 @@ def _joined_admission_evidence(evidence, approval, reservation):
     # Pure protected validation only: no journal construction or filesystem IO.
     _ExecutiveReleaseActuatorJournal._validate_admission_joins(
         admission, reservation, approval["operation_key"])
-    return MappingProxyType({
-        "approval": original, "admission": admission, "preconditions": preconditions,
-        "root_qualification_digest": evidence["root_qualification_digest"],
-    })
+    return evidence
+
+
+def _bounded_private_payload(payload):
+    # Match the shared transport's actual ASCII encoding, including expansion
+    # of Unicode and the newline. Never widen the existing broker request cap.
+    from control_plane.executive_privileged_broker import _MAX_REQUEST_BYTES
+    encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                          allow_nan=False) + "\n").encode("ascii")
+    if len(encoded) > _MAX_REQUEST_BYTES:
+        raise ReleaseConsumerError("RELEASE_BROKER_REQUEST_TOO_LARGE")
+    return payload
 
 
 def _private_release_result(response, operation, approval, fields):
@@ -292,10 +361,10 @@ class ReleaseBrokerClient:
         public = ingress.project_frame(frame.operation, frame.arguments, principal=frame.principal)
         operation = "start_reserved_release"
         reply = _send_one_frame(
-            {"schema": BROKER_SCHEMA, "operation": operation,
+            _bounded_private_payload({"schema": BROKER_SCHEMA, "operation": operation,
              "arguments": public["arguments"], "principal": public["principal"],
              "approval": approval.to_dict(), "reservation": reservation.to_dict(),
-             "admission": evidence["admission"].to_dict()},
+             "admission_evidence": json.loads(contract.canonical_release_bytes(evidence))}),
             socket_path=DEFAULT_SOCKET, timeout_seconds=15, require_root_peer=True,
         )
         result = _private_release_result(
@@ -318,20 +387,23 @@ class ReleaseBrokerClient:
         return _RootReleaseStartResponse(
             approval, reservation, evidence["admission"], start, _START_RESPONSE_CAPABILITY)
 
-    def read_release_closure(self, *, approval) -> _RootReleaseResponse:
+    def read_release_closure(self, *, canonical_evidence) -> _RootReleaseResponse:
         """Private history query for the installed Control owner.
 
-        The original sealed approval is evidence, not a renewed Web principal.
-        This operation has no token, reservation, START, or effect selector.
+        Only the finalizer's canonical unresolved snapshot issues this one-shot
+        request. Its history data never renews a principal or authorizes START.
         """
         from control_plane.executive_privileged_client import (
             _send_one_frame, DEFAULT_SOCKET,
         )
-        original = contract.validate_approval_evidence(approval)
+        if type(canonical_evidence) is not _CanonicalUnresolvedReleaseEvidence:
+            raise ReleaseConsumerError("RELEASE_CANONICAL_EVIDENCE_REQUIRED")
+        evidence = canonical_evidence._consume()
+        original = evidence["approval"]
         operation = "read_release_closure"
         response = _send_one_frame(
-            {"schema": BROKER_SCHEMA, "operation": operation,
-             "approval": original.to_dict()},
+            _bounded_private_payload({"schema": BROKER_SCHEMA, "operation": operation,
+             "admission_evidence": json.loads(contract.canonical_release_bytes(evidence))}),
             socket_path=DEFAULT_SOCKET, timeout_seconds=15, require_root_peer=True,
         )
         if (type(response) is not dict or response.get("schema") != BROKER_SCHEMA
@@ -628,7 +700,17 @@ class ReleaseControlConsumer:
             # Detach before releasing the snapshot, even if a future reader
             # implementation accidentally exposes a mutable mapping.
             evidence = json.loads(original_bytes)
-        response = self.broker.read_release_closure(approval=evidence["approval"])
+        _validated_admission_evidence(evidence)
+        # Issue only here, after the exact canonical read snapshot has closed.
+        # No constructor, generic mint or restoration hook can issue/reissue it.
+        canonical = object.__new__(_CanonicalUnresolvedReleaseEvidence)
+        object.__setattr__(canonical, "evidence_bytes", original_bytes)
+        object.__setattr__(canonical, "evidence_digest", hashlib.sha256(original_bytes).hexdigest())
+        object.__setattr__(canonical, "_capability", _CANONICAL_UNRESOLVED_EVIDENCE_CAPABILITY)
+        object.__setattr__(canonical, "receiver_pid", os.getpid())
+        object.__setattr__(canonical, "_consumed", False)
+        object.__setattr__(canonical, "_lock", threading.Lock())
+        response = self.broker.read_release_closure(canonical_evidence=canonical)
         _validated_release_closure(response, evidence)
         with self.runtime.store.transaction() as connection:
             current = registry.read_unresolved_admission(connection)
