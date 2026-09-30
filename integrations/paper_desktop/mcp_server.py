@@ -101,7 +101,12 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
 
     @server.tool(annotations=read_annotations)
     async def paper_read(tool: str, arguments: dict, expected_snapshot: str | None = None) -> CallToolResult:
-        """Call an allowed Paper inspection/screenshot/JSX tool, never a document mutation."""
+        """Call an allowed read-only Paper tool, never a document mutation.
+
+        For a known exact target, get_basic_info with fileId returns that file's
+        guarded document snapshot for prepare/edit even when another file is
+        user-active or default active-file context is unavailable.
+        """
         if tool not in READ_TOOLS:
             return CallToolResult(content=[TextContent(type="text", text="TOOL_NOT_ALLOWED")], isError=True)
         return await asyncio.to_thread(run, "read", tool=tool, arguments=arguments,
@@ -131,9 +136,10 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
         @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True,
                                                 idempotentHint=False, openWorldHint=True))
         async def paper_edit(tool: str, arguments: dict, expected_snapshot: str, operation_id: str) -> CallToolResult:
-            """Mutate the explicitly approved active Paper design. Never auto-retry this action.
+            """Mutate an explicitly approved Paper target by exact fileId. Never auto-retry this action.
 
-            Caller must have current write permission for this logical mutation/target.
+            The target need not be the user's active Paper file. Caller must have
+            current write permission for this logical mutation/target.
             Other admitted sessions may modify disjoint targets in the same Paper file or page.
             Known same-board overlap should use disjoint node targets plus fresh re-read/re-plan;
             this operation/carrier fence is not a file-wide or page-wide lease.
