@@ -261,3 +261,39 @@ def test_native_failure_condition_survives_collection_and_reconciliation(configu
     c.request=lambda method,fields,**kwargs:({'session_reachable':True,'session_id':c.sid,'failure':native}
         if method=='reconcile' else request(method,fields,**kwargs))
     assert a.reconcile(g).recommended_failure_class.value==expected
+
+
+@pytest.mark.parametrize('model', ['best','BEST','default','DEFAULT','fable','FABLE',
+    'opus','OPUS','opusplan','OPUSPLAN','sonnet','SONNET','haiku','HAIKU','claude-opus-5-5'])
+def test_native_model_preflight_refuses_selectors_and_incompatible_runtime(configured, model):
+    a,c,p,e,g=configured
+    requested=replace(p,requested_model=model)
+    validation=a.validate_requested_profile(requested)
+    assert not validation.accepted
+    assert 'native model/runtime is not qualified' in validation.reasons
+    with pytest.raises(ClaudeOperatorError,match='requested native profile refused') as error:
+        a.start_session(operation_id=OperationId('ohf-op:model-refusal'),
+                        requested=requested,epoch=e,generation=g)
+    assert error.value.effect_unknown is False
+    assert not c.running and c.calls==[]
+    assert a._generations=={} and a._operations==set()
+
+
+def test_compatible_exact_native_model_preserves_zero_turn_initialization(configured):
+    a,c,p,e,g=configured
+    requested=replace(p,requested_model='claude-fable-5-1')
+    assert a.validate_requested_profile(requested).accepted
+    a.start_session(operation_id=OperationId('ohf-op:exact-model'),
+                    requested=requested,epoch=e,generation=g)
+    assert [fields['config']['model'] for method,fields in c.calls if method=='initialize']==['claude-fable-5-1']
+    assert not any(method=='begin_turn' for method,_ in c.calls)
+
+
+def test_native_requested_version_cannot_override_bound_runtime_floor(configured):
+    a,c,p,e,g=configured
+    requested=replace(p,requested_model='claude-opus-5-5',harness_version='2.1.280')
+    validation=a.validate_requested_profile(requested)
+    assert not validation.accepted
+    assert 'native profile differs from bound constructor' in validation.reasons
+    assert 'native model/runtime is not qualified' in validation.reasons
+    assert not c.running and not c.calls
