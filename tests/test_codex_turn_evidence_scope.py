@@ -45,10 +45,18 @@ def _cursor(turn, sequence=0):
 def test_second_native_turn_returns_only_its_own_events(tmp_path):
     with _fixture(tmp_path) as (harness, launch):
         first, second = _turn(harness, "turn-first"), _turn(harness, "turn-second")
+        state = harness.adapter._generations[first.process_generation_id]
+        # The serial fake server emits token usage after turn/completed.
+        # A subsequent RPC settles those notifications before snapshot equality.
+        def settle_fixture():
+            state.client.request("thread/turns/list", {
+                "threadId": state.provider_session_id})
         _begin(harness, launch, first)
+        settle_fixture()
         first_events, first_cursor = harness.adapter.read_events(_cursor(first))
         assert first_events
         _begin(harness, launch, second)
+        settle_fixture()
         second_events, second_cursor = harness.adapter.read_events(_cursor(second))
         assert second_events
         assert all(event.turn_id in {None, second.turn_id} for event in second_events)
