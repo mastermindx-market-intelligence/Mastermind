@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
 )
 from control_plane.worker_adapter import adapter_descriptor
 
@@ -700,12 +701,11 @@ class ModelRouter:
                 raise RoutingPolicyError(
                     f"worker alias {alias!r} requires an enabled autonomous provider"
                 )
-            if worker_eligible and execution_profile.execution_surface not in {
-                "codex-exec",
-                "codex-app-server",
-            }:
+            if worker_eligible and not adapter_supports_execution_surface(
+                provider.adapter_id, execution_profile.execution_surface
+            ):
                 raise RoutingPolicyError(
-                    f"worker alias {alias!r} requires an implemented Codex execution surface"
+                    f"worker alias {alias!r} has an adapter/execution-surface mismatch"
                 )
             model_aliases[alias] = ModelAlias(
                 model_alias=alias,
