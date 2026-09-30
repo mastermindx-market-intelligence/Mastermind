@@ -2861,3 +2861,347 @@ def test_competing_terminal_writers_only_one_generation(tmp_path, state):
         journal.read(record["operation_key"])["journal_generation"]
         == record["journal_generation"] + 1
     )
+
+
+# Request deadlines tighten only the existing journal; they never arm a host.
+@pytest.fixture
+def request_deadline_clock(monkeypatch):
+    from types import SimpleNamespace
+    clock = [1_000_000_000]
+    sleeps = []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += int(seconds * 1_000_000_000)
+    monkeypatch.setattr(actuator, "time", SimpleNamespace(
+        monotonic_ns=lambda: clock[0], monotonic=lambda: clock[0] / 1e9,
+        sleep=sleep))
+    return clock, sleeps
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, -1, 1.0, "12", float("nan"),
+                                  float("inf"), 1 << 63, 10 ** 1000])
+def test_request_deadline_invalid_before_any_journal_io(tmp_path, monkeypatch, bad):
+    journal = _journal(tmp_path / "absent")
+    touched = []
+    def unexpected(*args, **kwargs):
+        touched.append(True)
+        raise AssertionError("invalid deadline reached filesystem")
+    monkeypatch.setattr(journal, "_open_root", unexpected)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="INVALID_REQUEST_DEADLINE"):
+        journal.read(OPERATION_KEY, deadline_monotonic_ns=bad)
+    assert touched == []
+    assert not journal._root.exists()
+
+
+def test_request_deadline_bounds_local_lock_wait_and_preserves_legacy(
+        tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    calls = []
+    class UnavailableLock:
+        def acquire(self, *, timeout):
+            calls.append(timeout)
+            return False
+    monkeypatch.setattr(actuator, "_LOCAL_LOCK", UnavailableLock())
+    journal = _journal(tmp_path / "absent", lock_timeout=3)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="LOCK_TIMEOUT"):
+        journal.read(OPERATION_KEY, deadline_monotonic_ns=clock[0] + 100_000_000)
+    assert calls == [pytest.approx(0.1)]
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="LOCK_TIMEOUT"):
+        journal.read(OPERATION_KEY)
+    assert calls[-1] == pytest.approx(3)
+
+
+def test_request_deadline_clamps_flock_sleep_and_checks_immediate_success(
+        tmp_path, monkeypatch, request_deadline_clock):
+    clock, sleeps = request_deadline_clock
+    journal = _journal(tmp_path / "unused")
+    calls = []
+    def blocked(*args):
+        calls.append(True)
+        raise BlockingIOError()
+    monkeypatch.setattr(actuator.fcntl, "flock", blocked)
+    end = clock[0] + 1_000_000
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="DEADLINE"):
+        journal._acquire_flock(1, 99.0, deadline_monotonic_ns=end)
+    assert sleeps == [pytest.approx(0.001)]
+    assert calls == [True]
+    def late_success(*args):
+        clock[0] += 2_000_000
+    monkeypatch.setattr(actuator.fcntl, "flock", late_success)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="DEADLINE"):
+        journal._acquire_flock(1, 99.0, deadline_monotonic_ns=clock[0] + 1_000_000)
+
+
+def test_request_deadline_reservation_read_uses_same_endpoint(
+        tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    reservation, approval, _, _ = _reservation_fixture()
+    journal.reserve_prestart(reservation=reservation, approval=approval)
+    end = clock[0] + 1_000_000
+    original = journal._read_prestart_snapshot
+    endpoints = []
+    def late(*args, **kwargs):
+        endpoints.append(kwargs.get("deadline_monotonic_ns"))
+        result = original(*args, **kwargs)
+        clock[0] = end
+        return result
+    monkeypatch.setattr(journal, "_read_prestart_snapshot", late)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="DEADLINE"):
+        journal.read_prestart_reservation(OPERATION_KEY, approval=approval,
+                                         deadline_monotonic_ns=end)
+    assert endpoints == [end]
+    assert not _record_path(journal._root).exists()
+
+
+def test_request_deadline_after_qualifier_late_recovery_refuses_new_start(
+        tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    end = clock[0] + 1_000_000
+    original = journal._recover_linked_start
+    calls = []
+    def qualifier():
+        calls.append("qualified")
+        return 2_001
+    def late(*args, **kwargs):
+        assert calls == ["qualified"]
+        result = original(*args, **kwargs)
+        clock[0] = end
+        return result
+    monkeypatch.setattr(journal, "_recover_linked_start", late)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="DEADLINE"):
+        _start(journal, deadline_monotonic_ns=end, commit_qualifier=qualifier)
+    assert calls == ["qualified"]
+    assert not _record_path(journal._root).exists()
+    assert not list(journal._root.glob("*.start"))
+
+
+def test_request_deadline_late_stage_remains_for_exact_reconciliation(
+        tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    end = clock[0] + 1_000_000
+    original = journal._write_new
+    def late(root, name, raw):
+        result = original(root, name, raw)
+        if name.endswith(".start"):
+            clock[0] = end
+        return result
+    monkeypatch.setattr(journal, "_write_new", late)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="DEADLINE_EFFECT_UNKNOWN"):
+        _start(journal, deadline_monotonic_ns=end)
+    path = _record_path(journal._root)
+    staged = path.with_suffix(".start")
+    before = staged.read_bytes()
+    assert before and not path.exists()
+    monkeypatch.setattr(journal, "_write_new", original)
+    # A fresh legacy test call reconciles the exact candidate; no second stage.
+    recovered = _start(journal)
+    assert recovered["journal_generation"] == 1
+    assert path.read_bytes() == before
+    assert not staged.exists()
+
+
+def test_request_deadline_success_and_missing_option_remain_compatible(
+        tmp_path, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    end = clock[0] + 12_000_000_000
+    record = _start(journal, deadline_monotonic_ns=end)
+    assert journal.read(OPERATION_KEY, deadline_monotonic_ns=end) == record
+    assert journal.read(OPERATION_KEY) == record
+    assert _start(journal) == record
+
+
+@pytest.mark.parametrize("error", [
+    actuator.ExecutiveReleaseActuatorJournalError("CONFLICT"),
+    actuator.ExecutiveReleaseActuatorJournalError("RESERVATION_CONFLICT"),
+    actuator.ExecutiveReleaseActuatorJournalError("RECORD_REPLACED"),
+    ValueError("original failure"),
+])
+def test_request_deadline_cleanup_preserves_primary_exception_identity(
+        tmp_path, monkeypatch, request_deadline_clock, error):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    _start(journal)
+    end = clock[0] + 1_000_000
+    real_lock = actuator._LOCAL_LOCK
+    released = []
+
+    class LateReleaseLock:
+        def acquire(self, **kwargs):
+            return real_lock.acquire(**kwargs)
+
+        def release(self):
+            real_lock.release()
+            released.append(True)
+            clock[0] = end
+
+    monkeypatch.setattr(actuator, "_LOCAL_LOCK", LateReleaseLock())
+
+    def fail_operation(*args):
+        raise error
+
+    with pytest.raises(type(error)) as caught:
+        journal._locked(journal._name(OPERATION_KEY), fail_operation,
+                        create_root=False, deadline_monotonic_ns=end)
+    assert caught.value is error
+    assert released == [True]
+    assert not real_lock.locked()
+
+
+def test_request_deadline_success_crossing_unlock_still_refuses(
+        tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    record = _start(journal)
+    end = clock[0] + 1_000_000
+    real_lock = actuator._LOCAL_LOCK
+
+    class LateReleaseLock:
+        def acquire(self, **kwargs):
+            return real_lock.acquire(**kwargs)
+
+        def release(self):
+            real_lock.release()
+            clock[0] = end
+
+    monkeypatch.setattr(actuator, "_LOCAL_LOCK", LateReleaseLock())
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="^DEADLINE_EFFECT_UNKNOWN$"):
+        journal._locked(journal._name(OPERATION_KEY), lambda *args: record,
+                        create_root=False, deadline_monotonic_ns=end)
+    assert not real_lock.locked()
+
+
+@pytest.mark.parametrize("effect_unknown", [False, True])
+@pytest.mark.parametrize("error", [
+    actuator.ExecutiveReleaseActuatorJournalError("RECORD_METADATA"),
+    ValueError("original read failure"),
+])
+def test_request_deadline_descriptor_close_preserves_primary_exception_identity(
+        tmp_path, monkeypatch, request_deadline_clock, error, effect_unknown):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    _start(journal)
+    root, _ = journal._open_root(create=False)
+    end = clock[0] + 1_000_000
+    real_close = actuator.os.close
+    closed = []
+
+    def late_close(descriptor):
+        real_close(descriptor)
+        closed.append(descriptor)
+        clock[0] = end
+
+    def fail_metadata(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(actuator.os, "close", late_close)
+    monkeypatch.setattr(journal, "_check_descriptor", fail_metadata)
+    try:
+        with pytest.raises(type(error)) as caught:
+            journal._read_file(root, journal._name(OPERATION_KEY), required=True,
+                               deadline_monotonic_ns=end,
+                               deadline_effect_unknown=effect_unknown)
+        assert caught.value is error
+        assert len(closed) == 1
+    finally:
+        real_close(root)
+
+
+@pytest.mark.parametrize("effect_unknown,code", [
+    (False, "DEADLINE_EXCEEDED"), (True, "DEADLINE_EFFECT_UNKNOWN"),
+])
+def test_request_deadline_success_crossing_descriptor_close_still_refuses(
+        tmp_path, monkeypatch, request_deadline_clock, effect_unknown, code):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    _start(journal)
+    root, _ = journal._open_root(create=False)
+    end = clock[0] + 1_000_000
+    real_close = actuator.os.close
+    closed = []
+
+    def late_close(descriptor):
+        real_close(descriptor)
+        closed.append(descriptor)
+        clock[0] = end
+
+    monkeypatch.setattr(actuator.os, "close", late_close)
+    try:
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+            journal._read_file(root, journal._name(OPERATION_KEY), required=True,
+                               deadline_monotonic_ns=end,
+                               deadline_effect_unknown=effect_unknown)
+        assert caught.value.code == code
+        assert len(closed) == 1
+    finally:
+        real_close(root)
+
+
+def test_request_deadline_before_stage_retains_pre_effect_classification(
+        tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    end = clock[0] + 1_000_000
+    recover = journal._recover_linked_start
+
+    def late_recovery(*args, **kwargs):
+        result = recover(*args, **kwargs)
+        assert result is None
+        clock[0] = end
+        return result
+
+    monkeypatch.setattr(journal, "_recover_linked_start", late_recovery)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="^DEADLINE_EXCEEDED$"):
+        _start(journal, deadline_monotonic_ns=end)
+    assert not _record_path(journal._root).exists()
+    assert not list(journal._root.glob("*.start"))
+    assert not actuator._LOCAL_LOCK.locked()
+
+
+@pytest.mark.parametrize("phase", ["stage_read", "linked_read", "recovery_read"])
+def test_request_deadline_nested_post_effect_reads_retain_unknown_classification(
+        tmp_path, monkeypatch, request_deadline_clock, phase):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / "journal")
+    end = clock[0] + 1_000_000
+    final = _record_path(journal._root)
+    read_file = journal._read_file
+    if phase == "recovery_read":
+        unlink = journal._unlink_owned
+
+        def interrupted_unlink(root, name, *args):
+            if name.endswith(".start"):
+                raise actuator.ExecutiveReleaseActuatorJournalError("RECORD_PUBLISH")
+            return unlink(root, name, *args)
+
+        monkeypatch.setattr(journal, "_unlink_owned", interrupted_unlink)
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+            _start(journal)
+        monkeypatch.setattr(journal, "_unlink_owned", unlink)
+        assert final.stat().st_nlink == 2
+    tripped = []
+
+    def late_read(root, name, *args, **kwargs):
+        if phase == "stage_read":
+            selected = (name.endswith(".start") and kwargs.get("required")
+                        and kwargs.get("expected_links", 1) == 1)
+        else:
+            selected = kwargs.get("expected_links") == 2
+        if selected and not tripped:
+            tripped.append(name)
+            clock[0] = end
+        return read_file(root, name, *args, **kwargs)
+
+    monkeypatch.setattr(journal, "_read_file", late_read)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="^DEADLINE_EFFECT_UNKNOWN$"):
+        _start(journal, deadline_monotonic_ns=end)
+    assert tripped
+    assert final.exists() or final.with_suffix(".start").exists()
+    assert not actuator._LOCAL_LOCK.locked()
