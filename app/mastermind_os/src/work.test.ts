@@ -397,3 +397,13 @@ describe("Work root acquisition budget", () => {
     else expect(decoded).toBeNull();
   });
 });
+
+
+it.each([0, 1, -1, 0.5, false, "0", null])(
+  "only accepts root-discovery depth zero, not %s", (depth) => {
+    const value: any = workAvailable();
+    value.groups.QUEUED[0].lifecycle.depth = depth;
+    if (depth === 0) expect(decodeWorkDocument(value)).not.toBeNull();
+    else expect(decodeWorkDocument(value)).toBeNull();
+  },
+);

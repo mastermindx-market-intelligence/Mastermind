@@ -541,7 +541,7 @@ function row(value: unknown, group: WorkGroup): WorkRow | null {
     !STATUSES.has(enumToken(value.lifecycle.status)) ||
     value.lifecycle.source !== "EXECUTIVE_RUNTIME" ||
     !nullable(value.lifecycle.orchestration_role, text) ||
-    !integer(value.lifecycle.depth) ||
+    value.lifecycle.depth !== 0 ||
     !nextActor(value.next_actor) ||
     !capacity(value.capacity) ||
     !effect(value.effect) ||
