@@ -53,6 +53,18 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
                              coordination_scope="BOARD_ARTBOARD_NODE")
         except Refusal as exc:
             value = {"state": exc.code, "detail": exc.detail, "retry_allowed": False}
+            if action == "status" and exc.code == "DOCUMENT_UNAVAILABLE":
+                # Default active-file lookup failure is narrower than exact-file
+                # serviceability. Keep the refusal typed/error-visible while
+                # making the lawful one-shot bootstrap machine-readable even
+                # when a ChatGPT app is still using an older frozen tool description.
+                value.update({
+                    "context_scope": "DEFAULT_ACTIVE_FILE",
+                    "whole_paper_outage_proven": False,
+                    "exact_target_status": "UNKNOWN",
+                    "next_action_if_file_id_known": "paper_read:get_basic_info(fileId)",
+                    "retry_paper_inspect": False,
+                })
         if execution_binding is not None:
             value = dict(value, execution_binding=dict(execution_binding))
         bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}

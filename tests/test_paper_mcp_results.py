@@ -142,6 +142,21 @@ class McpResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(actual["retry_allowed"])
         self.assertEqual(actual["presentation_errors"], ["IMAGE_BLOCK_INVALID"])
 
+    async def test_default_context_refusal_names_exact_target_bootstrap_without_claiming_outage(self):
+        with patch.object(self.module, "execute",
+                          side_effect=self.module.Refusal("DOCUMENT_UNAVAILABLE")):
+            result = await self.invoke("paper_inspect", {})
+        self.assertTrue(result.isError)
+        payload = self.payload(result)
+        self.assertEqual(payload["state"], "DOCUMENT_UNAVAILABLE")
+        self.assertEqual(payload["context_scope"], "DEFAULT_ACTIVE_FILE")
+        self.assertFalse(payload["whole_paper_outage_proven"])
+        self.assertEqual(payload["exact_target_status"], "UNKNOWN")
+        self.assertEqual(payload["next_action_if_file_id_known"],
+                         "paper_read:get_basic_info(fileId)")
+        self.assertFalse(payload["retry_paper_inspect"])
+        self.assertFalse(payload["retry_allowed"])
+
     async def test_read_only_refusal_still_returns_typed_receipt(self):
         with patch.object(self.module, "execute", side_effect=self.module.Refusal("UPSTREAM_FORBIDDEN")):
             result = await self.invoke("paper_inspect", {})
