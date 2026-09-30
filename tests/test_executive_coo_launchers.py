@@ -107,3 +107,29 @@ def test_control_policy_and_grant_projection_are_stdlib_only(tmp_path):
         input=json.dumps(raw), capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == "STDLIB_CONTROL_OK"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_release_only_profile_rejects_dormant_coo_configuration(tmp_path, enabled):
+    """A role-isolated release listener must not carry an unused COO binding."""
+    from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
+    _, coo, _, _ = helpers.setup(tmp_path)
+    coo["missions"] = []
+    coo["binding"]["enabled"] = enabled
+    raw = install.base_document()
+    raw.update(coo=coo, executive_mcp_profile=RELEASE_CONTROL_PROFILE)
+    with pytest.raises(ValueError, match="Release control profile refuses optional mounts"):
+        entry.validate_document(raw)
+
+
+@pytest.mark.parametrize("profile", ["release-control-v1", "web-ceo-release-v1"])
+def test_release_profiles_do_not_select_coo_mission_builder(tmp_path, profile):
+    from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
+    from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
+    selected = {"release-control-v1": RELEASE_CONTROL_PROFILE,
+                "web-ceo-release-v1": WEB_CEO_RELEASE_PROFILE}[profile]
+    _, coo, _, _ = helpers.setup(tmp_path)
+    raw = install.base_document()
+    raw.update(coo=coo, executive_mcp_profile=selected)
+    with pytest.raises(ValueError):
+        entry.validate_document(raw)

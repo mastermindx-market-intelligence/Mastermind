@@ -13,6 +13,8 @@ from typing import Any
 from integrations.executive_mcp import schemas as legacy
 from integrations.executive_mcp import web_ceo as v2
 from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
+from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
+from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
 
 WEB_CEO_V3_PROFILE = "web_ceo_v3"
 WEB_CEO_V3_SERVER_NAME = legacy.SERVER_NAME
@@ -172,6 +174,8 @@ def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:
         v2.WEB_CEO_V2_PROFILE,
         WEB_CEO_V3_PROFILE,
         PERSONAL_READ_PROFILE,
+        RELEASE_CONTROL_PROFILE,
+        WEB_CEO_RELEASE_PROFILE,
     }:
         return value
     raise ValueError("installed Executive MCP profile is invalid")
