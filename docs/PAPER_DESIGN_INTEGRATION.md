@@ -53,9 +53,11 @@ The direct route may serve multiple ChatGPT accounts/workspaces concurrently wit
 Paper control plane. Each Business seat owns one exact tunnel-client process, loopback health endpoint,
 private bundle state and seat-specific transport singleton/launchd label. Every seat's MCP child still
 loads the same guarded bridge implementation and all Paper calls contend on the existing per-OS-user
-`desktop.lock`. This preserves one Paper Desktop execution plane and one shared safety/effect contract while
-allowing C1/C2/C3/C4/admin ChatGPT transports to remain connected simultaneously. No transport seat
-creates a Paper user identity, retry owner, queue, document lease or second auth plane.
+`desktop.lock`. Ordinary same-host overlap waits on that local mutex for at most 30 seconds before any
+Paper call is sent; prolonged contention fails closed as `DESKTOP_BUSY`. This preserves one Paper Desktop
+execution plane and one shared safety/effect contract while allowing C1/C2/C3/C4/admin ChatGPT transports
+to remain connected simultaneously. The bounded lock wait is not a retry owner or persistent queue, and no
+transport seat creates a Paper user identity, document lease or second auth plane.
 
 Seat-aware install schema v3 requires a safe stable `seat_id`; legacy v2 bundles remain backward
 compatible. v3 local binding requires the exact tunnel ID but does not require a guessed backend
@@ -169,10 +171,11 @@ partitioned; if overlap is known or suspected, re-read the current target and co
 or re-plan the next operation rather than acquiring a file-wide or page-wide lease.
 This contract is advertised as `MULTI_WRITER_PER_FILE_TARGET_SCOPED`.
 
-The local per-OS-user mutex remains only a bridge-call serialization primitive. It does
-not provide a distributed lock, and `paper_prepare` does not mint ownership or replace
-the existing Capacity/routing owner. A fresh snapshot is optimistic evidence for one
-bounded edit, not a global revision or collaboration lock. Every logical mutation still
+The local per-OS-user mutex remains only a bridge-call serialization primitive. Its
+bounded acquisition wait absorbs transient same-host session overlap before dispatch; it
+does not provide a distributed lock, effect retry, or persistent queue. `paper_prepare`
+does not mint ownership or replace the existing Capacity/routing owner. A fresh exact-target
+snapshot is optimistic evidence for one bounded edit, not a global revision or collaboration lock. Every logical mutation still
 binds to one carrier + operation identity until its effect is reconciled; `EFFECT_UNKNOWN`
 remains original-carrier sticky.
 

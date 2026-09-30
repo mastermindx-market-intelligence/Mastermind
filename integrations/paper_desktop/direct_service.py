@@ -263,8 +263,9 @@ Seat-aware v3 bundles use one transport singleton and launchd label per ChatGPT 
 all seats share bridge.py's per-OS-user Paper desktop mutex. This is not a second Paper plane.
 The selected tool surface is recorded in INSTALLATION.json. Optional paper_prepare
 binds one exact existing file through Paper's explicit `fileId` API, never a host helper,
-URL, path, or raw open_file transition. Paper must already be running. A fresh active-context
-snapshot and stable operation ID are required; prepare returns the exact target snapshot used
+URL, path, or raw open_file transition. Paper must already be running. A fresh exact-target
+snapshot from paper_read(get_basic_info, {fileId}) and stable operation ID are required;
+prepare does not depend on foreground-file state and returns the exact target snapshot used
 by the subsequent target-bound edit. Multiple admitted sessions/hosts may modify the same
 fileId, including the same page. Coordinate by board/artboard/node target and re-read/re-plan
 known overlap; the per-OS-user desktop mutex is a local call guard, not a document lease.

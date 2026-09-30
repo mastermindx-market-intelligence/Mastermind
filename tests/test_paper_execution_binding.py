@@ -143,12 +143,13 @@ class ExecutionBindingTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_prepare_then_background_read_and_edit_share_binding(self):
-        guard = self.snapshot(self.scope, A)["snapshot_sha256"]
+        guard = self.snapshot(self.scope, B)["snapshot_sha256"]
         prepared = self.p.prepare_document(B, guard, "bound-prepare-1", allow_prepare=True,
                      client=self.client, lock_root=self.root, _server_pin=None,
                      _catalog_pin=None, execution_binding=self.scope)
         self.assertFalse(prepared["open_attempted"])
-        self.assertFalse(prepared["target_active"])
+        self.assertIsNone(prepared["target_active"])
+        self.assertFalse(prepared["active_context_required"])
         target_guard = prepared["snapshot_sha256"]
         read = self.execute("read", tool="get_jsx", arguments={"fileId": B},
                             expected_snapshot=target_guard, execution_binding=self.scope)

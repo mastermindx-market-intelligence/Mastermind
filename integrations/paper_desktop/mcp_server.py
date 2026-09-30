@@ -113,10 +113,12 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
         async def paper_prepare(file_id: str, expected_snapshot: str, operation_id: str) -> CallToolResult:
             """Bind one existing Paper file by bare ID, never a URL or path.
 
-            Paper must already be running with an inspectable current file. Use
-            paper_inspect first and pass its fresh snapshot. Validates the exact
-            target without changing active-file focus or design content. Use the
-            returned target snapshot on this same installed host and service.
+            Paper must already be running. First call paper_read with
+            tool="get_basic_info" and arguments={"fileId": file_id}; pass the
+            returned document snapshot. The user's active file is not a prerequisite
+            and may change concurrently. Validates only the exact target without changing active-file focus
+            or design content. Use the returned target
+            snapshot on this same installed host and service.
             """
             return await asyncio.to_thread(run, "prepare", file_id=file_id,
                                            expected_snapshot=expected_snapshot,

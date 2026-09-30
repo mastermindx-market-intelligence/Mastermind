@@ -14,8 +14,11 @@ operator procedure. Use one existing tunnel, not a replacement for the Chairman-
 The previous blanket rule against a dedicated Paper ChatGPT app is superseded for this explicitly
 commissioned Business migration. It does not authorize unattended enrollment or publication.
 The direct build supports explicit-file target binding through `paper_prepare`: Paper 0.5.12 can
-read/write an addressed file by `fileId` while another file remains user-active, so direct prepare
-validates the target and returns its snapshot without using raw `open_file` as a focus surrogate.
+read/write an addressed file by `fileId` while another file remains user-active. Bootstrap the guard
+with `paper_read(tool="get_basic_info", arguments={"fileId": ...})`; a successful explicit read returns
+the bridge-created target snapshot. Direct prepare compares that target guard without requiring or
+querying the unrelated foreground file, and returns the exact target snapshot without using raw
+`open_file` as a focus surrogate.
 Retain one carrier per logical modifying operation, no fallback after a denial, and original-carrier
 reconciliation of EFFECT_UNKNOWN. This carrier fence is not a file-wide ownership lease. Source/config/
 stdio proof is not a working ChatGPT app or accepted cutover.
@@ -37,7 +40,9 @@ The OpenAI-side tunnel/workspace association remains authoritative and must be c
 account's attended app setup. Multiple admitted sessions/hosts may modify the same exact `fileId`,
 including the same page. Coordinate by board/artboard/node target: prefer disjoint boards, and when
 same-board work overlaps, partition node targets and re-read/re-plan the next operation. The host-global
-`desktop.lock` is only a local bridge-call mutex, never a distributed document or page lease.
+`desktop.lock` is only a local bridge-call mutex: transient contention may wait up to 30 seconds before
+dispatch, while prolonged contention refuses `DESKTOP_BUSY`. That wait is not a Paper retry, persistent
+queue, distributed document lock, or page lease.
 
 The Studio/RDC selection matrix below applies only to legacy/non-migrated seats. Do not apply it
 to evade a direct-app denial or unknown effect. At accepted Business cutover, Studio Direct's

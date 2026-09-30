@@ -2,8 +2,8 @@
 
 Reuses bridge.py's transport, desktop mutex, target snapshots and exact schema pin.
 Paper 0.5.12 can address files directly by fileId even when another file remains
-user-active. This projection accepts only one bare Paper ULID, checks fresh source
-context, validates the exact target read, and returns its snapshot for a subsequent
+user-active. This projection accepts only one bare Paper ULID, checks a fresh exact-target
+snapshot, validates the target read, and returns its snapshot for a subsequent
 explicit-file edit. It never calls raw vendor open_file, shell, app launchers, paths,
 URLs, page overrides, or a retry owner. Paper must already be running.
 """
@@ -49,11 +49,18 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
         client.initialize()
         catalog = client.catalog()
         schema = bridge.schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
-        before = bridge.snapshot(client, execution_binding=execution_binding)
-        if before["snapshot_sha256"] != expected_snapshot:
-            raise bridge.Refusal("DOCUMENT_CHANGED", "Inspect the current file before deciding on focus.")
+        # Bind and guard the exact requested file first. Another admitted
+        # session may change the user's foreground file, and Paper may have no usable
+        # default active-file context at all. Neither condition is relevant to an
+        # explicit-file operation and must not invalidate this target.
+        target = bridge.snapshot(client, file_id, execution_binding=execution_binding)
+        if target["snapshot_sha256"] != expected_snapshot:
+            raise bridge.Refusal(
+                "DOCUMENT_CHANGED",
+                "Re-read the exact target file before deciding on a new operation.",
+            )
         receipt = {
-            "file_id": file_id, "operation_id": operation_id, "before": before,
+            "file_id": file_id, "operation_id": operation_id, "before": target,
             "write_schema": schema, "write_qualified": schema["accepted_for_write"],
             "retry_allowed": False, "production_acceptance": False,
             "concurrency_rule": "MULTI_WRITER_PER_FILE_TARGET_SCOPED",
@@ -61,22 +68,16 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
             "same_page_multi_writer_allowed": True,
             "coordination_scope": "BOARD_ARTBOARD_NODE",
         }
-        if _file_id(before) == file_id:
-            return dict(receipt, state="PAPER_READY" if schema["accepted_for_write"] else "PAPER_READY_READ_ONLY",
-                        already_active=True, open_attempted=False, response_observed=True,
-                        target_observed=True, target_active=True, target_addressable=True,
-                        after=before, snapshot_sha256=before["snapshot_sha256"])
 
         # Paper 0.5.12 addresses files directly by fileId, including files that are
-        # not user-active. Do not use vendor open_file as a focus surrogate: its
-        # successful response is not a guarantee that the user's active file changes.
-        # Prepare therefore performs only a target-specific read/binding check and
-        # returns the target snapshot required by the subsequent explicit-file edit.
-        target = bridge.snapshot(client, file_id, execution_binding=execution_binding)
+        # not user-active. Do not use vendor open_file as a focus surrogate and do
+        # not query unrelated active context merely to qualify this target. Active
+        # state is therefore intentionally unknown rather than guessed.
         return dict(receipt,
                     state="PAPER_READY" if schema["accepted_for_write"] else "PAPER_READY_READ_ONLY",
-                    already_active=False, open_attempted=False, response_observed=True,
-                    response_ok=True, target_observed=True, target_active=False,
+                    already_active=None, open_attempted=False, response_observed=True,
+                    response_ok=True, target_observed=True, target_active=None,
                     target_addressable=True, prepare_mode="EXPLICIT_FILE_BINDING",
-                    result=None, after=target, snapshot_sha256=target["snapshot_sha256"],
+                    active_context_required=False, result=None, after=target,
+                    snapshot_sha256=target["snapshot_sha256"],
                     observation_error=None, reason=None)

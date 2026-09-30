@@ -79,9 +79,11 @@ loopback health endpoint, one log pair, and one launchd label
 `com.mastermind.paper-direct.business.<seat>`. The Paper Desktop process, bridge allowlists, schema
 pin, effect semantics and per-OS-user `~/.local/state/mastermind-paper/desktop.lock` remain shared.
 Consequently, two ChatGPT seats may keep their tunnel clients connected concurrently. Bridge calls
-from the same OS user still serialize through `desktop.lock`, and a colliding local call may fail
-closed as `DESKTOP_BUSY`; this is not a hidden queue, retry plane, or document lease. Multiple
-admitted sessions/hosts may modify the same exact `fileId`, including the same page. Prefer disjoint
+from the same OS user still serialize through `desktop.lock`. Ordinary transient overlap now waits
+for that local lock for at most 30 seconds before any Paper call is sent; prolonged contention fails
+closed as `DESKTOP_BUSY`. This bounded lock acquisition is not an effect retry, hidden persistent
+queue, or document lease. Multiple admitted sessions/hosts may modify the same exact `fileId`,
+including the same page. Prefer disjoint
 board/artboard/node targets; known same-board overlap is coordinated with disjoint node targets plus
 fresh re-read/re-plan. The advertised contract is `MULTI_WRITER_PER_FILE_TARGET_SCOPED`.
 
@@ -202,7 +204,7 @@ reference for the selected binary. Do not assume a future release retains identi
 and validate a new reviewed bundle instead of upgrading an active installation in place.
 
 
-## Host-bound fleet foundation: candidate install v4 / bridge runtime v7
+## Host-bound fleet foundation: candidate install v4 / bridge runtime v8
 
 This source adds the first host-affinity prerequisite for a multi-computer pool.
 It does **not** implement remote routing, qualify a computer, enroll a ChatGPT
@@ -253,13 +255,18 @@ app's normal reviewed action-snapshot refresh; no duplicate app is authorized.
 Previously `execute(read)` could pre-read the user-active file even when the
 caller supplied another `fileId`, making a valid background-target guard fail or
 letting an active-file guard check the wrong read context. Guarded reads now
-observe the explicit target first. This permits prepare -> screenshot/JSX/read
--> edit verification without moving the user's active file. The upstream read
-still uses the caller's allowed tool and exact arguments. No extra vendor tool,
-raw file-open capability, destructive action or automatic retry is introduced.
+observe the explicit target first. A successful explicit `get_basic_info` read
+also returns the bridge-created target document snapshot and write-schema receipt,
+so a caller can bootstrap the exact guard even when no default active-file context
+is usable. This permits read -> prepare -> screenshot/JSX/read -> edit verification
+without moving the user's active file. The upstream read still uses the caller's
+allowed tool and exact arguments. No extra vendor tool, raw file-open capability,
+destructive action or automatic retry is introduced.
 
-`paper_prepare` is an explicit-file binding check, not a UI-focus operation; its
-source description now reflects the implementation. Its conservative existing
+`paper_prepare` now compares that exact-target snapshot and does not gate on or
+query unrelated foreground-file state. It is an explicit-file binding check, not
+a UI-focus operation; its source description reflects the implementation. Active
+focus is reported as unknown rather than guessed. Its conservative existing
 annotation and workspace confirmation policy are unchanged in this source slice.
 
 ### Remaining multi-host implementation and acceptance

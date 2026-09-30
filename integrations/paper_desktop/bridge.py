@@ -25,6 +25,8 @@ ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
 PRIVATE_DIR_MODE = 0o700
+DESKTOP_LOCK_WAIT_SECONDS = 30.0
+DESKTOP_LOCK_POLL_SECONDS = 0.05
 SUPPORTED_SERVER = ("paper-desktop", "0.5.12")
 SUPPORTED_CATALOG_SHA256 = "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb"
 READ_TOOLS = frozenset({
@@ -87,17 +89,32 @@ def state_root() -> Path:
 
 
 @contextlib.contextmanager
-def desktop_lock(root: Path | None = None):
+def desktop_lock(root: Path | None = None, *, wait_seconds: float | None = None):
+    """Serialize one host's Paper calls while absorbing ordinary session overlap.
+
+    Waiting is only for the local OS lock before any upstream call is sent. It is
+    not an effect retry, queue, lease, or exactly-once mechanism. A bounded
+    timeout still fails closed with DESKTOP_BUSY and no Paper call dispatched.
+    """
     root = private_dir(root) if root else state_root()
     fd = os.open(root / "desktop.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o077:
             raise Refusal("UNSAFE_LOCK_FILE")
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise Refusal("DESKTOP_BUSY", "Another bridge call owns this desktop; no call sent.") from exc
+        limit = DESKTOP_LOCK_WAIT_SECONDS if wait_seconds is None else max(0.0, float(wait_seconds))
+        deadline = time.monotonic() + limit
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                if time.monotonic() >= deadline:
+                    raise Refusal(
+                        "DESKTOP_BUSY",
+                        f"Another bridge call held this desktop for more than {limit:g}s; no Paper call sent.",
+                    ) from exc
+                time.sleep(min(DESKTOP_LOCK_POLL_SECONDS, max(0.0, deadline - time.monotonic())))
         yield
     finally:
         os.close(fd)
@@ -469,7 +486,18 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
                         "before": before, "retry_allowed": False, "reason": "RESPONSE_NOT_OBSERVED"}
             raise
         if not editing:
-            return {"state": "TOOL_ERROR" if result.get("isError") else "OBSERVED", "result": result}
+            observed = {"state": "TOOL_ERROR" if result.get("isError") else "OBSERVED", "result": result}
+            if tool == "get_basic_info" and supplied_file is not None and not result.get("isError"):
+                # Bootstrap through the existing read schema when Paper has no
+                # default active-file context. Never infer a target from a name.
+                if not same_document({"kind": "file-id", "id": supplied_file}, basic_object(result)):
+                    raise Refusal("FILE_ID_MISMATCH", "Paper target read did not return the requested file.")
+                # Keep page-specific content in result, but obtain the guard
+                # from the same file-only snapshot constructor used by edits.
+                # Installed host/runtime provenance and the mutex are retained.
+                observed["document"] = snapshot(client, supplied_file, execution_binding=execution_binding)
+                observed["write_schema"] = schema
+            return observed
         if result.get("isError"):
             return {"state": "EFFECT_UNKNOWN", "operation_id": operation_id, "tool": tool,
                     "result": result, "before": before, "retry_allowed": False, "reason": "UPSTREAM_TOOL_ERROR_MAY_BE_PARTIAL"}

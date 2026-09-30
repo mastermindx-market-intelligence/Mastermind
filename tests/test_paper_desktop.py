@@ -252,10 +252,48 @@ class CoreTests(unittest.TestCase):
         for name in ["delete_nodes", "export", "launch_shell"]:
             with self.subTest(name=name), self.assertRaisesRegex(b.Refusal, "TOOL_NOT_ALLOWED"):
                 self.call(tool=name)
-    def test_lock_contention_refuses_without_upstream(self):
-        with b.desktop_lock(self.root), self.assertRaisesRegex(b.Refusal, "DESKTOP_BUSY"):
-            self.call()
+    def test_lock_contention_times_out_without_upstream(self):
+        with b.desktop_lock(self.root), patch.object(b, "DESKTOP_LOCK_WAIT_SECONDS", 0):
+            with self.assertRaisesRegex(b.Refusal, "DESKTOP_BUSY"):
+                self.call()
         self.assertEqual(self.client.calls, [])
+
+    def test_transient_lock_contention_waits_then_executes(self):
+        held = threading.Event()
+        release = threading.Event()
+        started = threading.Event()
+        result, errors = [], []
+
+        def owner():
+            with b.desktop_lock(self.root):
+                held.set()
+                release.wait(timeout=2)
+
+        def waiter():
+            started.set()
+            try:
+                with patch.object(b, "DESKTOP_LOCK_WAIT_SECONDS", 1.0):
+                    result.append(self.call())
+            except Exception as exc:
+                errors.append(exc)
+
+        owner_thread = threading.Thread(target=owner)
+        owner_thread.start()
+        self.assertTrue(held.wait(timeout=1))
+        waiter_thread = threading.Thread(target=waiter)
+        waiter_thread.start()
+        self.assertTrue(started.wait(timeout=1))
+        threading.Event().wait(0.05)
+        self.assertEqual(result, [], "waiter must not enter Paper while the host lock is held")
+        release.set()
+        owner_thread.join(timeout=2)
+        waiter_thread.join(timeout=2)
+
+        self.assertFalse(errors)
+        self.assertFalse(owner_thread.is_alive())
+        self.assertFalse(waiter_thread.is_alive())
+        self.assertEqual(result[0]["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertEqual(self.client.calls.count("create_artboard"), 1)
 
     def test_same_file_disjoint_targets_can_modify_concurrently_across_hosts(self):
         barrier = threading.Barrier(2)

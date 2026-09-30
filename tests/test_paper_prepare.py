@@ -74,7 +74,7 @@ class PrepareTests(unittest.TestCase):
                 return {"structuredContent": copy.deepcopy(owner.active_info)}
 
         self.client = Client()
-        self.expected = self.b.digest(self.active_info)
+        self.expected = self.b.digest(self.target_info)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -126,17 +126,18 @@ class PrepareTests(unittest.TestCase):
             self.prepare(expected_snapshot="invalid")
         self.assertEqual(self.calls, [])
 
-    def test_fresh_active_snapshot_precedes_target_binding(self):
+    def test_foreground_drift_does_not_block_exact_target_binding(self):
         self.active_info["pageName"] = "Human changed this"
-        with self.assertRaisesRegex(self.b.Refusal, "DOCUMENT_CHANGED"):
-            self.prepare()
+        result = self.prepare()
+        self.assertEqual(result["state"], "PAPER_READY")
+        self.assertEqual(result["after"]["identity"]["id"], TARGET)
         self.assertEqual(
-            self.calls, [("get_basic_info", {})],
-            "stale source context must stop before target inspection",
+            self.calls, [("get_basic_info", {"fileId": TARGET})],
+            "prepare must bind only the explicit target, not unrelated foreground context",
         )
 
     def test_reuses_bridge_desktop_mutex(self):
-        with self.b.desktop_lock(self.root):
+        with self.b.desktop_lock(self.root), patch.object(self.b, "DESKTOP_LOCK_WAIT_SECONDS", 0):
             with self.assertRaisesRegex(self.b.Refusal, "DESKTOP_BUSY"):
                 self.prepare()
         self.assertEqual(self.calls, [])
@@ -152,7 +153,7 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(result["state"], "PAPER_READY_READ_ONLY")
         self.assertFalse(result["write_qualified"])
         self.assertTrue(result["target_addressable"])
-        self.assertFalse(result["target_active"])
+        self.assertIsNone(result["target_active"])
         self.assertEqual(result["after"]["identity"]["id"], TARGET)
         self.assertEqual(self.opens(), [])
 
@@ -163,32 +164,35 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(result["prepare_mode"], "EXPLICIT_FILE_BINDING")
         self.assertEqual(self.opens(), [])
 
-    def test_already_active_file_is_verified_without_open(self):
+    def test_active_file_state_is_not_required_for_target_binding(self):
         self.active_info = copy.deepcopy(self.target_info)
-        self.expected = self.b.digest(self.active_info)
         result = self.prepare()
         self.assertEqual(result["state"], "PAPER_READY")
-        self.assertTrue(result["already_active"])
-        self.assertTrue(result["target_active"])
+        self.assertIsNone(result["already_active"])
+        self.assertIsNone(result["target_active"])
+        self.assertFalse(result["active_context_required"])
         self.assertTrue(result["target_addressable"])
         self.assertFalse(result["open_attempted"])
+        self.assertEqual(
+            self.calls, [("get_basic_info", {"fileId": TARGET})],
+        )
         self.assertEqual(self.opens(), [])
 
-    def test_already_active_schema_drift_is_readonly_ready(self):
+    def test_target_schema_drift_is_readonly_ready_even_if_target_is_active(self):
         self.active_info = copy.deepcopy(self.target_info)
-        self.expected = self.b.digest(self.active_info)
         result = self.prepare(_catalog_pin="0" * 64)
         self.assertEqual(result["state"], "PAPER_READY_READ_ONLY")
         self.assertFalse(result["write_qualified"])
+        self.assertIsNone(result["target_active"])
         self.assertEqual(self.opens(), [])
 
     def test_background_target_is_bound_without_vendor_open(self):
         result = self.prepare()
         self.assertEqual(result["state"], "PAPER_READY")
-        self.assertFalse(result["already_active"])
+        self.assertIsNone(result["already_active"])
         self.assertFalse(result["open_attempted"])
         self.assertTrue(result["target_observed"])
-        self.assertFalse(result["target_active"])
+        self.assertIsNone(result["target_active"])
         self.assertTrue(result["target_addressable"])
         self.assertEqual(result["after"]["identity"]["id"], TARGET)
         self.assertEqual(result["snapshot_sha256"], self.b.digest(self.target_info))
@@ -202,7 +206,7 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(self.opens(), [])
         self.assertEqual(
             self.calls,
-            [("get_basic_info", {}), ("get_basic_info", {"fileId": TARGET})],
+            [("get_basic_info", {"fileId": TARGET})],
         )
 
     def test_target_mismatch_refuses_without_effect(self):
@@ -212,7 +216,7 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(self.opens(), [])
         self.assertEqual(
             self.calls,
-            [("get_basic_info", {}), ("get_basic_info", {"fileId": TARGET})],
+            [("get_basic_info", {"fileId": TARGET})],
         )
 
     def test_target_read_denial_refuses_without_effect(self):
@@ -222,7 +226,7 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(self.opens(), [])
         self.assertEqual(
             self.calls,
-            [("get_basic_info", {}), ("get_basic_info", {"fileId": TARGET})],
+            [("get_basic_info", {"fileId": TARGET})],
         )
 
     def test_raw_open_remains_blocked_in_original_guard(self):
