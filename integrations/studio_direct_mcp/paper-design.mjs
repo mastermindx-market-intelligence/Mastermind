@@ -23,8 +23,9 @@ export const PAPER_INSPECT_TOOL = Object.freeze({
   name: 'paper_inspect',
   title: 'Inspect Paper Design',
   description:
-    'Read Paper Desktop availability and the active design identity through the guarded Mastermind adapter. ' +
-    'Start here when Paper is already on the intended file; if not, use paper_read with tool=list_files, then paper_prepare. ' +
+    'Read Paper Desktop availability and default active-design identity through the guarded Mastermind adapter. ' +
+    'DOCUMENT_UNAVAILABLE means the default active context is unavailable; it does not prove Paper Desktop or a known exact file is unavailable. ' +
+    'If an exact fileId is already known, one read-only paper_read get_basic_info(fileId) may still prove that target readable; otherwise use paper_read with tool=list_files, then paper_prepare. ' +
     'The response also declares the gateway Paper surface contract. If paper_prepare is listed there but absent from the current client tool surface, ' +
     'treat that as client publication drift and review/refresh the same Studio Direct app\'s approved action snapshot before file-transition work; a reconnect alone is not proof of refresh. ' +
     'Do not emulate prepare through generic process or desktop commands. ' +
@@ -61,7 +62,8 @@ export const PAPER_READ_TOOL = Object.freeze({
   name: 'paper_read',
   title: 'Read Paper Design',
   description:
-    'Run one allowed read-only Paper operation against the active design using the guarded adapter. ' +
+    'Run one allowed read-only Paper operation through the guarded adapter. ' +
+    'When an upstream read accepts fileId, it may read that exact target even if default active-file inspection is unavailable; this proves read serviceability, not write readiness. ' +
     'Use tool=list_files when the target file id is unknown; then call paper_prepare before editing another file. ' +
     'Examples include node inspection, screenshots and JSX extraction. Unknown or modifying upstream tools are refused.',
   inputSchema: {
