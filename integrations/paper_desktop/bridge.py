@@ -20,14 +20,14 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
 PRIVATE_DIR_MODE = 0o700
 DESKTOP_LOCK_WAIT_SECONDS = 30.0
 DESKTOP_LOCK_POLL_SECONDS = 0.05
-SUPPORTED_SERVER = ("paper-desktop", "0.5.12")
+SUPPORTED_SERVER = ("paper-desktop", None)
 SUPPORTED_CATALOG_SHA256 = "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb"
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
@@ -407,10 +407,19 @@ def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
     server = client.server if isinstance(client.server, dict) else {}
     actual = {"server_name": server.get("name"), "server_version": server.get("version"),
               "catalog_sha256": digest(catalog)}
-    server_ok = server_pin is None or (actual["server_name"] == server_pin[0] and actual["server_version"] == server_pin[1])
+    expected_name = server_pin[0] if server_pin else None
+    expected_version = server_pin[1] if server_pin and len(server_pin) > 1 else None
+    server_name_ok = expected_name is None or actual["server_name"] == expected_name
+    # Paper's release version is diagnostic metadata, not a write-compatibility
+    # boundary. Exact reviewed tool schemas remain the fail-closed write gate.
+    server_version_ok = expected_version is None or actual["server_version"] == expected_version
     catalog_ok = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
-    return {**actual, "accepted_for_write": bool(server_ok and catalog_ok),
-            "expected_server": list(server_pin) if server_pin else None,
+    return {**actual, "accepted_for_write": bool(server_name_ok and server_version_ok and catalog_ok),
+            "expected_server": [expected_name, expected_version] if server_pin else None,
+            "server_name_compatible": server_name_ok,
+            "server_version_compatible": server_version_ok,
+            "server_version_policy": "EXACT" if expected_version is not None else "OBSERVED_NOT_PINNED",
+            "catalog_compatible": catalog_ok,
             "expected_catalog_sha256": catalog_pin}
 
 
@@ -457,7 +466,7 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS),
                     "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
         if editing and not schema["accepted_for_write"]:
-            raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server/catalog changed; inspect read-only and review a new exact pin before editing.")
+            raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server identity or catalog schema changed; inspect read-only and review compatibility before editing.")
         if tool not in catalog:
             raise Refusal("TOOL_NOT_AVAILABLE")
         supplied_file = arguments.get("fileId")
