@@ -499,3 +499,37 @@ Rollback is configuration- and code-safe:
 The stop conditions are simple: unexpected authority expansion, unexplained
 placement, lower-quality workers consuming more frontier repair/review capacity
 than they save, or any need for a second lifecycle authority.
+
+
+## Manual pool/model override — execution plan v4
+
+Automatic Fabric routing remains the default. Existing execution-plan v2/v3
+behavior is unchanged: an admitted work step names an exact reviewed
+`provider_realm + quota_class` placement and Capacity selects the concrete
+eligible Worker under the existing claim/lease/fence rules.
+
+When an orchestrator deliberately needs one exact model inside an already
+admitted pool, it may emit `mastermind.execution_plan/v4`. V4 retains the V3
+dependency contract and adds exactly one required field to the work placement:
+
+```json
+{
+  "provider_realm": "minimax",
+  "quota_class": "minimax-token-plan",
+  "model": "minimax-m3"
+}
+```
+
+The model value is a **hard narrowing constraint**, not a fallback preference.
+Runtime first verifies that the provider/quota pool is already present in the
+root's reviewed `work_placement_union`, persists the exact model on the child
+Job, and Capacity then matches only currently available quota rows serving that
+model. If none are eligible, no Attempt is created. The system must not silently
+drop the override, substitute another model, hop accounts, or retry through a
+different carrier.
+
+This interface never accepts a Worker id, numbered account, credential, host,
+native session, executable or provider endpoint. Capacity still chooses the
+concrete receiver, and all existing capability, authority, lease, source,
+readiness, quota and effect-reconciliation gates remain binding. V3 remains the
+normal auto-model path; V4 is the explicit model-override path.

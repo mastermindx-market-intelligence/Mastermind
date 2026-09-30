@@ -263,7 +263,12 @@ def test_expired_active_attempt_keeps_reconciliation_priority(tmp_path):
     assert runtime.jobs.get_job(second.job_id).attempt_count == 0
 
 
-def _register_codex_peer(runtime: Runtime, worker_id: str) -> None:
+def _register_codex_peer(
+    runtime: Runtime,
+    worker_id: str,
+    *,
+    model: str = "gpt-5.6-sol",
+) -> None:
     runtime.workers.register_worker(
         worker_id,
         provider="codex",
@@ -275,7 +280,7 @@ def _register_codex_peer(runtime: Runtime, worker_id: str) -> None:
                 "provider": "codex",
                 "capabilities": ["read", "research"],
                 "cost_class": "small",
-                "model": "gpt-5.6-sol",
+                "model": model,
                 "effort": "xhigh",
                 "metadata": {
                     "routing_policy_version": "fph0-routing",
@@ -955,3 +960,75 @@ def test_lost_dispatch_effect_survives_runtime_reopen(tmp_path):
     assert len(reopened.attempts.list_attempts(first.job_id)) == 1
     assert reopened.attempts.list_attempts(second.job_id) == []
     assert reopened.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is None
+
+
+
+def test_v4_manual_model_override_selects_exact_model_inside_admitted_pool(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    _register_codex_peer(runtime, "worker-terra", model="gpt-5.6-terra")
+
+    placements = [
+        {**_CODEX, "model": "gpt-5.6-sol"},
+        {**_CODEX, "model": "gpt-5.6-terra"},
+    ]
+    runtime, root, plan, admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=placements,
+    )
+    by_step = {job.plan_step_id: job for job in admitted}
+    first = by_step["step-0"]
+    second = by_step["step-1"]
+
+    assert plan["schema_version"] == "mastermind.execution_plan/v4"
+    assert first.constraints["model"] == "gpt-5.6-sol"
+    assert second.constraints["model"] == "gpt-5.6-terra"
+    assert second.constraints["provider"] == "codex"
+    assert second.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+    assert "manual_model_override" in second.constraints["routing_reason_codes"]
+
+    _start_first(runtime, root.job_id, first.job_id)
+
+    def dispatch(job_id: str, command_id: str):
+        return runtime.attempts.dispatch_cycle_job(job_id, command_id=command_id)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(root.job_id)
+    assert outcome.action == "DISPATCHED"
+    assert outcome.selected_job_id == second.job_id
+    assert outcome.receipt["attempt"]["worker_id"] == "worker-terra"
+    assert outcome.receipt["attempt"]["quota_class"] == "codex-hf1q-step"
+
+
+def test_v4_manual_model_override_never_silently_falls_back(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=[{**_CODEX, "model": "model-that-is-not-in-this-pool"}],
+    )
+    work = admitted[0]
+    command_id = f"coo-cycle:{root.job_id}:dispatch:{work.job_id}:attempt:1"
+
+    assert runtime.attempts.dispatch_cycle_job(
+        work.job_id,
+        command_id=command_id,
+    ) is None
+    current = runtime.jobs.get_job(work.job_id)
+    assert current is not None
+    assert current.attempt_count == 0
+    assert current.current_attempt_id is None
+
+
+def test_v3_placement_stays_closed_and_cannot_smuggle_model_override(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+
+    with pytest.raises(Exception, match="placement"):
+        _admit_v2_plan(
+            runtime,
+            plan_schema_version="mastermind.execution_plan/v3",
+            placements=[{**_CODEX, "model": "gpt-5.6-terra"}],
+        )

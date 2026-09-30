@@ -986,11 +986,31 @@ def _project_work_placement(
         raise StateConflict(
             "plan step placement is outside the reviewed host work-placement union"
         )
+
     projected = dict(constraints)
     projected["provider"] = provider_realm
     projected["eligible_quota_classes"] = [quota_class]
-    return projected
 
+    # V4 may add an exact model inside the already-admitted pool. This is a
+    # hard narrowing constraint, not provider/account/host selection. Runtime
+    # capacity still chooses the concrete Worker and claim target; if no
+    # currently eligible quota row serves the requested model, claim returns
+    # no capacity and the caller must not silently fall back.
+    if "model" in placement:
+        model = str(placement.get("model") or "").strip().lower()
+        if (
+            not model
+            or len(model) > 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in model)
+        ):
+            raise StateConflict("plan step model override is invalid")
+        projected["model"] = model
+        reasons = list(projected.get("routing_reason_codes") or [])
+        if "manual_model_override" not in reasons:
+            reasons.append("manual_model_override")
+        projected["routing_reason_codes"] = reasons
+
+    return projected
 
 def _has_executive_provenance(
     provenance: dict[str, Any] | None, *, target: str
@@ -8625,13 +8645,13 @@ def _work_dependency_manifest(
     """Derive the canonical accepted-revision snapshot for one V3 work step."""
 
     if (
-        plan_body.get("schema_version") != "mastermind.execution_plan/v3"
+        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         or admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2
         or admission.get("root_job_id") != root_row["job_id"]
         or admission.get("plan_attempt_id") != plan_body.get("plan_attempt_id")
         or admission.get("plan_digest") is None
     ):
-        raise StateConflict("work dependency manifest requires an admitted V3 plan")
+        raise StateConflict("work dependency manifest requires an admitted V3/V4 plan")
     steps = [
         step for step in plan_body.get("steps", [])
         if isinstance(step, Mapping) and step.get("step_id") == plan_step_id
@@ -8829,7 +8849,7 @@ def _validated_plan_admission(
     plan_body = dict(envelope["role_result"])
     expected_admission_schema = (
         _COO_PLAN_ADMISSION_SCHEMA_V2
-        if plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+        if plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         else _COO_PLAN_ADMISSION_SCHEMA_V1
     )
     if admission_schema != expected_admission_schema:
@@ -9397,7 +9417,7 @@ def _current_orchestration_tree_material_for_dispatch(
         if not revisions:
             deferred_v3 = bool(
                 admission.get("schema_version") == _COO_PLAN_ADMISSION_SCHEMA_V2
-                and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                 and step.get("prerequisite_step_ids")
                 and reservation.get("initial_work_job_id") is None
                 and reservation.get("initial_work_command_id") is None
@@ -9709,7 +9729,7 @@ def _validated_job_dependency_manifest(
         name="work dependency JOB_CREATED payload",
     )
 
-    is_v3 = plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
     has_manifest = "dependency_manifest" in payload
     has_digest = "dependency_manifest_digest" in payload
     if not is_v3:
@@ -9717,9 +9737,9 @@ def _validated_job_dependency_manifest(
             raise StateConflict("legacy work unexpectedly carries dependency evidence")
         return None
     if admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2:
-        raise StateConflict("V3 work dependency admission is not V2")
+        raise StateConflict("V3/V4 work dependency admission is not V2")
     if not has_manifest or not has_digest:
-        raise StateConflict("V3 work is missing immutable dependency evidence")
+        raise StateConflict("V3/V4 work is missing immutable dependency evidence")
 
     manifest = _validate_work_dependency_manifest(
         payload["dependency_manifest"],
@@ -10522,7 +10542,7 @@ def _insert_cycle_child(
     manifest = None
     if dependency_manifest is not None:
         if role != "work":
-            raise StateConflict("only V3 work may carry a dependency manifest")
+            raise StateConflict("only V3/V4 work may carry a dependency manifest")
         manifest = _validate_work_dependency_manifest(
             dependency_manifest,
             root_job_id=str(root_row["job_id"]),
@@ -10733,7 +10753,7 @@ def _reconcile_cycle_child_creation(
     manifest = None
     if dependency_manifest is not None:
         if role != "work":
-            raise StateConflict("only V3 work may carry a dependency manifest")
+            raise StateConflict("only V3/V4 work may carry a dependency manifest")
         manifest = _validate_work_dependency_manifest(
             dependency_manifest,
             root_job_id=str(root_row["job_id"]),
@@ -12358,24 +12378,30 @@ class JobRegistry:
                 )
                 for step in plan_body["steps"]
             )
-            is_v3 = plan_body["schema_version"] == "mastermind.execution_plan/v3"
+            is_v3 = plan_body["schema_version"] in {
+                "mastermind.execution_plan/v3",
+                "mastermind.execution_plan/v4",
+            }
             if plan_body["schema_version"] in {
                 "mastermind.execution_plan/v2",
                 "mastermind.execution_plan/v3",
+                "mastermind.execution_plan/v4",
             }:
                 if any("placement" not in step for step in plan_body["steps"]):
                     raise StateConflict(
-                        "v2/v3 plan work steps require an exact placement"
+                        "v2/v3/v4 plan work steps require an exact placement"
                     )
                 for step in plan_body["steps"]:
                     placement = step.get("placement")
+                    expected_placement_keys = {"provider_realm", "quota_class"}
+                    if plan_body["schema_version"] == "mastermind.execution_plan/v4":
+                        expected_placement_keys.add("model")
                     if (
                         not isinstance(placement, dict)
-                        or set(placement)
-                        != {"provider_realm", "quota_class"}
+                        or set(placement) != expected_placement_keys
                     ):
                         raise StateConflict(
-                            "v2/v3 plan step placement is invalid"
+                            "v2/v3/v4 plan step placement is invalid"
                         )
             try:
                 reserved_total = policy.reserved_children_total(requirements)
@@ -12528,7 +12554,7 @@ class JobRegistry:
         root_job_id: str,
         plan_step_id: str,
     ) -> dict[str, Any]:
-        """Project one ready deferred V3 step without minting authority."""
+        """Project one ready deferred V3/V4 step without minting authority."""
 
         root_token = str(root_job_id or "").strip()
         step_token = str(plan_step_id or "").strip()
@@ -12552,11 +12578,11 @@ class JobRegistry:
             )
             if (
                 admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
-                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                 or step is None
                 or not step["prerequisite_step_ids"]
             ):
-                raise StateConflict("dependency projection requires a deferred V3 step")
+                raise StateConflict("dependency projection requires a deferred V3/V4 step")
             existing = connection.execute(
                 """
                 SELECT 1 FROM jobs
@@ -12567,7 +12593,7 @@ class JobRegistry:
                 (root_token, step_token),
             ).fetchone()
             if existing is not None:
-                raise StateConflict("deferred V3 step already has a work revision")
+                raise StateConflict("deferred V3/V4 step already has a work revision")
             return _work_dependency_manifest(
                 connection,
                 root_row=root,
@@ -12617,14 +12643,14 @@ class JobRegistry:
             )
             if (
                 admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
-                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                 or step is None
                 or reservation is None
                 or not step["prerequisite_step_ids"]
                 or reservation["initial_work_job_id"] is not None
                 or reservation["initial_work_command_id"] is not None
             ):
-                raise StateConflict("work creation requires one deferred V3 reservation")
+                raise StateConflict("work creation requires one deferred V3/V4 reservation")
             expected_manifest = _work_dependency_manifest(
                 connection,
                 root_row=root,
@@ -12688,7 +12714,7 @@ class JobRegistry:
                 (root_token, step_token),
             ).fetchall()
             if existing_step_rows:
-                raise StateConflict("deferred V3 step already consumed a reserved slot")
+                raise StateConflict("deferred V3/V4 step already consumed a reserved slot")
             child_count = int(
                 connection.execute(
                     "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root_token,)
