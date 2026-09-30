@@ -7,12 +7,13 @@ from collections.abc import Mapping
 from typing import Any
 
 SERVER_NAME = "mastermind-session-bridge"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 RESULT_SCHEMA = "mastermind.session_bridge_result.v1"
 
 TARGET_KINDS = ("fabric_attempt", "codex", "claude")
 MODIFYING_TOOLS = ("session_send", "session_summon")
-MAX_MESSAGE_CHARS = 12000
+MAX_INSTRUCTION_CHARS = 700
+MAX_STOP_CONDITION_CHARS = 700
 MAX_OPERATION_KEY_CHARS = 96
 
 _TARGET_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
@@ -65,6 +66,22 @@ def _text(value: Any, field: str, *, max_chars: int) -> str:
     return value
 
 
+def _target_ref(value: Any) -> str:
+    target_ref = _text(value, "target_ref", max_chars=256)
+    if _TARGET_REF_RE.fullmatch(target_ref) is None:
+        raise BridgeError("invalid_input", "target_ref has an unsupported form")
+    if target_ref.startswith(("newest-tab:", "latest:", "fallback:")):
+        raise BridgeError("invalid_input", "implicit target selection is forbidden")
+    return target_ref
+
+
+def _operation_key(value: Any) -> str:
+    operation_key = _text(value, "operation_key", max_chars=MAX_OPERATION_KEY_CHARS)
+    if _OPERATION_KEY_RE.fullmatch(operation_key) is None:
+        raise BridgeError("invalid_input", "operation_key has an unsupported form")
+    return operation_key
+
+
 def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
     if tool_name == "session_targets":
         obj = _object(arguments, required=set(), optional={"kind"})
@@ -74,39 +91,38 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
         return {} if kind is None else {"kind": kind}
 
     if tool_name == "session_send":
-        obj = _object(arguments, required={"target_ref", "message", "operation_key"})
-        target_ref = _text(obj["target_ref"], "target_ref", max_chars=256)
-        if _TARGET_REF_RE.fullmatch(target_ref) is None:
-            raise BridgeError("invalid_input", "target_ref has an unsupported form")
-        message = _text(obj["message"], "message", max_chars=MAX_MESSAGE_CHARS)
-        operation_key = _text(obj["operation_key"], "operation_key", max_chars=MAX_OPERATION_KEY_CHARS)
-        if _OPERATION_KEY_RE.fullmatch(operation_key) is None:
-            raise BridgeError("invalid_input", "operation_key has an unsupported form")
-        return {"target_ref": target_ref, "message": message, "operation_key": operation_key}
+        obj = _object(
+            arguments,
+            required={"target_ref", "instruction", "stop_condition", "operation_key"},
+        )
+        return {
+            "target_ref": _target_ref(obj["target_ref"]),
+            "instruction": _text(
+                obj["instruction"], "instruction", max_chars=MAX_INSTRUCTION_CHARS
+            ),
+            "stop_condition": _text(
+                obj["stop_condition"],
+                "stop_condition",
+                max_chars=MAX_STOP_CONDITION_CHARS,
+            ),
+            "operation_key": _operation_key(obj["operation_key"]),
+        }
 
     if tool_name == "session_summon":
         obj = _object(
             arguments,
             required={"objective", "execution_profile", "operation_key"},
-            optional={"preferred_surface"},
         )
         objective = _text(obj["objective"], "objective", max_chars=4000)
-        execution_profile = _text(obj["execution_profile"], "execution_profile", max_chars=64)
+        execution_profile = _text(
+            obj["execution_profile"], "execution_profile", max_chars=64
+        )
         if execution_profile not in ("bounded_code_change", "research_only"):
             raise BridgeError("invalid_input", "execution_profile is unsupported")
-        operation_key = _text(obj["operation_key"], "operation_key", max_chars=MAX_OPERATION_KEY_CHARS)
-        if _OPERATION_KEY_RE.fullmatch(operation_key) is None:
-            raise BridgeError("invalid_input", "operation_key has an unsupported form")
-        preferred_surface = obj.get("preferred_surface")
-        if preferred_surface is not None and preferred_surface not in ("codex", "claude"):
-            raise BridgeError("invalid_input", "preferred_surface is unsupported")
-        out = {
+        return {
             "objective": objective,
             "execution_profile": execution_profile,
-            "operation_key": operation_key,
+            "operation_key": _operation_key(obj["operation_key"]),
         }
-        if preferred_surface is not None:
-            out["preferred_surface"] = preferred_surface
-        return out
 
     raise BridgeError("not_found", "unknown tool")
