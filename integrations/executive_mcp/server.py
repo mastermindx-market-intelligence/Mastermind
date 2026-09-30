@@ -148,12 +148,15 @@ def _is_e1_envelope(
 class _DuplicateAuthorizationGuard:
     """Reject raw duplicate credentials before SDK header coalescing."""
 
-    def __init__(self, app: Any, *, fenced_app: Any | None = None) -> None:
+    def __init__(self, app: Any, *, fenced_app: Any | None = None, mcp_path: str = "/mcp") -> None:
+        if mcp_path not in {"/mcp", "/mcp/coo"}:
+            raise ValueError("unknown static Executive transport")
         self._app = app
         self._fenced_app = fenced_app or app
+        self._mcp_path = mcp_path
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if scope.get("type") == "http" and scope.get("path") == "/mcp":
+        if scope.get("type") == "http" and scope.get("path") == self._mcp_path:
             values = [value for key, value in scope.get("headers", []) if key.lower() == b"authorization"]
             if len(values) > 1:
                 response = JSONResponse(
@@ -1307,3 +1310,184 @@ def describe(config: GatewayConfig) -> str:
             "tools": [tool.name for tool in build_tools()],
         }
     ).decode("utf-8")
+
+
+def build_coo_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Static COO route for composition in the existing listener; never a daemon."""
+    from control_plane.coo_principal_request import principal_request_ref, principal_intent_id
+    from control_plane import ceo_intent
+    from integrations.executive_mcp.coo import (
+        COO_MCP_PATH, COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS,
+        validate_coo_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.coo import create_coo_app, unknown
+
+    core = create_coo_app(settings, audit_sink=audit_sink)
+    inner = BoundedE1App(core)
+    oauth = MastermindTokenVerifier(authenticator=core.authenticator, policy=settings.policy,
+        now=settings.executive.clock, audit_sink=audit_sink)
+
+    class BoundVerifier:
+        async def verify_token(self, token):
+            access = await oauth.verify_token(token)
+            if access is None:
+                return None
+            try:
+                principal, _ = await core.authorize_token(token)
+                if (access.client_id != principal.client_ref or access.subject != principal.subject_digest
+                        or access.resource != principal.resource or access.scopes != list(principal.scopes)):
+                    return None
+            except Exception:
+                return None
+            return access
+
+    server = Server(COO_SERVER_NAME, version=COO_SERVER_VERSION)
+    schemes = oauth_security_schemes(settings.policy.required_scopes)
+    tools = tuple(mcp_types.Tool(name=spec.name, description=spec.description,
+        inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        securitySchemes=schemes, _meta={"securitySchemes": schemes}) for spec in COO_TOOL_SPECS)
+
+    @server.list_tools()
+    async def list_tools():
+        return list(tools)
+
+    def error(name, code="backend_unavailable"):
+        value = _e1_error(settings.executive, name, code, "COO response is unavailable")
+        value["server_version"] = COO_SERVER_VERSION
+        return value
+
+    def result(payload, challenge=None):
+        return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
+            text=canonical_json(payload).decode("utf-8"))], isError=payload.get("ok") is not True,
+            _meta={"mcp/www_authenticate": [challenge]} if challenge else None)
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(name, arguments):
+        request = server.request_context.request
+        if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
+            raise ValueError("unambiguous current authorization required")
+        try:
+            validated = validate_coo_tool_arguments(name, arguments)
+        except GatewayError as exc:
+            return result(error(name, exc.code))
+        is_submit = name == "submit_principal_intent"
+        has_receipt = is_submit or name == "principal_intent_status"
+        request_ref = principal_request_ref(validated) if is_submit else validated.get("request_ref")
+        def failed():
+            return json.loads(unknown(request_ref).body) if has_receipt else error(name)
+        challenge = None
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=inner),
+                    base_url="http://127.0.0.1", trust_env=False, follow_redirects=False) as client:
+                response = await client.post("/v1/tools/" + name,
+                    headers={"authorization": request.headers["authorization"]}, json={"arguments": validated})
+            payload = response.json()
+            canonical_json(payload)
+            challenge = response.headers.get("www-authenticate")
+            preflight = (response.status_code in (400, 401, 403, 413, 503)
+                and isinstance(payload, dict) and set(payload) == {"ok", "error"}
+                and payload["ok"] is False and isinstance(payload["error"], dict)
+                and payload["error"].get("code") in {"invalid_input", "authority_refused", "scope_refused",
+                    "authorization_missing", "authorization_malformed", "identity_unverified", "grounding_unavailable"})
+            if not preflight and has_receipt:
+                if not _executive_outcome(payload, request_ref, response.status_code):
+                    payload = failed()
+                elif payload.get("ok") is True:
+                    receipt = payload.get("receipt", {})
+                    if (receipt.get("schema") != ceo_intent.RECEIPT_SCHEMA_PRINCIPAL
+                            or receipt.get("request_ref") != request_ref
+                            or receipt.get("intent_id") != principal_intent_id(request_ref)):
+                        payload = failed()
+            elif not preflight and (response.status_code != 200 or not _is_e1_envelope(payload, name, COO_SERVER_VERSION)):
+                payload = failed()
+        except Exception:
+            payload = failed()
+        reply = result(payload, challenge)
+        if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
+            reply = result(failed() if has_receipt else error(name, "output_too_large"))
+        return reply
+
+    manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,
+        security_settings=TransportSecuritySettings(
+            allowed_hosts=["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "::1", "[::1]", "[::1]:*"],
+            allowed_origins=[]))
+    authenticated = PreAuthMcpBodyApp(AuthenticationMiddleware(
+        RequireAuthMiddleware(BoundedRequestApp(manager.handle_request), required_scopes=list(settings.policy.required_scopes),
+                              resource_metadata_url=settings.policy.resource_metadata_url),
+        backend=BearerAuthBackend(BoundVerifier())))
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        try:
+            async with manager.run():
+                yield
+        finally:
+            await inner.aclose()
+
+    app = Starlette(routes=[Route(COO_MCP_PATH, authenticated, methods=["POST"])], lifespan=lifespan)
+    app.router.redirect_slashes = False
+    return _LiteralCooRoute(app)
+
+
+class _LiteralCooRoute:
+    def __init__(self, app):
+        self._app = app
+        self._guard = _DuplicateAuthorizationGuard(app, mcp_path="/mcp/coo")
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and (
+                scope.get("path") != "/mcp/coo" or scope.get("raw_path") != b"/mcp/coo"
+                or scope.get("method") != "POST" or scope.get("query_string")):
+            await JSONResponse({"error": "not_found"}, status_code=404)(scope, receive, send)
+            return
+        await self._guard(scope, receive, send)
+
+
+class _ExecutiveWithCoo:
+    """Two fixed role routes, one host process and one shared resource document."""
+    def __init__(self, ceo, coo, metadata_path, metadata):
+        self._ceo, self._coo = ceo, coo
+        self._metadata_path, self._metadata = metadata_path, metadata
+
+        @asynccontextmanager
+        async def lifespan(_app):
+            async with AsyncExitStack() as owners:
+                await owners.enter_async_context(ceo._app.router.lifespan_context(ceo._app))
+                await owners.enter_async_context(coo._app.router.lifespan_context(coo._app))
+                yield
+        self._app = Starlette(lifespan=lifespan)
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+        elif scope.get("path", "").startswith("/mcp/coo"):
+            await self._coo(scope, receive, send)
+        elif (scope.get("path") == self._metadata_path and scope.get("method") == "GET"
+                and scope.get("raw_path") == self._metadata_path.encode("ascii") and not scope.get("query_string")):
+            await JSONResponse(self._metadata, headers={"Cache-Control": "no-store"})(scope, receive, send)
+        else:
+            await self._ceo(scope, receive, send)
+
+
+def build_web_ceo_v2_with_coo_mcp_app(settings: Any, *, coo_settings: Any, audit_sink: Any,
+                                    workspace_app=None, content_app=None, os_app=None) -> Any:
+    """Opt-in host composition only. Existing CEO-only builders stay unchanged."""
+    from integrations.mastermind_executive_app.coo import CooAppSettings
+    from integrations.mastermind_executive_app.app import _metadata_policy_and_path
+    from integrations.mastermind_executive_app.gateway import make_shared_jwks_cache
+    if type(coo_settings) is not CooAppSettings or coo_settings.executive != settings:
+        raise ValueError("COO and CEO must use the exact same installed Executive settings")
+    cache = settings.jwks_cache or make_shared_jwks_cache(settings.policies)
+    if cache is None:
+        raise ValueError("a shared Executive JWKS authority is required")
+    configured = dataclasses.replace(settings, jwks_cache=cache)
+    coo_configured = dataclasses.replace(coo_settings, executive=configured)
+    _, metadata_path = _metadata_policy_and_path(configured.policies)
+    if metadata_path.startswith("/mcp/coo"):
+        raise ValueError("metadata route collides with the static COO transport")
+    metadata = protected_resource_metadata(configured.policies.submit)
+    metadata["scopes_supported"] = sorted(set(metadata["scopes_supported"]) | set(coo_configured.policy.required_scopes))
+    ceo = build_web_ceo_v2_mcp_app(configured, audit_sink=audit_sink,
+        workspace_app=workspace_app, content_app=content_app, os_app=os_app)
+    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink)
+    return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata)
