@@ -58,12 +58,13 @@ def test_launchd_templates_are_two_non_root_persistent_system_jobs() -> None:
     assert worker["GroupName"] == "__WORKER_GROUP__"
     assert control["UserName"] != worker["UserName"]
     assert worker["InitGroups"] is False
+    assert control["ProcessType"] == "Interactive"
+    assert worker["ProcessType"] == "Interactive"
 
     for value in (control, worker):
         assert value["RunAtLoad"] is True
         assert value["KeepAlive"] is True
         assert value["AbandonProcessGroup"] is False
-        assert value["ProcessType"] == "Background"
         assert value["Umask"] == 0o77
         assert 1 <= value["ExitTimeOut"] <= 30
         assert value["HardResourceLimits"]["Core"] == 0
@@ -136,12 +137,24 @@ def test_executive_daemons_do_not_throttle_disk_io() -> None:
     # and why a manual `_mastermind_exec` shell reproduction always
     # succeeded: an interactive shell has normal I/O policy; only launchd's
     # plist-driven daemon start applies the throttle. Both Executive
-    # launchd plists must never set the key again. ProcessType=Background
-    # (CPU scheduling politeness, not disk I/O) is retained and is not the
-    # defect -- it stays asserted on both templates below.
+    # launchd plists must never set the key again. Separately, Control serves
+    # latency-bounded user reads, so it must not receive Background policy.
+    # Worker also performs deadline-bounded repository preflight and provider
+    # launch work. A launchd Background clamp can outlive those fixed request
+    # deadlines even when the same operation is sub-second at normal policy.
+    # launchd.plist(5) documents CPU and I/O resource limits, not CPU-only
+    # politeness. In #987, the installed reader passed as UID450 with its
+    # launchd file-size limit but timed out under a background QoS clamp.
+    # Standard also clamps these user-requested reads to utility QoS: the
+    # e981 installed reader exceeded its deadline under taskpolicy -c utility,
+    # while the same reader finished in 13.5s under taskpolicy -a. Request-level
+    # pthread QoS cannot override the process clamp. Interactive supplies the
+    # application resource policy; this Unix socket service has no XPC activity
+    # to drive Adaptive. Explicit resource/deadline limits remain in force.
     for value in (_plist(CONTROL), _plist(WORKER)):
         assert "LowPriorityIO" not in value
-        assert value["ProcessType"] == "Background"
+    assert _plist(CONTROL)["ProcessType"] == "Interactive"
+    assert _plist(WORKER)["ProcessType"] == "Interactive"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="plutil is a Darwin-only binary")
@@ -294,11 +307,11 @@ def test_generated_launchd_plists_pass_plutil_lint(tmp_path: Path) -> None:
         "SockPathMode": 0o660,
     }
 
-    for rendered_path in (control, worker):
+    for rendered_path, process_type in ((control, "Interactive"), (worker, "Interactive")):
         with rendered_path.open("rb") as handle:
             rendered = plistlib.load(handle)
         assert "LowPriorityIO" not in rendered
-        assert rendered["ProcessType"] == "Background"
+        assert rendered["ProcessType"] == process_type
 
 
 def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> None:
@@ -315,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|status}" in lifecycle
+    assert "{start|stop|restart|start-readside|stop-readside|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -631,7 +644,7 @@ def test_installer_ships_the_backup_daemon_disabled_like_the_others() -> None:
         '/bin/launchctl bootout "system/$BACKUP_LABEL"',
     ):
         assert line in install
-    assert 'if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then' in install
+    assert 'wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65' in install
     assert (
         '/usr/bin/install -o root -g wheel -m 0644 "$RELEASE_ROOT/ops/executive_os/$BACKUP_LABEL.plist.template" "$BACKUP_PLIST"'
         in install
@@ -741,9 +754,10 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
 
     value = json.loads((OPS / "control.json.template").read_text(encoding="utf-8"))
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
-    # Installed product groups and the optional read-profile selector stay
-    # omitted in the unconfigured template. Null groups fail validation;
-    # an omitted executive_mcp_profile preserves the legacy generation.
+    # Installed product groups, the optional read-profile selector, and the
+    # attended subscription realm stay omitted in the unconfigured template.
+    # Null groups fail validation; an omitted executive_mcp_profile preserves
+    # the legacy generation and an omitted realm preserves the v4 worker.
     installed_product_keys = {
         "executive_mcp_profile",
         "content_observer",
@@ -751,6 +765,12 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
+        # Provenance is injected only after the installer validates the live
+        # receipt; the static template intentionally has no host digest.
+        "python_runtime_provenance_digest",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)
@@ -1707,10 +1727,10 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     source = (OPS / "install.sh").read_text(encoding="utf-8")
     stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"')
     control_absent = source.index(
-        'if /bin/launchctl print "system/$CONTROL_LABEL"', stop
+        'wait_for_launchd_absent "$CONTROL_LABEL" control', stop
     )
     worker_absent = source.index(
-        'if /bin/launchctl print "system/$WORKER_LABEL"', control_absent
+        'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
     archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
     config_write = source.index('temporary.write_text(', archive)
@@ -1728,6 +1748,30 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     bootstrap = tail_after_plists.index('/bin/launchctl bootstrap system "$PRIVILEGED_PLIST"')
     manifest_verify = tail_after_plists.rindex('release_manifest.py" verify', 0, arm)
     assert manifest_verify < arm < bootstrap
+
+
+def test_installer_waits_boundedly_for_asynchronous_launchd_bootout() -> None:
+    source = (OPS / "install.sh").read_text(encoding="utf-8")
+    helper_start = source.index("wait_for_launchd_absent() {")
+    helper_end = source.index("\n}\nleave_installed_services_stopped()", helper_start)
+    helper = source[helper_start:helper_end]
+    assert "for attempt in 1 2 3 4 5; do" in helper
+    assert 'launchctl print "system/$label"' in helper
+    assert 'if [ "$attempt" -lt 5 ]; then' in helper
+    assert "/bin/sleep 1" in helper
+    assert "return 1" in helper
+
+    mutation_start = source.index("trap leave_installed_services_stopped EXIT")
+    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive', mutation_start)
+    mutation = source[mutation_start:archive]
+    for label, description in (
+        ("RELAY_LABEL", "relay"),
+        ("CONTROL_LABEL", "control"),
+        ("WORKER_LABEL", "worker"),
+        ("BACKUP_LABEL", "backup"),
+        ("PRIVILEGED_LABEL", "privileged"),
+    ):
+        assert f'wait_for_launchd_absent "${label}" {description} || exit 65' in mutation
 
 
 @pytest.mark.skipif(sys.platform != 'darwin', reason='macOS plutil installer rendering')

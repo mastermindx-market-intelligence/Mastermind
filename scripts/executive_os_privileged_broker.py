@@ -15,6 +15,7 @@ if str(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, str(_RELEASE_ROOT))
 
 from control_plane.executive_privileged_broker import PrivilegedBrokerConfig, run_broker
+from control_plane.executive_release_factory import build_release_owner
 
 
 CONFIG_PATH = Path("/Library/Application Support/MastermindExecutive/config/privileged-broker.json")
@@ -51,7 +52,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command != "serve":  # pragma: no cover - argparse owns this invariant
         raise RuntimeError("unsupported privileged broker command")
     config = load_config(args.config)
-    run_broker(config)
+    run_broker(config, release_owner=build_release_owner(config))
     return 0
 
 

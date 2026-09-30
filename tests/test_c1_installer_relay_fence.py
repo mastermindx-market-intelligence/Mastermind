@@ -42,11 +42,11 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
         assert block.index(relay_disable) < block.index(control_disable)
         assert block.index(relay_bootout) < block.index(control_bootout)
 
-    relay_loaded = 'print "system/$RELAY_LABEL"'
-    control_loaded = 'print "system/$CONTROL_LABEL"'
+    relay_loaded = 'wait_for_launchd_absent "$RELAY_LABEL" relay'
+    control_loaded = 'wait_for_launchd_absent "$CONTROL_LABEL" control'
     assert relay_loaded in mutation
     assert mutation.index(relay_loaded) < mutation.index(control_loaded)
-    assert "relay LaunchDaemon remained loaded after bootout" in mutation
+    assert '"$description LaunchDaemon remained loaded after bootout"' in source
 
     archive = '/usr/bin/git -C "$SOURCE_REPO" archive'
     assert source.index(relay_loaded) < source.index(archive)
