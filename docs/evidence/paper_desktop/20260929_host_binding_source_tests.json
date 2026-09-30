@@ -1,0 +1,81 @@
+{
+  "candidate_bridge_generation": "v7",
+  "candidate_install_schema": "mastermind.paper_direct_install.v4",
+  "capability_state": "BUILT_NOT_PROVEN",
+  "host_reference_semantics": "Existing fleet reference supplied by deployment; shape validation is not physical host attestation or runtime admission.",
+  "hosted_ci": "NOT_YET_RUN_FOR_THIS_CANDIDATE",
+  "implementation_pr": 1017,
+  "independent_review": "NOT_YET_OBSERVED",
+  "live_runtime_changed": false,
+  "local_validation": [
+    {
+      "mcp_sdk": "1.30.0",
+      "process_id": 21399,
+      "result": "PASS",
+      "runtime_seconds": 32.778,
+      "suite": "Paper design integration, six explicit test patterns",
+      "tests": 166
+    },
+    {
+      "process_id": 15058,
+      "result": "PASS",
+      "suite": "tests/test_provider_readiness_refresh.py",
+      "tests": 20
+    },
+    {
+      "process_id": 16083,
+      "result": "PASS",
+      "suite": "tests/test_paper_design_workflow_skill.py",
+      "tests": 12
+    },
+    {
+      "process_id": 16787,
+      "result": "PASS",
+      "suite": "Studio Paper wrapper and gateway",
+      "tests": 17
+    },
+    {
+      "result": "PASS",
+      "suite": "git diff --check"
+    }
+  ],
+  "negative_proofs": [
+    "wrong-host guard refuses before edit",
+    "changed service/source/bridge guard refuses before edit",
+    "legacy/bound guards cannot be interchanged",
+    "wrong active-file guard cannot validate explicit background-file read",
+    "uncertain edit dispatched once and retains original scope",
+    "CLI conflicting configured host refuses before stdio start",
+    "no caller-supplied host/endpoint/binding input on the five MCP tools"
+  ],
+  "observed_at": "2026-09-29T05:03:29.107729+00:00",
+  "operation_id": "paper-direct-chatgpt-mcp-20260926-sol-001",
+  "paper_document_mutated": false,
+  "production_acceptance": false,
+  "protected_procedure_sha": "c6497083cbfc74b3ca32bc3afd39890c836c8d1b",
+  "remaining": [
+    "restore Ryan direct route through permitted same-target admin/transport recovery",
+    "reconcile actual host identity and implement selection through existing fleet transport owner",
+    "recover M1 connection and Mini 1 authorized desktop/file readiness",
+    "independent source review and exact-candidate hosted CI",
+    "protected release then attended per-account/per-host real-path proof"
+  ],
+  "remote_host_routing_implemented": false,
+  "schema": "mastermind.paper_source_evidence.v1",
+  "source_base_sha": "0b525b277b136bbbd46712d8c2a87d3da696ca38",
+  "source_sha256": {
+    "docs/PAPER_DIRECT_CHATGPT.md": "d803c0ec02c3eba4e67b3ae555bde86412b60da97897075c83edab6fbcc03df5",
+    "integrations/paper_desktop/bridge.py": "a7977f45ebae7cc405cf2a7b81744712089ef9a243512b867dd738f07031072d",
+    "integrations/paper_desktop/direct_service.py": "923fc079da596db336dc8e0aab0de36e065a897c7dbe19330d75d56698cf5620",
+    "integrations/paper_desktop/mcp_server.py": "83bf802521dee0feae6c366f2e4f2c1ce1e80947b68a4f321c6bc923a6d87fb7",
+    "integrations/paper_desktop/prepare.py": "48efae2e32713d077d61810d2254186f46026b4acd434ac30765a268714d6255",
+    "integrations/paper_desktop/runtime_stage.py": "9fba2f45b52ae25918b29b5b28354d114465369b27f867c0639fd7b84857539a",
+    "tests/test_paper_direct_host_binding.py": "9a099e55e1a3e5a4f19ea11367bc329db9d7e3d17357c582db96b47d47a19f21",
+    "tests/test_paper_execution_binding.py": "6a8803f2a3e7069203b3b79cee24406496b5990a17077283bfe63ed130645d44",
+    "tests/test_paper_runtime_stage.py": "e59f5dc1fd8136db62c63f2dd824a13ae8801234f9db9e81b3be2e8190e4ca9e"
+  },
+  "validation_repairs": [
+    "Overbroad test_paper*.py discovery included unrelated trading tests requiring pytest; reran the explicit Paper.design integration patterns without changing the sealed SDK.",
+    "Gateway test initially lacked source-workspace npm dependencies; installed package-lock dependencies with scripts disabled only in that workspace, then all 17 tests passed."
+  ]
+}
