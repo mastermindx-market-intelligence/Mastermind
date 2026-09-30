@@ -27,6 +27,6 @@ REVIEWED_ANCHORS = {'_Reader': {'node_type': 'ClassDef',
                         512,
                         '512'),)},
  '_resident': {'node_type': 'FunctionDef',
-               'ast_sha256': '429b84b69c05e23026d3f7c4b55b7d24e3bbf638254a73859d1e2b2eb30ccf08',
+               'ast_sha256': 'd8648e9088618d888b05482c7c68ac98c5828fd7884a2791bc88744b566a99ab',
                'sites': ((('body', 3, 'iter', 'elts', 3, 'elts', 4), 'int', 450, '450'),
                          (('body', 23, 'test', 'values', 2, 'comparators', 0), 'int', 450, '450'))}}

@@ -8,6 +8,7 @@ No installed root authority or physical release is attested.
 import copy
 import dataclasses
 import hashlib
+import json
 import os
 
 import pytest
@@ -189,19 +190,53 @@ def test_start_before_reservation_cannot_close():
         c._validated_release_closure(response, evidence)
 
 
-def broker_response():
-    evidence, root = records()
-    return evidence["approval"], {
+def _capture_canonical_capability(control, monkeypatch):
+    """Capture only the real finalizer's mint, before its broker consumes it."""
+    captured = []
+
+    class Captured(Exception):
+        pass
+
+    def capture(*, canonical_evidence):
+        assert not control.runtime.store._read_connections
+        assert not control.runtime.store._write_connections
+        captured.append(canonical_evidence)
+        raise Captured
+
+    with monkeypatch.context() as patch:
+        patch.setattr(control.broker, "read_release_closure", capture)
+        with pytest.raises(Captured):
+            control.finalize_unresolved_admission()
+    assert len(captured) == 1
+    return captured[0]
+
+
+@pytest.fixture
+def canonical_lane(tmp_path, monkeypatch):
+    runtime = runtime_api.Runtime.at(tmp_path / "runtime")
+    approval, reservation, _, _, status = _seed_real_admission(runtime)
+    control = c.ReleaseControlConsumer(runtime)
+    capability = _capture_canonical_capability(control, monkeypatch)
+    reply = {
         "schema": c.BROKER_SCHEMA,
         "operation": "read_release_closure",
         "ok": True,
-        "approval": root.approval.to_dict(),
-        "result": root.result,
+        "approval": approval,
+        "result": {
+            "reservation": reservation,
+            "terminal_status": status,
+            "cancellation": None,
+        },
     }
+    return dict(runtime=runtime, control=control, capability=capability,
+                evidence=json.loads(capability.evidence_bytes), reply=reply)
 
 
-def test_private_history_wire_has_no_renewal_token_or_public_selector(monkeypatch):
-    approval, reply = broker_response()
+def test_private_history_wire_has_no_renewal_token_or_public_selector(
+    canonical_lane, monkeypatch
+):
+    lane = canonical_lane
+    approval, reply = lane["evidence"]["approval"], lane["reply"]
     calls = []
 
     def send(payload, **kwargs):
@@ -209,14 +244,15 @@ def test_private_history_wire_has_no_renewal_token_or_public_selector(monkeypatc
         return reply
 
     monkeypatch.setattr(transport, "_send_one_frame", send)
-    root = c.ReleaseBrokerClient().read_release_closure(approval=approval)
+    root = c.ReleaseBrokerClient().read_release_closure(
+        canonical_evidence=lane["capability"])
     assert root.approval.to_dict() == approval
     assert len(calls) == 1
     assert calls[0] == (
         {
             "schema": c.BROKER_SCHEMA,
             "operation": "read_release_closure",
-            "approval": approval,
+            "admission_evidence": lane["evidence"],
         },
         {
             "socket_path": transport.DEFAULT_SOCKET,
@@ -242,8 +278,11 @@ def test_private_history_wire_has_no_renewal_token_or_public_selector(monkeypatc
         "error_extra_field",
     ],
 )
-def test_private_history_rejects_protocol_drift_without_retry(monkeypatch, mutation):
-    approval, reply = broker_response()
+def test_private_history_rejects_protocol_drift_without_retry(
+    canonical_lane, monkeypatch, mutation
+):
+    lane = canonical_lane
+    approval, reply = lane["evidence"]["approval"], lane["reply"]
     if mutation in {"schema", "operation"}:
         reply[mutation] = "other"
     elif mutation == "ok_integer":
@@ -276,12 +315,15 @@ def test_private_history_rejects_protocol_drift_without_retry(monkeypatch, mutat
         transport, "_send_one_frame", lambda *a, **k: calls.append(a) or reply
     )
     with pytest.raises((c.ReleaseConsumerError, contract.ReleaseContractError)):
-        c.ReleaseBrokerClient().read_release_closure(approval=approval)
+        c.ReleaseBrokerClient().read_release_closure(
+            canonical_evidence=lane["capability"])
+    with pytest.raises(c.ReleaseConsumerError, match="CANONICAL_EVIDENCE_REQUIRED"):
+        c.ReleaseBrokerClient().read_release_closure(
+            canonical_evidence=lane["capability"])
     assert len(calls) == 1
 
 
-def test_private_transport_loss_is_not_retried(monkeypatch):
-    approval, _ = broker_response()
+def test_private_transport_loss_is_not_retried(canonical_lane, monkeypatch):
     calls = []
 
     def lost(*args, **kwargs):
@@ -290,7 +332,11 @@ def test_private_transport_loss_is_not_retried(monkeypatch):
 
     monkeypatch.setattr(transport, "_send_one_frame", lost)
     with pytest.raises(TimeoutError):
-        c.ReleaseBrokerClient().read_release_closure(approval=approval)
+        c.ReleaseBrokerClient().read_release_closure(
+            canonical_evidence=canonical_lane["capability"])
+    with pytest.raises(c.ReleaseConsumerError, match="CANONICAL_EVIDENCE_REQUIRED"):
+        c.ReleaseBrokerClient().read_release_closure(
+            canonical_evidence=canonical_lane["capability"])
     assert len(calls) == 1
 
 
@@ -378,10 +424,11 @@ def finalizer(tmp_path, monkeypatch):
         )
         return outcome if state["write_result"] == "exact" else {}
 
-    def history(*, approval):
+    def history(*, canonical_evidence):
         assert not runtime.store._read_connections
         assert not runtime.store._write_connections
-        assert approval == state["evidence"]["approval"]
+        assert type(canonical_evidence) is c._CanonicalUnresolvedReleaseEvidence
+        assert _bytes(canonical_evidence._consume()) == _bytes(state["evidence"])
         trace.append("broker")
         if isinstance(state["response"], BaseException):
             raise state["response"]
@@ -556,6 +603,9 @@ def _wire(
         "terminal_status": status,
         "cancellation": cancellation,
     }
+    with runtime.store.read() as connection:
+        evidence = json.loads(_bytes(
+            runtime.release_maintenance.read_unresolved_admission(connection)))
 
     def send(payload, **options):
         assert not runtime.store._write_connections
@@ -563,7 +613,7 @@ def _wire(
         assert payload == {
             "schema": c.BROKER_SCHEMA,
             "operation": "read_release_closure",
-            "approval": approval,
+            "admission_evidence": evidence,
         }
         assert options == {
             "socket_path": transport.DEFAULT_SOCKET,
@@ -854,19 +904,26 @@ def fresh_lane(installed, monkeypatch):
                 "principal",
                 "approval",
                 "reservation",
-                "admission",
+                "admission_evidence",
             }
             assert request["arguments"] == frame.arguments
             assert request["reservation"] == reservation
+            with runtime.store.read() as connection:
+                canonical = runtime.release_maintenance.read_unresolved_admission(connection)
+                assert _bytes(request["admission_evidence"]) == _bytes(canonical)
             result = {
                 "reservation": copy.deepcopy(reservation),
-                "admission": copy.deepcopy(request["admission"]),
+                "admission": copy.deepcopy(request["admission_evidence"]["admission"]),
                 "start_record": _synthetic_start(
-                    approval, reservation, request["admission"]
+                    approval, reservation, request["admission_evidence"]["admission"]
                 ),
             }
         else:
             assert operation == "read_release_closure"
+            assert set(request) == {"schema", "operation", "admission_evidence"}
+            with runtime.store.read() as connection:
+                canonical = runtime.release_maintenance.read_unresolved_admission(connection)
+                assert _bytes(request["admission_evidence"]) == _bytes(canonical)
             result = {
                 "reservation": copy.deepcopy(reservation),
                 "terminal_status": None,
@@ -1337,3 +1394,291 @@ def test_active_attempt_prevents_admission_after_reserve(fresh_lane):
     with pytest.raises(runtime_api.ReleaseMaintenanceError, match="ACTIVE_ATTEMPT"):
         _fresh(lane)
     assert _admission_count(lane) == 0 and len(lane["calls"]) == 1
+
+
+@pytest.mark.parametrize("first", ["before", "success", "loss", "preflight"])
+def test_canonical_capability_cannot_be_copied_constructed_or_restored(
+    canonical_lane, monkeypatch, first
+):
+    import pickle
+    import threading
+
+    lane, calls = canonical_lane, []
+    capability = lane["capability"]
+
+    def send(*args, **kwargs):
+        calls.append(args)
+        if first == "loss":
+            raise TimeoutError("lost closure response")
+        return lane["reply"]
+
+    monkeypatch.setattr(transport, "_send_one_frame", send)
+    read = lambda: lane["control"].broker.read_release_closure(
+        canonical_evidence=capability)
+    if first == "success":
+        read()
+    elif first == "loss":
+        with pytest.raises(TimeoutError):
+            read()
+    elif first == "preflight":
+        raw = capability.evidence_bytes
+        object.__setattr__(capability, "evidence_bytes", raw + b" ")
+        with pytest.raises(c.ReleaseConsumerError):
+            read()
+        object.__setattr__(capability, "evidence_bytes", raw)
+    consumed = capability._consumed
+    for duplicate in (copy.copy, copy.deepcopy, pickle.dumps):
+        with pytest.raises(TypeError, match="process-local"):
+            duplicate(capability)
+    for construct in (c._CanonicalUnresolvedReleaseEvidence, capability.__init__):
+        with pytest.raises(c.ReleaseConsumerError, match="CANONICAL_EVIDENCE_REQUIRED"):
+            construct(capability.evidence_bytes, capability.evidence_digest,
+                      capability._capability)
+    for fields in ({}, {"_consumed": False}, {"_lock": threading.Lock()},
+                   {"evidence_bytes": b"{}"}, {"receiver_pid": os.getpid() + 1}):
+        with pytest.raises(c.ReleaseConsumerError, match="CANONICAL_EVIDENCE_REQUIRED"):
+            dataclasses.replace(capability, **fields)
+    with pytest.raises(TypeError, match="process-local"):
+        capability.__getstate__()
+    with pytest.raises(TypeError, match="process-local"):
+        capability.__setstate__([None] * 6)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        capability._consumed = False
+    assert capability._consumed is consumed
+    if first == "before":
+        read()
+    with pytest.raises(c.ReleaseConsumerError, match="CANONICAL_EVIDENCE_REQUIRED"):
+        read()
+    assert len(calls) == (0 if first == "preflight" else 1)
+
+
+@pytest.mark.parametrize("replacement", [None, {}, b"{}", "approval", object()])
+def test_closure_client_requires_exact_private_capability(monkeypatch, replacement):
+    calls = []
+    monkeypatch.setattr(transport, "_send_one_frame", lambda *a, **k: calls.append(a))
+    with pytest.raises(c.ReleaseConsumerError, match="CANONICAL_EVIDENCE_REQUIRED"):
+        c.ReleaseBrokerClient().read_release_closure(canonical_evidence=replacement)
+    assert calls == []
+
+
+@pytest.mark.parametrize("mutation", ["pid", "capability", "digest", "bytes_type", "bytes"])
+def test_canonical_capability_tampering_refuses_before_transport(
+    canonical_lane, monkeypatch, mutation
+):
+    capability, calls = canonical_lane["capability"], []
+    monkeypatch.setattr(transport, "_send_one_frame", lambda *a, **k: calls.append(a))
+    field, value = {
+        "pid": ("receiver_pid", os.getpid() + 1),
+        "capability": ("_capability", object()),
+        "digest": ("evidence_digest", "f" * 64),
+        "bytes_type": ("evidence_bytes", bytearray(capability.evidence_bytes)),
+        "bytes": ("evidence_bytes", capability.evidence_bytes + b" "),
+    }[mutation]
+    object.__setattr__(capability, field, value)
+    with pytest.raises(c.ReleaseConsumerError, match="CANONICAL_EVIDENCE_REQUIRED"):
+        c.ReleaseBrokerClient().read_release_closure(canonical_evidence=capability)
+    assert calls == []
+
+
+@pytest.mark.parametrize("field", ["approval", "admission", "preconditions", "root_qualification_digest"])
+@pytest.mark.parametrize("mutation", ["missing", "wrong_type"])
+def test_canonical_capability_revalidates_every_field_before_transport(
+    canonical_lane, monkeypatch, field, mutation
+):
+    lane, calls = canonical_lane, []
+    evidence, capability = lane["evidence"], lane["capability"]
+    if mutation == "missing":
+        del evidence[field]
+    else:
+        evidence[field] = []
+    raw = _bytes(evidence)
+    object.__setattr__(capability, "evidence_bytes", raw)
+    object.__setattr__(capability, "evidence_digest", hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(transport, "_send_one_frame", lambda *a, **k: calls.append(a))
+    with pytest.raises((c.ReleaseConsumerError, contract.ReleaseContractError)):
+        lane["control"].broker.read_release_closure(canonical_evidence=capability)
+    assert calls == [] and capability._consumed is True
+
+
+@pytest.mark.parametrize("mutation", ["extra_field", "noncanonical", "invalid_digest"])
+def test_canonical_capability_rejects_extra_or_noncanonical_evidence(
+    canonical_lane, monkeypatch, mutation
+):
+    lane, calls = canonical_lane, []
+    evidence, capability = lane["evidence"], lane["capability"]
+    if mutation == "extra_field":
+        evidence["retry"] = True
+    elif mutation == "invalid_digest":
+        evidence["root_qualification_digest"] = "F" * 64
+    raw = _bytes(evidence) + (b" " if mutation == "noncanonical" else b"")
+    object.__setattr__(capability, "evidence_bytes", raw)
+    object.__setattr__(capability, "evidence_digest", hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(transport, "_send_one_frame", lambda *a, **k: calls.append(a))
+    with pytest.raises((c.ReleaseConsumerError, contract.ReleaseContractError)):
+        lane["control"].broker.read_release_closure(canonical_evidence=capability)
+    assert calls == [] and capability._consumed is True
+
+
+def test_concurrent_closure_consumers_send_only_once(canonical_lane, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    lane, calls = canonical_lane, []
+    monkeypatch.setattr(transport, "_send_one_frame",
+                        lambda *a, **k: calls.append(a) or lane["reply"])
+
+    def read(_):
+        try:
+            return lane["control"].broker.read_release_closure(
+                canonical_evidence=lane["capability"])
+        except c.ReleaseConsumerError as exc:
+            return exc.code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(read, range(2)))
+    assert sum(type(value) is c._RootReleaseResponse for value in results) == 1
+    assert results.count("RELEASE_CANONICAL_EVIDENCE_REQUIRED") == 1
+    assert len(calls) == 1
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires actual fork inheritance")
+@pytest.mark.parametrize("lane_name", ["fresh_lane", "canonical_lane"])
+def test_fork_rejects_before_waiting_on_inherited_capability_lock(request, lane_name):
+    import select
+    import signal
+
+    lane = request.getfixturevalue(lane_name)
+    capability = _fresh(lane) if lane_name == "fresh_lane" else lane["capability"]
+    expected = ("RELEASE_FRESH_ADMISSION_REQUIRED" if lane_name == "fresh_lane"
+                else "RELEASE_CANONICAL_EVIDENCE_REQUIRED")
+    reader, writer = os.pipe()
+    capability._lock.acquire()
+    child = None
+    try:
+        child = os.fork()
+        if child == 0:
+            os.close(reader)
+            try:
+                capability._consume()
+                result = "UNEXPECTED_ACCEPTANCE"
+            except c.ReleaseConsumerError as exc:
+                result = exc.code
+            except BaseException:
+                result = "UNEXPECTED_EXCEPTION"
+            os.write(writer, result.encode("ascii"))
+            os._exit(0)
+        os.close(writer)
+        assert select.select([reader], [], [], 3)[0], "fork waited on inherited lock"
+        assert os.read(reader, 256).decode("ascii") == expected
+        assert capability._consumed is False
+    finally:
+        capability._lock.release()
+        os.close(reader)
+        if child is None:
+            os.close(writer)
+        elif child > 0:
+            observed, _ = os.waitpid(child, os.WNOHANG)
+            if observed == 0:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
+
+
+def test_lost_closure_keeps_runtime_evidence_and_reopen_closes_once(
+    canonical_lane, monkeypatch
+):
+    lane, calls = canonical_lane, []
+    runtime = lane["runtime"]
+    before = _events(runtime)
+
+    def lost(*args, **kwargs):
+        calls.append(args)
+        raise TimeoutError("lost closure response")
+
+    monkeypatch.setattr(transport, "_send_one_frame", lost)
+    with pytest.raises(TimeoutError):
+        lane["control"].finalize_unresolved_admission()
+    assert len(calls) == 1 and _events(runtime) == before
+    with runtime.store.read() as connection:
+        pending = runtime.release_maintenance.read_unresolved_admission(connection)
+        assert _bytes(pending) == _bytes(lane["evidence"])
+    reopened = runtime_api.Runtime.at(runtime.store.root)
+    reply = lane["reply"]
+    calls, _ = _wire(monkeypatch, reopened, reply["approval"],
+                     reply["result"]["reservation"],
+                     status=reply["result"]["terminal_status"])
+    control = c.ReleaseControlConsumer(reopened)
+    assert control.finalize_unresolved_admission() is None
+    assert len(_events(reopened)) == len(before) + 1 and len(calls) == 1
+    assert control.finalize_unresolved_admission() is None
+    assert len(_events(reopened)) == len(before) + 1 and len(calls) == 1
+
+
+def test_private_frame_limits_include_ascii_expansion_and_newline():
+    from control_plane import executive_privileged_broker as broker
+
+    assert broker._MAX_REQUEST_BYTES == 64 * 1024
+    assert transport._MAX_RESPONSE_BYTES == 128 * 1024
+    assert contract._MAX_BYTES == 16 * 1024
+    # This is a transport boundary probe, not a valid release record. Unicode
+    # expands to six ASCII bytes in the real shared transport's encoder.
+    payload = {"x": "\u00e9" * 10_000 + "a" * 5_527}
+    encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    assert len(encoded) == broker._MAX_REQUEST_BYTES
+    assert c._bounded_private_payload(payload) is payload
+    payload["x"] += "a"
+    with pytest.raises(c.ReleaseConsumerError, match="REQUEST_TOO_LARGE"):
+        c._bounded_private_payload(payload)
+    assert len(_bytes({"x": "a" * (16 * 1024 - 8)})) == 16 * 1024
+    with pytest.raises(contract.ReleaseContractError):
+        _bytes({"x": "a" * (16 * 1024 - 7)})
+
+
+@pytest.mark.parametrize("fault", ["read_error", "foreign_snapshot", "malformed_event", "orphan_admission"])
+def test_failed_canonical_read_never_reaches_broker(tmp_path, monkeypatch, fault):
+    import sqlite3
+
+    runtime = runtime_api.Runtime.at(tmp_path / "runtime")
+    _seed_real_admission(runtime)
+    control = c.ReleaseControlConsumer(runtime)
+    calls = []
+    monkeypatch.setattr(control.broker, "read_release_closure",
+                        lambda **kwargs: calls.append(kwargs))
+    if fault in {"malformed_event", "orphan_admission"}:
+        # Fault injection is confined to this disposable test database.
+        with sqlite3.connect(runtime.store.path) as raw:
+            if fault == "malformed_event":
+                raw.execute("DROP TRIGGER events_are_immutable_update")
+                raw.execute("UPDATE events SET payload_json='{}' "
+                            "WHERE event_type='EXECUTIVE_RELEASE_ADMITTED'")
+            else:
+                raw.execute("DROP TRIGGER events_are_immutable_delete")
+                raw.execute("DELETE FROM events WHERE event_type='EXECUTIVE_RELEASE_APPROVED'")
+    before = _events(runtime)
+    with monkeypatch.context() as patch:
+        if fault == "read_error":
+            def failed_read(connection):
+                raise sqlite3.OperationalError("test read failed")
+            patch.setattr(runtime.release_maintenance, "read_unresolved_admission", failed_read)
+        elif fault == "foreign_snapshot":
+            foreign = runtime_api.Runtime.at(tmp_path / "foreign")
+            patch.setattr(runtime.store, "read", foreign.store.read)
+        with pytest.raises((runtime_api.ReleaseMaintenanceError,
+                            contract.ReleaseContractError, runtime_api.PersistenceError)):
+            control.finalize_unresolved_admission()
+    assert calls == [] and _events(runtime) == before
+    assert not runtime.store._read_connections and not runtime.store._write_connections
+
+
+def test_complete_start_and_closure_frames_fit_unchanged_bounds(fresh_lane):
+    lane = fresh_lane
+    capability = _fresh(lane)
+    lane["control"].broker.start_reserved_release(fresh_admission=capability)
+    with pytest.raises(c.ReleaseConsumerError, match="CLOSURE_UNQUALIFIED"):
+        lane["control"].finalize_unresolved_admission()
+    start, closure = lane["calls"][-2:]
+    assert start["operation"] == "start_reserved_release"
+    assert closure["operation"] == "read_release_closure"
+    assert start["admission_evidence"] == closure["admission_evidence"]
+    assert len(_bytes(start["admission_evidence"])) <= 16 * 1024
+    for payload in (start, closure):
+        encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+        assert len(encoded) <= 64 * 1024

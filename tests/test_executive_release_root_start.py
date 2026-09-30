@@ -45,30 +45,6 @@ def digest(value):
     return hashlib.sha256(contract.canonical_release_bytes(value)).hexdigest()
 
 
-def reader(**changes):
-    value = {
-        "schema": consumer.BROKER_SCHEMA,
-        "operation": "start_reserved_release",
-        "arguments": {"operation_key": "root-start-proof", "prepared_token": None},
-        "principal": "unused",
-        "approval": None,
-        "reservation": None,
-        "admission": None,
-    }
-    value.update(changes)
-    return value
-
-
-class AdmissionReader:
-    def __init__(self):
-        self.evidence = None
-        self.calls = []
-
-    def read_admission_evidence(self, *, approved_transition_ref, request_fingerprint):
-        self.calls.append((approved_transition_ref, request_fingerprint))
-        return copy.deepcopy(self.evidence)
-
-
 def fixture(inputs):
     principal, effect, policy = copy.deepcopy(inputs)
     effect = contract.validate_normalized_effect(effect)
@@ -221,6 +197,15 @@ def admission_fixture(approval, reservation):
     })
 
 
+def admission_evidence_fixture(approval, admission, reservation):
+    return {
+        "approval": approval.to_dict(),
+        "admission": admission.to_dict(),
+        "preconditions": reservation["preconditions"],
+        "root_qualification_digest": digest(reservation),
+    }
+
+
 class Composition:
     def __init__(self, tmp_path, monkeypatch, inputs, **snapshot_changes):
         principal, effect, snapshot, state_factory = fixture(inputs)
@@ -244,10 +229,11 @@ class Composition:
         self.token = snapshot.codec.encode_prepared(self.prepared)
         self.journal = actuator._ExecutiveReleaseActuatorJournal._for_tests(
             tmp_path / "journal")
-        self.admission_reader = AdmissionReader()
+        self.peer_calls = []
         self.owner = ReleaseBrokerOwner(
             state_factory if not snapshot_changes else (lambda transition: snapshot),
-            root_journal=self.journal, admission_reader=self.admission_reader)
+            root_journal=self.journal)
+        self._monkeypatch = monkeypatch
         monkeypatch.setattr(
             __import__("control_plane.executive_release_owner", fromlist=["time"]).time,
             "time_ns", lambda: NOW[0] * 1_000_000)
@@ -256,7 +242,10 @@ class Composition:
             "monotonic_ns", lambda: MONOTONIC[0])
         monkeypatch.setattr(
             __import__("control_plane.executive_release_owner", fromlist=["_qualify_connection"]),
-            "_qualify_connection", lambda connection, role: None)
+            "_qualify_connection", self._record_peer)
+
+    def _record_peer(self, connection, role):
+        self.peer_calls.append((id(connection), role))
 
     def frame(self, operation, **changes):
         public = ingress.project_frame(
@@ -267,7 +256,7 @@ class Composition:
                  "approval": self.approval.to_dict()}
         if operation == "start_reserved_release":
             value["reservation"] = self._plain(self.reservation)
-            value["admission"] = self._plain(self.admission)
+            value["admission_evidence"] = self._plain(self.evidence)
         value.update(changes)
         return value
 
@@ -275,12 +264,8 @@ class Composition:
         result = self.owner.handle(self.frame("reserve_release_prestart"), object())
         self.reservation = result["result"]["reservation"]
         self.admission = admission_fixture(self.approval, self.reservation)
-        self.admission_reader.evidence = {
-            "approval": self.approval.to_dict(),
-            "admission": self.admission.to_dict(),
-            "preconditions": self.reservation["preconditions"],
-            "root_qualification_digest": digest(self.reservation),
-        }
+        self.evidence = admission_evidence_fixture(
+            self.approval, self.admission, self.reservation)
         return result
 
     def start(self, raw=None):
@@ -323,14 +308,10 @@ def test_reserve_start_and_exact_replay(tmp_path, monkeypatch, inputs):
     assert record["state"] == "STARTED"
     assert record["journal_generation"] == 1
     assert record["actuator_generation"] == ACTUATOR_GENERATION
-    assert composition.admission_reader.calls == [(
-        composition.reservation["approved_transition_ref"],
-        composition.reservation["request_fingerprint"])]
     NOW[0] += 1
     MONOTONIC[0] += 1_000_000
     replay = composition.start()
     assert replay == started
-    assert composition.admission_reader.calls[-1] == composition.admission_reader.calls[0]
 
 
 @pytest.mark.parametrize("clock", ["wall", "monotonic"])
@@ -343,18 +324,16 @@ def test_expiry_during_runtime_read_prevents_durable_start(
         composition.reserve()
         NOW[0] = composition.prepared["expires_at_ms"] - 1
         MONOTONIC[0] = composition.prepared["expires_monotonic_ns"] - 1_000_000
-        read = composition.admission_reader.read_admission_evidence
 
-        def delayed(**kwargs):
-            evidence = read(**kwargs)
+        def delayed_snapshot(_transition, _state=None):
+            evidence = copy.deepcopy(composition.evidence)
             if clock == "wall":
                 NOW[0] = composition.prepared["expires_at_ms"] + past
             else:
                 MONOTONIC[0] = composition.prepared["expires_monotonic_ns"] + past
             return evidence
 
-        monkeypatch.setattr(
-            composition.admission_reader, "read_admission_evidence", delayed)
+        monkeypatch.setattr(composition.owner, "_snapshot", delayed_snapshot)
         with pytest.raises(consumer.ReleaseConsumerError):
             composition.start()
         with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
@@ -370,23 +349,28 @@ def test_physical_snapshot_drift_during_runtime_read_prevents_start(
         tmp_path, monkeypatch, inputs, field):
     composition = Composition(tmp_path, monkeypatch, inputs)
     composition.reserve()
-    read = composition.admission_reader.read_admission_evidence
+    real_snapshot = composition.owner._snapshot
+    calls = {"count": 0}
 
-    def drift(**kwargs):
-        evidence = read(**kwargs)
-        if field == "before":
-            changed = copy.deepcopy(composition.snapshot.before)
-            changed["broker_binary_digest"] = "0" * 64
-        elif field == "actuator_generation":
-            changed = composition.snapshot.actuator_generation + 1
-        else:
-            changed = "0" * 64
-        current = replace(composition.snapshot, **{field: changed})
-        composition.owner._snapshot = lambda transition: current
-        return evidence
+    def drift_snapshot(transition):
+        calls["count"] += 1
+        # The first outer private-inputs call still sees the original
+        # snapshot; the drift becomes visible to the second call (which
+        # the journal acquire callback invokes after all blocking reads)
+        # and would also be visible to ``qualify_locked_start`` if it
+        # ran. Either way the journal must refuse to write a START.
+        if calls["count"] >= 2:
+            if field == "before":
+                changed = copy.deepcopy(composition.snapshot.before)
+                changed["broker_binary_digest"] = "0" * 64
+            elif field == "actuator_generation":
+                changed = composition.snapshot.actuator_generation + 1
+            else:
+                changed = "0" * 64
+            return replace(composition.snapshot, **{field: changed})
+        return real_snapshot(transition)
 
-    monkeypatch.setattr(
-        composition.admission_reader, "read_admission_evidence", drift)
+    composition.owner._snapshot = drift_snapshot
     with pytest.raises(consumer.ReleaseConsumerError):
         composition.start()
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
@@ -422,7 +406,7 @@ def test_expiry_during_final_journal_lock_prevents_durable_start(
         composition.journal.read(composition.approval["operation_key"])
 
 
-@pytest.mark.parametrize("field", ["reservation", "admission"])
+@pytest.mark.parametrize("field", ["reservation", "admission_evidence"])
 def test_start_rejects_missing_top_level_field(tmp_path, monkeypatch, inputs, field):
     composition = Composition(tmp_path, monkeypatch, inputs)
     composition.reserve()
@@ -430,7 +414,6 @@ def test_start_rejects_missing_top_level_field(tmp_path, monkeypatch, inputs, fi
     raw.pop(field)
     with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_BROKER_FRAME_INVALID"):
         composition.start(raw)
-    assert not composition.admission_reader.calls
 
 
 def test_private_envelope_rejects_extra_fields_and_public_commit_remains_disarmed(tmp_path, monkeypatch, inputs):
@@ -451,12 +434,12 @@ def test_private_envelope_rejects_extra_fields_and_public_commit_remains_disarme
 def test_start_rejects_missing_expired_or_foreign_admission_evidence(tmp_path, monkeypatch, inputs):
     composition = Composition(tmp_path, monkeypatch, inputs)
     composition.reserve()
-    good = copy.deepcopy(composition.admission_reader.evidence)
+    good = copy.deepcopy(composition.evidence)
     cases = []
     cases.append(("missing", None))
-    changed_admission = copy.deepcopy(good)
-    changed_admission["admission"]["maintenance_sequence"] = 2
-    cases.append(("foreign", changed_admission))
+    changed_join = copy.deepcopy(good)
+    changed_join["admission"]["target_observation_digest"] = "0" * 64
+    cases.append(("foreign", changed_join))
     changed_digest = copy.deepcopy(good)
     changed_digest["root_qualification_digest"] = "0" * 64
     cases.append(("digest", changed_digest))
@@ -464,10 +447,11 @@ def test_start_rejects_missing_expired_or_foreign_admission_evidence(tmp_path, m
     extra["extra"] = 1
     cases.append(("extra", extra))
     for _name, evidence in cases:
-        composition.admission_reader.evidence = evidence
-        with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_ADMISSION_EVIDENCE"):
+        composition.evidence = evidence
+        with pytest.raises(consumer.ReleaseConsumerError,
+                           match="RELEASE_BROKER_FRAME_INVALID|RELEASE_ADMISSION_EVIDENCE|RELEASE_ROOT_JOURNAL_"):
             composition.start()
-    composition.admission_reader.evidence = copy.deepcopy(good)
+    composition.evidence = copy.deepcopy(good)
     NOW[0] += 300_001
     MONOTONIC[0] += 300_001_000_000
     try:
@@ -476,7 +460,7 @@ def test_start_rejects_missing_expired_or_foreign_admission_evidence(tmp_path, m
     finally:
         NOW[0] -= 300_001
         MONOTONIC[0] -= 300_001_000_000
-    composition.admission_reader.evidence = copy.deepcopy(good)
+    composition.evidence = copy.deepcopy(good)
     assert composition.start()["ok"] is True
 
 
@@ -487,10 +471,10 @@ def test_start_rejects_changed_reservation_admission_or_target_observation(tmp_p
     reservation["target_observation_digest"] = "7" * 64
     with pytest.raises(consumer.ReleaseConsumerError):
         composition.start(composition.frame("start_reserved_release", reservation=reservation))
-    admission = composition.admission.to_dict()
-    admission["maintenance_sequence"] = 2
-    with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_ADMISSION_EVIDENCE_MISMATCH"):
-        composition.start(composition.frame("start_reserved_release", admission=admission))
+    evidence = copy.deepcopy(composition.evidence)
+    evidence["admission"]["target_observation_digest"] = "7" * 64
+    with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_ROOT_JOURNAL_ADMISSION_JOIN"):
+        composition.start(composition.frame("start_reserved_release", admission_evidence=evidence))
     snapshot = replace(composition.snapshot, target_observation_digest="7" * 64)
     composition.snapshot = snapshot
     composition.owner._snapshot = lambda transition: snapshot
@@ -574,17 +558,6 @@ def cancellation_fixture(composition):
     }
 
 
-def test_admission_reader_must_be_object_method_not_callable(tmp_path, monkeypatch, inputs):
-    principal, effect, snapshot, state_factory = fixture(inputs)
-    with pytest.raises(TypeError):
-        ReleaseBrokerOwner(
-            state_factory, admission_reader=lambda *_args, **_kwargs: None)
-    reader = AdmissionReader()
-    owner = ReleaseBrokerOwner(state_factory, admission_reader=reader)
-    assert not callable(owner._admission_reader)
-    assert callable(owner._admission_reader.read_admission_evidence)
-
-
 def test_public_snapshot_constructor_is_positionally_compatible(inputs):
     principal, effect, snapshot, _factory = fixture(inputs)
     rebuilt = ReleaseOwnerSnapshot(
@@ -595,3 +568,267 @@ def test_public_snapshot_constructor_is_positionally_compatible(inputs):
     assert rebuilt.actuator_generation == 0
     assert rebuilt.target_observation_digest == ""
     assert rebuilt.before == {}
+
+
+# ---------------------------------------------------------------------------
+# R10 strict private-wire and evidence regression tests.
+# ---------------------------------------------------------------------------
+
+
+def test_start_strict_wire_keys(tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    raw = composition.frame("start_reserved_release")
+    assert set(raw) == {
+        "schema", "operation", "arguments", "principal", "approval",
+        "reservation", "admission_evidence"}
+    assert "admission" not in raw
+    nested = raw["admission_evidence"]
+    assert set(nested) == {
+        "approval", "admission", "preconditions", "root_qualification_digest"}
+
+
+@pytest.mark.parametrize("mutation,change", [
+    ("admission_top_level", {"admission": {}}),
+    ("approval_top_level", {"approval": {}}),
+    ("reservation_top_level", {"reservation": {}}),
+    ("evidence_extra_field", {"admission_evidence": {
+        "approval": None, "admission": None, "preconditions": None,
+        "root_qualification_digest": None, "extra": 1}}),
+    ("evidence_missing_field", {"admission_evidence": {
+        "approval": None, "admission": None, "root_qualification_digest": None}}),
+    ("wrong_type_evidence", {"admission_evidence": "notamapping"}),
+    ("wrong_type_approval", {"admission_evidence": {
+        "approval": [], "admission": None, "preconditions": None,
+        "root_qualification_digest": None}}),
+    ("wrong_type_digest", {"admission_evidence": {
+        "approval": None, "admission": None, "preconditions": None,
+        "root_qualification_digest": []}}),
+])
+def test_start_rejects_strict_wire_mutation(tmp_path, monkeypatch, inputs, mutation, change):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    raw = composition.frame("start_reserved_release")
+    raw.update(change)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start(raw)
+
+
+def test_start_evidence_approval_must_byte_equal_top_level_approval(
+        tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    raw = composition.frame("start_reserved_release")
+    # Build a second sealed approval using a different owner codec so the
+    # two approvals are both valid but their canonical bytes differ.
+    # Mutating the original approval in place fails the frozen validator
+    # before the canonical-byte check can run.
+    principal2, _effect2, _snapshot2, _factory2 = fixture(inputs)
+    different_codec = _OwnerReleaseCodec(
+        key=bytes(reversed(range(32))), key_id="test-key", trust_generation=1,
+        owner_installation_id=OWNER)
+    snapshot2 = ReleaseOwnerSnapshot(
+        policy=composition.snapshot.policy, codec=different_codec,
+        owner_installation_id=OWNER, target_ref=TARGET,
+        boot_id=OWNER, key_id="test-key", trust_generation=1,
+        app_generation=1, schema_digest="1" * 64,
+        admission_contract_digest="e" * 64, effect=composition.snapshot.effect,
+        preconditions=composition.snapshot.preconditions,
+        actuator_generation=ACTUATOR_GENERATION,
+        target_observation_digest=TARGET_OBSERVATION,
+        before=composition.snapshot.before)
+    different_approval = approval_fixture(
+        snapshot2, principal2, operation_key=composition.approval["operation_key"])
+    assert (contract.canonical_release_bytes(different_approval.to_dict())
+            != contract.canonical_release_bytes(composition.approval.to_dict()))
+    raw["admission_evidence"]["approval"] = different_approval.to_dict()
+    with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_ADMISSION_EVIDENCE"):
+        composition.start(raw)
+
+
+def test_start_evidence_digest_must_equal_reservation_digest(
+        tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    raw = composition.frame("start_reserved_release")
+    raw["admission_evidence"]["root_qualification_digest"] = "0" * 64
+    with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_ADMISSION_EVIDENCE_MISMATCH"):
+        composition.start(raw)
+
+
+@pytest.mark.parametrize("field", [
+    "reservation_prepared_token_digest",
+    "reservation_target_observation_digest",
+    "admission_target_observation_digest",
+    "preconditions_production_arming_digest",
+    "root_qualification_digest",
+])
+def test_start_full_join_mutation_refuses(tmp_path, monkeypatch, inputs, field):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    raw = composition.frame("start_reserved_release")
+    if field == "reservation_prepared_token_digest":
+        raw["reservation"]["prepared_token_digest"] = "0" * 64
+    elif field == "reservation_target_observation_digest":
+        raw["reservation"]["target_observation_digest"] = "0" * 64
+    elif field == "admission_target_observation_digest":
+        raw["admission_evidence"]["admission"]["target_observation_digest"] = "0" * 64
+    elif field == "preconditions_production_arming_digest":
+        raw["admission_evidence"]["preconditions"]["production_arming_digest"] = "0" * 64
+    elif field == "root_qualification_digest":
+        raw["admission_evidence"]["root_qualification_digest"] = "0" * 64
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start(raw)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="NOT_FOUND"):
+        composition.journal.read(composition.approval["operation_key"])
+
+
+def test_start_rejects_qualifier_owner_drift_at_final_lock(
+        tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    real_inputs = composition.owner._private_inputs
+
+    def drift_inputs(frame, raw):
+        state, effect, sealed, payload, preconditions = real_inputs(frame, raw)
+        return (replace(state, target_observation_digest="0" * 64),
+                effect, sealed, payload, preconditions)
+
+    monkeypatch.setattr(composition.owner, "_private_inputs", drift_inputs)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="NOT_FOUND"):
+        composition.journal.read(composition.approval["operation_key"])
+
+
+def test_start_peer_qualification_runs_at_final_lock(tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    composition.peer_calls = []
+    composition.start()
+    # The final operation lock qualifier must invoke peer qualification
+    # at least once after every blocking read and immediately before
+    # create/replay. Each call into ``_qualify_connection`` records a tuple
+    # containing the role; assert at least one such call was made during
+    # the locked start.
+    assert any(role == "control" for _id, role in composition.peer_calls)
+
+
+@pytest.mark.parametrize("invalidating_snapshot", [1, 2])
+def test_start_refuses_peer_invalidation_during_final_owner_snapshots(
+        tmp_path, monkeypatch, inputs, invalidating_snapshot):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    real_inputs = composition.owner._private_inputs
+    real_snapshot = composition.owner._snapshot
+    private_calls = 0
+    final_snapshot_calls = 0
+    peer_valid = True
+
+    def tracked_inputs(frame, raw):
+        nonlocal private_calls
+        private_calls += 1
+        return real_inputs(frame, raw)
+
+    def invalidating_snapshot_call(transition):
+        nonlocal final_snapshot_calls, peer_valid
+        if private_calls == 2:
+            final_snapshot_calls += 1
+            if final_snapshot_calls == invalidating_snapshot:
+                peer_valid = False
+        return real_snapshot(transition)
+
+    def qualify(_connection, role):
+        assert role == "control"
+        if not peer_valid:
+            raise consumer.ReleaseConsumerError("RELEASE_PEER_UNAVAILABLE")
+
+    monkeypatch.setattr(composition.owner, "_private_inputs", tracked_inputs)
+    monkeypatch.setattr(composition.owner, "_snapshot", invalidating_snapshot_call)
+    monkeypatch.setattr(
+        __import__("control_plane.executive_release_owner",
+                   fromlist=["_qualify_connection"]),
+        "_qualify_connection", qualify)
+    with pytest.raises(consumer.ReleaseConsumerError,
+                       match="RELEASE_PEER_UNAVAILABLE"):
+        composition.start()
+    assert final_snapshot_calls == 2
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="NOT_FOUND"):
+        composition.journal.read(composition.approval["operation_key"])
+
+
+@pytest.mark.parametrize("clock", ["wall", "monotonic"])
+def test_start_refuses_expiry_during_final_peer_qualification(
+        tmp_path, monkeypatch, inputs, clock):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    owner_module = __import__(
+        "control_plane.executive_release_owner", fromlist=["_qualify_connection"])
+    calls = 0
+
+    def expiring_peer(_connection, role):
+        nonlocal calls
+        assert role == "control"
+        calls += 1
+        if calls == 2:
+            if clock == "wall":
+                NOW[0] += 300_000
+            else:
+                MONOTONIC[0] += 300_000_000_000
+
+    monkeypatch.setattr(owner_module, "_qualify_connection", expiring_peer)
+    with pytest.raises(consumer.ReleaseConsumerError,
+                       match="RELEASE_PREPARED_EXPIRED"):
+        composition.start()
+    assert calls == 2
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="NOT_FOUND"):
+        composition.journal.read(composition.approval["operation_key"])
+
+
+def test_start_rejects_owner_drift_at_final_qualifier(
+        tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    real_snapshot = composition.owner._snapshot
+    drift_calls = {"count": 0}
+
+    def drift(transition):
+        drift_calls["count"] += 1
+        if drift_calls["count"] == 2:
+            return replace(composition.snapshot, target_observation_digest="0" * 64)
+        return real_snapshot(transition)
+
+    composition.owner._snapshot = drift
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start()
+
+
+def test_start_no_mutation_on_refusal(tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    stem = actuator._operation_stem(composition.approval["operation_key"])
+    snapshot_files = sorted(
+        p.name for p in Path(composition.journal._root).iterdir())
+    raw = composition.frame("start_reserved_release")
+    raw["admission_evidence"]["admission"]["target_observation_digest"] = "0" * 64
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start(raw)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="NOT_FOUND"):
+        composition.journal.read(composition.approval["operation_key"])
+    assert sorted(
+        p.name for p in Path(composition.journal._root).iterdir()) == snapshot_files
+
+
+def test_start_rejects_evidence_with_wrong_preconditions(
+        tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    raw = composition.frame("start_reserved_release")
+    raw["admission_evidence"]["preconditions"]["production_arming_digest"] = "0" * 64
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start(raw)

@@ -399,11 +399,10 @@ class Composition:
         self.token = snapshot.codec.encode_prepared(self.prepared)
         self.journal = actuator._ExecutiveReleaseActuatorJournal._for_tests(tmp_path / "journal")
         self.connection = object()
-        self.admission_reader = AdmissionReader()
         self.qualifications = []
         self.owner = ReleaseBrokerOwner(
             state_factory, history_trust=self.history_trust,
-            root_journal=self.journal, admission_reader=self.admission_reader)
+            root_journal=self.journal)
         monkeypatch.setattr(owner_module.time, "time_ns", lambda: NOW[0] * 1_000_000)
         monkeypatch.setattr(owner_module.time, "monotonic_ns", lambda: MONOTONIC[0])
         monkeypatch.setattr(owner_module, "_qualify_connection", self.qualify)
@@ -423,7 +422,7 @@ class Composition:
         value = {
             "schema": consumer.BROKER_SCHEMA,
             "operation": "read_release_closure",
-            "approval": self.approval.to_dict(),
+            "admission_evidence": copy.deepcopy(self.evidence),
         }
         value.update(changes)
         return value
@@ -440,7 +439,7 @@ class Composition:
         result = self.owner.handle(raw, self.connection)
         self.reservation = result["result"]["reservation"]
         self.admission = admission_fixture(self.approval, self.reservation)
-        self.admission_reader.evidence = {
+        self.evidence = {
             "approval": self.approval.to_dict(),
             "admission": self.admission.to_dict(),
             "preconditions": self.reservation["preconditions"],
@@ -453,20 +452,6 @@ class Composition:
         return self.owner.handle(raw or self.frame(), self.connection)
 
 
-class AdmissionReader:
-    def __init__(self):
-        self.evidence = None
-        self.calls = []
-
-    def read_admission_evidence(self, *, approved_transition_ref,
-                                request_fingerprint):
-        # The canonical reader is installation-bound and accepts only the
-        # two admission identity fields.  The owner separately qualifies its
-        # serving Control transport.
-        self.calls.append((approved_transition_ref, request_fingerprint))
-        return copy.deepcopy(self.evidence)
-
-
 TERMINAL_STATES = ("SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED")
 NONTERMINAL_STATES = ("STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING")
 
@@ -477,7 +462,7 @@ def test_exact_journal_record_union_is_returned(
     composition = Composition(tmp_path, monkeypatch, inputs)
     composition.reserve()
     original_reservation = copy.deepcopy(composition.reservation)
-    original_evidence = copy.deepcopy(composition.admission_reader.evidence)
+    original_evidence = copy.deepcopy(composition.evidence)
     stored = install_journal_record(composition, state)
     mark_written(composition.journal)
     result = composition.read()
@@ -489,10 +474,7 @@ def test_exact_journal_record_union_is_returned(
         stored, composition.reservation, composition.admission, composition.approval)
     assert result["result"]["terminal_status"] == expected
     assert result["result"]["cancellation"] is None
-    assert composition.admission_reader.calls == [(
-        original_reservation["approved_transition_ref"],
-        original_reservation["request_fingerprint"])]
-    assert composition.qualifications == ["control"] * 3
+    assert composition.qualifications == ["control"] * 6
     assert Path(composition.journal._root).joinpath(
         actuator._operation_stem(composition.approval["operation_key"]) + ".json"
     ).read_bytes() == contract.canonical_release_bytes(stored)
@@ -503,7 +485,7 @@ def test_qualified_cancellation_returns_exact_union(
     composition = Composition(tmp_path, monkeypatch, inputs)
     composition.reserve()
     reservation = copy.deepcopy(composition.reservation)
-    evidence = copy.deepcopy(composition.admission_reader.evidence)
+    evidence = copy.deepcopy(composition.evidence)
     composition.journal.cancel_prestart(
         cancellation=cancellation_fixture(composition),
         reservation=reservation, admission=composition.admission.to_dict(),
@@ -518,9 +500,7 @@ def test_qualified_cancellation_returns_exact_union(
     assert result["result"] == {
         "reservation": reservation, "terminal_status": None,
         "cancellation": cancellation}
-    assert composition.admission_reader.calls == [(
-        reservation["approved_transition_ref"], reservation["request_fingerprint"])]
-    assert composition.qualifications == ["control"] * 3
+    assert composition.qualifications == ["control"] * 6
 
 
 def test_missing_history_refuses_and_never_implies_cancellation(
@@ -537,9 +517,6 @@ def test_missing_history_refuses_and_never_implies_cancellation(
     with pytest.raises(consumer.ReleaseConsumerError,
                        match="RELEASE_ROOT_JOURNAL_NOT_FOUND"):
         composition.read()
-    assert composition.admission_reader.calls == [(
-        composition.reservation["approved_transition_ref"],
-        composition.reservation["request_fingerprint"])]
 
 
 def test_journal_and_qualified_cancellation_conflict_refuses(
@@ -598,9 +575,9 @@ def test_changed_durable_joins_refuse(tmp_path, monkeypatch, inputs, kind, mutat
         Path(composition.journal._root, stem + ".json").write_bytes(
             contract.canonical_release_bytes(record))
     else:
-        evidence = copy.deepcopy(composition.admission_reader.evidence)
+        evidence = copy.deepcopy(composition.evidence)
         evidence[kind][mutation] = "0" * 64
-        composition.admission_reader.evidence = evidence
+        composition.evidence = evidence
     with pytest.raises(consumer.ReleaseConsumerError):
         composition.read()
 
@@ -663,25 +640,18 @@ def test_journal_start_identity_mismatch_refuses_before_status(
         composition.read()
 
 
-def test_closure_reader_receives_only_identity_fields_while_owner_qualifies(
+def test_closure_wire_carries_only_canonical_evidence_while_owner_qualifies(
         tmp_path, monkeypatch, inputs):
     composition = Composition(tmp_path, monkeypatch, inputs)
     composition.reserve()
     install_journal_record(composition, "SUCCEEDED")
-    approved_transition_ref = composition.reservation["approved_transition_ref"]
-    request_fingerprint = composition.reservation["request_fingerprint"]
-    # A transport socket is outside the canonical installation-bound reader
-    # interface and cannot be supplied positionally.
-    with pytest.raises(TypeError):
-        composition.admission_reader.read_admission_evidence(
-            composition.connection,
-            approved_transition_ref=approved_transition_ref,
-            request_fingerprint=request_fingerprint)
-    composition.admission_reader.calls = []
+    raw = composition.frame()
+    assert set(raw) == {"schema", "operation", "admission_evidence"}
+    assert raw["admission_evidence"] == composition.evidence
+    assert not any(key in raw for key in (
+        "path", "runtime", "socket", "callback", "selector", "approval"))
     composition.read()
-    assert composition.admission_reader.calls == [(
-        approved_transition_ref, request_fingerprint)]
-    assert composition.qualifications == ["control"] * 3
+    assert composition.qualifications == ["control"] * 6
 
 
 @pytest.mark.parametrize("field", [
@@ -695,8 +665,12 @@ def test_original_approval_drift_refuses(tmp_path, monkeypatch, inputs, field):
     else:
         approval[field] = "0" * 64
     with pytest.raises(consumer.ReleaseConsumerError,
-                       match="RELEASE_APPROVAL_IDENTITY_MISMATCH|RELEASE_BROKER_FRAME_INVALID"):
-        composition.read(composition.frame(approval=approval))
+                       match=("RELEASE_ADMISSION_EVIDENCE_INVALID|"
+                              "RELEASE_APPROVAL_IDENTITY_MISMATCH|"
+                              "RELEASE_BROKER_FRAME_INVALID")):
+        raw = composition.frame()
+        raw["admission_evidence"]["approval"] = approval
+        composition.read(raw)
 
 
 def test_unstable_history_trust_refuses(tmp_path, monkeypatch, inputs):
@@ -719,6 +693,21 @@ def test_unstable_history_trust_refuses(tmp_path, monkeypatch, inputs):
     assert calls == [0, 1]
 
 
+def test_durable_closure_never_restages_expired_transition(
+        tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    install_journal_record(composition, "SUCCEEDED")
+
+    def staging_unavailable(_transition):
+        raise consumer.ReleaseConsumerError("RELEASE_STAGE_UNAVAILABLE")
+
+    composition.owner._snapshot = staging_unavailable
+    result = composition.read()
+    assert result["result"]["terminal_status"]["state"] == "SUCCEEDED"
+    assert result["result"]["cancellation"] is None
+
+
 @pytest.mark.parametrize("mutation,change", [
     ("extra", {"retry": True}),
     ("principal", {"principal": {}}),
@@ -735,7 +724,7 @@ def test_exact_private_wire_and_response_keys(
     raw = composition.frame(**({} if mutation == "missing" else change))
     original = mark_written(composition.journal)
     if mutation == "missing":
-        raw.pop("approval")
+        raw.pop("admission_evidence")
     elif mutation == "extra":
         raw.update(change)
     with pytest.raises(consumer.ReleaseConsumerError,
@@ -775,7 +764,7 @@ def test_missing_installed_composition_refuses(tmp_path, monkeypatch, inputs):
                        match="RELEASE_ROOT_JOURNAL_UNAVAILABLE"):
         ReleaseBrokerOwner(state_factory).handle(
             {"schema": consumer.BROKER_SCHEMA, "operation": "read_release_closure",
-             "approval": approval.to_dict()}, object())
+             "admission_evidence": {}}, object())
     owner = ReleaseBrokerOwner(
         state_factory, history_trust=lambda: owner_module.ReleaseHistoryTrust(
             codec=snapshot.codec, owner_installation_id=snapshot.owner_installation_id,
@@ -784,8 +773,8 @@ def test_missing_installed_composition_refuses(tmp_path, monkeypatch, inputs):
                        match="RELEASE_ROOT_JOURNAL_UNAVAILABLE"):
         owner.handle({"schema": consumer.BROKER_SCHEMA,
                       "operation": "read_release_closure",
-                      "approval": approval.to_dict()}, object())
-    assert owner._admission_reader is None
+                      "admission_evidence": {}}, object())
+    assert not hasattr(owner, "_admission_reader")
 
 
 # ---------------------------------------------------------------------------
@@ -832,17 +821,16 @@ def test_closure_refuses_sidecar_drift_during_runtime_read(
         Path(composition.journal._root) / (stem + ".reservation.json")
     ).read_bytes()
     path = Path(composition.journal._root) / (stem + ".reservation.json")
-    real_read = composition.admission_reader.read_admission_evidence
+    real_read = composition.journal._read_closure_snapshot
 
-    def drift(**kw):
-        evidence = real_read(**kw)
+    def drift(*args, **kw):
         _mutate_reservation_sidecar(
             path, kind, approval=composition.approval.to_dict()
         )
-        return evidence
+        return real_read(*args, **kw)
 
     monkeypatch.setattr(
-        composition.admission_reader, "read_admission_evidence", drift
+        composition.journal, "_read_closure_snapshot", drift
     )
     mark_written(composition.journal)
     with pytest.raises(consumer.ReleaseConsumerError) as caught:
@@ -880,18 +868,17 @@ def test_closure_refuses_inode_only_reservation_replacement_during_runtime_read(
     original_journal_raw = (
         Path(composition.journal._root) / (stem + ".json")
     ).read_bytes()
-    real_read = composition.admission_reader.read_admission_evidence
+    real_read = composition.journal._read_closure_snapshot
 
-    def drift(**kw):
-        evidence = real_read(**kw)
+    def drift(*args, **kw):
         replacement = path.with_suffix(".replacement")
         replacement.write_bytes(original_raw)
         replacement.chmod(0o600)
         os.replace(replacement, path)
-        return evidence
+        return real_read(*args, **kw)
 
     monkeypatch.setattr(
-        composition.admission_reader, "read_admission_evidence", drift
+        composition.journal, "_read_closure_snapshot", drift
     )
     mark_written(composition.journal)
     with pytest.raises(consumer.ReleaseConsumerError) as caught:

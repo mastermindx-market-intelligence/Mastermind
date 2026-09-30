@@ -44,6 +44,7 @@ _DEPENDENCIES = (
     "control_plane/executive_release_owner.py",
     "control_plane/executive_release_token.py",
     "control_plane/executive_release_contract.py",
+    "control_plane/executive_release_actuator.py",
     "control_plane/executive_authority.py",
     "control_plane/executive_release_consumer.py",
     "control_plane/executive_privileged_broker.py",
@@ -435,6 +436,18 @@ def _resident(config, reader, now, *, admission=False):
     provenance = _match(control.get("python_runtime_provenance_digest"), _HEX64)
     if provenance == "0" * 64:
         _unavailable()
+    # The release_control_armed flag is read only from the already
+    # resident-verified control.json bytes. Missing or exact boolean False
+    # leaves the factory disarmed for compatibility with the current
+    # template/default. Only exact boolean True attaches the fixed
+    # production ExecutiveReleaseActuatorJournal. Any non-boolean value
+    # refuses composition. The resident control bytes and installed
+    # evidence/configuration digest already bind this value to the
+    # installed source/config identity.
+    armed_value = control.get("release_control_armed", False)
+    if type(armed_value) is not bool:
+        _unavailable()
+    armed = armed_value
     evidence = _object(file_document(files["evidence"].raw),
         "schema owner_installation_id target_ref registration_generation release_commit release_tree "
         "control_config_digest broker_config_digest installed_configuration_digest "
@@ -478,7 +491,7 @@ def _resident(config, reader, now, *, admission=False):
                               trust_generation=reg["trust_generation"],
                               owner_installation_id=reg["owner_installation_id"])
     reader.check()
-    return reg, files, evidence, policy, boot, codec, identity
+    return reg, files, evidence, policy, boot, codec, identity, armed
 
 
 def _array(value, maximum, *, paths=False):
@@ -502,7 +515,7 @@ def _join(value, expected):
 
 
 def _stage(reader, transition, resident, now):
-    reg, files, evidence, policy, boot, codec, resident_identity = resident
+    reg, files, evidence, policy, boot, codec, resident_identity, _armed = resident
     _match(transition, _HEX64)
     registry_file = reader.observe(_REGISTRY, maximum=16384, mode=0o400)
     table = registry(file_document(registry_file.raw), reg["registration_generation"])
@@ -652,7 +665,7 @@ def build_release_owner(config):
         baseline = _resident(config, _Reader(resident=True), composed_at)
         if reg != baseline[0] or initial != baseline[1]["registration"]:
             _unavailable()
-        original_identity = baseline[-1]
+        original_identity = baseline[-2]
 
         def current(*, admission=False, reader=None):
             now = int(time.time())
@@ -660,7 +673,9 @@ def build_release_owner(config):
                 _unavailable()
             observation = _resident(config, reader or _Reader(resident=True), now,
                                     admission=admission)
-            if not hmac.compare_digest(observation[-1], original_identity):
+            # The tuple now carries an attached root journal at the end
+            # (or None); identity is at index -2.
+            if not hmac.compare_digest(observation[-2], original_identity):
                 _unavailable()
             return observation, now
 
@@ -675,13 +690,22 @@ def build_release_owner(config):
         def history():
             try:
                 observation, _ = current()
-                reg, _files, _evidence, _policy, _boot, codec, identity = observation
+                reg, _files, _evidence, _policy, _boot, codec, identity, _armed = observation
                 return ReleaseHistoryTrust(codec=codec,
                     owner_installation_id=reg["owner_installation_id"], target_ref=reg["target_ref"],
                     input_identity_digest=identity)
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 _unavailable()
-        return ReleaseBrokerOwner(snapshot, history_trust=history)
+        root_journal = None
+        if baseline[-1]:
+            # Import only after the resident manifest/source closure has been
+            # verified. Construction stores the fixed path and performs no IO.
+            from control_plane.executive_release_actuator import (
+                ExecutiveReleaseActuatorJournal,
+            )
+            root_journal = ExecutiveReleaseActuatorJournal()
+        return ReleaseBrokerOwner(snapshot, history_trust=history,
+                                  root_journal=root_journal)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         _unavailable()
 
