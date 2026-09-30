@@ -1,0 +1,28 @@
+{
+  "reviewed_head": "5c64d1f83c1aba17a9365730182bc0cfe6ab0aa1",
+  "review_id": 5363345941,
+  "finding_comment": 4142287861,
+  "scope": "Enforce canonical 64-root acquisition budget in Work decoder",
+  "red": {
+    "passed": 61,
+    "failed": 2
+  },
+  "green_full_frontend": {
+    "passed": 601,
+    "failed": 0,
+    "skipped": 1
+  },
+  "typecheck": "PASS",
+  "web_build": "PASS",
+  "native_assets": "PASS",
+  "source_postimages": {
+    "app/mastermind_os/src/work.ts": "7d85ad3d8eb32a873582e0f209f721af8cb5e9e75b09835b77a59accc0127a94",
+    "app/mastermind_os/src/work.test.ts": "604fbd6167fa0d2048f0e035c006e2bce9805de92ca0b16f1ec99666a50980f7"
+  },
+  "native_rust_prior_head": {
+    "head": "5c64d1f83c1aba17a9365730182bc0cfe6ab0aa1",
+    "passed": 19,
+    "failed": 0
+  },
+  "installed_acceptance": false
+}

@@ -373,3 +373,27 @@ describe("Work source recovery regressions", () => {
     expect(decodeWorkDocument(value)).toBeNull();
   });
 });
+
+
+describe("Work root acquisition budget", () => {
+  it.each([
+    [64, false, true],
+    [65, false, false],
+    [64, true, true],
+    [65, true, false],
+  ] as const)("enforces %i roots with truncated=%s", (count, truncated, accepted) => {
+    const value = workAvailable();
+    for (const group of Object.keys(value.groups) as Array<keyof WorkDocument["groups"]>)
+      value.groups[group] = [];
+    for (let id = 1; id <= count; id++)
+      value.groups.QUEUED.push(row(`JOB-${id}`, "QUEUED", "QUEUED", false));
+    value.lifecycle_source!.runtime.acquisition.truncation.roots = truncated;
+    value.coverage = {
+      count, total: truncated ? null : count, truncated,
+      completeness: truncated ? "PARTIAL" : "COMPLETE",
+    };
+    const decoded = decodeWorkDocument(value);
+    if (accepted) expect(decoded?.coverage.count).toBe(count);
+    else expect(decoded).toBeNull();
+  });
+});

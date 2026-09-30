@@ -483,7 +483,8 @@ function coverageConsistent(
   coverage: WorkDocument["coverage"],
   source: WorkLifecycleSource,
 ): boolean {
-  const { truncation, provenance } = source.runtime.acquisition;
+  const { budgets, truncation, provenance } = source.runtime.acquisition;
+  if (coverage.count > budgets.roots) return false;
   const truncated = truncation.roots || truncation.projection;
   if (coverage.truncated !== truncated) return false;
   if (truncated && coverage.total !== null) return false;
