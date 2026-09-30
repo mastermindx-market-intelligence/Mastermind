@@ -3,7 +3,53 @@
 Paper has one guarded adapter and multiple lawful clients. Carrier choice changes how the session
 reaches that adapter; it does not create a second Paper auth, lifecycle, retry, or ownership plane.
 
-## ChatGPT Web — Studio Direct preferred
+## Business direct Web route — staged, enrollment separate
+
+The private **Mastermind Paper** app is the normal Business Paper route after explicit enrollment
+and accepted direct-path scratch-file proof. Its path is Secure MCP Tunnel -> guarded stdio
+`mcp_server.py` -> the same `bridge.py` -> Paper loopback. It has no generic workstation tools.
+`direct_service.py` stages and verifies this deployment; `docs/PAPER_DIRECT_CHATGPT.md` owns its
+operator procedure. Use one existing tunnel, not a replacement for the Chairman-created tunnel.
+
+The previous blanket rule against a dedicated Paper ChatGPT app is superseded for this explicitly
+commissioned Business migration. It does not authorize unattended enrollment or publication.
+The direct build supports explicit-file target binding through `paper_prepare`: Paper 0.5.12 can
+read/write an addressed file by `fileId` while another file remains user-active. Bootstrap the guard
+with `paper_read(tool="get_basic_info", arguments={"fileId": ...})`; a successful explicit read returns
+the bridge-created target snapshot. Direct prepare compares that target guard without requiring or
+querying the unrelated foreground file, and returns the exact target snapshot without using raw
+`open_file` as a focus surrogate.
+Retain one carrier per logical modifying operation, no fallback after a denial, and original-carrier
+reconciliation of EFFECT_UNKNOWN. This carrier fence is not a file-wide ownership lease. Source/config/
+stdio proof is not a working ChatGPT app or accepted cutover.
+
+The ChatGPT app's approved action snapshot may lag an accepted runtime/source revision. When exact
+source/runtime now declares `MULTI_WRITER_PER_FILE_TARGET_SCOPED` but the current app tool
+description still says one designer/exclusive ownership or describes prepare as active-file focus,
+classify **DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Keep the same app/tunnel identity and
+refresh/recreate that app's approved action snapshot through its normal attended admin ceremony
+after the accepted runtime is deployed. Do not create a second Paper plane, infer a file lease from
+stale metadata, or use publication drift to bypass a denial or unresolved effect.
+
+For multi-seat Business rollout, each ChatGPT seat may have its own exact tunnel-client transport,
+seat-specific launchd label and transport singleton. All such transports reuse the same stdio server
+implementation/bridge contract and the same host-global Paper `desktop.lock`; do not create a Paper
+account, bridge, auth plane, retry queue or raw-port listener per ChatGPT account. A seat-aware v3
+binding may omit a backend workspace ID when it is not independently observable; never fabricate one.
+The OpenAI-side tunnel/workspace association remains authoritative and must be completed in that
+account's attended app setup. Multiple admitted sessions/hosts may modify the same exact `fileId`,
+including the same page. Coordinate by board/artboard/node target: prefer disjoint boards, and when
+same-board work overlaps, partition node targets and re-read/re-plan the next operation. The host-global
+`desktop.lock` is only a local bridge-call mutex: transient contention may wait up to 30 seconds before
+dispatch, while prolonged contention refuses `DESKTOP_BUSY`. That wait is not a Paper retry, persistent
+queue, distributed document lock, or page lease.
+
+The Studio/RDC selection matrix below applies only to legacy/non-migrated seats. Do not apply it
+to evade a direct-app denial or unknown effect. At accepted Business cutover, Studio Direct's
+primary Paper-Web requirement is retired for that workspace; other Studio host capabilities and
+non-migrated seats are not silently removed. There is one primary route per accepted workspace.
+
+## Legacy/non-migrated ChatGPT Web — Studio Direct preferred
 
 For ChatGPT Web, first inspect the current effective tool surface for the Paper action family itself.
 When a connected Studio Direct seat advertises `paper_inspect`, `paper_catalog`, `paper_read`
@@ -38,7 +84,8 @@ grants authority to use it. Before selecting RDC for a Paper modifying action, e
 2. the current session directly observes RDC access/resource permission for that exact host;
 3. no explicit provider, Studio Direct, Paper, workspace, account, safety, or organizational denial
    applies to the intended effect;
-4. no Paper mutation on another carrier is STARTed, pending, or `EFFECT_UNKNOWN`; and
+4. no conflicting mutation for the same logical operation/target on another carrier is STARTed,
+   pending, or `EFFECT_UNKNOWN`; disjoint target mutations in the same file/page do not block; and
 5. current same-pinned source procedure, document identity, source custody, and action-specific write
    gates are satisfied.
 
@@ -64,10 +111,11 @@ carrier/permission gate instead of using host access as a substitute for permiss
 ```
 <!-- PAPER_CARRIER_DECISION_V1_END -->
 
-Evaluate the matrix top-to-bottom. `ANY` is a wildcard. `EFFECT_UNKNOWN` therefore blocks before
-all carrier-selection logic, and `EXPLICIT_DENIAL` blocks regardless of RDC authorization. If no
-row matches, `default_decision` applies and fails closed; an unrecognized future state never becomes
-implicit fallback authority.
+Evaluate the matrix top-to-bottom. `ANY` is a wildcard. Here `effect_state` is scoped to the
+logical mutation/target being selected, not every other edit in the same Paper file. `EFFECT_UNKNOWN`
+for that operation therefore blocks before all carrier-selection logic, and `EXPLICIT_DENIAL` blocks
+regardless of RDC authorization. If no row matches, `default_decision` applies and fails closed; an
+unrecognized future state never becomes implicit fallback authority.
 
 
 RDC remains valid for authorized host diagnosis/installation even when it is not authorized to edit
@@ -119,10 +167,10 @@ current source-law path; never broaden the bridge's raw `open_file` capability.
 A pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing another carrier
 before the first Paper edit **only when that carrier is independently authorized under the predicates
 above**. Technical absence does not grant that authorization. An explicit safety/permission denial
-never permits fallback. After any Paper edit dispatch, the logical mutation remains on that carrier
-until its post-read/effect is reconciled.
-A timeout or lost response is `EFFECT_UNKNOWN`; do not replay through Desktop Commander, Studio
-Direct, another mode, account or provider.
+never permits fallback. After any Paper edit dispatch, the logical mutation remains on that carrier until its post-read/effect
+is reconciled. This is an operation/target fence, not a file-wide or page-wide lease; disjoint admitted
+writers may continue in the same file. A timeout or lost response is `EFFECT_UNKNOWN`; do not replay through Desktop Commander,
+Studio Direct, another mode, account or provider.
 
 Read-only diagnosis through the other carrier does not grant it write authority and must not be used
 to hide an unresolved original effect.
@@ -135,9 +183,10 @@ adapter can be read-only or write-capable. Clients control their approval prompt
 Use `paper_inspect`, `paper_catalog`, `paper_read`, `paper_prepare` and `paper_edit` only
 when those actions are actually exposed and approved.
 
-Do not enroll a second dedicated Paper ChatGPT app, public-tunnel `127.0.0.1:29979`, build a new
-auth service, or hide mutations behind read-only declarations. Seat enrollment and tunnel publication
-remain Studio Direct's existing account/admin ceremony.
+Do not public-tunnel `127.0.0.1:29979`, build a new auth service, or hide mutations behind read-only
+declarations. The commissioned Business migration may enroll one private Mastermind Paper app at
+the final attended setup boundary. Account/admin ceremony is still required; a staged bundle,
+model-mode change, or direct tool discovery never grants permission or transfers an unknown effect.
 
 The full source/acceptance contract is `docs/PAPER_DESIGN_INTEGRATION.md`. Re-read current protected
 procedure before modifying work.
