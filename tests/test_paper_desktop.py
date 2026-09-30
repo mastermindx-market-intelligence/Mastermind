@@ -206,6 +206,47 @@ class CoreTests(unittest.TestCase):
             )
         self.assertNotIn("create_artboard", self.client.calls)
 
+    def test_default_server_set_accepts_0512_and_0514_only_with_exact_catalog(self):
+        catalog_pin = b.digest(self.client.catalog())
+        for version in ("0.5.12", "0.5.14"):
+            with self.subTest(version=version):
+                self.client.info = {"fileId": "file-a", "artboards": []}
+                self.client.calls.clear()
+                self.client.server = {"name": "paper-desktop", "version": version}
+                result = self.call(
+                    expected_snapshot=b.digest(self.client.info),
+                    arguments={"fileId": "file-a"},
+                    _server_pin=b.SUPPORTED_SERVERS,
+                    _catalog_pin=catalog_pin,
+                )
+                self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.client.info = {"fileId": "file-a", "artboards": []}
+        self.client.calls.clear()
+        self.client.server = {"name": "paper-desktop", "version": "0.5.13"}
+        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+            self.call(
+                expected_snapshot=b.digest(self.client.info),
+                arguments={"fileId": "file-a"},
+                _server_pin=b.SUPPORTED_SERVERS,
+                _catalog_pin=catalog_pin,
+            )
+
+    def test_schema_receipt_reports_all_accepted_server_identities(self):
+        self.client.server = {"name": "paper-desktop", "version": "0.5.14"}
+        catalog = self.client.catalog()
+        receipt = b.schema_receipt(
+            self.client,
+            catalog,
+            server_pin=b.SUPPORTED_SERVERS,
+            catalog_pin=b.digest(catalog),
+        )
+        self.assertTrue(receipt["accepted_for_write"])
+        self.assertIsNone(receipt["expected_server"])
+        self.assertEqual(
+            receipt["expected_servers"],
+            [["paper-desktop", "0.5.12"], ["paper-desktop", "0.5.14"]],
+        )
+
     def test_current_safe_tool_classes(self):
         for name in ["list_files", "find_nodes", "get_tokens",
                      "list_comment_threads", "get_comment_thread",
