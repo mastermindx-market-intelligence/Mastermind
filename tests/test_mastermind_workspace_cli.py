@@ -327,6 +327,30 @@ def test_invalid_storage_policy_is_not_silently_ignored(storage_cli, capsys, cha
     assert not root.exists()
 
 
+def test_storage_policy_accepts_bounded_inert_rationale_metadata(storage_cli, capsys):
+    cli, root, policy, data = storage_cli
+    data["_why"] = "operator rationale retained verbatim"
+    policy.write_text(json.dumps(data))
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 0
+    assert result["receipt"]["state"] == "READY"
+    assert result["receipt"]["admission_allowed"] is True
+    assert len(result["receipt"]["policy_sha256"]) == 64
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("why", [None, True, 7, ["text"], {"note": "text"}, "x" * 8193])
+def test_storage_policy_rejects_malformed_rationale_metadata(storage_cli, capsys, why):
+    cli, root, policy, data = storage_cli
+    data["_why"] = why
+    policy.write_text(json.dumps(data))
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 2
+    assert "STORAGE_POLICY_INVALID" in result["error"]
+    assert result["effect"] == "NOT_APPLIED"
+    assert not root.exists()
+
+
 def test_storage_policy_duplicate_keys_are_refused(storage_cli, capsys):
     cli, _, policy, data = storage_cli
     policy.write_text(json.dumps(data)[:-1] + ', "min_free_bytes": 1}')

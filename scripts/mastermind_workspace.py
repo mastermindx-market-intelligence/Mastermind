@@ -55,7 +55,9 @@ def _workspace_root() -> Path:
 _STORAGE_POLICY_FIELDS = frozenset(
     {"version", "mount_point", "volume_uuid", "root", "min_free_bytes"}
 )
+_STORAGE_POLICY_METADATA_FIELDS = frozenset({"_why"})
 _STORAGE_POLICY_MAX_BYTES = 16 * 1024
+_STORAGE_POLICY_MAX_RATIONALE_BYTES = 8 * 1024
 
 
 def _unique_policy_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -104,8 +106,20 @@ def _read_storage_policy(path: Path) -> tuple[dict[str, object], str]:
         ):
             raise ValueError("policy changed while reading")
         data = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_policy_pairs)
-        if not isinstance(data, dict) or set(data) != _STORAGE_POLICY_FIELDS:
+        if (
+            not isinstance(data, dict)
+            or not _STORAGE_POLICY_FIELDS.issubset(data)
+            or not set(data).issubset(_STORAGE_POLICY_FIELDS | _STORAGE_POLICY_METADATA_FIELDS)
+        ):
             raise ValueError("policy fields are not closed")
+        if "_why" in data:
+            rationale = data["_why"]
+            if (
+                type(rationale) is not str
+                or not rationale
+                or len(rationale.encode("utf-8")) > _STORAGE_POLICY_MAX_RATIONALE_BYTES
+            ):
+                raise ValueError("policy rationale metadata is invalid")
         if type(data["version"]) is not int or data["version"] != 1:
             raise ValueError("unsupported policy version")
         minimum = data["min_free_bytes"]
