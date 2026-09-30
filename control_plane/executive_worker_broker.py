@@ -4161,6 +4161,8 @@ class RemoteCodexWorkerAdapter:
             "status",
             {"run_id": ref.run_id},
         )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote recovery adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         observed = _process_ref_from_json(run.get("process_ref"))
         if observed != ref:
@@ -4224,6 +4226,8 @@ class RemoteCodexWorkerAdapter:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request("status", {"run_id": ref.run_id})
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote status adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         value = run.get("status")
         aliases = {
@@ -4248,6 +4252,14 @@ class RemoteCodexWorkerAdapter:
             + max(60.0, float(spec.cancel_grace_seconds) + 30.0),
         )
         receipt = _collection_from_json(result.get("collection"))
+        # A correctly bound transport/process envelope cannot relabel its result.
+        # Validate attribution before accepting data or updating sweep evidence.
+        if (
+            receipt.result.job_id != spec.job_id
+            or receipt.result.run_id != spec.run_id
+            or receipt.result.worker_id != spec.worker_id
+        ):
+            raise BrokerProtocolError("remote collection result identity differs from bound LaunchSpec")
         collected_ref = receipt.process_ref
         immutable_ref = dataclasses.replace(
             collected_ref,
@@ -4473,8 +4485,15 @@ class RemoteWorkerBrokerEndpoint:
     worker_uid: int
     worker_gid: int
     secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    # Fixed by trusted endpoint construction, never a broker request selector.
+    # Keep the legacy default without making native Claude use the Codex facade.
+    adapter_id: str = "codex-cli"
 
     def __post_init__(self) -> None:
+        if type(self.adapter_id) is not str or self.adapter_id not in (
+            "codex-cli", "claude-code"
+        ):
+            raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
         worker_id = str(self.worker_id or "").strip()
         worker_user = str(self.worker_user or "").strip()
         if not _ID_RE.fullmatch(worker_id):
@@ -4631,10 +4650,17 @@ class RemoteWorkerBrokerFleet:
             raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
         validation_resolver = validation_commands_for_spec or (lambda _spec: ())
         if adapter_factory is None:
-            adapter_factory = lambda row: RemoteCodexWorkerAdapter(
-                row.client,
-                validation_commands_for_spec=validation_resolver,
-            )
+            def adapter_factory(row: RemoteWorkerBrokerEndpoint) -> RemoteCodexWorkerAdapter:
+                if row.adapter_id == "codex-cli":
+                    facade = RemoteCodexWorkerAdapter
+                elif row.adapter_id == "claude-code":
+                    facade = RemoteClaudeWorkerAdapter
+                else:
+                    raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
+                return facade(
+                    row.client,
+                    validation_commands_for_spec=validation_resolver,
+                )
         if controller_factory is None:
             controller_factory = lambda row: RemoteWorkerProcessController(row.client)
         self._endpoints = {row.worker_id: row for row in rows}

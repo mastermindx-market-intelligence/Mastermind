@@ -434,6 +434,16 @@ def _before(record):
         "release_tree": record["before_release_tree"],
         "installed_manifest_digest": record["before_installed_manifest_digest"],
         "configuration_digest": record["before_configuration_digest"],
+        "broker_source_commit": record["before_release_commit"],
+        "broker_source_tree": record["before_release_tree"],
+        "broker_binary_digest": _hex64(50),
+        "service_generation_digests": {
+            "control": _hex64(60),
+            "worker": _hex64(61),
+            "relay": _hex64(62),
+            "gateway": _hex64(63),
+            "broker": _hex64(64),
+        },
     }
 
 
@@ -443,6 +453,16 @@ def _target(record):
         "release_tree": record["target_release_tree"],
         "installed_manifest_digest": _hex64(30),
         "configuration_digest": _hex64(31),
+        "broker_source_commit": record["target_release_commit"],
+        "broker_source_tree": record["target_release_tree"],
+        "broker_binary_digest": _hex64(80),
+        "service_generation_digests": {
+            "control": _hex64(70),
+            "worker": _hex64(71),
+            "relay": _hex64(72),
+            "gateway": _hex64(73),
+            "broker": _hex64(74),
+        },
     }
 
 
@@ -457,26 +477,33 @@ def _to_recovering(journal, record):
 
 
 def _terminal(journal, record, state):
+    before = _before(record)
     if state == "SUCCEEDED":
         after = _target(record)
         rollback = {"attempted": False}
     elif state == "FAILED_NOT_APPLIED":
-        after = _before(record)
+        after = copy.deepcopy(before)
         rollback = {"attempted": False}
     else:
-        after = _before(record)
+        after = copy.deepcopy(before)
         rollback = {
             "attempted": True,
-            "restored_preimage_digest": _canonical_hash(after),
+            "restored_preimage_digest": _canonical_hash(before),
         }
+    reservation, approval, _preconds, _prep = _reservation_fixture(
+        record["operation_key"]
+    )
     return journal.advance(
         record["operation_key"],
         expected_generation=record["journal_generation"],
         state=state,
         completed_at_ms=3_000,
         postcondition_digest=POSTCONDITION,
+        before=before,
         after=after,
         rollback=rollback,
+        reservation=reservation,
+        approval=approval,
     )
 
 
@@ -682,6 +709,7 @@ def test_each_terminal_truth_and_terminal_immutability(tmp_path, state):
     assert terminal["state"] == state
     assert terminal["journal_generation"] == 5
     assert _journal(tmp_path / state).read(OPERATION_KEY) == terminal
+    reservation, approval, _preconds, _prep = _reservation_fixture()
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         journal.advance(
             OPERATION_KEY,
@@ -689,8 +717,11 @@ def test_each_terminal_truth_and_terminal_immutability(tmp_path, state):
             state="SUCCEEDED",
             completed_at_ms=2_001,
             postcondition_digest=POSTCONDITION,
+            before=_before(terminal),
             after=_target(terminal),
             rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
         )
     assert caught.value.code == "TERMINAL_IMMUTABLE"
 
@@ -709,7 +740,9 @@ def test_each_terminal_truth_and_terminal_immutability(tmp_path, state):
 def test_terminal_truth_refusals(tmp_path, state, after_kind, rollback):
     journal = _journal(tmp_path / (state + after_kind + str(rollback["attempted"])))
     record = _to_recovering(journal, _start(journal))
-    after = _before(record) if after_kind == "before" else _target(record)
+    before = _before(record)
+    after = copy.deepcopy(before) if after_kind == "before" else _target(record)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         journal.advance(
             OPERATION_KEY,
@@ -717,8 +750,11 @@ def test_terminal_truth_refusals(tmp_path, state, after_kind, rollback):
             state=state,
             completed_at_ms=3_000,
             postcondition_digest=POSTCONDITION,
+            before=before,
             after=after,
             rollback=rollback,
+            reservation=reservation,
+            approval=approval,
         )
     assert caught.value.code == "INVALID_TERMINAL_TRUTH"
 
@@ -726,6 +762,8 @@ def test_terminal_truth_refusals(tmp_path, state, after_kind, rollback):
 def test_terminal_time_and_closed_rollback_union(tmp_path):
     journal = _journal(tmp_path / "journal")
     record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
     for completed, rollback in (
         (999, {"attempted": False}),
         (2_000, {"attempted": False, "restored_preimage_digest": "a" * 64}),
@@ -739,9 +777,247 @@ def test_terminal_time_and_closed_rollback_union(tmp_path):
                 state="FAILED_NOT_APPLIED",
                 completed_at_ms=completed,
                 postcondition_digest=POSTCONDITION,
-                after=_before(record),
+                before=before,
+                after=before,
                 rollback=rollback,
+                reservation=reservation,
+                approval=approval,
             )
+
+
+def test_terminal_after_missing_field_refuses(tmp_path):
+    journal = _journal(tmp_path / "after-missing")
+    record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    after = _target(record)
+    del after["broker_binary_digest"]
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="SUCCEEDED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            before=before,
+            after=after,
+            rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "INVALID_AFTER"
+
+
+def test_terminal_after_extra_field_refuses(tmp_path):
+    journal = _journal(tmp_path / "after-extra")
+    record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    after = _target(record)
+    after["unexpected"] = _hex64(99)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="SUCCEEDED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            before=before,
+            after=after,
+            rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "INVALID_AFTER"
+
+
+def test_terminal_after_partial_service_roles_refuses(tmp_path):
+    journal = _journal(tmp_path / "after-roles-partial")
+    record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    after = _target(record)
+    after["service_generation_digests"] = {
+        "control": _hex64(70), "relay": _hex64(72),
+    }
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="SUCCEEDED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            before=before,
+            after=after,
+            rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "INVALID_AFTER"
+
+
+def test_terminal_after_extra_service_role_refuses(tmp_path):
+    journal = _journal(tmp_path / "after-roles-extra")
+    record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    after = _target(record)
+    after["service_generation_digests"]["admin"] = _hex64(99)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="SUCCEEDED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            before=before,
+            after=after,
+            rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "INVALID_AFTER"
+
+
+def test_terminal_after_broker_source_mismatch_refuses(tmp_path):
+    journal = _journal(tmp_path / "after-broker-mismatch")
+    record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    after = _target(record)
+    after["broker_source_commit"] = "0" * 40
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="SUCCEEDED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            before=before,
+            after=after,
+            rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "INVALID_AFTER"
+
+
+def test_terminal_before_broker_source_mismatch_refuses(tmp_path):
+    journal = _journal(tmp_path / "before-broker-mismatch")
+    record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    before["broker_source_commit"] = "0" * 40
+    after = copy.deepcopy(before)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="FAILED_NOT_APPLIED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            before=before,
+            after=after,
+            rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "BEFORE_MISMATCH"
+
+
+def test_terminal_rolled_back_preimage_hash_over_8_fields(tmp_path):
+    journal = _journal(tmp_path / "rolled-back-preimage")
+    record = _to_recovering(journal, _start(journal))
+    before = _before(record)
+    # Build an 8-field before with the same content shape but tweak one service
+    # digest so the canonical bytes diverge from the reservation's before.
+    tampered_before = copy.deepcopy(before)
+    tampered_before["service_generation_digests"]["broker"] = _hex64(99)
+    after = copy.deepcopy(before)
+    preimage = _canonical_hash(after)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="ROLLED_BACK",
+            completed_at_ms=3000,
+            postcondition_digest=POSTCONDITION,
+            before=tampered_before,
+            after=after,
+            rollback={
+                "attempted": True,
+                "restored_preimage_digest": preimage,
+            },
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "BEFORE_MISMATCH"
+
+
+def test_terminal_legacy_4_field_shape_refuses(tmp_path):
+    journal = _journal(tmp_path / "legacy-4")
+    record = _to_recovering(journal, _start(journal))
+    legacy_before = {
+        "release_commit": record["before_release_commit"],
+        "release_tree": record["before_release_tree"],
+        "installed_manifest_digest": record["before_installed_manifest_digest"],
+        "configuration_digest": record["before_configuration_digest"],
+    }
+    legacy_after = copy.deepcopy(legacy_before)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="FAILED_NOT_APPLIED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            before=legacy_before,
+            after=legacy_after,
+            rollback={"attempted": False},
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "BEFORE_MISMATCH"
+
+
+def test_nonterminal_advance_rejects_terminal_arguments(tmp_path):
+    journal = _journal(tmp_path / "nonterminal-rejects")
+    _start(journal)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=1,
+            state="PUBLISHED",
+            completed_at_ms=2_500,
+        )
+    assert caught.value.code == "TERMINAL_ARGUMENTS"
+    before = {"release_commit": "1" * 40}
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=1,
+            state="PUBLISHED",
+            before=before,
+        )
+    assert caught.value.code == "TERMINAL_ARGUMENTS"
+
+
+def test_terminal_advance_requires_caller_supplied_before(tmp_path):
+    journal = _journal(tmp_path / "terminal-requires-before")
+    record = _to_recovering(journal, _start(journal))
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=record["journal_generation"],
+            state="FAILED_NOT_APPLIED",
+            completed_at_ms=3_000,
+            postcondition_digest=POSTCONDITION,
+            after=_before(record),
+            rollback={"attempted": False},
+        )
+    assert caught.value.code == "TERMINAL_ARGUMENTS"
 
 
 @pytest.mark.parametrize(
@@ -2188,3 +2464,400 @@ def test_start_time_half_open_boundary(tmp_path, boundary):
             journal.create(**arguments)
     else:
         assert journal.create(**arguments)["state"] == "STARTED"
+
+
+# ---------------------------------------------------------------------------
+# R9 terminal-ancestry discrimination tests
+# ---------------------------------------------------------------------------
+
+
+def _r9_terminal_kwargs(record, reservation, approval, *, before=None, after=None,
+                        state="SUCCEEDED", completed_at_ms=3_000):
+    if before is None:
+        before = _before(record)
+    if after is None:
+        after = copy.deepcopy(before)
+    rollback = (
+        {"attempted": False}
+        if state != "ROLLED_BACK"
+        else {
+            "attempted": True,
+            "restored_preimage_digest": _canonical_hash(before),
+        }
+    )
+    return {
+        "operation_key": record["operation_key"],
+        "expected_generation": record["journal_generation"],
+        "state": state,
+        "completed_at_ms": completed_at_ms,
+        "postcondition_digest": POSTCONDITION,
+        "before": before,
+        "after": after,
+        "rollback": rollback,
+        "reservation": reservation,
+        "approval": approval,
+    }
+
+
+def test_terminal_advance_requires_reservation_and_approval(tmp_path):
+    journal = _journal(tmp_path / "ancestry-args")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    base = _r9_terminal_kwargs(record, reservation, approval)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**{**base, "reservation": None})
+    assert caught.value.code == "ANCESTRY_ARGUMENTS"
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**{**base, "approval": None})
+    assert caught.value.code == "ANCESTRY_ARGUMENTS"
+
+
+def test_terminal_advance_refuses_when_reservation_sidecar_absent(tmp_path):
+    journal = _journal(tmp_path / "no-reservation-sidecar")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    _reservation_path(root=Path(tmp_path / "no-reservation-sidecar"),
+                      operation_key=OPERATION_KEY).unlink()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(record, reservation, approval))
+    assert caught.value.code in {"RESERVATION_ABSENT", "NOT_FOUND"}
+
+
+def test_terminal_advance_refuses_when_supplied_reservation_byte_differs(tmp_path):
+    journal = _journal(tmp_path / "supplied-mismatch")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    mutated = copy.deepcopy(reservation)
+    mutated["target_observation_digest"] = _hex64(99)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(record, mutated, approval))
+    assert caught.value.code == "RESERVATION_MISMATCH"
+
+
+def test_terminal_advance_refuses_when_stored_reservation_is_replaced(tmp_path):
+    journal = _journal(tmp_path / "stored-replaced")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    stem = _stem(OPERATION_KEY)
+    foreign_raw = contract.canonical_release_bytes(
+        contract.validate_release_prestart_reservation(
+            {**reservation, "target_observation_digest": _hex64(33)},
+            expected_approval=approval))
+    (Path(tmp_path / "stored-replaced") /
+     (stem + ".reservation.json")).write_bytes(foreign_raw)
+    os.chmod(Path(tmp_path / "stored-replaced") /
+              (stem + ".reservation.json"), 0o600)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(record, reservation, approval))
+    assert caught.value.code == "RESERVATION_MISMATCH"
+
+
+def test_terminal_advance_refuses_when_stored_reservation_malformed(tmp_path):
+    journal = _journal(tmp_path / "stored-malformed")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    stem = _stem(OPERATION_KEY)
+    (Path(tmp_path / "stored-malformed") /
+     (stem + ".reservation.json")).write_bytes(b"{")
+    os.chmod(Path(tmp_path / "stored-malformed") /
+              (stem + ".reservation.json"), 0o600)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(record, reservation, approval))
+    assert caught.value.code == "RECORD_BYTES"
+
+
+def test_terminal_advance_refuses_when_approval_does_not_validate_reservation(
+    tmp_path,
+):
+    journal = _journal(tmp_path / "approval-mismatch")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    bad_approval = copy.deepcopy(approval)
+    bad_approval["effective_grant_digest"] = _hex64(99)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(record, reservation, bad_approval))
+    assert caught.value.code in {
+        "RECORD_BYTES",
+        "RESERVATION_MISMATCH",
+        "INVALID_EMBEDDED_RECORD",
+    }
+
+
+def test_terminal_advance_refuses_when_root_qualification_digest_mismatches(
+    tmp_path,
+):
+    journal = _journal(tmp_path / "root-mismatch")
+    _start(journal)
+    record = journal.advance(
+        OPERATION_KEY, expected_generation=1, state="PUBLISHED")
+    record = journal.advance(
+        OPERATION_KEY,
+        expected_generation=record["journal_generation"],
+        state="BROKER_RESTART_PENDING",
+    )
+    record = journal.advance(
+        OPERATION_KEY,
+        expected_generation=record["journal_generation"],
+        state="RECOVERING",
+    )
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    stem = _stem(OPERATION_KEY)
+    journal_path = Path(tmp_path / "root-mismatch") / (stem + ".json")
+    record_raw = journal_path.read_bytes()
+    tampered = contract.parse_release_json(record_raw).to_dict()
+    tampered["root_qualification_digest"] = _hex64(99)
+    journal_path.write_bytes(contract.canonical_release_bytes(tampered))
+    os.chmod(journal_path, 0o600)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(record, reservation, approval))
+    assert caught.value.code == "ROOT_QUALIFICATION_MISMATCH"
+
+
+def test_terminal_advance_refuses_when_start_reservation_join_mismatches(
+    tmp_path,
+):
+    journal = _journal(tmp_path / "join-mismatch")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    # Mutate the journal record's `before_release_commit` so the START-bound
+    # identity diverges from the reservation's before.release_commit while
+    # the journal record itself still validates.
+    stem = _stem(OPERATION_KEY)
+    journal_path = Path(tmp_path / "join-mismatch") / (stem + ".json")
+    record_raw = journal_path.read_bytes()
+    tampered = contract.parse_release_json(record_raw).to_dict()
+    tampered["before_release_commit"] = "0" * 40
+    journal_path.write_bytes(contract.canonical_release_bytes(tampered))
+    os.chmod(journal_path, 0o600)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(record, reservation, approval))
+    assert caught.value.code == "RESERVATION_MISMATCH"
+
+
+def test_terminal_advance_refuses_when_before_differs_in_broker_binary(tmp_path):
+    journal = _journal(tmp_path / "before-broker-binary")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    before = _before(record)
+    before["broker_binary_digest"] = _hex64(123)
+    after = copy.deepcopy(before)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(
+            record, reservation, approval, before=before, after=after))
+    assert caught.value.code == "BEFORE_MISMATCH"
+
+
+def test_terminal_advance_refuses_when_before_differs_in_one_service_role(
+    tmp_path,
+):
+    journal = _journal(tmp_path / "before-one-role")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    before = _before(record)
+    before["service_generation_digests"]["worker"] = _hex64(99)
+    after = copy.deepcopy(before)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(**_r9_terminal_kwargs(
+            record, reservation, approval, before=before, after=after))
+    assert caught.value.code == "BEFORE_MISMATCH"
+
+
+def test_nonterminal_advance_rejects_reservation_and_approval_arguments(tmp_path):
+    journal = _journal(tmp_path / "nonterminal-ancestry")
+    _start(journal)
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=1,
+            state="PUBLISHED",
+            reservation=reservation,
+            approval=approval,
+        )
+    assert caught.value.code == "ANCESTRY_ARGUMENTS"
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            OPERATION_KEY,
+            expected_generation=1,
+            state="PUBLISHED",
+            reservation=reservation,
+        )
+    assert caught.value.code == "ANCESTRY_ARGUMENTS"
+
+
+def test_terminal_advance_never_writes_when_ancestry_fails(tmp_path):
+    journal = _journal(tmp_path / "no-write-ancestry")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    stem = _stem(OPERATION_KEY)
+    journal_path = Path(tmp_path / "no-write-ancestry") / (stem + ".json")
+    original_raw = journal_path.read_bytes()
+    _reservation_path(root=Path(tmp_path / "no-write-ancestry"),
+                      operation_key=OPERATION_KEY).unlink()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
+        journal.advance(**_r9_terminal_kwargs(record, reservation, approval))
+    assert journal_path.read_bytes() == original_raw
+
+
+# ---------------------------------------------------------------------------
+# R9 TOCTOU final-publication guard tests (F2).
+# ---------------------------------------------------------------------------
+
+
+def _mutate_reservation_sidecar(path, kind, *, approval):
+    """Apply an Astra R1 reproduction to the on-disk reservation sidecar.
+
+    ``kind == "malformed"`` writes a non-JSON opener; ``"valid_before_drift"``
+    revalidates the canonical reservation against the supplied approval and
+    rewrites one field of the immutable full 8-field before — exactly the
+    Astra R1 reproduction that previously slipped past the initial under-lock
+    ancestry guard but is now caught by the missing final-publication fence.
+    """
+
+    if kind == "malformed":
+        path.write_bytes(b"{")
+        path.chmod(0o600)
+        return
+    parsed = contract.parse_release_json(path.read_bytes()).to_dict()
+    parsed["before"]["broker_binary_digest"] = "e" * 64
+    mutated = contract.canonical_release_bytes(
+        contract.validate_release_prestart_reservation(
+            parsed, expected_approval=approval
+        )
+    )
+    path.write_bytes(mutated)
+    path.chmod(0o600)
+
+
+@pytest.mark.parametrize("kind", ["malformed", "valid_before_drift"])
+def test_terminal_refuses_sidecar_drift_after_staging(tmp_path, monkeypatch, kind):
+    """A reservation sidecar change after ``_write_new(.tmp)`` must refuse.
+
+    Mirrors the Astra R1 reproduction: the canonical reservation bytes are
+    mutated exactly once, immediately after the real ``_write_new`` returns
+    for the staged temporary inode. The final-publication guard catches the
+    drift, the original nonterminal journal stays intact, and the owned
+    temporary inode is cleaned up.
+    """
+
+    journal = _journal(tmp_path / "drift-after-staging")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    path = _reservation_path(journal._root)
+    original_raw = path.read_bytes()
+    original_journal_raw = (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes()
+    original_write_new = journal._write_new
+
+    def drift(root_descriptor, name, raw):
+        identity = original_write_new(root_descriptor, name, raw)
+        if name.endswith(".tmp"):
+            _mutate_reservation_sidecar(path, kind, approval=approval)
+        return identity
+
+    monkeypatch.setattr(journal, "_write_new", drift)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            **_r9_terminal_kwargs(
+                record, reservation, approval, after=_target(record)
+            )
+        )
+    assert caught.value.code == "RESERVATION_REPLACED"
+    # The on-disk reservation is now the injected drift; the original bytes
+    # are no longer equal. The nonterminal journal record stays intact.
+    assert path.read_bytes() != original_raw
+    assert (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes() == original_journal_raw
+    # The owned temporary inode was cleaned up by the finally clause.
+    assert not (Path(journal._root) / (_stem(OPERATION_KEY) + ".tmp")).exists()
+
+
+def test_terminal_refuses_inode_only_reservation_replacement_after_staging(
+    tmp_path, monkeypatch
+):
+    """Inode-only replacement during staging refuses with byte equality.
+
+    An inode-only replacement that happens to keep the canonical reservation
+    bytes equal still differs in filesystem identity, so the F2 final-publication
+    guard must refuse and clean the owned temporary file rather than adopting the
+    replacement as a new truth.
+    """
+
+    journal = _journal(tmp_path / "inode-only-drift")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    path = _reservation_path(journal._root)
+    original_raw = path.read_bytes()
+    original_inode = path.stat().st_ino
+    original_journal_raw = (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes()
+    original_write_new = journal._write_new
+
+    def swap_inode(root_descriptor, name, raw):
+        identity = original_write_new(root_descriptor, name, raw)
+        if name.endswith(".tmp"):
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(original_raw)
+            replacement.chmod(0o600)
+            os.replace(replacement, path)
+            assert path.stat().st_ino != original_inode
+        return identity
+
+    monkeypatch.setattr(journal, "_write_new", swap_inode)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            **_r9_terminal_kwargs(
+                record, reservation, approval, after=_target(record)
+            )
+        )
+    assert caught.value.code == "RESERVATION_REPLACED"
+    # The nonterminal journal is preserved.
+    assert (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes() == original_journal_raw
+    # The owned temporary inode is cleaned up; the on-disk reservation is
+    # still byte-equal to the original and now lives on a different inode.
+    assert path.read_bytes() == original_raw
+    assert path.stat().st_ino != original_inode
+    assert not (Path(journal._root) / (_stem(OPERATION_KEY) + ".tmp")).exists()
+
+
+@pytest.mark.parametrize("state", ["SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"])
+def test_competing_terminal_writers_only_one_generation(tmp_path, state):
+    """Two writers racing on the same operation lock produce one advance.
+
+    A compliant second writer using the same operation lock must serialize:
+    exactly one generation advance plus exactly one refusal. The test runs
+    in two threads sharing the same journal root.
+    """
+
+    import threading
+
+    journal = _journal(tmp_path / "race")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    after = _target(record) if state == "SUCCEEDED" else _before(record)
+    kwargs = _r9_terminal_kwargs(
+        record, reservation, approval, state=state, after=after
+    )
+    gate = threading.Barrier(2)
+
+    def run():
+        other = _journal(Path(journal._root))
+        gate.wait(timeout=5)
+        try:
+            other.advance(**kwargs)
+            return ("ok", other.read(record["operation_key"])["state"])
+        except actuator.ExecutiveReleaseActuatorJournalError as exc:
+            return ("refused", exc.code)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: run(), range(2)))
+    assert sorted(result[0] for result in results) == ["ok", "refused"], results
+    assert (
+        journal.read(record["operation_key"])["journal_generation"]
+        == record["journal_generation"] + 1
+    )
