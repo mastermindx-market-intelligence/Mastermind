@@ -510,7 +510,7 @@ eligible Worker under the existing claim/lease/fence rules.
 
 When an orchestrator deliberately needs one exact model inside an already
 admitted pool, it may emit `mastermind.execution_plan/v4`. V4 retains the V3
-dependency contract and adds exactly one required field to the work placement:
+dependency contract and permits one additional per-step field on the work placement:
 
 ```json
 {
@@ -523,6 +523,9 @@ dependency contract and adds exactly one required field to the work placement:
 The provider/quota names above are illustrative. A real plan must use an exact
 pair already present in that root's current reviewed `work_placement_union`;
 the model value must likewise name a model actually served by eligible capacity.
+
+Steps that do not include `model` retain the normal automatic model choice inside
+their admitted pool, so one V4 plan may mix auto-routed and model-pinned work.
 
 The model value is a **hard narrowing constraint**, not a fallback preference.
 Runtime first verifies that the provider/quota pool is already present in the

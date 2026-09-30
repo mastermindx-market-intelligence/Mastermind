@@ -12400,10 +12400,10 @@ class JobRegistry:
                     v4_keys_valid = (
                         plan_body["schema_version"] == "mastermind.execution_plan/v4"
                         and actual_placement_keys
-                        in {
-                            frozenset(expected_placement_keys),
-                            frozenset(expected_placement_keys | {"model"}),
-                        }
+                        in (
+                            expected_placement_keys,
+                            expected_placement_keys | {"model"},
+                        )
                     )
                     if (
                         not isinstance(placement, dict)
