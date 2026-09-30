@@ -1180,13 +1180,51 @@ def test_copy_serialization_and_dataclass_replace_cannot_duplicate_start(fresh_l
         for duplicate in (copy.copy, copy.deepcopy, pickle.dumps):
             with pytest.raises(TypeError):
                 duplicate(value)
-    clone = dataclasses.replace(capability)
-    lane["control"].broker.start_reserved_release(fresh_admission=clone)
+    with pytest.raises(
+        c.ReleaseConsumerError, match="RELEASE_FRESH_ADMISSION_REQUIRED"
+    ):
+        dataclasses.replace(capability)
+    lane["control"].broker.start_reserved_release(fresh_admission=capability)
     with pytest.raises(
         c.ReleaseConsumerError, match="RELEASE_FRESH_ADMISSION_REQUIRED"
     ):
         lane["control"].broker.start_reserved_release(fresh_admission=capability)
     assert len(lane["calls"]) == 2
+
+
+@pytest.mark.parametrize("after_loss", [False, True])
+@pytest.mark.parametrize("replacement", [[], False, None, {}, True])
+def test_replacement_cannot_reset_consumption_after_start(
+    fresh_lane, after_loss, replacement
+):
+    import threading
+
+    lane = fresh_lane
+    capability = _fresh(lane)
+    if after_loss:
+        lane["knobs"]["loss"] = "start_reserved_release"
+        with pytest.raises(TimeoutError):
+            lane["control"].broker.start_reserved_release(fresh_admission=capability)
+        lane["knobs"]["loss"] = None
+    else:
+        lane["control"].broker.start_reserved_release(fresh_admission=capability)
+    for fields in (
+        {"_consumed": replacement},
+        {"_consumed": replacement, "_lock": threading.Lock()},
+        {"_lock": threading.Lock()},
+    ):
+        with pytest.raises(
+            c.ReleaseConsumerError, match="RELEASE_FRESH_ADMISSION_REQUIRED"
+        ):
+            dataclasses.replace(capability, **fields)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        capability._consumed = False
+    assert capability._consumed is True
+    with pytest.raises(
+        c.ReleaseConsumerError, match="RELEASE_FRESH_ADMISSION_REQUIRED"
+    ):
+        lane["control"].broker.start_reserved_release(fresh_admission=capability)
+    assert _admission_count(lane) == 1 and len(lane["calls"]) == 2
 
 
 def test_concurrent_consumers_can_send_start_only_once(fresh_lane):

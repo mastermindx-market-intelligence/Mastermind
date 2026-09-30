@@ -92,37 +92,36 @@ class _RootReleaseAdmissionResponse(_ProcessLocalReleaseEvidence):
     receiver_pid: int = dataclasses.field(default_factory=os.getpid)
 
 
-@dataclasses.dataclass(frozen=True, slots=True, repr=False)
+@dataclasses.dataclass(frozen=True, slots=True, repr=False, init=False)
 class _FreshReleaseAdmission(_ProcessLocalReleaseEvidence):
     root_response: _RootReleaseAdmissionResponse
     admission_evidence: Mapping
     _capability: object
-    receiver_pid: int = dataclasses.field(default_factory=os.getpid)
-    # A shared cell also prevents dataclasses.replace from duplicating use.
-    _consumed: list = dataclasses.field(default_factory=list)
-    _lock: Any = dataclasses.field(default_factory=threading.Lock)
+    receiver_pid: int
+    _consumed: bool
+    _lock: Any
 
-    def __post_init__(self):
-        if (self._capability is not _FRESH_RELEASE_ADMISSION_CAPABILITY
-                or self.receiver_pid != os.getpid()):
+    def __init__(self, root_response, admission_evidence, _capability, **replacements):
+        # Only the private new-admission path constructs this object. Generic
+        # record replacement passes the lifecycle fields and must fail closed;
+        # a copied/reset cell must never restore a consumed START permission.
+        if replacements or _capability is not _FRESH_RELEASE_ADMISSION_CAPABILITY:
             raise ReleaseConsumerError("RELEASE_FRESH_ADMISSION_REQUIRED")
-        with self._lock:
-            if not self._consumed:
-                self._consumed.append((self.root_response, self.admission_evidence))
-            elif (self._consumed[0][0] is not self.root_response
-                    or self._consumed[0][1] is not self.admission_evidence):
-                raise ReleaseConsumerError("RELEASE_FRESH_ADMISSION_REQUIRED")
+        object.__setattr__(self, "root_response", root_response)
+        object.__setattr__(self, "admission_evidence", admission_evidence)
+        object.__setattr__(self, "_capability", _capability)
+        object.__setattr__(self, "receiver_pid", os.getpid())
+        object.__setattr__(self, "_consumed", False)
+        object.__setattr__(self, "_lock", threading.Lock())
 
     def _consume(self):
         # The one-shot bit is consumed even when preflight or transport fails.
         # There is no serialization, copy, restore, or public retry selector.
         with self._lock:
             if (self._capability is not _FRESH_RELEASE_ADMISSION_CAPABILITY
-                    or self.receiver_pid != os.getpid() or len(self._consumed) != 1
-                    or self._consumed[0][0] is not self.root_response
-                    or self._consumed[0][1] is not self.admission_evidence):
+                    or self.receiver_pid != os.getpid() or self._consumed):
                 raise ReleaseConsumerError("RELEASE_FRESH_ADMISSION_REQUIRED")
-            self._consumed.append(True)
+            object.__setattr__(self, "_consumed", True)
             frame, approval, reservation = _validated_reservation_response(
                 self.root_response)
             evidence = _joined_admission_evidence(
