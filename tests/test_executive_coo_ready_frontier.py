@@ -966,13 +966,13 @@ def test_lost_dispatch_effect_survives_runtime_reopen(tmp_path):
 
 
 
-def test_v4_manual_model_override_selects_exact_model_inside_admitted_pool(tmp_path):
+def test_v4_mixes_auto_model_and_exact_model_inside_admitted_pool(tmp_path):
     runtime = Runtime.at(tmp_path)
     _register_placement_union(runtime)
     _register_codex_peer(runtime, "worker-terra", model="gpt-5.6-terra")
 
     placements = [
-        {**_CODEX, "model": "gpt-5.6-sol"},
+        _CODEX,
         {**_CODEX, "model": "gpt-5.6-terra"},
     ]
     runtime, root, plan, admitted = _admit_v2_plan(
@@ -985,7 +985,7 @@ def test_v4_manual_model_override_selects_exact_model_inside_admitted_pool(tmp_p
     second = by_step["step-1"]
 
     assert plan["schema_version"] == "mastermind.execution_plan/v4"
-    assert first.constraints["model"] == "gpt-5.6-sol"
+    assert "model" not in first.constraints
     assert second.constraints["model"] == "gpt-5.6-terra"
     assert second.constraints["provider"] == "codex"
     assert second.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]

@@ -159,7 +159,6 @@ def _role_body_schema(role: str) -> dict[str, Any]:
         v4_step["properties"]["placement"]["properties"]["model"] = _schema_string(
             minimum=1, maximum=128
         )
-        v4_step["properties"]["placement"]["required"].append("model")
         plan_body = _schema_object(
             {
                 "schema_version": {

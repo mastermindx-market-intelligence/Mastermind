@@ -12394,11 +12394,27 @@ class JobRegistry:
                 for step in plan_body["steps"]:
                     placement = step.get("placement")
                     expected_placement_keys = {"provider_realm", "quota_class"}
-                    if plan_body["schema_version"] == "mastermind.execution_plan/v4":
-                        expected_placement_keys.add("model")
+                    actual_placement_keys = (
+                        set(placement) if isinstance(placement, dict) else set()
+                    )
+                    v4_keys_valid = (
+                        plan_body["schema_version"] == "mastermind.execution_plan/v4"
+                        and actual_placement_keys
+                        in {
+                            frozenset(expected_placement_keys),
+                            frozenset(expected_placement_keys | {"model"}),
+                        }
+                    )
                     if (
                         not isinstance(placement, dict)
-                        or set(placement) != expected_placement_keys
+                        or (
+                            plan_body["schema_version"] != "mastermind.execution_plan/v4"
+                            and actual_placement_keys != expected_placement_keys
+                        )
+                        or (
+                            plan_body["schema_version"] == "mastermind.execution_plan/v4"
+                            and not v4_keys_valid
+                        )
                     ):
                         raise StateConflict(
                             "v2/v3/v4 plan step placement is invalid"
