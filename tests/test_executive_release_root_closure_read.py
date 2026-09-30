@@ -399,7 +399,7 @@ class Composition:
         self.token = snapshot.codec.encode_prepared(self.prepared)
         self.journal = actuator._ExecutiveReleaseActuatorJournal._for_tests(tmp_path / "journal")
         self.connection = object()
-        self.admission_reader = AdmissionReader(self.connection)
+        self.admission_reader = AdmissionReader()
         self.qualifications = []
         self.owner = ReleaseBrokerOwner(
             state_factory, history_trust=self.history_trust,
@@ -454,22 +454,16 @@ class Composition:
 
 
 class AdmissionReader:
-    def __init__(self, expected_connection):
+    def __init__(self):
         self.evidence = None
         self.calls = []
-        self.expected_connection = expected_connection
 
-    def read_admission_evidence(self, connection, *, approved_transition_ref,
+    def read_admission_evidence(self, *, approved_transition_ref,
                                 request_fingerprint):
-        # The canonical admission read binds the qualified Control
-        # connection positionally; an omitted or replaced connection is
-        # refused so the read cannot be retargeted against a different
-        # transport surface.
-        if connection is not self.expected_connection:
-            raise consumer.ReleaseConsumerError(
-                "RELEASE_ADMISSION_EVIDENCE_CONNECTION_MISMATCH")
-        self.calls.append(
-            (connection, approved_transition_ref, request_fingerprint))
+        # The canonical reader is installation-bound and accepts only the
+        # two admission identity fields.  The owner separately qualifies its
+        # serving Control transport.
+        self.calls.append((approved_transition_ref, request_fingerprint))
         return copy.deepcopy(self.evidence)
 
 
@@ -496,7 +490,6 @@ def test_exact_journal_record_union_is_returned(
     assert result["result"]["terminal_status"] == expected
     assert result["result"]["cancellation"] is None
     assert composition.admission_reader.calls == [(
-        composition.connection,
         original_reservation["approved_transition_ref"],
         original_reservation["request_fingerprint"])]
     assert composition.qualifications == ["control"] * 3
@@ -526,7 +519,6 @@ def test_qualified_cancellation_returns_exact_union(
         "reservation": reservation, "terminal_status": None,
         "cancellation": cancellation}
     assert composition.admission_reader.calls == [(
-        composition.connection,
         reservation["approved_transition_ref"], reservation["request_fingerprint"])]
     assert composition.qualifications == ["control"] * 3
 
@@ -546,7 +538,6 @@ def test_missing_history_refuses_and_never_implies_cancellation(
                        match="RELEASE_ROOT_JOURNAL_NOT_FOUND"):
         composition.read()
     assert composition.admission_reader.calls == [(
-        composition.connection,
         composition.reservation["approved_transition_ref"],
         composition.reservation["request_fingerprint"])]
 
@@ -672,32 +663,25 @@ def test_journal_start_identity_mismatch_refuses_before_status(
         composition.read()
 
 
-def test_admission_reader_requires_qualified_control_connection(
+def test_closure_reader_receives_only_identity_fields_while_owner_qualifies(
         tmp_path, monkeypatch, inputs):
     composition = Composition(tmp_path, monkeypatch, inputs)
     composition.reserve()
-    foreign = object()
-    assert foreign is not composition.connection
+    install_journal_record(composition, "SUCCEEDED")
     approved_transition_ref = composition.reservation["approved_transition_ref"]
     request_fingerprint = composition.reservation["request_fingerprint"]
-    # A replaced connection is refused before any evidence is returned.
-    with pytest.raises(consumer.ReleaseConsumerError,
-                       match="RELEASE_ADMISSION_EVIDENCE_CONNECTION_MISMATCH"):
-        composition.admission_reader.read_admission_evidence(
-            foreign,
-            approved_transition_ref=approved_transition_ref,
-            request_fingerprint=request_fingerprint)
-    # Omitting the positional connection is also a refused surface.
+    # A transport socket is outside the canonical installation-bound reader
+    # interface and cannot be supplied positionally.
     with pytest.raises(TypeError):
         composition.admission_reader.read_admission_evidence(
+            composition.connection,
             approved_transition_ref=approved_transition_ref,
             request_fingerprint=request_fingerprint)
-    # The bound Control connection is accepted and returns the evidence.
-    evidence = composition.admission_reader.read_admission_evidence(
-        composition.connection,
-        approved_transition_ref=approved_transition_ref,
-        request_fingerprint=request_fingerprint)
-    assert evidence == composition.admission_reader.evidence
+    composition.admission_reader.calls = []
+    composition.read()
+    assert composition.admission_reader.calls == [(
+        approved_transition_ref, request_fingerprint)]
+    assert composition.qualifications == ["control"] * 3
 
 
 @pytest.mark.parametrize("field", [
@@ -850,8 +834,8 @@ def test_closure_refuses_sidecar_drift_during_runtime_read(
     path = Path(composition.journal._root) / (stem + ".reservation.json")
     real_read = composition.admission_reader.read_admission_evidence
 
-    def drift(connection, **kw):
-        evidence = real_read(connection, **kw)
+    def drift(**kw):
+        evidence = real_read(**kw)
         _mutate_reservation_sidecar(
             path, kind, approval=composition.approval.to_dict()
         )
@@ -898,8 +882,8 @@ def test_closure_refuses_inode_only_reservation_replacement_during_runtime_read(
     ).read_bytes()
     real_read = composition.admission_reader.read_admission_evidence
 
-    def drift(connection, **kw):
-        evidence = real_read(connection, **kw)
+    def drift(**kw):
+        evidence = real_read(**kw)
         replacement = path.with_suffix(".replacement")
         replacement.write_bytes(original_raw)
         replacement.chmod(0o600)

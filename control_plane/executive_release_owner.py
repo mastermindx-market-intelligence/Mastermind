@@ -663,7 +663,6 @@ class ReleaseBrokerOwner:
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_UNAVAILABLE")
         try:
             evidence = self._admission_reader.read_admission_evidence(
-                connection,
                 approved_transition_ref=reservation["approved_transition_ref"],
                 request_fingerprint=reservation["request_fingerprint"])
         except ExecutiveReleaseActuatorJournalError:
