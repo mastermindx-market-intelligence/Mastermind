@@ -191,6 +191,20 @@ Global repository CI, independent exact-head review and protected source converg
 from runtime acceptance. No source merge is implied by a live canary, and no newly staged seat is
 accepted merely by running `stage`, `probe` or `doctor`.
 
+## Paper 0.5.14 compatibility gate — 2026-09-30
+
+Ryan's tunnel transport was repaired without changing its tunnel identity. The next live
+read reached Paper Desktop 0.5.14 and returned the exact MASTERMIND PAGES target, but the
+protected v8 bridge correctly held writes because its reviewed server identity was 0.5.12.
+The full upstream catalog digest is unchanged at
+`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb`.
+
+Bridge 0.1.3 / runtime v9 therefore adds only the exact reviewed 0.5.14 server identity;
+the catalog pin, read/edit allowlists, blocked tools, target guards, desktop mutex and
+effect semantics are unchanged. Do not weaken this to a version range or catalog-family
+check. A runtime rollout still requires exact-head review/CI and real-route readback before
+calling Ryan write-capable again.
+
 ## Official sources rechecked 2026-09-26
 
 - OpenAI Secure MCP Tunnel: https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
