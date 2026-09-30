@@ -1,40 +1,51 @@
 """MCP presentation for the stateless Mastermind Session Bridge.
 
-The server is only a presentation adapter over SessionBridgeGateway. It owns no
-session registry, lifecycle, placement, retry, queue, or provider state.
+This module is the optional MCP SDK edge only. The bridge owns no session
+registry, lifecycle, dialogue, placement, retry, queue, or provider state.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-
 from .gateway import SessionBridgeGateway
 
 
-def build_mcp_server(gateway: SessionBridgeGateway) -> FastMCP:
+def build_mcp_server(gateway: SessionBridgeGateway) -> Any:
+    # Keep the core package importable in control-plane/runtime environments
+    # that intentionally do not install the optional MCP SDK.
+    from mcp.server.fastmcp import FastMCP
+
     server = FastMCP(
         "mastermind-session-bridge",
         instructions=(
-            "Use exact session targets only. session_send never selects a fallback. "
-            "session_summon requests admission through existing Executive owners; "
-            "accepted is not dispatched or started."
+            "Use exact current session targets only. session_send writes one "
+            "governed Agent Dialogue CONTINUE before exact native attention; "
+            "it is not a raw provider prompt injector. session_summon requests "
+            "existing Executive admission and Capacity placement."
         ),
     )
 
     @server.tool()
     async def session_targets(kind: str | None = None) -> dict[str, Any]:
-        """List addressable current targets from canonical Runtime/Agent projections."""
-        return await gateway.call("session_targets", {} if kind is None else {"kind": kind})
+        """List exact addressable targets from canonical current projections."""
+        return await gateway.call(
+            "session_targets", {} if kind is None else {"kind": kind}
+        )
 
     @server.tool()
-    async def session_send(target_ref: str, message: str, operation_key: str) -> dict[str, Any]:
-        """Send one bounded message to one exact already-bound session target."""
+    async def session_send(
+        target_ref: str,
+        instruction: str,
+        stop_condition: str,
+        operation_key: str,
+    ) -> dict[str, Any]:
+        """Reply on the canonical carrier, then wake only the exact bound runtime."""
         return await gateway.call(
             "session_send",
             {
                 "target_ref": target_ref,
-                "message": message,
+                "instruction": instruction,
+                "stop_condition": stop_condition,
                 "operation_key": operation_key,
             },
         )
@@ -44,17 +55,16 @@ def build_mcp_server(gateway: SessionBridgeGateway) -> FastMCP:
         objective: str,
         execution_profile: str,
         operation_key: str,
-        preferred_surface: str | None = None,
     ) -> dict[str, Any]:
-        """Request one new admitted session via existing Executive placement/lifecycle."""
-        arguments: dict[str, Any] = {
-            "objective": objective,
-            "execution_profile": execution_profile,
-            "operation_key": operation_key,
-        }
-        if preferred_surface is not None:
-            arguments["preferred_surface"] = preferred_surface
-        return await gateway.call("session_summon", arguments)
+        """Request admission; provider/host selection remains with Capacity."""
+        return await gateway.call(
+            "session_summon",
+            {
+                "objective": objective,
+                "execution_profile": execution_profile,
+                "operation_key": operation_key,
+            },
+        )
 
     return server
 
