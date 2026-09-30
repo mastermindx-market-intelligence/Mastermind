@@ -50,7 +50,7 @@ def test_summon_is_delegated_not_provider_spawned():
             "session_summon",
             {
                 "objective": "inspect the failing integration",
-                "execution_profile": "code_repair",
+                "execution_profile": "bounded_code_change",
                 "operation_key": "dot-summon-001",
                 "preferred_surface": "codex",
             },
