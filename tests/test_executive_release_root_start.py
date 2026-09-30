@@ -388,8 +388,8 @@ def test_expiry_during_final_journal_lock_prevents_durable_start(
     acquire = composition.journal._acquire_flock
     calls = []
 
-    def delayed(descriptor, deadline):
-        acquire(descriptor, deadline)
+    def delayed(descriptor, deadline, **kwargs):
+        acquire(descriptor, deadline, **kwargs)
         calls.append(1)
         if len(calls) == 3:
             if clock == "wall":
@@ -690,8 +690,8 @@ def test_start_rejects_qualifier_owner_drift_at_final_lock(
     composition.reserve()
     real_inputs = composition.owner._private_inputs
 
-    def drift_inputs(frame, raw):
-        state, effect, sealed, payload, preconditions = real_inputs(frame, raw)
+    def drift_inputs(frame, raw, **kwargs):
+        state, effect, sealed, payload, preconditions = real_inputs(frame, raw, **kwargs)
         return (replace(state, target_observation_digest="0" * 64),
                 effect, sealed, payload, preconditions)
 
@@ -727,10 +727,10 @@ def test_start_refuses_peer_invalidation_during_final_owner_snapshots(
     final_snapshot_calls = 0
     peer_valid = True
 
-    def tracked_inputs(frame, raw):
+    def tracked_inputs(frame, raw, **kwargs):
         nonlocal private_calls
         private_calls += 1
-        return real_inputs(frame, raw)
+        return real_inputs(frame, raw, **kwargs)
 
     def invalidating_snapshot_call(transition):
         nonlocal final_snapshot_calls, peer_valid
@@ -832,3 +832,354 @@ def test_start_rejects_evidence_with_wrong_preconditions(
     raw["admission_evidence"]["preconditions"]["production_arming_digest"] = "0" * 64
     with pytest.raises(consumer.ReleaseConsumerError):
         composition.start(raw)
+
+
+# Owner START aggregate deadline regression tests.
+from control_plane import executive_release_owner as owner
+from control_plane.executive_release_consumer import ReleaseConsumerError
+import inspect
+
+
+BUDGET = 12_000_000_000
+
+
+STAGES = [("snapshot", n) for n in range(1, 5)] + [
+    ("peer", 1), ("peer", 2), ("evidence", 1),
+    *[("authorize", n) for n in range(1, 6)],
+    ("reservation", 1), ("create", 1),
+]
+
+
+def hook_target(composition, phase):
+    return {
+        "snapshot": (composition.owner, "_snapshot"),
+        "peer": (owner, "_qualify_connection"),
+        "evidence": (owner, "_validate_evidence"),
+        "authorize": (owner, "authorize_release_transition"),
+        "reservation": (composition.journal, "read_prestart_reservation"),
+        "create": (composition.journal, "create"),
+        "history": (composition.journal, "read"),
+    }[phase]
+
+
+def read_record(composition):
+    return composition.journal.read(composition.approval["operation_key"])
+
+
+def no_start(composition):
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        read_record(composition)
+    assert caught.value.code == "NOT_FOUND"
+
+
+@pytest.mark.parametrize("phase,ordinal", STAGES)
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_boundary_each_owner_phase(tmp_path, monkeypatch, inputs, phase, ordinal, offset):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    endpoint = MONOTONIC[0] + BUDGET
+    target, name = hook_target(c, phase)
+    original = getattr(target, name)
+    calls = []
+
+    def delayed(*args, **kwargs):
+        calls.append(1)
+        if phase == "create" and len(calls) == ordinal:
+            MONOTONIC[0] = endpoint + offset
+        result = original(*args, **kwargs)
+        if phase != "create" and len(calls) == ordinal:
+            MONOTONIC[0] = endpoint + offset
+        return result
+
+    monkeypatch.setattr(target, name, delayed)
+    if offset < 0:
+        assert c.start()["result"]["start_record"]["state"] == "STARTED"
+    else:
+        with pytest.raises(ReleaseConsumerError) as caught:
+            c.start()
+        assert "DEADLINE" in caught.value.code
+        no_start(c)
+    assert len(calls) >= ordinal
+
+
+@pytest.mark.parametrize("phase,ordinal", [p for p in STAGES if p[0] != "create"])
+def test_primary_callback_exception_survives_expiry(tmp_path, monkeypatch, inputs, phase, ordinal):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    endpoint = MONOTONIC[0] + BUDGET
+    target, name = hook_target(c, phase)
+    original = getattr(target, name)
+    primary = RuntimeError("primary refused " + phase)
+    calls = []
+
+    def failing(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == ordinal:
+            MONOTONIC[0] = endpoint
+            raise primary
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, name, failing)
+    with pytest.raises(RuntimeError) as caught:
+        c.start()
+    assert caught.value is primary
+    no_start(c)
+
+
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_absent_start_history_consumes_deadline(tmp_path, monkeypatch, inputs, offset):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    endpoint = MONOTONIC[0] + BUDGET
+    original = c.journal.read
+    calls = []
+
+    def delayed(*args, **kwargs):
+        calls.append(kwargs.get("deadline_monotonic_ns"))
+        try:
+            return original(*args, **kwargs)
+        except actuator.ExecutiveReleaseActuatorJournalError as exc:
+            assert exc.code == "NOT_FOUND"
+            MONOTONIC[0] = endpoint + offset
+            raise
+
+    monkeypatch.setattr(c.journal, "read", delayed)
+    if offset < 0:
+        assert c.start()["ok"]
+    else:
+        with pytest.raises(ReleaseConsumerError) as caught:
+            c.start()
+        assert "DEADLINE" in caught.value.code
+        monkeypatch.setattr(c.journal, "read", original)
+        no_start(c)
+    assert calls == [endpoint]
+
+
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_existing_start_history_late_return_cannot_create_again(tmp_path, monkeypatch, inputs, offset):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    first = c.start()
+    endpoint = MONOTONIC[0] + BUDGET
+    original_read, original_create = c.journal.read, c.journal.create
+    creates = []
+
+    def delayed(*args, **kwargs):
+        result = original_read(*args, **kwargs)
+        MONOTONIC[0] = endpoint + offset
+        return result
+
+    def create(*args, **kwargs):
+        creates.append(kwargs)
+        return original_create(*args, **kwargs)
+
+    monkeypatch.setattr(c.journal, "read", delayed)
+    monkeypatch.setattr(c.journal, "create", create)
+    if offset < 0:
+        assert c.start() == first
+        assert len(creates) == 1
+    else:
+        with pytest.raises(ReleaseConsumerError) as caught:
+            c.start()
+        assert "DEADLINE" in caught.value.code
+        assert not creates
+    assert original_read(c.approval["operation_key"]).to_dict() == first["result"]["start_record"]
+
+
+def test_identical_endpoint_across_journal_and_fresh_replay_request(tmp_path, monkeypatch, inputs):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    endpoint = MONOTONIC[0] + BUDGET
+    seen = []
+    for name in ("read_prestart_reservation", "read", "create"):
+        original = getattr(c.journal, name)
+        def recording(*args, _fn=original, _name=name, **kwargs):
+            seen.append((_name, kwargs.get("deadline_monotonic_ns")))
+            return _fn(*args, **kwargs)
+        monkeypatch.setattr(c.journal, name, recording)
+    first = c.start()
+    assert seen == [(name, endpoint) for name in ("read_prestart_reservation", "read", "create")]
+    MONOTONIC[0] += BUDGET * 2
+    seen.clear()
+    assert c.start() == first
+    assert seen == [(name, endpoint + BUDGET * 2) for name in ("read_prestart_reservation", "read", "create")]
+    def no_deadline(value):
+        if isinstance(value, dict):
+            assert not any("deadline" in key for key in value)
+            for item in value.values(): no_deadline(item)
+        elif isinstance(value, list):
+            for item in value: no_deadline(item)
+    no_deadline(first)
+    no_deadline(c.frame("start_reserved_release"))
+
+
+def test_cumulative_snapshots_do_not_reset_request_budget(tmp_path, monkeypatch, inputs):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    original = c.owner._snapshot
+    count = []
+    def delayed(transition):
+        count.append(1)
+        result = original(transition)
+        MONOTONIC[0] += BUDGET // 4
+        return result
+    monkeypatch.setattr(c.owner, "_snapshot", delayed)
+    with pytest.raises(ReleaseConsumerError) as caught:
+        c.start()
+    assert "DEADLINE" in caught.value.code
+    assert len(count) == 4
+    no_start(c)
+
+
+@pytest.mark.parametrize("offset", [0, 1])
+def test_known_canonical_create_result_survives_late_return(tmp_path, monkeypatch, inputs, offset):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    endpoint = MONOTONIC[0] + BUDGET
+    original = c.journal.create
+    created = []
+    def delayed(**kwargs):
+        record = original(**kwargs)
+        created.append(record)
+        MONOTONIC[0] = endpoint + offset
+        return record
+    monkeypatch.setattr(c.journal, "create", delayed)
+    result = c.start()
+    assert len(created) == 1
+    assert result["result"]["start_record"] == created[0].to_dict() == read_record(c).to_dict()
+
+
+@pytest.mark.parametrize("after_write", [False, True])
+def test_create_primary_exception_no_reissue_or_automatic_read(tmp_path, monkeypatch, inputs, after_write):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    original_create, original_read = c.journal.create, c.journal.read
+    creates, reads = [], []
+    primary = RuntimeError("lost create return")
+    def fail(**kwargs):
+        creates.append(kwargs)
+        if after_write: original_create(**kwargs)
+        MONOTONIC[0] += BUDGET
+        raise primary
+    def read(*args, **kwargs):
+        reads.append(kwargs)
+        return original_read(*args, **kwargs)
+    monkeypatch.setattr(c.journal, "create", fail)
+    monkeypatch.setattr(c.journal, "read", read)
+    with pytest.raises(RuntimeError) as caught: c.start()
+    assert caught.value is primary
+    assert len(creates) == len(reads) == 1
+    # A separate canonical observation demonstrates the uncertainty; the failed
+    # START request does not retry/create/recover itself using a new budget.
+    monkeypatch.setattr(c.journal, "read", original_read)
+    if after_write: assert read_record(c)["state"] == "STARTED"
+    else: no_start(c)
+
+
+@pytest.mark.parametrize("code", ["DEADLINE_EXCEEDED", "DEADLINE_EFFECT_UNKNOWN", "CONFLICT", "RECORD_REPLACED"])
+def test_existing_journal_error_code_is_not_masked(tmp_path, monkeypatch, inputs, code):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    calls = []
+    def fail(**kwargs):
+        calls.append(kwargs)
+        MONOTONIC[0] += BUDGET
+        raise actuator.ExecutiveReleaseActuatorJournalError(code)
+    monkeypatch.setattr(c.journal, "create", fail)
+    with pytest.raises(ReleaseConsumerError) as caught: c.start()
+    assert caught.value.code == "RELEASE_ROOT_JOURNAL_" + code
+    assert len(calls) == 1
+
+
+def test_public_handle_signature_unchanged():
+    assert str(inspect.signature(owner.ReleaseBrokerOwner.handle)) == "(self, raw, connection)"
+
+
+def test_handle_establishes_endpoint_before_private_frame(tmp_path, monkeypatch, inputs):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    began = MONOTONIC[0]
+    seen = []
+    expected = object()
+    def observe(raw, connection, *, deadline_monotonic_ns=None):
+        seen.append(deadline_monotonic_ns)
+        return expected
+    monkeypatch.setattr(c.owner, "_start_reserved_release", observe)
+    assert c.start() is expected
+    assert seen == [began + BUDGET]
+
+
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_real_journal_post_publish_boundary_preserves_durable_truth(tmp_path, monkeypatch, inputs, offset):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    endpoint = MONOTONIC[0] + BUDGET
+    original = c.journal._publish_start
+    calls = []
+    def delayed(*args, **kwargs):
+        calls.append(kwargs.get("deadline_monotonic_ns"))
+        result = original(*args, **kwargs)
+        MONOTONIC[0] = endpoint + offset
+        return result
+    monkeypatch.setattr(c.journal, "_publish_start", delayed)
+    if offset < 0:
+        assert c.start()["result"]["start_record"]["state"] == "STARTED"
+    else:
+        with pytest.raises(ReleaseConsumerError) as caught: c.start()
+        assert caught.value.code == "RELEASE_ROOT_JOURNAL_DEADLINE_EFFECT_UNKNOWN"
+    assert calls == [endpoint]
+    # This is a distinct read observation, never an automatic retry in START.
+    assert c.journal.read(c.approval["operation_key"])["state"] == "STARTED"
+
+
+@pytest.mark.parametrize("ordinal", [1, 2, 3])
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_same_deadline_before_each_actual_journal_lock(tmp_path, monkeypatch, inputs, ordinal, offset):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    endpoint = MONOTONIC[0] + BUDGET
+    original = c.journal._locked
+    calls = []
+    def delayed(*args, **kwargs):
+        calls.append(kwargs.get("deadline_monotonic_ns"))
+        if len(calls) == ordinal: MONOTONIC[0] = endpoint + offset
+        return original(*args, **kwargs)
+    monkeypatch.setattr(c.journal, "_locked", delayed)
+    if offset < 0: assert c.start()["ok"]
+    else:
+        with pytest.raises(ReleaseConsumerError) as caught: c.start()
+        assert caught.value.code == "RELEASE_ROOT_JOURNAL_DEADLINE_EXCEEDED"
+    assert calls and set(calls) == {endpoint}
+    if offset >= 0: assert len(calls) == ordinal
+    monkeypatch.setattr(c.journal, "_locked", original)
+    if offset >= 0:
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+            c.journal.read(c.approval["operation_key"])
+        assert caught.value.code == "NOT_FOUND"
+
+
+def test_reserve_has_no_deadline_keyword_or_ambient_budget(tmp_path, monkeypatch, inputs):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    initial_dict = copy.copy(c.owner.__dict__)
+    original = c.journal._locked
+    seen = []
+    def record(*args, **kwargs):
+        seen.append(kwargs)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(c.journal, "_locked", record)
+    c.reserve()
+    assert all("deadline_monotonic_ns" not in kw for kw in seen)
+    c.start()
+    assert c.owner.__dict__ == initial_dict
+
+
+@pytest.mark.parametrize("endpoint", [False, True, 0, -1, 1.2, "42", 1 << 63])
+def test_private_endpoint_validation_prevents_dependent_effects(tmp_path, monkeypatch, inputs, endpoint):
+    c = Composition(tmp_path, monkeypatch, inputs)
+    c.reserve()
+    calls = []
+    monkeypatch.setattr(owner, "_qualify_connection", lambda *a, **kw: calls.append("peer"))
+    with pytest.raises(ReleaseConsumerError) as caught:
+        c.owner._start_reserved_release(c.frame("start_reserved_release"), object(), deadline_monotonic_ns=endpoint)
+    assert "INVALID" in caught.value.code
+    assert not calls
