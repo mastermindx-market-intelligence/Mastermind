@@ -1248,6 +1248,60 @@ def test_concurrent_consumers_can_send_start_only_once(fresh_lane):
     assert len(lane["calls"]) == 2
 
 
+@pytest.mark.parametrize("first", ["before", "success", "loss", "preflight"])
+def test_constructor_and_state_hooks_cannot_issue_or_restore_start(fresh_lane, first):
+    lane = fresh_lane
+    capability = _fresh(lane)
+    if first == "success":
+        lane["control"].broker.start_reserved_release(fresh_admission=capability)
+    elif first == "loss":
+        lane["knobs"]["loss"] = "start_reserved_release"
+        with pytest.raises(TimeoutError):
+            lane["control"].broker.start_reserved_release(fresh_admission=capability)
+        lane["knobs"]["loss"] = None
+    elif first == "preflight":
+        original = lane["mono"][0]
+        lane["mono"][0] = lane["reservation"]["prepared_payload"][
+            "expires_monotonic_ns"
+        ]
+        with pytest.raises(c.ReleaseConsumerError):
+            lane["control"].broker.start_reserved_release(fresh_admission=capability)
+        lane["mono"][0] = original
+    used = capability._consumed
+    args = (
+        capability.root_response,
+        capability.admission_evidence,
+        capability._capability,
+    )
+    for construct in (c._FreshReleaseAdmission, capability.__init__):
+        with pytest.raises(
+            c.ReleaseConsumerError, match="RELEASE_FRESH_ADMISSION_REQUIRED"
+        ):
+            construct(*args)
+    for value in (capability, capability.root_response):
+        with pytest.raises(TypeError, match="process-local"):
+            value.__getstate__()
+        with pytest.raises(TypeError, match="process-local"):
+            value.__setstate__([None] * 7)
+    assert capability._consumed is used
+    if first == "before":
+        result = lane["control"].broker.start_reserved_release(
+            fresh_admission=capability
+        )
+        with pytest.raises(TypeError, match="process-local"):
+            result.__getstate__()
+        with pytest.raises(TypeError, match="process-local"):
+            result.__setstate__([None] * 6)
+    else:
+        with pytest.raises(
+            c.ReleaseConsumerError, match="RELEASE_FRESH_ADMISSION_REQUIRED"
+        ):
+            lane["control"].broker.start_reserved_release(fresh_admission=capability)
+    starts = sum(row["operation"] == "start_reserved_release" for row in lane["calls"])
+    assert starts == (0 if first == "preflight" else 1)
+    assert _admission_count(lane) == 1
+
+
 def test_dataclass_replace_cannot_rebind_fresh_capability(fresh_lane):
     from types import MappingProxyType
 

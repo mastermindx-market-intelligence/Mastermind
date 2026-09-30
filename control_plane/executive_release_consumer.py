@@ -82,9 +82,19 @@ class _ProcessLocalReleaseEvidence:
     def __reduce_ex__(self, protocol):
         raise TypeError("release evidence is process-local")
 
+    def __getstate__(self):
+        raise TypeError("release evidence is process-local")
+
+    def __setstate__(self, state):
+        raise TypeError("release evidence is process-local")
+
 
 @dataclasses.dataclass(frozen=True, slots=True, repr=False)
 class _RootReleaseAdmissionResponse(_ProcessLocalReleaseEvidence):
+    # Frozen slotted dataclasses otherwise generate restoring state hooks.
+    __getstate__ = _ProcessLocalReleaseEvidence.__getstate__
+    __setstate__ = _ProcessLocalReleaseEvidence.__setstate__
+
     frame_bytes: bytes
     approval: contract.ReleaseRecord
     reservation: contract.ReleaseRecord
@@ -94,6 +104,10 @@ class _RootReleaseAdmissionResponse(_ProcessLocalReleaseEvidence):
 
 @dataclasses.dataclass(frozen=True, slots=True, repr=False, init=False)
 class _FreshReleaseAdmission(_ProcessLocalReleaseEvidence):
+    # Frozen slotted dataclasses otherwise generate restoring state hooks.
+    __getstate__ = _ProcessLocalReleaseEvidence.__getstate__
+    __setstate__ = _ProcessLocalReleaseEvidence.__setstate__
+
     root_response: _RootReleaseAdmissionResponse
     admission_evidence: Mapping
     _capability: object
@@ -101,18 +115,10 @@ class _FreshReleaseAdmission(_ProcessLocalReleaseEvidence):
     _consumed: bool
     _lock: Any
 
-    def __init__(self, root_response, admission_evidence, _capability, **replacements):
-        # Only the private new-admission path constructs this object. Generic
-        # record replacement passes the lifecycle fields and must fail closed;
-        # a copied/reset cell must never restore a consumed START permission.
-        if replacements or _capability is not _FRESH_RELEASE_ADMISSION_CAPABILITY:
-            raise ReleaseConsumerError("RELEASE_FRESH_ADMISSION_REQUIRED")
-        object.__setattr__(self, "root_response", root_response)
-        object.__setattr__(self, "admission_evidence", admission_evidence)
-        object.__setattr__(self, "_capability", _capability)
-        object.__setattr__(self, "receiver_pid", os.getpid())
-        object.__setattr__(self, "_consumed", False)
-        object.__setattr__(self, "_lock", threading.Lock())
+    def __init__(self, *args, **kwargs):
+        # Generic construction, replacement and reinitialization never issue
+        # START authority. Only the canonical new-admission path creates it.
+        raise ReleaseConsumerError("RELEASE_FRESH_ADMISSION_REQUIRED")
 
     def _consume(self):
         # The one-shot bit is consumed even when preflight or transport fails.
@@ -131,6 +137,10 @@ class _FreshReleaseAdmission(_ProcessLocalReleaseEvidence):
 
 @dataclasses.dataclass(frozen=True, slots=True, repr=False)
 class _RootReleaseStartResponse(_ProcessLocalReleaseEvidence):
+    # Frozen slotted dataclasses otherwise generate restoring state hooks.
+    __getstate__ = _ProcessLocalReleaseEvidence.__getstate__
+    __setstate__ = _ProcessLocalReleaseEvidence.__setstate__
+
     approval: contract.ReleaseRecord
     reservation: contract.ReleaseRecord
     admission: contract.ReleaseRecord
@@ -589,7 +599,16 @@ class ReleaseControlConsumer:
                 raise ReleaseConsumerError("RELEASE_ADMISSION_READBACK_UNKNOWN")
         _qualify_connection(connection, "gateway")
         _validated_reservation_response(response)
-        return _FreshReleaseAdmission(response, evidence, _FRESH_RELEASE_ADMISSION_CAPABILITY)
+        # Keep issuance local to this proven new-admission path: no generic
+        # constructor, restoration hook or separately callable mint can reset it.
+        fresh = object.__new__(_FreshReleaseAdmission)
+        object.__setattr__(fresh, "root_response", response)
+        object.__setattr__(fresh, "admission_evidence", evidence)
+        object.__setattr__(fresh, "_capability", _FRESH_RELEASE_ADMISSION_CAPABILITY)
+        object.__setattr__(fresh, "receiver_pid", os.getpid())
+        object.__setattr__(fresh, "_consumed", False)
+        object.__setattr__(fresh, "_lock", threading.Lock())
+        return fresh
 
     def finalize_unresolved_admission(self) -> None:
         """Close qualified historical work through the one Runtime owner.
