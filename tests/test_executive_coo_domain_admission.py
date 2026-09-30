@@ -82,7 +82,7 @@ def _with_domain_enabled(raw: dict, enabled: object) -> dict:
 def test_canonical_policy_bytes_and_default_disabled_resolve_refusal():
     raw_bytes = _canonical_policy_bytes()
     assert _sha256_bytes(raw_bytes) == (
-        "31c2dccb5c3185dc92aac0cc8906fc007d3249d40c8f4483ef1f83990ccb87cd"
+        "94bfcd11ac145a6c5986a7e8532005dbb3b03716a6e8876f8bf6a730df0dc101"
     )
 
     registry = ExecutionCapabilityRegistry.load()
@@ -245,19 +245,19 @@ def test_enabled_coo_domain_refuses_authority_widening(tmp_path, mutation):
 
 
 # ---------------------------------------------------------------------------
-# 7. Canonical policy bytes are unchanged after the source amendment.
+# 7. Canonical policy bytes match the current protected source after #1028.
 # ---------------------------------------------------------------------------
 
 
 def test_canonical_policy_bytes_are_byte_identical_after_r15():
-    """The shipped canonical config must remain untouched; only the COO
+    """The COO amendment leaves the current canonical policy untouched.
 
-    domain shape validator in source is amended. This test exists to
-    fail loudly if the amendment inadvertently mutates installed policy.
+    Protected #1028 added separate Claude worker profiles and rotated the
+    policy version; it did not change the disabled COO domain profile.
     """
 
     assert _canonical_sha256() == (
-        "31c2dccb5c3185dc92aac0cc8906fc007d3249d40c8f4483ef1f83990ccb87cd"
+        "94bfcd11ac145a6c5986a7e8532005dbb3b03716a6e8876f8bf6a730df0dc101"
     )
 
 
