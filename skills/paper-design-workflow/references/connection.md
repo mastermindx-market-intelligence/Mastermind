@@ -13,8 +13,10 @@ operator procedure. Use one existing tunnel, not a replacement for the Chairman-
 
 The previous blanket rule against a dedicated Paper ChatGPT app is superseded for this explicitly
 commissioned Business migration. It does not authorize unattended enrollment or publication.
-The direct build supports explicit-file target binding through `paper_prepare`: Paper 0.5.12 can
-read/write an addressed file by `fileId` while another file remains user-active. Bootstrap the guard
+The direct build supports explicit-file target binding through `paper_prepare`: qualified Paper Desktop
+schemas can read/write an addressed file by `fileId` while another file remains user-active. Paper's
+reported release version is diagnostic metadata, not a write-admission gate; the exact reviewed catalog
+schema remains fail closed. Bootstrap the guard
 with `paper_read(tool="get_basic_info", arguments={"fileId": ...})`; a successful explicit read returns
 the bridge-created target snapshot. Direct prepare compares that target guard without requiring or
 querying the unrelated foreground file, and returns the exact target snapshot without using raw
