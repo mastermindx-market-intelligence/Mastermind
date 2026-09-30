@@ -30,7 +30,7 @@ OPERATIONS = frozenset({
 _KEYS = {
     "approve_release_transition": frozenset({"operation_key", "action", "transition_digest"}),
     "prepare_release_transition": frozenset({"operation_key", "approved_transition_ref"}),
-    "commit_prepared_release_transition": frozenset({"prepared_token"}),
+    "commit_prepared_release_transition": frozenset({"operation_key", "prepared_token"}),
     "reconcile_release_transition": frozenset({"operation_key"}),
 }
 _PRINCIPAL_KEYS = frozenset({

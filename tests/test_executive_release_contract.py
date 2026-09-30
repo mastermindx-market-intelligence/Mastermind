@@ -852,3 +852,975 @@ def test_source_modes_match_pinned_owner_contract():
                     modes.add(value.value)
     assert modes == {"exact_protected_master", "frozen_accepted_ancestor"}
     assert set(c._SOURCE_MODES) == modes
+
+
+# Parent terminal-status acceptance vectors; independent of worker implementation.
+TERMINAL_TEST_STATES = (
+    "NOT_FOUND",
+    "STARTED",
+    "PUBLISHED",
+    "BROKER_RESTART_PENDING",
+    "RECOVERING",
+    "SUCCEEDED",
+    "ROLLED_BACK",
+    "FAILED_NOT_APPLIED",
+)
+TERMINAL_TEST_OUTCOMES = TERMINAL_TEST_STATES[5:]
+
+
+def terminal_fixture(state="SUCCEEDED", rollback_action=False):
+    p, e, g, a, _ = fixtures()
+    if rollback_action:
+        a = rollback_approval()
+        p = a["principal_projection"]
+        e = a["normalized_requested_effect"]
+        g = a["grant"]
+    f = {
+        "operation_key": a["operation_key"],
+        "approved_transition_ref": a["approved_transition_ref"],
+        "approval_evidence_digest": digest(a),
+        "authenticated_principal_digest": digest(p),
+        "target_ref": a["target_ref"],
+        "action_family": a["action"],
+        "normalized_requested_effect_digest": digest(e),
+    }
+    fp = hashlib.sha256(
+        b"MMX_EXECUTIVE_RELEASE_REQUEST_V1\x00"
+        + json.dumps(f, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    s = dict(
+        schema="mastermind.executive_release_terminal_status/v1",
+        state=state,
+        request_id="p4r-" + fp[:48],
+        request_fingerprint=fp,
+        **f,
+        effective_grant_digest=digest(g),
+        owner_installation_id=a["owner_installation_id"],
+        action_target_digest=digest(
+            {"action": a["action"], "target_ref": a["target_ref"]}
+        ),
+        from_release_commit=e["from_release_commit"],
+        to_release_commit=e["to_release_commit"]
+    )
+    if state == "NOT_FOUND":
+        return (a, s)
+    pre = dict(
+        schema="mastermind.executive_release_preconditions/v1",
+        owner_installation_id=a["owner_installation_id"],
+        target_ref=a["target_ref"],
+        boot_id="22222222-2222-4222-8222-222222222222",
+        authority_policy_hash=g["authority_policy_hash"],
+        grant_digest=digest(g),
+        approval_evidence_digest=digest(a),
+    )
+    for k in (
+        "from_installed_manifest_digest",
+        "staged_artifact_digest",
+        "staged_content_metadata_digest",
+        "compatibility_proof_digest",
+        "preservation_plan_digest",
+    ):
+        pre[k] = e[k]
+    for i, k in enumerate(
+        (
+            "installed_configuration_digest",
+            "python_runtime_provenance_digest",
+            "provider_binary_attestation_digest",
+            "issuer_binding_digest",
+            "admission_contract_digest",
+            "production_arming_digest",
+        ),
+        30,
+    ):
+        pre[k] = format(i, "064x")
+    admission = dict(
+        schema="mastermind.executive_release_admission/v1",
+        operation_key=a["operation_key"],
+        approved_transition_ref=a["approved_transition_ref"],
+        target_ref=a["target_ref"],
+        owner_installation_id=a["owner_installation_id"],
+        boot_id=pre["boot_id"],
+        request_fingerprint=fp,
+        effective_grant_digest=digest(g),
+        maintenance_sequence=1,
+        admission_event_command_id="p4-admit:" + a["request_ref"],
+        target_observation_digest="a" * 64,
+        admission_contract_digest=pre["admission_contract_digest"],
+    )
+    s.update(
+        actuator_generation=1,
+        journal_generation=1,
+        started_at_ms=2000,
+        preconditions=pre,
+        expected_precondition_digest=digest(pre),
+        admission=admission,
+        admission_digest=digest(admission),
+    )
+    if state not in TERMINAL_TEST_OUTCOMES:
+        return (a, s)
+    before = dict(
+        release_commit=e["from_release_commit"],
+        release_tree=e["from_release_tree"],
+        installed_manifest_digest=e["from_installed_manifest_digest"],
+        configuration_digest=pre["installed_configuration_digest"],
+        broker_source_commit=e["from_release_commit"],
+        broker_source_tree=e["from_release_tree"],
+        broker_binary_digest="b" * 64,
+        service_generation_digests={
+            k: format(i, "064x")
+            for i, k in enumerate(
+                ("control", "worker", "relay", "gateway", "broker"), 100
+            )
+        },
+    )
+    after = copy.deepcopy(before)
+    if state == "SUCCEEDED":
+        after.update(
+            release_commit=e["to_release_commit"],
+            release_tree=e["to_release_tree"],
+            broker_source_commit=e["to_release_commit"],
+            broker_source_tree=e["to_release_tree"],
+            installed_manifest_digest="c" * 64,
+        )
+    rollback = (
+        {"attempted": True, "restored_preimage_digest": digest(before)}
+        if state == "ROLLED_BACK"
+        else {"attempted": False}
+    )
+    r = {
+        k: s[k]
+        for k in (
+            "request_id",
+            "request_fingerprint",
+            "approval_evidence_digest",
+            "expected_precondition_digest",
+            "admission_digest",
+            "actuator_generation",
+            "journal_generation",
+            "started_at_ms",
+        )
+    }
+    r.update(
+        schema="mastermind.executive_release_terminal_receipt/v1",
+        completed_at_ms=400000,
+        outcome=state,
+        before=before,
+        after=after,
+        rollback=rollback,
+        postcondition_digest="d" * 64,
+    )
+    s["terminal_receipt"] = r
+    return (a, s)
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_STATES)
+def test_terminal_all_state_vectors_and_detachment(state):
+    a, s = terminal_fixture(state)
+    original = copy.deepcopy(s)
+    out = c.validate_release_terminal_status(s, expected_approval=a)
+    assert out.to_dict() == original
+    s["request_id"] = "bad"
+    a["operation_key"] = "bad"
+    assert out.to_dict() == original
+    assert len(c.canonical_release_bytes(out)) <= 16384
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_OUTCOMES)
+def test_terminal_public_receipt_and_completion_after_expiry(state):
+    a, s = terminal_fixture(state)
+    out = c.validate_release_terminal_receipt(
+        s["terminal_receipt"], expected_status=s, expected_approval=a
+    )
+    assert out.to_dict() == s["terminal_receipt"]
+    s["terminal_receipt"]["postcondition_digest"] = "e" * 64
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_receipt(out, expected_status=s, expected_approval=a)
+
+
+TERMINAL_TEST_COMMON = tuple(terminal_fixture("NOT_FOUND")[1])
+
+
+@pytest.mark.parametrize("field", TERMINAL_TEST_COMMON)
+def test_terminal_every_common_join_and_exact_set(field):
+    a, s = terminal_fixture("NOT_FOUND")
+    for val in (
+        None,
+        True,
+        {},
+        "invalid",
+        s[field].upper() if isinstance(s[field], str) else "other",
+    ):
+        if val == s[field]:
+            continue
+        bad = copy.deepcopy(s)
+        bad[field] = val
+        with pytest.raises(c.ReleaseContractError):
+            c.validate_release_terminal_status(bad, expected_approval=a)
+    del s[field]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_STATES)
+def test_terminal_receipt_presence_and_unknown_field(state):
+    a, s = terminal_fixture(state)
+    s["unexpected"] = "value"
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+    del s["unexpected"]
+    if state in TERMINAL_TEST_OUTCOMES:
+        del s["terminal_receipt"]
+    else:
+        s["terminal_receipt"] = terminal_fixture()[1]["terminal_receipt"]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+@pytest.mark.parametrize(
+    "field", ("actuator_generation", "journal_generation", "started_at_ms")
+)
+@pytest.mark.parametrize("value", (None, False, True, -1, 0, 2**63, 1.0, "1"))
+def test_terminal_integer_grammar_and_start_bounds(field, value):
+    a, s = terminal_fixture("STARTED")
+    s[field] = value
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "owner_installation_id",
+        "target_ref",
+        "approval_evidence_digest",
+        "grant_digest",
+        "authority_policy_hash",
+        "from_installed_manifest_digest",
+        "staged_artifact_digest",
+        "staged_content_metadata_digest",
+        "compatibility_proof_digest",
+        "preservation_plan_digest",
+    ),
+)
+def test_terminal_precondition_correlations_even_when_digest_recomputed(field):
+    a, s = terminal_fixture("STARTED")
+    s["preconditions"][field] = (
+        "33333333-3333-4333-8333-333333333333"
+        if field == "owner_installation_id"
+        else "e" * 64
+    )
+    s["expected_precondition_digest"] = digest(s["preconditions"])
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "request_fingerprint",
+        "effective_grant_digest",
+        "boot_id",
+        "admission_contract_digest",
+        "target_ref",
+        "owner_installation_id",
+        "maintenance_sequence",
+        "admission_event_command_id",
+    ),
+)
+def test_terminal_admission_correlations_even_when_digest_recomputed(field):
+    a, s = terminal_fixture("STARTED")
+    s["admission"][field] = (
+        0
+        if field == "maintenance_sequence"
+        else (
+            "33333333-3333-4333-8333-333333333333"
+            if field in ("boot_id", "owner_installation_id")
+            else "e" * 64
+        )
+    )
+    s["admission_digest"] = digest(s["admission"])
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_OUTCOMES)
+@pytest.mark.parametrize("side", ("before", "after"))
+@pytest.mark.parametrize("role", ("control", "worker", "relay", "gateway", "broker"))
+def test_terminal_exact_service_role_map(state, side, role):
+    a, s = terminal_fixture(state)
+    del s["terminal_receipt"][side]["service_generation_digests"][role]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+@pytest.mark.parametrize("state", ("ROLLED_BACK", "FAILED_NOT_APPLIED"))
+def test_terminal_no_partial_mutation_can_equal_preimage(state):
+    a, s = terminal_fixture(state)
+    s["terminal_receipt"]["after"]["service_generation_digests"]["relay"] = "e" * 64
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+def test_terminal_shortened_id_collision_rejected():
+    a, s = terminal_fixture("STARTED")
+    fp = s["request_fingerprint"]
+    s["request_fingerprint"] = fp[:48] + ("f" * 16 if fp[48:] != "f" * 16 else "e" * 16)
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=a)
+
+
+def test_terminal_forged_approval_and_status_records_revalidated():
+    a, s = terminal_fixture()
+    a["owner_seal"]["mac"] = "bad"
+    forged = c.ReleaseRecord(tuple(a.items()))
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(s, expected_approval=forged)
+    a, s = terminal_fixture()
+    s["request_fingerprint"] = "e" * 64
+    forged = c.ReleaseRecord(tuple(s.items()))
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_receipt(
+            s["terminal_receipt"], expected_status=forged, expected_approval=a
+        )
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_STATES)
+def test_terminal_original_rollback_action_all_outcomes(state):
+    a, s = terminal_fixture(state, rollback_action=True)
+    out = c.validate_release_terminal_status(s, expected_approval=a)
+    assert out["action_family"] == "executive.release.rollback"
+    if state in TERMINAL_TEST_OUTCOMES:
+        assert (
+            c.validate_release_terminal_receipt(
+                s["terminal_receipt"], expected_status=s, expected_approval=a
+            ).to_dict()
+            == s["terminal_receipt"]
+        )
+
+
+@pytest.mark.parametrize(
+    "timestamp,valid", [(999, False), (1000, True), (300999, True), (301000, False)]
+)
+def test_terminal_start_exact_lifetime_boundaries(timestamp, valid):
+    a, s = terminal_fixture("STARTED")
+    s["started_at_ms"] = timestamp
+    if valid:
+        c.validate_release_terminal_status(s, expected_approval=a)
+    else:
+        with pytest.raises(c.ReleaseContractError):
+            c.validate_release_terminal_status(s, expected_approval=a)
+
+
+def terminal_node(status, path):
+    value = status
+    for key in path:
+        value = value[key]
+    return value
+
+
+TERMINAL_TEST_OBJECT_PATHS = (
+    (),
+    ("preconditions",),
+    ("admission",),
+    ("terminal_receipt",),
+    ("terminal_receipt", "before"),
+    ("terminal_receipt", "after"),
+    ("terminal_receipt", "rollback"),
+    ("terminal_receipt", "before", "service_generation_digests"),
+    ("terminal_receipt", "after", "service_generation_digests"),
+)
+TERMINAL_TEST_FIELD_PATHS = tuple(
+    (
+        (path, key)
+        for path in TERMINAL_TEST_OBJECT_PATHS
+        for key in terminal_node(terminal_fixture("ROLLED_BACK")[1], path)
+    )
+)
+
+
+@pytest.mark.parametrize("path,key", TERMINAL_TEST_FIELD_PATHS)
+@pytest.mark.parametrize("mutation", ("missing", "null"))
+def test_terminal_every_nested_field_is_required_and_nonnull(path, key, mutation):
+    approval, status = terminal_fixture("ROLLED_BACK")
+    node = terminal_node(status, path)
+    if mutation == "missing":
+        del node[key]
+    else:
+        node[key] = None
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(status, expected_approval=approval)
+
+
+@pytest.mark.parametrize("path", TERMINAL_TEST_OBJECT_PATHS)
+def test_terminal_every_object_refuses_unknown_fields(path):
+    approval, status = terminal_fixture("ROLLED_BACK")
+    terminal_node(status, path)["untrusted_field_never_echo"] = "payload"
+    with pytest.raises(c.ReleaseContractError) as caught:
+        c.validate_release_terminal_status(status, expected_approval=approval)
+    assert "untrusted_field_never_echo" not in str(caught.value)
+    assert "payload" != caught.value.code
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_OUTCOMES)
+@pytest.mark.parametrize("value", (0, 1, None, "false", [], {}))
+def test_terminal_rollback_boolean_is_not_an_integer_or_other_value(state, value):
+    approval, status = terminal_fixture(state)
+    status["terminal_receipt"]["rollback"]["attempted"] = value
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(status, expected_approval=approval)
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_OUTCOMES)
+def test_terminal_rollback_opposite_boolean_is_rejected(state):
+    approval, status = terminal_fixture(state)
+    status["terminal_receipt"]["rollback"]["attempted"] = state != "ROLLED_BACK"
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(status, expected_approval=approval)
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_STATES[:5])
+def test_terminal_public_receipt_requires_a_complete_terminal_status(state):
+    approval, status = terminal_fixture(state)
+    receipt = terminal_fixture()[1]["terminal_receipt"]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_receipt(
+            receipt, expected_status=status, expected_approval=approval
+        )
+
+
+@pytest.mark.parametrize("field", tuple(terminal_fixture()[1]["terminal_receipt"]))
+def test_terminal_public_receipt_revalidates_every_field(field):
+    approval, status = terminal_fixture()
+    receipt = copy.deepcopy(status["terminal_receipt"])
+    receipt[field] = None
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_receipt(
+            receipt, expected_status=status, expected_approval=approval
+        )
+
+
+def test_terminal_aggregate_size_is_checked_before_per_child_schema():
+    approval, status = terminal_fixture()
+    status["preconditions"]["padding"] = "p" * 9000
+    status["admission"]["padding"] = "q" * 9000
+    assert len(c.canonical_release_bytes(status["preconditions"])) < 16384
+    assert len(c.canonical_release_bytes(status["admission"])) < 16384
+    with pytest.raises(c.ReleaseContractError) as caught:
+        c.validate_release_terminal_status(status, expected_approval=approval)
+    assert caught.value.code == "SIZE"
+    with pytest.raises(c.ReleaseContractError) as caught:
+        c.validate_release_terminal_receipt(
+            status["terminal_receipt"],
+            expected_status=status,
+            expected_approval=approval,
+        )
+    assert caught.value.code == "SIZE"
+
+
+def test_terminal_aggregate_depth_is_checked_before_per_child_schema():
+    approval, status = terminal_fixture()
+    nested = []
+    for _ in range(9):
+        nested = [nested]
+    status["terminal_receipt"]["before"]["extra"] = nested
+    with pytest.raises(c.ReleaseContractError) as caught:
+        c.validate_release_terminal_status(status, expected_approval=approval)
+    assert caught.value.code == "DEPTH"
+
+
+@pytest.mark.parametrize("state", TERMINAL_TEST_OUTCOMES)
+def test_terminal_completion_cannot_precede_start(state):
+    approval, status = terminal_fixture(state)
+    status["terminal_receipt"]["completed_at_ms"] = status["started_at_ms"] - 1
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(status, expected_approval=approval)
+
+
+def test_terminal_legacy_p2_receipt_or_status_does_not_become_p4_history():
+    approval, status = terminal_fixture()
+    legacy = {"request_id": status["request_id"], "status": "SUCCEEDED", "exit_code": 0}
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(legacy, expected_approval=approval)
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_receipt(
+            legacy, expected_status=status, expected_approval=approval
+        )
+
+
+class TerminalSplitState(dict):
+    def __init__(self, value, reported):
+        super().__init__(value)
+        self.reported = reported
+
+    def get(self, key, default=None):
+        return self.reported if key == "state" else super().get(key, default)
+
+
+@pytest.mark.parametrize("reported", ["NOT_FOUND", "STARTED"])
+@pytest.mark.parametrize(
+    "actual", ["SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED", False, "UNRECOGNIZED"]
+)
+def test_terminal_discriminator_uses_the_validated_snapshot(reported, actual):
+    approval, status = terminal_fixture(reported)
+    status["state"] = actual
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_status(
+            TerminalSplitState(status, reported), expected_approval=approval
+        )
+
+
+@pytest.mark.parametrize("reported", ["NOT_FOUND", "STARTED"])
+@pytest.mark.parametrize("actual", ["SUCCEEDED", False, "UNRECOGNIZED"])
+def test_terminal_receipt_expected_status_rejects_split_mapping(reported, actual):
+    approval, status = terminal_fixture(reported)
+    status["state"] = actual
+    receipt = terminal_fixture()[1]["terminal_receipt"]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_terminal_receipt(
+            receipt, expected_status=TerminalSplitState(status, reported),
+            expected_approval=approval,
+        )
+
+
+@pytest.mark.parametrize("api", ["status", "receipt"])
+def test_terminal_caller_discriminator_get_cannot_mutate_snapshot(api):
+    class MutatingGet(dict):
+        calls = 0
+
+        def get(self, key, default=None):
+            self.calls += 1
+            self["state"] = "NOT_FOUND"
+            self.pop("terminal_receipt", None)
+            return super().get(key, default)
+
+    approval, status = terminal_fixture()
+    caller = MutatingGet(status)
+    if api == "status":
+        accepted = c.validate_release_terminal_status(caller, expected_approval=approval)
+        assert accepted == c.validate_release_terminal_status(
+            accepted, expected_approval=approval
+        )
+    else:
+        accepted = c.validate_release_terminal_receipt(
+            status["terminal_receipt"], expected_status=caller,
+            expected_approval=approval,
+        )
+        assert accepted.to_dict() == status["terminal_receipt"]
+    assert caller.calls == 0
+    assert caller["state"] == "SUCCEEDED"
+
+
+def test_terminal_source_mapping_items_is_read_once():
+    class Once(dict):
+        calls = 0
+
+        def items(self):
+            self.calls += 1
+            assert self.calls == 1, "caller mapping re-read after snapshot"
+            return super().items()
+
+    approval, status = terminal_fixture()
+    caller = Once(status)
+    record = c.validate_release_terminal_status(caller, expected_approval=approval)
+    assert caller.calls == 1
+    assert record == c.validate_release_terminal_status(record, expected_approval=approval)
+
+
+# PRESTART evidence vectors; all producer/registry authority is synthetic.
+PRESTART_TEST_COMMON = (
+    "request_id request_fingerprint operation_key approved_transition_ref approval_evidence_digest "
+    "authenticated_principal_digest effective_grant_digest normalized_requested_effect_digest action_family "
+    "action_target_digest owner_installation_id target_ref from_release_commit to_release_commit"
+).split()
+PRESTART_TEST_REASONS = (
+    "PREPARED_TOKEN_EXPIRED PRINCIPAL_EXPIRED GRANT_EXPIRED AUTHORITY_REVOKED PRECONDITIONS_CHANGED TARGET_OBSERVATION_CHANGED"
+).split()
+
+
+def prestart_fixture(reason="PREPARED_TOKEN_EXPIRED", rollback=False):
+    a, s = terminal_fixture("SUCCEEDED", rollback_action=rollback)
+    p = prepared_fixture()
+    for k in (
+        "request_fingerprint operation_key approved_transition_ref approval_evidence_digest authenticated_principal_digest effective_grant_digest normalized_requested_effect_digest action_family action_target_digest owner_installation_id target_ref"
+    ).split():
+        p[k] = s[k]
+    for k in (
+        "policy_id policy_generation authority_policy_hash confirmation_requirement"
+    ).split():
+        p[k] = a["grant"][k]
+    p.update(
+        normalized_requested_effect=copy.deepcopy(a["normalized_requested_effect"]),
+        expected_source_and_precondition_digest=digest(s["preconditions"]),
+        admission_contract_digest=s["preconditions"]["admission_contract_digest"],
+        boot_id=s["preconditions"]["boot_id"],
+    )
+    r = {k: copy.deepcopy(s[k]) for k in PRESTART_TEST_COMMON}
+    r.update(
+        schema="mastermind.executive_release_prestart_reservation/v1",
+        reservation_generation=1,
+        reserved_at_ms=2000,
+        reserved_monotonic_ns=2000000000,
+        preconditions=copy.deepcopy(s["preconditions"]),
+        expected_precondition_digest=digest(s["preconditions"]),
+        prepared_payload=p,
+        prepared_token_digest="c" * 64,
+        before=copy.deepcopy(s["terminal_receipt"]["before"]),
+        target_observation_digest=s["admission"]["target_observation_digest"],
+    )
+    t = {k: copy.deepcopy(r[k]) for k in PRESTART_TEST_COMMON}
+    t.update(
+        schema="mastermind.executive_release_prestart_cancellation/v1",
+        reservation_generation=1,
+        root_qualification_digest=digest(r),
+        admission_digest=digest(s["admission"]),
+        cancellation_generation=1,
+        cancelled_at_ms=302000,
+        cancelled_monotonic_ns=302000000000,
+        reason=reason,
+        before=copy.deepcopy(r["before"]),
+        current=copy.deepcopy(r["before"]),
+        original_target_observation_digest=r["target_observation_digest"],
+        current_target_observation_digest=(
+            "f" * 64
+            if reason == "TARGET_OBSERVATION_CHANGED"
+            else r["target_observation_digest"]
+        ),
+        current_precondition_digest=(
+            "e" * 64
+            if reason == "PRECONDITIONS_CHANGED"
+            else r["expected_precondition_digest"]
+        ),
+        authority_evidence_digest="d" * 64,
+    )
+    return a, r, s["admission"], t
+
+
+def validate_test_cancellation(a, r, ad, t):
+    return c.validate_release_prestart_cancellation(
+        t, expected_reservation=r, expected_admission=ad, expected_approval=a
+    )
+
+
+@pytest.mark.parametrize("reason", PRESTART_TEST_REASONS)
+@pytest.mark.parametrize("rollback", [False, True])
+def test_complete_synthetic_vectors_and_historical_expiry(reason, rollback):
+    a, r, ad, t = prestart_fixture(reason, rollback)
+    v = c.validate_release_prestart_reservation(r, expected_approval=a)
+    result = validate_test_cancellation(a, r, ad, t)
+    assert v.to_dict() == r and result.to_dict() == t
+    r["prepared_payload"]["normalized_requested_effect"]["to_release_commit"] = "9" * 40
+    t["current"]["service_generation_digests"]["broker"] = "9" * 64
+    assert (
+        v["prepared_payload"]["normalized_requested_effect"]["to_release_commit"]
+        != "9" * 40
+    )
+    assert result["current"]["service_generation_digests"]["broker"] != "9" * 64
+
+
+@pytest.mark.parametrize("reason", PRESTART_TEST_REASONS)
+@pytest.mark.parametrize("location", ["before", "current"])
+def test_no_reason_can_hide_a_physical_service_change(reason, location):
+    a, r, ad, t = prestart_fixture(reason)
+    t[location]["service_generation_digests"]["relay"] = "9" * 64
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "request_fingerprint",
+        "root_qualification_digest",
+        "admission_digest",
+        "original_target_observation_digest",
+    ],
+)
+def test_short_id_or_matching_operation_never_substitutes_for_exact_evidence(key):
+    a, r, ad, t = prestart_fixture()
+    t[key] = t[key][:-1] + ("0" if t[key][-1] != "0" else "1")
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "maintenance_sequence",
+        "target_observation_digest",
+        "admission_contract_digest",
+        "boot_id",
+    ],
+)
+def test_canonical_admission_changed_under_existing_cancellation(key):
+    a, r, ad, t = prestart_fixture()
+    ad[key] = (
+        2
+        if key == "maintenance_sequence"
+        else ("33333333-3333-4333-8333-333333333333" if key == "boot_id" else "9" * 64)
+    )
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+@pytest.mark.parametrize(
+    "wall,mono,accepted",
+    [
+        (300999, 300999999999, False),
+        (301000, 300999999999, True),
+        (300999, 301000000000, True),
+    ],
+)
+def test_prepared_expiry_uses_either_original_clock(wall, mono, accepted):
+    a, r, ad, t = prestart_fixture()
+    t.update(cancelled_at_ms=wall, cancelled_monotonic_ns=mono)
+    if accepted:
+        validate_test_cancellation(a, r, ad, t)
+    else:
+        with pytest.raises(c.ReleaseContractError):
+            validate_test_cancellation(a, r, ad, t)
+
+
+@pytest.mark.parametrize(
+    "key", ["reservation_generation", "reserved_at_ms", "reserved_monotonic_ns"]
+)
+def test_reservation_bool_is_not_an_integer(key):
+    a, r, ad, t = prestart_fixture()
+    r[key] = True
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_prestart_reservation(r, expected_approval=a)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "cancellation_generation",
+        "reservation_generation",
+        "cancelled_at_ms",
+        "cancelled_monotonic_ns",
+    ],
+)
+def test_cancellation_bool_is_not_an_integer(key):
+    a, r, ad, t = prestart_fixture()
+    t[key] = True
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("state", "FAILED_NOT_APPLIED"),
+        ("started_at_ms", 2000),
+        ("terminal_receipt", {}),
+        ("prepared_token", "bearer-never-persist"),
+    ],
+)
+def test_cancellation_cannot_be_terminal_or_bearer_carrier(key, value):
+    a, r, ad, t = prestart_fixture()
+    t[key] = value
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "trust_generation",
+        "policy_generation",
+        "expected_source_and_precondition_digest",
+        "action_target_digest",
+        "effective_grant_digest",
+        "confirmation_requirement",
+    ],
+)
+def test_prepared_payload_must_join_original_qualification(key):
+    a, r, ad, t = prestart_fixture()
+    p = r["prepared_payload"]
+    p[key] = (
+        2
+        if key.endswith("generation")
+        else ("required" if key == "confirmation_requirement" else "9" * 64)
+    )
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_prestart_reservation(r, expected_approval=a)
+
+
+def test_rehashed_foreign_preparation_cannot_escape_original_approval():
+    a, r, ad, t = prestart_fixture()
+    r["prepared_payload"]["normalized_requested_effect"]["to_release_tree"] = "9" * 40
+    r["prepared_payload"]["normalized_requested_effect_digest"] = digest(
+        r["prepared_payload"]["normalized_requested_effect"]
+    )
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_prestart_reservation(r, expected_approval=a)
+
+
+def test_pure_contract_does_not_manufacture_a_start_or_modify_terminal_enum():
+    a, r, ad, t = prestart_fixture()
+    for value in (r, t):
+        with pytest.raises(c.ReleaseContractError):
+            c.validate_release_terminal_status(value, expected_approval=a)
+    assert TERMINAL_TEST_STATES == (
+        "NOT_FOUND",
+        "STARTED",
+        "PUBLISHED",
+        "BROKER_RESTART_PENDING",
+        "RECOVERING",
+        "SUCCEEDED",
+        "ROLLED_BACK",
+        "FAILED_NOT_APPLIED",
+    )
+
+
+class PrestartOnce(dict):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.calls = 0
+
+    def items(self):
+        self.calls += 1
+        assert self.calls == 1, "Caller evidence re-read after snapshot"
+        return super().items()
+
+
+@pytest.mark.parametrize("which", ["value", "reservation", "admission", "approval"])
+def test_each_untrusted_mapping_is_detached_once(which):
+    a, r, ad, t = prestart_fixture()
+    values = {"value": t, "reservation": r, "admission": ad, "approval": a}
+    original = PrestartOnce(values[which])
+    values[which] = original
+    validate_test_cancellation(
+        values["approval"], values["reservation"], values["admission"], values["value"]
+    )
+    assert original.calls == 1
+
+
+@pytest.mark.parametrize("which", ["approval", "reservation", "admission"])
+def test_constructed_record_type_cannot_hide_invalid_expected_object(which):
+    a, r, ad, t = prestart_fixture()
+    values = {"approval": a, "reservation": r, "admission": ad}
+    corrupt = dict(values[which])
+    corrupt["schema"] = "forged-history/v1"
+    values[which] = c.ReleaseRecord(tuple(corrupt.items()))
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(
+            values["approval"], values["reservation"], values["admission"], t
+        )
+
+
+@pytest.mark.parametrize(
+    "reason,key",
+    [
+        "PRECONDITIONS_CHANGED current_precondition_digest".split(),
+        "TARGET_OBSERVATION_CHANGED current_target_observation_digest".split(),
+    ],
+)
+def test_changed_reason_requires_an_actual_changed_digest(reason, key):
+    a, r, ad, t = prestart_fixture(reason)
+    t[key] = (
+        r["expected_precondition_digest"]
+        if key == "current_precondition_digest"
+        else r["target_observation_digest"]
+    )
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+@pytest.mark.parametrize("kind", ["reservation", "cancellation"])
+@pytest.mark.parametrize("bad", [None, False, 0, "", "UPPERCASE" * 8])
+def test_prestart_external_digest_grammar_never_substitutes_authority(kind, bad):
+    a, r, ad, t = prestart_fixture()
+    keys = (
+        ["prepared_token_digest", "target_observation_digest"]
+        if kind == "reservation"
+        else [
+            "root_qualification_digest",
+            "admission_digest",
+            "current_target_observation_digest",
+            "current_precondition_digest",
+            "authority_evidence_digest",
+        ]
+    )
+    for key in keys:
+        value = copy.deepcopy(r if kind == "reservation" else t)
+        value[key] = bad
+        with pytest.raises(c.ReleaseContractError):
+            if kind == "reservation":
+                c.validate_release_prestart_reservation(value, expected_approval=a)
+            else:
+                validate_test_cancellation(a, r, ad, value)
+
+
+@pytest.mark.parametrize("kind", ["reservation", "cancellation"])
+def test_prestart_every_field_is_required_and_no_extra_field_is_admitted(kind):
+    a, r, ad, t = prestart_fixture()
+    original = r if kind == "reservation" else t
+    for field in list(original) + ["untrusted_secret_extra"]:
+        value = copy.deepcopy(original)
+        if field in value:
+            del value[field]
+        else:
+            value[field] = "untrusted_secret_value"
+        with pytest.raises(c.ReleaseContractError) as caught:
+            if kind == "reservation":
+                c.validate_release_prestart_reservation(value, expected_approval=a)
+            else:
+                validate_test_cancellation(a, r, ad, value)
+        assert "untrusted_secret" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "field,endpoint",
+    [
+        ("reserved_at_ms", "issued_at_ms"),
+        ("reserved_monotonic_ns", "issued_monotonic_ns"),
+    ],
+)
+def test_prestart_reservation_half_open_original_deadline(field, endpoint):
+    a, r, ad, t = prestart_fixture()
+    r[field] = r["prepared_payload"][endpoint]
+    c.validate_release_prestart_reservation(r, expected_approval=a)
+    r[field] -= 1
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_prestart_reservation(r, expected_approval=a)
+    r[field] = r["prepared_payload"][endpoint.replace("issued", "expires")]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_prestart_reservation(r, expected_approval=a)
+
+
+def test_prestart_reservation_rejects_different_declared_clock_durations():
+    a, r, ad, t = prestart_fixture()
+    r["prepared_payload"]["expires_monotonic_ns"] -= 1
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_prestart_reservation(r, expected_approval=a)
+
+
+@pytest.mark.parametrize("field", ["cancelled_at_ms", "cancelled_monotonic_ns"])
+def test_prestart_cancellation_cannot_invent_before_reservation_time(field):
+    a, r, ad, t = prestart_fixture("AUTHORITY_REVOKED")
+    t[field] = r[field.replace("cancelled", "reserved")] - 1
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+def test_prestart_equal_fake_before_and_current_cannot_replace_original_identity():
+    a, r, ad, t = prestart_fixture()
+    t["before"]["broker_binary_digest"] = "9" * 64
+    t["current"] = copy.deepcopy(t["before"])
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+
+
+def test_prestart_original_grant_expiry_is_not_the_shorter_prepared_expiry():
+    a, r, ad, t = prestart_fixture("GRANT_EXPIRED")
+    r["prepared_payload"]["expires_at_ms"] = 201000
+    r["prepared_payload"]["expires_monotonic_ns"] = 201000000000
+    t.update(
+        root_qualification_digest=digest(r),
+        cancelled_at_ms=202000,
+        cancelled_monotonic_ns=202000000000,
+    )
+    with pytest.raises(c.ReleaseContractError):
+        validate_test_cancellation(a, r, ad, t)
+    t["reason"] = "PREPARED_TOKEN_EXPIRED"
+    validate_test_cancellation(a, r, ad, t)
