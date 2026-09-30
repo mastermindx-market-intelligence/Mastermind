@@ -412,8 +412,14 @@ def test_alias_cannot_disagree_with_provider_descriptor(offline_mechanics):
 def test_disabled_profile_refuses(offline_mechanics):
     owner, router, adapter = offline_mechanics()
     registry = router.capability_registry
-    registry.profiles[owner.execution_profile_id] = dataclasses.replace(
-        registry.profiles[owner.execution_profile_id], enabled=False)
+    router.capability_registry = dataclasses.replace(
+        registry,
+        profiles={
+            **registry.profiles,
+            owner.execution_profile_id: dataclasses.replace(
+                registry.profiles[owner.execution_profile_id], enabled=False),
+        },
+    )
     with pytest.raises(binding.PoolBindingRefusal, match="EXECUTION_PROFILE_UNRESOLVED"):
         prepare("oc-free", (owner, router, adapter))
 
