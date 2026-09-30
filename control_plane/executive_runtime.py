@@ -990,6 +990,10 @@ def _project_work_placement(
     projected = dict(constraints)
     projected["provider"] = provider_realm
     projected["eligible_quota_classes"] = [quota_class]
+    reasons = list(projected.get("routing_reason_codes") or [])
+    if "manual_pool_override" not in reasons:
+        reasons.append("manual_pool_override")
+    projected["routing_reason_codes"] = reasons
 
     # V4 may add an exact model inside the already-admitted pool. This is a
     # hard narrowing constraint, not provider/account/host selection. Runtime
@@ -12387,11 +12391,19 @@ class JobRegistry:
                 "mastermind.execution_plan/v3",
                 "mastermind.execution_plan/v4",
             }:
-                if any("placement" not in step for step in plan_body["steps"]):
+                requires_placement = plan_body["schema_version"] in {
+                    "mastermind.execution_plan/v2",
+                    "mastermind.execution_plan/v3",
+                }
+                if requires_placement and any(
+                    "placement" not in step for step in plan_body["steps"]
+                ):
                     raise StateConflict(
-                        "v2/v3/v4 plan work steps require an exact placement"
+                        "v2/v3 plan work steps require an exact placement"
                     )
                 for step in plan_body["steps"]:
+                    if "placement" not in step:
+                        continue
                     placement = step.get("placement")
                     expected_placement_keys = {"provider_realm", "quota_class"}
                     actual_placement_keys = (

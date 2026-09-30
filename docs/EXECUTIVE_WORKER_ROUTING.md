@@ -503,14 +503,23 @@ than they save, or any need for a second lifecycle authority.
 
 ## Manual pool/model override — execution plan v4
 
-Automatic Fabric routing remains the default. Existing execution-plan v2/v3
-behavior is unchanged: an admitted work step names an exact reviewed
-`provider_realm + quota_class` placement and Capacity selects the concrete
-eligible Worker under the existing claim/lease/fence rules.
+Automatic Fabric routing remains the default. V4 exposes exactly three
+per-step modes while preserving the existing Capacity/claim owners:
 
-When an orchestrator deliberately needs one exact model inside an already
-admitted pool, it may emit `mastermind.execution_plan/v4`. V4 retains the V3
-dependency contract and permits one additional per-step field on the work placement:
+1. **No `placement`** — automatic route. The child inherits the root's
+   already-reviewed automatic routing constraints; no manual-routing reason is
+   recorded.
+2. **`placement = {provider_realm, quota_class}`** — manual pool override.
+   The exact pair must already be inside the root's reviewed
+   `work_placement_union`.
+3. **`placement = {provider_realm, quota_class, model}`** — manual pool +
+   exact-model override. The model is an additional hard narrowing constraint
+   inside that admitted pool.
+
+One V4 plan may mix all three modes across different work steps. Existing
+execution-plan V2/V3 behavior is unchanged.
+
+Illustrative pinned-model step:
 
 ```json
 {
@@ -524,19 +533,13 @@ The provider/quota names above are illustrative. A real plan must use an exact
 pair already present in that root's current reviewed `work_placement_union`;
 the model value must likewise name a model actually served by eligible capacity.
 
-Steps that do not include `model` retain the normal automatic model choice inside
-their admitted pool, so one V4 plan may mix auto-routed and model-pinned work.
-
-The model value is a **hard narrowing constraint**, not a fallback preference.
-Runtime first verifies that the provider/quota pool is already present in the
-root's reviewed `work_placement_union`, persists the exact model on the child
-Job, and Capacity then matches only currently available quota rows serving that
-model. If none are eligible, no Attempt is created. The system must not silently
-drop the override, substitute another model, hop accounts, or retry through a
-different carrier.
+A manual override is a **hard narrowing constraint**, not a fallback
+preference. If the selected pool or model has no currently eligible capacity,
+no Attempt is created. The system must not silently drop the override,
+substitute another pool/model, hop accounts, or retry through a different
+carrier.
 
 This interface never accepts a Worker id, numbered account, credential, host,
 native session, executable or provider endpoint. Capacity still chooses the
 concrete receiver, and all existing capability, authority, lease, source,
-readiness, quota and effect-reconciliation gates remain binding. V3 remains the
-normal auto-model path; V4 is the explicit model-override path.
+readiness, quota and effect-reconciliation gates remain binding.

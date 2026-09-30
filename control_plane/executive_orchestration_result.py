@@ -156,6 +156,10 @@ def _role_body_schema(role: str) -> dict[str, Any]:
         # inside the already-admitted provider/quota pool; it never selects an account,
         # host, credential, Worker or native session.
         v4_step = json.loads(json.dumps(v3_step))
+        # V4 restores automatic routing as the default per step.  Omitting
+        # placement inherits the root's already-reviewed automatic route.
+        # Supplying placement pins one admitted pool; model remains optional.
+        v4_step["required"].remove("placement")
         v4_step["properties"]["placement"]["properties"]["model"] = _schema_string(
             minimum=1, maximum=128
         )

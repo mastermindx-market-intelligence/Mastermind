@@ -972,7 +972,7 @@ def test_v4_mixes_auto_model_and_exact_model_inside_admitted_pool(tmp_path):
     _register_codex_peer(runtime, "worker-terra", model="gpt-5.6-terra")
 
     placements = [
-        _CODEX,
+        None,
         {**_CODEX, "model": "gpt-5.6-terra"},
     ]
     runtime, root, plan, admitted = _admit_v2_plan(
@@ -986,9 +986,13 @@ def test_v4_mixes_auto_model_and_exact_model_inside_admitted_pool(tmp_path):
 
     assert plan["schema_version"] == "mastermind.execution_plan/v4"
     assert "model" not in first.constraints
+    assert first.constraints["provider"] == "codex"
+    assert first.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+    assert "manual_pool_override" not in first.constraints.get("routing_reason_codes", [])
     assert second.constraints["model"] == "gpt-5.6-terra"
     assert second.constraints["provider"] == "codex"
     assert second.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+    assert "manual_pool_override" in second.constraints["routing_reason_codes"]
     assert "manual_model_override" in second.constraints["routing_reason_codes"]
 
     _start_first(runtime, root.job_id, first.job_id)
@@ -1035,3 +1039,22 @@ def test_v3_placement_stays_closed_and_cannot_smuggle_model_override(tmp_path):
             plan_schema_version="mastermind.execution_plan/v3",
             placements=[{**_CODEX, "model": "gpt-5.6-terra"}],
         )
+
+
+
+def test_v4_manual_pool_override_does_not_pin_model(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+
+    runtime, _root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=[_CODEX],
+    )
+    work = admitted[0]
+
+    assert work.constraints["provider"] == "codex"
+    assert work.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+    assert "model" not in work.constraints
+    assert "manual_pool_override" in work.constraints["routing_reason_codes"]
+    assert "manual_model_override" not in work.constraints["routing_reason_codes"]
