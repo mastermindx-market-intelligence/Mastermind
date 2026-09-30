@@ -13,6 +13,222 @@ type that password locally. The device-login step likewise requires the
 operator to approve OpenAI's one-time code in a browser. Neither secret should
 be pasted into a terminal transcript, issue, PR, or chat.
 
+## Unattended recovery readiness (read-only departure gate)
+
+Before a period without a human at the keyboard, prove each home Mac recovers
+on its own instead of remembering that it was set up. This is a read-only
+observation, so it needs no install stage, no administrator password, and no
+service state change. Run it as the ordinary operator on Studio, M1, and any
+future host being enrolled — but you must say which **role** you are proving,
+because the three profiles have different requirements.
+
+`--profile` is mandatory and has exactly three accepted values. There is no
+default, and the checker never infers the role from which services happen to
+be installed: a Studio whose Executive control plane has stopped looks exactly
+like a worker host that never had one, and guessing the weaker profile there
+would turn a real outage into a pass.
+
+| Host | Command profile | What a `READY` proves |
+|---|---|---|
+| Studio (canonical Executive control host) | `executive-control-host/v1` | physical recovery **and** the installed Executive control, MCP, and sol-state-relay daemons running |
+| Any home Mac, observation only | `home-mac-recovery-base/v1` | physical/local recovery of that Mac only |
+| Mac being admitted as a secondary fleet host | `fleet-secondary-host-preflight/v1` | physical/local recovery **and** proof that the central Executive control, MCP, and sol-state-relay daemons are not installed |
+
+On Studio:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile executive-control-host/v1
+```
+
+For physical recovery observation only:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile home-mac-recovery-base/v1
+```
+
+Before admitting a Mac into the secondary fleet-host enrollment lane:
+
+```bash
+/usr/bin/python3 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/host_recovery_readiness.py" \
+  --profile fleet-secondary-host-preflight/v1
+```
+
+A `READY` secondary-host preflight is intentionally only permission to continue
+to the existing enrollment/qualification owners. It does **not** prove a Worker,
+provider realm, MH1 gateway, Studio Direct seat, credential, or Fabric route.
+
+It emits one canonical `mastermind.host_recovery_readiness/v1` JSON report on
+stdout and exits `0`. The report stamps the exact `profile` you named, and a
+report produced under one profile is refused if it is later validated as the
+other. `--host-ref host-<64-lower-hex>` optionally stamps an opaque host
+reference; any other value is refused without echoing it. A typed refusal exits
+`65` and writes only a closed code to stderr — an omitted profile is
+`ARGUMENTS_INVALID` and an unrecognized one is `PROFILE_INVALID`, both refused
+before the host is observed at all. Reruns are free and create no effect.
+
+All profiles collect the same fixed superset of observations with the same
+fixed argv. The profile changes classification requirements only; it is never
+command authority and never widens what the checker reads.
+
+
+### `fleet-secondary-host-preflight/v1` is an anti-duplication gate, not enrollment acceptance
+
+Use this profile immediately before handing a physical Mac to the existing
+fleet/worker enrollment owners. It adds exactly one rule to the physical base:
+the three canonical central Executive services must be `NOT_INSTALLED`. A
+running, stopped, or disabled copy is `NOT_READY`, and unknown service state
+fails closed to `UNKNOWN`. Worker/provider services remain advisory because
+this profile neither installs nor qualifies them.
+
+This prevents a secondary Mac from becoming an accidental second Executive
+control plane while keeping host placement, Worker identity, provider capacity,
+MH1 transport, Studio Direct, credentials, and execution acceptance with their
+existing owners. Once enrollment starts, use the owning subsystem's acceptance
+proofs rather than treating this preflight as a permanent worker-health gate.
+
+### `home-mac-recovery-base/v1` is not worker or fabric acceptance
+
+The base profile proves exactly one thing: that this physical Mac comes back on
+its own after a power loss or reboot, and can be reached over Remote Login
+without a human at the keyboard. It is **not** evidence that the host can
+execute Agent Fabric / worker work. Worker-runtime and fabric acceptance are
+defined and gated by their current owners (Fable/Codex autonomy and Agent
+Fabric), and that gate is a separate journey with its own evidence; this
+checker neither performs it nor substitutes for it.
+
+Studio remains the canonical Executive control host. Do **not** install the
+Executive control, MCP, or sol-state-relay daemons on a worker or capacity host
+in order to turn this checker green — that would stand up a duplicate Executive
+control plane, which the strategic state prohibits. On those hosts, the absent
+control daemons are reported as `ADVISORY` visibility only and cannot make the
+base profile `NOT_READY` or `UNKNOWN`. Equally, a green base-profile report on
+Studio is not control-host acceptance: use `executive-control-host/v1` there.
+
+Read `recovery_state` first: `READY`, `NOT_READY`, or `UNKNOWN`. Unknown
+load-bearing evidence — a missing command, a permission refusal, or malformed
+output — fails closed to `UNKNOWN` and is never inferred as a pass. A definite
+defect outranks unknown evidence, so `NOT_READY` wins when both are present.
+`blocking_predicates` and `unknown_predicates` name exactly which predicates
+produced that state, which is the whole point before departure: an operator sees
+that (for example) `auto_restart_after_power_loss` is the single reason a host
+is unsafe.
+
+Each predicate carries a reviewed `requirement` that decides whether it can move
+the overall state:
+
+| Requirement | Load-bearing | Meaning |
+|---|---|---|
+| `REQUIRED` | yes | Unattended recovery depends on it. |
+| `REQUIRED_RUNNING` | yes | An already-installed critical system LaunchDaemon must be running. Control profile only. |
+| `REQUIRED_ABSENT` | yes | A central Executive LaunchDaemon must not be installed on a secondary pre-enrollment host. |
+| `OPTIONAL` | no | Reviewed as preferable, but it does not decide readiness. |
+| `DISARMED_EXPECTED` | no | The current gates intend this service to be absent or disabled. Control profile only. |
+| `ADVISORY` | no | Reported because the operator must know it. |
+
+Every physical predicate — platform, power policy, Remote Login, preboot
+unlock, disk headroom — carries the same requirement in all profiles. The only
+difference is the Executive system LaunchDaemons:
+
+| Label group | `executive-control-host/v1` | `fleet-secondary-host-preflight/v1` | `home-mac-recovery-base/v1` |
+|---|---|---|---|
+| control, MCP, sol-state-relay | `REQUIRED_RUNNING` | `REQUIRED_ABSENT` | `ADVISORY` |
+| worker, backup, privileged broker | `DISARMED_EXPECTED` | `ADVISORY` | `ADVISORY` |
+
+Under the base profile those labels are reported with their truthful observed
+state (`DAEMON_NOT_INSTALLED`, `DAEMON_DISABLED`, `DAEMON_LOADED_NOT_RUNNING`,
+`DAEMON_RUNNING`) and no load-bearing requirement. They are deliberately not
+called `DAEMON_INTENTIONALLY_DISARMED` there, because a worker host is not a
+host where the Executive control plane was gated off — it is a host the control
+plane does not belong to.
+
+These semantics are deliberate and should not be "fixed" later without a
+decision:
+
+- **`autorestart` is required; `autorestartatconnect` is optional.** Recovery
+  after a power cut on a continuously-powered desktop comes from `autorestart`.
+  `autorestartatconnect` only governs restarting when AC is reconnected, and
+  macOS exposes the key only on models that support that behavior — so a `0`
+  there is `ADVISORY` and a missing key is `NOT_APPLICABLE`, never a defect.
+- **Installation is proven by the job definition, never by `print-disabled`.**
+  `launchctl print-disabled system` is an override table, so a normally enabled
+  installed service usually has no row in it at all. Each fixed Executive label
+  is therefore classified from `/Library/LaunchDaemons/<label>.plist` first, then
+  an explicit disable override, then `launchctl print`; Remote Login uses
+  `/System/Library/LaunchDaemons/ssh.plist` plus launchd registration, because
+  that plist ships with macOS whether or not the listener is on. An installed
+  label launchd will not describe is `UNKNOWN`, never `NOT_INSTALLED`.
+- **Unloaded worker, backup, and privileged-broker daemons are not defects.**
+  Under the control profile they are `DISARMED_EXPECTED`, and the report
+  distinguishes
+  `DAEMON_NOT_INSTALLED` from `DAEMON_INTENTIONALLY_DISARMED` so the current
+  gates do not read as failures. A disarmed service found running is `ADVISORY`
+  (`DAEMON_UNEXPECTEDLY_RUNNING`), not a readiness failure.
+- **User-session surfaces are reported separately.** The Executive tunnel,
+  Chairman Control Room, Desktop Commander, and studio-direct MCP are
+  LaunchAgents. They cannot exist before a console login, so
+  `user_session_surfaces` is `ADVISORY` with
+  `USER_SESSION_LOGIN_REQUIRED` rather than pretending system-boot
+  availability.
+- **FileVault-on recovery is conditional, not generic.** A host with FileVault
+  on stops at the preboot unlock screen after a restart, and only one platform
+  generation can be unlocked from there without a human at the keyboard. The
+  local prerequisite is exact: Apple silicon, **macOS 26 or later**, and Remote
+  Login enabled. `disk_encryption_state` therefore stays `ADVISORY` — it only
+  reports the encryption state and never carries encryption or recovery
+  material — while the `REQUIRED` `preboot_remote_unlock` predicate is the
+  load-bearing law:
+
+  | Observed host | `preboot_remote_unlock` |
+  |---|---|
+  | FileVault off | `OK` / `PREBOOT_UNLOCK_NOT_REQUIRED` — no unlock is needed, so macOS 14/15 is fine |
+  | FileVault on, Apple silicon, macOS 26+, Remote Login enabled | `OK` / `PREBOOT_UNLOCK_SUPPORTED` |
+  | FileVault on, macOS below 26 | `NOT_READY` / `PREBOOT_UNLOCK_OS_GENERATION_UNSUPPORTED` |
+  | FileVault on, not Apple silicon | `NOT_READY` / `PREBOOT_UNLOCK_ARCHITECTURE_UNSUPPORTED` |
+  | FileVault on, Remote Login disabled or not installed | `NOT_READY` / `PREBOOT_UNLOCK_REMOTE_LOGIN_UNAVAILABLE` |
+  | FileVault encrypting/decrypting/unreadable, or unknown architecture or version | `UNKNOWN` / `PREBOOT_UNLOCK_STATE_UNKNOWN` |
+
+  So an encrypted M1 on macOS 15 is honestly `NOT_READY` for the unattended
+  cruise journey even though every power and service predicate is green, and
+  the same M1 with FileVault off passes. The two remedies are a Chairman-owned
+  decision, not something this observer chooses: upgrade that host to macOS 26+,
+  or leave FileVault off on a physically controlled always-on host.
+- **This predicate is local eligibility only.** It proves the host *can* be
+  unlocked at preboot over Remote Login, never that anything can reach it. The
+  checker opens no socket and performs no reachability probe, so external
+  network path, bastion, and tunnel reachability remain a separate acceptance
+  journey with its own evidence. A green `preboot_remote_unlock` plus an
+  unreachable network is still an unrecoverable host.
+- **`auto_restart_after_power_loss` stays independent.** Preboot unlock decides
+  whether a returning host can be opened; `autorestart` decides whether it
+  returns at all. Neither substitutes for the other, and a host missing both
+  reports both.
+
+`disk_free_floor` uses the reviewed 25 GiB floor in
+`control_plane/executive_recovery_readiness.py`; it reports
+`DISK_FREE_BELOW_FLOOR` and never deletes anything. The observer's only
+external calls are fixed, absolute, read-only macOS tools (`pmset -g custom`,
+`sw_vers`, `sysctl -n hw.optional.arm64`, `fdesetup status`, and
+`launchctl print` / `print-disabled`). It opens no socket, so it observes the
+Remote Login listener's enablement without touching sshd.
+
+### Remediation boundary
+
+This observer never remediates. Turning a red predicate green is a one-time
+local administrator ceremony, and the privileged root actions belong to the
+existing reviewed broker path described in this runbook — do not add a second
+broker, helper, or mutation script beside the checker, and do not widen the
+checker's authority. In particular, power-policy, FileVault, Remote Login, and
+launchd enablement changes remain administrator/broker-owned actions performed
+once at the host, after which the exact same read-only command must turn green
+with no source change. If a host needs authority the current broker does not
+already hold, stop and return the gap for a Chairman/CEO decision instead of
+extending this path.
+
 ## Stage 1 — review and merge (no administrator actions)
 
 The delivery pull request must have a clean pushed head, passing deterministic CI and CodeQL, and
@@ -559,8 +775,17 @@ CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
 ```
 
 A repeated request with the same id and identical content returns the stored
-receipt without re-executing. The same id with changed content refuses, and a
-stale in-flight marker returns `EFFECT_UNKNOWN` rather than retrying blindly.
+terminal receipt only when that original effect actually reached a terminal
+child result. The same id with changed content refuses. A stale in-flight marker
+returns `EFFECT_UNKNOWN` and is never retried blindly.
+
+For the separately reviewed marker-preserving reconciliation path, the broker may
+record `RECONCILED_NOT_APPLIED` only after it proves the exact original
+`verify_ready` request/marker identity and pre-effect readiness state while
+preserving the marker byte-for-byte. That classification is **not** a synthetic
+FAILED/SUCCEEDED child result. It means the requested business effect was proven
+not applied, and the original request id remains non-replayable. Any later
+readiness attempt requires a separately authorized new request id.
 
 To inspect an earlier request's outcome without resubmitting it, query its id
 over the same socket:
@@ -569,11 +794,15 @@ over the same socket:
 "$MMX_ADMIN" status --request-id "company-ready-$MERGE_SHA"
 ```
 
-This is observation only: it never re-executes the action, never creates or
-repairs a receipt/marker, and never retries. Exit `0` means the terminal
-receipt was retrieved (regardless of that receipt's own recorded outcome),
-`75` means only a stale in-flight marker exists (`EFFECT_UNKNOWN`), and `4`
-means neither exists yet (`NOT_FOUND`, which is not license to resubmit).
+This is a status-query only: it never re-executes the action, creates or repairs
+evidence, removes a marker, or retries. Exit `0` means a valid `TERMINAL`
+projection **or** a valid `RECONCILED_NOT_APPLIED` projection was retrieved;
+for the latter, exit `0` confirms successful status retrieval only and does not
+reinterpret the original privileged effect as success. Exit `75` means
+unresolved marker evidence remains (`EFFECT_UNKNOWN`), and `4` means neither
+terminal nor in-flight/reconciled evidence exists (`NOT_FOUND`, which is not
+license to resubmit). Malformed or mismatched reconciliation evidence is
+refused rather than downgraded to a clean state.
 
 ### Three isolated Personal Pro readiness slots
 
@@ -1063,3 +1292,107 @@ census—not this preparer—emits `GROUNDED_CF1_GIT_RELEASE_PATH_ACCEPTED`. Eve
 then, CF2-I-A is the next separate carrier. OAuth/device ceremonies,
 credentials, provider calls, service start, runtime composition, routing,
 fan-out and failover remain held.
+
+
+## Job-bound worker login check (P2-1)
+
+The current-attempt controller adds the `REQUEST_WORKER_LOGIN_CHECK` policy
+capability with scope `current_attempt_assigned_worker_slot`. It can perform only
+`executive.worker_auth.verify_only` for the real Attempt's assigned reviewed
+worker slot. A successful terminal observation is login-status evidence; it is
+never a READY claim or permission to dispatch another Job.
+
+Source acceptance and installed acceptance are separate. Before this policy
+transition, reconcile the installed Runtime and prove **zero living Attempts**,
+or settle them explicitly using the existing lifecycle. Do not replace the
+policy under living Attempts that carry the previous policy digest. Preserve the
+single installed Control/Runtime owner and its existing receipt/custody protocol.
+
+After independent exact-head review and required CI, merge through protected
+master and prepare that exact immutable release for the existing administrator
+bootstrap. The existing `install.sh --arm-privileged-broker` ceremony is the sole
+arm: it derives `privileged_readiness_armed=true` and the canonical privileged
+socket in root-owned Control configuration. A caller-supplied configuration that
+conflicts with the ceremony refuses. Without that flag the arm is false and the
+socket field is null; a retained older wrapper grants no command authority.
+
+Only after the broker's registration, socket ownership and mode are verified does
+the installer publish root-owned mode0555 `mmx-control`. The wrapper fixes the
+release, canonical Control socket, and `check-current-worker-login` subcommand.
+It accepts exactly three positional arguments and rejects option-prefixed values:
+
+```bash
+"/Library/Application Support/MastermindExecutive/bin/mmx-control" \
+  JOB_ID ATTEMPT_ID FENCE_GENERATION
+```
+
+Use the installed Control's existing `register-worker`, `create-proof-job`, and
+`dispatch` commands as the non-root approved operator. When the installer-derived
+readiness arm is true, the fixed proof contract adds `REQUEST_WORKER_LOGIN_CHECK`
+to its existing four authorities; the existing Supervisor/Runtime claims that
+real Job for `codex-01`. No caller supplies authorities and no direct Runtime or
+database write substitutes for admission. Creation and dispatch alone perform no
+privileged broker action. Prove the returned current Job/Attempt/fence, policy
+digest and installed release, then explicitly invoke `mmx-control`. It requires
+the existing Control service to be READY. If the worker already finished, first
+admission refuses with zero effect: record that result, never hold the worker or
+automatically redispatch just to obtain a proof window.
+Verify the observed login status independently of the broker child's exit code,
+and retain the exact Runtime Event family plus broker request/receipt IDs,
+installed release, host boot identity and no-password-prompt evidence.
+
+Interrupt only the client and read the same logical family again. A terminal
+receipt replays without an effect; an uncertain effect performs at most one
+status read. `NOT_FOUND`, a broker marker, timeout, and malformed evidence remain
+`EFFECT_UNKNOWN`. None authorizes a resend. Prove exactly one effect, wrong Job
+and stale-fence refusals, and denial of a dedicated worker's direct broker
+socket access. Read back the existing broker peer policy: the operator UID
+retains its inherited direct `mmx-admin` grant; this wrapper does not contain that
+principal. No credentials, lease tokens or arbitrary child output belong in the
+acceptance record.
+
+P2-1 remains `BUILT_NOT_PROVEN` until that real installed path and fresh native
+orchestrator consumption are observed. Provider renewal, readiness canaries,
+service-control request authority and multi-host admission remain separately
+owned later slices; do not infer full autonomy from this login-check capability.
+# Optional private account-email comparison
+
+The existing `provider_identity_probe.py` has an opt-in `--compare-seat-stdin`
+diagnostic. Its entire output is one line: `MATCH`, `MISMATCH`, or `UNKNOWN`.
+Exit status is zero only for `MATCH`, and two otherwise. In this mode argument,
+input, policy, observation, and cleanup failures produce `UNKNOWN` without
+printing usage, identifiers, or raw error details. The default v1 identity JSON
+and the readiness receipt schema are unchanged.
+
+Supply the expected **account email** from an approved in-memory producer through
+private pipe stdin. The producer must close the pipe after the value; EOF is
+required, including when the value ends with a newline. The diagnostic reads at
+most 256 bytes and waits at most five seconds for this input. It rejects terminals,
+regular files, socket descriptors, extra lines, and oversized input. Never put a
+real expected identifier in command arguments, environment variables, shell
+history, temporary files, logs, receipts, or a persisted hash. Do not derive an
+email from a slot label or create a seat-to-account registry for this diagnostic.
+
+Comparison is exact and case-sensitive, with no alias stripping or normalization.
+Both values must be ASCII dot-atom emails: at most 254 bytes total, a local part
+of at most 64 bytes, and at least two nonempty domain labels of at most 63 bytes
+each. Display names, quoted local parts, Unicode, whitespace, controls, and other
+unsupported forms yield `UNKNOWN`. `MISMATCH` means two supported values differ;
+`UNKNOWN` includes absent email, an unmapped seat label, and any failed guard.
+
+The existing Darwin/root, approved worker principal and provider-home, credential
+kind, plan, workspace-binding-class, and host/auth-transaction requirements still
+apply. This mode uses the same pinned binary and existing
+`account/read(refreshToken:false)` observation. The existing forced-auth absence,
+login status, binary, and credential-metadata checks must all succeed, and the
+app-server must be closed, before `MATCH` or `MISMATCH` can leave the probe. The
+expected value is not sent to the app-server. Credential contents remain opaque.
+
+A match establishes only in-memory account-email equality under those checks.
+It establishes no workspace ID, independent quota domain, spend entitlement,
+readiness, routing eligibility, installation, or production acceptance. Source
+review, installation, and a later authorized diagnostic invocation are separate
+steps; this documentation authorizes none of those host effects. Do not use
+`provision-worker-auth.sh --verify-ready` as a comparison shortcut: that path may
+reserve and run inference. Existing canary reservations and adverse receipts
+remain unchanged and grant no retry.

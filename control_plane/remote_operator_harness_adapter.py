@@ -91,15 +91,17 @@ def _validate_remote_capabilities(capabilities: HarnessAdapterCapabilities) -> N
         raise TypeError("capabilities must be HarnessAdapterCapabilities")
     if capabilities.interface_version != OPERATOR_HARNESS_INTERFACE_VERSION:
         raise BrokerProtocolError("remote operator interface version is unsupported")
-    if (
-        tuple(capabilities.supported_required_operations)
-        != _REQUIRED_REMOTE_OPERATIONS
-    ):
+    required = tuple(capabilities.supported_required_operations)
+    # Some harnesses explicitly list the two local introspection operations.
+    # Both accepted shapes describe the same implemented remote operations.
+    introspected = ("describe_capabilities", "validate_requested_profile") + _REQUIRED_REMOTE_OPERATIONS
+    if required not in (_REQUIRED_REMOTE_OPERATIONS, introspected):
         raise BrokerProtocolError("remote operator required-operation profile is unsupported")
     optional = tuple(capabilities.supported_optional_operations)
-    if optional != ("resume_session",):
+    if optional not in ((), ("resume_session",)):
         raise BrokerProtocolError("remote operator optional-operation profile is unsupported")
-    if capabilities.supports_native_resume is not True:
+    if (type(capabilities.supports_native_resume) is not bool
+            or capabilities.supports_native_resume != bool(optional)):
         raise BrokerProtocolError("remote operator resume capability disagrees with operation profile")
     if any((
         capabilities.supports_native_fork,
@@ -218,6 +220,8 @@ class RemoteOperatorHarnessAdapter:
         provider_session: ProviderSessionHandoff,
         requested: RequestedExecutionProfile,
     ) -> SessionStartObservation:
+        if self._capabilities.supports_native_resume is not True:
+            raise BrokerProtocolError("remote operator does not support native resume")
         return self._start(
             operation_name="ohf-resume",
             operation_id=operation_id,

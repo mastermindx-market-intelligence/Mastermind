@@ -16,6 +16,7 @@ Coverage:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -250,6 +251,80 @@ def simple_regime():
 # ---------------------------------------------------------------------------
 # compose() smoke test
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("injected_loader", [False, True])
+@pytest.mark.parametrize("regime_available", [False, True])
+def test_empty_positions_never_request_price_history(
+    tmp_path, run_date, monkeypatch, injected_loader, regime_available,
+):
+    """An empty result needs market context, but has no consumer for SPY prices."""
+    from portfolio import held_risk as hr
+
+    vendor = tmp_path / "vendor"
+    regime_path = vendor / "data" / "regime" / "latest.json"
+    if regime_available:
+        regime_path.parent.mkdir(parents=True)
+        regime_path.write_text(json.dumps(_make_regime()))
+    price_requests = []
+
+    def record_price_request(ticker, *args, **kwargs):
+        price_requests.append(ticker)
+        return None
+
+    # Observe the dependency seam without ever invoking a live data loader.
+    monkeypatch.setattr(hr, "_load_ohlcv", record_price_request)
+    state = hr.compose(
+        [], vendor_root=vendor, data_root=tmp_path / "data", now=run_date,
+        price_loader=record_price_request if injected_loader else None,
+    )
+
+    assert price_requests == []
+    assert set(state) == {"schema", "asof", "generated_at", "market", "positions"}
+    assert state["schema"] == "portfolio_risk_state.v1"
+    assert state["positions"] == []
+    assert state["asof"] == ("2026-07-02" if regime_available else str(run_date))
+    assert state["generated_at"]
+    assert state["market"] == {
+        "risk_radar": {
+            "verdict": "calm" if regime_available else None,
+            "score": 20.0 if regime_available else None,
+            "dominant_scare": None,
+        },
+        "market_state": {
+            "verdict": "risk-on" if regime_available else None,
+            "score": 12.0 if regime_available else None,
+        },
+        "vol_regime": "normalizing" if regime_available else None,
+        "quad": "Q1" if regime_available else None,
+        "quad_name": "Goldilocks" if regime_available else None,
+        "asof": "2026-07-02" if regime_available else None,
+    }
+    assert not (tmp_path / "data" / "portfolio_watch" / "ohlcv").exists()
+
+
+def test_nonempty_positions_still_share_one_spy_load(
+    tmp_path, run_date, simple_frames, simple_position,
+):
+    """Removing unused empty-input IO must not remove real price composition."""
+    from portfolio.held_risk import compose
+
+    requests = []
+
+    def price_loader(ticker):
+        requests.append(ticker)
+        return simple_frames.get(ticker)
+
+    positions = [simple_position, {**simple_position, "id": "pos-2"}]
+    state = compose(
+        positions, vendor_root=tmp_path, data_root=tmp_path / "data",
+        now=run_date, price_loader=price_loader,
+    )
+
+    assert requests == ["SPY", "TST", "TST"]
+    assert [row["position_id"] for row in state["positions"]] == ["pos-1", "pos-2"]
+    assert all(row["path"]["ref_close"] == simple_frames["TST"]["close"].iloc[-1]
+               for row in state["positions"])
+
 
 def test_compose_returns_valid_schema(simple_frames, simple_position, simple_sd, simple_regime, tmp_path, run_date):
     """compose() with one position returns portfolio_risk_state.v1 with all required keys."""
@@ -1295,19 +1370,37 @@ def test_cli_positions_json(tmp_path, run_date):
 
 
 def test_cli_no_positions_exits_zero(tmp_path):
-    """CLI with empty positions JSON exits 0 gracefully."""
+    """An empty local-input CLI run exits zero and emits JSON without price IO."""
     pos_file = tmp_path / "positions.json"
     pos_file.write_text("[]")
-
     repo_root = Path(__file__).resolve().parent.parent
+    # Retain installed test dependencies without inheriting provider credentials,
+    # custom startup settings, or the real user's home in this fresh child.
+    dependency_paths = [
+        path for path in sys.path
+        if path and Path(path).name in {"site-packages", "dist-packages"}
+    ]
+    env = {
+        "PATH": os.defpath,
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "PYTHONPATH": os.pathsep.join(dependency_paths),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
     result = subprocess.run(
         [sys.executable, str(repo_root / "scripts" / "run_portfolio_risk.py"),
-         "--positions-json", str(pos_file),
-         "--dry-run"],
-        capture_output=True, text=True,
-        cwd=str(repo_root),
+         "--positions-json", str(pos_file), "--skip-refresh", "--dry-run"],
+        capture_output=True, text=True, cwd=str(repo_root), env=env, timeout=20,
     )
     assert result.returncode == 0, f"STDERR: {result.stderr[:300]}"
+    # A lock-conflict early exit is not successful composition.
+    state = json.loads(result.stdout)
+    assert state["schema"] == "portfolio_risk_state.v1"
+    assert state["positions"] == []
+    assert set(state["market"]) == {
+        "risk_radar", "market_state", "vol_regime", "quad", "quad_name", "asof",
+    }
+    assert state["asof"] and state["generated_at"]
 
 
 def test_cli_bad_positions_json_exits_nonzero(tmp_path):

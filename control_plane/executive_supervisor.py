@@ -24,17 +24,21 @@ import pwd
 import signal
 import stat
 import time
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
 
 from control_plane.worker_execution_contract import (
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CollectionReceipt,
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
+    WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
     WorkerRunStatus,
 )
 from control_plane.worker_adapter import WorkerExecutionAdapter
@@ -43,6 +47,7 @@ from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityRegistry,
 )
 from control_plane.executive_authority import (
+    AuthorityDecision,
     AuthorityDenied,
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
@@ -55,6 +60,8 @@ from control_plane.executive_runtime import (
     JobPayload,
     JobStatus,
     OrchestrationDispatchOutcome,
+    ExactWorkerClaimTarget,
+    _require_exact_worker_target,
     Runtime,
     RuntimeProofError,
     StateConflict,
@@ -66,6 +73,15 @@ from control_plane.executive_workspace import (
 
 
 RESULT_SCHEMA_VERSION = "mastermind.executive_worker_result/v1"
+_RECOVERY_ERROR_TEXT_LIMIT = 1_000
+
+
+def _render_recovery_error(error: BaseException) -> str:
+    """Persist one complete, bounded recovery diagnostic."""
+
+    return (f"{type(error).__name__}: {str(error)}")[:_RECOVERY_ERROR_TEXT_LIMIT]
+
+
 _ACTIVE_ATTEMPT_STATUSES = {
     AttemptStatus.CLAIMED,
     AttemptStatus.RUNNING,
@@ -78,6 +94,76 @@ class SupervisorError(RuntimeProofError):
     """The supervisor could not safely launch or accept an attempt."""
 
 
+def validate_effective_grant(
+    job: Job, attempt: Attempt, decision: AuthorityDecision
+) -> dict[str, Any] | None:
+    """Validate a persisted grant using the same Job's preauthorized decision.
+
+    The caller owns policy loading and authorization before a Runtime write
+    transaction. This seam performs no filesystem, policy, Runtime or broker I/O.
+    A decision for a different scope cannot validate this Job's effective grant.
+    """
+    if decision.policy_sha256 != attempt.authority_policy_hash:
+        raise SupervisorError("authority policy changed after claim; result is rejected")
+    if (
+        set(decision.requested) != set(job.requested_authorities)
+        or decision.allowed_write_paths != tuple(job.allowed_write_paths)
+        or decision.validation_commands != tuple(tuple(argv) for argv in job.validation_commands)
+        or ("WRITE_BRANCH" in decision.requested and decision.worktree != job.worktree)
+    ):
+        raise SupervisorError("preauthorized decision does not match Job authority scope")
+    if job.orchestration_role is None:
+        if attempt.effective_grant is not None or attempt.effective_grant_digest is not None:
+            raise SupervisorError("role-null Attempt carries orchestration grant evidence")
+        return None
+    value = attempt.effective_grant
+    keys = {
+        "schema_version",
+        "authorities",
+        "write_paths",
+        "validation_argv",
+        "policy_sha",
+        "job_id",
+        "role",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != keys
+        or value.get("schema_version")
+        != "mastermind.executive_effective_grant/v1"
+        or value.get("job_id") != job.job_id
+        or value.get("role") != job.orchestration_role
+        or value.get("policy_sha") != attempt.authority_policy_hash
+        or not isinstance(value.get("authorities"), list)
+        or not isinstance(value.get("write_paths"), list)
+        or not isinstance(value.get("validation_argv"), list)
+        or any(item not in job.requested_authorities for item in value["authorities"])
+        or any(item not in job.allowed_write_paths for item in value["write_paths"])
+        or any(item not in job.validation_commands for item in value["validation_argv"])
+    ):
+        raise SupervisorError("orchestration Attempt effective grant is malformed or widened")
+    digest = hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    if digest != attempt.effective_grant_digest:
+        raise SupervisorError("orchestration Attempt effective grant digest drifted")
+    return dict(value)
+
+
+CONTROLLER_ONLY_AUTHORITIES = frozenset({"REQUEST_WORKER_LOGIN_CHECK"})
+
+
+def worker_visible_authorities(authorities: Sequence[str]) -> tuple[str, ...]:
+    """Project worker-visible capability names without altering durable authority."""
+    return tuple(item for item in authorities if item not in CONTROLLER_ONLY_AUTHORITIES)
+
+
 class TerminalAssignmentSealError(SupervisorError):
     """A worker assignment could not be sealed before terminal state."""
 
@@ -85,7 +171,6 @@ class TerminalAssignmentSealError(SupervisorError):
 def _codex_worker_contract():
     from control_plane.codex_worker import (
         ISOLATION_MANIFEST_SCHEMA_VERSION,
-        LAUNCH_ATTESTATION_SCHEMA_VERSION,
         ProcessIdentityError,
     )
 
@@ -107,13 +192,19 @@ class ReconcileStatus(str, Enum):
     AWAITING_LEASE_EXPIRY = "AWAITING_LEASE_EXPIRY"
     IDENTITY_AMBIGUOUS = "IDENTITY_AMBIGUOUS"
     OPERATOR_RECOVERED = "OPERATOR_RECOVERED"
+    LIVE_RECOVERED = "LIVE_RECOVERED"
+    TERMINAL_RECOVERED = "TERMINAL_RECOVERED"
+    ALREADY_RECOVERED = "ALREADY_RECOVERED"
+    LEASE_EXPIRED_QUARANTINED = "LEASE_EXPIRED_QUARANTINED"
+    STALE_FENCE_QUARANTINED = "STALE_FENCE_QUARANTINED"
 
 
 class ProcessPresence(str, Enum):
-    """PID/start/boot/PGID comparison result for one persisted invocation."""
+    """Persisted execution presence at its canonical process owner."""
 
     LIVE = "LIVE"
     ABSENT = "ABSENT"
+    TERMINAL_OWNED = "TERMINAL_OWNED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -150,7 +241,7 @@ class IdentitySafeProcessController:
             return ProcessPresence.UNKNOWN
         try:
             if self.inspector.boot_session_id() != attempt.boot_id:
-                return ProcessPresence.ABSENT
+                return ProcessPresence.UNKNOWN
             identity, pgid = self.inspector.identity(attempt.pid)
         except _codex_worker_contract()[2]:
             # ProcessInspector intentionally fails closed when identity cannot be
@@ -166,7 +257,7 @@ class IdentitySafeProcessController:
         except Exception:
             return ProcessPresence.UNKNOWN
         if identity != attempt.process_start_identity or pgid != attempt.pgid:
-            return ProcessPresence.ABSENT
+            return ProcessPresence.UNKNOWN
         return ProcessPresence.LIVE
 
     def _wait_for_absence(self, attempt: Attempt, timeout: float) -> bool:
@@ -294,6 +385,9 @@ class ActiveRun:
     effective_grant: Mapping[str, Any] | None = dataclasses.field(
         default=None, repr=False
     )
+    recovered_presence: ProcessPresence | None = dataclasses.field(
+        default=None, repr=False
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -334,6 +428,7 @@ class ReconcileReceipt:
     requeued: bool = False
     uid_sweep_receipt_path: str | None = None
     assignment_seal_receipt_path: str | None = None
+    error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = dataclasses.asdict(self)
@@ -477,6 +572,85 @@ def _write_private_json(path: Path, value: Any) -> None:
         os.close(directory)
 
 
+def _write_or_verify_private_json(
+    path: Path,
+    value: Any,
+    *,
+    name: str,
+) -> None:
+    """Create one receipt or accept only its exact private durable replay."""
+
+    material = _jsonable(value)
+    try:
+        _write_private_json(path, material)
+        return
+    except FileExistsError:
+        pass
+    try:
+        info = path.lstat()
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise SupervisorError(f"existing {name} cannot be verified") from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) & 0o077
+        or existing != material
+    ):
+        raise SupervisorError(f"existing {name} identity or payload drifted")
+
+
+def _write_private_recovery_prompt(path: Path, prompt: str) -> None:
+    payload = prompt.encode("utf-8")
+    if not payload or len(payload) > 1024 * 1024:
+        raise SupervisorError(
+            "worker recovery prompt is empty or exceeds one MiB"
+        )
+    try:
+        parent = path.parent.lstat()
+    except OSError as exc:
+        raise SupervisorError(
+            "worker recovery prompt directory is unavailable"
+        ) from exc
+    if (
+        stat.S_ISLNK(parent.st_mode)
+        or not stat.S_ISDIR(parent.st_mode)
+        or parent.st_uid != os.geteuid()
+    ):
+        raise SupervisorError(
+            "worker recovery prompt directory is not control-owned"
+        )
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError(
+                    "short write while persisting worker recovery prompt"
+                )
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    directory = os.open(
+        path.parent,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def _payload_from_output(output: Mapping[str, Any]) -> JobPayload:
     artifacts: list[str] = []
     for item in output.get("artifacts", []):
@@ -532,8 +706,31 @@ class ExecutiveSupervisor:
         process_controller: PersistedProcessController | None = None,
         validation_timeout_seconds: float = 300.0,
         instance_id: str | None = None,
+        exact_target_provider: Callable[[str], ExactWorkerClaimTarget | None] | None = None,
+        subscription_canary_claim_provider: Callable[
+            [str, str], Mapping[str, Any]
+        ] | None = None,
+        subscription_canary_binding_id: str | None = None,
     ) -> None:
         self.runtime = runtime
+        if exact_target_provider is not None and not callable(exact_target_provider):
+            raise SupervisorError("exact worker target provider must be callable")
+        self._exact_target_provider = exact_target_provider
+        if subscription_canary_claim_provider is not None and (
+            not callable(subscription_canary_claim_provider)
+            or subscription_canary_binding_id is None
+            or not isinstance(subscription_canary_binding_id, str)
+            or not subscription_canary_binding_id
+        ):
+            raise SupervisorError(
+                "subscription canary claim provider requires a non-empty binding id"
+            )
+        self._subscription_canary_claim_provider = subscription_canary_claim_provider
+        self._subscription_canary_binding_id = (
+            str(subscription_canary_binding_id)
+            if subscription_canary_claim_provider is not None
+            else None
+        )
         self.adapter = adapter
         self.runs_root = (
             Path(runs_root).resolve()
@@ -575,6 +772,8 @@ class ExecutiveSupervisor:
         if not 0.1 <= self.validation_timeout_seconds <= 3600:
             raise SupervisorError("validation timeout must be between 0.1 and 3600 seconds")
         self.instance_id = instance_id or f"supervisor-{uuid4().hex}"
+        self._recovered_runs: dict[str, ActiveRun] = {}
+        self._recovered_attempt_ids: set[str] = set()
 
     def _job(self, job_id: str) -> Job:
         job = self.runtime.jobs.get_job(job_id)
@@ -583,7 +782,7 @@ class ExecutiveSupervisor:
         return job
 
     @staticmethod
-    def _revalidate_authority(job: Job, attempt: Attempt) -> None:
+    def _revalidate_authority(job: Job, attempt: Attempt) -> AuthorityDecision:
         try:
             decision = ExecutiveAuthorityPolicy.load().authorize(
                 job.requested_authorities,
@@ -595,54 +794,13 @@ class ExecutiveSupervisor:
             raise SupervisorError(f"job authority no longer validates: {exc}") from exc
         if decision.policy_sha256 != attempt.authority_policy_hash:
             raise SupervisorError("authority policy changed after claim; result is rejected")
+        return decision
 
     @staticmethod
     def _effective_grant(job: Job, attempt: Attempt) -> dict[str, Any] | None:
-        """Return the exact orchestration grant, leaving legacy Jobs byte-stable."""
-
-        ExecutiveSupervisor._revalidate_authority(job, attempt)
-        if job.orchestration_role is None:
-            if attempt.effective_grant is not None or attempt.effective_grant_digest is not None:
-                raise SupervisorError("role-null Attempt carries orchestration grant evidence")
-            return None
-        value = attempt.effective_grant
-        keys = {
-            "schema_version",
-            "authorities",
-            "write_paths",
-            "validation_argv",
-            "policy_sha",
-            "job_id",
-            "role",
-        }
-        if (
-            not isinstance(value, dict)
-            or set(value) != keys
-            or value.get("schema_version")
-            != "mastermind.executive_effective_grant/v1"
-            or value.get("job_id") != job.job_id
-            or value.get("role") != job.orchestration_role
-            or value.get("policy_sha") != attempt.authority_policy_hash
-            or not isinstance(value.get("authorities"), list)
-            or not isinstance(value.get("write_paths"), list)
-            or not isinstance(value.get("validation_argv"), list)
-            or any(item not in job.requested_authorities for item in value["authorities"])
-            or any(item not in job.allowed_write_paths for item in value["write_paths"])
-            or any(item not in job.validation_commands for item in value["validation_argv"])
-        ):
-            raise SupervisorError("orchestration Attempt effective grant is malformed or widened")
-        digest = hashlib.sha256(
-            json.dumps(
-                value,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8")
-        ).hexdigest()
-        if digest != attempt.effective_grant_digest:
-            raise SupervisorError("orchestration Attempt effective grant digest drifted")
-        return dict(value)
+        """Reauthorize once, then use the shared pure grant-validation owner."""
+        decision = ExecutiveSupervisor._revalidate_authority(job, attempt)
+        return validate_effective_grant(job, attempt, decision)
 
     def _run_dir(self, attempt_id: str) -> Path:
         return self.runs_root / attempt_id
@@ -804,10 +962,12 @@ class ExecutiveSupervisor:
         attempt: Attempt,
         effective_grant: Mapping[str, Any] | None = None,
     ) -> str:
-        authorities = (
-            list(effective_grant["authorities"])
-            if effective_grant is not None
-            else job.requested_authorities
+        authorities = list(
+            worker_visible_authorities(
+                effective_grant["authorities"]
+                if effective_grant is not None
+                else job.requested_authorities
+            )
         )
         write_paths = (
             list(effective_grant["write_paths"])
@@ -934,7 +1094,7 @@ class ExecutiveSupervisor:
             run_dir=run_dir,
             prompt=self._prompt(job, attempt, effective_grant),
             result_schema_path=schema_path,
-            authorities=tuple(
+            authorities=worker_visible_authorities(
                 effective_grant["authorities"]
                 if effective_grant is not None
                 else job.requested_authorities
@@ -959,6 +1119,59 @@ class ExecutiveSupervisor:
             secret_canary_verdict=self.secret_canary_verdict,
             require_secret_canary=self.require_complete_launch_attestation,
             **spec_kwargs,
+        )
+
+    def _enrich_spec_with_canary_claim(
+        self,
+        spec: WorkerLaunchSpec,
+        job: Job,
+    ) -> WorkerLaunchSpec:
+        """Apply one immutable subscription canary claim to a freshly built spec.
+
+        Only an injected claim provider (a callable taking ``attempt_id`` and
+        ``binding_id``) drives this path; ordinary composition leaves the
+        provider as ``None`` and the original spec is returned unchanged.  The
+        enrichment runs immediately after constructing the base ``spec`` and
+        before any prompt/recovery/broker write, so the durable WorkerLaunchSpec
+        sealed by the recovery binding already carries the exact claim.
+        """
+
+        provider = self._subscription_canary_claim_provider
+        if provider is None:
+            return spec
+        binding_id = self._subscription_canary_binding_id
+        if binding_id is None:
+            raise SupervisorError(
+                "subscription canary claim provider has no bound binding id"
+            )
+        try:
+            observation = provider(spec.run_id, binding_id)
+        except Exception as exc:
+            raise SupervisorError(
+                f"subscription canary claim provider refused: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not isinstance(observation, Mapping):
+            raise SupervisorError(
+                "subscription canary claim provider returned a non-mapping"
+            )
+        if (
+            observation.get("run_id") != spec.run_id
+            or observation.get("job_id") != spec.job_id
+            or observation.get("worker_id") != spec.worker_id
+            or observation.get("binding_id") != binding_id
+            or observation.get("model") != spec.model
+        ):
+            raise SupervisorError(
+                "subscription canary claim differs from the claimed launch spec"
+            )
+        # The observation owner is the existing typed
+        # ``observe_subscription_canary_claim``; it has already frozen and
+        # validated the exact closed schema, so passing it through
+        # ``dataclasses.replace`` lets WorkerLaunchSpec re-validate the exact
+        # contract on assignment.
+        return dataclasses.replace(
+            spec, subscription_canary_claim=dict(observation),
         )
 
     def _validate_execution_profile(
@@ -1043,6 +1256,7 @@ class ExecutiveSupervisor:
         spec: WorkerLaunchSpec,
         process_ref: WorkerProcessRef,
         effective_grant: Mapping[str, Any] | None = None,
+        recovery_prompt_path: Path | None = None,
     ) -> dict[str, Any]:
         quota = self.runtime.workers.get_quota_class(
             lease.attempt.worker_id, lease.attempt.quota_class
@@ -1071,7 +1285,7 @@ class ExecutiveSupervisor:
             }
         if (self.require_complete_launch_attestation or effective_grant is not None) and (
             not isinstance(attestation, dict)
-            or attestation.get("schema_version") != _codex_worker_contract()[1]
+            or attestation.get("schema_version") != LAUNCH_ATTESTATION_SCHEMA_VERSION
         ):
             raise SupervisorError("worker adapter did not provide a complete launch attestation")
         if effective_grant is not None:
@@ -1129,6 +1343,24 @@ class ExecutiveSupervisor:
             result["effective_grant_digest"] = lease.attempt.effective_grant_digest
             result["write_paths"] = list(effective_grant["write_paths"])
             result["validation_argv"] = list(effective_grant["validation_argv"])
+        reattach = getattr(self.adapter, "reattach", None)
+        if callable(reattach):
+            if recovery_prompt_path is None:
+                raise SupervisorError(
+                    "recoverable worker launch has no durable prompt"
+                )
+            try:
+                binding = WorkerRecoveryBinding.bind(
+                    adapter_id=str(getattr(self.adapter, "adapter_id", "")),
+                    spec=spec,
+                    process_ref=process_ref,
+                    prompt_path=recovery_prompt_path,
+                )
+            except WorkerRecoveryContractError as exc:
+                raise SupervisorError(
+                    f"worker recovery binding failed: {exc}"
+                ) from exc
+            result["worker_recovery_binding"] = binding.to_dict()
         return result
 
     def _fail_claim(self, lease: AttemptLease, message: str) -> Job:
@@ -1154,33 +1386,38 @@ class ExecutiveSupervisor:
     async def start_cycle_job(
         self, job_id: str, *, command_id: str
     ) -> ActiveRun | OrchestrationDispatchOutcome:
-        """Claim exactly ``job_id`` under ``command_id`` and launch it once.
-
-        Replaying an already active/terminal dispatch returns the immutable
-        command-bound outcome.  It never scans or claims another queued Job.
-        """
-
+        """Use the existing exact child claim; replay never reissues a target."""
+        target = (
+            self._exact_target_provider(job_id)
+            if self._exact_target_provider is not None else None
+        )
+        if target is not None:
+            target = _require_exact_worker_target(target)
         outcome = self.runtime.attempts.dispatch_cycle_job(
             job_id,
             command_id=command_id,
             lease_owner=self.instance_id,
+            **({"exact_target": target} if target is not None else {}),
         )
         if outcome is None:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
-        if outcome.outcome == "TERMINAL" or outcome.attempt.status is not AttemptStatus.CLAIMED:
+        if (
+            (target is not None and not outcome.claimed_now)
+            or outcome.outcome == "TERMINAL"
+            or outcome.attempt.status is not AttemptStatus.CLAIMED
+        ):
             return outcome
         if outcome.lease_token is None:  # pragma: no cover - dataclass invariant
             raise SupervisorError("active cycle dispatch lost its lease token")
         return await self._start_claimed_job(
             job_id,
-            AttemptLease(
-                attempt=outcome.attempt,
-                lease_token=outcome.lease_token,
-            ),
+            AttemptLease(attempt=outcome.attempt, lease_token=outcome.lease_token),
+            **({"exact_target": target} if target is not None else {}),
         )
 
     async def _start_claimed_job(
-        self, job_id: str, lease: AttemptLease
+        self, job_id: str, lease: AttemptLease, *,
+        exact_target: ExactWorkerClaimTarget | None = None,
     ) -> ActiveRun:
         """Launch one already claimed exact Job and persist its principal."""
 
@@ -1197,6 +1434,12 @@ class ExecutiveSupervisor:
                 effective_grant=effective_grant,
             )
             spec = self._launch_spec(job, lease, schema_path, effective_grant)
+            spec = self._enrich_spec_with_canary_claim(spec, job)
+            recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
+            _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
+            if exact_target is not None:
+                exact_target.revalidate_source()
+                self.runtime.attempts._validate_exact_target_launch(exact_target, lease)
             start_invoked = True
             process_ref = await self.adapter.start(spec)
             launch_metadata = self._launch_metadata(
@@ -1205,6 +1448,7 @@ class ExecutiveSupervisor:
                 spec=spec,
                 process_ref=process_ref,
                 effective_grant=effective_grant,
+                recovery_prompt_path=recovery_prompt_path,
             )
             self.runtime.attempts.record_process(
                 lease.attempt.attempt_id,
@@ -1225,7 +1469,7 @@ class ExecutiveSupervisor:
                 fence_generation=lease.attempt.fence_generation,
                 lease_token=lease.lease_token,
                 required_launch_attestation_schema=(
-                    _codex_worker_contract()[1]
+                    LAUNCH_ATTESTATION_SCHEMA_VERSION
                     if self.require_complete_launch_attestation
                     else None
                 ),
@@ -1376,7 +1620,9 @@ class ExecutiveSupervisor:
                     "complete remote collection has no dedicated-UID sweep receipt"
                 )
             payload = collection
-        _write_private_json(path, payload)
+        _write_or_verify_private_json(
+            path, payload, name="collection receipt"
+        )
         return path
 
     @staticmethod
@@ -1576,6 +1822,52 @@ class ExecutiveSupervisor:
             ) from exc
         return path
 
+    async def _settle_recovered_terminal_owner(
+        self, active: ActiveRun
+    ) -> None:
+        """Keep cancellation fenced until broker-owned terminal work settles."""
+
+        if active.recovered_presence is not ProcessPresence.TERMINAL_OWNED:
+            return
+        attempt = active.lease.attempt
+        loop = asyncio.get_running_loop()
+        settlement_seconds = max(
+            1.0,
+            float(self.validation_timeout_seconds) + 60.0,
+        )
+        deadline = loop.time() + settlement_seconds
+        extend_seconds = max(1, int(settlement_seconds) + 1)
+        while True:
+            # Refresh before a synchronous broker status probe. The Unix client
+            # has its own bounded timeout, but even that bound must not be able
+            # to consume the adopted lease before cancellation can terminalize.
+            self.runtime.attempts.heartbeat_attempt(
+                attempt.attempt_id,
+                fence_generation=attempt.fence_generation,
+                lease_token=active.lease.lease_token,
+                extend_seconds=extend_seconds,
+            )
+            presence = await asyncio.to_thread(
+                self.process_controller.presence, attempt
+            )
+            if presence is ProcessPresence.ABSENT:
+                if not await asyncio.to_thread(
+                    self.process_controller.absence_verified, attempt
+                ):
+                    raise SupervisorError(
+                        "recovered terminal owner lost its verified absence"
+                    )
+                return
+            if presence is not ProcessPresence.TERMINAL_OWNED:
+                raise SupervisorError(
+                    "recovered terminal owner became live or ambiguous"
+                )
+            if loop.time() >= deadline:
+                raise SupervisorError(
+                    "recovered terminal owner did not settle before timeout"
+                )
+            await asyncio.sleep(self.heartbeat_interval_seconds)
+
     def _active_terminal_uid_sweep(
         self, active: ActiveRun
     ) -> Mapping[str, Any] | None:
@@ -1676,7 +1968,9 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "complete remote validation has no dedicated-UID sweep receipt"
             )
-        _write_private_json(path, payload)
+        _write_or_verify_private_json(
+            path, payload, name="supervisor validation receipt"
+        )
         return path
 
     async def _run_supervisor_validations(
@@ -1750,17 +2044,34 @@ class ExecutiveSupervisor:
             return seal_path
 
         if receipt.result.exit_code is None:
-            raise SupervisorError("Codex process has no terminal exit code")
-        self.runtime.attempts.record_process_exit(
-            attempt.attempt_id,
-            fence_generation=fence,
-            lease_token=token,
-            exit_code=receipt.result.exit_code,
-            result_path=receipt.process_ref.result_path,
-            provider_session_id=receipt.result.provider_session_id,
-        )
+            raise SupervisorError(
+                "recovered local worker has no truthful durable OS exit code; "
+                "the original Attempt remains quarantined"
+            )
+        current_attempt = self.runtime.attempts.get_attempt(attempt.attempt_id)
+        if current_attempt is None:
+            raise SupervisorError("terminal Attempt disappeared before exit evidence")
+        if current_attempt.exit_code is None:
+            self.runtime.attempts.record_process_exit(
+                attempt.attempt_id,
+                fence_generation=fence,
+                lease_token=token,
+                exit_code=receipt.result.exit_code,
+                result_path=receipt.process_ref.result_path,
+                provider_session_id=receipt.result.provider_session_id,
+            )
+        elif (
+            int(current_attempt.exit_code) != int(receipt.result.exit_code)
+            or current_attempt.result_path != receipt.process_ref.result_path
+            or current_attempt.provider_session_id
+            != receipt.result.provider_session_id
+        ):
+            raise SupervisorError(
+                "persisted process-exit evidence differs from recovered collection"
+            )
         job = self._job(attempt.job_id)
         if job.status == JobStatus.CANCEL_REQUESTED:
+            await self._settle_recovered_terminal_owner(active)
             ensure_sealed()
             cancelled = self.runtime.attempts.acknowledge_cancel(
                 attempt.attempt_id, fence_generation=fence, lease_token=token
@@ -1958,6 +2269,298 @@ class ExecutiveSupervisor:
             return started
         return await self.finish_job(started)
 
+    def take_recovered_runs(self) -> tuple[ActiveRun, ...]:
+        """Return each process-local recovered finisher exactly once."""
+
+        values = tuple(self._recovered_runs.values())
+        self._recovered_runs.clear()
+        return values
+
+    def _attempt_lease_expired(self, attempt: Attempt) -> bool:
+        try:
+            expiry = datetime.fromisoformat(
+                attempt.lease_expires_at.replace("Z", "+00:00")
+            )
+            if expiry.tzinfo is None:
+                raise ValueError("missing timezone")
+        except ValueError as exc:
+            raise SupervisorError(
+                "attempt lease expiry is malformed"
+            ) from exc
+        return int(expiry.timestamp() * 1000) <= int(
+            self.runtime.store.now_ms()
+        )
+
+    @staticmethod
+    def _process_ref_matches_attempt(
+        ref: WorkerProcessRef, attempt: Attempt
+    ) -> bool:
+        return (
+            ref.run_id == attempt.attempt_id
+            and ref.pid == attempt.pid
+            and ref.pgid == attempt.pgid
+            and ref.process_start_identity == attempt.process_start_identity
+            and ref.boot_session_id == attempt.boot_id
+            and ref.provider_session_id == attempt.provider_session_id
+            and ref.stdout_path == attempt.stdout_path
+            and ref.stderr_path == attempt.stderr_path
+            and ref.result_path == attempt.result_path
+        )
+
+    def _validated_recovery_binding(
+        self, attempt: Attempt
+    ) -> tuple[
+        WorkerRecoveryBinding,
+        WorkerLaunchSpec,
+        Mapping[str, Any] | None,
+    ]:
+        raw = attempt.launch_metadata.get("worker_recovery_binding")
+        if not isinstance(raw, Mapping):
+            raise SupervisorError(
+                "attempt has no durable worker recovery binding"
+            )
+        try:
+            binding = WorkerRecoveryBinding.from_dict(raw)
+            fields = binding.launch_spec.get("fields")
+            spec_type = (
+                OrchestrationLaunchSpec
+                if isinstance(fields, Mapping)
+                and "effective_grant_digest" in fields
+                else WorkerLaunchSpec
+            )
+            spec = binding.recover_launch_spec(spec_type)
+        except WorkerRecoveryContractError as exc:
+            raise SupervisorError(
+                f"worker recovery binding is invalid: {exc}"
+            ) from exc
+        if not self._process_ref_matches_attempt(
+            binding.process_ref, attempt
+        ):
+            raise SupervisorError(
+                "worker recovery binding differs from durable Attempt identity"
+            )
+        job = self._job(attempt.job_id)
+        effective_grant = self._effective_grant(job, attempt)
+        expected_authorities = tuple(
+            effective_grant["authorities"]
+            if effective_grant is not None
+            else job.requested_authorities
+        )
+        expected_paths = tuple(
+            effective_grant["write_paths"]
+            if effective_grant is not None
+            else job.allowed_write_paths
+        )
+        if (
+            spec.run_id != attempt.attempt_id
+            or spec.job_id != attempt.job_id
+            or spec.worker_id != attempt.worker_id
+            or not job.worktree
+            or Path(spec.workspace_path).resolve(strict=False)
+            != Path(job.worktree).resolve(strict=False)
+            or Path(spec.run_dir).resolve(strict=False)
+            != self._run_dir(attempt.attempt_id).resolve(strict=False)
+            or Path(spec.result_schema_path).resolve(strict=False)
+            != (
+                self._run_dir(attempt.attempt_id)
+                / "input"
+                / "worker-result.schema.json"
+            ).resolve(strict=False)
+            or tuple(spec.authorities) != expected_authorities
+            or tuple(spec.allowed_artifact_paths) != expected_paths
+            or spec.expected_base_sha
+            != (str(job.constraints.get("base_sha") or "") or None)
+        ):
+            raise SupervisorError(
+                "worker recovery launch contract differs from durable Job"
+            )
+        if effective_grant is not None and (
+            not isinstance(spec, OrchestrationLaunchSpec)
+            or spec.effective_grant_digest
+            != attempt.effective_grant_digest
+        ):
+            raise SupervisorError(
+                "worker recovery orchestration grant changed"
+            )
+        attestation = attempt.launch_metadata.get("launch_attestation")
+        identity = (
+            attestation.get("process_identity")
+            if isinstance(attestation, Mapping)
+            else None
+        )
+        if not isinstance(identity, Mapping) or any(
+            identity.get(key) != value
+            for key, value in {
+                "pid": binding.process_ref.pid,
+                "pgid": binding.process_ref.pgid,
+                "session_id": binding.process_ref.session_id,
+                "start_identity": binding.process_ref.process_start_identity,
+                "boot_id": binding.process_ref.boot_session_id,
+                "effective_uid": binding.process_ref.effective_uid,
+                "effective_gid": binding.process_ref.effective_gid,
+                "real_uid": binding.process_ref.real_uid,
+                "real_gid": binding.process_ref.real_gid,
+            }.items()
+        ):
+            raise SupervisorError(
+                "worker recovery binding differs from launch attestation"
+            )
+        return binding, spec, effective_grant
+
+    def _normalise_recovered_lease(
+        self, lease: AttemptLease
+    ) -> AttemptLease:
+        attempt = lease.attempt
+        if attempt.status is AttemptStatus.CLAIMED:
+            self.runtime.attempts.mark_running(
+                attempt.attempt_id,
+                fence_generation=attempt.fence_generation,
+                lease_token=lease.lease_token,
+                required_launch_attestation_schema=(
+                    _codex_worker_contract()[1]
+                    if self.require_complete_launch_attestation
+                    else None
+                ),
+            )
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if current is None:
+                raise SupervisorError(
+                    "recovered Attempt disappeared after RUNNING transition"
+                )
+            attempt = current
+        if attempt.status is AttemptStatus.RUNNING:
+            self.runtime.attempts.checkpoint_attempt(
+                attempt.attempt_id,
+                fence_generation=attempt.fence_generation,
+                lease_token=lease.lease_token,
+                payload=JobPayload(
+                    summary="Authorized worker ownership recovered",
+                    completed_steps=[
+                        "exact durable process and launch identity reattached"
+                    ],
+                    current_state=(
+                        "existing worker execution remains under Executive ownership"
+                    ),
+                    next_actions=[
+                        "collect and validate the original provider result"
+                    ],
+                ),
+            )
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if current is None:
+                raise SupervisorError(
+                    "recovered Attempt disappeared after checkpoint"
+                )
+            attempt = current
+        return AttemptLease(
+            attempt=attempt,
+            lease_token=lease.lease_token,
+        )
+
+    def _recover_existing_attempt(
+        self,
+        attempt: Attempt,
+        *,
+        presence: ProcessPresence,
+    ) -> ReconcileReceipt:
+        process_was_live = presence is ProcessPresence.LIVE
+        if attempt.attempt_id in self._recovered_attempt_ids:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.ALREADY_RECOVERED,
+                process_was_live=process_was_live,
+            )
+        if self._attempt_lease_expired(attempt):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.LEASE_EXPIRED_QUARANTINED,
+                process_was_live=process_was_live,
+                error=(
+                    "live or terminal execution has an expired lease; "
+                    "Runtime-owner reconciliation required"
+                ),
+            )
+        try:
+            binding, spec, effective_grant = (
+                self._validated_recovery_binding(attempt)
+            )
+        except SupervisorError as exc:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=process_was_live,
+                error=str(exc)[:1000],
+            )
+        reattach = getattr(self.adapter, "reattach", None)
+        if not callable(reattach):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=process_was_live,
+                error=(
+                    "worker adapter does not support existing-execution recovery"
+                ),
+            )
+        try:
+            adopted = self.runtime.attempts.adopt_attempt(
+                attempt.attempt_id,
+                expected_fence_generation=attempt.fence_generation,
+                lease_owner=self.instance_id,
+            )
+        except StateConflict as exc:
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if (
+                current is None
+                or current.status not in _ACTIVE_ATTEMPT_STATUSES
+            ):
+                return ReconcileReceipt(
+                    attempt_id=attempt.attempt_id,
+                    job_id=attempt.job_id,
+                    status=ReconcileStatus.ALREADY_RECOVERED,
+                    process_was_live=process_was_live,
+                )
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.STALE_FENCE_QUARANTINED,
+                process_was_live=process_was_live,
+                error=str(exc)[:1000],
+            )
+        try:
+            adopted = self._normalise_recovered_lease(adopted)
+            ref = reattach(spec, binding)
+        except Exception as exc:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=process_was_live,
+                error=_render_recovery_error(exc),
+            )
+        active = ActiveRun(
+            lease=adopted,
+            process_ref=ref,
+            launch_spec=spec,
+            effective_grant=effective_grant,
+            recovered_presence=presence,
+        )
+        self._recovered_runs[attempt.attempt_id] = active
+        self._recovered_attempt_ids.add(attempt.attempt_id)
+        return ReconcileReceipt(
+            attempt_id=attempt.attempt_id,
+            job_id=attempt.job_id,
+            status=(
+                ReconcileStatus.LIVE_RECOVERED
+                if process_was_live
+                else ReconcileStatus.TERMINAL_RECOVERED
+            ),
+            process_was_live=process_was_live,
+        )
+
     def _maybe_requeue(self, job_id: str) -> bool:
         job = self._job(job_id)
         if job.status != JobStatus.LOST or job.attempt_count >= job.attempt_limit:
@@ -1988,14 +2591,19 @@ class ExecutiveSupervisor:
                 / "reconciliation-receipt.json"
             ),
         )
-        _write_private_json(
-            path,
-            {
-                "schema_version": "mastermind.executive_reconciliation_evidence/v1",
-                "outcome": outcome.to_dict(),
-                "uid_sweep": _jsonable(uid_sweep),
-            },
-        )
+        payload = {
+            "schema_version": "mastermind.executive_reconciliation_evidence/v1",
+            "outcome": outcome.to_dict(),
+            "uid_sweep": _jsonable(uid_sweep),
+        }
+        try:
+            _write_private_json(path, payload)
+        except FileExistsError:
+            # A no-PID claim may first await expiry and reconcile again later.
+            # Keep each fresh sweep/outcome immutable and return its exact path;
+            # neither overwrite the earlier receipt nor reuse its stale sweep.
+            path = path.with_name(f"{path.stem}-{uuid4().hex}{path.suffix}")
+            _write_private_json(path, payload)
         return dataclasses.replace(outcome, uid_sweep_receipt_path=str(path))
 
     def _restart_uid_sweep(self, attempt: Attempt) -> Mapping[str, Any] | None:
@@ -2022,13 +2630,55 @@ class ExecutiveSupervisor:
             )
         return sweep
 
-    def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
-        """Inspect durable nonterminal attempts after a supervisor restart.
+    @staticmethod
+    def _is_unbound_claim(attempt: Attempt) -> bool:
+        """Empty control identity is a cleanup candidate, never absence proof."""
 
-        A live local child cannot be reconstructed because the in-memory JSONL
-        parser was lost.  It is identity-safely terminated and verified absent
-        before any fence rotation, cancellation acknowledgement, LOST state, or
-        requeue.  Ambiguous and provider-only identities remain quarantined.
+        return (
+            attempt.status is AttemptStatus.CLAIMED
+            and all(value is None for value in (
+                attempt.pid, attempt.pgid, attempt.process_start_identity,
+                attempt.boot_id, attempt.provider_session_id,
+                attempt.stdout_path, attempt.stderr_path, attempt.result_path,
+            ))
+            and "worker_recovery_binding" not in attempt.launch_metadata
+            and "launch_attestation" not in attempt.launch_metadata
+        )
+
+    def _cleanup_unbound_claim(self, attempt: Attempt) -> Mapping[str, Any]:
+        """Ask the existing exact-run owner for fresh, worker-bound absence."""
+
+        cleanup = getattr(self.process_controller, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise SupervisorError("unbound claim has no exact-run cleanup owner")
+        requested_at = time.time()
+        sweep = self._validate_terminal_uid_sweep(cleanup(attempt.attempt_id))
+        completed_at = time.time()
+        observed_at = sweep.get("observed_at")
+        if not isinstance(observed_at, str):
+            raise SupervisorError("unbound cleanup has no observation time")
+        observed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        expected_uid = (
+            self.worker_uid if self.worker_uid is not None
+            else pwd.getpwnam(self.worker_user).pw_uid
+        )
+        if (
+            observed.tzinfo is None
+            or not requested_at <= observed.timestamp() <= completed_at
+            or sweep.get("reason") != "status_absence"
+            or sweep.get("worker_uid") != expected_uid
+            or self._restart_uid_sweep(attempt) != sweep
+        ):
+            raise SupervisorError("unbound cleanup absence receipt is stale or foreign")
+        return sweep
+
+    def reconcile_restart(self, *, requeue_lost: bool = True) -> list[ReconcileReceipt]:
+        """Recover exact sealed workers or quarantine uncertainty after restart.
+
+        A durable recovery binding adopts the original Job/Attempt and existing
+        provider execution without another start. Healthy legacy executions
+        lacking that binding remain active and quarantined; cancellation is the
+        only path that may identity-safely terminate one during reconciliation.
         """
 
         outcomes: list[ReconcileReceipt] = []
@@ -2042,6 +2692,71 @@ class ExecutiveSupervisor:
             presence = self.process_controller.presence(attempt)
             process_was_live = presence is ProcessPresence.LIVE
             uid_sweep: Mapping[str, Any] | None = None
+            recovery_raw = attempt.launch_metadata.get(
+                "worker_recovery_binding"
+            )
+            if (
+                presence
+                in {
+                    ProcessPresence.LIVE,
+                    ProcessPresence.ABSENT,
+                    ProcessPresence.TERMINAL_OWNED,
+                }
+                and isinstance(recovery_raw, Mapping)
+            ):
+                if (
+                    presence is ProcessPresence.ABSENT
+                    and not self.process_controller.absence_verified(attempt)
+                ):
+                    presence = ProcessPresence.UNKNOWN
+                else:
+                    outcomes.append(
+                        self._recover_existing_attempt(
+                            attempt,
+                            presence=presence,
+                        )
+                    )
+                    continue
+            if (
+                presence is ProcessPresence.TERMINAL_OWNED
+                and not isinstance(recovery_raw, Mapping)
+            ):
+                outcomes.append(
+                    ReconcileReceipt(
+                        attempt_id=attempt.attempt_id,
+                        job_id=attempt.job_id,
+                        status=ReconcileStatus.LIVE_QUARANTINED,
+                        process_was_live=False,
+                        error=(
+                            "terminal execution remains owned by its adapter but "
+                            "has no durable recovery binding"
+                        ),
+                    )
+                )
+                continue
+            if (
+                process_was_live
+                and not isinstance(recovery_raw, Mapping)
+                and attempt.status is not AttemptStatus.CANCEL_REQUESTED
+            ):
+                expired = self._attempt_lease_expired(attempt)
+                outcomes.append(
+                    ReconcileReceipt(
+                        attempt_id=attempt.attempt_id,
+                        job_id=attempt.job_id,
+                        status=(
+                            ReconcileStatus.LEASE_EXPIRED_QUARANTINED
+                            if expired
+                            else ReconcileStatus.LIVE_QUARANTINED
+                        ),
+                        process_was_live=True,
+                        error=(
+                            "healthy legacy worker has no durable recovery binding; "
+                            "refusing to signal or replace the original execution"
+                        ),
+                    )
+                )
+                continue
             if process_was_live:
                 self.process_controller.terminate(attempt)
                 if not self.process_controller.absence_verified(attempt):
@@ -2049,7 +2764,25 @@ class ExecutiveSupervisor:
                         f"attempt {attempt.attempt_id} remained live or ambiguous after termination"
                     )
                 presence = ProcessPresence.ABSENT
-            if presence is ProcessPresence.ABSENT:
+            if presence is ProcessPresence.UNKNOWN and self._is_unbound_claim(attempt):
+                try:
+                    uid_sweep = self._cleanup_unbound_claim(attempt)
+                except Exception as exc:
+                    outcomes.append(
+                        ReconcileReceipt(
+                            attempt_id=attempt.attempt_id,
+                            job_id=attempt.job_id,
+                            status=ReconcileStatus.IDENTITY_AMBIGUOUS,
+                            process_was_live=False,
+                            error=_render_recovery_error(exc),
+                        )
+                    )
+                    continue
+                # The exact broker owner proved fresh overall absence. Its
+                # retained terminal run still cannot match missing control
+                # metadata, so repeating presence() would recreate the wedge.
+                presence = ProcessPresence.ABSENT
+            elif presence is ProcessPresence.ABSENT:
                 if not self.process_controller.absence_verified(attempt):
                     presence = ProcessPresence.UNKNOWN
                 else:

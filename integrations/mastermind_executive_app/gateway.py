@@ -72,6 +72,7 @@ __all__ = [
     "GroundingUnavailable",
     "load_app_policies",
     "make_jwt_authenticators",
+    "make_shared_jwks_cache",
     "observe_trusted_grounding",
     "read_only_gateway_config",
 ]
@@ -154,24 +155,55 @@ def _default_jwks_cache(policy: ResourcePolicy) -> JwksKeySource:
     )
 
 
+def _jwks_cache_contract(policy: ResourcePolicy) -> tuple[object, ...]:
+    """Return the authority and refresh controls that make a JWKS cache shareable."""
+
+    return (
+        policy.resource,
+        policy.issuer,
+        policy.authorization_servers,
+        policy.jwks_uri,
+        policy.allowed_algorithms,
+        policy.jwks_cache_ttl_seconds,
+        policy.unknown_kid_refresh_cooldown_seconds,
+        policy.fetch_failure_backoff_seconds,
+    )
+
+
+def make_shared_jwks_cache(policies: AppPolicies) -> JwksKeySource | None:
+    """Build one cache only when both policies have the same JWKS contract.
+
+    The cache contains public signing keys and bounded refresh state only; it
+    carries no authorization decision.  Scope, subject, audience, lifetime, and
+    tool authority stay inside the separate JwtAuthenticator instances.
+    """
+
+    if _jwks_cache_contract(policies.read) != _jwks_cache_contract(policies.submit):
+        return None
+    return _default_jwks_cache(policies.read)
+
+
 def make_jwt_authenticators(
     policies: AppPolicies, *, jwks_cache: JwksKeySource | None = None
 ) -> tuple[JwtAuthenticator, JwtAuthenticator]:
     """Build the (read, submit) :class:`JwtAuthenticator` pair.
 
-    ``integrations.business_mcp_auth.jwks.BoundedJwksCache``/``HttpxJwksFetcher``
-    are each bound to exactly ONE :class:`ResourcePolicy` (its own
-    ``jwks_uri``/cache TTL), so the default production wiring builds one
-    independent cache PER policy even though both name the same authorization
-    server in every legal deployment.  A caller-supplied ``jwks_cache`` is a
-    single stateless object (e.g. a test fake) reused for BOTH authenticators
-    instead — the :class:`JwksKeySource` protocol has no policy-affinity
-    requirement, only ``.key_for(kid)``.
+    Read and submit remain separate authorization policies.  When they bind
+    the same OAuth resource/JWKS authority and the same cache safety controls,
+    they share one process-memory JWKS cache.  This prevents a wider-scope
+    token from performing two independent JWKS refreshes while preserving
+    separate scope, subject, audience, lifetime, and tool-authority checks.
+    Policies with different JWKS authority or refresh controls keep independent
+    caches.  A caller-supplied ``jwks_cache`` is reused for both as before.
     """
 
     if jwks_cache is None:
-        read_cache: JwksKeySource = _default_jwks_cache(policies.read)
-        submit_cache: JwksKeySource = _default_jwks_cache(policies.submit)
+        shared_cache = make_shared_jwks_cache(policies)
+        if shared_cache is None:
+            read_cache: JwksKeySource = _default_jwks_cache(policies.read)
+            submit_cache: JwksKeySource = _default_jwks_cache(policies.submit)
+        else:
+            read_cache = submit_cache = shared_cache
     else:
         read_cache = submit_cache = jwks_cache
     read_authenticator = JwtAuthenticator(policy=policies.read, jwks_cache=read_cache)
@@ -336,6 +368,22 @@ class CeoIngressClient:
     ) -> CeoIngressResponse:
         """Send exactly one JSON frame; never retries internally."""
 
+        request_ceiling = MAX_REQUEST_BYTES
+        response_ceiling = MAX_RESPONSE_BYTES
+        stream_limit = _STREAM_LIMIT
+        # Only the separately versioned, closed release frame can use the
+        # larger token envelope; every historical schema retains its limits.
+        from control_plane import executive_release_ingress as release_ingress
+        if isinstance(frame, Mapping) and frame.get("schema") == release_ingress.FRAME_SCHEMA:
+            try:
+                release_ingress.validate_frame(frame)
+            except release_ingress.ReleaseIngressError:
+                return CeoIngressResponse(
+                    transport=TRANSPORT_NOT_SENT, detail="release frame is invalid"
+                )
+            request_ceiling = release_ingress.MAX_FRAME_BYTES
+            response_ceiling = release_ingress.MAX_RESPONSE_BYTES
+            stream_limit = response_ceiling + 4096
         try:
             encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
                 "utf-8"
@@ -345,16 +393,16 @@ class CeoIngressClient:
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
             )
         line = encoded + b"\n"
-        if len(line) > MAX_REQUEST_BYTES:
+        if len(line) > request_ceiling:
             # Refuse locally; never put an oversized frame on the wire.
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT,
-                detail=f"frame is {len(line)} bytes, over the {MAX_REQUEST_BYTES}-byte ceiling",
+                detail=f"frame is {len(line)} bytes, over the {request_ceiling}-byte ceiling",
             )
 
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_unix_connection(str(socket_path), limit=_STREAM_LIMIT),
+                asyncio.open_unix_connection(str(socket_path), limit=stream_limit),
                 timeout=self._connect_timeout,
             )
         except (OSError, asyncio.TimeoutError) as exc:
@@ -404,7 +452,7 @@ class CeoIngressClient:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="connection closed with no response"
                 )
-            if len(raw) > MAX_RESPONSE_BYTES:
+            if len(raw) > response_ceiling:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
@@ -449,11 +497,19 @@ class CeoIngressClient:
 
 
 class CeoIngressReadGateway:
-    """Network-only access to the installed control process's four readers."""
+    """Network-only access to one statically admitted installed read profile."""
+
+    _READ_TOOL_NAMES = READ_TOOL_NAMES
+    _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
 
     def __init__(self, socket_path: Path | str, client: CeoIngressClient) -> None:
         self._socket_path = socket_path
         self._client = client
+
+    def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from integrations.executive_mcp.schemas import validate_tool_arguments
+
+        return validate_tool_arguments(name, arguments)
 
     async def aclose(self) -> None:
         # Each request owns and closes its socket. No local state to drain.
@@ -462,14 +518,14 @@ class CeoIngressReadGateway:
     async def call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         from datetime import datetime, timezone
         from integrations.executive_mcp.schemas import (
-            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope, validate_tool_arguments,
+            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope,
         )
         try:
-            if name not in READ_TOOL_NAMES:
+            if name not in self._READ_TOOL_NAMES:
                 raise GatewayError("authority_refused", "installed reader is read-only")
-            validated = validate_tool_arguments(name, arguments)
+            validated = self._validate_arguments(name, arguments)
             response = await self._client.send_frame(self._socket_path, {
-                "schema": ceo_ingress.APP_READ_SCHEMA,
+                "schema": self._READ_SCHEMA,
                 "tool": name, "arguments": validated,
             })
             result = response.result
@@ -486,6 +542,39 @@ class CeoIngressReadGateway:
             )
 
 
+class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
+    """Versioned Web-CEO installed reader; legacy v1 remains unchanged."""
+
+    _READ_TOOL_NAMES = (
+        "executive_state",
+        "executive_inbox",
+        "executive_job",
+        "executive_fabric",
+        "ceo_intent_status",
+    )
+    _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V2
+
+    def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from integrations.executive_mcp.web_ceo import (
+            validate_web_ceo_tool_arguments,
+        )
+
+        return validate_web_ceo_tool_arguments(name, arguments)
+
+
+class WebCeoV2CeoIngressReadGateway(WebCeoCeoIngressReadGateway):
+    """Static Web-CEO v2 installed reader (App-read v3); earlier readers frozen."""
+
+    _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V3
+
+    def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from integrations.executive_mcp.web_ceo import (
+            validate_web_ceo_v2_tool_arguments,
+        )
+
+        return validate_web_ceo_v2_tool_arguments(name, arguments)
+
+
 async def observe_ingress_grounding(
     client: CeoIngressClient, socket_path: Path | str,
 ) -> dict[str, str]:
@@ -497,3 +586,31 @@ async def observe_ingress_grounding(
     if result is None:
         raise GroundingUnavailable("installed grounding is unavailable")
     return result
+
+
+def make_jwt_authenticator_variants(
+    primary: AppPolicies,
+    alternates: tuple[AppPolicies, ...] = (),
+    *,
+    primary_jwks_cache: JwksKeySource | None = None,
+) -> tuple[tuple[JwtAuthenticator, JwtAuthenticator], ...]:
+    """Build exact per-resource authenticator pairs for one Executive service.
+
+    Every resource keeps its own immutable ResourcePolicy pair and therefore
+    retains exact JWT audience validation. This helper groups those exact
+    pairs for one app composition; it never turns the resource claim into a
+    wildcard or list-valued policy. A caller-supplied JWKS cache belongs only
+    to the primary resource. Alternate resources build their own bounded
+    caches so the existing cache-sharing contract is not widened across OAuth
+    resources.
+    """
+
+    if type(primary) is not AppPolicies:
+        raise TypeError("primary must be AppPolicies")
+    if type(alternates) is not tuple or any(
+        type(item) is not AppPolicies for item in alternates
+    ):
+        raise TypeError("alternates must be a tuple of AppPolicies")
+    pairs = [make_jwt_authenticators(primary, jwks_cache=primary_jwks_cache)]
+    pairs.extend(make_jwt_authenticators(item) for item in alternates)
+    return tuple(pairs)

@@ -143,7 +143,7 @@ def test_resume_operation_and_boolean_must_match_current_proxy_contract():
             _Client(),
             turn_input_loader=lambda _turn: "",
             capabilities=_capabilities(
-                supported_optional_operations=(),
+                supported_optional_operations=("fork_session",),
                 supports_native_resume=False,
             ),
         )
@@ -162,3 +162,77 @@ def test_structured_events_are_required_by_current_proxy():
             turn_input_loader=lambda _turn: "",
             capabilities=_capabilities(supports_structured_events=False),
         )
+
+
+# Native capability declarations are source facts, not installed admission.
+def _native_claude_capabilities():
+    from control_plane.claude_operator_adapter import ClaudeOperatorAdapter
+    # describe_capabilities reads only the interface constant, not provider state.
+    return ClaudeOperatorAdapter.describe_capabilities(object.__new__(ClaudeOperatorAdapter))
+
+
+def test_native_claude_declaration_composes_without_fabricated_resume():
+    capabilities = _native_claude_capabilities()
+    assert capabilities.supports_native_resume is False
+    assert capabilities.supported_optional_operations == ()
+    adapter = RemoteOperatorHarnessAdapter(
+        _Client(), turn_input_loader=lambda _turn: "", capabilities=capabilities
+    )
+    assert adapter.describe_capabilities() is capabilities
+    assert adapter.describe_capabilities().supports_subagent_capability_ceiling is False
+
+
+def test_native_no_resume_refuses_before_any_request_or_materialization():
+    adapter = RemoteOperatorHarnessAdapter(
+        _Client(), turn_input_loader=lambda _turn: "", capabilities=_native_claude_capabilities()
+    )
+    with pytest.raises(BrokerProtocolError, match="does not support native resume"):
+        adapter.resume_session(operation_id=None, epoch=None, generation=None,
+                               provider_session=None, requested=None)
+    assert adapter._start_receipts == {}
+    assert adapter._turn_results == {}
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "false"])
+def test_native_resume_claim_must_be_an_actual_boolean(value):
+    with pytest.raises(BrokerProtocolError, match="resume capability"):
+        RemoteOperatorHarnessAdapter(
+            _Client(), turn_input_loader=lambda _turn: "",
+            capabilities=_capabilities(supports_native_resume=value),
+        )
+
+
+@pytest.mark.parametrize("introspected", [False, True])
+@pytest.mark.parametrize("resume", [False, True])
+def test_closed_operation_shapes_preserve_actual_resume_claim(introspected, resume):
+    required = (("describe_capabilities", "validate_requested_profile") if introspected else ()) + _REQUIRED
+    capabilities = _capabilities(supported_required_operations=required,
+                                supported_optional_operations=("resume_session",) if resume else (),
+                                supports_native_resume=resume)
+    adapter = RemoteOperatorHarnessAdapter(_Client(), turn_input_loader=lambda _turn: "",
+                                           capabilities=capabilities)
+    assert adapter.describe_capabilities() is capabilities
+
+
+@pytest.mark.parametrize("required", [
+    ("describe_capabilities",) + _REQUIRED,
+    ("validate_requested_profile", "describe_capabilities") + _REQUIRED,
+    ("describe_capabilities", "validate_requested_profile") + _REQUIRED + ("invented",),
+    _REQUIRED + ("start_session",),
+])
+def test_extra_partial_or_reordered_required_operations_remain_closed(required):
+    with pytest.raises(BrokerProtocolError, match="required-operation"):
+        RemoteOperatorHarnessAdapter(_Client(), turn_input_loader=lambda _turn: "",
+                                     capabilities=_capabilities(supported_required_operations=required))
+
+
+def test_missing_resume_operation_cannot_advertise_resume_support():
+    with pytest.raises(BrokerProtocolError, match="resume capability"):
+        RemoteOperatorHarnessAdapter(_Client(), turn_input_loader=lambda _turn: "",
+                                     capabilities=_capabilities(supported_optional_operations=()))
+
+
+def test_protected_consultation_removal_is_not_resurrected_by_refactor():
+    import control_plane.remote_codex_operator_adapter as compatibility
+    for name in ("CodexConsultationIngress", "ConsultationIngressUnavailable", "ConsultationIngressRefused"):
+        assert not hasattr(compatibility, name)

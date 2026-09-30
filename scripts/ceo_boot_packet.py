@@ -43,6 +43,10 @@ def _parser() -> argparse.ArgumentParser:
         help="emit the mastermind.ceo_boot_packet.v1 document instead of text",
     )
     parser.add_argument(
+        "--repo-root",
+        help="Mastermind checkout/release root to project as this packet's source",
+    )
+    parser.add_argument(
         "--macro-root",
         help=f"Macro checkout to read Agent OS from (overrides ${ENV_MACRO_ROOT})",
     )
@@ -63,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
 
     packet = build_packet(
+        repo_root=Path(args.repo_root) if args.repo_root else None,
         macro_root_flag=args.macro_root,
         since=args.since,
         now=args.now,

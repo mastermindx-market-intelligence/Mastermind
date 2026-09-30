@@ -18,17 +18,21 @@ from control_plane import executive_worker_broker
 from control_plane import worker_adapter
 from control_plane import worker_execution_contract
 from control_plane.worker_execution_contract import (
+    LAUNCH_ATTESTATION_SCHEMA_VERSION,
     WORKER_EXECUTION_CONTRACT_VERSION,
     ArtifactReceipt,
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    LaunchAttestation,
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerResult,
     WorkerRunStatus,
+    validate_subscription_canary_claim,
+    worker_launch_spec_sha256,
 )
 
 
@@ -62,12 +66,15 @@ _LAUNCH_FIELDS = {
     "shared_run_gid",
     "secret_canary_verdict",
     "require_secret_canary",
+    "subscription_canary_claim",
 }
 _MOVED_NAMES = {
     "ArtifactReceipt",
     "BinaryAttestation",
     "CancelReceipt",
     "CollectionReceipt",
+    "LAUNCH_ATTESTATION_SCHEMA_VERSION",
+    "LaunchAttestation",
     "LaunchSpec",
     "ProcessRef",
     "ValidationReceipt",
@@ -93,6 +100,7 @@ _TARGET_CONSTRUCTORS = {
     "control_plane.executive_supervisor.ExecutiveSupervisor": "supervisor",
 }
 _EXPECTED_CONSTRUCTOR_SITES = {
+    ("control_plane/codex_account_environment.py", "CodexAccountEnvironment.worker_adapter", "adapter", 1),
     ("scripts/executive_os_phase1b.py", "_supervisor", "adapter", 1),
     ("scripts/executive_os_phase1b.py", "_supervisor", "supervisor", 1),
     ("scripts/executive_os_phase1b_proof.py", "_run", "adapter", 1),
@@ -107,6 +115,7 @@ _EXPECTED_CONSTRUCTOR_SITES = {
         1,
     ),
     ("scripts/executive_os_phase1c_worker.py", "_build_broker", "adapter", 1),
+    ("scripts/executive_os_linux_worker.py", "build_linux_worker_broker", "adapter", 1),
     (
         "scripts/executive_os_phase1fc_acceptance.py",
         "_ExactSupervisorFixtureDispatcher.__init__",
@@ -420,6 +429,11 @@ def test_common_artifact_limit_source_mutation_reaches_defaults_and_adapter_vali
         mutated_root / "control_plane",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    shutil.copytree(
+        _ROOT / "common",
+        mutated_root / "common",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
     contract_path = mutated_root / "control_plane" / "worker_execution_contract.py"
     tree = ast.parse(contract_path.read_text(encoding="utf-8"))
     replacements = {
@@ -686,6 +700,8 @@ def test_codex_compatibility_names_are_the_common_types() -> None:
         "BinaryAttestation": BinaryAttestation,
         "CancelReceipt": CancelReceipt,
         "CollectionReceipt": CollectionReceipt,
+        "LAUNCH_ATTESTATION_SCHEMA_VERSION": LAUNCH_ATTESTATION_SCHEMA_VERSION,
+        "LaunchAttestation": LaunchAttestation,
         "LaunchSpec": WorkerLaunchSpec,
         "ProcessRef": WorkerProcessRef,
         "ValidationReceipt": ValidationReceipt,
@@ -696,7 +712,58 @@ def test_codex_compatibility_names_are_the_common_types() -> None:
     for name, common_type in aliases.items():
         exported = getattr(codex_worker, name)
         assert exported is common_type
-        assert exported.__module__ == "control_plane.worker_execution_contract"
+        if isinstance(exported, type):
+            assert exported.__module__ == "control_plane.worker_execution_contract"
+        else:
+            assert getattr(worker_execution_contract, name) == exported
+
+
+def test_launch_attestation_to_dict_shape() -> None:
+    binary = _binary()
+    attestation = LaunchAttestation(
+        schema_version=LAUNCH_ATTESTATION_SCHEMA_VERSION,
+        created_at="2026-09-17T00:00:00+00:00",
+        executable_path="/fixture/provider",
+        binary=binary,
+        rendered_argv=("/fixture/provider", "exec", "--json", "-"),
+        environment_keys=("CODEX_HOME", "HOME", "PATH"),
+        permission_profile_sha256="c" * 64,
+        prompt_sha256="d" * 64,
+        expected_base_sha="e" * 40,
+        observed_base_sha="f" * 40,
+        workspace_identity={"path": "/fixture/workspace"},
+        worker_identity={"requested_user": "mastermind-worker"},
+        provider_home_identity={"path": "/fixture/provider-home"},
+        secret_canary_verdict={"schema_version": "v1", "passed": True},
+        launch_nonce="nonce-fixture",
+        process_identity={"pid": 42420, "pgid": 42420},
+    )
+
+    expected_keys = (
+        "schema_version",
+        "created_at",
+        "executable_path",
+        "binary",
+        "rendered_argv",
+        "environment_keys",
+        "permission_profile_sha256",
+        "prompt_sha256",
+        "expected_base_sha",
+        "observed_base_sha",
+        "workspace_identity",
+        "worker_identity",
+        "provider_home_identity",
+        "secret_canary_verdict",
+        "launch_nonce",
+        "process_identity",
+    )
+    assert tuple(attestation.to_dict().keys()) == expected_keys
+    assert attestation.to_dict()["schema_version"] == (
+        "mastermind.executive_launch_attestation/v1"
+    )
+    assert LAUNCH_ATTESTATION_SCHEMA_VERSION == (
+        "mastermind.executive_launch_attestation/v1"
+    )
 
 
 def test_common_consumers_do_not_import_moved_types_from_codex() -> None:
@@ -750,6 +817,188 @@ def test_serialized_common_launch_request_has_no_provider_owned_fields(
     }.isdisjoint(serialized)
 
 
+def _subscription_claim() -> dict:
+    now = 1_758_000_000_000
+    value = {
+        "schema": "mastermind.subscription_canary_claim/v1",
+        "execution_mode": "interactive_canary",
+        "run_id": "run-1",
+        "job_id": "job-1",
+        "worker_id": "worker-1",
+        "quota_class": "interactive",
+        "fence_generation": 7,
+        "capacity_generation": 7,
+        "capacity_state": "BUSY",
+        "held_attempt_id": "run-1",
+        "current_attempt_id": "run-1",
+        "binding_id": "reviewed-binding",
+        "profile_id": "reviewed-profile",
+        "adapter_id": "codex-cli",
+        "model": "reviewed-model",
+        "realm_config_sha256": "a" * 64,
+        "realm_generation": 2,
+        "catalog_digest": "b" * 64,
+        "issued_at_ms": now,
+        "expires_at_ms": now + 1_000,
+        "observation_digest": "c" * 64,
+    }
+    import hashlib
+    import json
+    value["observation_digest"] = hashlib.sha256(json.dumps(
+        {key: item for key, item in value.items() if key != "observation_digest"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return value
+
+
+def test_subscription_claim_is_frozen_closed_and_digest_participating(
+    tmp_path: Path,
+) -> None:
+    claim = _subscription_claim()
+    spec = _spec(tmp_path, authorities=("READ",), subscription_canary_claim=claim)
+
+    assert isinstance(spec.subscription_canary_claim, Mapping)
+    assert type(spec.subscription_canary_claim) is not dict
+    with pytest.raises(TypeError):
+        spec.subscription_canary_claim["run_id"] = "changed"
+    assert set(spec.subscription_canary_claim) == set(claim)
+    assert spec.subscription_canary_claim == claim
+    assert worker_launch_spec_sha256(spec) != worker_launch_spec_sha256(_spec(tmp_path))
+    changed = dict(claim)
+    changed["run_id"] = "run-2"
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="subscription canary claim is malformed",
+    ):
+        _spec(tmp_path, subscription_canary_claim=changed)
+
+
+def test_subscription_claim_rejects_unknown_malformed_and_secret_input(
+    tmp_path: Path,
+) -> None:
+    unknown = _subscription_claim()
+    unknown["seal"] = "opaque"
+    malformed = _subscription_claim()
+    malformed["expires_at_ms"] = "not-an-integer"
+    raw_secret = _subscription_claim()
+    raw_secret["binding_id"] = "token"
+
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="claim fields are invalid",
+    ):
+        validate_subscription_canary_claim(unknown)
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="expires_at_ms is invalid",
+    ):
+        validate_subscription_canary_claim(malformed)
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="raw secret label",
+    ):
+        validate_subscription_canary_claim(raw_secret)
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="claim fields are invalid",
+    ):
+        _spec(tmp_path, subscription_canary_claim=unknown)
+
+
+def test_subscription_claim_recovers_exactly_in_recovery_binding(
+    tmp_path: Path,
+) -> None:
+    prompt_path = tmp_path / "run" / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text("bounded interactive prompt", encoding="utf-8")
+    prompt_path.chmod(0o600)
+    spec = _spec(
+        tmp_path,
+        run_dir=tmp_path / "run",
+        prompt="bounded interactive prompt",
+        authorities=("READ",),
+        subscription_canary_claim=_subscription_claim(),
+    )
+    process = WorkerProcessRef(
+        run_id=spec.run_id,
+        pid=61,
+        pgid=61,
+        process_start_identity="start-61",
+        boot_session_id="boot-fixture",
+        launch_nonce="nonce-fixture",
+        provider_session_id=None,
+        stdout_path=str(spec.run_dir / "logs" / "stdout.jsonl"),
+        stderr_path=str(spec.run_dir / "logs" / "stderr.log"),
+        result_path=str(spec.run_dir / "output" / "result.json"),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=_binary(),
+        base_sha="c" * 40,
+    )
+    binding = worker_execution_contract.WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=process,
+        prompt_path=prompt_path,
+    )
+    restored = binding.recover_launch_spec()
+
+    assert restored == spec
+    assert restored.subscription_canary_claim == spec.subscription_canary_claim
+    assert worker_launch_spec_sha256(restored) == worker_launch_spec_sha256(spec)
+
+
+def test_launch_attestation_adds_canary_fields_only_for_canary(tmp_path: Path) -> None:
+    binary = _binary()
+    arguments = (
+        LAUNCH_ATTESTATION_SCHEMA_VERSION,
+        "2026-09-18T00:00:00+00:00",
+        "/fixture/provider",
+        binary,
+        ("/usr/bin/codex",),
+        ("CODEX_HOME",),
+        "d" * 64,
+        "e" * 64,
+        None,
+        "f" * 40,
+        {},
+        {},
+        {},
+        {},
+        "nonce-fixture",
+        {"pid": 61},
+    )
+    ordinary = LaunchAttestation(*arguments)
+    canary = LaunchAttestation(
+        *arguments,
+        subscription_canary_observation_digest="c" * 64,
+        subscription_canary_binding_id="reviewed-binding",
+        subscription_canary_model="reviewed-model",
+    )
+
+    assert set(ordinary.to_dict()) == {
+        "schema_version",
+        "created_at",
+        "executable_path",
+        "binary",
+        "rendered_argv",
+        "environment_keys",
+        "permission_profile_sha256",
+        "prompt_sha256",
+        "expected_base_sha",
+        "observed_base_sha",
+        "workspace_identity",
+        "worker_identity",
+        "provider_home_identity",
+        "secret_canary_verdict",
+        "launch_nonce",
+        "process_identity",
+    }
+    assert canary.to_dict()["subscription_canary_observation_digest"] == "c" * 64
+    assert canary.to_dict()["subscription_canary_binding_id"] == "reviewed-binding"
+    assert canary.to_dict()["subscription_canary_model"] == "reviewed-model"
+
+
 def test_phase1c_worker_composes_exactly_one_policy_owned_codex_home() -> None:
     source = (
         Path(__file__).resolve().parents[1] / "scripts" / "executive_os_phase1c_worker.py"
@@ -789,7 +1038,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
     assert census.violations == ()
     assert {site.identity for site in census.sites} == _EXPECTED_CONSTRUCTOR_SITES
     assert sum(site.kind == "supervisor" for site in census.sites) == 6
-    assert sum(site.kind == "adapter" for site in census.sites) == 4
+    assert sum(site.kind == "adapter" for site in census.sites) == 6
 
     killed: list[tuple[str, str, str, int]] = []
     for site in census.sites:
@@ -803,7 +1052,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
         assert len(mutant.violations) == 1
         assert expected in mutant.violations[0]
         killed.append(site.identity)
-    assert len(killed) == 10
+    assert len(killed) == 12
 
 
 def test_constructor_source_law_preserves_alias_qualified_opaque_and_foreign_controls(
@@ -849,3 +1098,133 @@ def test_constructor_source_law_preserves_alias_qualified_opaque_and_foreign_con
     assert foreign.violations == ()
     observed.append("foreign-adapter-home")
     assert len(observed) == 5
+
+def test_worker_recovery_binding_round_trips_exact_launch_spec(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "run" / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text("bounded recovery prompt", encoding="utf-8")
+    prompt_path.chmod(0o600)
+    spec = _spec(
+        tmp_path,
+        run_dir=tmp_path / "run",
+        prompt="bounded recovery prompt",
+        authorities=("READ", "RUN_TESTS"),
+        allowed_artifact_paths=("research/proof.md",),
+        isolation_manifest={"schema_version": "fixture", "entries": []},
+        isolation_manifest_sha256="1" * 64,
+        secret_canary_verdict={"schema_version": "fixture", "passed": True},
+    )
+    process = WorkerProcessRef(
+        run_id=spec.run_id,
+        pid=41,
+        pgid=41,
+        process_start_identity="start-41",
+        boot_session_id="boot-fixture",
+        launch_nonce="nonce-fixture",
+        provider_session_id=None,
+        stdout_path=str(tmp_path / "run" / "logs" / "stdout.jsonl"),
+        stderr_path=str(tmp_path / "run" / "logs" / "stderr.log"),
+        result_path=str(tmp_path / "run" / "output" / "result.json"),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=_binary(),
+        base_sha="c" * 40,
+        session_id=41,
+        effective_uid=501,
+        effective_gid=20,
+        real_uid=501,
+        real_gid=20,
+    )
+    binding = worker_execution_contract.WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=process,
+        prompt_path=prompt_path,
+    )
+    restored = worker_execution_contract.WorkerRecoveryBinding.from_dict(
+        binding.to_dict()
+    )
+    assert restored.process_ref == process
+    assert restored.recover_launch_spec() == spec
+    assert restored.launch_spec_sha256 == (
+        worker_execution_contract.worker_launch_spec_sha256(spec)
+    )
+    assert restored.collection_contract_version == (
+        worker_execution_contract.DURABLE_COLLECTION_CONTRACT_VERSION
+    )
+    assert "bounded recovery prompt" not in repr(restored)
+
+
+def test_worker_recovery_binding_refuses_prompt_or_identity_drift(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "run" / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text("original prompt", encoding="utf-8")
+    prompt_path.chmod(0o600)
+    spec = _spec(tmp_path, run_dir=tmp_path / "run", prompt="original prompt")
+    process = WorkerProcessRef(
+        run_id=spec.run_id,
+        pid=52,
+        pgid=52,
+        process_start_identity="start-52",
+        boot_session_id="boot-fixture",
+        launch_nonce="nonce-fixture",
+        provider_session_id=None,
+        stdout_path=str(tmp_path / "run" / "logs" / "stdout.jsonl"),
+        stderr_path=str(tmp_path / "run" / "logs" / "stderr.log"),
+        result_path=str(tmp_path / "run" / "output" / "result.json"),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=_binary(),
+        base_sha="c" * 40,
+    )
+    binding = worker_execution_contract.WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=process,
+        prompt_path=prompt_path,
+    )
+    prompt_path.write_text("changed prompt", encoding="utf-8")
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="prompt digest",
+    ):
+        binding.recover_launch_spec()
+    changed = binding.to_dict()
+    changed["process_ref"]["run_id"] = "different-run"
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="run identity",
+    ):
+        worker_execution_contract.WorkerRecoveryBinding.from_dict(changed)
+
+
+def test_worker_adapter_v1_keeps_recovery_as_an_optional_capability() -> None:
+    class MissingReattach:
+        adapter_id = "fixture"
+        inspector = _SyntheticInspector()
+
+        async def start(self, spec):
+            raise NotImplementedError
+
+        async def status(self, ref):
+            raise NotImplementedError
+
+        async def collect_result(self, ref):
+            raise NotImplementedError
+
+        async def cancel(self, ref, reason):
+            raise NotImplementedError
+
+        async def run_validation_argv(self, spec, argv, *, timeout_seconds=300.0):
+            raise NotImplementedError
+
+    class Complete(MissingReattach):
+        def reattach(self, spec, binding):
+            return binding.process_ref
+
+    assert isinstance(MissingReattach(), worker_adapter.WorkerExecutionAdapter)
+    assert not isinstance(
+        MissingReattach(), worker_adapter.RecoverableWorkerExecutionAdapter
+    )
+    assert isinstance(Complete(), worker_adapter.WorkerExecutionAdapter)
+    assert isinstance(
+        Complete(), worker_adapter.RecoverableWorkerExecutionAdapter
+    )

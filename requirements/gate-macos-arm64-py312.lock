@@ -3,7 +3,7 @@
 # Platform:    darwin / arm64
 # Interpreter: /opt/homebrew/bin/python3.12 (CPython 3.12.13)
 # Source:      pyproject.toml (extra "dev")
-# pyproject.toml sha256: d5d346c445dfce58fac1a3de82afe333d3eb8eeff4e49e957e402ce26af9a9ae
+# pyproject.toml sha256: f26dbfe12683bdd7eeb3cd15e9fbfe114f76c04e0b71bd650047001f22f58a2c
 #
 # Regenerate with (network to PyPI required):
 #   python scripts/rwe_env.py lock

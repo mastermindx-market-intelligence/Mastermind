@@ -820,6 +820,22 @@ class WorkbenchActionRuntime:
         except (SyncExecutorClosed, SyncExecutorLoopConflict) as error:
             raise RuntimeClosed("runtime admission is closed") from error
 
+    def read_channel_admissions(self, action_digest: str) -> tuple[ChannelAuditEvent, ...]:
+        """Read the durable channel admission facts for one exact action digest.
+
+        Synchronous by design: the consumer is an already admitted ``run_io``
+        operation on the bounded executor thread, so the read must never be
+        nested through the executor again.  It observes the same sink the
+        admission path appends to, mutates nothing, and reopens no admission.
+        """
+
+        with self._gate:
+            if self._closing or self._closed:
+                raise RuntimeClosed("runtime admission is closed")
+            if type(getattr(self, "channel_services", None)) is not ChannelRuntimeServices:
+                raise ValueError("channel audit binding is invalid")
+        return self._audit_sink.read_channel_admissions(action_digest)
+
     def revoke(self) -> None:
         with self._gate:
             self._revoked = True

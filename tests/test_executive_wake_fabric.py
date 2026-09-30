@@ -1245,3 +1245,62 @@ def test_mixed_binding_generations_cannot_coalesce():
 def test_negative_binding_generation_fails_closed():
     with pytest.raises(SessionTargetError, match="integer|>= 1"):
         RuntimeBinding(session_alias="PROPHET-COO-A", binding_id=_BIND, binding_generation=-1)
+
+
+def test_grok_bot_vocabulary_adds_no_target_or_transport_implementation() -> None:
+    assert "grok-bot" in REASONING_SURFACES
+    binding = RuntimeBinding(
+        session_alias="GROK-BOT-A",
+        binding_id="bind-grokbot00000001",
+        binding_generation=1,
+        reasoning_surface="grok-bot",
+    )
+    assert binding.reasoning_surface == "grok-bot"
+
+    registry = load_session_targets()
+    assert all(
+        target.reasoning_surface != "grok-bot"
+        for target in registry.targets.values()
+    )
+    assert "grok-bot" not in DEFAULT_TARGETS_PATH.read_text(encoding="utf-8")
+    assert transport_implemented("grok-computer") is False
+    assert {
+        transport_id
+        for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
+        if descriptor.transport_implemented
+    } == {"codex-app-server"}
+
+
+def test_requester_answer_wake_vocabulary_is_closed_and_separate() -> None:
+    source_ref = "consultation_answer_attention:" + "a" * 64
+    obligation = mint_obligation(
+        wake_kind=WakeKind.CONSULTATION_ANSWER_AVAILABLE,
+        source_kind=SourceKind.CONSULTATION_ANSWER_ATTENTION,
+        source_ref=source_ref,
+        declared_target_seat="coo",
+        job_id="JOB-101",
+        attempt_id=_ATT,
+        root_job_id=_JOB,
+    )
+
+    assert obligation.wake_kind is WakeKind.CONSULTATION_ANSWER_AVAILABLE
+    assert obligation.source_kind is SourceKind.CONSULTATION_ANSWER_ATTENTION
+    assert obligation.source_ref == source_ref
+    assert source_ref in obligation.evidence_refs
+
+    with pytest.raises(WakeObligationError, match="cannot mint wake_kind"):
+        mint_obligation(
+            wake_kind=WakeKind.CONSULTATION_ANSWER_AVAILABLE,
+            source_kind=SourceKind.AGENT_DIALOGUE_ATTENTION,
+            source_ref="agent_dialogue_attention:" + "b" * 64,
+            declared_target_seat="coo",
+            root_job_id=_JOB,
+        )
+    with pytest.raises(WakeObligationError, match="cannot mint wake_kind"):
+        mint_obligation(
+            wake_kind=WakeKind.DIALOGUE_TURN_PENDING,
+            source_kind=SourceKind.CONSULTATION_ANSWER_ATTENTION,
+            source_ref=source_ref,
+            declared_target_seat="coo",
+            root_job_id=_JOB,
+        )

@@ -257,3 +257,398 @@ def test_channel_event_exceeding_line_budget_poisons_without_append(
         assert (directory / "auth-audit.jsonl").read_bytes() == b""
     finally:
         os.close(host_fd)
+
+
+# ---------------------------------------------------------------------------
+# Durable admission read-back (#670): the sink is the only reader of its own
+# ledger, and only exact refused-before-dispatch history may ever support a
+# NOT_APPLIED reconciliation.
+# ---------------------------------------------------------------------------
+
+from integrations.business_mcp_auth.audit import (  # noqa: E402
+    ADMISSION_ABSENT,
+    ADMISSION_ACCEPTED,
+    ADMISSION_REFUSED_ONLY,
+    ADMISSION_UNCERTAIN,
+    classify_channel_admissions,
+)
+
+OTHER_DIGEST = "c" * 64
+OTHER_CHANNEL_REF = "d" * 64
+
+
+def _seed_ledger(sink: DurableAuthAuditSink) -> None:
+    sink.emit(oauth_event())
+    sink.emit(channel_event(code="accepted", tool="prepare_text_patch"))
+    sink.emit(
+        channel_event(
+            code="channel_refused", tool="commit_text_patch", action_digest=ACTION_DIGEST
+        )
+    )
+    sink.emit(
+        channel_event(code="accepted", tool="commit_text_patch", action_digest=OTHER_DIGEST)
+    )
+    sink.emit(
+        channel_event(
+            code="accepted", tool="reconcile_text_patch", action_digest=ACTION_DIGEST
+        )
+    )
+    sink.emit(oauth_event("scope_refused", False))
+
+
+def test_read_channel_admissions_returns_exact_digest_rows_in_order_and_after_reopen(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    try:
+        sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        _seed_ledger(sink)
+        before = (directory / "auth-audit.jsonl").read_bytes()
+        rows = sink.read_channel_admissions(ACTION_DIGEST)
+        assert [(row.tool, row.code, row.accepted) for row in rows] == [
+            ("commit_text_patch", "channel_refused", False),
+            ("reconcile_text_patch", "accepted", True),
+        ]
+        assert all(row.action_digest == ACTION_DIGEST for row in rows)
+        assert sink.read_channel_admissions("e" * 64) == ()
+        # A read appends nothing and leaves the sink live for its next append.
+        assert (directory / "auth-audit.jsonl").read_bytes() == before
+        sink.emit(channel_event(code="accepted", tool="workspace_manifest"))
+        sink.close()
+
+        # Restart: a freshly opened sink over the same named ledger reads the
+        # identical durable history; nothing lives only in memory.
+        reopened = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        try:
+            again = reopened.read_channel_admissions(ACTION_DIGEST)
+            assert again == rows
+        finally:
+            reopened.close()
+    finally:
+        os.close(host_fd)
+
+
+def test_read_channel_admissions_refuses_when_not_live(tmp_path: Path) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    try:
+        sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        with pytest.raises(AuditSinkPoisoned):
+            sink.read_channel_admissions("not-a-digest")
+        sink.close()
+        with pytest.raises(AuditSinkPoisoned):
+            sink.read_channel_admissions(ACTION_DIGEST)
+    finally:
+        os.close(host_fd)
+
+
+@pytest.mark.parametrize(
+    "injected",
+    [
+        pytest.param(b'{"accepted":false,"code":"channel_refused"', id="torn-tail"),
+        pytest.param(b"\n", id="blank-line"),
+        pytest.param(b"[" * 2000 + b"]" * 2000 + b"\n", id="deeply-nested-line"),
+        pytest.param(
+            canonical(
+                {
+                    "accepted": False,
+                    "action_digest": ACTION_DIGEST,
+                    "channel_ref": CHANNEL_REF,
+                    "code": "channel_refused",
+                    "policy_id": "some-other-policy",
+                    "schema": CHANNEL_AUDIT_SCHEMA,
+                    "tool": "commit_text_patch",
+                }
+            ).encode("ascii")
+            + b"\n",
+            id="off-policy-row",
+        ),
+        pytest.param(
+            canonical(
+                {
+                    "accepted": False,
+                    "action_digest": ACTION_DIGEST,
+                    "channel_ref": CHANNEL_REF,
+                    "code": "channel_refused",
+                    "extra": 1,
+                    "policy_id": POLICY_ID,
+                    "schema": CHANNEL_AUDIT_SCHEMA,
+                    "tool": "commit_text_patch",
+                }
+            ).encode("ascii")
+            + b"\n",
+            id="extra-key",
+        ),
+        pytest.param(
+            (
+                canonical(
+                    {
+                        "accepted": False,
+                        "action_digest": ACTION_DIGEST,
+                        "channel_ref": CHANNEL_REF,
+                        "code": "channel_refused",
+                        "policy_id": POLICY_ID,
+                        "schema": CHANNEL_AUDIT_SCHEMA,
+                        "tool": "commit_text_patch",
+                    }
+                ).replace(",", ", ")
+            ).encode("ascii")
+            + b"\n",
+            id="non-canonical-whitespace",
+        ),
+        pytest.param(
+            canonical(
+                {
+                    "accepted": True,
+                    "action_digest": ACTION_DIGEST,
+                    "channel_ref": CHANNEL_REF,
+                    "code": "channel_refused",
+                    "policy_id": POLICY_ID,
+                    "schema": CHANNEL_AUDIT_SCHEMA,
+                    "tool": "commit_text_patch",
+                }
+            ).encode("ascii")
+            + b"\n",
+            id="accepted-flag-contradicts-code",
+        ),
+        pytest.param(
+            canonical(
+                {
+                    "accepted": False,
+                    "code": "channel_refused",
+                    "policy_id": POLICY_ID,
+                    "schema": CHANNEL_AUDIT_SCHEMA,
+                }
+            ).encode("ascii")
+            + b"\n",
+            id="channel-code-in-oauth-shape",
+        ),
+    ],
+)
+def test_read_channel_admissions_refuses_torn_foreign_or_off_contract_lines(
+    tmp_path: Path, injected: bytes
+) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    try:
+        sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        _seed_ledger(sink)
+        sink.close()
+        # The ledger is edited while no sink owns it (a restart gap).  Reopen
+        # sees only a size; the read must refuse to speak for any action.
+        with open(directory / "auth-audit.jsonl", "ab") as handle:
+            handle.write(injected)
+        reopened = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        try:
+            with pytest.raises(AuditSinkPoisoned):
+                reopened.read_channel_admissions(ACTION_DIGEST)
+            with pytest.raises(AuditSinkPoisoned):
+                reopened.read_channel_admissions(OTHER_DIGEST)
+        finally:
+            reopened.close()
+    finally:
+        os.close(host_fd)
+
+
+def test_read_channel_admissions_refuses_size_or_identity_drift(tmp_path: Path) -> None:
+    directory = tmp_path / "audit"
+    host_fd = open_directory(directory)
+    try:
+        sink = DurableAuthAuditSink.open(host_fd, policy_id=POLICY_ID)
+        _seed_ledger(sink)
+        assert len(sink.read_channel_admissions(ACTION_DIGEST)) == 2
+        named = directory / "auth-audit.jsonl"
+        content = named.read_bytes()
+        # Out-of-band append: the named file is larger than the owned size.
+        with open(named, "ab") as handle:
+            handle.write(b"\n")
+        with pytest.raises(AuditSinkPoisoned):
+            sink.read_channel_admissions(ACTION_DIGEST)
+        # Identity replacement with byte-identical content: the owned
+        # description no longer names the file, so nothing is readable.
+        forged = directory / "forged.jsonl"
+        forged.write_bytes(content)
+        os.chmod(forged, 0o600)
+        os.replace(forged, named)
+        with pytest.raises(AuditSinkPoisoned):
+            sink.read_channel_admissions(ACTION_DIGEST)
+        with pytest.raises(AuditSinkPoisoned):
+            sink.emit(channel_event(code="accepted", tool="workspace_manifest"))
+        with pytest.raises(AuditSinkPoisoned):
+            sink.close()
+    finally:
+        os.close(host_fd)
+
+
+def _row(
+    *,
+    tool: str,
+    code: str,
+    digest: str = ACTION_DIGEST,
+    channel_ref: str = CHANNEL_REF,
+    policy_id: str = POLICY_ID,
+    accepted: bool | None = None,
+    schema: str = CHANNEL_AUDIT_SCHEMA,
+) -> ChannelAuditEvent:
+    return channel_event(
+        code=code,
+        accepted=accepted,
+        tool=tool,
+        channel_ref=channel_ref,
+        action_digest=digest,
+        policy_id=policy_id,
+        schema=schema,
+    )
+
+
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        pytest.param((), ADMISSION_ABSENT, id="empty"),
+        pytest.param(
+            (_row(tool="reconcile_text_patch", code="accepted"),),
+            ADMISSION_ABSENT,
+            id="only-read-side-admissions",
+        ),
+        pytest.param(
+            (_row(tool="commit_text_patch", code="channel_refused"),),
+            ADMISSION_REFUSED_ONLY,
+            id="single-refusal",
+        ),
+        pytest.param(
+            (
+                _row(tool="commit_text_patch", code="channel_refused"),
+                _row(tool="reconcile_text_patch", code="accepted"),
+                _row(tool="commit_text_patch", code="channel_refused"),
+            ),
+            ADMISSION_REFUSED_ONLY,
+            id="repeated-refusals-with-reconcile-reads",
+        ),
+        pytest.param(
+            (
+                _row(tool="commit_text_patch", code="channel_refused"),
+                _row(tool="commit_text_patch", code="accepted"),
+            ),
+            ADMISSION_ACCEPTED,
+            id="refused-then-accepted",
+        ),
+        pytest.param(
+            (
+                _row(tool="commit_text_patch", code="accepted"),
+                _row(tool="commit_text_patch", code="channel_refused"),
+            ),
+            ADMISSION_ACCEPTED,
+            id="accepted-then-refused",
+        ),
+        pytest.param(
+            (
+                _row(tool="commit_text_patch", code="channel_refused"),
+                _row(
+                    tool="commit_text_patch",
+                    code="accepted",
+                    channel_ref=OTHER_CHANNEL_REF,
+                ),
+            ),
+            ADMISSION_ACCEPTED,
+            id="another-channel-accepted-the-same-digest",
+        ),
+        pytest.param(
+            (
+                _row(tool="commit_text_patch", code="channel_refused"),
+                _row(tool="run_project_command", code="accepted"),
+            ),
+            ADMISSION_ACCEPTED,
+            id="other-modifying-tool-accepted-the-same-digest",
+        ),
+        pytest.param(
+            (_row(tool="run_project_command", code="channel_refused"),),
+            ADMISSION_ABSENT,
+            id="refusal-of-a-different-modifying-tool-is-not-evidence",
+        ),
+        pytest.param(
+            (_row(tool="commit_text_patch", code="channel_refused", digest=OTHER_DIGEST),),
+            ADMISSION_ABSENT,
+            id="refusal-of-a-different-digest-is-not-evidence",
+        ),
+        pytest.param(
+            (
+                _row(
+                    tool="commit_text_patch",
+                    code="channel_refused",
+                    channel_ref=OTHER_CHANNEL_REF,
+                ),
+            ),
+            ADMISSION_UNCERTAIN,
+            id="refusal-under-another-channel-identity",
+        ),
+        pytest.param(
+            (
+                _row(
+                    tool="commit_text_patch",
+                    code="channel_refused",
+                    policy_id="some-other-policy",
+                ),
+            ),
+            ADMISSION_UNCERTAIN,
+            id="refusal-under-another-policy-identity",
+        ),
+        pytest.param(
+            (_row(tool="commit_text_patch", code="request_refused"),),
+            ADMISSION_UNCERTAIN,
+            id="non-channel-refusal-code-on-a-modifying-tool",
+        ),
+        pytest.param(
+            (_row(tool="commit_text_patch", code="channel_refused", accepted=True),),
+            ADMISSION_UNCERTAIN,
+            id="contradictory-accepted-flag",
+        ),
+        pytest.param(
+            (
+                _row(tool="commit_text_patch", code="channel_refused"),
+                _row(
+                    tool="reconcile_text_patch",
+                    code="accepted",
+                    schema=AUTH_AUDIT_SCHEMA,
+                ),
+            ),
+            ADMISSION_UNCERTAIN,
+            id="wrong-schema-on-any-row-for-the-digest",
+        ),
+    ],
+)
+def test_classify_channel_admissions_verdicts(rows, expected) -> None:
+    assert (
+        classify_channel_admissions(
+            rows,
+            action_digest=ACTION_DIGEST,
+            channel_ref=CHANNEL_REF,
+            policy_id=POLICY_ID,
+            modifying_tool="commit_text_patch",
+        )
+        == expected
+    )
+
+
+def test_classify_channel_admissions_refuses_invalid_identity_inputs() -> None:
+    rows = (_row(tool="commit_text_patch", code="channel_refused"),)
+    assert (
+        classify_channel_admissions(
+            rows,
+            action_digest="short",
+            channel_ref=CHANNEL_REF,
+            policy_id=POLICY_ID,
+            modifying_tool="commit_text_patch",
+        )
+        == ADMISSION_UNCERTAIN
+    )
+    assert (
+        classify_channel_admissions(
+            rows,
+            action_digest=ACTION_DIGEST,
+            channel_ref=CHANNEL_REF,
+            policy_id=POLICY_ID,
+            modifying_tool="reconcile_text_patch",
+        )
+        == ADMISSION_UNCERTAIN
+    )

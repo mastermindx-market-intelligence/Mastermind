@@ -45,6 +45,9 @@ dev = [
 business-mcp = [
     "mcp==1.28.1",
     "PyJWT[crypto]==2.13.0",
+    # Executive installed reads execute the canonical boot-packet collector in
+    # this dependency-complete edge runtime; the sealed control Python stays -S.
+    "PyYAML==6.0.3",
 ]
 
 [tool.setuptools.packages.find]

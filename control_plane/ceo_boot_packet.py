@@ -46,11 +46,18 @@ Usage
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import selectors
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -80,7 +87,425 @@ DEFAULT_TIMEOUT = 60
 # Other existing callers retain the historical stdlib subprocess path unless they
 # explicitly opt into that runner contract.
 DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+_MAX_RUNNER_INPUT_BYTES = 32 * 1024 * 1024
 Runner = Callable[..., Mapping[str, Any]]
+
+
+def _process_group_presence(pgid: int) -> bool | None:
+    """True/False for observed group presence; None means presence is uncertain."""
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return None
+
+
+def _wait_process_group_absent(pgid: int, *, timeout: float) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if _process_group_presence(pgid) is False:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+
+
+def _positively_settled(proc: subprocess.Popen[bytes], *, timeout: float) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        leader_done = proc.poll() is not None
+        group_gone = _process_group_presence(proc.pid) is False
+        if leader_done and group_gone:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.005)
+
+
+def _terminate_owned_process_group(proc: subprocess.Popen[bytes]) -> None:
+    """Settle one owned session without suppressing an uncertain signal failure."""
+    proc.poll()  # Reap/settle a fast-exited leader before the group probe.
+    presence = _process_group_presence(proc.pid)
+    if presence is False and proc.returncode is not None:
+        return
+
+    signal_error: OSError | None = None
+    if presence is not False:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError as exc:
+            signal_error = exc
+            # Darwin can race a just-exited/new-session leader and return EPERM.
+            # Give that exact child a tiny bounded settlement window; only a
+            # positively reaped leader plus absent group makes the error harmless.
+            if _positively_settled(proc, timeout=0.05):
+                return
+
+    if signal_error is not None or (presence is False and proc.returncode is None):
+        # If the group signal raced session establishment, kill the exact Popen
+        # leader we own.  This cannot target a recycled pid while the Popen is live.
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError as exc:
+                if not _positively_settled(proc, timeout=0.05):
+                    raise RuntimeError("owned process cleanup is uncertain") from exc
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("owned process leader did not settle") from exc
+        if _process_group_presence(proc.pid) is False:
+            return
+        # A descendant can keep the owned pgid alive after its leader settles.
+        # Retry the group kill now that the setsid/fast-exit race is over.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError as exc:
+            if _positively_settled(proc, timeout=0.05):
+                return
+            raise RuntimeError("owned process-group cleanup is uncertain") from exc
+
+    try:
+        proc.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except OSError as exc:
+            if proc.poll() is None:
+                raise RuntimeError("owned process cleanup is uncertain") from exc
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("owned process leader did not settle") from exc
+
+    if not _wait_process_group_absent(proc.pid, timeout=0.5):
+        raise RuntimeError("owned process group did not settle")
+
+
+def bounded_subprocess_runner(
+    argv: Sequence[str | os.PathLike[str]], *, cwd: Path, timeout: float, max_bytes: int,
+    env: Mapping[str, str] | None = None, input_bytes: bytes | None = None,
+) -> dict[str, Any]:
+    """Run one read-only helper with hard input, output, and lifecycle ceilings."""
+    if input_bytes is not None and (
+        type(input_bytes) is not bytes or len(input_bytes) > _MAX_RUNNER_INPUT_BYTES
+    ):
+        raise ValueError("bounded runner input is invalid")
+    stdin_file = None
+    stdin_source: int | Any = subprocess.DEVNULL
+    if input_bytes is not None:
+        stdin_file = tempfile.TemporaryFile()
+        stdin_file.write(input_bytes)
+        stdin_file.seek(0)
+        stdin_source = stdin_file
+    try:
+        proc = subprocess.Popen(
+            [os.fspath(item) for item in argv], cwd=os.fspath(cwd),
+            stdin=stdin_source, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True, env=dict(env) if env is not None else None,
+        )
+    finally:
+        if stdin_file is not None:
+            stdin_file.close()
+    assert proc.stdout is not None and proc.stderr is not None
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
+    selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    total = 0
+    timed_out = False
+    limit_exceeded = False
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            for key, _mask in selector.select(min(0.1, remaining)):
+                chunk = os.read(key.fileobj.fileno(), min(65536, max_bytes + 1))
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                buffers[key.data].extend(chunk)
+                total += len(chunk)
+                if total > max_bytes:
+                    limit_exceeded = True
+                    break
+            if limit_exceeded:
+                break
+
+        if not (timed_out or limit_exceeded) and proc.poll() is None:
+            remaining = max(0.0, deadline - time.monotonic())
+            try:
+                proc.wait(timeout=remaining)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+    finally:
+        selector.close()
+        for pipe in (proc.stdout, proc.stderr):
+            if pipe is not None and not pipe.closed:
+                pipe.close()
+
+    # Always settle the owned process group.  This handles both timeout/overflow
+    # and a clean leader that forked a quiet descendant before exiting.
+    _terminate_owned_process_group(proc)
+
+    invalid_utf8 = False
+    decoded: dict[str, str] = {}
+    for name, raw in buffers.items():
+        if len(raw) > max_bytes:
+            del raw[max_bytes:]
+        try:
+            decoded[name] = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            decoded[name] = ""
+            invalid_utf8 = True
+    return {
+        "code": proc.returncode, "stdout": decoded["stdout"],
+        "stderr": decoded["stderr"], "timed_out": timed_out,
+        "limit_exceeded": limit_exceeded, "invalid_utf8": invalid_utf8,
+    }
+
+
+@dataclass(frozen=True)
+class _CapacityBootRuntimeContract:
+    runtime_root: Path
+    python_binary: Path
+    site_packages: Path
+    python_version: str
+    python_binary_sha256: str
+    pyyaml_version: str
+    pyyaml_record_sha256: str
+    runtime_tree_sha256: str
+    owner_uid: int
+    owner_gid: int
+    trusted_ancestors: tuple[Path, ...]
+    strict_group_ancestors: tuple[Path, ...]
+    has_extended_acl: Callable[[int], bool]
+    verify_pyyaml_record: Callable[[Path], str]
+    runtime_tree_digest: Callable[[Path], str]
+
+
+def _capacity_runtime_contract() -> _CapacityBootRuntimeContract:
+    """Consume the accepted CF2 capacity-runtime owner without cloning its law."""
+    from ops.executive_os import capacity_host_artifacts, capacity_source_contract
+
+    runtime_root = capacity_source_contract.RUNTIME_ROOT
+    system_root = capacity_source_contract.SYSTEM_ROOT
+    return _CapacityBootRuntimeContract(
+        runtime_root=runtime_root,
+        python_binary=capacity_source_contract.PYTHON_BINARY,
+        site_packages=(
+            runtime_root / "lib" / "python3.12" / "site-packages"
+        ),
+        python_version=capacity_source_contract.BASE_PYTHON_VERSION,
+        python_binary_sha256=capacity_source_contract.BASE_PYTHON_BINARY_SHA256,
+        pyyaml_version=capacity_source_contract.PYYAML_VERSION,
+        pyyaml_record_sha256=capacity_source_contract.PYYAML_RECORD_SHA256,
+        runtime_tree_sha256=capacity_source_contract.RUNTIME_TREE_SHA256,
+        owner_uid=0,
+        owner_gid=0,
+        trusted_ancestors=(
+            Path("/Library"),
+            Path("/Library/Application Support"),
+            system_root,
+            system_root / "capacity-runtimes",
+            runtime_root,
+        ),
+        strict_group_ancestors=(
+            system_root, system_root / "capacity-runtimes", runtime_root,
+        ),
+        has_extended_acl=capacity_host_artifacts._descriptor_has_extended_acl,
+        verify_pyyaml_record=capacity_host_artifacts.verify_pyyaml_record,
+        runtime_tree_digest=capacity_host_artifacts.runtime_tree_digest,
+    )
+
+
+def _require_capacity_runtime_acl(
+    path: Path, observed: os.stat_result, contract: Any,
+) -> None:
+    """Reuse the capacity host ACL observer and bind it to the lstat object."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    if stat.S_ISDIR(observed.st_mode):
+        flags |= getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise RuntimeError("capacity runtime ACL inspection failed") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_mode,
+            opened.st_uid,
+            opened.st_gid,
+        ) != (
+            observed.st_dev,
+            observed.st_ino,
+            observed.st_mode,
+            observed.st_uid,
+            observed.st_gid,
+        ):
+            raise RuntimeError("capacity runtime metadata changed during ACL inspection")
+        try:
+            has_extended_acl = contract.has_extended_acl(descriptor)
+        except Exception as exc:
+            raise RuntimeError("capacity runtime ACL inspection failed") from exc
+        if has_extended_acl:
+            raise RuntimeError("capacity runtime ACL seal differs")
+    finally:
+        os.close(descriptor)
+
+
+def _require_capacity_runtime_metadata(contract: Any) -> None:
+    runtime_root = Path(contract.runtime_root)
+    trusted_ancestors = tuple(
+        Path(value) for value in getattr(contract, "trusted_ancestors", (runtime_root,))
+    )
+    strict_group_ancestors = frozenset(
+        Path(value)
+        for value in getattr(contract, "strict_group_ancestors", (runtime_root,))
+    )
+    for ancestor in trusted_ancestors:
+        observed = ancestor.lstat()
+        if (
+            not stat.S_ISDIR(observed.st_mode)
+            or observed.st_uid != contract.owner_uid
+            # Generic macOS traversal ancestors such as /Library/Application Support
+            # may be root:admin while remaining sealed. The Mastermind-owned subtree
+            # stays on the capacity owner's exact root:wheel group contract.
+            or (ancestor in strict_group_ancestors and observed.st_gid != contract.owner_gid)
+            or stat.S_IMODE(observed.st_mode) & 0o022
+        ):
+            raise RuntimeError("capacity runtime ancestor metadata differs")
+        _require_capacity_runtime_acl(ancestor, observed, contract)
+
+    for directory, directory_names, file_names in os.walk(
+        runtime_root, topdown=True, followlinks=False,
+    ):
+        root_path = Path(directory)
+        for name in sorted([*directory_names, *file_names]):
+            path = root_path / name
+            observed = path.lstat()
+            if (
+                observed.st_uid != contract.owner_uid
+                or observed.st_gid != contract.owner_gid
+                or stat.S_IMODE(observed.st_mode) & 0o022
+                or stat.S_ISLNK(observed.st_mode)
+            ):
+                raise RuntimeError("capacity runtime object metadata differs")
+            if stat.S_ISREG(observed.st_mode):
+                if observed.st_nlink != 1:
+                    raise RuntimeError("capacity runtime file hard-link count differs")
+            elif not stat.S_ISDIR(observed.st_mode):
+                raise RuntimeError("capacity runtime object type differs")
+            _require_capacity_runtime_acl(path, observed, contract)
+
+    python_binary = Path(contract.python_binary)
+    binary_stat = python_binary.lstat()
+    if (
+        not stat.S_ISREG(binary_stat.st_mode)
+        or binary_stat.st_nlink != 1
+        or not (stat.S_IMODE(binary_stat.st_mode) & 0o111)
+    ):
+        raise RuntimeError("capacity runtime Python metadata differs")
+    site_packages = Path(contract.site_packages)
+    if (
+        not site_packages.is_dir()
+        or site_packages.is_symlink()
+        or runtime_root not in site_packages.parents
+    ):
+        raise RuntimeError("capacity runtime site-packages path differs")
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def attest_capacity_boot_runtime(
+    python_executable: Path, *, Runner: Callable[..., Mapping[str, Any]] | None = None,
+    runner: Callable[..., Mapping[str, Any]] | None = None,
+) -> Path:
+    """Attest and probe the one accepted dependency-complete boot runtime.
+
+    ``Runner`` is retained only as a fail-closed typo guard for callers migrating from
+    older drafts; exactly one lower-case ``runner`` may be supplied.
+    """
+    if Runner is not None:
+        raise TypeError("capacity runtime attestor requires lower-case runner")
+    contract = _capacity_runtime_contract()
+    configured = Path(os.path.abspath(os.fspath(python_executable)))
+    expected_python = Path(contract.python_binary)
+    if configured != expected_python:
+        raise RuntimeError("capacity runtime Python path differs")
+
+    def verify_closure() -> None:
+        _require_capacity_runtime_metadata(contract)
+        if _sha256_file(expected_python) != contract.python_binary_sha256:
+            raise RuntimeError("capacity runtime Python digest differs")
+        if contract.verify_pyyaml_record(Path(contract.runtime_root)) != contract.pyyaml_record_sha256:
+            raise RuntimeError("capacity runtime PyYAML RECORD digest differs")
+        if contract.runtime_tree_digest(Path(contract.runtime_root)) != contract.runtime_tree_sha256:
+            raise RuntimeError("capacity runtime tree digest differs")
+
+    verify_closure()
+    probe = runner or bounded_subprocess_runner
+    probe_code = (
+        "import pathlib,site,sys;"
+        "root=pathlib.Path(sys.argv[1]).resolve(strict=True);"
+        "site_packages=pathlib.Path(sys.argv[2]).resolve(strict=True);"
+        "expected_python=pathlib.Path(sys.argv[3]).resolve(strict=True);"
+        "assert pathlib.Path(sys.executable).resolve(strict=True)==expected_python;"
+        # CF1 is a sealed runtime tree, not a venv; sys.prefix/base_prefix correctly
+        # remain the reviewed framework. Exact runtime identity is bound above by
+        # executable path/digest, RECORD digest and the complete runtime-tree digest.
+        "assert sys.version.split()[0]==sys.argv[4];"
+        "assert site.ENABLE_USER_SITE is not True;"
+        "sys.path.insert(0,str(site_packages));"
+        "import _yaml,yaml;"
+        "assert yaml.__version__==sys.argv[5];"
+        "assert all(site_packages in pathlib.Path(m.__file__).resolve(strict=True).parents "
+        "for m in (yaml,_yaml));"
+        "print('CAPACITY_RUNTIME_OK')"
+    )
+    environment = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+    }
+    result = probe(
+        [
+            os.fspath(expected_python), "-I", "-S", "-B", "-c", probe_code,
+            os.fspath(contract.runtime_root), os.fspath(contract.site_packages),
+            os.fspath(expected_python), contract.python_version, contract.pyyaml_version,
+        ],
+        cwd=Path(contract.runtime_root), timeout=10.0, max_bytes=64 * 1024,
+        env=environment,
+    )
+    if (
+        not isinstance(result, Mapping)
+        or result.get("code") != 0
+        or result.get("stdout") != "CAPACITY_RUNTIME_OK\n"
+        or result.get("stderr") not in {"", None}
+        or any(
+            result.get(flag) is True
+            for flag in ("timed_out", "limit_exceeded", "invalid_utf8")
+        )
+    ):
+        raise RuntimeError("capacity runtime import probe failed")
+    verify_closure()
+    return Path(contract.site_packages)
+
 
 #: Budget for the two ``git rev-parse`` probes.  A hung git is a degraded packet, not
 #: a hung CEO.
@@ -358,6 +783,88 @@ def git_sha(path: Path) -> str | None:
 def git_branch(path: Path) -> str | None:
     """Public name for :func:`_git_branch`.  A wrapper, for the reason above."""
     return _git_branch(path)
+
+
+def build_packet_in_interpreter(
+    *,
+    boot_python: Path | None,
+    repo_root: Path,
+    macro_root: Path,
+    timeout: float = DEFAULT_TIMEOUT,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Build one grounded packet in a sealed YAML-capable read interpreter.
+
+    This is an orientation-only process boundary owned by the canonical boot-packet
+    module.  It never enters the MCP integration package, never inherits HOME or
+    ambient Git configuration, and accepts child output only when schema plus both
+    repository SHAs match fresh host observations.
+    """
+    root = Path(repo_root).resolve()
+    macro = Path(macro_root).resolve()
+
+    def fallback(reason: str) -> dict[str, Any]:
+        packet = build_packet(
+            repo_root=root, macro_root_flag=os.fspath(macro), now=now, timeout=timeout
+        )
+        packet["degraded"] = [
+            f"installed boot helper unavailable: {reason}",
+            *(str(item) for item in (packet.get("degraded") or [])),
+        ]
+        return packet
+
+    if boot_python is None:
+        return fallback("interpreter_not_configured")
+    python = Path(boot_python).resolve()
+    argv = [
+        os.fspath(python), "-I", "-B",
+        os.fspath(root / "scripts" / "ceo_boot_packet.py"),
+        "--json", "--macro-root", os.fspath(macro),
+        "--timeout", str(timeout),
+    ]
+    if now is not None:
+        argv.extend(["--now", str(now)])
+    env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": os.fspath(root),
+        "GIT_CONFIG_KEY_1": "safe.directory",
+        "GIT_CONFIG_VALUE_1": os.fspath(macro),
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "MACRO_MASTERMIND_REPO": os.fspath(root),
+    }
+    try:
+        process = subprocess.run(
+            argv, cwd=os.fspath(root), env=env, capture_output=True, text=True,
+            check=False, timeout=timeout + 10.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return fallback("process_unavailable")
+    if process.returncode != 0:
+        return fallback("process_failed")
+    try:
+        packet = json.loads(process.stdout)
+    except (TypeError, ValueError):
+        return fallback("invalid_json")
+    if not isinstance(packet, dict) or packet.get("schema") != SCHEMA:
+        return fallback("schema_mismatch")
+    expected_mastermind = git_sha(root)
+    expected_macro = git_sha(macro)
+    if (
+        not expected_mastermind or not expected_macro
+        or (packet.get("mastermind") or {}).get("sha") != expected_mastermind
+        or (packet.get("macro") or {}).get("sha") != expected_macro
+    ):
+        return fallback("grounding_mismatch")
+    return packet
 
 
 def load_strategic_summary() -> tuple[dict[str, Any] | None, str | None]:

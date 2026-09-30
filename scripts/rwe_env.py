@@ -23,6 +23,9 @@ Subcommands
 ``gate --env DIR [--subset PATH]``
     Run the repository test gate (or a bounded ``pytest`` subset) using
     ``DIR``'s interpreter, and append the outcome to the receipt.
+``run --receipt-out PATH [--subset PATH] [--lock PATH] [--python PATH]``
+    Realize one fresh disposable environment, run the gate, export its final
+    secret-free receipt, and remove the environment before returning.
 
 Receipt schema: ``mastermind.worker_environment/v1`` (see ``build_receipt``).
 Hard rule: the receipt never contains secrets, raw environment-variable
@@ -34,12 +37,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -1020,6 +1026,273 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# subcommand: run -- one fresh disposable worker environment + gate
+# ---------------------------------------------------------------------------
+
+
+def _receipt_output_target(value: str) -> tuple[Path, tuple[int, int]]:
+    """Resolve a new receipt target and bind the canonical parent identity.
+
+    Existing parent symlinks (notably macOS ``/tmp``) are canonicalized once.
+    The final leaf must not already exist, including a broken symlink.  The
+    returned device/inode pair lets publication refuse if the canonical parent
+    is replaced between preflight and the atomic create.
+    """
+
+    lexical = Path(value).expanduser()
+    if lexical.exists() or lexical.is_symlink():
+        raise EnvError(f"receipt output already exists: {lexical}")
+    try:
+        parent = lexical.parent.resolve(strict=True)
+        info = parent.stat()
+    except OSError as exc:
+        raise EnvError("receipt output parent must be an existing real directory") from exc
+    if not parent.is_dir():
+        raise EnvError("receipt output parent must be an existing real directory")
+    return parent / lexical.name, (int(info.st_dev), int(info.st_ino))
+
+
+def _receipt_output_path(value: str) -> Path:
+    """Compatibility helper returning only the canonical receipt path."""
+
+    return _receipt_output_target(value)[0]
+
+
+def _export_receipt(
+    path: Path,
+    receipt: Mapping[str, Any],
+    *,
+    expected_parent_identity: tuple[int, int] | None = None,
+) -> None:
+    """Atomically publish one complete receipt without replacing caller state.
+
+    Bytes are written and fsynced to a private same-directory inode first.  A
+    hard-link publication then creates the final leaf atomically and refuses if
+    any racer already owns that name.  Directory-fd operations bind publication
+    to the opened parent rather than re-traversing an intermediate pathname.
+    """
+
+    payload = (json.dumps(receipt, indent=2, sort_keys=False) + "\n").encode("utf-8")
+    parent = path.parent
+    leaf = path.name
+    directory_fd: int | None = None
+    temporary_fd: int | None = None
+    temporary_name = f".{leaf}.{uuid.uuid4().hex}.tmp"
+    published = False
+    try:
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        directory_fd = os.open(parent, directory_flags)
+        parent_info = os.fstat(directory_fd)
+        observed_identity = (int(parent_info.st_dev), int(parent_info.st_ino))
+        if (
+            expected_parent_identity is not None
+            and observed_identity != expected_parent_identity
+        ):
+            raise EnvError("receipt output parent identity changed")
+
+        temporary_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        temporary_flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        temporary_fd = os.open(
+            temporary_name,
+            temporary_flags,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        stream = os.fdopen(temporary_fd, "wb")
+        temporary_fd = None
+        with stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        try:
+            os.link(
+                temporary_name,
+                leaf,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise EnvError(f"receipt output already exists: {path}") from exc
+        published = True
+        # Remove the staging name before the directory fsync so a successful
+        # return durably leaves only the final receipt leaf. The hard link means
+        # the final leaf already references the fully fsynced inode.
+        os.unlink(temporary_name, dir_fd=directory_fd)
+        temporary_name = ""
+
+        # Persist both publication and staging-name cleanup on supported RWE
+        # hosts (darwin/linux).
+        os.fsync(directory_fd)
+    except EnvError:
+        raise
+    except OSError as exc:
+        if published:
+            raise EnvError("receipt output publication could not be finalized") from exc
+        raise EnvError("receipt output could not be written") from exc
+    finally:
+        if temporary_fd is not None:
+            try:
+                os.close(temporary_fd)
+            except OSError:
+                pass
+        if directory_fd is not None:
+            if temporary_name:
+                try:
+                    os.unlink(temporary_name, dir_fd=directory_fd)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    # A fully published final receipt remains valid; cleanup
+                    # failure must never overwrite or unlink that leaf.
+                    pass
+            try:
+                os.close(directory_fd)
+            except OSError:
+                pass
+
+
+def _record_run_gate_outcome(receipt: dict[str, Any], gate_rc: int) -> int:
+    """Record whether ``cmd_gate`` produced real gate evidence.
+
+    ``proof.gate`` continues to mean that a gate command actually ran.  A
+    pre-execution refusal therefore receives a distinct ``proof.run`` record
+    instead of fabricating a gate command receipt.  The returned code is the
+    truthful one-command result: a zero gate without matching evidence fails
+    closed as 2.
+    """
+
+    proof = receipt.get("proof")
+    if not isinstance(proof, dict):
+        proof = {}
+        receipt["proof"] = proof
+    gate = proof.get("gate")
+    gate_recorded = isinstance(gate, Mapping)
+    if gate_recorded:
+        gate_exit = gate.get("exit")
+        if type(gate_exit) is int and gate_exit == gate_rc:
+            status = "gate_completed"
+            run_rc = gate_rc
+        else:
+            status = "gate_evidence_mismatch"
+            run_rc = 2
+    elif gate_rc != 0:
+        status = "gate_refused_before_execution"
+        run_rc = gate_rc
+    else:
+        status = "gate_evidence_missing"
+        run_rc = 2
+    proof["run"] = {
+        "status": status,
+        "exit": gate_rc,
+        "gate_proof_recorded": gate_recorded,
+    }
+    return run_rc
+
+
+def _record_unavailable_gate_outcome(receipt: dict[str, Any]) -> None:
+    """Record a fixed, non-echoing result when the gate raises before receipt proof."""
+
+    proof = receipt.get("proof")
+    if not isinstance(proof, dict):
+        proof = {}
+        receipt["proof"] = proof
+    proof["run"] = {
+        "status": "gate_outcome_unavailable",
+        "exit": 2,
+        "gate_proof_recorded": isinstance(proof.get("gate"), Mapping),
+    }
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """Realize -> gate -> export receipt -> cleanup as one worker-facing action.
+
+    This composes the existing RWE primitives. It does not cache environments,
+    redefine the test gate, select a worker/provider, or create lifecycle state.
+    The temporary environment is removed on success, test failure, refusal, and
+    exceptions; only the secret-free receipt copy is retained.
+    """
+
+    root = Path(args.root).resolve() if args.root else repo_root()
+    try:
+        receipt_out, receipt_parent_identity = _receipt_output_target(args.receipt_out)
+    except EnvError as exc:
+        print(f"rwe_env run refused: {exc}", file=sys.stderr)
+        return 2
+
+    with tempfile.TemporaryDirectory(prefix="mastermind-rwe-run-") as temporary_parent:
+        env_dir = Path(temporary_parent) / "env"
+        realize_args = argparse.Namespace(
+            dest=str(env_dir),
+            lock=args.lock,
+            python=args.python,
+            force=False,
+            root=str(root),
+        )
+        realize_rc = cmd_realize(realize_args)
+        if realize_rc != 0:
+            return realize_rc
+
+        gate_args = argparse.Namespace(
+            env=str(env_dir),
+            subset=args.subset,
+            root=str(root),
+        )
+        try:
+            gate_rc = cmd_gate(gate_args)
+        except (EnvError, OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            # The local gate may have failed before launch or after a local test
+            # effect but before it could persist proof. Never invent a gate
+            # terminal; export only an explicit unavailable outcome. A failed
+            # receipt write may itself leave unreadable JSON, so that recovery
+            # read must fail closed rather than raising a second exception.
+            try:
+                receipt = load_receipt(env_dir)
+            except (OSError, json.JSONDecodeError):
+                receipt = None
+            if receipt is None:
+                print(
+                    "rwe_env run refused: gate outcome unavailable and no receipt remains",
+                    file=sys.stderr,
+                )
+                return 2
+            _record_unavailable_gate_outcome(receipt)
+            try:
+                _export_receipt(
+                    receipt_out,
+                    receipt,
+                    expected_parent_identity=receipt_parent_identity,
+                )
+            except EnvError as exc:
+                print(f"rwe_env run refused: {exc}", file=sys.stderr)
+                return 2
+            print("rwe_env run refused: gate outcome unavailable", file=sys.stderr)
+            return 2
+
+        receipt = load_receipt(env_dir)
+        if receipt is None:
+            print("rwe_env run refused: realized environment produced no receipt", file=sys.stderr)
+            return gate_rc if gate_rc != 0 else 2
+        run_rc = _record_run_gate_outcome(receipt, gate_rc)
+        try:
+            _export_receipt(
+                receipt_out,
+                receipt,
+                expected_parent_identity=receipt_parent_identity,
+            )
+        except EnvError as exc:
+            print(f"rwe_env run refused: {exc}", file=sys.stderr)
+            # Once the gate has returned a nonzero code, an artifact publication
+            # failure must not rewrite that real test/refusal outcome to code 2.
+            return run_rc if run_rc != 0 else 2
+        print(f"run receipt written: {receipt_out}")
+        print(f"environment_id={receipt.get('environment_id', 'unknown')}")
+        return run_rc
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1050,6 +1323,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate.add_argument("--subset", default=None)
     p_gate.add_argument("--root", default=None)
     p_gate.set_defaults(func=cmd_gate)
+
+    p_run = sub.add_parser(
+        "run", help="realize a disposable env, run the gate, and export its receipt"
+    )
+    p_run.add_argument("--receipt-out", required=True)
+    p_run.add_argument("--subset", default=None)
+    p_run.add_argument("--lock", default=None)
+    p_run.add_argument("--python", default=None)
+    p_run.add_argument("--root", default=None)
+    p_run.set_defaults(func=cmd_run)
 
     return parser
 

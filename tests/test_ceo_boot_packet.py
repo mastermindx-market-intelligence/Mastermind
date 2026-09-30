@@ -737,3 +737,82 @@ def test_module_imports_no_execution_plane():
         and name != "control_plane.strategic_state"
     }
     assert not forbidden, f"read-only bridge must not import {sorted(forbidden)}"
+
+
+def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    repo.mkdir()
+    macro.mkdir()
+    boot_python = tmp_path / "sealed-python"
+    mastermind_sha = "a" * 40
+    macro_sha = "b" * 40
+    packet = {
+        "schema": SCHEMA,
+        "mastermind": {"sha": mastermind_sha},
+        "macro": {"sha": macro_sha},
+    }
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(packet)
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = list(argv)
+        seen["kwargs"] = dict(kwargs)
+        return Result()
+
+    def fake_sha(path):
+        return mastermind_sha if path.resolve() == repo.resolve() else macro_sha
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod, "git_sha", fake_sha)
+    result = mod.build_packet_in_interpreter(
+        boot_python=boot_python,
+        repo_root=repo,
+        macro_root=macro,
+        timeout=3.0,
+        now="2026-09-16T10:00:00Z",
+    )
+    assert result == packet
+    assert seen["argv"][:3] == [str(boot_python.resolve()), "-I", "-B"]
+    env = seen["kwargs"]["env"]
+    assert "HOME" not in env
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert {env["GIT_CONFIG_VALUE_0"], env["GIT_CONFIG_VALUE_1"]} == {
+        str(repo.resolve()), str(macro.resolve()),
+    }
+    assert env["MACRO_MASTERMIND_REPO"] == str(repo.resolve())
+
+
+def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    repo.mkdir()
+    macro.mkdir()
+    packet = {
+        "schema": SCHEMA,
+        "mastermind": {"sha": "c" * 40},
+        "macro": {"sha": "d" * 40},
+    }
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(packet)
+
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(mod, "git_sha", lambda _p: "a" * 40)
+    monkeypatch.setattr(
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+    result = mod.build_packet_in_interpreter(
+        boot_python=tmp_path / "sealed-python",
+        repo_root=repo,
+        macro_root=macro,
+        timeout=3.0,
+    )
+    assert result["degraded"] == [
+        "installed boot helper unavailable: grounding_mismatch"
+    ]
