@@ -1517,7 +1517,12 @@ def _service_from_config(
     exact_target_source: _ExactWorkerTargetSource | None = None,
     workspace_bindings_path: Path | None = None,
     coo_source: Any | None = None,
+    claimed_operator_adapter_factory: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
+    # This is trusted host composition, never a JSON/model-selected factory.
+    if (claimed_operator_adapter_factory is not None
+            and not callable(claimed_operator_adapter_factory)):
+        raise ServiceError("claimed operator factory must be callable")
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
         ExecutiveOperatorSupervisor,
@@ -1697,7 +1702,14 @@ def _service_from_config(
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
-        def adapter_factory(turn_input_loader):
+        def primary_factory(attempt, requested, turn_input_loader, *, recovery):
+            # A fixed primary client must never carry another claimed worker.
+            # Multi-worker composition supplies its current owner-bound factory.
+            if (attempt.worker_id != config.worker_id
+                    or requested.worker_id != config.worker_id
+                    or requested.provider != "openai-codex"
+                    or requested.harness_kind != "codex-app-server"):
+                raise ServiceError("claim differs from the configured operator worker")
             return RemoteCodexOperatorAdapter(
                 client,
                 turn_input_loader=turn_input_loader,
@@ -1705,7 +1717,8 @@ def _service_from_config(
 
         return ExecutiveOperatorSupervisor(
             runtime,
-            adapter_factory=adapter_factory,
+            claimed_adapter_factory=(claimed_operator_adapter_factory
+                if claimed_operator_adapter_factory is not None else primary_factory),
             prompt_source=sealed_supervisor,
         )
 
