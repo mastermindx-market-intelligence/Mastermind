@@ -71,12 +71,7 @@ struct Inner {
 impl Inner {
     fn new(client: Option<&str>) -> Self {
         let client_id = client
-            .filter(|s| {
-                !s.is_empty()
-                    && s.len() <= 128
-                    && s.bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-            })
+            .filter(|value| crate::native_client::validate_native_client_id(value).is_ok())
             .map(str::to_owned);
         Self {
             client_id,
@@ -718,16 +713,48 @@ pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<V
     }
     Ok(value)
 }
+const WINDOW_SCHEMA_V1: &str = "mastermind.workspace.window_read_candidate.v1";
+const WINDOW_SCHEMA_V2: &str = "mastermind.workspace.window_read_candidate.v2";
+fn allowed_window_schema(schema: &str) -> bool {
+    schema == WINDOW_SCHEMA_V1 || schema == WINDOW_SCHEMA_V2
+}
+async fn read_current_window_document(app: AppHandle) -> Result<Value> {
+    let url = Url::parse(&format!("{ORIGIN}/workspace/window/current")).map_err(|_| "REQUEST_INVALID")?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (
+            inner
+                .token(Resource::Content)
+                .ok_or("AUTHENTICATION_REQUIRED")?
+                .value
+                .clone(),
+            inner.generation,
+        )
+    };
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send()
+        .await
+        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = bounded_json(response, MAX_RESPONSE).await;
+    if !state.lock()?.release_allowed(generation, Resource::Content) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    let schema = value.get("schema").and_then(Value::as_str).unwrap_or("");
+    if !value.is_object() || !allowed_window_schema(schema) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
 #[tauri::command]
 pub async fn read_current_window(app: AppHandle) -> Result<Value> {
-    read(
-        app,
-        Resource::Content,
-        "/workspace/window/current",
-        "mastermind.workspace.window_read_candidate.v1",
-        None,
-    )
-    .await
+    read_current_window_document(app).await
 }
 
 #[cfg(test)]
@@ -797,6 +824,42 @@ mod tests {
         let mut i = Inner::new(None);
         assert_eq!(i.status().status, "unconfigured");
         assert!(i.transaction(Resource::Acquisition).is_err());
+    }
+    #[test]
+    fn native_client_identity_uses_the_closed_shared_grammar() {
+        for invalid in [
+            "",
+            "invalid client",
+            "client/slash",
+            "client.dot",
+            "client:colon",
+            "client\nnewline",
+        ] {
+            assert_eq!(Inner::new(Some(invalid)).status().status, "unconfigured");
+        }
+        assert_eq!(
+            Inner::new(Some(&"a".repeat(129))).status().status,
+            "unconfigured"
+        );
+        assert_eq!(
+            Inner::new(Some(&"a".repeat(128))).status().status,
+            "signed_out"
+        );
+        assert_eq!(
+            Inner::new(Some("tpc_A1_-valid")).status().status,
+            "signed_out"
+        );
+    }
+    #[test]
+    fn native_client_identity_constructor_is_wired_to_shared_validator() {
+        let source = include_str!("auth.rs");
+        let constructor = source
+            .split_once("fn new(client: Option<&str>) -> Self {")
+            .and_then(|(_, rest)| rest.split_once("\n    fn token"))
+            .map(|(body, _)| body)
+            .expect("Inner::new source must remain present");
+        assert!(constructor.contains("crate::native_client::validate_native_client_id"));
+        assert!(!constructor.contains("is_ascii_alphanumeric"));
     }
     #[test]
     fn separate_authorizations_have_exact_custom_scope_and_s256() {
@@ -883,6 +946,23 @@ mod tests {
         for seconds in [0, -1, 604801] {
             assert!(parse_token(serde_json::json!({"access_token":"secret","token_type":"Bearer","expires_in":seconds}),Resource::Acquisition).is_err());
         }
+    }
+    #[test]
+    fn current_window_allowlist_is_exactly_v1_and_v2() {
+        assert!(allowed_window_schema(
+            "mastermind.workspace.window_read_candidate.v1"
+        ));
+        assert!(allowed_window_schema(
+            "mastermind.workspace.window_read_candidate.v2"
+        ));
+        assert!(!allowed_window_schema(
+            "mastermind.workspace.window_read_candidate.v3"
+        ));
+        assert!(!allowed_window_schema(
+            "mastermind.workspace.recorded_read_candidate.v1"
+        ));
+        assert!(!allowed_window_schema("mastermind.mission_workspace.v3"));
+        assert!(!allowed_window_schema(""));
     }
     #[test]
     fn structured_result_selectors_use_exact_new_contract() {

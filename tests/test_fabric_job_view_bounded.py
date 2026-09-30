@@ -95,6 +95,192 @@ def test_legacy_job_visible_but_provenance_partial(monkeypatch, tmp_path):
     assert any(f["target_field"] == "runtime.acquisition.provenance" for f in doc["missingness"])
 
 
+# ---------------------------------------------------------------------------
+# root-ratified narrow COO-cycle planner join (immutable Runtime-row relation)
+# ---------------------------------------------------------------------------
+
+
+def _planner_fixture(tmp_path):
+    runtime, root = _root(tmp_path)
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0")
+    return runtime, root, planner
+
+
+def _snapshot_with_jobs(monkeypatch, jobs, *, truncated=False):
+    from control_plane import executive_runtime as er
+    original = er.BoundedRuntimeReadObservation.read_job_root_bounded
+
+    def mutated(read, root_id):
+        snapshot = original(read, root_id)
+        return dataclasses.replace(
+            snapshot, jobs=tuple(jobs),
+            jobs_truncated=bool(truncated) or snapshot.jobs_truncated)
+
+    monkeypatch.setattr(er.BoundedRuntimeReadObservation, "read_job_root_bounded", mutated)
+
+
+def test_canonical_planner_child_joins_the_validated_workstream_root(monkeypatch, tmp_path):
+    runtime, root, planner = _planner_fixture(tmp_path)
+    _use_runtime(monkeypatch, runtime)
+    monkeypatch.setattr(runtime.events, "get_event_by_command_id", _trap)
+    doc = view.read_fabric_view_v3_from_runtime(
+        runtime, root.job_id, armed={}, runtime_identity=_identity())
+    fabric = doc["fabric_view"]
+    assert [child["job_id"] for child in fabric["children"]] == [planner.job_id]
+    child = fabric["children"][0]
+    assert child["orchestration_role"] == "plan"
+    assert child["parent_job_id"] == root.job_id
+    assert child["root_job_id"] == root.job_id
+    assert child["depth"] == 1
+    assert fabric["unjoined_job_ids"] == [] and fabric["unjoined_job_count"] == 0
+    assert fabric["runtime"]["acquisition"]["provenance"] == {
+        "state": "COMPLETE", "unjoined_job_ids": []}
+    assert fabric["capability"]["state"] == "PROVEN"
+    assert not any("provenance not projected" in note for note in fabric["degraded"])
+    assert not any("planner join refused" in note for note in fabric["degraded"])
+
+
+def test_planner_join_requires_event_backed_root_workstream(monkeypatch, tmp_path):
+    runtime, root, planner = _planner_fixture(tmp_path)
+    from control_plane import executive_runtime as er
+    original = er.BoundedRuntimeReadObservation.get_creation_event_by_command_id
+
+    def without_workstream(read, command):
+        event = original(read, command)
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, dict) or "provenance" not in payload:
+            return event
+        stripped = dict(payload)
+        stripped["provenance"] = {
+            key: value for key, value in payload["provenance"].items()
+            if key != "workstream"}
+        return dataclasses.replace(event, payload=stripped)
+
+    monkeypatch.setattr(er.BoundedRuntimeReadObservation, "get_creation_event_by_command_id", without_workstream)
+    _use_runtime(monkeypatch, runtime)
+    doc = view.read_fabric_view_v3_from_runtime(
+        runtime, root.job_id, armed={}, runtime_identity=_identity())
+    fabric = doc["fabric_view"]
+    assert fabric["children"] == []
+    assert fabric["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"] == sorted(
+        [root.job_id, planner.job_id])
+    assert fabric["runtime"]["acquisition"]["provenance"]["state"] == "PARTIAL"
+
+
+@pytest.mark.parametrize("fault", [
+    "foreign_source_digest", "wrong_command", "wrong_creator", "work_role",
+    "depth2", "foreign_parent", "nonnumeric_id",
+])
+def test_rehashed_or_foreign_plan_cycle_stays_unjoined(monkeypatch, tmp_path, fault):
+    from control_plane.executive_runtime import orchestration_digest
+    runtime, root, planner = _planner_fixture(tmp_path)
+    cycle = dict(planner.orchestration_provenance)
+    changes = {}
+    if fault == "foreign_source_digest":
+        cycle["source_digest"] = "f" * 64
+    elif fault == "wrong_command":
+        cycle["command_id"] = f"coo-cycle:{root.job_id}:create-planner:1"
+    elif fault == "wrong_creator":
+        cycle["creator"] = "ceo_intent"
+    elif fault == "work_role":
+        cycle["role"] = "work"
+        changes["orchestration_role"] = "work"
+    elif fault == "depth2":
+        changes["depth"] = 2
+    elif fault == "foreign_parent":
+        cycle["parent_job_id"] = "JOB-999"
+        changes["parent_job_id"] = "JOB-999"
+    else:
+        cycle["job_id"] = "JOB-XX"
+        changes["job_id"] = "JOB-XX"
+    changes["orchestration_provenance"] = cycle
+    changes["orchestration_provenance_digest"] = orchestration_digest(cycle)
+    hostile = dataclasses.replace(planner, **changes)
+    _snapshot_with_jobs(monkeypatch, [root, hostile])
+    _use_runtime(monkeypatch, runtime)
+    doc = view.read_fabric_view_v3_from_runtime(
+        runtime, root.job_id, armed={}, runtime_identity=_identity())
+    fabric = doc["fabric_view"]
+    assert fabric["children"] == []
+    assert hostile.job_id in fabric["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"]
+    assert root.job_id not in fabric["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"]
+    assert any("provenance not projected" in note for note in fabric["degraded"])
+
+
+def test_ordinary_child_without_cycle_stays_unjoined(monkeypatch, tmp_path):
+    # The Runtime refuses role-null children in an orchestration subtree, so a
+    # legacy row can only appear as a hostile observation member; the view must
+    # still keep it unjoined rather than joining it as a planner.
+    from control_plane.executive_runtime import Job
+    runtime, root = _root(tmp_path)
+    plain = Job(
+        job_id="JOB-004", objective="plain child", department="executive-infrastructure",
+        priority=5, status=None, assigned_worker_id=None, assigned_quota_class=None,
+        authority_level="READ", branch=None, worktree=None, checkpoint=None, result=None,
+        created_at="2026-01-01T00:00:00Z", updated_at="2026-01-01T00:00:00Z",
+        parent_job_id=root.job_id, root_job_id=root.job_id, depth=1,
+    )
+    _snapshot_with_jobs(monkeypatch, [root, plain])
+    _use_runtime(monkeypatch, runtime)
+    doc = view.read_fabric_view_v3_from_runtime(
+        runtime, root.job_id, armed={}, runtime_identity=_identity())
+    fabric = doc["fabric_view"]
+    assert fabric["children"] == []
+    assert fabric["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"] == [plain.job_id]
+
+
+def test_foreign_root_member_invalidates_the_whole_bounded_observation(monkeypatch, tmp_path):
+    # A row claiming another root never reaches the planner join: the bounded
+    # membership invariant refuses the entire observation first.
+    from control_plane.executive_runtime import orchestration_digest
+    runtime, root, planner = _planner_fixture(tmp_path)
+    cycle = dict(planner.orchestration_provenance)
+    cycle["root_job_id"] = "JOB-999"
+    hostile = dataclasses.replace(
+        planner, root_job_id="JOB-999", orchestration_provenance=cycle,
+        orchestration_provenance_digest=orchestration_digest(cycle))
+    _snapshot_with_jobs(monkeypatch, [root, hostile])
+    _use_runtime(monkeypatch, runtime)
+    doc = view.read_fabric_view_v3_from_runtime(
+        runtime, root.job_id, armed={}, runtime_identity=_identity())
+    fabric = doc["fabric_view"]
+    assert fabric["root"] is None
+    assert fabric["children"] == []
+    assert any("bounded acquisition unavailable" in note for note in fabric["degraded"])
+
+
+def test_duplicate_eligible_planners_refuse_the_join(monkeypatch, tmp_path):
+    from control_plane.executive_runtime import orchestration_digest
+    runtime, root, planner = _planner_fixture(tmp_path)
+    cycle = dict(planner.orchestration_provenance)
+    cycle["job_id"] = "JOB-003"
+    twin = dataclasses.replace(
+        planner, job_id="JOB-003", orchestration_provenance=cycle,
+        orchestration_provenance_digest=orchestration_digest(cycle))
+    _snapshot_with_jobs(monkeypatch, [root, planner, twin])
+    _use_runtime(monkeypatch, runtime)
+    doc = view.read_fabric_view_v3_from_runtime(
+        runtime, root.job_id, armed={}, runtime_identity=_identity())
+    fabric = doc["fabric_view"]
+    assert fabric["children"] == []
+    assert fabric["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"] == sorted(
+        [planner.job_id, twin.job_id])
+    assert any("ambiguous eligible plan children" in note for note in fabric["degraded"])
+
+
+def test_truncated_job_scope_cannot_establish_planner_uniqueness(monkeypatch, tmp_path):
+    runtime, root, planner = _planner_fixture(tmp_path)
+    _snapshot_with_jobs(monkeypatch, [root, planner], truncated=True)
+    _use_runtime(monkeypatch, runtime)
+    doc = view.read_fabric_view_v3_from_runtime(
+        runtime, root.job_id, armed={}, runtime_identity=_identity())
+    fabric = doc["fabric_view"]
+    assert fabric["children"] == []
+    assert fabric["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"] == [planner.job_id]
+    assert any("planner uniqueness unavailable" in note for note in fabric["degraded"])
+
+
 def test_missing_owner_api_is_no_unbounded_fallback(monkeypatch, tmp_path):
     old = SimpleNamespace(jobs=SimpleNamespace(list_jobs=_trap), events=SimpleNamespace(list_events=_trap))
     monkeypatch.setattr(view, "_open_runtime", lambda *_args: (old, True, []))

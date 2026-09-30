@@ -126,9 +126,23 @@ class ServiceRuntimeNamespaceCustody:
         if not directory and (value.st_uid != os.geteuid() or value.st_nlink != 1
                               or stat.S_IMODE(value.st_mode) & 0o077):
             raise RuntimeReadUnavailable("namespace file ownership or mode invalid")
-        flags = os.O_RDONLY | os.O_NOFOLLOW
-        if directory:
-            flags |= os.O_DIRECTORY
+        if directory and sys.platform == "darwin":
+            # Runtime ancestors may deliberately permit traversal without
+            # listing. O_SEARCH retains a directory identity descriptor without
+            # requiring the additional read permission of O_RDONLY.
+            directory_flag = getattr(os, "O_DIRECTORY", None)
+            nofollow = getattr(os, "O_NOFOLLOW", None)
+            if directory_flag is None or nofollow is None:
+                raise RuntimeReadUnavailable("Darwin directory search flags unavailable")
+            # Darwin sys/fcntl.h defines O_EXEC=0x40000000 and
+            # O_SEARCH=(O_EXEC | O_DIRECTORY). Some Python builds (including
+            # the installed Control 3.12 runtime) omit both exported symbols.
+            search = getattr(os, "O_SEARCH", 0x40000000 | directory_flag)
+            flags = search | nofollow
+        else:
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            if directory:
+                flags |= os.O_DIRECTORY
         fd = os.open(path, flags)
         # Retain even a failed seal. Closing a raw database/SHM descriptor can
         # drop unrelated POSIX locks held by this process's SQLite connections.

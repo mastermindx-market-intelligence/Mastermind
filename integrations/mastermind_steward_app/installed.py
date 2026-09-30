@@ -19,6 +19,7 @@ from integrations.executive_content_contract import (
 from integrations.business_mcp_auth.contracts import VerifiedPrincipal, validate_resource_policy
 from integrations.mastermind_window_reader.production_binding import read_installed_window
 from integrations.mastermind_steward_app.live_window import LiveWindowConfig
+from integrations.mastermind_window_reader.owner_read_resource import ObservationBinding
 
 
 @dataclass(frozen=True)
@@ -147,8 +148,13 @@ def construct_installed_live_window(*, profile, authenticator, content_policy, a
     if policy.policy_id!=p.policy_id or policy.resource!=p.content_resource or policy.required_scopes!=(p.content_scope,):
         raise ValueError('ACCESS_DENIED')
     source=InstalledWindowSource(profile=p,client=CeoIngressContentClient(ceo_ingress_socket_path),now=now)
+    # The installed path always derives the typed owner tuple from the validated
+    # profile. A profile whose Job/Attempt tokens are noncanonical is a closed
+    # typed refusal here — never a silent fallback to the generic v1 shape.
+    binding=ObservationBinding(job_id=p.job_id,attempt_id=p.attempt_id)
     return LiveWindowConfig(authenticator=authenticator,content_policy=policy,current_access=source.current_access,
-        read_source=source.read_source,source_ref=p.source_ref,now=now,allowed_origin=allowed_origin,audit_sink=audit_sink)
+        read_source=source.read_source,source_ref=p.source_ref,now=now,allowed_origin=allowed_origin,audit_sink=audit_sink,
+        observation_binding=binding)
 
 
 def build_installed_steward_app(*, profile, steward_policy, steward_token_verifier,

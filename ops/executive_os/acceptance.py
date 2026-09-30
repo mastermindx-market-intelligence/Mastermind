@@ -32,6 +32,13 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from ops.executive_os.a2_agent_relay_enrollment import (
+    RELAY_GID as AGENT_RELAY_GID,
+    RELAY_GROUP as AGENT_RELAY_GROUP,
+    RELAY_HOME as AGENT_RELAY_HOME,
+    RELAY_UID as AGENT_RELAY_UID,
+    RELAY_USER as AGENT_RELAY_USER,
+)
 
 
 SCHEMA_VERSION = "mastermind.executive_host_acceptance/v1"
@@ -698,6 +705,7 @@ def _validate_protected_membership_snapshot(
     control_gid: int,
     worker_gid: int,
     ops_gid: int,
+    agent_relay_present: bool = False,
 ) -> dict[str, list[str]]:
     """Prove all four macOS membership representations are exact."""
 
@@ -716,6 +724,41 @@ def _validate_protected_membership_snapshot(
         OPS_GROUP: (ops_gid, set(), {operator_user}),
     }
     reviewed_users = {control_user, worker_user, operator_user}
+    reviewed_user_ids = {
+        control_user: control_uid,
+        worker_user: worker_uid,
+        operator_user: operator_uid,
+    }
+    protected_group_ids = {
+        CONTROL_GROUP: control_gid,
+        WORKER_GROUP: worker_gid,
+        OPS_GROUP: ops_gid,
+    }
+    if agent_relay_present:
+        expected[AGENT_RELAY_GROUP] = (
+            AGENT_RELAY_GID,
+            {AGENT_RELAY_USER},
+            {control_user},
+        )
+        reviewed_users.add(AGENT_RELAY_USER)
+        reviewed_user_ids[AGENT_RELAY_USER] = AGENT_RELAY_UID
+        protected_group_ids[AGENT_RELAY_GROUP] = AGENT_RELAY_GID
+    else:
+        reserved_uid_owners = {
+            str(candidate)
+            for candidate, candidate_record in users.items()
+            if isinstance(candidate_record, Mapping)
+            and candidate_record.get("unique_uid") == AGENT_RELAY_UID
+        }
+        if reserved_uid_owners:
+            raise AcceptanceError("reserved Agent Relay UID has unexpected owners")
+        reserved_gid_owners = {
+            str(candidate)
+            for candidate, candidate_gid in group_primary_gids.items()
+            if candidate_gid == AGENT_RELAY_GID
+        }
+        if reserved_gid_owners:
+            raise AcceptanceError("reserved Agent Relay GID has unexpected owners")
     reviewed_uuids: dict[str, str] = {}
     for name in reviewed_users:
         record = users.get(name)
@@ -726,11 +769,7 @@ def _validate_protected_membership_snapshot(
     if len(set(reviewed_uuids.values())) != len(reviewed_uuids):
         raise AcceptanceError("reviewed account GeneratedUID values are not unique")
 
-    for name, uid in (
-        (control_user, control_uid),
-        (worker_user, worker_uid),
-        (operator_user, operator_uid),
-    ):
+    for name, uid in reviewed_user_ids.items():
         record = users.get(name)
         if not isinstance(record, Mapping) or record.get("unique_uid") != uid:
             raise AcceptanceError(f"reviewed account {name} UniqueID drifted")
@@ -743,11 +782,7 @@ def _validate_protected_membership_snapshot(
         if owners != {name}:
             raise AcceptanceError(f"UniqueID {uid} has duplicate or aliased owners")
 
-    for name, gid in (
-        (CONTROL_GROUP, control_gid),
-        (WORKER_GROUP, worker_gid),
-        (OPS_GROUP, ops_gid),
-    ):
+    for name, gid in protected_group_ids.items():
         owners = {
             str(candidate)
             for candidate, candidate_gid in group_primary_gids.items()
@@ -795,6 +830,7 @@ def _validate_service_directory_group_sets(
     worker_groups: Sequence[int],
     control_gid: int,
     worker_gid: int,
+    agent_relay_gid: int | None = None,
 ) -> set[int]:
     if dict(system_group_gids) != _REVIEWED_MACOS_ACCOUNT_GROUPS:
         raise AcceptanceError("reviewed macOS system group identities drifted")
@@ -807,6 +843,10 @@ def _validate_service_directory_group_sets(
         "com.apple.access_disabled"
     ]
     expected_control = common | {control_gid, worker_gid}
+    if agent_relay_gid is not None:
+        if agent_relay_gid != AGENT_RELAY_GID:
+            raise AcceptanceError("agent relay group identity drifted")
+        expected_control.add(agent_relay_gid)
     expected_worker = common | {worker_gid}
     observed_control = set(control_groups)
     observed_worker = set(worker_groups)
@@ -845,7 +885,9 @@ def _numeric_directory_census(
     return result
 
 
-def _live_directory_membership_snapshot(*, operator_user: str) -> dict[str, Any]:
+def _live_directory_membership_snapshot(
+    *, operator_user: str, agent_relay_present: bool = False
+) -> dict[str, Any]:
     user_primary_gids = _numeric_directory_census(
         "Users", "PrimaryGroupID", label="local user primary-GID census"
     )
@@ -859,14 +901,20 @@ def _live_directory_membership_snapshot(*, operator_user: str) -> dict[str, Any]
         }
         for name in set(user_primary_gids) | set(user_unique_uids)
     }
-    for name in (CONTROL_USER, WORKER_USER, operator_user):
+    reviewed_users = [CONTROL_USER, WORKER_USER, operator_user]
+    if agent_relay_present:
+        reviewed_users.append(AGENT_RELAY_USER)
+    for name in reviewed_users:
         if name not in users:
             raise AcceptanceError(f"reviewed account is absent from local census: {name}")
         users[name]["generated_uid"] = _directory_attribute(
             f"/Users/{name}", "GeneratedUID"
         )
     groups: dict[str, dict[str, Any]] = {}
-    for name in (CONTROL_GROUP, WORKER_GROUP, OPS_GROUP):
+    reviewed_groups = [CONTROL_GROUP, WORKER_GROUP, OPS_GROUP]
+    if agent_relay_present:
+        reviewed_groups.append(AGENT_RELAY_GROUP)
+    for name in reviewed_groups:
         groups[name] = {
             "primary_gid": int(_directory_attribute(f"/Groups/{name}", "PrimaryGroupID")),
             "generated_uid": _directory_attribute(f"/Groups/{name}", "GeneratedUID"),
@@ -1470,6 +1518,31 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             raise AcceptanceError("operator account name is invalid")
         if self.control_identity.pw_uid == self.worker_identity.pw_uid:
             raise AcceptanceError("control and worker service accounts are not distinct")
+        try:
+            agent_relay_identity = pwd.getpwnam(AGENT_RELAY_USER)
+        except KeyError:
+            agent_relay_identity = None
+        try:
+            agent_relay_group = grp.getgrnam(AGENT_RELAY_GROUP)
+        except KeyError:
+            agent_relay_group = None
+        if (agent_relay_identity is None) != (agent_relay_group is None):
+            raise AcceptanceError("agent relay principal is only partially provisioned")
+        agent_relay_present = agent_relay_identity is not None
+        if agent_relay_present:
+            if agent_relay_identity is None or agent_relay_group is None:
+                raise AcceptanceError("agent relay principal reconciliation failed")
+            if (
+                agent_relay_identity.pw_uid != AGENT_RELAY_UID
+                or agent_relay_identity.pw_gid != AGENT_RELAY_GID
+                or agent_relay_group.gr_gid != AGENT_RELAY_GID
+                or _directory_attribute(
+                    f"/Groups/{AGENT_RELAY_GROUP}", "RealName"
+                )
+                != f"{AGENT_RELAY_GROUP} service group"
+            ):
+                raise AcceptanceError("agent relay principal identity drifted")
+
         expected_accounts = {
             CONTROL_USER: (
                 self.control_identity.pw_uid,
@@ -1482,6 +1555,12 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 os.fspath(RUNTIME_ROOT / "workers" / "codex-01" / "provider-home"),
             ),
         }
+        if agent_relay_present:
+            expected_accounts[AGENT_RELAY_USER] = (
+                AGENT_RELAY_UID,
+                AGENT_RELAY_GID,
+                os.fspath(AGENT_RELAY_HOME),
+            )
         for account, (uid, gid, home) in expected_accounts.items():
             expected_attributes = {
                 "UniqueID": str(uid),
@@ -1526,9 +1605,11 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             ),
             control_gid=self.control_group.gr_gid,
             worker_gid=self.worker_group.gr_gid,
+            agent_relay_gid=AGENT_RELAY_GID if agent_relay_present else None,
         )
         membership_snapshot = _live_directory_membership_snapshot(
-            operator_user=self.operator_user
+            operator_user=self.operator_user,
+            agent_relay_present=agent_relay_present,
         )
         self.protected_group_effective = _validate_protected_membership_snapshot(
             membership_snapshot,
@@ -1541,6 +1622,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             control_gid=self.control_group.gr_gid,
             worker_gid=self.worker_group.gr_gid,
             ops_gid=self.ops_group.gr_gid,
+            agent_relay_present=agent_relay_present,
         )
 
         head = _run(
@@ -2553,9 +2635,40 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 label=f"TCP listener scan for {account}",
                 check=False,
             )
+            # Darwin lsof uses exit 1 with completely empty stdout/stderr when
+            # a privileged query has no matches.  That exact observation is the
+            # only negative proof accepted here; every other non-listener shape
+            # is UNKNOWN and must fail closed rather than becoming a false zero.
+            if (
+                completed.returncode == 1
+                and not completed.stdout
+                and not completed.stderr
+            ):
+                continue
+
             lines = completed.stdout.splitlines()
-            if len(lines) > 1:
-                raise AcceptanceError(f"{account} owns a TCP listener")
+            if completed.returncode == 0 and len(lines) > 1:
+                header = lines[0].split()
+                rows = [line.split() for line in lines[1:] if line.strip()]
+                valid_table = (
+                    len(header) >= 2
+                    and header[0] == b"COMMAND"
+                    and header[1] == b"PID"
+                    and header[-1] == b"NAME"
+                    and bool(rows)
+                    and all(
+                        len(row) >= 10
+                        and row[-3] == b"TCP"
+                        and row[-1] == b"(LISTEN)"
+                        for row in rows
+                    )
+                )
+                if valid_table:
+                    raise AcceptanceError(f"{account} owns a TCP listener")
+
+            raise AcceptanceError(
+                f"TCP listener scan for {account} did not produce a complete observation"
+            )
         if not CONTROL_SOCKET.is_socket() or not WORKER_SOCKET.is_socket():
             raise AcceptanceError("private Unix launchd sockets are unavailable")
 

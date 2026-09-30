@@ -125,6 +125,38 @@ describe("installed typed host", () => {
       "WINDOW_RESPONSE_INVALID",
     );
   });
+  it("exposes one invalidation generation that spans sequential mission and window reads", async () => {
+    const e = raw(),
+      host = bindMissionHost(e.client);
+    expect(host.invalidationGeneration?.()).toBe(0);
+    const first = host.invalidationGeneration?.();
+    e.notify(out);
+    const afterAuth = host.invalidationGeneration?.();
+    expect(afterAuth).toBeGreaterThan(first ?? -1);
+    const missionHold = deferred<unknown>();
+    const windowHold = deferred<unknown>();
+    e.client.readMissionV3 = () => missionHold.promise;
+    e.client.readCurrentWindow = () => windowHold.promise;
+    const started = host.invalidationGeneration?.() ?? 0;
+    const mission = host.readMissionV3!({
+      workRef: "WS:B5",
+      rootJobId: "JOB-100",
+      signal: new AbortController().signal,
+    });
+    e.notify(signed);
+    missionHold.resolve(v3Current17);
+    await expect(mission).rejects.toThrow("READ_CANCELLED");
+    expect(host.invalidationGeneration?.()).not.toBe(started);
+    const windowStarted = host.invalidationGeneration?.() ?? 0;
+    const windowRead = host.readCurrentWindow!({
+      signal: new AbortController().signal,
+    });
+    windowHold.resolve({
+      schema: "mastermind.workspace.window_read_candidate.v1",
+    });
+    await expect(windowRead).rejects.toThrow("WINDOW_RESPONSE_INVALID");
+    expect(windowStarted).not.toBe(started);
+  });
   it.each(["logout", "auth", "abort"])(
     "fences an abort-ignoring late response after %s",
     async (kind) => {

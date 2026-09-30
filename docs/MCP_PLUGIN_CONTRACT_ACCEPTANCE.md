@@ -111,6 +111,40 @@ its expected values. Its inert empty argument schemas test metadata projection,
 not production-schema parity. The original adversarial fixture remains to test
 understated mutation labels, unknown capabilities and missing read-only evidence.
 
+## Minimize avoidable pre-dispatch safety refusals
+
+Truthful risk metadata is necessary but not sufficient. The host may refuse an action before
+Studio Direct receives it, so backend locking, idempotency, and effect reconciliation cannot
+make an opaque model-authored command safe to dispatch.
+
+Prefer the narrowest semantic action that represents the actual job:
+
+- use Executive's bounded submission surface for a work commission rather than embedding a
+  worker prompt, handoff packet, or heredoc inside `start_process`;
+- use Workbench's reviewed project actions for project-scoped preparation/execution when that
+  existing surface owns the job;
+- use Studio Direct file/design tools for their direct file/design effects;
+- reserve `start_process` and `interact_with_process` for direct terminal work whose command
+  or input is itself the requested effect, not as a generic transport for nested instructions.
+
+Do not split, encode, rename, reword, account-hop, or move a refused action to another carrier
+to make a platform check disappear. A refusal that occurred before the gateway has observed no
+Studio backend effect; preserve that evidence and select another route only when it is a genuinely
+different semantic operation authorized by the existing owners.
+
+Keep these failure classes separate in diagnosis: served-action absence/unsupported surface,
+authentication failure, resource permission refusal, platform safety refusal before dispatch,
+backend refusal after dispatch, timeout with a proven read-only no-effect path, and
+`EFFECT_UNKNOWN` after a possibly effectful call. Never infer an account-level reputation score,
+a fixed recovery period, or a weekly throttle from an individual refusal without platform evidence.
+
+For a repeated clearly benign platform refusal, preserve a minimal redacted incident receipt in
+the existing evidence/checkpoint owner: exact displayed safety message, product/model surface,
+UTC time, app/action name, request id when exposed, and whether the Studio gateway observed the
+call. Do not store the raw nested prompt, credentials, private file contents, or a guessed risk
+score. That receipt supports same-carrier reconciliation and provider support; it grants no retry
+or account-failover authority.
+
 ## Distinguish five layers
 
 1. **Source:** reviewed metadata and exact executable/input contracts in GitHub.

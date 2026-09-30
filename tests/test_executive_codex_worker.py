@@ -243,6 +243,122 @@ def _passing_canary() -> dict:
     }
 
 
+def _subscription_spec(tmp_path: Path, adapter: cw.CodexWorkerAdapter) -> cw.LaunchSpec:
+    workspace, head = _workspace(tmp_path / "canary")
+    run_dir = tmp_path / "canary" / "run"
+    run_dir.mkdir(mode=0o700)
+    input_dir = run_dir / "input"
+    input_dir.mkdir(mode=0o700)
+    schema_path = input_dir / "worker-result.schema.json"
+    schema_path.write_text(json.dumps(_schema()), encoding="utf-8")
+    schema_path.chmod(0o600)
+    return cw.LaunchSpec(
+        run_id="run-1",
+        job_id="job-1",
+        worker_id="codex-01",
+        workspace_path=workspace,
+        run_dir=run_dir,
+        prompt="interactive canary",
+        result_schema_path=schema_path,
+        authorities=("READ",),
+        authority=None,
+        model="reviewed-model",
+        expected_base_sha=head,
+        subscription_canary_claim={
+            "schema": "mastermind.subscription_canary_claim/v1",
+            "execution_mode": "interactive_canary",
+            "run_id": "run-1",
+            "job_id": "job-1",
+            "worker_id": "codex-01",
+            "quota_class": "interactive",
+            "fence_generation": 7,
+            "capacity_generation": 7,
+            "capacity_state": "BUSY",
+            "held_attempt_id": "run-1",
+            "current_attempt_id": "run-1",
+            "binding_id": "reviewed-binding",
+            "profile_id": "reviewed-profile",
+            "adapter_id": "codex-cli",
+            "model": "reviewed-model",
+            "realm_config_sha256": "a" * 64,
+            "realm_generation": 2,
+            "catalog_digest": "b" * 64,
+            "issued_at_ms": 1,
+            "expires_at_ms": 2,
+            "observation_digest": "c" * 64,
+        },
+    )
+
+
+class _RecordingRealmOwner:
+    pass
+
+
+def test_plain_start_refuses_subscription_before_credential_or_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _ordinary_spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    adapter.subscription_realm_owner = _RecordingRealmOwner()
+    spec = _subscription_spec(tmp_path, adapter)
+    credential_calls: list[object] = []
+    subprocess_calls: list[object] = []
+    monkeypatch.setattr(
+        adapter, "_environment", lambda *_args, **_kwargs: credential_calls.append(1),
+    )
+    def record_subprocess(*_args, **_kwargs):
+        subprocess_calls.append(1)
+        raise _InterruptSubprocess()
+
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", record_subprocess)
+
+    with pytest.raises(cw.LaunchValidationError, match="typed admission seam"):
+        asyncio.run(adapter.start(spec))
+
+    assert credential_calls == []
+    assert subprocess_calls == []
+
+
+def test_canary_seam_reverifies_admission_before_credential_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _RecordingRealmOwner()
+    adapter, _ordinary_spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    object.__setattr__(adapter, "subscription_realm_owner", owner)
+    spec = _subscription_spec(tmp_path, adapter)
+    calls: list[tuple[object, cw.LaunchSpec]] = []
+    observed_order: list[str] = []
+
+    def verify(admission, *, spec):
+        calls.append((admission, spec))
+        observed_order.append("verify")
+
+    def environment(*_args, **_kwargs):
+        observed_order.append("credential")
+        return {}
+
+    def subprocess_exec(*_args, **_kwargs):
+        observed_order.append("subprocess")
+        raise _InterruptSubprocess()
+
+    monkeypatch.setattr(
+        "control_plane.subscription_canary_admission.verify_broker_subscription_canary_admission",
+        verify,
+    )
+    monkeypatch.setattr(adapter, "_environment", environment)
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", subprocess_exec)
+    admission = object()
+
+    with pytest.raises(_InterruptSubprocess):
+        asyncio.run(adapter.start_subscription_canary(spec, admission))
+
+    assert calls == [(admission, spec)]
+    assert observed_order == ["verify", "credential", "subprocess"]
+
+
+class _InterruptSubprocess(BaseException):
+    pass
+
+
 def test_native_binary_attestation_allows_bounded_cold_codesign_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -305,7 +421,7 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
 ) -> None:
     workspace = tmp_path.resolve() / "workspace-that-must-not-cross-the-broker"
     workspace.mkdir()
-    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=no")
 
     def timed_out(argv, **kwargs):
         raise subprocess.TimeoutExpired(
@@ -323,11 +439,11 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
     error = raised.value
     assert isinstance(error, cw.LaunchValidationError)
     assert error.code == "git_preflight_timeout"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.timeout_seconds == cw._GIT_COMMAND_TIMEOUT_SECONDS == 15.0
     assert str(error) == (
         "Git preflight timed out after 15s: "
-        "status --porcelain=v1 -z --untracked-files=all"
+        "status --porcelain=v1 -z --untracked-files=no"
     )
     assert str(workspace) not in str(error)
     assert "private workspace" not in str(error)
@@ -351,16 +467,16 @@ def test_git_preflight_nonzero_names_only_operation_and_bounded_exit_code(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         )
 
     error = raised.value
     assert error.code == "git_preflight_failed"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.exit_code == 128
     assert str(error) == (
         "Git preflight failed: status --porcelain=v1 -z "
-        "--untracked-files=all (exit 128)"
+        "--untracked-files=no (exit 128)"
     )
     assert str(workspace) not in str(error)
     assert hostile_stderr.decode().strip() not in str(error)
@@ -482,7 +598,7 @@ def test_installed_git_sees_exact_trust_only_in_command_scope_without_writes(
     assert cw._git_command(workspace, "remote") == b""
     assert cw._git_command(workspace, "rev-parse", "--verify", "HEAD").decode().strip() == head
     assert cw._git_command(
-        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=no"
     ) == b""
     assert cw._git_command(workspace, "ls-files", "--others", "-z") == b""
     assert cw._git_command(workspace, "diff", "--name-only", "-z", "HEAD", "--") == b""
@@ -506,7 +622,7 @@ def test_git_preflight_safe_types_reject_arbitrary_operation_and_exit_code() -> 
             exit_code=128,
         )
     with pytest.raises(ValueError, match="exit code"):
-        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=all", exit_code=999)
+        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=no", exit_code=999)
 
 
 def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
@@ -525,7 +641,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         ):
             return subprocess.CompletedProcess(argv, 128, b"", hostile_stderr)
         raise AssertionError(operation)
@@ -535,7 +651,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
     with pytest.raises(cw.GitPreflightFailed) as raised:
         cw._git_snapshot(workspace, require_clean=True)
 
-    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert raised.value.exit_code == 128
     assert "top-secret" not in str(raised.value)
 
@@ -4365,3 +4481,61 @@ def test_recovery_reattach_anchors_exact_group_members(tmp_path: Path) -> None:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=2)
+
+
+@pytest.mark.parametrize("authority", ("READ", "RESEARCH"))
+@pytest.mark.parametrize("artifact_name", ("artifact.txt", "ignored.tmp"))
+def test_readonly_collection_rejects_declared_untracked_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    authority: str, artifact_name: str,
+) -> None:
+    """An artifact allowlist does not grant WRITE_BRANCH to a read-only run.
+
+    Exercise the actual collector with the existing local fake provider. The
+    fake deliberately ignores the provider sandbox; acceptance must independently
+    reject its write even when the declared artifact and hashes are valid.
+    """
+    monkeypatch.setitem(globals(), "_FAKE_CODEX", _FAKE_CODEX.replace(
+        "artifact.txt", artifact_name,
+    ))
+
+    async def exercise():
+        adapter, spec, workspace, _run_dir = _fixture(
+            tmp_path, prompt="artifact", authority=authority,
+            allowed_artifacts=(artifact_name,),
+        )
+        ref = await adapter.start(spec)
+        receipt = await adapter.collect_result(ref)
+        assert (workspace / artifact_name).read_text() == "bounded artifact\n"
+        assert receipt.result.artifact_manifest
+        return receipt
+
+    receipt = asyncio.run(exercise())
+    assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
+    assert "read-only worker changed the workspace" in (receipt.result.error or "")
+
+
+@pytest.mark.parametrize("relative_path, tracked", (
+    ("README.md", True),
+    ("artifact.txt", False),
+    ("nested/artifact.txt", False),
+    ("ignored.tmp", False),
+))
+def test_split_git_snapshot_rejects_real_tracked_and_untracked_dirt(
+    tmp_path: Path, relative_path: str, tracked: bool,
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    assert cw._git_snapshot(workspace, require_clean=True).status == b""
+    changed = workspace / relative_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("changed fixture content\n", encoding="utf-8")
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        cw._git_snapshot(workspace, require_clean=True)
+    assert raised.value.code == "launch_validation_stage"
+    assert raised.value.stage == "git_cleanliness"
+    assert str(raised.value) == "Launch validation failed at stage: git_cleanliness"
+
+    snapshot = cw._git_snapshot(workspace, require_clean=False)
+    assert bool(snapshot.status) is tracked
+    assert relative_path in cw._git_changed_paths(workspace)

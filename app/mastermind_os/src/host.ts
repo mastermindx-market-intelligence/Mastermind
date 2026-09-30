@@ -76,6 +76,7 @@ export interface MissionHost {
   readCurrentWindow?: (request: {
     signal: AbortSignal;
   }) => Promise<WindowDocument>;
+  invalidationGeneration?: () => number;
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
 }
@@ -93,6 +94,7 @@ export function bindMissionHost(client: RawClient): MissionHost {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
   return {
+    invalidationGeneration: () => epoch,
     auth: {
       getState: () => client.getState(),
       subscribe: (listener) => client.subscribe(listener),

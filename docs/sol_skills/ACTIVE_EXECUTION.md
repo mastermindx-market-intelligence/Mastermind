@@ -27,6 +27,98 @@ Advance the highest-leverage unfinished capability through the real critical pat
 A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
 not permission to end the whole turn while another in-scope critical-path lane remains executable.
 
+## Start and recover without administrative ceremony
+
+These are decision checks, not additional forms or approval messages. Apply them to Web, Claude,
+Codex and other assigned sessions through their existing instruction/admission owners.
+
+**Assignment is permission to begin the permitted work, not proof it ran.** A current explicit
+Chairman instruction or accepted direct handoff supplies human/session assignment. Read the packet,
+record required pickup, and start the permitted next action without an ACK-of-ACK or redundant Slack
+claim. A retrieved packet alone does not assign work. Do not ask the Chairman to re-approve routine
+in-scope execution; return only material scope, risk, spend or authority expansion to its decision owner.
+A task-local planning, design or testing playbook must not create a second human-approval round for
+an already-commissioned routine plan/build/test/repair cycle. Resolve ordinary reversible design
+choices inside the assignment. Preserve any actual reserved decision and platform-required confirmation,
+authentication or user-consent boundary; do not treat those as administrative ceremony.
+
+**Responsibility survives a chat; a chat does not own work forever.** Separate the accountable role,
+current receiver assignment and exclusive execution/source lease. A historical title, old PR author,
+archived Web chat or Agent OS claim is not current liveness. Inspect fresh live claim, source-writer
+custody and pending effects once through their existing owners. An observation failure means unknown
+is not expired. Preserve any live or EFFECT_UNKNOWN modifier; no timeout, archived tab or handoff
+silently clears its fence. Use existing compare-and-swap/fencing and successor/recovery admission to
+replace an actual lease. Where current assignment exists and no lease, writer or pending effect is
+displaced, proceed with permitted independent work instead of demanding a reply from a ghost owner.
+Do not wait indefinitely for an abandoned conversation to ACK. The active assigned session owns the
+next recovery action: reconcile/recover through the incumbent owner, continue another safe in-scope
+lane, or expose the exact unavailable recovery capability and a real action target, not merely an
+historical owner name. This procedure does not itself transfer a STARTed operation.
+
+**Gate the action, not the entire mission.** Apply current admission, permission and proof only to
+the effect or dependency that needs them. A later deployment, Slack dialogue, worker dispatch or
+runtime gate does not block otherwise-permitted source investigation, implementation or tests.
+A transport failure still blocks the required transport-dependent effect. A missing watcher prevents
+reliance on unattended return, not safe foreground execution. Never fabricate receipt or persistence.
+
+**A platform refusal is action-scoped until evidence proves otherwise.** Distinguish a refusal that
+occurred before tool dispatch from a lost/ambiguous response after dispatch. Use the incumbent carrier's
+bounded call history/status/readback when available. If the refused call is proven never to have reached
+the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
+do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
+
+EFFECT_NONE is not retry permission. The first explicit safety or permission denial ends retry for
+that action. Do not rephrase it or change tools, carriers, accounts, models or providers to get the
+denied effect through. An unclear refusal reason is not evidence of a technical fault; establish the
+permitted recovery from current platform/permission evidence, not experiments against the refusal.
+For a permitted technical schema, payload or transport failure, re-read the exact current target, then
+one bounded same-carrier retry may reshape the call without changing its intended effect (for example a
+smaller typed file chunk rather than a compound operation). If an equivalent pre-dispatch refusal repeats
+with no new evidence, change tactic or lane; do not enter an identical third loop. If dispatch may have
+occurred or effect cannot be proven absent, classify `EFFECT_UNKNOWN` and reconcile on that carrier
+without retry or failover. For chunked file/copy work, acknowledged prior chunks plus exact readback are
+known effects: preserve the verified prefix and continue only the missing suffix on the same carrier.
+Never overwrite a known-good prefix merely because a later chunk was refused.
+
+**Preserve provider capacity; do not turn a refusal into filter-probing.** The causal threshold for
+provider throttling or temporary restriction may be unknown. Treat repeated safety/refusal events as
+scarce-capacity pressure anyway: do not repeatedly rephrase the same effect, deliberately generate
+blocked calls, or switch accounts/models/providers merely to get a refused action through. After the
+single permitted technical recovery above, another equivalent refusal ends that recovery loop;
+it never permits probing a safety or permission denial. Continue only independent permitted work
+or wait for the actual provider restriction/recovery condition. A different account may later receive genuinely
+independent work only through normal capacity/routing law, never as refusal evasion.
+
+Do not contaminate provider-refusal evidence with transport loss. A device/host/network offline state or
+connector timeout without explicit provider safety/permission evidence is a transport failure, not a
+provider safety refusal and not a blocked-call datum for throttling analysis. Cause and effect state stay
+separate: if dispatch may have occurred before connectivity was lost, preserve `EFFECT_UNKNOWN`; if
+dispatch is proven absent, apply only the permitted technical-recovery law above. Record provider-safety
+pressure only from an explicit supported refusal/classification, never by inference from connectivity.
+
+Keep model/mode evidence separate from model inference. Record the visible selected model/mode,
+timestamp and exact refusal/error class when those facts are material and observable. A selected mode
+does not prove the actually served model, and degraded response quality, latency or tool availability
+does not prove a downgrade. If the provider visibly changes/reroutes the model or mode, treat that as
+a material surface change and re-evaluate task fit/continuity before further effectful work. When served
+identity cannot be verified, record it as UNKNOWN rather than inferring Astra, Sol, Terra or another
+model from behavior.
+
+**CI is a release dependency.** Pending checks do not stop implementation, test repair, review or
+other independent authorized work. Preserve the exact candidate identity, use one existing cheap
+observer, and consume its result before the gated merge/release; follow `docs/DELIVERY_WORKFLOW.md`.
+Do not bypass required checks or independent review, and do not generate empty pushes or repeated
+status turns. When changing the candidate is necessary, invalidate only evidence affected by that
+change and bind subsequent observation to the new head. Do not duplicate a worker's assigned work.
+
+**Problem-solve before escalating.** Reuse the current checkpoint and minimum relevant source; do
+not reload unrelated history. Inspect the exact failure, try the bounded lawful repair, or change to
+an independent lane. Two equivalent failures without new evidence require a changed hypothesis or
+re-plan, not a third identical loop. Ask a human only for the precise decision or action actually
+reserved to them. A real blocker has an affected action, evidence and a reachable resolver/return
+condition in the existing checkpoint; this is not a new ledger. These checks create no new lifecycle,
+scheduler, lock service, retry budget, authority grant or background execution.
+
 ## Step 1 — Freeze the active-turn frame
 
 After recovery/reconciliation, keep one compact working frame:

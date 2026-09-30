@@ -67,7 +67,12 @@ _DUPLICATE_JSON_KEY_REASON = "capability policy has a duplicate JSON key"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 _CONFIG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server", "claude-code"})
+CLAUDE_OPERATOR_PROVIDER = "claude"
+CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
+CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+})
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
@@ -91,6 +96,45 @@ def is_sealed_worker_execution_surface(execution_surface: str) -> bool:
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
 _NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
+
+
+def claude_security_config_projection(effective: Mapping[str, Any], *,
+                                     launch_provenance: Mapping[str, Any]) -> dict[str, object]:
+    """Canonical security subset of native get_settings.effective.
+
+    This encoder grants no observation authority. The helper supplies actual
+    readback; the registry supplies expected policy through the same encoder.
+    Missing permissions in a complete effective-settings read means no rules;
+    null/malformed values refuse. Never fill missing sandbox state from intent.
+    Tools and permission mode are attested separately from native init metadata.
+    launch_provenance records the helper's actually applied immutable launch
+    options; it is explicitly separate from native effective-settings readback.
+    """
+    if not isinstance(effective, Mapping):
+        raise CapabilityPolicyError("Claude effective settings are unavailable")
+    sandbox, permissions = effective.get("sandbox"), effective.get("permissions", {})
+    if (not isinstance(sandbox, Mapping) or not isinstance(permissions, Mapping)
+            or type(sandbox.get("enabled")) is not bool):
+        raise CapabilityPolicyError("Claude effective security settings are unavailable")
+    if (not isinstance(launch_provenance, Mapping)
+            or set(launch_provenance) != {"setting_sources", "strict_mcp_config", "skills"}
+            or type(launch_provenance["strict_mcp_config"]) is not bool
+            or any(not isinstance(launch_provenance[k], list)
+                   or len(launch_provenance[k]) > 32
+                   or any(not isinstance(x, str) or not x or len(x) > 128 for x in launch_provenance[k])
+                   for k in ("setting_sources", "skills"))):
+        raise CapabilityPolicyError("Claude applied launch provenance is unavailable")
+    try:
+        return json.loads(json.dumps({"sandbox": dict(sandbox), "permissions": dict(permissions),
+                                     "applied_launch_provenance": dict(launch_provenance)},
+                                     sort_keys=True, allow_nan=False))
+    except (TypeError, ValueError):
+        raise CapabilityPolicyError("Claude effective security settings are invalid") from None
+
+
+def claude_security_config_digest(effective: Mapping[str, Any], *,
+                                 launch_provenance: Mapping[str, Any]) -> str:
+    return _digest(claude_security_config_projection(effective, launch_provenance=launch_provenance))
 _MCP_TRANSPORTS = frozenset({"stdio", "streamable-http"})
 _MCP_AUTH_STATUSES = frozenset(
     {"unsupported", "notLoggedIn", "bearerToken", "oAuth"}
@@ -751,6 +795,9 @@ class ExecutionCapabilityProfile:
     def app_server_config_projection(self) -> dict[str, object]:
         """Security-relevant config expected back from ``config/read``."""
 
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            raise CapabilityPolicyError("Claude policy cannot use a Codex config projection")
+
         agents: dict[str, object]
         multi_agent: object = False
         multi_agent_v2: object = False
@@ -815,7 +862,44 @@ class ExecutionCapabilityProfile:
 
     @property
     def expected_config_digest(self) -> str:
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            requested = self.claude_sdk_config_projection()
+            return claude_security_config_digest({
+                "sandbox": requested["sandbox"],
+                "permissions": {},
+            }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
         return _digest(self.app_server_config_projection())
+
+    def claude_sdk_config_projection(self) -> dict[str, object]:
+        """Requested policy only; never evidence that the CLI enforced it.
+
+        This first disabled profile has no command, write, MCP, plugin or child
+        capability. A current production policy observer is still required
+        before enabling it or deriving observed OHF enforcement fields.
+        """
+        if (self.execution_surface != CLAUDE_OPERATOR_EXECUTION_SURFACE
+                or self.write_capable or self.sandbox_policy != "read-only"
+                or self.network_policy != "disabled"
+                or self.native_helper_policy is not NativeHelperPolicy.DISABLED
+                or self.skills or self.skill_grants or self.mcp_server_grants
+                or self.plugins or self.resource_grants):
+            raise CapabilityPolicyError("Claude policy exceeds its unadmitted first profile")
+        return {
+            "tools": ["Read", "Glob", "Grep"],
+            "skills": [],
+            "permission_mode": "dontAsk",
+            "setting_sources": [],
+            "strict_mcp_config": True,
+            "mcp_servers": {},
+            "sandbox": {
+                "enabled": True, "failIfUnavailable": True,
+                "autoAllowBashIfSandboxed": False,
+                "allowUnsandboxedCommands": False,
+                "excludedCommands": [],
+                "network": {"allowedDomains": [], "deniedDomains": ["*"],
+                            "allowAllUnixSockets": False, "allowLocalBinding": False},
+            },
+        }
 
     def app_server_config_overrides(self) -> tuple[str, ...]:
         if self.execution_surface != "codex-app-server":
@@ -886,6 +970,15 @@ class ExecutionCapabilityProfile:
                 "harness_binary_digest must be a lowercase SHA-256 digest"
             )
         required: list[CapabilityIdentity] = []
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            # The SDK injects its result-rendering tool only for the fixed
+            # Executive plan output schema. It is observed as a capability,
+            # not supplied as a permission or an extra base tool in the SDK.
+            self.claude_sdk_config_projection()
+            required.extend(
+                CapabilityIdentity(name=name, kind="tool", harness_binary_digest=binary_digest)
+                for name in ("Read", "Glob", "Grep", "StructuredOutput")
+            )
         if self.skill_grants:
             # Exact V4 company-Skill grants compile their closure digest
             # into the existing OHF identity; package path, source commit
@@ -1290,6 +1383,8 @@ class ExecutionCapabilityRegistry:
                 field=f"profiles.{profile_id}.execution_surface",
                 choices=_EXECUTION_SURFACES,
             )
+            if execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE and enabled:
+                raise CapabilityPolicyError("Claude policy observation is not admitted")
             auth_realm = _closed_choice(
                 value.get("auth_realm"),
                 field=f"profiles.{profile_id}.auth_realm",

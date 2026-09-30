@@ -31,6 +31,8 @@ from control_plane.worker_execution_contract import (
     WorkerProcessRef,
     WorkerResult,
     WorkerRunStatus,
+    validate_subscription_canary_claim,
+    worker_launch_spec_sha256,
 )
 
 
@@ -64,6 +66,7 @@ _LAUNCH_FIELDS = {
     "shared_run_gid",
     "secret_canary_verdict",
     "require_secret_canary",
+    "subscription_canary_claim",
 }
 _MOVED_NAMES = {
     "ArtifactReceipt",
@@ -97,6 +100,7 @@ _TARGET_CONSTRUCTORS = {
     "control_plane.executive_supervisor.ExecutiveSupervisor": "supervisor",
 }
 _EXPECTED_CONSTRUCTOR_SITES = {
+    ("control_plane/codex_account_environment.py", "CodexAccountEnvironment.worker_adapter", "adapter", 1),
     ("scripts/executive_os_phase1b.py", "_supervisor", "adapter", 1),
     ("scripts/executive_os_phase1b.py", "_supervisor", "supervisor", 1),
     ("scripts/executive_os_phase1b_proof.py", "_run", "adapter", 1),
@@ -111,6 +115,7 @@ _EXPECTED_CONSTRUCTOR_SITES = {
         1,
     ),
     ("scripts/executive_os_phase1c_worker.py", "_build_broker", "adapter", 1),
+    ("scripts/executive_os_linux_worker.py", "build_linux_worker_broker", "adapter", 1),
     (
         "scripts/executive_os_phase1fc_acceptance.py",
         "_ExactSupervisorFixtureDispatcher.__init__",
@@ -812,6 +817,188 @@ def test_serialized_common_launch_request_has_no_provider_owned_fields(
     }.isdisjoint(serialized)
 
 
+def _subscription_claim() -> dict:
+    now = 1_758_000_000_000
+    value = {
+        "schema": "mastermind.subscription_canary_claim/v1",
+        "execution_mode": "interactive_canary",
+        "run_id": "run-1",
+        "job_id": "job-1",
+        "worker_id": "worker-1",
+        "quota_class": "interactive",
+        "fence_generation": 7,
+        "capacity_generation": 7,
+        "capacity_state": "BUSY",
+        "held_attempt_id": "run-1",
+        "current_attempt_id": "run-1",
+        "binding_id": "reviewed-binding",
+        "profile_id": "reviewed-profile",
+        "adapter_id": "codex-cli",
+        "model": "reviewed-model",
+        "realm_config_sha256": "a" * 64,
+        "realm_generation": 2,
+        "catalog_digest": "b" * 64,
+        "issued_at_ms": now,
+        "expires_at_ms": now + 1_000,
+        "observation_digest": "c" * 64,
+    }
+    import hashlib
+    import json
+    value["observation_digest"] = hashlib.sha256(json.dumps(
+        {key: item for key, item in value.items() if key != "observation_digest"},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return value
+
+
+def test_subscription_claim_is_frozen_closed_and_digest_participating(
+    tmp_path: Path,
+) -> None:
+    claim = _subscription_claim()
+    spec = _spec(tmp_path, authorities=("READ",), subscription_canary_claim=claim)
+
+    assert isinstance(spec.subscription_canary_claim, Mapping)
+    assert type(spec.subscription_canary_claim) is not dict
+    with pytest.raises(TypeError):
+        spec.subscription_canary_claim["run_id"] = "changed"
+    assert set(spec.subscription_canary_claim) == set(claim)
+    assert spec.subscription_canary_claim == claim
+    assert worker_launch_spec_sha256(spec) != worker_launch_spec_sha256(_spec(tmp_path))
+    changed = dict(claim)
+    changed["run_id"] = "run-2"
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="subscription canary claim is malformed",
+    ):
+        _spec(tmp_path, subscription_canary_claim=changed)
+
+
+def test_subscription_claim_rejects_unknown_malformed_and_secret_input(
+    tmp_path: Path,
+) -> None:
+    unknown = _subscription_claim()
+    unknown["seal"] = "opaque"
+    malformed = _subscription_claim()
+    malformed["expires_at_ms"] = "not-an-integer"
+    raw_secret = _subscription_claim()
+    raw_secret["binding_id"] = "token"
+
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="claim fields are invalid",
+    ):
+        validate_subscription_canary_claim(unknown)
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="expires_at_ms is invalid",
+    ):
+        validate_subscription_canary_claim(malformed)
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="raw secret label",
+    ):
+        validate_subscription_canary_claim(raw_secret)
+    with pytest.raises(
+        worker_execution_contract.WorkerRecoveryContractError,
+        match="claim fields are invalid",
+    ):
+        _spec(tmp_path, subscription_canary_claim=unknown)
+
+
+def test_subscription_claim_recovers_exactly_in_recovery_binding(
+    tmp_path: Path,
+) -> None:
+    prompt_path = tmp_path / "run" / "input" / "worker-prompt.txt"
+    prompt_path.parent.mkdir(parents=True)
+    prompt_path.write_text("bounded interactive prompt", encoding="utf-8")
+    prompt_path.chmod(0o600)
+    spec = _spec(
+        tmp_path,
+        run_dir=tmp_path / "run",
+        prompt="bounded interactive prompt",
+        authorities=("READ",),
+        subscription_canary_claim=_subscription_claim(),
+    )
+    process = WorkerProcessRef(
+        run_id=spec.run_id,
+        pid=61,
+        pgid=61,
+        process_start_identity="start-61",
+        boot_session_id="boot-fixture",
+        launch_nonce="nonce-fixture",
+        provider_session_id=None,
+        stdout_path=str(spec.run_dir / "logs" / "stdout.jsonl"),
+        stderr_path=str(spec.run_dir / "logs" / "stderr.log"),
+        result_path=str(spec.run_dir / "output" / "result.json"),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=_binary(),
+        base_sha="c" * 40,
+    )
+    binding = worker_execution_contract.WorkerRecoveryBinding.bind(
+        adapter_id="codex-cli",
+        spec=spec,
+        process_ref=process,
+        prompt_path=prompt_path,
+    )
+    restored = binding.recover_launch_spec()
+
+    assert restored == spec
+    assert restored.subscription_canary_claim == spec.subscription_canary_claim
+    assert worker_launch_spec_sha256(restored) == worker_launch_spec_sha256(spec)
+
+
+def test_launch_attestation_adds_canary_fields_only_for_canary(tmp_path: Path) -> None:
+    binary = _binary()
+    arguments = (
+        LAUNCH_ATTESTATION_SCHEMA_VERSION,
+        "2026-09-18T00:00:00+00:00",
+        "/fixture/provider",
+        binary,
+        ("/usr/bin/codex",),
+        ("CODEX_HOME",),
+        "d" * 64,
+        "e" * 64,
+        None,
+        "f" * 40,
+        {},
+        {},
+        {},
+        {},
+        "nonce-fixture",
+        {"pid": 61},
+    )
+    ordinary = LaunchAttestation(*arguments)
+    canary = LaunchAttestation(
+        *arguments,
+        subscription_canary_observation_digest="c" * 64,
+        subscription_canary_binding_id="reviewed-binding",
+        subscription_canary_model="reviewed-model",
+    )
+
+    assert set(ordinary.to_dict()) == {
+        "schema_version",
+        "created_at",
+        "executable_path",
+        "binary",
+        "rendered_argv",
+        "environment_keys",
+        "permission_profile_sha256",
+        "prompt_sha256",
+        "expected_base_sha",
+        "observed_base_sha",
+        "workspace_identity",
+        "worker_identity",
+        "provider_home_identity",
+        "secret_canary_verdict",
+        "launch_nonce",
+        "process_identity",
+    }
+    assert canary.to_dict()["subscription_canary_observation_digest"] == "c" * 64
+    assert canary.to_dict()["subscription_canary_binding_id"] == "reviewed-binding"
+    assert canary.to_dict()["subscription_canary_model"] == "reviewed-model"
+
+
 def test_phase1c_worker_composes_exactly_one_policy_owned_codex_home() -> None:
     source = (
         Path(__file__).resolve().parents[1] / "scripts" / "executive_os_phase1c_worker.py"
@@ -851,7 +1038,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
     assert census.violations == ()
     assert {site.identity for site in census.sites} == _EXPECTED_CONSTRUCTOR_SITES
     assert sum(site.kind == "supervisor" for site in census.sites) == 6
-    assert sum(site.kind == "adapter" for site in census.sites) == 4
+    assert sum(site.kind == "adapter" for site in census.sites) == 6
 
     killed: list[tuple[str, str, str, int]] = []
     for site in census.sites:
@@ -865,7 +1052,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
         assert len(mutant.violations) == 1
         assert expected in mutant.violations[0]
         killed.append(site.identity)
-    assert len(killed) == 10
+    assert len(killed) == 12
 
 
 def test_constructor_source_law_preserves_alias_qualified_opaque_and_foreign_controls(

@@ -1,5 +1,9 @@
 import type { AuthState, MissionHost } from "./host";
-import type { WindowDocument } from "./workspace-contract";
+import type {
+  ObservedMissionAssociation,
+  WindowDocument,
+} from "./workspace-contract";
+import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   allEvidence,
@@ -24,19 +28,47 @@ import {
 } from "./result";
 export const navigation = [
   "Today",
+  "Work",
   "Programs",
+  "Fleet & Capacity",
   "Mission Workspace",
+  "Conversation",
+  "Activity",
   "Connections",
   "Evidence",
-  "Conversation",
 ] as const;
 type View = (typeof navigation)[number];
+const primaryNavigation: readonly View[] = [
+  "Today",
+  "Work",
+  "Programs",
+  "Fleet & Capacity",
+];
+const missionNavigation: readonly View[] = [
+  "Mission Workspace",
+  "Conversation",
+  "Activity",
+  "Connections",
+  "Evidence",
+];
+const navGlyph: Record<View, string> = {
+  Today: "⌂",
+  Work: "▤",
+  Programs: "◫",
+  "Fleet & Capacity": "◇",
+  "Mission Workspace": "◎",
+  Conversation: "◌",
+  Activity: "↯",
+  Connections: "⌘",
+  Evidence: "□",
+};
 interface BuildReceipt {
   version: string;
   source_revision: string;
   build_identity: string;
   transport: string;
   state: string;
+  native_client_ref?: string | null;
 }
 declare global {
   interface Window {
@@ -504,6 +536,84 @@ function Mission({ d }: { d: MissionDocument }) {
     </>
   );
 }
+function Activity({ d }: { d: MissionDocument }) {
+  return (
+    <>
+      <section className="card activity-summary">
+        <div className="section-title">
+          <div>
+            <h2>Activity</h2>
+            <p className="muted">
+              The same admitted Mission document, organized by current work
+              posture. Opening this view performs no extra read and starts no
+              work.
+            </p>
+          </div>
+          <State value={d.execution.state} />
+        </div>
+        <div className="activity-facts">
+          <div>
+            <small>EXECUTION</small>
+            <State value={d.execution.state} />
+          </div>
+          <div>
+            <small>REVIEW</small>
+            <State value={d.review.verdict} />
+          </div>
+          <div>
+            <small>TRANSPORT</small>
+            <State value={d.transport.dispatch_state} />
+          </div>
+          <div>
+            <small>ACCEPTANCE</small>
+            <State value={d.acceptance.state} />
+          </div>
+          <div>
+            <small>POSTURE</small>
+            <State value={d.posture.value} />
+          </div>
+        </div>
+      </section>
+      <section className="card">
+        <div className="section-title">
+          <div>
+            <h2>Live work</h2>
+            <p className="muted">
+              Canonical child facts from this Mission snapshot. Missing joins
+              remain missing; a row is never promoted to running from UI state.
+            </p>
+          </div>
+          <State value={d.children.state} />
+        </div>
+        {d.children.items.length ? (
+          <ul className="items activity-items">
+            {d.children.items.map((item, index) => (
+              <li key={item.job_id ?? `unidentified-activity-${index}`}>
+                <code>{display(item.job_id, "Unidentified child")}</code>
+                <State value={item.status} />
+                <small>
+                  {display(item.orchestration_role)} · attempt{" "}
+                  {item.latest_attempt?.status ?? "not established"}
+                </small>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty>
+            No bounded child rows are available. This is not evidence of zero
+            work.
+          </Empty>
+        )}
+        <p className="muted">
+          {d.children.coverage === "INCOMPLETE"
+            ? "Coverage is incomplete; known rows are not the complete queue."
+            : "The owner reported complete child coverage for this observation."}
+        </p>
+      </section>
+    </>
+  );
+}
+
 function Connections({ d }: { d: MissionDocument }) {
   const rs = useMemo(() => relationshipsForMission(d), [d]),
     [mode, setMode] = useState<"graph" | "list">("graph"),
@@ -674,32 +784,66 @@ function Conversation({
   pending,
   refresh,
   selection,
+  association,
+  contentAvailable,
 }: {
   document?: WindowDocument | null;
   pending?: boolean;
   refresh?: () => void;
   selection?: MissionSelection | null;
+  association?: ObservedMissionAssociation | null;
+  contentAvailable?: boolean;
 }) {
+  const refreshControl = (
+    <button onClick={refresh} disabled={!!pending || !contentAvailable}>
+      Refresh window
+    </button>
+  );
   if (document)
     return (
       <section className="card">
         <div className="section-title">
-          <h2>Unbound current window</h2>
-          <State value="UNBOUND" />
+          <h2>
+            {association
+              ? "Observed window for this Mission"
+              : "Unbound current window"}
+          </h2>
+          <State
+            value={association ? "OBSERVED_MISSION_ASSOCIATION" : "UNBOUND"}
+          />
         </div>
-        <div className="unjoined" role="note">
-          <b>NOT_LINKED_TO_SELECTED_MISSION</b>
-          <p>
-            {selection
-              ? `No relationship is proven between this current window and ${selection.workRef} / ${selection.rootJobId}.`
-              : "No relationship is proven between this current window and any Mission selection."}
-          </p>
-        </div>
+        {association ? (
+          <div className="unjoined" role="note">
+            <b>Observed window for this Mission</b>
+            <p>
+              Job {association.job_id} · Attempt {association.attempt_id}. The
+              content owner observed this Job/Attempt and the separately
+              authorized Mission owner placed that same current Job/Attempt
+              under this selected root. Independent owner observations. This
+              display does not prove shared identity, later liveness, complete
+              history, terminal acceptance, review approval, or action/result
+              correspondence.
+            </p>
+            <p>
+              Window observed at {association.window_observed_at}. Mission
+              document generated at{" "}
+              {association.mission_generated_at ?? "unavailable"}.
+            </p>
+          </div>
+        ) : (
+          <div className="unjoined" role="note">
+            <b>NOT_LINKED_TO_SELECTED_MISSION</b>
+            <p>
+              {selection
+                ? `No relationship is proven between this current window and ${selection.workRef} / ${selection.rootJobId}.`
+                : "No relationship is proven between this current window and any Mission selection."}
+            </p>
+          </div>
+        )}
         <p className="muted">
-          Global current permitted turn · observed {document.view.observed_at} ·
-          coverage {label(document.view.coverage)}. This window does not
-          establish full history, Mission evidence, action or result
-          correlation, review, or product acceptance.
+          {association
+            ? `Coverage ${label(document.view.coverage)}. This window does not establish full history, Mission evidence, action or result correlation, review, or product acceptance.`
+            : `Global current permitted turn · observed ${document.view.observed_at} · coverage ${label(document.view.coverage)}. This window does not establish full history, Mission evidence, action or result correlation, review, or product acceptance.`}
         </p>
         {document.view.items.map((item) => (
           <article key={item.id}>
@@ -719,7 +863,7 @@ function Conversation({
         {document.view.gaps.length ? (
           <p className="muted">The source reported gaps in this window.</p>
         ) : null}
-        <button onClick={refresh}>Refresh window</button>
+        {refreshControl}
       </section>
     );
   return (
@@ -742,9 +886,11 @@ function Conversation({
         <summary>Technical details</summary>
         <code>CONVERSATION_TRANSPORT_UNAVAILABLE</code>
       </details>
+      {refreshControl}
     </section>
   );
 }
+
 export function App() {
   const native = "__TAURI_INTERNALS__" in window,
     initialLocation = useMemo(() => locationSelectionInput(), []),
@@ -777,6 +923,18 @@ export function App() {
     [windowDocument, setWindowDocument] = useState<WindowDocument | null>(null),
     [windowPending, setWindowPending] = useState(false),
     [windowRevision, setWindowRevision] = useState(0),
+    [association, setAssociation] = useState<ObservedMissionAssociation | null>(
+      null,
+    ),
+    invalidation = useRef(0),
+    pairAbort = useRef<AbortController | null>(null),
+    previousAuth = useRef<string | null>(
+      authState ? JSON.stringify(authState) : null,
+    ),
+    bumpInvalidation = () => {
+      invalidation.current += 1;
+      pairAbort.current?.abort();
+    },
     [missionV3, setMissionV3] = useState<
       Missionv3Document | UnavailableMission | null
     >(null),
@@ -826,9 +984,14 @@ export function App() {
   useEffect(
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
+        const serialized = JSON.stringify(state);
+        if (serialized === previousAuth.current) return;
+        previousAuth.current = serialized;
+        bumpInvalidation();
         setAuthState(state);
         setAuthRevision((n) => n + 1);
         setWindowDocument(null);
+        setAssociation(null);
         setMissionV3(null);
         setResultState({ kind: "IDLE" });
         if (!state.acquisition)
@@ -853,32 +1016,78 @@ export function App() {
     }
   }, [authState?.acquisition, resultState]);
   useEffect(() => {
+    bumpInvalidation();
     const controller = new AbortController();
+    pairAbort.current = controller;
+    const started = invalidation.current;
+    const hostGeneration =
+      window.MastermindMissionHost?.invalidationGeneration?.() ?? 0;
     let attached = true;
     setWindowDocument(null);
+    setAssociation(null);
     setWindowPending(false);
-    const read = window.MastermindMissionHost?.readCurrentWindow;
-    if (active !== "Conversation" || !read || !authState?.content)
+    const host = window.MastermindMissionHost;
+    const readWindow = host?.readCurrentWindow;
+    const readV3 = host?.readMissionV3;
+    const stillCurrent = () =>
+      attached &&
+      !controller.signal.aborted &&
+      started === invalidation.current &&
+      hostGeneration === (host?.invalidationGeneration?.() ?? 0);
+    if (active !== "Conversation")
       return () => {
         attached = false;
         controller.abort();
       };
-    setWindowPending(true);
-    read({ signal: controller.signal })
-      .then((value) => {
-        if (attached && !controller.signal.aborted) setWindowDocument(value);
-      })
-      .catch(() => {
-        if (attached) setWindowDocument(null);
-      })
-      .finally(() => {
-        if (attached) setWindowPending(false);
-      });
+    const run = async () => {
+      setWindowPending(true);
+      let pairMission: Missionv3Document | null = null;
+      if (authState?.acquisition && selection && readV3) {
+        try {
+          const raw = await readV3({ ...selection, signal: controller.signal });
+          if (!stillCurrent()) return;
+          // Same full decoder as the main Mission path: a fresh response that
+          // fails the closed contract can never establish an association, so
+          // the window stays UNBOUND rather than trusting an unknown shape.
+          pairMission = decodeMissionv3(raw, selection);
+        } catch {
+          if (!stillCurrent()) return;
+          pairMission = null;
+        }
+      }
+      if (!stillCurrent()) return;
+      if (!authState?.content || !readWindow) {
+        setWindowPending(false);
+        return;
+      }
+      try {
+        const value = await readWindow({ signal: controller.signal });
+        if (!stillCurrent()) return;
+        setWindowDocument(value);
+        setAssociation(
+          observedMissionAssociation(value, pairMission, selection),
+        );
+      } catch {
+        if (!stillCurrent()) return;
+        setWindowDocument(null);
+        setAssociation(null);
+      } finally {
+        if (stillCurrent()) setWindowPending(false);
+      }
+    };
+    void run();
     return () => {
       attached = false;
       controller.abort();
     };
-  }, [active, selection, authRevision, windowRevision, authState?.content]);
+  }, [
+    active,
+    selection,
+    authRevision,
+    windowRevision,
+    authState?.content,
+    authState?.acquisition,
+  ]);
   useEffect(() => {
     if (!initialLocation.hasIdentity && initial) {
       const location = new URL(window.location.href);
@@ -985,7 +1194,9 @@ export function App() {
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
+      bumpInvalidation();
       setWindowDocument(null);
+      setAssociation(null);
       setWindowPending(false);
       setMissionV3(null);
       setResultState({ kind: "IDLE" });
@@ -1144,33 +1355,63 @@ export function App() {
     conversationActive = active === "Conversation",
     conversationState = windowPending
       ? "SOURCE_READ_PENDING"
-      : windowDocument && authState?.content
-        ? "UNBOUND"
-        : "UNAVAILABLE",
+      : association
+        ? "OBSERVED_MISSION_ASSOCIATION"
+        : windowDocument && authState?.content
+          ? "UNBOUND"
+          : "UNAVAILABLE",
     headerState = conversationActive
       ? conversationState
-      : (d?.read_state.state ?? "UNAVAILABLE"),
+      : active === "Today"
+        ? index.state === "PENDING"
+          ? "SOURCE_READ_PENDING"
+          : index.state
+        : active === "Work" || active === "Fleet & Capacity"
+          ? "NOT_PROJECTED"
+          : (d?.read_state.state ?? "UNAVAILABLE"),
     headerSummary = conversationActive
-      ? windowDocument && authState?.content
-        ? "A global current permitted window. No relationship to the selected Mission is proven."
-        : "No Mission-linked conversation is currently established."
-      : d
-        ? d.mission.root_job_id && d.read_state.state === "CURRENT"
-          ? "A bounded source-qualified mission, current as of its owner observation."
-          : d.mission.root_job_id
-            ? `This mission projection is ${label(d.read_state.state)}; source qualification is not current.`
-            : "A qualified reconciliation state; no mission root is established."
-        : "No producer document is currently admitted.",
-    visibleNotice = conversationActive
-      ? windowDocument && authState?.content
-        ? "This current permitted window is not linked to the selected Mission."
-        : windowPending
-          ? "Reading the unbound current permitted window…"
+      ? association
+        ? "Observed window for this Mission from separately authorized owner observations."
+        : windowDocument && authState?.content
+          ? "A global current permitted window. No relationship to the selected Mission is proven."
           : "No Mission-linked conversation is currently established."
-      : notice,
+      : active === "Today"
+        ? d && d.read_state.state !== "CURRENT"
+          ? `Selected mission projection is ${label(d.read_state.state)}; source qualification is not current.`
+          : index.state === "PENDING"
+            ? "Reading the bounded Programs projection; no company-wide queue is inferred."
+            : index.state === "AVAILABLE"
+              ? `${index.programs.length} Programs from the bounded source observation.`
+              : "Program source unavailable; current company movement is not inferred."
+        : active === "Work"
+          ? "Global next-action ownership is not yet exposed by this frontend read contract."
+          : active === "Fleet & Capacity"
+            ? "Fleet health and placement require their canonical Capacity source."
+            : d
+              ? d.mission.root_job_id && d.read_state.state === "CURRENT"
+                ? "A bounded source-qualified mission, current as of its owner observation."
+                : d.mission.root_job_id
+                  ? `This mission projection is ${label(d.read_state.state)}; source qualification is not current.`
+                  : "A qualified reconciliation state; no mission root is established."
+              : "No producer document is currently admitted.",
+    visibleNotice = conversationActive
+      ? association
+        ? "Observed window for this Mission. Independent owner observations."
+        : windowDocument && authState?.content
+          ? "This current permitted window is not linked to the selected Mission."
+          : windowPending
+            ? "Reading the current permitted window…"
+            : "No Mission-linked conversation is currently established."
+      : active === "Work"
+        ? "Global Work source not connected. Mission Activity remains source-qualified."
+        : active === "Fleet & Capacity"
+          ? "Capacity source not connected. No host readiness was inferred."
+          : notice,
     open = (w: string, r: string | null) => {
       if (r) {
+        bumpInvalidation();
         setWindowDocument(null);
+        setAssociation(null);
         setWindowPending(false);
         const next = { workRef: w, rootJobId: r },
           location = new URL(window.location.href);
@@ -1192,16 +1433,89 @@ export function App() {
   let content: React.ReactNode;
   if (active === "Today")
     content = (
-      <section className="card">
-        <h2>Today</h2>
-        <p className="muted">
-          Open Programs to choose a mission. Current work will appear when an
-          approved workspace source is available.
-        </p>
-        <button className="primary" onClick={() => setActive("Programs")}>
-          Open Programs
-        </button>
-      </section>
+      <div className="today-view">
+        <section className="hero today-hero">
+          <div>
+            <span className="eyebrow">TODAY</span>
+            <h2>
+              {index.state === "PENDING"
+                ? "Reading the bounded company projection…"
+                : index.state === "AVAILABLE"
+                  ? index.programs.length
+                    ? `${index.programs.length} Programs are source-qualified.`
+                    : "No Programs were projected by this source."
+                  : "Current company movement is unavailable."}
+            </h2>
+            <p>
+              Only bounded source facts are shown here. Missing source coverage
+              never becomes an all-clear.
+            </p>
+          </div>
+          <State
+            value={
+              index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state
+            }
+          />
+        </section>
+        <div className="today-grid">
+          <section className="card">
+            <div className="section-title">
+              <div>
+                <h2>What is moving</h2>
+                <p className="muted">
+                  Program state and next action from the existing bounded
+                  Programs projection.
+                </p>
+              </div>
+            </div>
+            {index.state === "PENDING" ? (
+              <Empty>Reading the bounded Control Room projection…</Empty>
+            ) : index.programs.length ? (
+              <div className="programs today-programs">
+                {index.programs.slice(0, 5).map((p) => (
+                  <button
+                    key={p.workRef}
+                    disabled={!p.rootJobId}
+                    onClick={() => open(p.workRef, p.rootJobId)}
+                  >
+                    <b>{p.title || p.workRef}</b>
+                    <span>
+                      {label(p.state)} ·{" "}
+                      {display(p.nextAction, "No next action projected")}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : index.state === "AVAILABLE" ? (
+              <Empty>
+                No Programs were projected. This is not evidence of zero work.
+              </Empty>
+            ) : (
+              <Empty>
+                Program source unavailable. No current movement was inferred.
+              </Empty>
+            )}
+          </section>
+          <section className="card attention-card">
+            <div className="section-title">
+              <div>
+                <h2>Chairman attention</h2>
+                <p className="muted">
+                  Reserved-power decisions require their own qualified source.
+                </p>
+              </div>
+              <State value="NOT_PROJECTED" />
+            </div>
+            <p>
+              This frontend contract does not yet include a Chairman-decision
+              feed. Absence here is not evidence that zero decisions exist.
+            </p>
+            <button className="primary" onClick={() => setActive("Programs")}>
+              Open Programs
+            </button>
+          </section>
+        </div>
+      </div>
     );
   else if (active === "Programs")
     content = (
@@ -1257,13 +1571,71 @@ export function App() {
         ) : null}
       </section>
     );
+  else if (active === "Work")
+    content = (
+      <section className="card source-gap">
+        <div className="section-title">
+          <div>
+            <h2>Work</h2>
+            <p className="muted">
+              Company-wide next-action ownership requires its own qualified
+              Executive projection.
+            </p>
+          </div>
+          <State value="NOT_PROJECTED" />
+        </div>
+        <p>
+          The current frontend read contract does not yet expose the global
+          Needs Sol / Needs Worker / Waiting Capacity queues. Mission-level
+          Activity remains available from the admitted Mission document.
+        </p>
+        {d ? (
+          <button className="primary" onClick={() => setActive("Activity")}>
+            Open selected Mission Activity
+          </button>
+        ) : null}
+        <details className="reason-details">
+          <summary>Technical details</summary>
+          <code>WORK_QUEUE_SOURCE_NOT_CONNECTED</code>
+        </details>
+      </section>
+    );
+  else if (active === "Fleet & Capacity")
+    content = (
+      <section className="card source-gap">
+        <div className="section-title">
+          <div>
+            <h2>Fleet & Capacity</h2>
+            <p className="muted">
+              Resource health and placement are separate from Mission lifecycle
+              and require their canonical Capacity source.
+            </p>
+          </div>
+          <State value="NOT_PROJECTED" />
+        </div>
+        <p>
+          This read-only app does not infer host readiness from browser,
+          provider, or Mission state. Capacity will appear here only when the
+          qualified fleet/placement feed is connected.
+        </p>
+        <details className="reason-details">
+          <summary>Technical details</summary>
+          <code>CAPACITY_SOURCE_NOT_CONNECTED</code>
+        </details>
+      </section>
+    );
   else if (active === "Conversation")
     content = (
       <Conversation
         document={authState?.content ? windowDocument : null}
         pending={windowPending}
-        refresh={() => setWindowRevision((n) => n + 1)}
+        refresh={() => {
+          bumpInvalidation();
+          setWindowRevision((n) => n + 1);
+        }}
         selection={selection}
+        association={association}
+        contentAvailable={!!authState?.content}
       />
     );
   else if (!d)
@@ -1377,6 +1749,7 @@ export function App() {
         <ResultCard state={resultState} />
       </>
     );
+  else if (active === "Activity") content = <Activity d={d} />;
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <Evidence d={d} />;
   else content = <Conversation />;
@@ -1387,27 +1760,65 @@ export function App() {
       </a>
       <aside>
         <div className="brand">
-          ▦{" "}
-          <span>
-            MASTERMIND<small>OPERATING SYSTEM</small>
+          <span className="brand-mark" aria-hidden="true">
+            M
+          </span>
+          <span className="brand-copy">
+            mastermind<small>EXECUTIVE OS</small>
           </span>
         </div>
-        <nav aria-label="Workspace navigation">
-          {navigation.map((x) => (
-            <button
-              key={x}
-              className={active === x ? "active" : ""}
-              aria-current={active === x ? "page" : undefined}
-              onClick={() => setActive(x)}
-            >
-              {x}
-            </button>
-          ))}
-        </nav>
+        <div className="nav-section">
+          <span className="nav-section-label">COMPANY</span>
+          <nav aria-label="Company navigation">
+            {primaryNavigation.map((x) => (
+              <button
+                key={x}
+                className={active === x ? "active" : ""}
+                aria-label={x}
+                aria-current={active === x ? "page" : undefined}
+                onClick={() => setActive(x)}
+              >
+                <span className="nav-glyph" aria-hidden="true">
+                  {navGlyph[x]}
+                </span>
+                <span className="nav-label">{x}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+        <div className="nav-section mission-nav">
+          <span className="nav-section-label">CURRENT MISSION</span>
+          {selection ? (
+            <div className="mission-context">
+              <b>{d?.program.title || selection.workRef}</b>
+              <small>Exact mission selected</small>
+            </div>
+          ) : (
+            <div className="mission-context mission-context-empty">
+              No exact mission selected
+            </div>
+          )}
+          <nav aria-label="Mission navigation">
+            {missionNavigation.map((x) => (
+              <button
+                key={x}
+                className={active === x ? "active" : ""}
+                aria-label={x}
+                aria-current={active === x ? "page" : undefined}
+                onClick={() => setActive(x)}
+              >
+                <span className="nav-glyph" aria-hidden="true">
+                  {navGlyph[x]}
+                </span>
+                <span className="nav-label">{x}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
         <div className="side-note">
-          <b>Read-only workspace</b>
+          <b>Source-qualified viewer</b>
           <br />
-          Source, execution, review, transport, acceptance and posture remain
+          Lifecycle, review, transport, acceptance and source freshness remain
           separate facts.
         </div>
       </aside>
@@ -1504,13 +1915,21 @@ export function App() {
               <dd>
                 <code>{build.build_identity}</code>
               </dd>
+              {build.native_client_ref ? (
+                <>
+                  <dt>Native client reference</dt>
+                  <dd>
+                    <code>{build.native_client_ref}</code>
+                  </dd>
+                </>
+              ) : null}
               <dt>Transport</dt>
               <dd>{`${build.transport} / ${build.state}`}</dd>
             </dl>
           </details>
         ) : null}
         {content}
-        {d && !conversationActive && (
+        {d && missionNavigation.includes(active) && !conversationActive && (
           <section className="card">
             <h2>Missingness and source state</h2>
             {d.missingness.length ? (

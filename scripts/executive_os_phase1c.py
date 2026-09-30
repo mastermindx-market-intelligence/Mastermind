@@ -95,6 +95,77 @@ def _build_executive_dialogue_wake_carrier(
 
 
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
+
+
+def _validate_subscription_canary_realm_config(config: dict[str, Any]) -> None:
+    """Validate the optional root-owned ``subscription_canary_realm`` block.
+
+    The shape is fixed: exactly ``{binding_id, generation, config_sha256}``
+    and each field passes the same fail-closed check the supervisor and the
+    worker re-apply on disk.  Validation does not rewrite the loaded mapping:
+    fixed-target source identity and hashes continue to cover the exact
+    root-owned bytes.  An ordinary (no realm) configuration remains unchanged.
+    """
+
+    realm = config.get("subscription_canary_realm")
+    if realm is None:
+        return
+    if not isinstance(realm, dict) or set(realm) != {
+        "binding_id", "generation", "config_sha256",
+    }:
+        raise ServiceError(
+            "control config subscription_canary_realm must have exactly "
+            "binding_id, generation, config_sha256"
+        )
+    binding_id = realm["binding_id"]
+    generation = realm["generation"]
+    config_sha = realm["config_sha256"]
+    if (
+        not isinstance(binding_id, str)
+        or not binding_id
+        or binding_id != binding_id.strip()
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.binding_id is invalid"
+        )
+    if (
+        type(generation) is not int
+        or isinstance(generation, bool)
+        or generation < 1
+        or generation >= 2 ** 63
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.generation is invalid"
+        )
+    if (
+        not isinstance(config_sha, str)
+        or config_sha != config_sha.lower()
+        or re.fullmatch(r"[0-9a-f]{64}", config_sha) is None
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.config_sha256 is invalid"
+        )
+    # Final fail-closed review of the binding against the catalog so a typo
+    # in the realm cannot survive even if the three scalar fields look sane.
+    from control_plane.subscription_harness_bindings import (
+        HarnessBindingError,
+        get_binding,
+    )
+    try:
+        binding = get_binding(binding_id)
+    except (HarnessBindingError, ValueError) as exc:
+        raise ServiceError(
+            "control config subscription_canary_realm binding is not reviewed"
+        ) from exc
+    if (
+        binding.adapter_id != "codex-cli"
+        or binding.implementation_state == "SPEC_ONLY"
+        or binding.autonomous_allowed is not False
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm binding is not a "
+            "reviewed codex-cli attended-only implementation"
+        )
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
 )
@@ -111,6 +182,7 @@ _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
+_CONTENT_PROFILE_MAX_BYTES = 65536
 _CONFIG_REQUIRED = frozenset(
     {
         "schema_version",
@@ -138,6 +210,7 @@ _CONFIG_REQUIRED = frozenset(
 _CONFIG_OPTIONAL = frozenset(
     {
         "content_observer",
+        "content_observer_profile_path",
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
@@ -177,6 +250,10 @@ _CONFIG_OPTIONAL = frozenset(
         "dialogue_observation_peer_uid",
         "dialogue_bridge_armed",
         "dialogue_wake_retry_policy",
+        "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
+        "python_runtime_provenance_digest",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -250,6 +327,11 @@ def _parser() -> argparse.ArgumentParser:
                 help="Content profile key (web or mac). Omit for legacy single-profile.",
             )
 
+    readiness = sub.add_parser("check-current-worker-login", help="Read assigned worker login status for one current Attempt.")
+    readiness.add_argument("job_id")
+    readiness.add_argument("attempt_id")
+    readiness.add_argument("fence_generation", type=int)
+
     job = sub.add_parser("job", help="Inspect one Job.")
     job.add_argument("job_id")
     attempt = sub.add_parser("attempt", help="Inspect one Attempt.")
@@ -304,6 +386,153 @@ def _private_json(path: Path, *, label: str, root_owned: bool) -> dict[str, Any]
     if not isinstance(value, dict):
         raise ServiceError(f"{label} must contain a JSON object")
     return value
+
+
+def _content_profile_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_gid,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _sealed_content_profile_ancestors(path: Path) -> tuple[tuple[str, tuple[int, ...]], ...]:
+    """Return stable identities for root-owned, non-symlink path ancestors."""
+
+    identities = []
+    for node in path.parents:
+        try:
+            info = node.lstat()
+        except OSError as exc:
+            raise ServiceError("content observer profile path is unavailable") from exc
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+        ):
+            raise ServiceError(
+                "content observer profile path ancestors must be root-owned and sealed"
+            )
+        identities.append((os.fspath(node), _content_profile_identity(info)))
+    return tuple(identities)
+
+
+def _content_profile_path(value: Any) -> Path:
+    """Accept one exact, normalized path without resolving aliases silently."""
+
+    if type(value) is not str or not value or not Path(value).is_absolute():
+        raise ServiceError("content observer profile path must be absolute")
+    path = Path(value)
+    if os.path.normpath(value) != value or os.fspath(path) != value:
+        raise ServiceError("content observer profile path must be normalized")
+    _sealed_content_profile_ancestors(path)
+    try:
+        if path.resolve(strict=True) != path:
+            raise ServiceError("content observer profile path must not traverse symlinks")
+    except ServiceError:
+        raise
+    except OSError as exc:
+        raise ServiceError("content observer profile path is unavailable") from exc
+    return path
+
+
+def _read_content_profile_document(path: Path, *, expected_gid: int) -> dict[str, Any]:
+    """Read one current root-published profile snapshot without cached fallback."""
+
+    if type(expected_gid) is not int or expected_gid < 0:
+        raise ServiceError("content observer profile Control GID is invalid")
+    before_ancestors = _sealed_content_profile_ancestors(path)
+    fd = -1
+    try:
+        fd = os.open(
+            path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+        )
+        before = os.fstat(fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != 0
+            or before.st_gid != expected_gid
+            or stat.S_IMODE(before.st_mode) != 0o440
+            or before.st_size > _CONTENT_PROFILE_MAX_BYTES
+        ):
+            raise ServiceError("content observer profile source identity is invalid")
+        parts: list[bytes] = []
+        size = 0
+        while True:
+            part = os.read(
+                fd,
+                min(65536, _CONTENT_PROFILE_MAX_BYTES + 1 - size),
+            )
+            if not part:
+                break
+            parts.append(part)
+            size += len(part)
+            if size > _CONTENT_PROFILE_MAX_BYTES:
+                raise ServiceError("content observer profile exceeds byte bound")
+        raw = b"".join(parts)
+        after = os.fstat(fd)
+        path_info = path.lstat()
+        after_ancestors = _sealed_content_profile_ancestors(path)
+        if (
+            _content_profile_identity(before) != _content_profile_identity(after)
+            or _content_profile_identity(after) != _content_profile_identity(path_info)
+            or before_ancestors != after_ancestors
+            or len(raw) != after.st_size
+        ):
+            raise ServiceError("content observer profile changed during read")
+
+        def unique_pairs(items):
+            result = {}
+            for key, item in items:
+                if key in result:
+                    raise ServiceError("content observer profile contains duplicate keys")
+                result[key] = item
+            return result
+
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs)
+        if type(value) is not dict:
+            raise ServiceError("content observer profile must contain a JSON object")
+        return value
+    except ServiceError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ServiceError("content observer profile is unavailable or malformed") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _validate_content_profiles(value: Any, *, expected_release_sha: str) -> Any:
+    from common.executive_content_contract import (
+        ContentObserverProfile,
+        load_content_profiles,
+    )
+
+    try:
+        configured = load_content_profiles(value)
+    except (TypeError, ValueError) as exc:
+        raise ServiceError("content observer profile is invalid") from exc
+    profiles = (
+        (configured,)
+        if type(configured) is ContentObserverProfile
+        else tuple(
+            slot.profile
+            for slot in (configured.web, configured.mac)
+            if slot.profile is not None
+        )
+    )
+    if any(profile.release_sha != expected_release_sha for profile in profiles):
+        raise ServiceError("content observer release differs from control source")
+    return configured
 
 
 def _path(value: Any, name: str) -> Path:
@@ -538,10 +767,19 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    arm = config.get("privileged_readiness_armed", False)
+    broker_socket = config.get("privileged_broker_socket_path")
+    if type(arm) is not bool:
+        raise ServiceError("privileged_readiness_armed must be boolean")
+    if (arm and broker_socket != "/var/run/mastermind-executive/privileged.sock") or (not arm and broker_socket is not None):
+        raise ServiceError("privileged readiness requires the armed canonical broker socket")
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
     app_present = keys & _CEO_INGRESS_APP_CONFIG_KEYS
+    content_sources = keys & {"content_observer", "content_observer_profile_path"}
+    if len(content_sources) > 1:
+        raise ServiceError("content observer sources are mutually exclusive")
     if app_present and (
         app_present != _CEO_INGRESS_APP_CONFIG_KEYS
         or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
@@ -549,9 +787,9 @@ def load_control_config(
         raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
         raise ServiceError("App boot interpreter requires the complete App binding")
-    from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
+    from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     try:
-        validate_installed_mcp_profile(config.get("executive_mcp_profile", "legacy"))
+        validate_installed_mcp_profile_current(config.get("executive_mcp_profile", "legacy"))
     except ValueError:
         raise ServiceError("installed Executive MCP profile is invalid") from None
     if "executive_mcp_profile" in keys and (
@@ -581,6 +819,10 @@ def load_control_config(
         "control_environment_attestation_path",
     ):
         config[name] = _path(config[name], name)
+    if "content_observer_profile_path" in config:
+        config["content_observer_profile_path"] = _content_profile_path(
+            config["content_observer_profile_path"]
+        )
     if ceo_ingress_present:
         config["ceo_ingress_socket_path"] = _path(
             config["ceo_ingress_socket_path"], "ceo_ingress_socket_path"
@@ -649,17 +891,21 @@ def load_control_config(
             config["workspace_acquisition"] = validate_workspace_bindings(config["workspace_acquisition"], workspace_policy)
         except Exception:
             raise ServiceError("workspace acquisition policy or binding refused") from None
-    if "content_observer" in config:
-        from integrations.executive_content_contract import ContentObserverProfile, load_content_profiles
+    if content_sources:
         if not app_present:
             raise ServiceError("content observer requires installed App peer")
-        configured = load_content_profiles(config["content_observer"])
-        profiles = (configured,) if type(configured) is ContentObserverProfile else tuple(
-            slot.profile for slot in (configured.web, configured.mac)
-            if slot.profile is not None
+        value = (
+            config["content_observer"]
+            if "content_observer" in config
+            else _read_content_profile_document(
+                config["content_observer_profile_path"],
+                expected_gid=os.getegid(),
+            )
         )
-        if any(profile.release_sha != config["proof_base_sha"] for profile in profiles):
-            raise ServiceError("content observer release differs from control source")
+        _validate_content_profiles(
+            value,
+            expected_release_sha=str(config["proof_base_sha"]),
+        )
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -716,6 +962,7 @@ def load_control_config(
             raise ServiceError(
                 "control config dialogue_wake_retry_policy is invalid"
             ) from exc
+    _validate_subscription_canary_realm_config(config)
     if enforce_current_uid and config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
@@ -807,6 +1054,13 @@ def load_control_config(
             raise ServiceError(
                 "control config operator_harness_binary_digest must be SHA-256"
             )
+    if "python_runtime_provenance_digest" in config:
+        digest = config["python_runtime_provenance_digest"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ServiceError(
+                "control config python_runtime_provenance_digest must be lowercase "
+                "64-hex SHA-256"
+            )
     if "operator_harness_version" in config:
         version = config["operator_harness_version"]
         if not isinstance(version, str) or not version.strip() or len(version) > 64:
@@ -845,6 +1099,96 @@ def _canonical_sha256(value: Any) -> str:
     except (TypeError, ValueError) as exc:
         raise ServiceError("canary receipt contains non-canonical JSON data") from exc
     return hashlib.sha256(payload).hexdigest()
+
+
+class _HotContentProfileSource:
+    """A fixed-path mutable profile source bound to one startup identity."""
+
+    def __init__(
+        self,
+        *,
+        profile_path: Path,
+        expected_gid: int,
+        expected_release_sha: str,
+        config_path: Path,
+        startup_attestation: Mapping[str, Any],
+        attestation_loader: Callable[[], Mapping[str, Any]],
+    ):
+        if not isinstance(startup_attestation, Mapping):
+            raise ServiceError("content observer startup attestation is invalid")
+        config_sha256 = startup_attestation.get("config_sha256")
+        process_identity = startup_attestation.get("process_identity")
+        if (
+            not isinstance(config_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", config_sha256) is None
+            or not isinstance(process_identity, Mapping)
+        ):
+            raise ServiceError("content observer startup identity is incomplete")
+        self._profile_path = profile_path
+        self._expected_gid = expected_gid
+        self._expected_release_sha = expected_release_sha
+        self._config_path = config_path
+        self._config_sha256 = config_sha256
+        self._startup_attestation = json.loads(
+            json.dumps(startup_attestation, ensure_ascii=False)
+        )
+        self._startup_attestation_sha256 = _canonical_sha256(
+            self._startup_attestation
+        )
+        self._startup_process_identity_sha256 = _canonical_sha256(
+            self._startup_attestation["process_identity"]
+        )
+        self._attestation_loader = attestation_loader
+        self.load()
+
+    def _require_startup_identity(self) -> None:
+        try:
+            current_config_sha256 = _sha256_file(self._config_path)
+        except OSError as exc:
+            raise ServiceError("content observer control config is unavailable") from exc
+        current = self._attestation_loader()
+        if (
+            not isinstance(current, Mapping)
+            or current_config_sha256 != self._config_sha256
+            or current.get("config_sha256") != self._config_sha256
+            or current.get("release_commit_sha") != self._expected_release_sha
+            or _canonical_sha256(current) != self._startup_attestation_sha256
+            or _canonical_sha256(current.get("process_identity"))
+            != self._startup_process_identity_sha256
+        ):
+            raise ServiceError("content observer startup config or attestation changed")
+
+    def load(self) -> dict[str, Any]:
+        self._require_startup_identity()
+        value = _read_content_profile_document(
+            self._profile_path,
+            expected_gid=self._expected_gid,
+        )
+        _validate_content_profiles(
+            value,
+            expected_release_sha=self._expected_release_sha,
+        )
+        self._require_startup_identity()
+        return value
+
+
+def _bind_hot_content_profile_source(
+    raw: Mapping[str, Any],
+    startup_attestation: Mapping[str, Any],
+    *,
+    config_path: Path,
+    attestation_loader: Callable[[], Mapping[str, Any]],
+) -> _HotContentProfileSource | None:
+    if "content_observer_profile_path" not in raw:
+        return None
+    return _HotContentProfileSource(
+        profile_path=Path(raw["content_observer_profile_path"]),
+        expected_gid=os.getegid(),
+        expected_release_sha=str(raw["proof_base_sha"]),
+        config_path=config_path,
+        startup_attestation=startup_attestation,
+        attestation_loader=attestation_loader,
+    )
 
 
 def _load_control_environment_attestation(
@@ -1205,6 +1549,32 @@ def _service_from_config(
             "armed COO Operator Harness requires an exact installed binary identity"
         )
 
+    realm_raw = raw.get("subscription_canary_realm")
+    realm_binding_id: str | None = None
+    realm_generation: int | None = None
+    realm_config_sha256: str | None = None
+    worker_provider = "codex"
+    worker_type = "codex-cli"
+    worker_model = str(raw.get("model") or "gpt-5.6-sol")
+    if realm_raw is not None:
+        _validate_subscription_canary_realm_config(
+            {"subscription_canary_realm": realm_raw}
+        )
+        # load_control_config has already validated this exact closed object.
+        # Derive worker identity from the reviewed catalog instead of trusting
+        # parallel provider/model fields in root configuration.
+        from control_plane.subscription_harness_bindings import get_binding
+        from control_plane.subscription_provider_profiles import get_profile
+
+        realm_binding_id = str(realm_raw["binding_id"])
+        realm_generation = int(realm_raw["generation"])
+        realm_config_sha256 = str(realm_raw["config_sha256"])
+        reviewed_binding = get_binding(realm_binding_id)
+        reviewed_profile = get_profile(reviewed_binding.profile_id)
+        worker_provider = reviewed_binding.provider
+        worker_type = reviewed_binding.adapter_id
+        worker_model = reviewed_binding.model_for(reviewed_profile)
+
     config = ServiceConfig(
         runtime_root=raw["runtime_root"],
         socket_path=raw["control_socket_path"],
@@ -1218,10 +1588,14 @@ def _service_from_config(
         worker_account_label=str(
             raw.get("worker_account_label") or "dedicated-codex-home"
         ),
+        worker_type=worker_type,
+        provider=worker_provider,
         quota_class=str(raw.get("quota_class") or "codex-native"),
-        model=str(raw.get("model") or "gpt-5.6-sol"),
+        model=worker_model,
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
+        privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
+        privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
@@ -1247,6 +1621,9 @@ def _service_from_config(
         operator_harness_version=binary_version,
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),
         shutdown_grace_seconds=float(raw.get("shutdown_grace_seconds") or 10.0),
+        subscription_canary_realm_binding_id=realm_binding_id,
+        subscription_canary_realm_generation=realm_generation,
+        subscription_canary_realm_config_sha256=realm_config_sha256,
     )
     # A persisted receipt from another service instance is never startup
     # authority. Every new PID starts quarantined and can activate only after a
@@ -1265,6 +1642,29 @@ def _service_from_config(
             client,
             validation_commands_for_spec=validations,
         )
+        # Only the attended subscription-canary lane gets a claim provider;
+        # ordinary composition passes ``None`` so the supervisor never calls
+        # the observation owner and never enriches the LaunchSpec.
+        claim_provider: Callable[[str, str], Mapping[str, Any]] | None = None
+        claim_binding_id: str | None = None
+        if config.subscription_canary_realm() is not None:
+            from control_plane.model_router import observe_subscription_canary_claim
+
+            realm = config.subscription_canary_realm()
+            assert realm is not None
+
+            def claim_provider(
+                attempt_id: str,
+                binding_id: str,
+                _runtime=runtime,
+            ) -> Mapping[str, Any]:
+                return observe_subscription_canary_claim(
+                    _runtime,
+                    attempt_id=attempt_id,
+                    binding_id=binding_id,
+                )
+
+            claim_binding_id = str(realm["binding_id"])
         return ExecutiveSupervisor(
             runtime,
             adapter,
@@ -1285,6 +1685,8 @@ def _service_from_config(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
                 if exact_target_source is not None else None
             ),
+            subscription_canary_claim_provider=claim_provider,
+            subscription_canary_binding_id=claim_binding_id,
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
@@ -1330,13 +1732,14 @@ def _service_from_config(
             terminal_return_projector_factory
         )
 
-    from integrations.executive_mcp.web_ceo import (
-        WEB_CEO_V2_PROFILE,
-        validate_installed_mcp_profile,
+    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_v3 import (
+        WEB_CEO_V3_PROFILE,
+        validate_installed_mcp_profile_current,
     )
 
     try:
-        installed_profile = validate_installed_mcp_profile(
+        installed_profile = validate_installed_mcp_profile_current(
             raw.get("executive_mcp_profile", "legacy")
         )
     except ValueError:
@@ -1366,6 +1769,12 @@ def _service_from_config(
     if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
         # SDK-free canonical projection runs under the existing control uid.
         # The network App has no Runtime database or source-checkout access.
+        # Commission lookup is likewise host-owned. Provider construction is
+        # network-inert; observations occur only during trusted admission.
+        from integrations.mastermind_executive_app.web_commission_source import (
+            GitHubWebCommissionSourceProvider,
+        )
+
         reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
@@ -1375,7 +1784,7 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
-        if installed_profile == WEB_CEO_V2_PROFILE:
+        if installed_profile in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}:
             from integrations.executive_mcp.web_ceo import (
                 WebCeoV2InstalledExecutiveReaders,
             )
@@ -1400,7 +1809,7 @@ def _service_from_config(
             readers = InstalledExecutiveReaders(**reader_kwargs)
             app_read_schema = CEO_APP_READ_SCHEMA
         content_factories = {}
-        if "content_observer" in raw:
+        if {"content_observer", "content_observer_profile_path"} & set(raw):
             from control_plane.executive_content_observer import ExecutiveContentObserver
             from integrations.mastermind_steward_app.installed_reads import InstalledStewardReadProvider
             from datetime import datetime, timezone
@@ -1479,6 +1888,9 @@ def _service_from_config(
             read_schema=app_read_schema,
             **content_factories, **workspace_factories,
         )
+        ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
+            GitHubWebCommissionSourceProvider()
+        )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
@@ -1531,9 +1943,15 @@ def _service_from_config(
                     "terminal-return Relay socket must be distinct from every "
                     "activated listener"
                 )
+    readiness_factory = None
+    if config.privileged_readiness_armed:
+        from control_plane.executive_privileged_authority import PrivilegedReadinessController
+        def readiness_factory(runtime):
+            return PrivilegedReadinessController(runtime, release_sha=config.proof_base_sha)
     service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        privileged_readiness_controller_factory=readiness_factory,
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
@@ -1598,6 +2016,17 @@ async def _serve_from_config(config_path: Path) -> None:
             expected_release_sha=str(raw["proof_base_sha"]),
         ),
     )
+    content_attestation_loader = lambda: _load_control_environment_attestation(
+        Path(raw["control_environment_attestation_path"]),
+        config_path=config_path,
+        expected_release_sha=str(raw["proof_base_sha"]),
+    )
+    hot_content_profile_source = _bind_hot_content_profile_source(
+        raw,
+        control_attestation,
+        config_path=config_path,
+        attestation_loader=content_attestation_loader,
+    )
     canary_path = Path(raw["secret_canary_receipt_path"])
 
     def load_canary() -> Mapping[str, Any]:
@@ -1637,12 +2066,20 @@ async def _serve_from_config(config_path: Path) -> None:
             persist_path=canary_path,
         )
 
+    content_profile_loader: Callable[[], Any] | None = None
+    if hot_content_profile_source is not None:
+        content_profile_loader = hot_content_profile_source.load
+    elif "content_observer" in raw:
+        content_profile_loader = lambda: load_control_config(config_path)[
+            "content_observer"
+        ]
+
     service = _service_from_config(
         raw,
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,
-        content_profile_loader=lambda: load_control_config(config_path)["content_observer"],
+        content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
@@ -1667,6 +2104,9 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return args.command, {}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
+    if args.command == "check-current-worker-login":
+        return args.command, {"job_id": args.job_id, "attempt_id": args.attempt_id,
+                              "fence_generation": args.fence_generation}
     if args.command == "run-coo-cycle":
         return args.command, {"root_job_id": args.root_job_id}
     if args.command == "attempt":

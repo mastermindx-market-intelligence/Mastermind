@@ -714,6 +714,9 @@ if [ "$CREATE_TELEMETRY_ROOT" = "true" ]; then
 fi
 verify_telemetry_boundary || refuse "canonical empty Provider Control telemetry root did not verify"
 
+# Freeze the intermediate source boundary explicitly instead of relying on
+# install(1) parent creation under this script's umask 077.
+/usr/bin/install -d -o root -g wheel -m 0700 "$SYSTEM_ROOT/capacity-sources"
 /usr/bin/install -d -o root -g wheel -m 0755 "$SOURCE_PARENT" "$RUNTIME_PARENT" "$RELEASE_PARENT" "$GENERATION_ROOT"
 if [ -e "$SOURCE_ROOT" ]; then verify_materialized_source "$SOURCE_ROOT" || refuse "existing versioned Macro source conflicts"; else /bin/mv "$SOURCE_STAGE" "$SOURCE_ROOT"; NEW_VERSIONED_PATHS+=("$SOURCE_ROOT"); fi
 if [ -e "$RUNTIME_ROOT" ]; then verify_runtime_tree "$RUNTIME_ROOT" >/dev/null || refuse "existing versioned capacity runtime conflicts"; else /bin/mv "$RUNTIME_STAGE" "$RUNTIME_ROOT"; NEW_VERSIONED_PATHS+=("$RUNTIME_ROOT"); fi

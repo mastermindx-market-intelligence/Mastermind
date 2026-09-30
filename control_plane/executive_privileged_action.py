@@ -29,13 +29,14 @@ _COMPANY_SLOT = get_slot("codex-01")
 _COMPANY_BINDING = _COMPANY_SLOT.workspace_binding_class
 _COMPANY_CREDENTIAL_KINDS = frozenset(_COMPANY_SLOT.allowed_credential_kinds)
 
-SERVICE_ACTIONS = frozenset(
-    {
-        "executive.services.start",
-        "executive.services.stop",
-        "executive.services.restart",
-    }
-)
+SERVICE_ACTION_VERBS = {
+    "executive.services.start": "start",
+    "executive.services.stop": "stop",
+    "executive.services.restart": "restart",
+    "executive.services.start_readside": "start-readside",
+    "executive.services.stop_readside": "stop-readside",
+}
+SERVICE_ACTIONS = frozenset(SERVICE_ACTION_VERBS)
 WORKER_AUTH_ACTIONS = frozenset(
     {
         "executive.worker_auth.verify_only",
@@ -43,14 +44,25 @@ WORKER_AUTH_ACTIONS = frozenset(
         "executive.worker_auth.recover_transaction",
     }
 )
-PRIVILEGED_ACTIONS = SERVICE_ACTIONS | WORKER_AUTH_ACTIONS
+HOST_POLICY_ACTIONS = frozenset(
+    {
+        "executive.host.prepare_secondary_power_policy",
+    }
+)
+PRIVILEGED_ACTIONS = SERVICE_ACTIONS | WORKER_AUTH_ACTIONS | HOST_POLICY_ACTIONS
 ACTION_EFFECT_CLASS = {
     "executive.services.start": "SERVICE_CONTROL",
     "executive.services.stop": "SERVICE_CONTROL",
     "executive.services.restart": "SERVICE_CONTROL",
+    "executive.services.start_readside": "SERVICE_CONTROL",
+    "executive.services.stop_readside": "SERVICE_CONTROL",
     "executive.worker_auth.verify_only": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.verify_ready": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.recover_transaction": "CREDENTIAL_ADMIN_RECOVERY",
+    "executive.host.prepare_secondary_power_policy": "HOST_POWER_POLICY",
+}
+ACTION_EFFECT_UNKNOWN_EXIT_CODE = {
+    "executive.host.prepare_secondary_power_policy": 75,
 }
 
 
@@ -199,6 +211,10 @@ def validate_request(raw: Mapping[str, Any]) -> ValidatedPrivilegedAction:
         if args:
             raise PrivilegedActionError("service action arguments must be empty")
         validated_args: tuple[tuple[str, str], ...] = ()
+    elif action in HOST_POLICY_ACTIONS:
+        if args:
+            raise PrivilegedActionError("host policy action arguments must be empty")
+        validated_args = ()
     elif action == "executive.worker_auth.verify_ready":
         validated_args = _validate_verify_ready_args(args)
     else:
@@ -229,11 +245,19 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
     root = Path(release_root)
     args = request.args_dict()
     if request.action in SERVICE_ACTIONS:
-        verb = request.action.rsplit(".", 1)[1]
+        verb = SERVICE_ACTION_VERBS[request.action]
         return (
             "/bin/bash",
             str(root / "ops/executive_os/service-control.sh"),
             verb,
+        )
+    if request.action in HOST_POLICY_ACTIONS:
+        return (
+            "/usr/bin/python3",
+            "-I",
+            "-S",
+            "-B",
+            str(root / "ops/executive_os/secondary_host_power_policy.py"),
         )
 
     argv: list[str] = [
@@ -274,6 +298,7 @@ def canonical_request_bytes(request: ValidatedPrivilegedAction) -> bytes:
 
 __all__ = [
     "ACTION_EFFECT_CLASS",
+    "ACTION_EFFECT_UNKNOWN_EXIT_CODE",
     "PRIVILEGED_ACTIONS",
     "REQUEST_SCHEMA",
     "STATUS_REQUEST_SCHEMA",

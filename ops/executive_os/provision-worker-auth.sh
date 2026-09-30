@@ -9,6 +9,7 @@ WORKER_USER="_mastermind_worker"
 WORKER_GROUP="_mastermind_worker"
 WORKER_UID="451"
 WORKER_GID="451"
+CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"
 PROVIDER_HOME="/var/db/mastermind-executive/workers/codex-01/provider-home"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
 CODEX_VERSION="0.147.0"
@@ -34,6 +35,8 @@ READINESS_TRANSACTION_LOCK="$SYSTEM_CONFIG/provider-readiness.transaction.lock"
 READINESS_LOCK_HELD="false"
 READINESS_LOCK_RELEASE_ON_EXIT="true"
 INSTALLED_CODEX_BINARY=""
+CODEX_EXECUTABLE=""
+USING_INSTALLED_CODEX="false"
 PINNED_CODEX_BINARY=""
 IDENTITY_RESULT=""
 POST_IDENTITY_RESULT=""
@@ -208,6 +211,7 @@ case "$CODEX_VERSION" in
   ''|*[!0-9A-Za-z._-]*) /bin/echo "Codex version is invalid" >&2; exit 65 ;;
 esac
 INSTALLED_CODEX_BINARY="$SYSTEM_BIN/codex-$CODEX_VERSION"
+CODEX_ATTESTATION_RECEIPT="$SYSTEM_ROOT/codex-attestation-$CODEX_VERSION.json"
 # Once this reviewed version is installed, bind every auth/readiness operation
 # to that root-owned versioned binary. The mutable Homebrew enrollment source is
 # only a pre-install bootstrap input and may legitimately upgrade afterward; it
@@ -216,6 +220,7 @@ INSTALLED_CODEX_BINARY="$SYSTEM_BIN/codex-$CODEX_VERSION"
 # strictly post-install and therefore refuses when the installed binary is absent.
 if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then
   CODEX_BINARY="$INSTALLED_CODEX_BINARY"
+  USING_INSTALLED_CODEX="true"
 elif [ "$VERIFY_READY" = "true" ]; then
   /bin/echo "install the exact release before --verify-ready" >&2
   exit 65
@@ -318,7 +323,7 @@ run_codex_as_worker() {
         LC_ALL="C.UTF-8" \
         NO_COLOR="1" \
         PATH="/usr/bin:/bin" \
-        "$PINNED_CODEX_BINARY" "$@"
+        "$CODEX_EXECUTABLE" "$@"
   )
 }
 
@@ -369,45 +374,90 @@ esac
   exit 65
 }
 
-# Never execute the Homebrew/user-owned source while this script is root. Copy
-# it first to a root-owned, non-writable temporary path, then attest and execute
-# only that pinned copy. A raced or partial copy cannot pass strict codesign.
-PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
-/bin/rm -f -- "$PINNED_CODEX_BINARY"
-/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
-/usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
-/bin/chmod 0555 "$PINNED_CODEX_BINARY"
-[ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
-  && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
-    /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+if [ "$USING_INSTALLED_CODEX" = "true" ]; then
+  # BEGIN installed Codex fast path
+  if ! "$PYTHON_BINARY" -I -S -B - \
+      "$SCRIPT_DIR/../.." "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX_BINARY" \
+      "$CODEX_ATTESTATION_OWNER_GID" "$CODEX_VERSION" "$CODEX_TEAM_ID" "$CODEX_SHA256" \
+      >/dev/null 2>&1 <<'PYATTEST'
+import pathlib
+import sys
+
+(
+    release_root,
+    receipt_path,
+    binary_path,
+    owner_gid,
+    expected_version,
+    expected_team,
+    expected_sha256,
+) = sys.argv[1:]
+sys.path.insert(0, str(pathlib.Path(release_root).resolve(strict=True)))
+from control_plane.codex_worker import load_codex_attestation_receipt
+
+attestation = load_codex_attestation_receipt(
+    receipt_path,
+    expected_binary_path=binary_path,
+    expected_owner_gid=int(owner_gid),
+)
+if (
+    attestation.path != binary_path
+    or attestation.version != expected_version
+    or attestation.team_identifier != expected_team
+    or attestation.sha256 != expected_sha256
+):
+    raise SystemExit("installed Codex attestation differs from reviewed constants")
+PYATTEST
+  then
+    /bin/echo "installed Codex attestation receipt validation failed" >&2
+    exit 65
+  fi
+  CODEX_EXECUTABLE="$INSTALLED_CODEX_BINARY"
+  # END installed Codex fast path
+else
+  # BEGIN pre-install Codex staging path
+  # Never execute the Homebrew/user-owned source while this script is root. Copy
+  # it first to a root-owned, non-writable temporary path, then attest and execute
+  # only that pinned copy. A raced or partial copy cannot pass strict codesign.
+  PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
+  /bin/rm -f -- "$PINNED_CODEX_BINARY"
+  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
+  /usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
+  /bin/chmod 0555 "$PINNED_CODEX_BINARY"
+  [ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
+    && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
+      /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+      exit 65
+    }
+  case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
+    *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
+  esac
+  /usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
+    /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
     exit 65
   }
-case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
-  *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
-esac
-/usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
-  /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
-  exit 65
-}
-/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
-  /bin/echo "Codex binary signature is invalid" >&2
-  exit 65
-}
-OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
-[ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
-  /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
-  exit 65
-}
-OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
-[ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
-  /bin/echo "Codex binary signer is not OpenAI" >&2
-  exit 65
-}
-OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
-[ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
-  /bin/echo "Codex binary version does not match the explicit allowlist" >&2
-  exit 65
-}
+  /usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
+    /bin/echo "Codex binary signature is invalid" >&2
+    exit 65
+  }
+  OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
+  [ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
+    /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+    exit 65
+  }
+  OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
+  [ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
+    /bin/echo "Codex binary signer is not OpenAI" >&2
+    exit 65
+  }
+  CODEX_EXECUTABLE="$PINNED_CODEX_BINARY"
+  OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
+  [ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
+    /bin/echo "Codex binary version does not match the explicit allowlist" >&2
+    exit 65
+  }
+  # END pre-install Codex staging path
+fi
 
 AUTH_PATH="$PROVIDER_HOME/auth.json"
 
@@ -541,16 +591,19 @@ recover_readiness_transaction_lock() {
 }
 
 invalidate_readiness_receipt() {
+  local receipt_binding_args
+  receipt_binding_args=()
+  if [ -n "$WORKSPACE_BINDING_CLASS" ]; then
+    receipt_binding_args=(--workspace-binding-class "$WORKSPACE_BINDING_CLASS")
+  fi
   if [ -e "$READINESS_RECEIPT" ] || [ -L "$READINESS_RECEIPT" ]; then
-    [ -f "$READINESS_RECEIPT" ] && [ ! -L "$READINESS_RECEIPT" ] \
-      && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$READINESS_RECEIPT")" = "0:0:400:1" ] || {
-        /bin/echo "existing provider readiness receipt is unsafe" >&2
-        exit 65
-      }
-    case "$(/usr/bin/stat -f '%Sp' "$READINESS_RECEIPT")" in
-      *+) /bin/echo "existing provider readiness receipt has an ACL" >&2; exit 65 ;;
-    esac
-    /bin/rm -f -- "$READINESS_RECEIPT"
+    if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" invalidate \
+        --receipt "$READINESS_RECEIPT" \
+        --worker-gid "$WORKER_GID" \
+        ${receipt_binding_args[@]+"${receipt_binding_args[@]}"} >/dev/null 2>&1; then
+      /bin/echo "existing provider readiness receipt is unsafe" >&2
+      exit 65
+    fi
   fi
 }
 
@@ -650,7 +703,7 @@ if [ "$VERIFY_READY" = "true" ]; then
   else
     reuse_status=$?
   fi
-  [ "$reuse_status" -eq 3 ] || {
+  [ "$reuse_status" -eq 3 ] || [ "$reuse_status" -eq 4 ] || {
     /bin/echo "existing provider readiness receipt is stale or invalid; fail closed" >&2
     exit 65
   }
@@ -667,13 +720,18 @@ if [ "$VERIFY_READY" = "true" ]; then
     exit 65
   fi
 
+  refresh_args=()
+  if [ "$reuse_status" -eq 4 ]; then
+    refresh_args=(--refresh-expired)
+  fi
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reserve \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
       --binary "$INSTALLED_CODEX_BINARY" --identity-json "$IDENTITY_RESULT" \
       --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" >/dev/null 2>&1; then
+      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+      ${refresh_args[@]+"${refresh_args[@]}"} >/dev/null 2>&1; then
     /bin/echo "provider canary reservation failed; no canary spent" >&2
     exit 65
   fi

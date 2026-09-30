@@ -68,24 +68,43 @@ same bounded request-id grammar as effect requests. Status never accepts an effe
 argument and never generates an id.
 
 The broker's status handler authenticates the peer, validates the request, and reads
-only that id's existing terminal receipt or in-flight marker; a terminal receipt always
-wins over a leftover marker. It returns exactly one of `TERMINAL` (the stored receipt,
-verbatim, from whatever release produced it), `EFFECT_UNKNOWN` (an existing marker), or
-`NOT_FOUND` (neither exists at observation time). The response also carries
-`installed_release_sha`, the broker's own current release, kept separate from any
-`release_sha` recorded inside a historical receipt; reading an older release's receipt
-is never reinterpreted as proof about the currently installed release.
+only that id's existing terminal receipt, in-flight marker, and any already-created
+broker reconciliation record. A terminal receipt always wins over a leftover marker.
+It returns exactly one of:
 
-Status lookup is pure observation: it never invokes the executor, never creates or
-repairs a receipt or marker, never removes a marker, and never retries or recovers a
-transaction on the caller's behalf. `NOT_FOUND` is not authority to resubmit, and an
-`EFFECT_UNKNOWN` result still requires the existing explicit canonical reconciliation
-path, not a blind retry.
+- `TERMINAL`: the stored child receipt, verbatim, from whatever release produced it;
+- `RECONCILED_NOT_APPLIED`: the original marker is still present byte-for-byte and a
+  create-only reconciliation record mutually validates that exact marker and the
+  independently proven pre-effect readiness state;
+- `EFFECT_UNKNOWN`: a marker exists without a valid reconciliation record;
+- `NOT_FOUND`: neither terminal nor in-flight/reconciled evidence exists at observation time.
 
-CLI exit codes distinguish query success from the original effect outcome: `0` for a
-successfully retrieved `TERMINAL` projection regardless of the stored outcome, `75` for
-`EFFECT_UNKNOWN`, `4` for `NOT_FOUND`, and nonzero for any malformed or refused
-response. The six effect actions and their exit codes are unchanged.
+The response also carries `installed_release_sha`, the broker's own current release,
+kept separate from any release SHA recorded in historical evidence. A
+`RECONCILED_NOT_APPLIED` projection is **not** a synthetic child exit and never means the
+original privileged effect succeeded or failed; it means the separately reviewed
+reconciliation proof established that the requested business effect was not applied.
+
+Status lookup remains pure observation: it never invokes the executor, creates or
+repairs evidence, removes a marker, retries an effect, or recovers a transaction on the
+caller's behalf. Creating a reconciliation record is a separate authenticated request
+on the same existing broker socket/receipt plane and is permitted only for an exact
+`executive.worker_auth.verify_ready` marker after the broker proves the target request
+identity/digest, marker bytes/release, pre-effect readiness receipt and identity
+continuity, absence of the target deadline, absence of the readiness transaction lock,
+and absence of a live verify-ready process. The original marker is preserved.
+
+`NOT_FOUND` is not authority to resubmit. `EFFECT_UNKNOWN` still requires explicit
+reconciliation rather than blind retry. After `RECONCILED_NOT_APPLIED`, replay of the
+original request id remains refused; any later readiness attempt requires a separately
+authorized new request id.
+
+CLI exit codes distinguish successful query retrieval from the original effect outcome:
+`0` for a valid `TERMINAL` or `RECONCILED_NOT_APPLIED` projection, `75` for
+`EFFECT_UNKNOWN`, `4` for `NOT_FOUND`, and nonzero for malformed or refused
+responses. Exit `0` on `RECONCILED_NOT_APPLIED` acknowledges only that the status
+projection was successfully validated. The effect actions and their effect exit
+semantics are unchanged.
 
 ## Provider unattended permissions
 

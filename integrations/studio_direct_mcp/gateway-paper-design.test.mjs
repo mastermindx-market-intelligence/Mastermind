@@ -70,6 +70,7 @@ test('gateway advertises and dispatches guarded Paper design tools locally', asy
       pythonPath: process.execPath,
       bridgePath,
       bridgeSha256,
+      appPath: '/Applications/Paper.app',
       commandTimeoutMs: 5000,
     },
   }, auth());
@@ -81,18 +82,31 @@ test('gateway advertises and dispatches guarded Paper design tools locally', asy
 
   const listed = await client.listTools();
   const byName = new Map(listed.tools.map((tool) => [tool.name, tool]));
-  for (const name of ['paper_inspect', 'paper_catalog', 'paper_read', 'paper_edit']) {
-    assert.ok(byName.has(name), `missing ${name}`);
-  }
+  const expectedPaperTools = ['paper_catalog', 'paper_edit', 'paper_inspect', 'paper_prepare', 'paper_read'];
+  const paperToolNames = [...byName.keys()].filter((name) => name.startsWith('paper_')).sort();
+  assert.deepEqual(paperToolNames, expectedPaperTools, 'Paper surface must stay narrow and exact');
   assert.equal(byName.get('paper_inspect').annotations.readOnlyHint, true);
   assert.equal(byName.get('paper_read').annotations.readOnlyHint, true);
+  assert.equal(byName.get('paper_prepare').annotations.readOnlyHint, false);
+  assert.equal(byName.get('paper_prepare').annotations.destructiveHint, false);
+  assert.equal(byName.get('paper_prepare').annotations.idempotentHint, true);
   assert.equal(byName.get('paper_edit').annotations.readOnlyHint, false);
+  assert.equal(byName.get('paper_edit').annotations.destructiveHint, true);
   assert.equal(byName.get('paper_edit').annotations.idempotentHint, false);
 
   const inspect = await client.callTool({ name: 'paper_inspect', arguments: {} });
   const inspectPayload = JSON.parse(inspect.content.find((item) => item.type === 'text').text);
   assert.equal(inspectPayload.state, 'CONNECTED');
   assert.equal(inspectPayload.document.fileId, 'FILE');
+  assert.deepEqual(inspectPayload.gateway_surface.gateway_advertises, [
+    'paper_inspect', 'paper_catalog', 'paper_read', 'paper_prepare', 'paper_edit',
+  ]);
+  assert.equal(inspectPayload.gateway_surface.file_transition_tool, 'paper_prepare');
+  assert.equal(inspectPayload.gateway_surface.file_transition_requires_direct_tool, true);
+  assert.equal(inspectPayload.gateway_surface.client_surface_drift_state, 'STUDIO_TOOL_PUBLICATION_DRIFT');
+  assert.equal(inspectPayload.gateway_surface.client_surface_recovery, 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT');
+  assert.equal(inspectPayload.gateway_surface.reconnect_alone_proves_refresh, false);
+  assert.equal(inspectPayload.gateway_surface.generic_process_fallback_allowed, false);
 
   const read = await client.callTool({
     name: 'paper_read',
