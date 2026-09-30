@@ -1,15 +1,21 @@
-"""Provider-specific exact-target adapters for Session Bridge.
+"""Exact-target composition adapters for Session Bridge.
 
-These adapters are intentionally tiny: they select an already-declared target
-kind and delegate to an incumbent canonical owner. They own no discovery,
-lifecycle, placement, retry, queue, provider process, or session state.
+These adapters own no dialogue, lifecycle, placement, retry, queue, provider
+process, or session state. They compose incumbent canonical owners only.
 """
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from .schemas import BridgeError
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 class ExactTargetRouter:
@@ -18,28 +24,90 @@ class ExactTargetRouter:
     def __init__(
         self,
         *,
-        fabric_sender: Callable[[str, str, str], Any],
-        codex_sender: Callable[[str, str, str], Any],
-        claude_sender: Callable[[str, str, str], Any],
+        fabric_reply: Callable[[str, str, str, str], Any],
+        codex_reply: Callable[[str, str, str, str], Any],
+        claude_reply: Callable[[str, str, str, str], Any],
     ) -> None:
-        self._senders = {
-            "fabric": fabric_sender,
-            "codex": codex_sender,
-            "claude": claude_sender,
+        self._replies = {
+            "fabric": fabric_reply,
+            "codex": codex_reply,
+            "claude": claude_reply,
         }
-        if any(not callable(sender) for sender in self._senders.values()):
-            raise TypeError("all exact-target senders must be callable")
+        if any(not callable(reply) for reply in self._replies.values()):
+            raise TypeError("all exact-target reply adapters must be callable")
 
-    def __call__(self, target_ref: str, message: str, operation_key: str) -> Any:
+    def __call__(
+        self,
+        target_ref: str,
+        instruction: str,
+        stop_condition: str,
+        operation_key: str,
+    ) -> Any:
         kind, sep, opaque = target_ref.partition(":")
         if not sep or not opaque:
-            raise BridgeError("invalid_input", "target_ref must include an explicit target kind")
-        sender = self._senders.get(kind)
-        if sender is None:
+            raise BridgeError(
+                "invalid_input", "target_ref must include an explicit target kind"
+            )
+        reply = self._replies.get(kind)
+        if reply is None:
             raise BridgeError("not_found", "target kind is not addressable")
-        # The selected canonical owner must itself verify the opaque exact target
-        # against current RuntimeBinding / dialogue / provider-session truth.
-        return sender(target_ref, message, operation_key)
+        return reply(target_ref, instruction, stop_condition, operation_key)
+
+
+class CanonicalReplyCoordinator:
+    """Commit the canonical dialogue reply before attempting native attention.
+
+    reply_writer is the existing Agent Dialogue owner (or a thin adapter over
+    it) and must fresh-read/reconcile the exact carrier itself. attention_waker
+    is attention only: Codex may use current-writer Wake/OHF attention; Claude
+    may use an exact attested session-management owner when available.
+
+    A missing/failed attention result never causes the carrier reply to be sent
+    again. An unknown carrier effect must be surfaced by reply_writer and never
+    reaches attention_waker.
+    """
+
+    def __init__(
+        self,
+        *,
+        reply_writer: Callable[[str, str, str, str], Any],
+        attention_waker: Callable[[str, str], Any],
+    ) -> None:
+        if not callable(reply_writer) or not callable(attention_waker):
+            raise TypeError("reply_writer and attention_waker must be callable")
+        self._reply_writer = reply_writer
+        self._attention_waker = attention_waker
+
+    async def __call__(
+        self,
+        target_ref: str,
+        instruction: str,
+        stop_condition: str,
+        operation_key: str,
+    ) -> dict[str, Any]:
+        carrier = await _maybe_await(
+            self._reply_writer(
+                target_ref,
+                instruction,
+                stop_condition,
+                operation_key,
+            )
+        )
+        if not isinstance(carrier, Mapping) or carrier.get("reply_committed") is not True:
+            raise BridgeError(
+                "carrier_not_committed",
+                "canonical dialogue reply was not proven committed",
+            )
+
+        attention = await _maybe_await(
+            self._attention_waker(target_ref, operation_key)
+        )
+        return {
+            "target_ref": target_ref,
+            "reply_committed": True,
+            "carrier": dict(carrier),
+            "attention": attention,
+        }
 
 
 class CanonicalTargetReader:
@@ -66,16 +134,11 @@ class CanonicalTargetReader:
             if reader is None:
                 raise BridgeError("invalid_input", "unsupported target kind")
             return reader()
-        # Read-only aggregation only. The returned records remain owned by their
-        # canonical sources and MUST carry enough identity for an exact send.
-        return {
-            name: reader()
-            for name, reader in self._readers.items()
-        }
+        return {name: reader() for name, reader in self._readers.items()}
 
 
 class ExecutiveSummonAdapter:
-    """Delegate summon to the incumbent Executive admission function."""
+    """Delegate summon to incumbent Executive admission and Capacity placement."""
 
     def __init__(self, submit_intent: Callable[[Mapping[str, Any]], Any]) -> None:
         if not callable(submit_intent):
@@ -83,9 +146,14 @@ class ExecutiveSummonAdapter:
         self._submit_intent = submit_intent
 
     def __call__(self, arguments: Mapping[str, Any]) -> Any:
-        # preferred_surface is a placement preference only. It grants no provider
-        # spawn authority and the Executive owner may refuse or choose otherwise.
+        # No model-visible provider/host preference is accepted here. Capacity
+        # and Executive routing retain selection authority.
         return self._submit_intent(dict(arguments))
 
 
-__all__ = ["CanonicalTargetReader", "ExactTargetRouter", "ExecutiveSummonAdapter"]
+__all__ = [
+    "CanonicalReplyCoordinator",
+    "CanonicalTargetReader",
+    "ExactTargetRouter",
+    "ExecutiveSummonAdapter",
+]
