@@ -401,7 +401,8 @@ def _parse_service(spec, rc, raw, stderr, argv, release):
     if type(rc) is not int or type(raw) is not bytes or type(stderr) is not bytes or len(raw) + len(stderr) > 65536:
         _refuse("RELEASE_OBSERVATION_SERVICE_REFUSED")
     absent = ('Could not find service "' + spec.label + '" in domain for system\n').encode("ascii")
-    if rc == 113 and not raw and stderr == absent:
+    absent_prefixed = b"Bad request.\n" + absent
+    if rc == 113 and not raw and stderr in (absent, absent_prefixed):
         return "UNLOADED", None
     if rc != 0 or stderr:
         _refuse("RELEASE_OBSERVATION_SERVICE_UNAVAILABLE")
@@ -438,6 +439,9 @@ def _parse_service(spec, rc, raw, stderr, argv, release):
             continue
         opener = body.endswith(" = {")
         if depth != 1:
+            nested_key = body[:-4] if opener else body.partition(" = ")[0]
+            if spec is _SPECS[-1] and nested_key in ("username", "group"):
+                _refuse("RELEASE_OBSERVATION_SERVICE_BINDING_REFUSED")
             if opener:
                 stack.append((depth, False))
             elif "{" in body or "}" in body:
@@ -456,9 +460,20 @@ def _parse_service(spec, rc, raw, stderr, argv, release):
             fields[key] = value
     if not closed or stack or not args_closed or tuple(arguments) != argv:
         _refuse("RELEASE_OBSERVATION_SERVICE_MALFORMED")
+    # launchd omits the default root/wheel identity for this fixed broker.
+    # Its root-owned fixed plist was already profile-qualified by
+    # _content_snapshot and is rechecked before returning any observation.
+    # A structured/malformed identity key is present in `seen`, not omitted.
+    broker_identity_omitted = (
+        spec is _SPECS[-1] and spec.role == "broker"
+        and (spec.username, spec.group, spec.uid) == ("root", "wheel", 0)
+        and "username" not in seen and "group" not in seen
+    )
     expected = {"path": spec.plist, "type": "LaunchDaemon", "domain": "system",
-                "username": spec.username, "group": spec.group, "program": argv[0],
-                "working directory": _RELEASES + release}
+                "program": argv[0], "working directory": _RELEASES + release}
+    if not broker_identity_omitted:
+        expected["username"] = spec.username
+        expected["group"] = spec.group
     if any(fields.get(key) != value for key, value in expected.items()):
         _refuse("RELEASE_OBSERVATION_SERVICE_BINDING_REFUSED")
     if fields.get("state") == "not running" and "pid" not in seen:

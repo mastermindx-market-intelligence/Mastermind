@@ -594,3 +594,171 @@ def test_peer_deadline_protocol_cannot_replace_or_disable_endpoint(monkeypatch, 
     with pytest.raises(o.ReleaseObservationError, match="DEADLINE_INVALID"):
         budget.caller_deadline = replacement
     assert budget.caller_deadline == budget.endpoint == 101
+
+
+def _parse_worker_absent(stderr):
+    spec = o._SPECS[o._ROLES.index("worker")]
+    return o._parse_service(spec, 113, b"", stderr, o._profile(spec)["ProgramArguments"], "a" * 40)
+
+
+def test_worker_absent_diagnostic_accepts_exact_two_line_prefix():
+    spec = o._SPECS[o._ROLES.index("worker")]
+    absent = ('Could not find service "' + spec.label + '" in domain for system\n').encode()
+    assert _parse_worker_absent(b"Bad request.\n" + absent) == ("UNLOADED", None)
+    assert _parse_worker_absent(absent) == ("UNLOADED", None)
+
+
+@pytest.mark.parametrize("stderr", [
+    b"",
+    b"Bad request.\n",
+    b"Bad request.\nCould not find service \"untrusted\" in domain for system\n",
+    b"Could not find service \"com.mastermind.executive.worker.codex\" in domain for gui/501\n",
+    b"Bad request.\nCould not find service \"com.mastermind.executive.worker.codex\" in domain for gui/501\n",
+    b"Bad request.\nCould not find service \"com.mastermind.executive.worker.codex\" in domain for system\n\n",
+    b"Bad request.\nCould not find service \"com.mastermind.executive.worker.codex\" in domain for system\ntrailing\n",
+])
+def test_worker_absent_diagnostic_rejects_imprecise_native_syntax(stderr):
+    with pytest.raises(o.ReleaseObservationError):
+        _parse_worker_absent(stderr)
+
+
+def test_worker_absent_diagnostic_rejects_nonempty_stdout_and_other_rc():
+    spec = o._SPECS[o._ROLES.index("worker")]
+    stderr = b"Bad request.\nCould not find service \"com.mastermind.executive.worker.codex\" in domain for system\n"
+    with pytest.raises(o.ReleaseObservationError):
+        o._parse_service(spec, 113, b"unexpected stdout", stderr, o._profile(spec)["ProgramArguments"], "a" * 40)
+    with pytest.raises(o.ReleaseObservationError):
+        o._parse_service(spec, 112, b"", stderr, o._profile(spec)["ProgramArguments"], "a" * 40)
+
+
+def _omit_native_identity(world, monkeypatch, role, fields=("username", "group")):
+    original = world.command
+    spec = o._SPECS[o._ROLES.index(role)]
+    def command(argv, budget):
+        rc, raw, stderr = original(argv, budget)
+        if argv == ("/bin/launchctl", "print", spec.service):
+            raw = b"\n".join(line for line in raw.split(b"\n")
+                             if not any(line.startswith(("\t" + field + " = ").encode()) for field in fields))
+        return rc, raw, stderr
+    monkeypatch.setattr(o, "_command", command)
+
+
+def test_broker_loaded_idle_omits_both_native_identities_only(world, monkeypatch):
+    _omit_native_identity(world, monkeypatch, "broker")
+    result = world.capture()
+    broker = result.roles[o._ROLES.index("broker")]
+    assert broker.state == "LOADED_IDLE" and broker.pid is None
+    spec = o._SPECS[-1]
+    assert plistlib.loads(world.artifacts[spec.plist])["UserName"] == "root"
+    assert plistlib.loads(world.artifacts[spec.plist])["GroupName"] == "wheel"
+
+
+@pytest.mark.parametrize("wrong_field", ["UserName", "GroupName"])
+@pytest.mark.parametrize("replacement", [None, "arbitrary"])
+def test_wrong_secured_broker_identity_refuses_despite_display_omission(world, monkeypatch, wrong_field, replacement):
+    _omit_native_identity(world, monkeypatch, "broker")
+    path = o._SPECS[-1].plist
+    document = plistlib.loads(world.artifacts[path])
+    if replacement is None:
+        document.pop(wrong_field)
+    else:
+        document[wrong_field] = replacement
+    world.artifacts[path] = plistlib.dumps(document)
+    with pytest.raises(o.ReleaseObservationError, match="PLIST_REFUSED"):
+        world.capture()
+
+
+@pytest.mark.parametrize("role", ["control", "worker", "relay", "gateway"])
+def test_nonbroker_native_identity_omission_refuses(world, monkeypatch, role):
+    _omit_native_identity(world, monkeypatch, role)
+    with pytest.raises(o.ReleaseObservationError, match="BINDING_REFUSED"):
+        world.capture()
+
+
+@pytest.mark.parametrize("field", ["username", "group"])
+def test_broker_partial_native_identity_omission_refuses(world, monkeypatch, field):
+    _omit_native_identity(world, monkeypatch, "broker", (field,))
+    with pytest.raises(o.ReleaseObservationError, match="BINDING_REFUSED"):
+        world.capture()
+
+
+@pytest.mark.parametrize("field", ["username", "group"])
+def test_broker_structured_identity_is_not_omission(world, monkeypatch, field):
+    original = world.command
+    spec = o._SPECS[-1]
+    def command(argv, budget):
+        rc, raw, stderr = original(argv, budget)
+        if argv == ("/bin/launchctl", "print", spec.service):
+            raw = b"\n".join(line for line in raw.split(b"\n")
+                             if not line.startswith((b"\tusername = ", b"\tgroup = ")))
+            raw = raw.replace(b"\tstate = ", ("\t" + field + " = {\n\t}\n\tstate = ").encode())
+        return rc, raw, stderr
+    monkeypatch.setattr(o, "_command", command)
+    with pytest.raises(o.ReleaseObservationError, match="BINDING_REFUSED"):
+        world.capture()
+
+
+@pytest.mark.parametrize("field,value", [("username", "arbitrary"), ("group", "arbitrary")])
+def test_wrong_explicit_native_broker_identity_refuses(world, field, value):
+    spec = o._SPECS[o._ROLES.index("broker")]
+    def command(argv, budget):
+        result = world.command(argv, budget)
+        if argv == ("/bin/launchctl", "print", spec.service):
+            rc, raw, stderr = result
+            raw = raw.replace((field + " = " + spec.username if field == "username" else field + " = " + spec.group).encode(),
+                              (field + " = " + value).encode())
+            return rc, raw, stderr
+        return result
+    world.module._command = command
+    with pytest.raises(o.ReleaseObservationError):
+        world.capture()
+
+
+def test_native_absent_worker_fixture_matches_captured_root_receipt():
+    raw = b'Bad request.\nCould not find service "com.mastermind.executive.worker.codex" in domain for system\n'
+    assert len(raw) == 97
+    assert hashlib.sha256(raw).hexdigest() == "6f5c084dfe4baca09461d96ef2d8b3bbcdc7df4a9f05c999d8e54bd43956a9bf"
+
+
+def test_broker_omission_preserves_remaining_native_bindings(world, monkeypatch):
+    _omit_native_identity(world, monkeypatch, "broker")
+    original = o._command
+    def command(argv, budget):
+        rc, raw, stderr = original(argv, budget)
+        if argv == ("/bin/launchctl", "print", o._SPECS[-1].service):
+            raw = raw.replace(b"domain = system", b"domain = gui/501")
+        return rc, raw, stderr
+    monkeypatch.setattr(o, "_command", command)
+    with pytest.raises(o.ReleaseObservationError, match="BINDING_REFUSED"):
+        world.capture()
+
+
+@pytest.mark.parametrize("field", ["username", "group"])
+@pytest.mark.parametrize("depth", [2, 3, 4, 5, 6, 7, 8])
+@pytest.mark.parametrize("structured", [False, True])
+def test_broker_identity_at_any_nested_depth_refuses(world, monkeypatch, field, depth, structured):
+    _omit_native_identity(world, monkeypatch, "broker")
+    original = o._command
+    block = "".join("\t" * level + "diagnostics = {\n" for level in range(1, depth))
+    block += "\t" * depth + field + (" = {\n" + "\t" * depth + "}\n" if structured else " = wrong\n")
+    block += "".join("\t" * level + "}\n" for level in reversed(range(1, depth)))
+    def command(argv, budget):
+        rc, raw, stderr = original(argv, budget)
+        if argv == ("/bin/launchctl", "print", o._SPECS[-1].service):
+            raw = raw.replace(b"\tstate = ", block.encode() + b"\tstate = ")
+        return rc, raw, stderr
+    monkeypatch.setattr(o, "_command", command)
+    with pytest.raises(o.ReleaseObservationError, match="BINDING_REFUSED"):
+        world.capture()
+
+
+def test_broker_harmless_nested_native_diagnostics_remain_valid(world, monkeypatch):
+    _omit_native_identity(world, monkeypatch, "broker")
+    original = o._command
+    def command(argv, budget):
+        rc, raw, stderr = original(argv, budget)
+        if argv == ("/bin/launchctl", "print", o._SPECS[-1].service):
+            raw = raw.replace(b"\tstate = ", b"\tdiagnostics = {\n\t\tstatus = harmless\n\t}\n\tstate = ")
+        return rc, raw, stderr
+    monkeypatch.setattr(o, "_command", command)
+    assert world.capture().roles[-1].state == "LOADED_IDLE"
