@@ -12,6 +12,7 @@ from control_plane.executive_orchestration_result import (
     OrchestrationResultError,
     canonical_digest as result_digest,
 )
+from control_plane.executive_supervisor import _planner_routing_options
 from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
@@ -1058,3 +1059,87 @@ def test_v4_manual_pool_override_does_not_pin_model(tmp_path):
     assert "model" not in work.constraints
     assert "manual_pool_override" in work.constraints["routing_reason_codes"]
     assert "manual_model_override" not in work.constraints["routing_reason_codes"]
+
+
+
+def test_planner_routing_options_expose_pools_models_without_worker_identity(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    _register_codex_peer(runtime, "worker-terra", model="gpt-5.6-terra")
+
+    runtime, root, _plan, _admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=[_CLAUDE],
+    )
+    planner = next(
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.root_job_id == root.job_id and job.orchestration_role == "plan"
+    )
+
+    options = _planner_routing_options(runtime, planner)
+    assert options is not None
+    assert options["schema_version"] == "mastermind.planner_routing_options/v1"
+    assert options["default_mode"] == "AUTO"
+    assert options["manual_override_plan_schema"] == "mastermind.execution_plan/v4"
+    assert options["default_route"] == {
+        "provider_realm": "codex",
+        "eligible_quota_classes": ["codex-hf1q-step"],
+        "model": None,
+    }
+
+    pools = {
+        (row["provider_realm"], row["quota_class"]): row
+        for row in options["pools"]
+    }
+    codex = pools[("codex", "codex-hf1q-step")]
+    assert codex["registered_capacity_count"] == 2
+    assert codex["available_capacity_count"] == 2
+    assert codex["models"] == [
+        {
+            "model": "gpt-5.6-sol",
+            "registered_capacity_count": 1,
+            "available_capacity_count": 1,
+        },
+        {
+            "model": "gpt-5.6-terra",
+            "registered_capacity_count": 1,
+            "available_capacity_count": 1,
+        },
+    ]
+    assert codex["models_truncated"] is False
+
+    claude = pools[
+        ("claude-compatible-subscription", "claude-hf1q-step")
+    ]
+    assert claude["registered_capacity_count"] == 1
+    assert claude["models"] == []
+
+    encoded = json.dumps(options, sort_keys=True)
+    for forbidden in (
+        "worker-a",
+        "worker-b",
+        "worker-terra",
+        "@company",
+        "account_label",
+        "worker_id",
+        "host",
+        "credential",
+        "session",
+    ):
+        assert forbidden not in encoded
+
+
+def test_non_planner_job_gets_no_planner_routing_options(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    job = runtime.jobs.create_job(
+        "ordinary worker",
+        requested_authorities=["READ"],
+        constraints={
+            "provider": "codex",
+            "eligible_quota_classes": ["codex-hf1q-step"],
+        },
+    )
+    assert _planner_routing_options(runtime, job) is None
