@@ -68,8 +68,9 @@ class ReleaseHistoryTrust:
 
 _APPROVAL_PRECONDITIONS = frozenset({"approval_evidence_digest", "grant_digest"})
 _PRIVATE_OPERATIONS = frozenset({
-    "reserve_release_prestart", "start_reserved_release"
+    "reserve_release_prestart", "start_reserved_release", "read_release_closure"
 })
+_READ_KEYS = frozenset({"schema", "operation", "approval"})
 _RESERVE_KEYS = frozenset({"schema", "operation", "arguments", "principal", "approval"})
 _START_KEYS = _RESERVE_KEYS | {"reservation", "admission"}
 _EVIDENCE_KEYS = frozenset({"approval", "admission", "preconditions", "root_qualification_digest"})
@@ -140,6 +141,143 @@ class ReleaseBrokerOwner:
                 raise ReleaseConsumerError("RELEASE_APPROVAL_IDENTITY_MISMATCH")
             _qualify_connection(connection, "control")
         return verified
+
+    def _history_only(self, approval, connection):
+        if self._history_trust is None:
+            raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
+        original_identity = None
+        for _ in range(2):
+            trust = self._history_trust()
+            if (type(trust) is not ReleaseHistoryTrust
+                    or type(trust.codec) is not _OwnerReleaseCodec):
+                raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
+            identity = (trust.owner_installation_id, trust.target_ref,
+                        trust.input_identity_digest)
+            if original_identity is not None and identity != original_identity:
+                raise ReleaseConsumerError("RELEASE_HISTORY_TRUST_UNAVAILABLE")
+            original_identity = identity
+            verified = trust.codec.verify_approval(approval)
+            if (verified["owner_installation_id"] != trust.owner_installation_id
+                    or verified["target_ref"] != trust.target_ref):
+                raise ReleaseConsumerError("RELEASE_APPROVAL_IDENTITY_MISMATCH")
+            _qualify_connection(connection, "control")
+        return verified
+
+    def _private_read_frame(self, raw, connection):
+        approval_evidence = None
+        if (type(raw) is not dict or raw.get("schema") != BROKER_SCHEMA
+                or raw.get("operation") != "read_release_closure"
+                or set(raw) != _READ_KEYS):
+            raise ReleaseConsumerError("RELEASE_BROKER_FRAME_INVALID")
+        try:
+            approval_evidence = contract.validate_approval_evidence(
+                raw["approval"])
+        except (TypeError, ValueError, contract.ReleaseContractError):
+            raise ReleaseConsumerError("RELEASE_BROKER_FRAME_INVALID") from None
+        _qualify_connection(connection, "control")
+        return approval_evidence
+
+    def _closure_status(
+            self, journal_record, reservation, reservation_digest,
+            admission, approval):
+        if not isinstance(journal_record, Mapping):
+            raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_INVALID_RECORD")
+        state = journal_record["state"]
+        if state not in {
+            "STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
+            "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+            raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_INVALID_RECORD")
+        if journal_record["root_qualification_digest"] != reservation_digest:
+            raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_RECORD_MISMATCH")
+        # Reuse the actuator journal's protected START-identity helper so the
+        # exact operation, request fingerprint, approval digest, requested-effect
+        # digest, source/precondition digest, action target, owner installation,
+        # target ref, complete first-four before, target release commit/tree,
+        # boot, canonical preconditions and START timing joins are repeated
+        # against the stored reservation and sealed approval before any typed
+        # status is projected. A self-consistent journal whose own START
+        # identity diverges from the validated reservation is rejected here.
+        try:
+            self._root_journal._validate_start_reservation_joins(
+                journal_record, reservation, approval)
+        except ExecutiveReleaseActuatorJournalError as exc:
+            raise ReleaseConsumerError(
+                "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+        journal_preconditions = journal_record["preconditions"]
+        journal_admission = journal_record["admission"]
+        if (contract.canonical_release_bytes(journal_preconditions)
+                != contract.canonical_release_bytes(reservation["preconditions"])
+                or contract.canonical_release_bytes(journal_admission)
+                != contract.canonical_release_bytes(admission)):
+            raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_RECORD_MISMATCH")
+
+        # Construct the protected status common/recorded fields from the
+        # already validated approval, reservation, journal and admission
+        # records. The contract validates the result below.
+        status = {
+            "schema": "mastermind.executive_release_terminal_status/v1",
+            "state": state,
+            "request_id": contract.broker_request_id_for(
+                reservation["request_fingerprint"]),
+            "operation_key": reservation["operation_key"],
+            "request_fingerprint": reservation["request_fingerprint"],
+            "approved_transition_ref": reservation["approved_transition_ref"],
+            "approval_evidence_digest": _hash(approval),
+            "authenticated_principal_digest": _hash(approval["principal_projection"]),
+            "effective_grant_digest": reservation["effective_grant_digest"],
+            "normalized_requested_effect_digest": reservation[
+                "normalized_requested_effect_digest"],
+            "action_family": reservation["action_family"],
+            "action_target_digest": reservation["action_target_digest"],
+            "owner_installation_id": reservation["owner_installation_id"],
+            "target_ref": reservation["target_ref"],
+            "from_release_commit": reservation["from_release_commit"],
+            "to_release_commit": reservation["to_release_commit"],
+            "actuator_generation": journal_record["actuator_generation"],
+            "journal_generation": journal_record["journal_generation"],
+            "started_at_ms": journal_record["started_at_ms"],
+            "preconditions": journal_preconditions.to_dict()
+            if hasattr(journal_preconditions, "to_dict")
+            else dict(journal_preconditions),
+            "expected_precondition_digest": reservation[
+                "expected_precondition_digest"],
+            "admission": journal_admission.to_dict()
+            if hasattr(journal_admission, "to_dict")
+            else dict(journal_admission),
+            "admission_digest": _hash(journal_admission),
+        }
+        if state in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+            terminal = journal_record["terminal"]
+            # terminal.before byte-equals reservation.before, immutable.
+            if (contract.canonical_release_bytes(terminal["before"])
+                    != contract.canonical_release_bytes(reservation["before"])):
+                raise ReleaseConsumerError(
+                    "RELEASE_ROOT_JOURNAL_RECORD_MISMATCH")
+            status["terminal_receipt"] = {
+                "schema": "mastermind.executive_release_terminal_receipt/v1",
+                "request_id": status["request_id"],
+                "request_fingerprint": status["request_fingerprint"],
+                "approval_evidence_digest": _hash(approval),
+                "expected_precondition_digest": status[
+                    "expected_precondition_digest"],
+                "admission_digest": status["admission_digest"],
+                "actuator_generation": status["actuator_generation"],
+                "journal_generation": status["journal_generation"],
+                "started_at_ms": status["started_at_ms"],
+                "completed_at_ms": terminal["completed_at_ms"],
+                "postcondition_digest": terminal["postcondition_digest"],
+                "outcome": state,
+                "before": dict(terminal["before"]),
+                "after": dict(terminal["after"]),
+                "rollback": dict(terminal["rollback"]),
+            }
+        try:
+            validated_status = contract.validate_release_terminal_status(
+                status, expected_approval=approval)
+        except (TypeError, ValueError, contract.ReleaseContractError):
+            raise ReleaseConsumerError(
+                "RELEASE_ROOT_JOURNAL_INVALID_RECORD") from None
+        return validated_status.to_dict()
 
     def _private_frame(self, raw, connection):
         if (type(raw) is not dict or raw.get("schema") != BROKER_SCHEMA
@@ -505,10 +643,99 @@ class ReleaseBrokerOwner:
                            "admission": evidence_admission.to_dict(),
                            "start_record": start_record.to_dict()}}
 
+    def _read_release_closure(self, raw, connection):
+        if self._root_journal is None:
+            raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_UNAVAILABLE")
+        approval_evidence = self._private_read_frame(raw, connection)
+        sealed = self._history_only(approval_evidence, connection)
+        operation_key = sealed["operation_key"]
+        try:
+            reservation = self._root_journal.read_prestart_reservation(
+                operation_key, approval=sealed)
+        except ExecutiveReleaseActuatorJournalError as exc:
+            raise ReleaseConsumerError(
+                "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+        if self._admission_reader is None:
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_UNAVAILABLE")
+        try:
+            evidence = self._admission_reader.read_admission_evidence(
+                connection,
+                approved_transition_ref=reservation["approved_transition_ref"],
+                request_fingerprint=reservation["request_fingerprint"])
+        except ExecutiveReleaseActuatorJournalError:
+            raise
+        except (TypeError, ValueError, OSError, KeyError, AttributeError):
+            raise ReleaseConsumerError(
+                "RELEASE_ADMISSION_EVIDENCE_UNAVAILABLE") from None
+        if not isinstance(evidence, Mapping) or set(evidence) != _EVIDENCE_KEYS:
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
+        try:
+            evidence_approval = contract.validate_approval_evidence(evidence["approval"])
+            evidence_admission = contract.validate_admission(evidence["admission"])
+            evidence_preconditions = contract.validate_precondition_manifest(
+                evidence["preconditions"])
+        except (TypeError, ValueError, contract.ReleaseContractError):
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID") from None
+        if (type(evidence["root_qualification_digest"]) is not str
+                or len(evidence["root_qualification_digest"]) != 64):
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
+        reservation_digest = hashlib.sha256(
+            contract.canonical_release_bytes(reservation)).hexdigest()
+        try:
+            self._root_journal._validate_admission_joins(
+                evidence_admission, reservation, operation_key)
+        except ExecutiveReleaseActuatorJournalError as exc:
+            raise ReleaseConsumerError(
+                "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+        if (evidence["root_qualification_digest"] != reservation_digest
+                or contract.canonical_release_bytes(evidence_approval)
+                != contract.canonical_release_bytes(sealed)
+                or evidence_admission["target_observation_digest"]
+                != reservation["target_observation_digest"]
+                or contract.canonical_release_bytes(evidence_preconditions)
+                != contract.canonical_release_bytes(
+                    reservation["preconditions"])):
+            raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
+        try:
+            journal = self._root_journal.read(operation_key)
+        except ExecutiveReleaseActuatorJournalError as exc:
+            if exc.code != "NOT_FOUND":
+                raise ReleaseConsumerError(
+                    "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+            journal = None
+        try:
+            cancellation = self._root_journal.read_prestart_cancellation(
+                operation_key, reservation=reservation,
+                admission=evidence_admission, approval=sealed).to_dict()
+        except ExecutiveReleaseActuatorJournalError as exc:
+            if exc.code != "NOT_FOUND":
+                raise ReleaseConsumerError(
+                    "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+            cancellation = None
+        if journal is None and cancellation is None:
+            raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_NOT_FOUND")
+        terminal_status = None
+        if journal is not None:
+            terminal_status = self._closure_status(
+                journal.to_dict(), reservation, reservation_digest,
+                evidence_admission, sealed)
+            if cancellation is not None:
+                raise ReleaseConsumerError("RELEASE_ROOT_HISTORY_AMBIGUOUS")
+        if (terminal_status is None) == (cancellation is None):
+            raise ReleaseConsumerError("RELEASE_ROOT_HISTORY_AMBIGUOUS")
+        return {"schema": BROKER_SCHEMA,
+                "operation": "read_release_closure", "ok": True,
+                "approval": sealed.to_dict(),
+                "result": {"reservation": reservation.to_dict(),
+                           "terminal_status": terminal_status,
+                           "cancellation": cancellation}}
+
     def handle(self, raw, connection):
         if type(raw) is dict and raw.get("operation") in _PRIVATE_OPERATIONS:
             if raw.get("operation") == "reserve_release_prestart":
                 return self._reserve_release_prestart(raw, connection)
+            if raw.get("operation") == "read_release_closure":
+                return self._read_release_closure(raw, connection)
             return self._start_reserved_release(raw, connection)
         if type(raw) is not dict or set(raw) != {"schema", "operation", "arguments", "principal", "approval"} or raw["schema"] != BROKER_SCHEMA:
             raise ReleaseConsumerError("RELEASE_BROKER_FRAME_INVALID")

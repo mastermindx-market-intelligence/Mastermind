@@ -86,7 +86,7 @@ _RECORD_FIELDS = frozenset(
     }
 )
 _TERMINAL_FIELDS = frozenset(
-    {"completed_at_ms", "postcondition_digest", "after", "rollback"}
+    {"completed_at_ms", "postcondition_digest", "before", "after", "rollback"}
 )
 _INSTALLED_IDENTITY_FIELDS = frozenset(
     {
@@ -94,8 +94,13 @@ _INSTALLED_IDENTITY_FIELDS = frozenset(
         "release_tree",
         "installed_manifest_digest",
         "configuration_digest",
+        "broker_source_commit",
+        "broker_source_tree",
+        "broker_binary_digest",
+        "service_generation_digests",
     }
 )
+_SERVICE_ROLES = frozenset({"control", "worker", "relay", "gateway", "broker"})
 _HEX64 = re.compile(r"[0-9a-f]{64}", re.ASCII)
 _HEX40 = re.compile(r"[0-9a-f]{40}", re.ASCII)
 _UUID = re.compile(
@@ -227,6 +232,16 @@ def _validate_installed_identity(value: Any, code: str) -> dict[str, Any]:
     _commit(identity["release_tree"], code)
     _digest(identity["installed_manifest_digest"], code)
     _digest(identity["configuration_digest"], code)
+    _commit(identity["broker_source_commit"], code)
+    _commit(identity["broker_source_tree"], code)
+    _digest(identity["broker_binary_digest"], code)
+    services = identity["service_generation_digests"]
+    if not isinstance(services, Mapping) or frozenset(services) != _SERVICE_ROLES:
+        _fail(code)
+    identity["service_generation_digests"] = {
+        role: _digest(services[role], code + ".service_generation_digests." + role)
+        for role in _SERVICE_ROLES
+    }
     return identity
 
 
@@ -238,7 +253,30 @@ def _validate_terminal(terminal: Any, record: Mapping[str, Any]) -> dict[str, An
     if completed_at_ms < record["started_at_ms"]:
         _fail("INVALID_COMPLETED_AT_MS")
     _digest(value["postcondition_digest"], "INVALID_POSTCONDITION_DIGEST")
+    before = _validate_installed_identity(value["before"], "INVALID_BEFORE")
     after = _validate_installed_identity(value["after"], "INVALID_AFTER")
+    # terminal.before first four content fields must equal the START identity.
+    if (
+        before["release_commit"] != record["before_release_commit"]
+        or before["release_tree"] != record["before_release_tree"]
+        or before["installed_manifest_digest"]
+        != record["before_installed_manifest_digest"]
+        or before["configuration_digest"]
+        != record["before_configuration_digest"]
+    ):
+        _fail("INVALID_BEFORE")
+    # broker_source commit/tree of before must equal before release commit/tree.
+    if (
+        before["broker_source_commit"] != before["release_commit"]
+        or before["broker_source_tree"] != before["release_tree"]
+    ):
+        _fail("INVALID_BEFORE")
+    # broker_source commit/tree of after must equal after release commit/tree.
+    if (
+        after["broker_source_commit"] != after["release_commit"]
+        or after["broker_source_tree"] != after["release_tree"]
+    ):
+        _fail("INVALID_AFTER")
     rollback = value["rollback"]
     if not isinstance(rollback, Mapping) or frozenset(rollback) not in (
         frozenset({"attempted"}),
@@ -257,7 +295,6 @@ def _validate_terminal(terminal: Any, record: Mapping[str, Any]) -> dict[str, An
     elif frozenset(rollback) != frozenset({"attempted"}):
         _fail("INVALID_ROLLBACK")
 
-    before = _before_identity(record)
     state = record["state"]
     if state == "SUCCEEDED":
         if (
@@ -282,6 +319,7 @@ def _validate_terminal(terminal: Any, record: Mapping[str, Any]) -> dict[str, An
     return {
         "completed_at_ms": completed_at_ms,
         "postcondition_digest": value["postcondition_digest"],
+        "before": before,
         "after": after,
         "rollback": dict(rollback),
     }
@@ -1718,8 +1756,11 @@ class _ExecutiveReleaseActuatorJournal:
         state: str,
         completed_at_ms: int | None = None,
         postcondition_digest: str | None = None,
+        before: Mapping[str, Any] | None = None,
         after: Mapping[str, Any] | None = None,
         rollback: Mapping[str, Any] | None = None,
+        reservation: Mapping[str, Any] | None = None,
+        approval: Mapping[str, Any] | None = None,
     ) -> ReleaseRecord:
         _integer(expected_generation, "INVALID_EXPECTED_GENERATION", minimum=1)
         if type(state) is not str or state not in _STATES:
@@ -1727,16 +1768,32 @@ class _ExecutiveReleaseActuatorJournal:
         terminal_arguments = (
             completed_at_ms,
             postcondition_digest,
+            before,
             after,
             rollback,
         )
+        ancestry_arguments = (reservation, approval)
         if state in _TERMINAL_STATES:
             if any(value is None for value in terminal_arguments):
                 _fail("TERMINAL_ARGUMENTS")
-        elif any(value is not None for value in terminal_arguments):
-            _fail("TERMINAL_ARGUMENTS")
+            if any(value is None for value in ancestry_arguments):
+                _fail("ANCESTRY_ARGUMENTS")
+        else:
+            if any(value is not None for value in terminal_arguments):
+                _fail("TERMINAL_ARGUMENTS")
+            if any(value is not None for value in ancestry_arguments):
+                _fail("ANCESTRY_ARGUMENTS")
         validated_operation_key = _operation_key(operation_key)
         name = self._name(validated_operation_key)
+        supplied_reservation_bytes: bytes | None = None
+        validated_approval: ReleaseRecord | None = None
+        if state in _TERMINAL_STATES:
+            # The reservation/approval are validated through the protected
+            # validators; that yields canonical bytes for the reservation.
+            validated_approval = self._decode_approval(approval)
+            supplied_reservation_bytes, _validated_reservation = self._decode_reservation(
+                reservation, validated_approval
+            )
         return self._locked(
             name,
             lambda root, record_name: self._advance_locked(
@@ -1746,9 +1803,12 @@ class _ExecutiveReleaseActuatorJournal:
                 state=state,
                 completed_at_ms=completed_at_ms,
                 postcondition_digest=postcondition_digest,
+                before=before,
                 after=after,
                 rollback=rollback,
                 operation_key=validated_operation_key,
+                supplied_reservation_bytes=supplied_reservation_bytes,
+                validated_approval=validated_approval,
             ),
             create_root=False,
         )
@@ -1762,9 +1822,12 @@ class _ExecutiveReleaseActuatorJournal:
         state: str,
         completed_at_ms: int | None,
         postcondition_digest: str | None,
+        before: Mapping[str, Any] | None,
         after: Mapping[str, Any] | None,
         rollback: Mapping[str, Any] | None,
         operation_key: str,
+        supplied_reservation_bytes: bytes | None,
+        validated_approval: ReleaseRecord | None,
     ) -> ReleaseRecord:
         current_raw, current_identity = self._read_file(
             root_descriptor, name, required=True
@@ -1783,9 +1846,56 @@ class _ExecutiveReleaseActuatorJournal:
         updated["state"] = state
         updated["journal_generation"] += 1
         if state in _TERMINAL_STATES:
+            # R9 terminal ancestry: revalidate the immutable reservation
+            # sidecar from inside the operation/process lock before any
+            # replacement journal bytes are written. The supplied approval
+            # has already been validated and the supplied reservation
+            # validated against it; preserve canonical bytes here.
+            stem = _operation_stem(operation_key)
+            stored_reservation_bytes, stored_reservation = (
+                self._read_and_validate_prestart(
+                    root_descriptor,
+                    stem,
+                    kind="reservation",
+                    operation_key=operation_key,
+                    required=True,
+                    approval=validated_approval,
+                )
+            )
+            if stored_reservation_bytes is None:
+                _fail("RESERVATION_ABSENT")
+            if supplied_reservation_bytes != stored_reservation_bytes:
+                _fail("RESERVATION_MISMATCH")
+            # START root_qualification_digest must be the sha256 of the
+            # stored reservation's canonical bytes, not any caller value.
+            expected_root_digest = hashlib.sha256(
+                stored_reservation_bytes
+            ).hexdigest()
+            if current["root_qualification_digest"] != expected_root_digest:
+                _fail("ROOT_QUALIFICATION_MISMATCH")
+            # Repeat the existing immutable joins between the stored
+            # reservation/approval and the START record identity.
+            self._validate_start_reservation_joins(
+                current,
+                stored_reservation,
+                validated_approval,
+            )
+            self._validate_admission_joins(
+                current["admission"],
+                stored_reservation,
+                operation_key,
+            )
+            # The terminal before must byte-equal the reservation's full
+            # 8-field before — not just the first four fields.
+            if (
+                canonical_release_bytes(before)
+                != canonical_release_bytes(stored_reservation["before"])
+            ):
+                _fail("BEFORE_MISMATCH")
             updated["terminal"] = {
                 "completed_at_ms": completed_at_ms,
                 "postcondition_digest": postcondition_digest,
+                "before": before,
                 "after": after,
                 "rollback": rollback,
             }
