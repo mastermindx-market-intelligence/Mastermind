@@ -87,3 +87,19 @@ def test_sender_receives_one_exact_target_only():
     assert calls == [
         ("claude:session:abc", "Please continue from the current checkpoint.", "dot-send-claude-001")
     ]
+
+
+def test_summon_refuses_non_executive_profile():
+    try:
+        validate_tool_arguments(
+            "session_summon",
+            {
+                "objective": "repair the failing integration",
+                "execution_profile": "direct_provider_spawn",
+                "operation_key": "dot-summon-invalid-001",
+            },
+        )
+    except Exception as exc:
+        assert "execution_profile is unsupported" in str(exc)
+    else:
+        raise AssertionError("invented summon profiles must be refused")
