@@ -342,3 +342,96 @@ source and artifact acquisition bindings, an eligible current native profile and
 permission envelope, one benign admitted model work task, and meaningful parent
 consumption. The source does not substitute Extra High/native work for required Web
 Pro reasoning or establish automatic control of an existing ChatGPT conversation.
+
+
+## Concrete acquisition and source binding — direct implementation continuation
+
+`control_plane/chairman_coordination_acquisition.py` supplies the previously external
+compiler and local sealed-artifact readers, plus their composition into the existing
+`CoordinationWorkSources`. It does not register a new service or activate a worker.
+
+### Actual compiled project memory
+
+`AgentOSCompileContextReader` invokes only the existing pinned Macro
+`scripts/agentos.py compile-context` through the original collector's bounded process
+runner. Host configuration fixes repository revision, compiler SHA-256, Python,
+exact project, UTC observation time and explicit budget. The compiler source and
+repository are checked before and after execution. No output is silently truncated,
+no failure falls back to a name search, and no new memory files are maintained.
+
+The approved installed source namespace and executable remain host obligations.
+Before/after equality is sampled evidence, not continuous write exclusion or a
+cryptographic authentication of a caller-supplied directory. A new observation is
+not permission to rerun an uncertain effect. Explicit revalidation uses the same
+source and as-of clock and does not refresh the age of an older observation.
+
+The project-reader default is now16,384 compiler-estimated tokens, still explicitly
+overridable within its configured bound. This is context packaging, not a model
+selection, context-window claim, entitlement, spend increase or automatic Pro turn.
+The real project sample under the8,000 default returned48 standing-context rows and
+omitted all18 optional rows, including every decision/discovery/handoff section.
+With the SAME repo revision, compiler, as-of clock and project-record digest,
+16,384 returned all66 rows:3 decisions,1 discovery,1 handoff and13 artifact references
+in addition to the standing context. The compiler estimate was12,736. There were no
+budget omissions. A missing active_builds.json/PR-state join remained explicit.
+No unknown join was converted to all-clear or inferred from another system's counts.
+
+### Correct scoped source identity
+
+The interrupted implementation mistakenly required the project compiler's
+source_records_digest to equal the company-wide Agent OS attestation. Upstream
+compile-context binds the direct records actually opened for that project, while
+other Agent OS views can bind a different set. The domains must not be conflated.
+
+`CompiledAgentOSContext.source_attestation` now carries its own exact project,
+repository revision, compiler digest, scoped record digest, whole-payload digest,
+and observation time. The existing pure `compose_input` accepts that dedicated
+native optional observation together with its payload. It refuses missing or
+mismatched pairs, future time and different projects. The generic additional-source
+route still refuses invented AGENT_OS receipts; the old CLI grammar is unchanged.
+Company brief identity, policy options and delegation envelopes are not rewritten.
+CURRENT describes an acquired matching snapshot, not complete memory, model reading,
+permission or outcome acceptance. Equivalent UTC spellings are compared as instants
+without changing payload bytes or refreshing timestamps.
+
+`bind_coordination_work_sources` assembles the existing host input from that observation,
+the current approved cognition source bundle, explicit project-context fields and the
+source owner's void-or-raise revalidator. Source revisions are derived from the unchanged
+composer rather than accepted as a model-written replacement map. Omission/degradation
+is propagated into partial coverage. The revalidator checks both original policy/intent
+material and the same compiler observation; a changed original source cannot be silently
+promoted to a newer instruction under the old operation. This is request-local assembly,
+not another durable snapshot, lifecycle or source-identity authority.
+
+### Exact sealed-file acquisition
+
+`SealedCoordinationArtifactReader` implements the existing host artifact callback for
+local SEALED_WORKER results only. It first re-acquires the exact canonical completed
+result and requires the original assignment seal, control-private workspace, effective
+write grant and collected artifact manifest. Caller Job/Attempt objects cannot replace
+the canonical selection. The one configured relative path, expected hash and bounded
+size must match the existing result and collection evidence.
+
+The file is read through retained no-follow descriptors. Symlinks, hardlinks, FIFO,
+nonregular files, changed namespaces, oversized data, altered contents and unsealed
+workspaces refuse. All descriptors close on success and failure. No raw Runtime SQL,
+latest-result fallback or uncontrolled path-open is exposed by the host interface.
+The host still rechecks the same result selector around artifact acquisition.
+
+The shared workspace parent is fenced by device/inode/ownership/mode, not sibling-count
+or directory mtime. Independent project workspace creation therefore does not invalidate
+this result. The selected sealed workspace, artifact traversal and file retain their
+stricter identity/content checks. Permission rules and the OS identity guard were not
+weakened; the unchanged0700 permission was named explicitly to distinguish it from an
+OS-account identity in that guard.
+
+### Acceptance limits
+
+The complete composed host test now uses these concrete compiler/file readers, the
+original source composer, supervisor and temporary Runtime. The portable test compiler
+and model output are explicit fixtures; a separate attended read exercised the ACTUAL
+Macro compiler and real project records. Neither demonstrates live model inference,
+automatic Web Pro continuation or installed coordination. Live Chairman/permission/target
+source acquisition and source namespace protection remain the existing owners' duties.
+The current Executive connection was observed readonly; no provider CLI or alternate
+transport was used to evade that admission boundary. No base builder was retasked.
