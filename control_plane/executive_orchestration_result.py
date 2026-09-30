@@ -151,9 +151,9 @@ def _role_body_schema(role: str) -> dict[str, Any]:
             unique=True,
         )
         v3_step["required"].append("prerequisite_step_ids")
-        # V4 is the explicit manual-model override form. V3 remains the normal
-        # auto-model path. V4 adds one exact model constraint inside the
-        # already-admitted provider/quota pool; it never selects an account,
+        # V4 is the explicit manual-model override-capable form. V3 remains
+        # the normal auto-model path. V4 may add one exact model constraint
+        # inside the already-admitted provider/quota pool; it never selects an account,
         # host, credential, Worker or native session.
         v4_step = json.loads(json.dumps(v3_step))
         v4_step["properties"]["placement"]["properties"]["model"] = _schema_string(
@@ -593,14 +593,23 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
             "cost_class": step["cost_class"],
         }
         if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4} and "placement" in step:
-            placement_keys = {"provider_realm", "quota_class"}
-            if schema_version == PLAN_SCHEMA_V4:
-                placement_keys.add("model")
-            placement = _closed(
-                step["placement"],
-                name=f"steps[{index}].placement",
-                keys=placement_keys,
+            placement_value = step["placement"]
+            placement_keys = (
+                set(placement_value) if isinstance(placement_value, Mapping) else set()
             )
+            required_placement_keys = {"provider_realm", "quota_class"}
+            valid_placement_keys = (
+                placement_keys == required_placement_keys
+                or (
+                    schema_version == PLAN_SCHEMA_V4
+                    and placement_keys == required_placement_keys | {"model"}
+                )
+            )
+            if not isinstance(placement_value, Mapping) or not valid_placement_keys:
+                raise OrchestrationResultError(
+                    f"steps[{index}].placement does not match its closed schema"
+                )
+            placement = placement_value
             resolved["placement"] = {
                 "provider_realm": _text(
                     placement["provider_realm"],
@@ -615,7 +624,7 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
                     nonempty=True,
                 ),
             }
-            if schema_version == PLAN_SCHEMA_V4:
+            if schema_version == PLAN_SCHEMA_V4 and "model" in placement:
                 resolved["placement"]["model"] = _text(
                     placement["model"],
                     name=f"steps[{index}].placement.model",
