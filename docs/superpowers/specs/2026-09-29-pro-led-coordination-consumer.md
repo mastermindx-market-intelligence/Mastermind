@@ -435,3 +435,126 @@ automatic Web Pro continuation or installed coordination. Live Chairman/permissi
 source acquisition and source namespace protection remain the existing owners' duties.
 The current Executive connection was observed readonly; no provider CLI or alternate
 transport was used to evade that admission boundary. No base builder was retasked.
+
+
+## Semantic review and substantive parent input — 2026-09-30 continuation
+
+Same operation #1056 and source #1059. State remains **BUILT_NOT_PROVEN**, with
+source/protocol qualification, not an admitted live model or Web Pro round trip.
+The Web principal retained direct implementation; no enhancement was reassigned.
+
+### Complete proposal into the original review role
+
+`control_plane/chairman_coordination_review.py` adds
+`read_coordination_review_request`, `read_coordination_review_return`, and the
+optional `CoordinationReviewSupervisor` prompt specialization. Existing work
+completion previously yielded a structural review without its full rationale or
+next instruction. The new task composes those complete verified bytes with the
+unchanged source-bound brief and sends them as evidence to an already-admitted
+original review role. The sealed artifact is acquired once per composition through
+the existing concrete reader and double-observed work-result consumer; a truncated
+summary is never parsed as the proposal.
+
+Exact project, root, work/review Jobs, current Attempts, plan lineage, grant and
+source revalidation must agree. The review schema remains the original typed
+review envelope. A canonical current-assignment fingerprint also prevents a stale
+outer Job prompt from being combined with freshly acquired task evidence. Hashes
+are integrity comparisons, never authority, credentials or leases. Relevant data
+is bounded; excess content refuses instead of being silently clipped.
+
+The fixed review instruction requires substantive goal preservation, material
+return consumption, counterevidence, useful bounded next steps, discriminating
+proof and explicit holds. It prohibits executing the candidate or treating source
+prose as authority. It retains Pro as substantive product/design/research/planning
+principal. A model citation is traceability, not evidence of understanding.
+
+Review returns preserve the complete candidate and the original complete Fabric
+review projection. `review_supports_proposal` reports only structural support,
+approve verdict, exact artifact citation and absence of errors. It is NOT parent
+eligibility. `review_independence:NOT_PROJECTED`, `acceptance_granted:false`,
+`parent_consumption_proven:false`, `requires_parent_judgment:true` and current-owner
+revalidation remain explicit. A now-held/partial source cannot be promoted by an
+older approve verdict. Errors expose bounded refusal messages, not private source
+or artifact diagnostics.
+
+### Three digest domains and existing admission independence
+
+The review owner's `reviewed_result_digest` is the canonical **work role-result**
+digest. The work **result-envelope** digest selects the bounded acquisition, while
+the **artifact** digest identifies candidate bytes. These are separately preserved;
+none may substitute for another. The new review task carries the original review
+lineage values explicitly in `review_target`.
+
+`ExactWorkerClaimTarget` is deliberately **work-only**. Review and aggregation use
+their original role placement/admission path; this enhancement does not broaden
+that target contract, create a target owner, or drop a supplied failing target to
+retry untargeted. All original Supervisor effect/lifecycle methods are inherited.
+
+An original COO qualifying review requires distinct worker, OS principal, account
+and provider-home evidence under its current canonical predicates. A completed
+same-OS native fixture review is correctly refused by the parent, including when
+its worker label differs. Neither helper replaces this independence ruling.
+
+### Full proposal into the original aggregation parent
+
+`control_plane/chairman_coordination_parent.py` adds only the optional
+`CoordinationParentSupervisor` prompt specialization for an exact parent and work
+Job. It first binds the current admitted parent through the existing bounded root
+reader and original effective-grant validator. The existing canonical aggregation
+handoff getter selects the actual qualifying review; the caller does not nominate
+a different reviewer or replace the acceptance evidence.
+
+The selected work/review role-result digests and Attempts must match that handoff.
+The complete candidate, structural review, original semantic review, current
+compiled project brief and unchanged handoff are included in the parent input.
+The original prompt and aggregation result schema are preserved. Current source,
+parent assignment and canonical handoff are revalidated before returning a prompt.
+No matching handoff, wrong scope, stale assignment, unreadable/changed artifact,
+invalid source or oversized content refuses without generic-task fallback.
+
+The parent instruction asks for a substantive retain/repair/hold judgment in the
+existing aggregate_summary and ordinary result fields, backed by exact evidence.
+All canonical revisions remain in the original result. Next actions remain
+proposals; this component does not execute the instruction, create an acceptance
+record, arm a watcher, spawn a worker or acknowledge a Web Pro return.
+
+### Exact qualification level
+
+Fresh final scoped run: **55 passed, zero failures/errors/skips**. This consists of
+36 new review cases, 17 new parent cases and two existing concrete-acquisition
+integration guards. The prior unchanged 682-case campaign was not repeated.
+Test source and original dependency hashes were unchanged across this run.
+
+The complete portable path uses the actual concrete compiler/file readers,
+source composer, temporary Runtime, work Supervisor, original review/result
+validators, CooCycle handoff and aggregation Supervisor/result sealing. Compiler
+CLI content, model output and the independent OHF review principal are explicit
+fixtures. The parent fixture derives its ordinary result from the full delivered
+proposal: both rationale and next instruction appear in the sealed result, with
+exact artifact citation and canonical work/review revisions. Parent replay is
+terminal, does not invoke the model again, and does not execute next_actions.
+Separate negative cases prove that a completed same-author or same-OS review does
+not receive a qualifying parent handoff, and an explicit unusable exact target
+is not silently retried through an untargeted path.
+
+This proves input/return plumbing and canonical protocol consumption, NOT real
+model intelligence, physical independent-review isolation, installed admission,
+project acceptance or actual Web Pro input/turn/return. The existing separate
+attended actual Macro context read remains historical evidence, not a model run.
+
+### Live frontier and source review gate
+
+Current live Executive ingress remains observed read-only. No provider CLI,
+production Runtime write, source install, registry/identity change or alternate
+transport was used to evade it. Runtime, Supervisor, work-role consumer, concrete
+readers, original compiler, source composer, result schemas and acceptance owners
+were not modified in this continuation.
+
+Before live qualification: independent source review of this exact candidate,
+original source acceptance/release/install, and current host-owned source/profile/
+permission admission are required. The admitted model must use actual current
+project evidence, produce a useful goal-preserving instruction assessed by the
+principal, and return it through its real parent. Actual Web Pro input/turn/return
+and a verified current target remain separate obligations. Missing active-build
+coverage must stay explicit until its existing owner supplies it. No base-builder
+handoff is reintroduced by this continuation.
