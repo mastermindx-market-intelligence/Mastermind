@@ -92,6 +92,8 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
         )
         objective = _text(obj["objective"], "objective", max_chars=4000)
         execution_profile = _text(obj["execution_profile"], "execution_profile", max_chars=64)
+        if execution_profile not in ("bounded_code_change", "research_only"):
+            raise BridgeError("invalid_input", "execution_profile is unsupported")
         operation_key = _text(obj["operation_key"], "operation_key", max_chars=MAX_OPERATION_KEY_CHARS)
         if _OPERATION_KEY_RE.fullmatch(operation_key) is None:
             raise BridgeError("invalid_input", "operation_key has an unsupported form")
