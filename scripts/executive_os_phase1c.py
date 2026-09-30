@@ -1518,11 +1518,16 @@ def _service_from_config(
     workspace_bindings_path: Path | None = None,
     coo_source: Any | None = None,
     claimed_operator_adapter_factory: Callable[..., Any] | None = None,
+    remote_operator_binding_source: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
     # This is trusted host composition, never a JSON/model-selected factory.
     if (claimed_operator_adapter_factory is not None
             and not callable(claimed_operator_adapter_factory)):
         raise ServiceError("claimed operator factory must be callable")
+    if (remote_operator_binding_source is not None
+            and (not callable(remote_operator_binding_source)
+                 or claimed_operator_adapter_factory is not None)):
+        raise ServiceError("remote operator binding source conflicts with factory")
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
         ExecutiveOperatorSupervisor,
@@ -1715,10 +1720,13 @@ def _service_from_config(
                 turn_input_loader=turn_input_loader,
             )
 
+        factory = claimed_operator_adapter_factory
+        if remote_operator_binding_source is not None:
+            from control_plane.remote_attempt_transport import build_claimed_remote_operator_factory
+            factory = build_claimed_remote_operator_factory(runtime, remote_operator_binding_source)
         return ExecutiveOperatorSupervisor(
             runtime,
-            claimed_adapter_factory=(claimed_operator_adapter_factory
-                if claimed_operator_adapter_factory is not None else primary_factory),
+            claimed_adapter_factory=(factory if factory is not None else primary_factory),
             prompt_source=sealed_supervisor,
         )
 
