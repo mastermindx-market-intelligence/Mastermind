@@ -210,3 +210,68 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path):
     )
     assert refused.returncode == 66
     assert "refusing fallback" in refused.stderr
+
+def test_cli_release_accepts_explicit_existing_pr_publication_branch(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+    root = tmp_path / "workspaces"
+
+    code, acquired = _run_cli(
+        source,
+        root,
+        "acquire",
+        "--operation-id",
+        "cli-existing-pr-001",
+        "--base-sha",
+        base_sha,
+    )
+    assert code == 0
+    workspace = Path(acquired["receipt"]["workspace_path"])
+    (workspace / "README.md").write_text("repair published to existing PR\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "existing PR repair")
+    head = _git(workspace, "rev-parse", "HEAD")
+    publication_branch = "sol/existing-pr-target"
+    _git(workspace, "push", "origin", f"HEAD:refs/heads/{publication_branch}")
+    assert _git(source, "rev-parse", f"refs/remotes/origin/{publication_branch}") == head
+
+    code, held = _run_cli(
+        source, root, "status", "--operation-id", "cli-existing-pr-001"
+    )
+    assert code == 0
+    assert held["receipt"]["state"] == "PRESERVED_UNPUBLISHED"
+
+    code, observed = _run_cli(
+        source,
+        root,
+        "status",
+        "--operation-id",
+        "cli-existing-pr-001",
+        "--published-branch",
+        publication_branch,
+    )
+    assert code == 0
+    assert observed["receipt"]["state"] == "RELEASABLE"
+    assert observed["receipt"]["recoverability"] == "HEAD_PUBLISHED_TO_DECLARED_ORIGIN_BRANCH"
+
+    code, released = _run_cli(
+        source,
+        root,
+        "release",
+        "--operation-id",
+        "cli-existing-pr-001",
+        "--published-branch",
+        publication_branch,
+    )
+    assert code == 0
+    assert released["effect"] == "APPLIED"
+    assert released["receipt"]["state"] == "REMOVED"
+    assert not workspace.exists()
