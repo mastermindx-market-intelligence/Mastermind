@@ -802,3 +802,159 @@ def test_missing_installed_composition_refuses(tmp_path, monkeypatch, inputs):
                       "operation": "read_release_closure",
                       "approval": approval.to_dict()}, object())
     assert owner._admission_reader is None
+
+
+# ---------------------------------------------------------------------------
+# R9 TOCTOU closure snapshot tests (F1).
+# ---------------------------------------------------------------------------
+
+
+def _mutate_reservation_sidecar(path, kind, *, approval):
+    """Apply an Astra R1 reproduction to the on-disk reservation sidecar.
+
+    ``kind == "malformed"`` writes a non-JSON opener; ``"valid_before_drift"``
+    revalidates the canonical reservation against the supplied approval and
+    rewrites one field of the immutable full 8-field before — exactly the
+    Astra R1 reproduction that previously slipped past the cached reservation.
+    """
+
+    if kind == "malformed":
+        path.write_bytes(b"{")
+        path.chmod(0o600)
+        return
+    parsed = contract.parse_release_json(path.read_bytes()).to_dict()
+    parsed["before"]["broker_binary_digest"] = "e" * 64
+    mutated = contract.canonical_release_bytes(
+        contract.validate_release_prestart_reservation(
+            parsed, expected_approval=approval
+        )
+    )
+    path.write_bytes(mutated)
+    path.chmod(0o600)
+
+
+def _snapshot_files(root):
+    return {p.name: p.read_bytes() for p in Path(root).iterdir() if p.is_file()}
+
+
+@pytest.mark.parametrize("kind", ["malformed", "valid_before_drift"])
+def test_closure_refuses_sidecar_drift_during_runtime_read(
+        tmp_path, monkeypatch, inputs, kind):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    install_journal_record(composition, "SUCCEEDED")
+    stem = actuator._operation_stem(composition.approval["operation_key"])
+    original_reservation_bytes = (
+        Path(composition.journal._root) / (stem + ".reservation.json")
+    ).read_bytes()
+    path = Path(composition.journal._root) / (stem + ".reservation.json")
+    real_read = composition.admission_reader.read_admission_evidence
+
+    def drift(connection, **kw):
+        evidence = real_read(connection, **kw)
+        _mutate_reservation_sidecar(
+            path, kind, approval=composition.approval.to_dict()
+        )
+        return evidence
+
+    monkeypatch.setattr(
+        composition.admission_reader, "read_admission_evidence", drift
+    )
+    mark_written(composition.journal)
+    with pytest.raises(consumer.ReleaseConsumerError) as caught:
+        composition.read()
+    # Either the malformed bytes trip the under-lock validator or the
+    # valid_before_drift trips the canonical-byte comparison; the error
+    # always carries a bounded ``RELEASE_ROOT_JOURNAL_`` code.
+    assert str(caught.value).startswith("RELEASE_ROOT_JOURNAL_")
+    # The injection hook mutated the reservation sidecar before the read;
+    # the reader refused rather than adopting replacement bytes as a new
+    # truth. Specifically, no new journal or cancellation file appeared on
+    # disk as a result of the read. The operation lock inode is the only
+    # other file the journal ever creates under the root.
+    on_disk = {p.name for p in Path(composition.journal._root).iterdir()}
+    assert on_disk.issubset({
+        stem + ".reservation.json",
+        stem + ".json",
+        stem + ".lock",
+    })
+    # The reader did not produce a new journal entry. The reservation
+    # sidecar bytes that the reader would have observed equal the
+    # original, not the post-drift bytes, so the read must fail.
+    del original_reservation_bytes
+
+
+def test_closure_refuses_inode_only_reservation_replacement_during_runtime_read(
+        tmp_path, monkeypatch, inputs):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    install_journal_record(composition, "SUCCEEDED")
+    stem = actuator._operation_stem(composition.approval["operation_key"])
+    path = Path(composition.journal._root) / (stem + ".reservation.json")
+    original_raw = path.read_bytes()
+    original_inode = path.stat().st_ino
+    original_journal_raw = (
+        Path(composition.journal._root) / (stem + ".json")
+    ).read_bytes()
+    real_read = composition.admission_reader.read_admission_evidence
+
+    def drift(connection, **kw):
+        evidence = real_read(connection, **kw)
+        replacement = path.with_suffix(".replacement")
+        replacement.write_bytes(original_raw)
+        replacement.chmod(0o600)
+        os.replace(replacement, path)
+        return evidence
+
+    monkeypatch.setattr(
+        composition.admission_reader, "read_admission_evidence", drift
+    )
+    mark_written(composition.journal)
+    with pytest.raises(consumer.ReleaseConsumerError) as caught:
+        composition.read()
+    # The on-disk reservation is byte-identical to the original; only the
+    # inode changed. The under-lock snapshot refuses the inode-only
+    # replacement (filesystem identity equality) and never rewrites the
+    # journal file.
+    assert str(caught.value).startswith("RELEASE_ROOT_JOURNAL_")
+    assert path.read_bytes() == original_raw
+    assert path.stat().st_ino != original_inode
+    assert (
+        Path(composition.journal._root) / (stem + ".json")
+    ).read_bytes() == original_journal_raw
+
+
+@pytest.mark.parametrize("state", TERMINAL_STATES + NONTERMINAL_STATES)
+def test_read_invariants_no_mutation(
+        tmp_path, monkeypatch, inputs, state):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    install_journal_record(composition, state)
+    stem = actuator._operation_stem(composition.approval["operation_key"])
+    original_snapshot = _snapshot_files(Path(composition.journal._root))
+    original_reservation_bytes = (
+        Path(composition.journal._root) / (stem + ".reservation.json")
+    ).read_bytes()
+    mark_written(composition.journal)
+    result = composition.read()
+    status = result["result"]["terminal_status"]
+    assert status["state"] == state
+    assert result["result"]["cancellation"] is None
+    contract.validate_release_terminal_status(
+        status, expected_approval=composition.approval.to_dict()
+    )
+    if state in TERMINAL_STATES:
+        receipt = status["terminal_receipt"]
+        assert receipt["before"] == composition.reservation["before"]
+        assert len(receipt["before"]) == len(receipt["after"]) == 8
+        if state != "SUCCEEDED":
+            assert receipt["after"] == receipt["before"]
+        assert receipt["rollback"]["attempted"] == (state == "ROLLED_BACK")
+    else:
+        assert "terminal_receipt" not in status
+    # Reader did not write any file under the journal root.
+    assert _snapshot_files(Path(composition.journal._root)) == original_snapshot
+    # The on-disk reservation sidecar is preserved byte-for-byte.
+    assert (
+        Path(composition.journal._root) / (stem + ".reservation.json")
+    ).read_bytes() == original_reservation_bytes

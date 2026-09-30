@@ -2697,3 +2697,167 @@ def test_terminal_advance_never_writes_when_ancestry_fails(tmp_path):
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
         journal.advance(**_r9_terminal_kwargs(record, reservation, approval))
     assert journal_path.read_bytes() == original_raw
+
+
+# ---------------------------------------------------------------------------
+# R9 TOCTOU final-publication guard tests (F2).
+# ---------------------------------------------------------------------------
+
+
+def _mutate_reservation_sidecar(path, kind, *, approval):
+    """Apply an Astra R1 reproduction to the on-disk reservation sidecar.
+
+    ``kind == "malformed"`` writes a non-JSON opener; ``"valid_before_drift"``
+    revalidates the canonical reservation against the supplied approval and
+    rewrites one field of the immutable full 8-field before — exactly the
+    Astra R1 reproduction that previously slipped past the initial under-lock
+    ancestry guard but is now caught by the missing final-publication fence.
+    """
+
+    if kind == "malformed":
+        path.write_bytes(b"{")
+        path.chmod(0o600)
+        return
+    parsed = contract.parse_release_json(path.read_bytes()).to_dict()
+    parsed["before"]["broker_binary_digest"] = "e" * 64
+    mutated = contract.canonical_release_bytes(
+        contract.validate_release_prestart_reservation(
+            parsed, expected_approval=approval
+        )
+    )
+    path.write_bytes(mutated)
+    path.chmod(0o600)
+
+
+@pytest.mark.parametrize("kind", ["malformed", "valid_before_drift"])
+def test_terminal_refuses_sidecar_drift_after_staging(tmp_path, monkeypatch, kind):
+    """A reservation sidecar change after ``_write_new(.tmp)`` must refuse.
+
+    Mirrors the Astra R1 reproduction: the canonical reservation bytes are
+    mutated exactly once, immediately after the real ``_write_new`` returns
+    for the staged temporary inode. The final-publication guard catches the
+    drift, the original nonterminal journal stays intact, and the owned
+    temporary inode is cleaned up.
+    """
+
+    journal = _journal(tmp_path / "drift-after-staging")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    path = _reservation_path(journal._root)
+    original_raw = path.read_bytes()
+    original_journal_raw = (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes()
+    original_write_new = journal._write_new
+
+    def drift(root_descriptor, name, raw):
+        identity = original_write_new(root_descriptor, name, raw)
+        if name.endswith(".tmp"):
+            _mutate_reservation_sidecar(path, kind, approval=approval)
+        return identity
+
+    monkeypatch.setattr(journal, "_write_new", drift)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            **_r9_terminal_kwargs(
+                record, reservation, approval, after=_target(record)
+            )
+        )
+    assert caught.value.code == "RESERVATION_REPLACED"
+    # The on-disk reservation is now the injected drift; the original bytes
+    # are no longer equal. The nonterminal journal record stays intact.
+    assert path.read_bytes() != original_raw
+    assert (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes() == original_journal_raw
+    # The owned temporary inode was cleaned up by the finally clause.
+    assert not (Path(journal._root) / (_stem(OPERATION_KEY) + ".tmp")).exists()
+
+
+def test_terminal_refuses_inode_only_reservation_replacement_after_staging(
+    tmp_path, monkeypatch
+):
+    """Inode-only replacement during staging refuses with byte equality.
+
+    An inode-only replacement that happens to keep the canonical reservation
+    bytes equal still differs in filesystem identity, so the F2 final-publication
+    guard must refuse and clean the owned temporary file rather than adopting the
+    replacement as a new truth.
+    """
+
+    journal = _journal(tmp_path / "inode-only-drift")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    path = _reservation_path(journal._root)
+    original_raw = path.read_bytes()
+    original_inode = path.stat().st_ino
+    original_journal_raw = (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes()
+    original_write_new = journal._write_new
+
+    def swap_inode(root_descriptor, name, raw):
+        identity = original_write_new(root_descriptor, name, raw)
+        if name.endswith(".tmp"):
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(original_raw)
+            replacement.chmod(0o600)
+            os.replace(replacement, path)
+            assert path.stat().st_ino != original_inode
+        return identity
+
+    monkeypatch.setattr(journal, "_write_new", swap_inode)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        journal.advance(
+            **_r9_terminal_kwargs(
+                record, reservation, approval, after=_target(record)
+            )
+        )
+    assert caught.value.code == "RESERVATION_REPLACED"
+    # The nonterminal journal is preserved.
+    assert (
+        Path(journal._root) / (_stem(OPERATION_KEY) + ".json")
+    ).read_bytes() == original_journal_raw
+    # The owned temporary inode is cleaned up; the on-disk reservation is
+    # still byte-equal to the original and now lives on a different inode.
+    assert path.read_bytes() == original_raw
+    assert path.stat().st_ino != original_inode
+    assert not (Path(journal._root) / (_stem(OPERATION_KEY) + ".tmp")).exists()
+
+
+@pytest.mark.parametrize("state", ["SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"])
+def test_competing_terminal_writers_only_one_generation(tmp_path, state):
+    """Two writers racing on the same operation lock produce one advance.
+
+    A compliant second writer using the same operation lock must serialize:
+    exactly one generation advance plus exactly one refusal. The test runs
+    in two threads sharing the same journal root.
+    """
+
+    import threading
+
+    journal = _journal(tmp_path / "race")
+    record = _to_recovering(journal, _start(journal))
+    reservation, approval, _preconds, _prep = _reservation_fixture()
+    after = _target(record) if state == "SUCCEEDED" else _before(record)
+    kwargs = _r9_terminal_kwargs(
+        record, reservation, approval, state=state, after=after
+    )
+    gate = threading.Barrier(2)
+
+    def run():
+        other = _journal(Path(journal._root))
+        gate.wait(timeout=5)
+        try:
+            other.advance(**kwargs)
+            return ("ok", other.read(record["operation_key"])["state"])
+        except actuator.ExecutiveReleaseActuatorJournalError as exc:
+            return ("refused", exc.code)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: run(), range(2)))
+    assert sorted(result[0] for result in results) == ["ok", "refused"], results
+    assert (
+        journal.read(record["operation_key"])["journal_generation"]
+        == record["journal_generation"] + 1
+    )

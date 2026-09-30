@@ -1124,22 +1124,44 @@ class _ExecutiveReleaseActuatorJournal:
     def read_prestart_reservation(
         self, operation_key: str, *, approval: Mapping[str, Any]
     ) -> ReleaseRecord:
+        return self._read_prestart_reservation_snapshot(
+            operation_key, approval=approval
+        )[0]
+
+    def _read_prestart_reservation_snapshot(
+        self, operation_key: str, *, approval: Mapping[str, Any]
+    ) -> tuple[ReleaseRecord, bytes, tuple[Any, ...]]:
+        """Read validated reservation content and identity under one lock."""
+
         validated_operation_key = _operation_key(operation_key)
         validated_approval = self._decode_approval(approval)
         stem = _operation_stem(validated_operation_key)
         name = stem + ".json"
         return self._locked(
             name,
-            lambda root, _: self._read_and_validate_prestart(
-                root,
-                stem,
-                kind="reservation",
-                operation_key=validated_operation_key,
-                required=True,
-                approval=validated_approval,
-            )[1],
+            lambda root, _: self._read_prestart_reservation_snapshot_locked(
+                root, stem, validated_operation_key, validated_approval
+            ),
             create_root=False,
         )
+
+    def _read_prestart_reservation_snapshot_locked(
+        self,
+        root_descriptor: int,
+        stem: str,
+        operation_key: str,
+        validated_approval: ReleaseRecord,
+    ) -> tuple[ReleaseRecord, bytes, tuple[Any, ...]]:
+        raw, identity = self._read_prestart_snapshot(
+            root_descriptor, stem, kind="reservation", required=True
+        )
+        record = self._validate_prestart_snapshot(
+            raw,
+            kind="reservation",
+            operation_key=operation_key,
+            approval=validated_approval,
+        )
+        return record, raw, identity
 
     def cancel_prestart(
         self,
@@ -1278,6 +1300,149 @@ class _ExecutiveReleaseActuatorJournal:
             )[1],
             create_root=False,
         )
+
+    def _read_closure_snapshot(
+        self,
+        operation_key: str,
+        *,
+        initial_reservation_bytes: bytes,
+        initial_reservation_identity: tuple[Any, ...] | None,
+        approval: Mapping[str, Any],
+        admission: Mapping[str, Any],
+    ) -> tuple[ReleaseRecord | None, ReleaseRecord | None]:
+        """Coherent journal + cancellation snapshot under one operation lock.
+
+        Acquires the per-operation `.lock` once, then revalidates the
+        reservation sidecar (the same operation lock guards it against an
+        interleaving mutation between the initial reservation read and this
+        external snapshot). Requires exact canonical byte equality against
+        ``initial_reservation_bytes`` and exact filesystem identity
+        equality against ``initial_reservation_identity``; refuses with
+        ``RESERVATION_REPLACED`` on any drift or absence rather than
+        adopting replacement bytes as a new truth. Replays the same
+        immutable joins the closure reader and terminal advance already
+        enforce against the stored reservation and sealed approval, and
+        reads the journal and cancellation under the same lock. Refuses
+        with ``RECORD_BYTES`` / ``RESERVATION_MISMATCH`` /
+        ``ROOT_QUALIFICATION_MISMATCH`` / ``BEFORE_MISMATCH`` on any other
+        drift before returning. No external Runtime, network, broker, or
+        provider I/O is performed under the operation lock.
+        """
+
+        validated_operation_key = _operation_key(operation_key)
+        validated_approval = self._decode_approval(approval)
+        validated_admission = validate_admission(admission)
+        if (
+            not isinstance(initial_reservation_bytes, bytes)
+            or not initial_reservation_bytes
+            or not initial_reservation_identity
+        ):
+            _fail("RESERVATION_REPLACED")
+        stem = _operation_stem(validated_operation_key)
+        name = stem + ".json"
+        return self._locked(
+            name,
+            lambda root, _: self._closure_snapshot_locked(
+                root,
+                validated_operation_key,
+                stem,
+                initial_reservation_bytes=initial_reservation_bytes,
+                initial_reservation_identity=initial_reservation_identity,
+                validated_approval=validated_approval,
+                validated_admission=validated_admission,
+            ),
+            create_root=False,
+        )
+
+    def _closure_snapshot_locked(
+        self,
+        root_descriptor: int,
+        operation_key: str,
+        stem: str,
+        *,
+        initial_reservation_bytes: bytes,
+        initial_reservation_identity: tuple[Any, ...],
+        validated_approval: ReleaseRecord,
+        validated_admission: Any,
+    ) -> tuple[ReleaseRecord | None, ReleaseRecord | None]:
+        # 1. Re-read the reservation sidecar; require canonical bytes and
+        # filesystem identity to match the initial reservation observation.
+        # An inode-only replacement with byte-identical content still
+        # differs in filesystem identity and is refused as drift; any
+        # byte-level replacement is refused the same way. Bytes-drift
+        # is unambiguous refusal; we do not adopt replacement bytes as a
+        # new truth.
+        stored_reservation_bytes, stored_reservation_identity = (
+            self._read_prestart_snapshot(
+                root_descriptor,
+                stem,
+                kind="reservation",
+                required=True,
+            )
+        )
+        if (
+            stored_reservation_bytes != initial_reservation_bytes
+            or stored_reservation_identity != initial_reservation_identity
+        ):
+            _fail("RESERVATION_REPLACED")
+        # 2. Re-decode the stored reservation against the sealed approval to
+        # bind every immutable join to the canonical bytes we just observed.
+        stored_reservation = self._validate_prestart_snapshot(
+            stored_reservation_bytes,
+            kind="reservation",
+            operation_key=operation_key,
+            approval=validated_approval,
+        )
+        reservation_digest = hashlib.sha256(
+            stored_reservation_bytes
+        ).hexdigest()
+        # 3. Repeat admission joins against the stored reservation and the
+        # supplied admission. The closure reader had the same evidence before
+        # the external call, so any drift here is unambiguous refusal.
+        self._validate_admission_joins(
+            validated_admission, stored_reservation, operation_key
+        )
+        # 4. Read the journal record under the same lock; refuse on
+        # root-digest drift, START/reservation drift, or terminal full-before
+        # drift.
+        journal_raw, _ = self._read_file(
+            root_descriptor, stem + ".json", required=False
+        )
+        journal_record: ReleaseRecord | None = None
+        if journal_raw:
+            journal_record = self._decode_for_operation(journal_raw, operation_key)
+            if journal_record["root_qualification_digest"] != reservation_digest:
+                _fail("ROOT_QUALIFICATION_MISMATCH")
+            self._validate_start_reservation_joins(
+                journal_record, stored_reservation, validated_approval
+            )
+            if journal_record["state"] in _TERMINAL_STATES:
+                if (
+                    canonical_release_bytes(journal_record["terminal"]["before"])
+                    != canonical_release_bytes(stored_reservation["before"])
+                ):
+                    # Preserve the established closure-reader error contract;
+                    # terminal advance uses BEFORE_MISMATCH for caller input,
+                    # while a stored journal inconsistency is RECORD_MISMATCH.
+                    _fail("RECORD_MISMATCH")
+        # 5. Read the cancellation sidecar under the same lock, validating
+        # it against the stored reservation (not the initial one).
+        cancellation_raw, cancellation_identity = self._read_prestart_snapshot(
+            root_descriptor, stem, kind="cancellation", required=False
+        )
+        cancellation_record: ReleaseRecord | None = None
+        if cancellation_identity:
+            cancellation_record = self._validate_prestart_snapshot(
+                cancellation_raw,
+                kind="cancellation",
+                operation_key=operation_key,
+                approval=validated_approval,
+                reservation=stored_reservation,
+                admission=validated_admission,
+            )
+        # Quiet the no-op bind for the cached sidecar identity.
+        del cancellation_identity
+        return journal_record, cancellation_record
 
     def _write_new(
         self, root_descriptor: int, name: str, raw: bytes
@@ -1845,25 +2010,34 @@ class _ExecutiveReleaseActuatorJournal:
         updated = current.to_dict()
         updated["state"] = state
         updated["journal_generation"] += 1
+        initial_reservation_bytes: bytes | None = None
+        initial_reservation_identity: tuple[Any, ...] | None = None
+        initial_reservation: ReleaseRecord | None = None
         if state in _TERMINAL_STATES:
             # R9 terminal ancestry: revalidate the immutable reservation
             # sidecar from inside the operation/process lock before any
             # replacement journal bytes are written. The supplied approval
             # has already been validated and the supplied reservation
-            # validated against it; preserve canonical bytes here.
+            # validated against it; preserve canonical bytes here. Capture
+            # both the canonical bytes and the inode/size/mtime identity so
+            # the final-publication guard below can detect an inode-only
+            # replacement during staging that leaves the canonical bytes
+            # unchanged.
             stem = _operation_stem(operation_key)
-            stored_reservation_bytes, stored_reservation = (
-                self._read_and_validate_prestart(
+            stored_reservation_bytes, stored_reservation_identity = (
+                self._read_prestart_snapshot(
                     root_descriptor,
                     stem,
                     kind="reservation",
-                    operation_key=operation_key,
                     required=True,
-                    approval=validated_approval,
                 )
             )
-            if stored_reservation_bytes is None:
-                _fail("RESERVATION_ABSENT")
+            stored_reservation = self._validate_prestart_snapshot(
+                stored_reservation_bytes,
+                kind="reservation",
+                operation_key=operation_key,
+                approval=validated_approval,
+            )
             if supplied_reservation_bytes != stored_reservation_bytes:
                 _fail("RESERVATION_MISMATCH")
             # START root_qualification_digest must be the sha256 of the
@@ -1892,6 +2066,9 @@ class _ExecutiveReleaseActuatorJournal:
                 != canonical_release_bytes(stored_reservation["before"])
             ):
                 _fail("BEFORE_MISMATCH")
+            initial_reservation_bytes = stored_reservation_bytes
+            initial_reservation_identity = stored_reservation_identity
+            initial_reservation = stored_reservation
             updated["terminal"] = {
                 "completed_at_ms": completed_at_ms,
                 "postcondition_digest": postcondition_digest,
@@ -1927,6 +2104,55 @@ class _ExecutiveReleaseActuatorJournal:
                 or temporary_identity_again != temporary_identity
             ):
                 _fail("RECORD_REPLACED")
+            if state in _TERMINAL_STATES:
+                # Final-publication guard: revalidate the reservation
+                # sidecar under the same operation lock immediately before
+                # ``os.replace``. Require exact canonical-bytes equality
+                # with the first under-lock observation and equal
+                # filesystem identity (an inode-only replacement that
+                # happens to keep the canonical bytes equal still leaves
+                # the original reservation unchanged; a byte drift is
+                # unambiguous refusal). Repeat root digest, START/
+                # reservation, admission/reservation, and full-before
+                # joins against the retained original identity. On
+                # refusal the original nonterminal journal stays intact
+                # and the owned temporary inode is the only file the
+                # finally clause unlinks.
+                stem = _operation_stem(operation_key)
+                final_reservation_bytes, final_reservation_identity = (
+                    self._read_prestart_snapshot(
+                        root_descriptor,
+                        stem,
+                        kind="reservation",
+                        required=True,
+                    )
+                )
+                if (
+                    final_reservation_bytes != initial_reservation_bytes
+                    or final_reservation_identity
+                    != initial_reservation_identity
+                ):
+                    _fail("RESERVATION_REPLACED")
+                expected_root_digest = hashlib.sha256(
+                    initial_reservation_bytes
+                ).hexdigest()
+                if current["root_qualification_digest"] != expected_root_digest:
+                    _fail("ROOT_QUALIFICATION_MISMATCH")
+                self._validate_start_reservation_joins(
+                    current,
+                    initial_reservation,
+                    validated_approval,
+                )
+                self._validate_admission_joins(
+                    current["admission"],
+                    initial_reservation,
+                    operation_key,
+                )
+                if (
+                    canonical_release_bytes(before)
+                    != canonical_release_bytes(initial_reservation["before"])
+                ):
+                    _fail("BEFORE_MISMATCH")
             try:
                 os.replace(
                     temporary_name,

@@ -650,8 +650,12 @@ class ReleaseBrokerOwner:
         sealed = self._history_only(approval_evidence, connection)
         operation_key = sealed["operation_key"]
         try:
-            reservation = self._root_journal.read_prestart_reservation(
-                operation_key, approval=sealed)
+            (reservation,
+             initial_reservation_bytes,
+             initial_reservation_identity) = (
+                self._root_journal._read_prestart_reservation_snapshot(
+                    operation_key, approval=sealed)
+            )
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
@@ -680,7 +684,7 @@ class ReleaseBrokerOwner:
                 or len(evidence["root_qualification_digest"]) != 64):
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_INVALID")
         reservation_digest = hashlib.sha256(
-            contract.canonical_release_bytes(reservation)).hexdigest()
+            initial_reservation_bytes).hexdigest()
         try:
             self._root_journal._validate_admission_joins(
                 evidence_admission, reservation, operation_key)
@@ -696,28 +700,39 @@ class ReleaseBrokerOwner:
                 != contract.canonical_release_bytes(
                     reservation["preconditions"])):
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
+        # Coherent root-history snapshot under the existing operation lock:
+        # revalidates the reservation sidecar (canonical bytes must equal
+        # the initial observation), repeats the admission joins against the
+        # on-disk reservation, and reads journal + cancellation under the
+        # same lock. Refuses drift before any root-history write.
         try:
-            journal = self._root_journal.read(operation_key)
+            journal_record, cancellation_record = (
+                self._root_journal._read_closure_snapshot(
+                    operation_key,
+                    initial_reservation_bytes=initial_reservation_bytes,
+                    initial_reservation_identity=initial_reservation_identity,
+                    approval=sealed,
+                    admission=evidence_admission,
+                )
+            )
         except ExecutiveReleaseActuatorJournalError as exc:
-            if exc.code != "NOT_FOUND":
-                raise ReleaseConsumerError(
-                    "RELEASE_ROOT_JOURNAL_" + exc.code) from None
-            journal = None
-        try:
-            cancellation = self._root_journal.read_prestart_cancellation(
-                operation_key, reservation=reservation,
-                admission=evidence_admission, approval=sealed).to_dict()
-        except ExecutiveReleaseActuatorJournalError as exc:
-            if exc.code != "NOT_FOUND":
-                raise ReleaseConsumerError(
-                    "RELEASE_ROOT_JOURNAL_" + exc.code) from None
-            cancellation = None
-        if journal is None and cancellation is None:
+            raise ReleaseConsumerError(
+                "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+        if journal_record is None and cancellation_record is None:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_NOT_FOUND")
+        cancellation = (
+            cancellation_record.to_dict()
+            if cancellation_record is not None
+            and hasattr(cancellation_record, "to_dict")
+            else (dict(cancellation_record) if cancellation_record else None)
+        )
         terminal_status = None
-        if journal is not None:
+        if journal_record is not None:
+            journal_dict = (journal_record.to_dict()
+                            if hasattr(journal_record, "to_dict")
+                            else dict(journal_record))
             terminal_status = self._closure_status(
-                journal.to_dict(), reservation, reservation_digest,
+                journal_dict, reservation, reservation_digest,
                 evidence_admission, sealed)
             if cancellation is not None:
                 raise ReleaseConsumerError("RELEASE_ROOT_HISTORY_AMBIGUOUS")
