@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.subscription_provider_profiles/v1",
-  "verified_at": "2026-09-13T06:55:00Z",
+  "verified_at": "2026-09-27T03:17:36Z",
   "profiles": {
     "glm-coding-plan": {
       "provider": "glm",
@@ -36,10 +36,10 @@
       "protocol": "anthropic",
       "base_url": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
       "models": {
-        "routine": "qwen3.8-max",
+        "routine": "qwen3.8-flash",
         "hard": "qwen3.8-max",
-        "fast": "qwen3.6-flash",
-        "subagent": "qwen3.7-max"
+        "fast": "qwen3.8-flash",
+        "subagent": "qwen3.8-flash"
       },
       "default_model_class": "routine",
       "supported_tool_only": true,

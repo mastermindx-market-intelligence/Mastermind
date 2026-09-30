@@ -1,6 +1,8 @@
 #!/opt/homebrew/bin/node
 import fs from "node:fs";
 import http from "node:http";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
 
 const LISTEN_HOST = "127.0.0.1";
 const LISTEN_PORT = 8444;
@@ -9,13 +11,33 @@ const UPSTREAM_PORT = 8443;
 const EXECUTIVE_CONFIG =
   "/Library/Application Support/MastermindExecutive/config/executive-mcp.json";
 
-const installed = JSON.parse(fs.readFileSync(EXECUTIVE_CONFIG, "utf8"));
+// Pure construction is the test seam; the executable retains fixed installation paths.
+export function createAdapter(installed, { requestExecutive = http.request, fetchOAuth = fetch } = {}) {
 const readPolicy = installed?.policies?.read;
-const submitPolicy = installed?.policies?.submit;
-if (!readPolicy || !submitPolicy ||
-    readPolicy.resource !== submitPolicy.resource ||
-    readPolicy.issuer !== submitPolicy.issuer) {
-  throw new Error("Executive OAuth policies are absent or divergent");
+const cooPolicy = installed?.coo?.policy;
+const COO_SCOPES = ["mastermind.executive.coo.act", "mastermind.executive.read"];
+if (!readPolicy || !cooPolicy ||
+    JSON.stringify(readPolicy.required_scopes) !== JSON.stringify([COO_SCOPES[1]]) ||
+    JSON.stringify(cooPolicy.required_scopes) !== JSON.stringify(COO_SCOPES) ||
+    readPolicy.resource !== cooPolicy.resource || readPolicy.issuer !== cooPolicy.issuer ||
+    readPolicy.resource_metadata_url !== cooPolicy.resource_metadata_url) {
+  throw new Error("role-correct Executive COO policy is unavailable");
+}
+function secureUrl(value) {
+  const parsed = new URL(value);
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error("Executive policy URL is invalid");
+  }
+  return parsed;
+}
+secureUrl(readPolicy.resource);
+secureUrl(readPolicy.issuer);
+const UPSTREAM_COO_PATH = "/mcp/coo";
+const UPSTREAM_METADATA_PATH = secureUrl(cooPolicy.resource_metadata_url).pathname;
+if (!/^\/[A-Za-z0-9._/-]*$/.test(UPSTREAM_METADATA_PATH) ||
+    UPSTREAM_METADATA_PATH.includes("//") || UPSTREAM_METADATA_PATH.split("/").some(x => x === "." || x === "..") ||
+    ["/mcp", UPSTREAM_COO_PATH].includes(UPSTREAM_METADATA_PATH)) {
+  throw new Error("Executive metadata route is invalid");
 }
 
 const CANONICAL_RESOURCE = readPolicy.resource;
@@ -43,6 +65,11 @@ function cleanHeaders(headers, { upstream = false } = {}) {
 function rewriteChallenge(value) {
   if (Array.isArray(value)) return value.map(rewriteChallenge);
   if (typeof value !== "string") return value;
+  const scopeFields = [...value.matchAll(/(?:^|[,\s])scope="([^"]*)"/gi)];
+  if (scopeFields.length > 1 || scopeFields.some(match =>
+      match[1].split(" ").some(scope => !COO_SCOPES.includes(scope)))) {
+    throw new Error("upstream role challenge refused");
+  }
   if (/resource_metadata="[^"]*"/i.test(value)) {
     return value.replace(/resource_metadata="[^"]*"/i,
       'resource_metadata="' + LOCAL_METADATA + '"');
@@ -73,7 +100,7 @@ async function readBody(req) {
 
 async function authMetadata(res) {
   const target = new URL(".well-known/oauth-authorization-server", AUTH_ISSUER);
-  const upstream = await fetch(target, {
+  const upstream = await fetchOAuth(target, {
     headers: { accept: "application/json" },
     redirect: "error",
   });
@@ -91,6 +118,11 @@ async function authMetadata(res) {
 }
 
 function translateResource(params) {
+  const scopes = params.getAll("scope");
+  if (scopes.length > 1 || (scopes.length === 1 &&
+      scopes[0].split(" ").some(scope => ![...COO_SCOPES, "offline_access"].includes(scope)))) {
+    throw new Error("unexpected_scope");
+  }
   const resources = params.getAll("resource");
   if (resources.length) {
     if (resources.length !== 1 || resources[0] !== LOCAL_RESOURCE) {
@@ -103,6 +135,7 @@ function translateResource(params) {
 function authorizeRedirect(res, parsed) {
   const params = new URLSearchParams(parsed.searchParams);
   translateResource(params);
+  if (!params.has("scope")) params.set("scope", COO_SCOPES.join(" "));
   const target = new URL("authorize", AUTH_ISSUER);
   target.search = params.toString();
   res.writeHead(302, {
@@ -123,7 +156,7 @@ async function proxyOAuthPost(req, res, endpoint) {
   translateResource(params);
 
   const target = new URL(endpoint, AUTH_ISSUER);
-  const upstream = await fetch(target, {
+  const upstream = await fetchOAuth(target, {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
@@ -145,27 +178,48 @@ async function proxyOAuthPost(req, res, endpoint) {
 }
 
 function proxyExecutive(req, res, parsed) {
-  const upstream = http.request({
+  const upstream = requestExecutive({
     host: UPSTREAM_HOST,
     port: UPSTREAM_PORT,
     method: req.method,
-    path: parsed.pathname + parsed.search,
+    path: parsed.pathname === "/mcp" ? UPSTREAM_COO_PATH : UPSTREAM_METADATA_PATH,
     headers: cleanHeaders(req.headers, { upstream: true }),
   }, (upstreamRes) => {
     const headers = cleanHeaders(upstreamRes.headers);
     if (headers["www-authenticate"]) {
-      headers["www-authenticate"] = rewriteChallenge(headers["www-authenticate"]);
+      try { headers["www-authenticate"] = rewriteChallenge(headers["www-authenticate"]); }
+      catch {
+        sendJson(res, 502, { error: "upstream_role_refused" });
+        upstreamRes.destroy(); return;
+      }
     }
 
     if (parsed.pathname === METADATA_PATH &&
         (upstreamRes.statusCode || 500) < 300) {
       const chunks = [];
-      upstreamRes.on("data", (chunk) => chunks.push(chunk));
+      let total = 0;
+      upstreamRes.on("data", (chunk) => {
+        total += chunk.length;
+        if (total > MAX_OAUTH_BODY) {
+          if (!res.writableEnded) sendJson(res, 502, { error: "invalid_upstream_metadata" });
+          upstreamRes.destroy(); return;
+        }
+        chunks.push(chunk);
+      });
+      upstreamRes.on("error", () => {
+        if (!res.writableEnded) sendJson(res, 502, { error: "invalid_upstream_metadata" });
+      });
       upstreamRes.on("end", () => {
+        if (res.writableEnded) return;
         try {
           const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (body.resource !== CANONICAL_RESOURCE || !Array.isArray(body.scopes_supported) ||
+              !COO_SCOPES.every(scope => body.scopes_supported.includes(scope))) {
+            throw new Error("upstream COO metadata is unavailable");
+          }
           body.resource = LOCAL_RESOURCE;
           body.authorization_servers = [LOCAL_ORIGIN];
+          body.scopes_supported = [...COO_SCOPES];
           const encoded = Buffer.from(JSON.stringify(body));
           headers["content-length"] = String(encoded.length);
           delete headers["content-encoding"];
@@ -181,15 +235,18 @@ function proxyExecutive(req, res, parsed) {
       return;
     }
 
+    upstreamRes.on("error", () => res.destroy());
     res.writeHead(upstreamRes.statusCode || 502, headers);
     upstreamRes.pipe(res);
   });
 
   upstream.on("error", () => {
     if (!res.headersSent) {
-      res.writeHead(502, {"content-type":"application/json"});
+      sendJson(res, 502, { error: "executive_upstream_unavailable", effect: "UNKNOWN",
+        reconcile_original_operation: true });
+    } else {
+      res.destroy();
     }
-    res.end('{"error":"executive_upstream_unavailable"}');
   });
   req.on("aborted", () => upstream.destroy());
   req.pipe(upstream);
@@ -205,6 +262,21 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    const rawHeaders = req.rawHeaders.filter((_, i) => i % 2 === 0).map(name => name.toLowerCase());
+    if (rawHeaders.filter(name => name === "authorization").length > 1) {
+      sendJson(res, 401, { error: "ambiguous_authorization" }); return;
+    }
+    if (rawHeaders.filter(name => name === "host").length !== 1 ||
+        req.headers.host !== LISTEN_HOST + ":" + LISTEN_PORT ||
+        (req.headers.origin && req.headers.origin !== LOCAL_ORIGIN)) {
+      sendJson(res, 403, { error: "local_transport_refused" }); return;
+    }
+    const methods = { "/mcp": "POST", [METADATA_PATH]: "GET", [AS_METADATA_PATH]: "GET",
+      "/authorize": "GET", "/oauth/token": "POST", "/oauth/revoke": "POST" };
+    if (req.url !== parsed.pathname + parsed.search || methods[parsed.pathname] !== req.method ||
+        (parsed.search && parsed.pathname !== "/authorize")) {
+      sendJson(res, 404, { error: "not_found" }); return;
+    }
     if (ALLOWED_PROXY_PATHS.has(parsed.pathname)) {
       proxyExecutive(req, res, parsed);
       return;
@@ -214,7 +286,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (parsed.pathname === "/authorize" && req.method === "GET") {
-      authorizeRedirect(res, parsed);
+      try { authorizeRedirect(res, parsed); }
+      catch { sendJson(res, 400, { error: "invalid_authorization_request" }); }
       return;
     }
     if (parsed.pathname === "/oauth/token" && req.method === "POST") {
@@ -238,9 +311,17 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 0;
 server.keepAliveTimeout = 70000;
 server.headersTimeout = 71000;
+return server;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+const installed = JSON.parse(fs.readFileSync(EXECUTIVE_CONFIG, "utf8"));
+const server = createAdapter(installed);
 server.listen(LISTEN_PORT, LISTEN_HOST, () => {
   process.stdout.write("mastermind-claude-executive-mcp-adapter ready\n");
 });
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.on(signal, () => server.close(() => process.exit(0)));
+}
+
 }

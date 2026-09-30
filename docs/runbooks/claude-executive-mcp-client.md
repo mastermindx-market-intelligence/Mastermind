@@ -97,3 +97,22 @@ Only after the role-correct principal admission and COO MCP profile are source-a
 No step may substitute a CEO intent for the COO request.
 
 If any modifying admission response is ambiguous, preserve `EFFECT_UNKNOWN` and reconcile the same request/carrier. Never resend, fail over, or mint a replacement identity.
+
+## Role-route convergence and scoped native registration
+
+The source adapter now translates local `/mcp` to the fixed upstream `/mcp/coo`, never to the CEO route. It requires the existing installed `coo.policy` to share Executive resource/issuer/metadata identity and require exactly Executive read plus COO action. Missing role configuration refuses startup; missing upstream COO service is not permission to fall back.
+The local protected-resource document uses the installed metadata path and exposes only those two role scopes. A CEO or foreign-scope challenge is rejected rather than triggering an authority upgrade. Role-correct resource translation preserves PKCE/state/callback inputs and leaves token storage with the native client. A lost upstream response is uncertain and must be reconciled under the original operation, never blindly retried.
+
+The earlier SPEC_ONLY status was a source-freeze boundary, not a permanent reason to stop implementation. Draft backend sources now exist (#1064/#1066/#1068/#1073); independent acceptance, exact installation, capability profile/delegation and actual native authentication remain owed. This adapter change alone grants none of them. The live installed adapter is not automatically changed by merging this source.
+
+After those source and installation gates, use a single native registration with explicit scopes rather than asking the provider to infer them from a combined server catalog. The equivalent public-client fields are `--client-id <PUBLIC_AUTH0_CLIENT_ID>` and `--callback-port 8774`; use this JSON form to carry the scope restriction as well, not both registration commands:
+
+```text
+claude mcp add-json mastermind-executive '{"type":"http","url":"http://127.0.0.1:8444/mcp","oauth":{"clientId":"<PUBLIC_AUTH0_CLIENT_ID>","callbackPort":8774,"scopes":"mastermind.executive.read mastermind.executive.coo.act"}}' --scope user
+```
+
+Inspect and reconcile the existing registration before any replacement. Never clear an existing token or remove/recreate a client as a retry for an uncertain operation. No client secret is supplied. Claude may add `offline_access` when the issuer advertises refresh support; it is not a modifying resource permission.
+
+Native acceptance must also verify issuer handling: the current translation retains the incumbent local authorization-server metadata facade. Modern MCP requires validation of authorization-response `iss` against the selected issuer. The local facade versus actual issuer must pass the real current Claude/IdP ceremony before authentication is called proven. This source unit does not prove that interoperability. Do not strip an issuer response or suppress validation to make sign-in succeed; reconcile the accepted transport with the actual provider contract if it refuses.
+
+Primary references verified during this source unit: Claude Code MCP documentation, sections preconfigured OAuth credentials, fixed callback port and restrict OAuth scopes (`https://code.claude.com/docs/en/mcp`); MCP2026-07-28 Authorization, scope selection and authorization-response validation (`https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization`).

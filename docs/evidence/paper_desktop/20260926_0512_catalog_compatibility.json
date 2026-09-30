@@ -1,0 +1,62 @@
+{
+  "schema": "mastermind.paper_catalog_compatibility.v2",
+  "observed_on": "2026-09-26",
+  "protected_base": "fda6ed3911cdda24eb63b2ccbe1b174121cf404f",
+  "server": [
+    "paper-desktop",
+    "0.5.12"
+  ],
+  "prior": {
+    "catalog_sha256": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570",
+    "tool_count": 34,
+    "durable_evidence": "docs/evidence/paper_desktop/20260924_0512_catalog_compatibility.json",
+    "raw_catalog_artifact_sha256": "5350da300d0e9327f5005b1e940b60990d6bdb4d864daa306bf13fafb9538b46"
+  },
+  "observed": {
+    "catalog_sha256": "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+    "tool_count": 35,
+    "accepted_for_write_before_candidate": false,
+    "blocked_tools": [
+      "create_file",
+      "delete_nodes",
+      "export",
+      "export_combined_pdf",
+      "open_file",
+      "rename_pages"
+    ]
+  },
+  "exact_catalog_delta": {
+    "added_tools": [
+      "rename_pages"
+    ],
+    "removed_tools": [],
+    "changed_existing_tools": [],
+    "classification": "BLOCKED_ONLY_ADDITION",
+    "comparison_method": "canonical bridge JSON encoding over exact name-keyed tool dictionaries"
+  },
+  "compatibility_review": {
+    "allowlisted_read_tool_count": 17,
+    "allowlisted_edit_tool_count": 12,
+    "allowlisted_tool_schemas_changed": false,
+    "allowlisted_tool_names_changed": false,
+    "rename_pages_allowlisted": false,
+    "file_id_bindings_preserved": true,
+    "token_delete_refusal_preserved": true,
+    "server_version_changed": false,
+    "conclusion": "Exact blocked-only upstream addition. Admit the new full-catalog digest without widening READ_TOOLS or EDIT_TOOLS; preserve fail-closed exact pinning."
+  },
+  "candidate": {
+    "bridge_version": "0.1.1",
+    "bridge_sha256": "d3301a1466d46ae081ded963f438c019fabf39c9bccfc8c669f16562a52bf7f6",
+    "runtime_generation": "v5",
+    "deployed": false,
+    "live_write_proven": false,
+    "production_acceptance": false
+  },
+  "effect_boundary": {
+    "paper_document_mutated": false,
+    "runtime_deployed": false,
+    "service_restarted": false,
+    "effect_unknown": false
+  }
+}

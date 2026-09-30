@@ -477,6 +477,27 @@ describe("native and interaction contracts", () => {
     ).toBeTruthy();
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+  it("renders configured native readiness only through an opaque client reference", async () => {
+    const nativeClientRef = `native-client:v1:${"b".repeat(64)}`;
+    invoke.mockResolvedValueOnce({
+      version: "0.1.0",
+      source_revision: "a".repeat(40),
+      build_identity: "configured-test-build",
+      transport: "CONFIGURED",
+      state: "BUILT_NOT_PROVEN",
+      native_client_ref: nativeClientRef,
+    });
+    (window as any).__TAURI_INTERNALS__ = {};
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+    };
+    render(<App />);
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("readiness"));
+    expect(screen.getByText(/CONFIGURED \/ BUILT_NOT_PROVEN/)).toBeTruthy();
+    expect(screen.getByText("Native client reference")).toBeTruthy();
+    expect(screen.getByText(nativeClientRef)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("tpc_");
+  });
   it("distinguishes an absent Programs source from a malformed source", async () => {
     render(<App />);
     const user = userEvent.setup();
