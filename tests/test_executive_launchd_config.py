@@ -513,6 +513,7 @@ def test_acceptance_rejects_existing_receipt_container_metadata_drift(
     monkeypatch.setattr(acceptance, "_assert_no_acl", lambda path: None)
     container = tmp_path / "acceptance"
     container.mkdir(mode=0o755)
+    container.chmod(0o755)  # Deliberately bad metadata, independent of process umask.
 
     with pytest.raises(acceptance.AcceptanceError, match="container metadata drifted"):
         acceptance._prepare_acceptance_receipt_root(

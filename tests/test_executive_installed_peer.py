@@ -1170,6 +1170,113 @@ def test_strict_json_preserves_finite_numbers_and_integers():
     }
 
 
+def _installed_config_read(monkeypatch, document):
+    raw = json.dumps(document, sort_keys=True, separators=(',', ':')).encode()
+    identity = SimpleNamespace(
+        st_dev=1, st_ino=2, st_mode=stat.S_IFREG | 0o644,
+        st_uid=0, st_gid=0, st_nlink=1, st_size=len(raw),
+        st_mtime_ns=3, st_ctime_ns=4,
+    )
+    monkeypatch.setattr(m, '_observe_ancestors', lambda *a: ())
+    monkeypatch.setattr(m, '_read_trusted_bytes', lambda *a, **k: (raw, identity))
+
+
+def _gateway_install_document(release, profile='release_control_v1'):
+    return {
+        'schema': 'mastermind.executive_mcp_install.v1',
+        'release_sha': release,
+        'service_uid': 458,
+        'ceo_ingress_socket_path': '/var/run/mastermind-executive/ceo-ingress.sock',
+        'port': 8443,
+        'policies': {},
+        'audit_root': '/var/log/mastermind-executive/mcp-auth',
+        'executive_mcp_profile': profile,
+    }
+
+
+def test_gateway_role_config_accepts_exact_release_control_profile(monkeypatch):
+    from ops.executive_os.executive_mcp_entry import CONFIG_SCHEMA
+
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release))
+    observed = m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+    assert m._GATEWAY_CONFIG_SCHEMA == CONFIG_SCHEMA
+    profile_source = (
+        Path(__file__).parents[1] / 'integrations/executive_mcp/release_control.py'
+    ).read_text()
+    assert 'RELEASE_CONTROL_PROFILE = "release_control_v1"' in profile_source
+    assert m._GATEWAY_MCP_PROFILE == 'release_control_v1'
+    assert observed.release == release
+
+
+def test_gateway_role_config_accepts_exact_combined_release_profile(monkeypatch):
+    from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
+
+    release = 'a' * 40
+    document = _gateway_install_document(release, WEB_CEO_RELEASE_PROFILE)
+    _installed_config_read(monkeypatch, document)
+    observed = m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+    assert m._GATEWAY_MCP_PROFILES == ('release_control_v1', WEB_CEO_RELEASE_PROFILE)
+    assert observed.release == release
+    assert observed.digest == m.hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+@pytest.mark.parametrize('profile', [
+    'web_ceo_release_v2', 'web_ceo_release_v1 ', 'WEB_CEO_RELEASE_V1',
+    'web_ceo_v3', 'personal_read', '',
+])
+def test_gateway_role_config_refuses_combined_profile_aliases(monkeypatch, profile):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release, profile))
+    with pytest.raises(peer.PeerIdentityError):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+@pytest.mark.parametrize('profile,code', [
+    ('web_ceo_v2', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    ('legacy', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    ('release_control_v2', 'SERVICE_CONFIG_PROFILE_DRIFT'),
+    (None, 'SERVICE_CONFIG_SCHEMA_DRIFT'),
+    (458, 'SERVICE_CONFIG_SCHEMA_DRIFT'),
+])
+def test_gateway_role_config_refuses_other_profiles(monkeypatch, profile, code):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, _gateway_install_document(release, profile))
+    with pytest.raises(peer.PeerIdentityError, match=code):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_gateway_role_config_requires_profile_field(monkeypatch):
+    release = 'a' * 40
+    document = _gateway_install_document(release)
+    del document['executive_mcp_profile']
+    _installed_config_read(monkeypatch, document)
+    with pytest.raises(peer.PeerIdentityError, match='SERVICE_CONFIG_SCHEMA_DRIFT'):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_gateway_role_config_requires_current_schema_field(monkeypatch):
+    release = 'a' * 40
+    document = _gateway_install_document(release)
+    document['schema_version'] = document.pop('schema')
+    _installed_config_read(monkeypatch, document)
+    with pytest.raises(peer.PeerIdentityError, match='SERVICE_CONFIG_SCHEMA_DRIFT'):
+        m._verify_role_config(m._role_topology('gateway'), release, m._Budget(25))
+
+
+def test_control_role_config_is_unchanged(monkeypatch):
+    release = 'a' * 40
+    _installed_config_read(monkeypatch, {
+        'proof_base_sha': release,
+        'control_uid': 450,
+        'python_runtime_provenance_digest': 'b' * 64,
+    })
+    observed = m._verify_role_config(m._role_topology('control'), release, m._Budget(25))
+    assert observed.release == release
+    assert observed.provenance_digest == ''
+
+
 @pytest.mark.parametrize('changed_field', [None, 'st_ino', 'st_mtime_ns', 'st_ctime_ns'])
 def test_release_recheck_retains_manifest_descriptor_identity(monkeypatch, changed_field):
     """An unchanged content digest must not hide replacement or metadata drift."""
@@ -1354,3 +1461,151 @@ def test_extra_subprocess_interface_refuses_unqualified_combinations(monkeypatch
     with pytest.raises(peer.PeerIdentityError, match='COMMAND_NOT_ALLOWED'):
         m._run_bounded_readonly(argv, budget=m._Budget(25), max_bytes=4096,
                                allow_empty=allow_empty, merge_stderr=merge_stderr)
+
+
+class _FakeProcPidInfo:
+    """Mock the libproc ABI, never query a real process."""
+
+    def __init__(self):
+        self.argtypes = None
+        self.restype = None
+        self.calls = []
+        self.size = 56
+        self.unique_id = 113769795
+        self.pidversion = 235172879
+        self.error = None
+
+    def __call__(self, pid, flavor, argument, output, size):
+        self.calls.append((pid, flavor, argument, size, ctypes.get_errno()))
+        if self.error is not None:
+            raise self.error
+        result = ctypes.cast(output, ctypes.POINTER(installed._ProcUniqueIdentifierInfo)).contents
+        result.p_uniqueid = self.unique_id
+        result.p_idversion = self.pidversion
+        return self.size
+
+
+@pytest.fixture
+def process_instance_api(monkeypatch):
+    query = _FakeProcPidInfo()
+    loads = []
+
+    class Library:
+        proc_pidinfo = query
+
+    def load(path, **kwargs):
+        loads.append((path, kwargs))
+        return Library()
+
+    monkeypatch.setattr(installed.sys, "platform", "darwin")
+    monkeypatch.setattr(installed.ctypes, "CDLL", load)
+    return query, loads
+
+
+def test_process_instance_abi_is_exact_56_byte_native_layout():
+    layout = installed._ProcUniqueIdentifierInfo
+    assert ctypes.sizeof(layout) == 56
+    assert [(name, getattr(layout, name).offset) for name, _ in layout._fields_] == [
+        ("p_uuid", 0), ("p_uniqueid", 16), ("p_puniqueid", 24),
+        ("p_idversion", 32), ("p_orig_ppidversion", 36),
+        ("p_reserve2", 40), ("p_reserve3", 48),
+    ]
+
+
+@pytest.mark.parametrize("pid", [1, 17778, (1 << 31) - 1])
+def test_process_instance_binds_exact_native_signature_and_clears_errno(process_instance_api, pid):
+    query, loads = process_instance_api
+    ctypes.set_errno(123)
+    value = installed._observe_process_instance(pid)
+    assert query.calls == [(pid, 17, 0, 56, 0)]
+    assert loads == [("/usr/lib/libproc.dylib", {"use_errno": True})]
+    assert query.argtypes == [ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
+                              ctypes.c_void_p, ctypes.c_int]
+    assert query.restype is ctypes.c_int
+    assert (value.unique_id, value.pidversion) == (query.unique_id, query.pidversion)
+    assert list(value.__dataclass_fields__) == ["unique_id", "pidversion"]
+    with pytest.raises(AttributeError):
+        value.unique_id = 1
+    assert "_observe_process_instance" not in installed.__all__
+
+
+def test_process_instance_reads_fresh_identity_and_distinguishes_exec(process_instance_api):
+    query, _ = process_instance_api
+    first = installed._observe_process_instance(123)
+    assert installed._observe_process_instance(123) == first
+    query.pidversion += 1
+    second = installed._observe_process_instance(123)
+    assert second.unique_id == first.unique_id
+    assert second != first
+    query.unique_id += 1
+    assert installed._observe_process_instance(123) != second
+    assert len(query.calls) == 4
+
+
+@pytest.mark.parametrize("pid", [True, False, None, "123", 1.0, b"1", [], {}, 0, -1, 1 << 31, 1 << 70])
+def test_process_instance_invalid_pid_never_loads_native_api(process_instance_api, pid):
+    query, loads = process_instance_api
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_PID_INVALID$"):
+        installed._observe_process_instance(pid)
+    assert query.calls == []
+    assert loads == []
+
+
+def test_process_instance_refuses_int_subclass_before_native_api(process_instance_api):
+    class Pid(int):
+        pass
+    query, loads = process_instance_api
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_PID_INVALID$"):
+        installed._observe_process_instance(Pid(123))
+    assert query.calls == loads == []
+
+
+def test_process_instance_non_darwin_never_loads_api(monkeypatch, process_instance_api):
+    query, loads = process_instance_api
+    monkeypatch.setattr(installed.sys, "platform", "linux")
+    with pytest.raises(peer.PeerIdentityError, match="^PEER_PLATFORM_UNSUPPORTED$"):
+        installed._observe_process_instance(123)
+    assert query.calls == loads == []
+
+
+def test_process_instance_wrong_layout_never_loads_api(monkeypatch, process_instance_api):
+    query, loads = process_instance_api
+    real_sizeof = ctypes.sizeof
+    monkeypatch.setattr(installed.ctypes, "sizeof", lambda kind:
+                        55 if kind is installed._ProcUniqueIdentifierInfo else real_sizeof(kind))
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_ABI_UNSUPPORTED$"):
+        installed._observe_process_instance(123)
+    assert query.calls == loads == []
+
+
+@pytest.mark.parametrize("failure", ["library", "symbol", "call"])
+def test_process_instance_api_failure_is_short_and_nonsecret(monkeypatch, process_instance_api, failure):
+    query, _ = process_instance_api
+    if failure == "library":
+        def unavailable(*args, **kwargs):
+            raise OSError("private path /secret and PID 123")
+        monkeypatch.setattr(installed.ctypes, "CDLL", unavailable)
+    elif failure == "symbol":
+        monkeypatch.setattr(installed.ctypes, "CDLL", lambda *args, **kwargs: object())
+    else:
+        query.error = OSError("private path /secret and PID 123")
+    with pytest.raises(peer.PeerIdentityError) as caught:
+        installed._observe_process_instance(123)
+    assert str(caught.value) == "SERVICE_PROCESS_OBSERVATION_UNAVAILABLE"
+    assert caught.value.__suppress_context__ is True
+
+
+@pytest.mark.parametrize("size", [-1, 0, 1, 55, 57, 112, True, 56.0, None])
+def test_process_instance_nonexact_return_never_yields_identity(process_instance_api, size):
+    query, _ = process_instance_api
+    query.size = size
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_OBSERVATION_SIZE_INVALID$"):
+        installed._observe_process_instance(123)
+
+
+@pytest.mark.parametrize("unique_id,pidversion", [(0, 1), (1, 0), (1, -1), (1, -(1 << 31)), (0, 0)])
+def test_process_instance_nonpositive_identity_refuses(process_instance_api, unique_id, pidversion):
+    query, _ = process_instance_api
+    query.unique_id, query.pidversion = unique_id, pidversion
+    with pytest.raises(peer.PeerIdentityError, match="^SERVICE_PROCESS_IDENTITY_INVALID$"):
+        installed._observe_process_instance(123)

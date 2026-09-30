@@ -27,7 +27,7 @@ KEY = "release-mcp-proof-001"
 ARGS = {
     "approve_release_transition": {"operation_key": KEY, "action": "executive.release.upgrade", "transition_digest": "a" * 64},
     "prepare_release_transition": {"operation_key": KEY, "approved_transition_ref": contract.approval_ref_for(KEY)},
-    "commit_prepared_release_transition": {"prepared_token": "inert-test-token"},
+    "commit_prepared_release_transition": {"operation_key": KEY, "prepared_token": "inert-test-token"},
     "reconcile_release_transition": {"operation_key": KEY},
 }
 
@@ -173,8 +173,12 @@ def test_selector_and_optional_mounts_preserve_defaults():
             entry.validate_document({**selected, name: {}})
 
 
-def test_durable_approval_lost_readback_recovers_once_over_native_mcp(
-        installed, rsa_key, tmp_path, short_socket_root, monkeypatch):
+@pytest.mark.parametrize("history_state", [
+    "NOT_FOUND", "STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
+    "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED",
+])
+def test_durable_approval_lost_readback_and_typed_history_over_native_mcp(
+        installed, rsa_key, tmp_path, short_socket_root, monkeypatch, history_state):
     from control_plane import executive_release_consumer as consumer
     from control_plane.executive_authority import ReleaseControllerPolicy
     from control_plane.executive_service import ExecutiveControlService, CeoIngressAppBinding
@@ -216,6 +220,22 @@ def test_durable_approval_lost_readback_recovers_once_over_native_mcp(
             ceo_ingress_peer_uid=os.geteuid() + 1000, ceo_ingress_grounding_provider=readers,
             ceo_ingress_armed=False, ceo_ingress_app_binding=CeoIngressAppBinding(
                 peer_uid=os.geteuid(), armed=False, grounding_provider=readers, read_provider=readers))
+        # These two future producer/registry seams are synthetic. JWT, Unix
+        # transport, original approval Event and read-only consumer are real.
+        from tests.test_executive_release_consumer import typed_history
+        projected, admission_reads = [], []
+        def project_history(approval):
+            status = typed_history(approval, history_state, installed["states"][0].preconditions)
+            projected.append(status)
+            return status
+        installed["history_projection"][0] = project_history
+        def read_admission(connection, *, approved_transition_ref, request_fingerprint):
+            status = projected[-1]
+            assert approved_transition_ref == status["approved_transition_ref"]
+            assert request_fingerprint == status["request_fingerprint"]
+            connection.execute("SELECT 1").fetchone()
+            admission_reads.append(approved_transition_ref)
+            return copy.deepcopy(status["admission"])
         original_read, lost = consumer.ReleaseControlConsumer._read, []
         def lose_once(self, key):
             value = original_read(self, key)
@@ -226,6 +246,7 @@ def test_durable_approval_lost_readback_recovers_once_over_native_mcp(
         monkeypatch.setattr(consumer.ReleaseControlConsumer, "_read", lose_once)
         await service.start()
         try:
+            monkeypatch.setattr(service.runtime.release_maintenance, "read_admission", read_admission, raising=False)
             before = counts(service.runtime)
             args = approve_arguments(installed)
             async with connection(settings) as client:
@@ -233,14 +254,50 @@ def test_durable_approval_lost_readback_recovers_once_over_native_mcp(
                 assert result["error"]["code"] == "RELEASE_APPROVAL_READBACK_UNKNOWN"
                 assert result["effect"] == "EFFECT_UNKNOWN"
                 _, history = await native.call(client, token, "reconcile_release_transition", {"operation_key": args["operation_key"]})
-                assert history["ok"] and history["approval"]["operation_key"] == args["operation_key"]
+                if history_state in {"STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"}:
+                    assert history["ok"] is False and history["effect"] == "EFFECT_UNKNOWN"
+                    assert history["error"]["code"] == "RELEASE_EFFECT_IN_PROGRESS"
+                else:
+                    assert history["ok"] and history["approval"]["operation_key"] == args["operation_key"]
+                    assert history["broker_status"]["state"] == history_state
+                assert len(admission_reads) == (0 if history_state == "NOT_FOUND" else 1)
                 _, prepared = await native.call(client, token, "prepare_release_transition", {
-                    "operation_key": args["operation_key"], "approved_transition_ref": history["approval"]["approved_transition_ref"]})
+                    "operation_key": args["operation_key"], "approved_transition_ref": contract.approval_ref_for(args["operation_key"])})
                 assert prepared["ok"]
-                _, refused = await native.call(client, token, "commit_prepared_release_transition", {"prepared_token": prepared["prepared_token"]})
+                _, refused = await native.call(client, token, "commit_prepared_release_transition", {"operation_key": args["operation_key"], "prepared_token": prepared["prepared_token"]})
                 assert refused["error"]["code"] == "RELEASE_COMMIT_DISARMED"
             assert counts(service.runtime) == (before[0] + 1, before[1], before[2])
             assert installed["root_broker"]._executor.calls == []
         finally:
             await service.close()
     asyncio.run(exercise())
+
+
+def test_commit_discovery_requires_the_same_exact_pair_as_ingress():
+    spec = next(s for s in profile.RELEASE_CONTROL_TOOL_SPECS
+                if s.name == "commit_prepared_release_transition")
+    assert set(spec.input_schema["properties"]) == {"operation_key", "prepared_token"}
+    assert set(spec.input_schema["required"]) == {"operation_key", "prepared_token"}
+    assert spec.input_schema["additionalProperties"] is False
+
+
+@pytest.mark.parametrize("arguments", [
+    {"prepared_token": "opaque-test-token"},
+    {"operation_key": KEY},
+    {"operation_key": KEY, "prepared_token": "opaque-test-token", "principal": {}},
+    {"operation_key": True, "prepared_token": "opaque-test-token"},
+    {"operation_key": "UPPERCASE", "prepared_token": "opaque-test-token"},
+])
+def test_native_commit_invalid_identity_never_forwards(settings, rsa_key, monkeypatch, arguments):
+    frames = []
+    async def send(self, path, frame):
+        frames.append(frame)
+        raise AssertionError("invalid commit identity reached transport")
+    monkeypatch.setattr(CeoIngressClient, "send_frame", send)
+    async def exercise():
+        async with connection(settings) as client:
+            _, result = await native.call(client, native.fixture._submit_token(rsa_key),
+                                          "commit_prepared_release_transition", arguments)
+            assert result["ok"] is False
+    asyncio.run(exercise())
+    assert not frames

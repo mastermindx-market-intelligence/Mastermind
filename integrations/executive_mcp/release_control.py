@@ -6,7 +6,6 @@ from typing import Any
 
 from control_plane import executive_release_contract as contract
 from control_plane import executive_release_ingress as ingress
-from control_plane.executive_privileged_client import validate_status_response
 from integrations.executive_mcp import schemas
 from integrations.mastermind_executive_app.release_admission import (
     _PUBLIC_CODES, _UNCERTAIN_CODES,
@@ -39,7 +38,8 @@ RELEASE_CONTROL_TOOL_SPECS = (
           {"operation_key": _KEY, "approved_transition_ref": {"type": "string"}}, read_only=True),
     _spec("commit_prepared_release_transition",
           "Request the prepared release effect. Production commit is disarmed and refuses in this generation.",
-          {"prepared_token": {"type": "string", "minLength": 1, "maxLength": ingress.MAX_TOKEN_BYTES}},
+          {"operation_key": _KEY,
+           "prepared_token": {"type": "string", "minLength": 1, "maxLength": ingress.MAX_TOKEN_BYTES}},
           read_only=False),
     _spec("reconcile_release_transition",
           "Read the original approval and broker history for an operation. Never resend or retry an effect.",
@@ -102,7 +102,9 @@ def valid_release_result(value, operation, arguments, status_code) -> bool:
         if operation == "prepare_release_transition":
             if set(value) != base | {"preview", "prepared_token", "expires_at_ms"}:
                 return False
-            ingress.validate_arguments("commit_prepared_release_transition", {"prepared_token": value["prepared_token"]})
+            ingress.validate_arguments("commit_prepared_release_transition",
+                                       {"operation_key": arguments["operation_key"],
+                                        "prepared_token": value["prepared_token"]})
             preview = value["preview"]
             return (type(value["expires_at_ms"]) is int and 0 < value["expires_at_ms"] < (1 << 63)
                     and type(preview) is dict and set(preview) == {"action", "target_ref", "from_release", "to_release"}
@@ -117,9 +119,9 @@ def valid_release_result(value, operation, arguments, status_code) -> bool:
             approval = contract.validate_approval_evidence(value["approval"])
             if approval["operation_key"] != arguments["operation_key"]:
                 return False
-            status = validate_status_response(value["broker_status"], expected_request_id=
-                contract.broker_request_id_for(contract.request_fingerprint_for(approval)))
-            return status["status"] == "NOT_FOUND"
+            status = contract.validate_release_terminal_status(
+                value["broker_status"], expected_approval=approval)
+            return status["state"] in {"NOT_FOUND", "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}
         # No commit-success shape is admitted while production is disarmed.
         return False
     except (KeyError, TypeError, ValueError, RuntimeError, RecursionError):

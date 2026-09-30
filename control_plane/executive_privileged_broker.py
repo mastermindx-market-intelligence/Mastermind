@@ -1703,8 +1703,10 @@ def run_broker(
     config: PrivilegedBrokerConfig,
     *,
     activated_socket: socket.socket | None = None,
+    release_owner: Any | None = None,
 ) -> None:
-    broker = PrivilegedActionBroker(config)
+    broker = (PrivilegedActionBroker(config) if release_owner is None
+              else PrivilegedActionBroker(config, release_owner=release_owner))
     listener = activated_socket if activated_socket is not None else activate_launchd_socket()
     listener.settimeout(_BROKER_IDLE_TIMEOUT_SECONDS)
     while True:

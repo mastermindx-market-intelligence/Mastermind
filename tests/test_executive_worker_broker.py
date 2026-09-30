@@ -3217,6 +3217,8 @@ def test_remote_adapter_reattaches_exact_broker_run_without_starting_again(
             assert operation == "status"
             assert payload == {"run_id": ref.run_id}
             return {
+                # Mirror the existing broker status wire, including its identity.
+                "adapter_id": "codex-cli",
                 "run": {
                     "status": "RUNNING",
                     "process_ref": _jsonable(ref),
@@ -3392,5 +3394,62 @@ def test_codex_validation_byte_semantics_preserved(tmp_path: Path) -> None:
                 ),
                 peer=peer,
             )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("facade_name", ["codex", "claude"])
+@pytest.mark.parametrize("field", ["job_id", "run_id", "worker_id"])
+def test_remote_collection_refuses_foreign_result_identity(
+    tmp_path: Path, facade_name: str, field: str
+) -> None:
+    async def scenario() -> None:
+        broker, adapter, _sweeper, _peer, spec_value = _fixture(tmp_path)
+        from control_plane.executive_worker_broker import (
+            RemoteClaudeWorkerAdapter,
+            RemoteCodexWorkerAdapter,
+            _jsonable,
+            _launch_spec_from_wire,
+        )
+
+        spec = _launch_spec_from_wire(spec_value, broker.policy)
+        ref = await adapter.start(spec)
+        adapter.finished.set()
+        receipt = adapter._collection()
+        replacement = {
+            "job_id": "JOB-foreign",
+            "run_id": "ATT-foreign",
+            "worker_id": "worker-foreign",
+        }[field]
+        foreign_result = dataclasses.replace(
+            receipt.result, **{field: replacement}
+        )
+        foreign_receipt = dataclasses.replace(receipt, result=foreign_result)
+
+        class Client:
+            async def request(self, operation, payload, *, timeout_seconds=None):
+                assert operation == "collect"
+                assert payload == {"run_id": ref.run_id}
+                return {
+                    "collection": _jsonable(foreign_receipt),
+                    "uid_sweep": _jsonable(FakeSweeper().sweep("remote-test")),
+                }
+
+        facade_type = (
+            RemoteCodexWorkerAdapter
+            if facade_name == "codex"
+            else RemoteClaudeWorkerAdapter
+        )
+        remote = facade_type(Client())  # type: ignore[arg-type]
+        remote._refs[spec.run_id] = ref
+        remote._specs[spec.run_id] = spec
+
+        with pytest.raises(BrokerProtocolError, match="result identity"):
+            await remote.collect_result(ref)
+
+        # Refusal does not retarget, forget, or settle the original run.
+        assert remote._refs[spec.run_id] == ref
+        assert remote._specs[spec.run_id] == spec
+        assert spec.run_id not in remote._uid_sweeps
 
     asyncio.run(scenario())
