@@ -515,10 +515,14 @@ dependency contract and adds exactly one required field to the work placement:
 ```json
 {
   "provider_realm": "minimax",
-  "quota_class": "minimax-token-plan",
+  "quota_class": "minimax-example-capacity",
   "model": "minimax-m3"
 }
 ```
+
+The provider/quota names above are illustrative. A real plan must use an exact
+pair already present in that root's current reviewed `work_placement_union`;
+the model value must likewise name a model actually served by eligible capacity.
 
 The model value is a **hard narrowing constraint**, not a fallback preference.
 Runtime first verifies that the provider/quota pool is already present in the

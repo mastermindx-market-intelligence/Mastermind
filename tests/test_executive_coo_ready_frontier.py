@@ -8,7 +8,10 @@ import pytest
 
 from control_plane.ceo_intent import submit_intent
 from control_plane.executive_coo_cycle import CooCycle
-from control_plane.executive_orchestration_result import canonical_digest as result_digest
+from control_plane.executive_orchestration_result import (
+    OrchestrationResultError,
+    canonical_digest as result_digest,
+)
 from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
@@ -1026,7 +1029,7 @@ def test_v3_placement_stays_closed_and_cannot_smuggle_model_override(tmp_path):
     runtime = Runtime.at(tmp_path)
     _register_placement_union(runtime)
 
-    with pytest.raises(Exception, match="placement"):
+    with pytest.raises(OrchestrationResultError, match="placement"):
         _admit_v2_plan(
             runtime,
             plan_schema_version="mastermind.execution_plan/v3",

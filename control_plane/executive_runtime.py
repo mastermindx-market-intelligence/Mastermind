@@ -8642,7 +8642,7 @@ def _work_dependency_manifest(
     plan_body: dict[str, Any],
     plan_step_id: str,
 ) -> dict[str, Any]:
-    """Derive the canonical accepted-revision snapshot for one V3 work step."""
+    """Derive the canonical accepted-revision snapshot for one V3/V4 work step."""
 
     if (
         plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
