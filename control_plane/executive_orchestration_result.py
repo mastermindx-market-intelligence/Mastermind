@@ -536,24 +536,25 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
     step_ids: set[str] = set()
     for index, item in enumerate(_array(raw["steps"], name="steps", minimum=1, maximum=8)):
+        step_keys = {
+            "ordinal", "step_id", "objective", "business_impact",
+            "review_required", "requested_authorities", "allowed_write_paths",
+            "validation_ids", "attempt_limit", "cost_class",
+        }
+        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3}:
+            step_keys.add("placement")
+        elif (
+            schema_version == PLAN_SCHEMA_V4
+            and isinstance(item, Mapping)
+            and "placement" in item
+        ):
+            step_keys.add("placement")
+        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}:
+            step_keys.add("prerequisite_step_ids")
         step = _closed(
             item,
             name=f"steps[{index}]",
-            keys={
-                "ordinal", "step_id", "objective", "business_impact",
-                "review_required", "requested_authorities", "allowed_write_paths",
-                "validation_ids", "attempt_limit", "cost_class",
-            }
-            | (
-                {"placement"}
-                if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}
-                else set()
-            )
-            | (
-                {"prerequisite_step_ids"}
-                if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}
-                else set()
-            ),
+            keys=step_keys,
         )
         if _integer(step["ordinal"], name="ordinal", minimum=0, maximum=7) != index:
             raise OrchestrationResultError("step ordinal must equal its array position")
