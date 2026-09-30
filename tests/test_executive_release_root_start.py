@@ -34,6 +34,13 @@ def inputs():
     return release_inputs.__wrapped__()
 
 
+@pytest.fixture(autouse=True)
+def restore_test_clocks():
+    wall, monotonic = NOW[0], MONOTONIC[0]
+    yield
+    NOW[0], MONOTONIC[0] = wall, monotonic
+
+
 def digest(value):
     return hashlib.sha256(contract.canonical_release_bytes(value)).hexdigest()
 
@@ -302,12 +309,16 @@ def test_snapshot_defaults_are_public_and_private_operations_refuse_them(tmp_pat
 def test_reserve_start_and_exact_replay(tmp_path, monkeypatch, inputs):
     composition = Composition(tmp_path, monkeypatch, inputs)
     reserved = composition.reserve()
+    assert reserved["operation"] == "reserve_release_prestart"
     assert reserved["result"]["reservation"]["reservation_generation"] == 1
     assert reserved["result"]["reservation"]["before"] == composition.snapshot.before
+    NOW[0] += 1
+    MONOTONIC[0] += 1_000_000
     replayed_reservation = composition.owner.handle(
         composition.frame("reserve_release_prestart"), object())
-    assert replayed_reservation["result"]["reservation"] == reserved["result"]["reservation"]
+    assert replayed_reservation == reserved
     started = composition.start()
+    assert started["operation"] == "start_reserved_release"
     record = started["result"]["start_record"]
     assert record["state"] == "STARTED"
     assert record["journal_generation"] == 1
@@ -315,9 +326,72 @@ def test_reserve_start_and_exact_replay(tmp_path, monkeypatch, inputs):
     assert composition.admission_reader.calls == [(
         composition.reservation["approved_transition_ref"],
         composition.reservation["request_fingerprint"])]
+    NOW[0] += 1
+    MONOTONIC[0] += 1_000_000
     replay = composition.start()
-    assert replay["result"]["start_record"] == record
+    assert replay == started
     assert composition.admission_reader.calls[-1] == composition.admission_reader.calls[0]
+
+
+@pytest.mark.parametrize("clock", ["wall", "monotonic"])
+@pytest.mark.parametrize("past", [0, 1])
+def test_expiry_during_runtime_read_prevents_durable_start(
+        tmp_path, monkeypatch, inputs, clock, past):
+    wall, monotonic = NOW[0], MONOTONIC[0]
+    try:
+        composition = Composition(tmp_path, monkeypatch, inputs)
+        composition.reserve()
+        NOW[0] = composition.prepared["expires_at_ms"] - 1
+        MONOTONIC[0] = composition.prepared["expires_monotonic_ns"] - 1_000_000
+        read = composition.admission_reader.read_admission_evidence
+
+        def delayed(**kwargs):
+            evidence = read(**kwargs)
+            if clock == "wall":
+                NOW[0] = composition.prepared["expires_at_ms"] + past
+            else:
+                MONOTONIC[0] = composition.prepared["expires_monotonic_ns"] + past
+            return evidence
+
+        monkeypatch.setattr(
+            composition.admission_reader, "read_admission_evidence", delayed)
+        with pytest.raises(consumer.ReleaseConsumerError):
+            composition.start()
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                           match="NOT_FOUND"):
+            composition.journal.read(composition.approval["operation_key"])
+    finally:
+        NOW[0], MONOTONIC[0] = wall, monotonic
+
+
+@pytest.mark.parametrize(
+    "field", ["target_observation_digest", "before", "actuator_generation"])
+def test_physical_snapshot_drift_during_runtime_read_prevents_start(
+        tmp_path, monkeypatch, inputs, field):
+    composition = Composition(tmp_path, monkeypatch, inputs)
+    composition.reserve()
+    read = composition.admission_reader.read_admission_evidence
+
+    def drift(**kwargs):
+        evidence = read(**kwargs)
+        if field == "before":
+            changed = copy.deepcopy(composition.snapshot.before)
+            changed["broker_binary_digest"] = "0" * 64
+        elif field == "actuator_generation":
+            changed = composition.snapshot.actuator_generation + 1
+        else:
+            changed = "0" * 64
+        current = replace(composition.snapshot, **{field: changed})
+        composition.owner._snapshot = lambda transition: current
+        return evidence
+
+    monkeypatch.setattr(
+        composition.admission_reader, "read_admission_evidence", drift)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        composition.start()
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match="NOT_FOUND"):
+        composition.journal.read(composition.approval["operation_key"])
 
 
 @pytest.mark.parametrize("field", ["reservation", "admission"])

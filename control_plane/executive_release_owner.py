@@ -324,27 +324,49 @@ class ReleaseBrokerOwner:
     def _reserve_release_prestart(self, raw, connection):
         frame = self._private_frame(raw, connection)
         state, effect, sealed, payload, preconditions = self._private_inputs(frame, raw)
+        try:
+            existing = self._root_journal.read_prestart_reservation(
+                frame.arguments["operation_key"], approval=sealed)
+        except ExecutiveReleaseActuatorJournalError as exc:
+            if exc.code != "NOT_FOUND":
+                raise ReleaseConsumerError(
+                    "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+            existing = None
+        # Reading immutable history may block. Requalify the complete owner
+        # snapshot and original token after that read before either creating or
+        # replaying PRESTART.
+        state, effect, sealed, payload, preconditions = self._private_inputs(frame, raw)
         now = time.time_ns() // 1_000_000
         monotonic = time.monotonic_ns()
         if not payload["issued_at_ms"] <= now < payload["expires_at_ms"]:
             raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
         if not payload["issued_monotonic_ns"] <= monotonic < payload["expires_monotonic_ns"]:
             raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+        reserved_at = now if existing is None else existing["reserved_at_ms"]
+        reserved_monotonic = (
+            monotonic if existing is None else existing["reserved_monotonic_ns"]
+        )
         reservation = self._reservation(
             state, effect, sealed, payload, preconditions,
-            token=frame.arguments["prepared_token"], now=now, monotonic=monotonic)
+            token=frame.arguments["prepared_token"], now=reserved_at,
+            monotonic=reserved_monotonic)
+        if (existing is not None
+                and contract.canonical_release_bytes(existing)
+                != contract.canonical_release_bytes(reservation)):
+            raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
         try:
             stored = self._root_journal.reserve_prestart(
                 reservation=reservation, approval=sealed)
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
-        return {"schema": BROKER_SCHEMA, "operation": frame.operation, "ok": True,
+        return {"schema": BROKER_SCHEMA, "operation": "reserve_release_prestart", "ok": True,
                 "approval": sealed.to_dict(), "result": {"reservation": stored.to_dict()}}
 
     def _start_reserved_release(self, raw, connection):
         frame = self._private_frame(raw, connection)
         state, effect, sealed, payload, current = self._private_inputs(frame, raw)
+        qualified_state_identity = _state_identity(state)
         if self._admission_reader is None:
             raise ReleaseConsumerError("RELEASE_ROOT_START_UNAVAILABLE")
         now = time.time_ns() // 1_000_000
@@ -405,6 +427,38 @@ class ReleaseBrokerOwner:
                 or contract.canonical_release_bytes(evidence_admission) != contract.canonical_release_bytes(supplied_admission)
                 or contract.canonical_release_bytes(evidence_preconditions) != contract.canonical_release_bytes(reservation["preconditions"])):
             raise ReleaseConsumerError("RELEASE_ADMISSION_EVIDENCE_MISMATCH")
+        try:
+            existing_start = self._root_journal.read(
+                frame.arguments["operation_key"])
+        except ExecutiveReleaseActuatorJournalError as exc:
+            if exc.code != "NOT_FOUND":
+                raise ReleaseConsumerError(
+                    "RELEASE_ROOT_JOURNAL_" + exc.code) from None
+            existing_start = None
+
+        # Runtime and journal reads are blocking trust boundaries. Re-run the
+        # complete owner qualification and rebuild the frozen reservation from
+        # current physical facts immediately before START. The original token
+        # lifetime is never renewed.
+        state, effect, sealed, payload, current = self._private_inputs(frame, raw)
+        if _state_identity(state) != qualified_state_identity:
+            raise ReleaseConsumerError("RELEASE_PRECONDITIONS_CHANGED")
+        now = time.time_ns() // 1_000_000
+        monotonic = time.monotonic_ns()
+        if not payload["issued_at_ms"] <= now < payload["expires_at_ms"]:
+            raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+        if not payload["issued_monotonic_ns"] <= monotonic < payload["expires_monotonic_ns"]:
+            raise ReleaseConsumerError("RELEASE_PREPARED_EXPIRED")
+        expected_reservation = self._reservation(
+            state, effect, sealed, payload, current,
+            token=frame.arguments["prepared_token"],
+            now=reservation["reserved_at_ms"],
+            monotonic=reservation["reserved_monotonic_ns"])
+        if (contract.canonical_release_bytes(reservation)
+                != contract.canonical_release_bytes(expected_reservation)
+                or evidence_admission["target_observation_digest"]
+                != state.target_observation_digest):
+            raise ReleaseConsumerError("RELEASE_RESERVATION_MISMATCH")
         before = reservation["before"]
         identity = {
             "operation_key": reservation["operation_key"],
@@ -432,12 +486,14 @@ class ReleaseBrokerOwner:
                 approval=evidence_approval,
                 reservation=reservation,
                 root_qualification_digest=reservation_digest,
-                started_at_ms=now,
+                started_at_ms=(
+                    now if existing_start is None else existing_start["started_at_ms"]
+                ),
             )
         except ExecutiveReleaseActuatorJournalError as exc:
             raise ReleaseConsumerError(
                 "RELEASE_ROOT_JOURNAL_" + exc.code) from None
-        return {"schema": BROKER_SCHEMA, "operation": frame.operation, "ok": True,
+        return {"schema": BROKER_SCHEMA, "operation": "start_reserved_release", "ok": True,
                 "approval": sealed.to_dict(),
                 "result": {"reservation": reservation.to_dict(),
                            "admission": evidence_admission.to_dict(),
