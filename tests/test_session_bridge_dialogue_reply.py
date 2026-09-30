@@ -162,7 +162,11 @@ def test_continue_writer_fresh_reads_then_exact_sends():
         "stop_condition": "Stop after the next validated RESULT.",
         "scope_change": False,
     }
-    assert message["actor_ref"] == {\n        "kind": "executive_surface",\n        "seat": "ceo",\n        "reasoning_surface": "chatgpt",\n    }
+    assert message["actor_ref"] == {
+        "kind": "executive_surface",
+        "seat": "ceo",
+        "reasoning_surface": "chatgpt",
+    }
 
 
 def test_continue_writer_reconciles_identical_existing_reply_without_resend():
