@@ -612,8 +612,34 @@ def build_claimed_remote_operator_factory(
         try:
             client = RemoteWorkerBrokerClient(binding.transport, identity,
                                                allowed_operations=operations)
-            return RemoteOperatorHarnessAdapter(client, turn_input_loader=loader,
-                                                capabilities=binding.capabilities)
+
+            class RuntimeGenerationBoundAdapter(RemoteOperatorHarnessAdapter):
+                def _start(self, *, operation_name, operation_id, requested, epoch,
+                           generation, provider_session=None):
+                    if (epoch.attempt_id != current.attempt_id
+                            or epoch.worker_id != current.worker_id
+                            or generation.session_epoch_id != epoch.session_epoch_id
+                            or generation.worker_id != current.worker_id):
+                        raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+                    try:
+                        canonical = runtime.operator_harness.current_writer_generation(epoch)
+                    except Exception:
+                        raise RemoteAttemptTransportError("STATE_MOVED") from None
+                    if canonical != generation:
+                        raise RemoteAttemptTransportError("STATE_MOVED")
+                    self.client.bind_payload_identity(
+                        session_epoch_id=epoch.session_epoch_id,
+                        process_generation_id=generation.process_generation_id,
+                    )
+                    return super()._start(
+                        operation_name=operation_name, operation_id=operation_id,
+                        requested=requested, epoch=epoch, generation=generation,
+                        provider_session=provider_session,
+                    )
+
+            return RuntimeGenerationBoundAdapter(
+                client, turn_input_loader=loader, capabilities=binding.capabilities
+            )
         except (TypeError, ValueError, WorkerBrokerError):
             raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from None
 

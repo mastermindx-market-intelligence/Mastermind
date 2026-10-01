@@ -9,7 +9,7 @@ import pytest
 from control_plane import remote_attempt_transport as rt
 from control_plane.executive_runtime import Runtime
 from control_plane.operator_harness_contract import (
-    CapabilityManifest, NativeHelperPolicy, RequestedExecutionProfile,
+    CapabilityManifest, NativeHelperPolicy, OperationId, RequestedExecutionProfile,
     WorkspaceIdentity,
 )
 from control_plane.remote_codex_operator_adapter import codex_remote_capabilities
@@ -58,6 +58,41 @@ def binding(case, **changes):
             supports_native_resume=False, supported_optional_operations=())
     values.update(changes)
     return rt.RemoteOperatorHostBinding(**values)
+
+
+def test_runtime_allocated_generation_is_bound_before_remote_start(case):
+    runtime, job, lease, requested, flat, calls = case
+    adapter = rt.build_claimed_remote_operator_factory(
+        runtime, lambda h, w: binding(case)
+    )(lease.attempt, requested, lambda t: 'bounded', recovery=False)
+    sealed = runtime.operator_harness.seal_operator_harness_attempt(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        requested=requested,
+    )
+    operation = OperationId(f'ohf-op:start:{sealed.attempt_id}')
+    epoch, generation = runtime.operator_harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=lease.lease_token,
+        operation_id=operation,
+    )
+    # The fixture's network trap proves validation reached the transport only
+    # after the Runtime-issued pair was accepted.  Before the repair this call
+    # refuses earlier with payload_identity_override instead.
+    with pytest.raises(AssertionError, match='No network is allowed'):
+        adapter.start_session(
+            operation_id=operation,
+            requested=requested,
+            epoch=epoch,
+            generation=generation,
+        )
+    assert adapter.client.bound_payload_identity == {
+        'session_epoch_id': epoch.session_epoch_id,
+        'process_generation_id': generation.process_generation_id,
+    }
+    assert calls == [adapter.client.identity]
 
 
 def test_selected_endpoint_uses_existing_transport_and_no_network(case):
