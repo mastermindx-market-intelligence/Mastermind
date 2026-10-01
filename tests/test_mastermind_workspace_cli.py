@@ -109,8 +109,17 @@ def test_cli_census_reports_source_and_managed_workspace(tmp_path: Path):
 
 
 @pytest.mark.parametrize("enrolled", [False, True])
-def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enrolled: bool):
+@pytest.mark.parametrize("path_component", [
+    "plain",
+    "O'Brien-workspaces",
+    "space $HOME $(touch unexpected-substitution) `touch unexpected-backtick` \";*?[x]&|<>\\dir",
+])
+def test_installer_pins_host_root_and_refuses_missing_mount(
+    tmp_path: Path, enrolled: bool, path_component: str,
+):
     repo_root = Path(__file__).resolve().parents[1]
+    tmp_path = tmp_path / path_component
+    tmp_path.mkdir()
     fixture = tmp_path / "installer-repo"
     (fixture / "scripts").mkdir(parents=True)
     (fixture / "control_plane").mkdir()
@@ -144,6 +153,7 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
             "volume_uuid": "11111111-1111-1111-1111-111111111111",
             "root": str(fake_home / "pinned-workspaces"),
             "min_free_bytes": 1024,
+            "_why": "Synthetic installer regression policy.",
         }))
     launcher = tmp_path / "bin" / "mmx-workspace"
     payload = tmp_path / "payload"
@@ -165,7 +175,10 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
         stderr=subprocess.PIPE,
     )
     wrapper = launcher.read_text(encoding="utf-8")
-    assert f"export MASTERMIND_SOURCE_REPO='{fixture.resolve()}'" in wrapper
+    syntax = subprocess.run(
+        ["/bin/sh", "-n", str(launcher)], capture_output=True, text=True, check=False,
+    )
+    assert syntax.returncode == 0, syntax.stderr
 
     observed_external = ""
     if Path("/Volumes/Mastermind").is_dir():
@@ -185,16 +198,16 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
     )
     if enrolled:
         expected_root = str(fake_home / "pinned-workspaces")
-    assert f"export MASTERMIND_AGENT_WORKSPACE_ROOT='{expected_root}'" in wrapper
     expected_policy = str(enrolled_policy) if enrolled else ""
-    assert f"export MASTERMIND_WORKSPACE_STORAGE_POLICY='{expected_policy}'" in wrapper
 
     payload_script = payload / "scripts" / "mastermind_workspace.py"
     payload_script.write_text(
-        "import json, os\n"
+        "import json, os, sys\n"
         "print(json.dumps({\"source\": os.environ.get(\"MASTERMIND_SOURCE_REPO\"), "
         "\"root\": os.environ.get(\"MASTERMIND_AGENT_WORKSPACE_ROOT\"), "
-        "\"policy\": os.environ.get(\"MASTERMIND_WORKSPACE_STORAGE_POLICY\")}))\n",
+        "\"policy\": os.environ.get(\"MASTERMIND_WORKSPACE_STORAGE_POLICY\"), "
+        "\"script\": __file__, \"args\": sys.argv[1:]}))\n"
+        "sys.exit(int(os.environ.get('TEST_PAYLOAD_EXIT', '0')))\n",
         encoding="utf-8",
     )
     hostile_env = dict(env)
@@ -202,8 +215,10 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
     hostile_env["MASTERMIND_SOURCE_REPO"] = str(tmp_path / "hostile-source")
     hostile_env["MASTERMIND_AGENT_WORKSPACE_ROOT"] = str(tmp_path / "hostile-root")
     hostile_env["MASTERMIND_WORKSPACE_STORAGE_POLICY"] = str(tmp_path / "unapproved-policy")
+    arguments = ["census", "", "two words", "O'Brien", "$HOME;*?", "line\nbreak"]
     completed = subprocess.run(
-        [str(launcher)],
+        [str(launcher), *arguments],
+        cwd=tmp_path,
         env=hostile_env,
         check=True,
         text=True,
@@ -211,18 +226,36 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
         stderr=subprocess.PIPE,
     )
     observed = json.loads(completed.stdout)
-    assert observed == {"source": str(fixture.resolve()), "root": expected_root, "policy": expected_policy}
+    assert observed == {
+        "source": str(fixture.resolve()), "root": expected_root,
+        "policy": expected_policy, "script": str(payload_script), "args": arguments,
+    }
+    failed_payload = subprocess.run(
+        [str(launcher), *arguments], cwd=tmp_path,
+        env={**hostile_env, "TEST_PAYLOAD_EXIT": "23"},
+        capture_output=True, text=True, check=False,
+    )
+    assert failed_payload.returncode == 23, failed_payload.stderr
+    assert json.loads(failed_payload.stdout) == observed
+    assert not (tmp_path / "unexpected-substitution").exists()
+    assert not (tmp_path / "unexpected-backtick").exists()
 
-    original_mount_line = next(
-        line for line in wrapper.splitlines() if line.startswith("workspace_mount=")
+    # Re-generate from a valid policy with an unavailable mount, exercising the
+    # exact emitted mount literal as well as the successful path above.
+    enrolled_policy.parent.mkdir(parents=True, exist_ok=True)
+    enrolled_policy.write_text(json.dumps({
+        "version": 1, "mount_point": str(tmp_path),
+        "volume_uuid": "11111111-1111-1111-1111-111111111111",
+        "root": str(tmp_path / "workspaces"), "min_free_bytes": 1024,
+    }))
+    subprocess.run(
+        ["/bin/sh", str(fixture / "scripts" / "install_mastermind_workspace_cli.sh")],
+        cwd=fixture, env=env, capture_output=True, text=True, check=True,
     )
-    guarded = wrapper.replace(
-        original_mount_line,
-        f"workspace_mount='{tmp_path}'",
-        1,
+    syntax = subprocess.run(
+        ["/bin/sh", "-n", str(launcher)], capture_output=True, text=True, check=False,
     )
-    launcher.write_text(guarded, encoding="utf-8")
-    launcher.chmod(0o755)
+    assert syntax.returncode == 0, syntax.stderr
     refused = subprocess.run(
         [str(launcher)],
         env=hostile_env,
@@ -232,7 +265,7 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
         stderr=subprocess.PIPE,
     )
     assert refused.returncode == 66
-    assert "refusing fallback" in refused.stderr
+    assert f"not mounted at {tmp_path}; refusing fallback" in refused.stderr
 
 
 # Storage admission is part of the existing attended workspace route, not a

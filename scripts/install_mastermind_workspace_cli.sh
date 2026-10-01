@@ -64,11 +64,23 @@ chmod 0755 "$payload_root/scripts/mastermind_workspace.py"
 chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py" \
   "$payload_root/common/commission_ref.py" "$payload_root/common/__init__.py"
 
+# Emit path values as POSIX shell literals, including embedded apostrophes.
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | /usr/bin/sed "s/'/'\\\\''/g"
+  printf "'"
+}
+quoted_mount="$(shell_quote "$workspace_mount")"
+quoted_source="$(shell_quote "$source_repo")"
+quoted_root="$(shell_quote "$workspace_root")"
+quoted_policy="$(shell_quote "$storage_policy")"
+quoted_payload="$(shell_quote "$payload_root/scripts/mastermind_workspace.py")"
+
 wrapper_tmp="$target.tmp.$$"
 cat > "$wrapper_tmp" <<EOF
 #!/bin/sh
 set -eu
-workspace_mount='$workspace_mount'
+workspace_mount=$quoted_mount
 if [ -n "\$workspace_mount" ]; then
   observed_mount="\$(/bin/df -P "\$workspace_mount" 2>/dev/null | /usr/bin/awk 'END {print \$6}')"
   if [ "\$observed_mount" != "\$workspace_mount" ]; then
@@ -76,15 +88,15 @@ if [ -n "\$workspace_mount" ]; then
     exit 66
   fi
 fi
-export MASTERMIND_SOURCE_REPO='$source_repo'
-export MASTERMIND_AGENT_WORKSPACE_ROOT='$workspace_root'
-export MASTERMIND_WORKSPACE_STORAGE_POLICY='$storage_policy'
+export MASTERMIND_SOURCE_REPO=$quoted_source
+export MASTERMIND_AGENT_WORKSPACE_ROOT=$quoted_root
+export MASTERMIND_WORKSPACE_STORAGE_POLICY=$quoted_policy
 if [ -n "\${MASTERMIND_PYTHON:-}" ]; then
-  exec "\$MASTERMIND_PYTHON" '$payload_root/scripts/mastermind_workspace.py' "\$@"
+  exec "\$MASTERMIND_PYTHON" $quoted_payload "\$@"
 elif [ -x /opt/homebrew/bin/python3 ]; then
-  exec /opt/homebrew/bin/python3 '$payload_root/scripts/mastermind_workspace.py' "\$@"
+  exec /opt/homebrew/bin/python3 $quoted_payload "\$@"
 else
-  exec python3 '$payload_root/scripts/mastermind_workspace.py' "\$@"
+  exec python3 $quoted_payload "\$@"
 fi
 EOF
 chmod 0755 "$wrapper_tmp"
