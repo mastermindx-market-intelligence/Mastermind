@@ -13,14 +13,16 @@ import urllib.request
 
 PIN = "56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66"
 BLOBS = {
+    "src/tools/filesystem.ts": "f84a796ddeb7aa4037df5d593910f60082f891d9",
     "src/search-manager.ts": "59b29580591167efcd39c1fc71b8f3f500a6a5e1",
     "src/handlers/search-handlers.ts": "40a1b268d29e4fa392abd2bc9ef758b824982031",
 }
 TESTS = [
+    "test-allowed-directories-symlink.js", "test-symlink-security.js",
     "test-search-files-literal.js", "test-search-files-file-pattern.js",
     "test-search-file-pattern.js", "test-search-office-any-folder.js",
     "test-search-error-output.js", "test-search-process-exit.js",
-    "test-search-stopped-not-failed.js", "test-issue1027-admission.mjs", "test-issue1027-office.mjs",
+    "test-search-stopped-not-failed.js", "test-issue1027-admission.mjs", "test-issue1027-office.mjs", "test-issue1027-validation-owner.mjs",
 ]
 
 class LimitedReader:
@@ -70,7 +72,7 @@ def main():
     run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
         root, output / "npm-ci.log")
     run(["npm", "run", "build"], root, output / "build.log")
-    for name in ('test-issue1027-admission.mjs', 'test-issue1027-office.mjs'):
+    for name in ('test-issue1027-admission.mjs', 'test-issue1027-office.mjs', 'test-issue1027-validation-owner.mjs'):
         shutil.copyfile(Path(__file__).with_name(name), root / 'test' / name)
     # Upstream runner isolates configuration/home and disables telemetry.
     run(["node", "test/run-all-tests.js", *TESTS], root, output / "tests.log")

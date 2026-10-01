@@ -7,7 +7,8 @@
 +import os from 'node:os';
 +import { performance } from 'node:perf_hooks';
  import fs from 'fs/promises';
- import { validatePath } from './tools/filesystem.js';
+-import { validatePath } from './tools/filesystem.js';
++import { startPathValidation } from './tools/filesystem.js';
  import { capture } from './utils/capture.js';
  import { logger } from './utils/logger.js';
  import { getRipgrepPath } from './utils/ripgrep-resolver.js';
@@ -32,7 +33,7 @@
    totalMatches: number;
    totalContextLines: number;  // Track context lines separately
    wasIncomplete?: boolean;  // NEW: Track if search was incomplete due to permissions/access issues
-@@ -59,16 +70,42 @@
+@@ -59,16 +70,43 @@
    literalSearch?: boolean;     // Force literal string matching (-F flag) instead of regex
  }
  
@@ -42,6 +43,7 @@
 +};
 +type SearchAdmission = {
 +  deadline: number; stopped: boolean; session?: SearchSession;
++  validationSettled?: Promise<void>;
 +  promise: Promise<SearchStart>; settled: Promise<void>;
 +  release: () => void; stop: (reason: 'deadline' | 'disposed') => void;
 +};
@@ -78,7 +80,7 @@
  
  /** The extensions of the files the Excel and DOCX searches are for (see targetsOfficeFiles) */
  const EXCEL_EXTENSIONS = ['.xlsx', '.xls', '.xlsm', '.xlsb'];
-@@ -91,10 +128,6 @@
+@@ -91,10 +129,6 @@
    | { kind: 'match' | 'context'; result: SearchResult }
    | { kind: 'begin' | 'end'; file: string }
    | { kind: 'summary' };
@@ -89,7 +91,7 @@
  
  /** Answers show this many characters of a result's text, then '...' if there is more */
  export const SHOWN_TEXT_CHARS = 100;
-@@ -109,81 +142,8 @@
+@@ -109,81 +143,8 @@
  const keptText = (text: string | undefined): string | undefined =>
    text === undefined ? undefined : Buffer.from(text.slice(0, SHOWN_TEXT_CHARS + 1), 'utf16le').toString('utf16le');
  
@@ -173,7 +175,7 @@
  
  /** The most of ripgrep's error output (stderr) a session keeps, in characters */
  const MAX_KEPT_ERROR_CHARS = 64 * 1024;
-@@ -193,6 +153,9 @@
+@@ -193,6 +154,9 @@
   * Supports both file search and content search with progressive results
   */export class SearchManager {
    private sessions = new Map<string, SearchSession>();
@@ -183,7 +185,7 @@
    private sessionCounter = 0;
    private cleanupTimer: NodeJS.Timeout | null = null;
  
-@@ -201,18 +164,111 @@
+@@ -201,18 +165,115 @@
     * Returns immediately with initial state and results
     */
  
@@ -203,6 +205,7 @@
 +    }
 +    options = {
 +      ...options,
++      earlyTermination: options.earlyTermination !== false,
 +      maxResults: finiteLimit(options.maxResults, DEFAULT_MAX_RESULTS, MAX_RESULTS),
 +      timeout: finiteLimit(options.timeout,
 +        this.isExactFilenameSearch(options) ? EXACT_FILENAME_SEARCH_TIMEOUT_MS : LONGEST_TIMER_MS,
@@ -216,7 +219,7 @@
 +    const key = JSON.stringify([options.rootPath, options.pattern, options.searchType,
 +      options.filePattern ?? '', options.ignoreCase !== false, options.includeHidden === true,
 +      options.maxResults, options.contextLines, options.timeout,
-+      options.earlyTermination === true, options.literalSearch === true]);
++      options.earlyTermination, options.literalSearch === true]);
 +    const existing = this.admissions.get(key);
 +    if (existing) return existing.promise; // reconcile the SAME live handle; never restart it
 +    if (this.admissions.size >= 2) return Promise.reject(new SearchAdmissionError('search_capacity'));
@@ -258,7 +261,8 @@
 +    void this.startAdmittedSearch(options, admission).then(resolve, error => {
 +      if (admission.session) this.stopSources(admission.session);
 +      reject(error instanceof Error ? error : new Error(String(error)));
-+    }).finally(() => {
++    }).finally(async () => {
++      await admission.validationSettled;
 +      if (!admission.session) admission.release();
 +    });
 +    return promise;
@@ -297,13 +301,16 @@
      const sessionId = `search_${++this.sessionCounter}_${Date.now()}`;
      
      // Validate path first
-     const validPath = await validatePath(options.rootPath);
+-    const validPath = await validatePath(options.rootPath);
++    const validation = startPathValidation(options.rootPath);
++    admission.validationSettled = validation.settled;
++    const validPath = await validation.result;
 +    this.assertAdmission(admission);
 +    this.assertNarrowRoot(validPath);
  
      // Build ripgrep arguments
      const args = this.buildRipgrepArgs({ ...options, rootPath: validPath });
-@@ -221,6 +277,7 @@
+@@ -221,6 +282,7 @@
      let rgPath: string;
      try {
        rgPath = await getRipgrepPath();
@@ -311,7 +318,7 @@
      } catch (err) {
        throw new Error(`Failed to locate ripgrep binary: ${err instanceof Error ? err.message : String(err)}`);
      }
-@@ -230,11 +287,11 @@
+@@ -230,11 +292,11 @@
      // that can't be stat'ed (missing...) can't be searched: start_search answers
      // with why, as for any search that can't start.
      const rootIsDirectory = (await fs.stat(validPath)).isDirectory();
@@ -324,7 +331,7 @@
  
      // Create session
      let markCompleted!: () => void;
-@@ -245,7 +302,7 @@
+@@ -245,7 +307,7 @@
        results: [],
        isComplete: false,
        isError: false,
@@ -333,16 +340,19 @@
        lastReadTime: Date.now(),
        options,
        buffer: '',
-@@ -259,6 +316,8 @@
+@@ -259,6 +321,11 @@
      };
  
      this.sessions.set(sessionId, session);
 +    admission.session = session;
-+    void session.completed.then(admission.release);
++    void session.completed.then(async () => {
++      await admission.validationSettled;
++      admission.release();
++    });
  
      // Set up process event handlers
      this.setupProcessHandlers(session);
-@@ -266,16 +325,11 @@
+@@ -266,16 +333,11 @@
      // Start cleanup interval now that we have a session
      this.startCleanupIfNeeded();
  
@@ -364,7 +374,7 @@
  
      capture('search_session_started', {
        sessionId,
-@@ -293,14 +347,7 @@
+@@ -293,14 +355,7 @@
        this.targetsOfficeFiles(EXCEL_EXTENSIONS, options.filePattern, validPath);
  
      if (shouldSearchExcel) {
@@ -380,7 +390,7 @@
      }
  
      // For content searches, also search DOCX files
-@@ -308,14 +355,7 @@
+@@ -308,14 +363,7 @@
        this.targetsOfficeFiles(DOCX_EXTENSIONS, options.filePattern, validPath);
  
      if (shouldSearchDocx) {
@@ -396,7 +406,7 @@
      }
  
      // Wait for first chunk of data or early completion instead of fixed delay
-@@ -362,6 +402,10 @@
+@@ -362,6 +410,10 @@
      runtime: number;
      wasIncomplete?: boolean;      // NEW: Indicates if search was incomplete due to permissions
      maxResultsReached: boolean;   // Search stopped at maxResults matches; more may exist
@@ -407,7 +417,7 @@
      timedOut: boolean;            // Search stopped at its time limit before it finished; more may exist
      skippedLines: Array<{ file: string; count: number }>;  // Lines too long to process (MAX_OUTPUT_LINE_CHARS), by file
    } {
-@@ -391,6 +435,10 @@
+@@ -391,6 +443,10 @@
          wasIncomplete: session.wasIncomplete,
          maxResultsReached: !!session.maxResultsReached,
          timedOut: !!session.timedOut,
@@ -418,7 +428,7 @@
          skippedLines: this.skippedLinesOf(session)
        };
      }
-@@ -414,6 +462,10 @@
+@@ -414,6 +470,10 @@
        wasIncomplete: session.wasIncomplete,
        maxResultsReached: !!session.maxResultsReached,
        timedOut: !!session.timedOut,
@@ -429,7 +439,7 @@
        skippedLines: this.skippedLinesOf(session)
      };
    }
-@@ -459,6 +511,7 @@
+@@ -459,6 +519,7 @@
        return false;
      }
  
@@ -437,7 +447,7 @@
      this.stopSources(session);
  
      // Don't delete session immediately - let user read final results
-@@ -472,15 +525,20 @@
+@@ -472,15 +533,20 @@
     * For owners that tear the search manager down (shutdown, tests); a later
     * startSearch() starts afresh.
     */
@@ -464,7 +474,7 @@
      }
    }
  
-@@ -522,21 +580,86 @@
+@@ -522,21 +588,86 @@
     * collected as it finds them, until it has searched every file or the session
     * stops it (stop_search, timeout, maxResults).
     */
@@ -554,7 +564,7 @@
        .catch((err) => {
          // Log Office search errors but don't fail the whole search
          const message = err instanceof Error ? err.message : String(err);
-@@ -547,192 +670,6 @@
+@@ -547,192 +678,6 @@
    }
  
    /**
@@ -747,7 +757,7 @@
     * Whether a content search runs the Excel or DOCX search, the one for files
     * with these extensions. Only when contextually relevant: the rootPath is
     * such a file, or a filePattern alternative targets them ("*.xlsx",
-@@ -749,136 +686,6 @@
+@@ -749,136 +694,6 @@
    }
  
    /**
@@ -884,7 +894,7 @@
     * Clean up completed sessions older than specified time
     * Called automatically by cleanup interval
     */
-@@ -956,7 +763,7 @@
+@@ -956,7 +771,7 @@
      // These arguments are the whole search: the user's ripgrep config file
      // (RIPGREP_CONFIG_PATH) must not add flags such as --hidden, --glob,
      // --max-count or --null that change what is found or the output parsed here
@@ -893,7 +903,7 @@
      
      if (options.searchType === 'content') {
        // Content search mode
-@@ -1068,6 +875,7 @@
+@@ -1068,6 +883,7 @@
      });
  
      process.stderr?.on('data', (data: string | Buffer) => {
@@ -901,7 +911,7 @@
        const errorText = data.toString();
  
        // Store error text for potential user display (bounded: see keepErrorOutput)
-@@ -1137,9 +945,10 @@
+@@ -1137,9 +953,10 @@
      });
  
      process.on('error', (error: Error) => {
@@ -913,7 +923,7 @@
      });
    }
  
-@@ -1149,6 +958,7 @@
+@@ -1149,6 +966,7 @@
     */
    private finishSource(session: SearchSession, source: SearchSource): void {
      session.pendingSources.delete(source);
@@ -921,7 +931,7 @@
      if (session.pendingSources.size > 0 || session.isComplete) return;
  
      // If we have results, don't mark as error even if there were permission issues
-@@ -1185,19 +995,40 @@
+@@ -1185,19 +1003,40 @@
    }
  
    /**
@@ -966,7 +976,7 @@
      }
    }
  
-@@ -1209,6 +1040,13 @@
+@@ -1209,6 +1048,13 @@
     * complete as it is.
     */
    private processOutput(session: SearchSession, text: string, isFinal: boolean = false): void {
@@ -980,7 +990,7 @@
      const pieces = text.split('\n');
      const lines: string[] = [];
      pieces.forEach((piece, i) => {
-@@ -1227,15 +1065,12 @@
+@@ -1227,15 +1073,12 @@
     * the rest of it dropped as it arrives.
     */
    private appendToLine(session: SearchSession, text: string): void {
@@ -998,7 +1008,16 @@
    }
  
    /** The line being received, now complete; undefined if it was skipped */
-@@ -1301,13 +1136,13 @@
+@@ -1277,7 +1120,7 @@
+ 
+         // Early termination for exact filename matches (if enabled)
+         if (parsed.kind === 'match' &&
+-            session.options.earlyTermination !== false && // Default to true
++            session.options.earlyTermination && // Normalized once at admission
+             this.isExactFilenameSearch(session.options)) {
+           const pat = path.normalize(session.options.pattern);
+           const filePath = path.normalize(parsed.result.file);
+@@ -1301,13 +1144,13 @@
     * is kept as context, like grep -m - and ripgrep is stopped when it ends.
     */
    private collectRipgrepLine(session: SearchSession, line: RipgrepLine): void {
@@ -1014,7 +1033,7 @@
        } else {
          // Note where this match's trailing context ends, in case it is the last match
          const contextLines = session.options.contextLines ?? 0;
-@@ -1320,8 +1155,7 @@
+@@ -1320,8 +1163,7 @@
        const trailing = session.trailingContext;
        const lineNumber = line.result.line;
        if (trailing && line.result.file === trailing.file && lineNumber !== undefined && lineNumber <= trailing.lastLine) {
@@ -1024,7 +1043,7 @@
          if (lineNumber === trailing.lastLine) {
            session.trailingContext = undefined;
          }
-@@ -1338,10 +1172,38 @@
+@@ -1338,10 +1180,38 @@
     * The one place a session counts a match - from ripgrep, Excel or DOCX alike -
     * so maxResults caps the TOTAL number of matches a search returns.
     */
@@ -1628,3 +1647,110 @@
 +} finally {
 +  port.close(); // The owner still waits for the worker's exit event.
 +}
+--- a/src/tools/filesystem.ts
++++ b/src/tools/filesystem.ts
+@@ -287,7 +287,7 @@
+  * @param pathToCheck Path to check
+  * @returns boolean True if path is allowed
+  */
+-async function isPathAllowed(pathToCheck: string): Promise<boolean> {
++async function isPathAllowed(pathToCheck: string, pendingWork?: Promise<unknown>[]): Promise<boolean> {
+     // If root directory is allowed, all paths are allowed
+     const allowedDirectories = await getAllowedDirs();
+     if (allowedDirectories.includes('/') || allowedDirectories.length === 0) {
+@@ -310,7 +310,7 @@
+     return new Promise<boolean>((resolve) => {
+         let pending = allowedDirectories.length;
+         for (const allowedDir of allowedDirectories) {
+-            void getAllowedDirRealPath(allowedDir).then((realPath) => {
++            const lookup = getAllowedDirRealPath(allowedDir).then((realPath) => {
+                 if (realPath !== null && isWithinAllowedDir(normalizedPathToCheck, realPath)) {
+                     resolve(true);
+                 }
+@@ -318,6 +318,7 @@
+                     resolve(false);
+                 }
+             });
++            pendingWork?.push(lookup);
+         }
+     });
+ }
+@@ -337,7 +338,18 @@
+  * @returns Promise<string> The validated path
+  * @throws Error if the path or its parent directories don't exist or if the path is not allowed
+  */
+-export async function validatePath(requestedPath: string, { entry = false }: { entry?: boolean } = {}): Promise<string> {
++export async function validatePath(requestedPath: string, options: { entry?: boolean } = {}): Promise<string> {
++    return startPathValidation(requestedPath, options).result;
++}
++
++/** The response can time out while native filesystem work is still running.
++ * settled accounts for that work, including parallel allowed-directory lookups.
++ * It does not claim to cancel native I/O or alter the access decision.
++ */
++export function startPathValidation(requestedPath: string, { entry = false }: { entry?: boolean } = {}): {
++    result: Promise<string>; settled: Promise<void>;
++} {
++    const pendingWork: Promise<unknown>[] = [];
+     const validationOperation = async (): Promise<string> => {
+         // Expand home directory if present
+         const expandedPath = expandHome(requestedPath);
+@@ -371,7 +383,7 @@
+         addToolCallPaths(pathForNextCheck);
+ 
+         // Check if path is allowed
+-        if (!(await isPathAllowed(pathForNextCheck))) {
++        if (!(await isPathAllowed(pathForNextCheck, pendingWork))) {
+             capture('server_path_validation_error', {
+                 error: 'Path not allowed',
+                 allowedDirsCount: (await getAllowedDirs()).length
+@@ -402,24 +414,31 @@
+         }
+     };
+ 
+-    // Execute with timeout
+-    const result = await withTimeout(
+-        validationOperation(),
+-        FILE_OPERATION_TIMEOUTS.PATH_VALIDATION,
+-        `Path validation operation`, // Generic name for telemetry
+-        null
+-    );
+-
+-    if (result === null) {
+-        // Keep original path in error for AI but a generic message for telemetry
+-        capture('server_path_validation_timeout', {
+-            timeoutMs: FILE_OPERATION_TIMEOUTS.PATH_VALIDATION
+-        });
+-
+-        throw new Error(`Path validation failed for path: ${requestedPath}`);
+-    }
+-
+-    return result;
++    const operation = validationOperation();
++    const settled = operation.then(() => undefined, () => undefined).then(async () => {
++        await Promise.allSettled(pendingWork);
++    });
++    const result = (async () => {
++        // Execute with timeout
++        const result = await withTimeout(
++            operation,
++            FILE_OPERATION_TIMEOUTS.PATH_VALIDATION,
++            `Path validation operation`, // Generic name for telemetry
++            null
++        );
++    
++        if (result === null) {
++            // Keep original path in error for AI but a generic message for telemetry
++            capture('server_path_validation_timeout', {
++                timeoutMs: FILE_OPERATION_TIMEOUTS.PATH_VALIDATION
++            });
++    
++            throw new Error(`Path validation failed for path: ${requestedPath}`);
++        }
++    
++        return result;
++    })();
++    return { result, settled };
+ }
+ 
+ // Re-export FileResult from base for consumers

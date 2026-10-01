@@ -51,7 +51,7 @@ try {
 
   // Before genuine path validation, resolver and stat stages respectively.
   for(const [label,needle] of [
-    ['validation','const validPath = await validatePath(options.rootPath);'],
+    ['validation','const validation = startPathValidation(options.rootPath);'],
     ['resolver','rgPath = await getRipgrepPath();'],
     ['stat','const rootIsDirectory = (await fs.stat(validPath)).isDirectory();']
   ]) {
@@ -69,7 +69,7 @@ try {
     check(`${label} deadline is bounded; late resolution cannot spawn`);
   }
 
-  const needle='const validPath = await validatePath(options.rootPath);';
+  const needle='const validation = startPathValidation(options.rootPath);';
   let unblock;globalThis.issue1027Pending=new Promise(r=>{unblock=r;gates.push(r);});
   const Type=await loadInjected(needle,'await globalThis.issue1027Pending;\n'+needle);
   const held=new Type();managers.push(held);

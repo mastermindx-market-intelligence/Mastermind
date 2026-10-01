@@ -1,8 +1,10 @@
 {
   "donor": "56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66",
-  "patchSHA256": "2103a5a026662758af53cb9f8e1112344493dc16fa5fe1f9297deab467eae395",
+  "patchSHA256": "9972d58ba03d3b6f2aa8627a5e6cb2642e407c4d2cdf1b078a019bcd2cd55516",
   "packageBuild": "PASS",
   "upstreamSuites": [
+    "test-allowed-directories-symlink.js",
+    "test-symlink-security.js",
     "test-search-files-literal.js",
     "test-search-files-file-pattern.js",
     "test-search-file-pattern.js",
@@ -11,13 +13,14 @@
     "test-search-process-exit.js",
     "test-search-stopped-not-failed.js",
     "test-issue1027-admission.mjs",
-    "test-issue1027-office.mjs"
+    "test-issue1027-office.mjs",
+    "test-issue1027-validation-owner.mjs"
   ],
   "scope": "source qualification only; not installed acceptance",
-  "schema": "mastermind.issue1027.upstream-qualification.v2",
+  "schema": "mastermind.issue1027.upstream-qualification.v3",
   "date": "2026-10-01",
   "upstreamSearchSuites": {
-    "passed": 9,
+    "passed": 12,
     "failed": 0,
     "skipped": 0
   },
@@ -61,10 +64,30 @@
       "mutation": "initial deadline flag",
       "status": "DETECTED",
       "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "actual validation settlement",
+      "status": "DETECTED",
+      "discriminator": "non-cancelling internal timeout released live work"
+    },
+    {
+      "mutation": "parallel validation settlement",
+      "status": "DETECTED",
+      "discriminator": "first path answer released parallel lookup work"
+    },
+    {
+      "mutation": "effective early-termination identity",
+      "status": "DETECTED",
+      "discriminator": "same effective true produced different admission"
+    },
+    {
+      "mutation": "explicit exhaustive execution",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
     }
   ],
   "ownedCommandTests": 3,
-  "independentReview": "REQUEST_CHANGES on predecessor; P1/P2 repaired pending new-head review",
+  "independentReview": "REQUEST_CHANGES on 8118114; both new findings repaired pending exact-head review",
   "installed": false,
   "remainingIssueGates": [
     "host-wide Executive admission",
@@ -75,9 +98,19 @@
     "quiesced native installed canary"
   ],
   "logSHA256": {
-    "v4-validation/build.log": "e7785b76336adb9ac1b1216571d07112185d234137e77dc615cbcf96718c1a2f",
-    "v4-validation/tests.log": "599690816ddb5344f17d74081f07ff808fb9aadc5fcb405266b646a51800993e",
-    "v4-mutation-results.json": "4c62757f62f7bc05898c6775b6e1054c9aa30b320434138ee75b83c7fd660106",
-    "v4-validation/upstream/test/office-results.json": "5798959f945d8850d6166c59e9f01b533e74ec0613cbf01885f29eb4cb8444f4"
-  }
+    "v5-red.log": "a4d2f6440006625dfe9386814efd28837a9b88203fc8597d072063f1f50d5868",
+    "v5-validation/build.log": "a569167c3d8f9bab12f08aea41b200e5e5eda87cee4b6c488cb77890cd1ec9ac",
+    "v5-validation/tests.log": "71396baec99b8c5968c6dbc4a21fba06d9fc7fbfaeae3b44614f603568b6ff34",
+    "v5-validation/v5-mutation-results.json": "5197b379ef5ebfb3144faee4f91de5a5c5ba2752355ff880c40235ec77d55753",
+    "v5-validation/upstream/test/office-results.json": "de6d022d99d346789f79b64dfc08b0bb4136c74e5a029f0c7f50eca1b087cd07"
+  },
+  "validationOwnerChecks": 3,
+  "redBeforeGreen": {
+    "baseline": "8118114e75b9f3cf3f8ffc665a38d640312347f0",
+    "internalTimeout": "FAIL: 0 admitted operations while 2 underlying validation operations remain live",
+    "earlyTermination": "FAIL: omitted and explicit true produced different admissions",
+    "afterRepair": "all 3 owner/identity checks PASS"
+  },
+  "filesystemDonorBlob": "f84a796ddeb7aa4037df5d593910f60082f891d9",
+  "nativeIOSettlement": "Retain admission and await actual work; no forced cancellation or finite native-I/O settlement claim."
 }

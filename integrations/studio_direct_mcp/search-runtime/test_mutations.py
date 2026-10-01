@@ -17,19 +17,27 @@ mutations=[
  ('initial cap disclosure',handler,'output += `\\nSearch result limit reached. Results are incomplete.`;','output += "";','result limit reached'),
  ('initial deadline flag',handler,'timedOut: limits.timedOut,','timedOut: false,','AssertionError'),
 ]
+mutations = [(*item, "test-issue1027-admission.mjs") for item in mutations]
+owner = root/"dist/tools/filesystem.js"
+mutations += [
+ ("actual validation settlement",manager,"await admission.validationSettled;","await Promise.resolve();","non-cancelling internal timeout released live work","test-issue1027-validation-owner.mjs"),
+ ("parallel validation settlement",owner,"pendingWork?.push(lookup);","void lookup;","first path answer released parallel lookup work","test-issue1027-validation-owner.mjs"),
+ ("effective early-termination identity",manager,"earlyTermination: options.earlyTermination !== false,","earlyTermination: options.earlyTermination,","same effective true produced different admission","test-issue1027-validation-owner.mjs"),
+ ("explicit exhaustive execution",manager,"session.options.earlyTermination &&","true &&","AssertionError","test-issue1027-validation-owner.mjs"),
+]
 runner="""import {spawnSync} from 'node:child_process';import {createTestEnv} from './test/helpers/test-env.js';
-const t=createTestEnv();try{const r=spawnSync(process.execPath,['test/test-issue1027-admission.mjs'],{env:t.env,stdio:'inherit',timeout:15000});process.exitCode=r.status??91;}finally{t.cleanup();}"""
+const t=createTestEnv();try{const r=spawnSync(process.execPath,['test/TEST_FILE'],{env:t.env,stdio:'inherit',timeout:15000});process.exitCode=r.status??91;}finally{t.cleanup();}"""
 results=[]
-for index,(name,target,before,after,discriminator) in enumerate(mutations):
+for index,(name,target,before,after,discriminator,test) in enumerate(mutations):
  original=target.read_bytes();text=original.decode();assert before in text,name
- log=root.parent/f'v4-mutation-{index}.log'
+ log=root.parent/f'v5-mutation-{index}.log'
  try:
-  target.write_text(text.replace(before,after,1))
-  try:run(['node','--input-type=module','-e',runner],root,log,timeout=20)
+  target.write_text(text.replace(before,after))
+  try:run(['node','--input-type=module','-e',runner.replace('TEST_FILE',test)],root,log,timeout=20)
   except subprocess.CalledProcessError:
    output=log.read_text();assert discriminator in output,(name,output[-2000:])
    results.append({'mutation':name,'status':'DETECTED','discriminator':discriminator})
   else:raise AssertionError('mutation survived: '+name)
  finally:target.write_bytes(original)
-(root.parent/'v4-mutation-results.json').write_text(json.dumps(results,indent=2)+'\n')
+(root.parent/'v5-mutation-results.json').write_text(json.dumps(results,indent=2)+'\n')
 print(json.dumps({'detected':len(results),'total':len(mutations),'compiledBytesRestored':True}))
