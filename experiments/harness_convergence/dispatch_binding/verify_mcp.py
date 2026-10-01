@@ -249,7 +249,7 @@ PROFILE_MUTATIONS = {
 def profile_checks() -> dict:
     owner = ROOT.parents[2] / 'integrations/acp_worker'
     originals = {name: (owner / name).read_bytes() for name in [
-        'dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs']}
+        'dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs', 'dsh_mcp_grant.mjs']}
     donor = {p.name: p.read_bytes() for p in (CACHE / 'mcp-donor').glob('*.ts')}
     positive = {**suite('profile-final', 'donor', set(), profile=True),
                 **profile_observations()}
@@ -315,6 +315,85 @@ def native_artifact_checks() -> dict:
             'scope': 'Actual built module imported by plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP'}
 
 
+GRANT_MUTATIONS = {
+    'schema': ('if (!isDeepStrictEqual(row, observed.get(name))) throw refused()',
+               'if (false) throw refused()', {
+        'refuses changed input schema', 'refuses changed output schema',
+        'refuses changed annotations', 'refuses changed execution policy',
+        'refuses changed missing required tool'}),
+    'target': ("if (!isDeepStrictEqual(actual, target) || !live('startup')) throw refused()",
+               "if (!live('startup')) throw refused()", {
+        'exact target must match before startup', 'HTTPS target is compared exactly, not just by hostname'}),
+    'dispatch': ("allow: execution => live('dispatch', rawName, execution)",
+                 'allow: execution => true', {
+        'matches exact source grant and filters ungranted tools',
+        'host revocation and both cancellation signals refuse dispatch'}),
+    'discovery': ("if (!live('discovery')) throw refused()", 'if (false) throw refused()', {
+        'matches exact source grant and filters ungranted tools',
+        'truthy and asynchronous host decisions cannot authorize anything',
+        'projection mutation cannot widen already compiled permission'}),
+}
+
+
+def grant_unit(name: str, expected: set[str], source: str = 'runtime') -> dict:
+    import re
+    result = subprocess.run([NODE, '--test', '--test-reporter=tap', 'grant-admission.test.mjs'],
+        cwd=ROOT, env={**ENV, 'MMX_DSH_GRANT_SOURCE': source},
+        capture_output=True, text=True, timeout=30)
+    text = result.stdout + result.stderr
+    (CACHE / f'{name}.tap').write_text(text)
+    cases = re.findall(r'^(ok|not ok) \d+ - (.+)$', result.stdout, re.MULTILINE)
+    failures = {label for state, label in cases if state == 'not ok'}
+    assert len(cases) == 18 and failures == expected, f'{name}: unexpected cases {failures}'
+    assert result.returncode == (1 if expected else 0) and not result.stderr
+    assert '# skipped 0' in text and '# cancelled 0' in text
+    return {'tests': 18, 'passed': 18 - len(expected), 'failed_cases': sorted(failures),
+            'exit_code': result.returncode, 'log_sha256': digest(text.encode())}
+
+
+def grant_checks() -> dict:
+    result = subprocess.run([sys.executable, '-B', '-m', 'unittest', 'discover', '-s', 'tests',
+        '-p', 'test_dsh_mcp_client_projection.py', '-v'], cwd=ROOT.parents[2],
+        env=ENV, capture_output=True, text=True, timeout=30)
+    output = result.stdout + result.stderr
+    (CACHE / 'grant-projection-final.log').write_text(output)
+    assert result.returncode == 0 and 'Ran 11 tests' in output and '\nOK\n' in output
+    report = {'python_projection': {'tests': 11, 'passed': 11, 'exit_code': 0,
+                                   'log_sha256': digest(output.encode())},
+              'runtime_projection': grant_unit('grant-admission-final', set())}
+    owner = ROOT.parents[2] / 'integrations/acp_worker/dsh_mcp_grant.mjs'
+    original = owner.read_bytes()
+    mutants = {}
+    for name, (old, new, expected) in GRANT_MUTATIONS.items():
+        text = original.decode()
+        assert text.count(old) == 1, f'{name}: ambiguous grant mutation'
+        changed = text.replace(old, new).encode()
+        (CACHE / 'grant-mutant.mjs').write_bytes(changed)
+        mutants[name] = {**grant_unit('grant-mutant-final-' + name, expected, 'mutant'),
+                         'mutant_sha256': digest(changed), 'killed': True}
+    assert owner.read_bytes() == original
+    report['mutations'] = mutants
+    artifact = json.loads((CACHE / 'profile-build-result.json').read_text())
+    scenarios = {}
+    for scenario in ['normal', 'revoked', 'schema-drift', 'target-mismatch',
+                     'source-mismatch', 'missing-tool', 'wrong-version', 'startup-revoked']:
+        result = subprocess.run([NODE, 'native-grant-canary.mjs', scenario], cwd=ROOT,
+            env={**ENV, 'MMX_TEST_PYTHON': sys.executable}, capture_output=True, text=True, timeout=30)
+        text = result.stdout + result.stderr
+        (CACHE / f'native-grant-final-{scenario}.log').write_text(text)
+        assert result.returncode == 0 and not result.stderr, f'grant canary {scenario}: {text}'
+        observed = json.loads((CACHE / f'native-grant-{scenario}.json').read_text())
+        assert observed['success'] and observed['fixture_children_absent'] and observed['inputs_unchanged']
+        assert observed['artifact_sha256'] == artifact['artifact_sha256']
+        assert observed['read_calls'] == (1 if scenario in {'normal', 'revoked'} else 0)
+        assert observed['search_calls'] == (1 if scenario == 'normal' else 0)
+        scenarios[scenario] = {**observed, 'exit_code': result.returncode,
+                               'log_sha256': digest(text.encode())}
+    report['native_artifact_scenarios'] = scenarios
+    report['scope'] = 'Existing Python grant/digest projection through built DSH profile; synthetic host witness, no production or ACP admission'
+    return report
+
+
 def main() -> dict:
     core_supply = prepare_core(download=False)
     mcp_supply = prepare(download=False)
@@ -345,6 +424,7 @@ def main() -> dict:
                           for mode in ['pristine', 'donor']}
     report['worker_profile'] = profile_checks()
     report['native_artifact'] = native_artifact_checks()
+    report['capability_grants'] = grant_checks()
     report['typecheck'] = typecheck()
     report['mutations'] = mutations()
     report['stdio'] = stdio_checks()
@@ -357,6 +437,11 @@ def main() -> dict:
         'profile-startup.test.mjs', 'build-profile.mjs', 'native-profile-canary.mjs',
         '../../../integrations/acp_worker/dsh_tool_profile.mjs',
         '../../../integrations/acp_worker/dsh_dispatch_preflight.mjs',
+        '../../../integrations/acp_worker/dsh_mcp_grant.mjs',
+        '../../../control_plane/dsh_mcp_client_projection.py',
+        '../../../control_plane/executive_agent_capabilities.py',
+        '../../../tests/test_dsh_mcp_client_projection.py',
+        'grant-admission.test.mjs', 'grant-projection-fixture.py', 'native-grant-canary.mjs',
         'package.json', 'package-lock.json', 'donor-manifest.json', 'strict-dispatch-binding.patch']}
     report['success'] = True
     return report
@@ -370,5 +455,8 @@ if __name__ == '__main__':
                       'upstream_tests': report['upstream']['donor']['passed'],
                       'stdio_tests': report['stdio']['patched']['passed'],
                       'profile_tests': report['worker_profile']['positive']['passed'],
+                      'grant_python_tests': report['capability_grants']['python_projection']['passed'],
+                      'grant_runtime_tests': report['capability_grants']['runtime_projection']['passed'],
+                      'grant_native_scenarios': len(report['capability_grants']['native_artifact_scenarios']),
                       'native_artifact_scenarios': len(report['native_artifact']['scenarios']),
                       'report': str(destination)}, indent=2))

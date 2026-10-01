@@ -363,6 +363,93 @@ project a fulfilled Cordis proxy to a primitive; config mutation targets the
 actual object passed to profile activation rather than Cordis's copied input.
 Neither issue was a production defect or accepted as security proof.
 
+## Existing capability grants → concrete DSH profile
+
+`control_plane/dsh_mcp_client_projection.py` now projects one existing typed
+`ExecutionCapabilityProfile` / `McpServerGrant` into the DSH profile. It accepts
+a complete owner-approved catalog and uses the EXISTING
+`observed_mcp_tool_schema_digest` to bind granted input/output schemas and
+security annotations. There is no second registry or cross-language digest
+implementation. Missing/duplicate tools, incomplete catalogs, schema drift,
+unsafe JSON numbers, unsupported targets, or prompt-to-auto-approval conversion
+are refused. The returned configuration is detached and non-arming.
+
+```python
+projection = project_dsh_mcp_tools(
+    validated_profile,
+    capability_id=exact_capability_id,
+    observed_tool_catalog=approved_complete_catalog,
+).configuration()
+```
+
+The existing startup module exposes the concrete consumer:
+
+```js
+const toolFiber = ctx.plugin(createDshGrantedToolProfile({
+  projection,
+  isCurrentBinding,
+  signal: ownerAbortSignal,
+}), fixedConfig)
+await toolFiber
+// Retain the same existing host teardown: await toolFiber.dispose().
+```
+
+The added runtime module `dsh_mcp_grant.mjs` compares exact configured namespace,
+transport, command/arguments or HTTPS URL before startup. At discovery it
+compares each granted raw tool's full input/output/annotation/execution contract
+and actual server name/version. Unselected tools remain unavailable. Top-level
+descriptions/titles are not authority, matching the existing digest owner's
+semantics. Startup inputs and guard functions are captured; changing the input
+projection or callback container afterward cannot widen the compiled grant.
+
+`isCurrentBinding(binding, request)` is a TRUSTED synchronous host closure.
+`binding` contains frozen source profile/grant/digest/realm/surface identity,
+target and server identity. `request.phase` is startup, discovery or dispatch;
+dispatch additionally carries rawName and the actual ToolExecution. Only literal
+true permits use. The incumbent host must attest the actual DSH Attempt,
+artifact, process/session and resource realm through its existing owners. It
+must not turn the source projection into a self-authenticating lease or infer
+permission from a server label, model argument, JSON boolean or cached receipt.
+
+The current registry's supported execution surfaces are NOT changed by this
+projection. Original Codex/Claude surface provenance is preserved, and
+`production_armed` remains false. Producing a DSH-shaped candidate does not
+transfer another harness's entitlement or admit DSH into production. That
+separate positive host/placement gate remains required. Tool-only context,
+explicit environment, fatal startup, disabled reconnect, preflight and the
+original plugin's readiness/rollback/disposal remain unchanged.
+
+New verification covers 11 Python projection tests, 18 runtime contract tests,
+and four exact schema/target/dispatch/discovery mutation falsifiers. Eight
+ordinary-Node scenarios exercise a Python-produced projection through the
+compiled profile and actual MCP subprocess. Normal work performs one read and
+one search; revocation prevents a subsequent search; wrong schema, target,
+source binding, missing tool and wrong server version refuse. Target/source
+mismatch is detected before the admitted subprocess starts.
+
+The startup-revocation regression changes the live host decision during the
+actual asynchronous dispatch preflight. The old composition started two extra
+MCP processes before discovery refused; the corrected composition rechecks the
+same grant after preflight and immediately before transport activation. Only
+the two already-disposed catalog-capture processes exist in that negative
+scenario; no admitted process or read/search call is created. The initial target
+check, positive execution, preflight, and original teardown all remain intact.
+This closes that observed startup window, not every possible host-isolation race.
+
+The cross-language fixture deliberately constructs SYNTHETIC typed grants and
+a synthetic host-currentness witness. It uses the real registry types and
+canonical digest function but does not write a live policy, approve discovery,
+claim a real Executive Attempt, or qualify a production host. A controlled
+catalog-capture phase calls no tools and is disposed before the actual profile
+phase. All synthetic disk files and process IDs remain bounded to this test.
+`npm test` runs this path via the existing verifier/build owners; full report
+hashes, nonce/hash/line-match results and process settlement are retained.
+
+The canonical registry, policy JSON, donor patches and dependency lockfile are
+unchanged in this increment. #825 custody/source acceptance, installed immutable
+closure, actual DSH/ACP Attempt identity, host confinement, provider accounting,
+and original Executive-parent consumption remain separate unfinished gates.
+
 ## License
 
 The donor patches and fetched test references derive from DeepSeek's MIT

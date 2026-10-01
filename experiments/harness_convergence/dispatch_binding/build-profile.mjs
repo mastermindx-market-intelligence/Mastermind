@@ -22,13 +22,13 @@ for (const file of core.files.filter(f => f.kind === 'source')) {
 for (const file of mcp.files.filter(f => f.folder === 'mcp-pristine')) {
   record(resolve(cache, 'mcp-donor', file.name), mcp.patched_source_sha256[file.name] ?? file.sha256)
 }
-for (const file of ['dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs']) {
+for (const file of ['dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs', 'dsh_mcp_grant.mjs']) {
   record(resolve(here, '../../../integrations/acp_worker', file))
 }
 record(resolve(here, 'package-lock.json'), core.npm_lock_sha256)
 record(fileURLToPath(import.meta.url))
-const entry = resolve(cache, 'profile-entry.mjs')
-const source = "export { createDshToolProfile } from 'mmx-worker-profile'\nexport { default as ToolRuntime } from '@deepseek-ai/dsh-tools'\n"
+const source = "export { createDshToolProfile, createDshGrantedToolProfile } from 'mmx-worker-profile'\nexport { default as ToolRuntime } from '@deepseek-ai/dsh-tools'\n"
+const entry = resolve(cache, `profile-entry-${hash(source)}.mjs`)
 if (existsSync(entry)) assert.equal(readFileSync(entry, 'utf8'), source)
 else writeFileSync(entry, source, { flag: 'wx' })
 const out = mkdtempSync(resolve(cache, 'profile-build-'))

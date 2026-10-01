@@ -1,25 +1,603 @@
 {
   "architecture": "arm64",
+  "capability_grants": {
+    "mutations": {
+      "discovery": {
+        "exit_code": 1,
+        "failed_cases": [
+          "matches exact source grant and filters ungranted tools",
+          "projection mutation cannot widen already compiled permission",
+          "truthy and asynchronous host decisions cannot authorize anything"
+        ],
+        "killed": true,
+        "log_sha256": "5e83f3723cc8a73e53b14a2cfc7f00b19049139ce1aafad21ba36a4d86c9e304",
+        "mutant_sha256": "346de9a8134d784246b054c43f808b5902129a8b234594365d943448d3d7d187",
+        "passed": 15,
+        "tests": 18
+      },
+      "dispatch": {
+        "exit_code": 1,
+        "failed_cases": [
+          "host revocation and both cancellation signals refuse dispatch",
+          "matches exact source grant and filters ungranted tools"
+        ],
+        "killed": true,
+        "log_sha256": "3c709e3ca58118701400c8f4badef0acc9181a8a5d9bf11de0ed658792a9b5ab",
+        "mutant_sha256": "cd6ef10a3c66050c4e4fc9e659b35a28e297bd1178208e668d6334c5ce35a1c1",
+        "passed": 16,
+        "tests": 18
+      },
+      "schema": {
+        "exit_code": 1,
+        "failed_cases": [
+          "refuses changed annotations",
+          "refuses changed execution policy",
+          "refuses changed input schema",
+          "refuses changed missing required tool",
+          "refuses changed output schema"
+        ],
+        "killed": true,
+        "log_sha256": "d9a7fb6348e5358ca54095f4adc77f56e618d7c7cfb8d4535f1239e0687e46fe",
+        "mutant_sha256": "146d6a83658cbdd8cff4fa5875ac96a3db0001442c78c1870e4cf8f5149ace8d",
+        "passed": 13,
+        "tests": 18
+      },
+      "target": {
+        "exit_code": 1,
+        "failed_cases": [
+          "HTTPS target is compared exactly, not just by hostname",
+          "exact target must match before startup"
+        ],
+        "killed": true,
+        "log_sha256": "9e1a214aa2a19a38cbf7cb745af944bdc38b7203a9db1dca4ec3f9f2574190cf",
+        "mutant_sha256": "0e4d586dc1eb73a5b9553a0d3ddac6ec2a351e8e6b3d5b059eefd7c275ad4a39",
+        "passed": 16,
+        "tests": 18
+      }
+    },
+    "native_artifact_scenarios": {
+      "missing-tool": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          63004,
+          63005
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          63004,
+          63005,
+          63011,
+          63014
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "d4ea9487f9fce1f6d328257d4313ce61ea24f58e7b193f6b22c5a808983d7d10",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "ec34985315e8e91038b076f912b17cc0b437e6e41e1b27ec10852031bdab0381",
+        "read_calls": 0,
+        "refusal": {
+          "code": null,
+          "message": "mcp-client(granted): initial connection or tool synchronization failed",
+          "name": "Error"
+        },
+        "scenario": "missing-tool",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-Cf3WX8",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "normal": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          62935,
+          62940
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          62935,
+          62940,
+          62943,
+          62944
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "3a3acf5ee2d67e74c8188d348b5a15c4fb979def1f2bd58dce3add5d3776a954",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup",
+          "discovery",
+          "dispatch",
+          "dispatch"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "0c040aaa813712e5ca3eed509016425553a5b98bbc7a6a08fd5d88e64f6b3bf0",
+        "read_calls": 1,
+        "scenario": "normal",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 1,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-EPqmeE",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true,
+        "workload": {
+          "read": {
+            "file": "memo.txt",
+            "nonce": "c8fca313-a4ce-4d27-849e-56d70ff328b6",
+            "pid": 62944,
+            "sha256": "e6e373df763147ef723ae7fb06d519d0ff9b2db7c9dee8afe13c71d9ca67058e",
+            "text": "grant\nneedle c8fca313-a4ce-4d27-849e-56d70ff328b6\n"
+          },
+          "search": {
+            "matches": [
+              {
+                "file": "memo.txt",
+                "line": 2,
+                "text": "needle c8fca313-a4ce-4d27-849e-56d70ff328b6"
+              },
+              {
+                "file": "signals.txt",
+                "line": 1,
+                "text": "needle c8fca313-a4ce-4d27-849e-56d70ff328b6"
+              }
+            ],
+            "nonce": "c8fca313-a4ce-4d27-849e-56d70ff328b6",
+            "pid": 62944
+          }
+        }
+      },
+      "revoked": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          62946,
+          62947
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          62946,
+          62947,
+          62954,
+          62956
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "cf298af693abff6c043df296eff2e02a999fb566f0942120da03105da5d25a1a",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup",
+          "discovery",
+          "dispatch",
+          "dispatch"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "8b5030932ed9a9c8c2886420d3cf777a2bd7b01940828ac59db31ef8ab1522d7",
+        "read_calls": 1,
+        "scenario": "revoked",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-uojWhl",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true,
+        "workload": {
+          "read": {
+            "file": "memo.txt",
+            "nonce": "39ba868c-1b0b-4f2d-805f-b8ba5b455fa5",
+            "pid": 62956,
+            "sha256": "7de5928cb01538daba31860e68f5715d6dc85490cb51dc9a63d7f721eb5278c3",
+            "text": "grant\nneedle 39ba868c-1b0b-4f2d-805f-b8ba5b455fa5\n"
+          }
+        }
+      },
+      "schema-drift": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          62958,
+          62959
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          62958,
+          62959,
+          62981,
+          62982
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "f645fe119630fa84e677ef05611103c70157914412844ed8cace4165e0970f4e",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "191afd709f6573fb542b7beeacc6c669e3f2171681be8f2f0b9e1945137bebe0",
+        "read_calls": 0,
+        "refusal": {
+          "code": null,
+          "message": "mcp-client(granted): initial connection or tool synchronization failed",
+          "name": "Error"
+        },
+        "scenario": "schema-drift",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-pkL2oB",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "source-mismatch": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          62995,
+          62997
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          62995,
+          62997
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "7234db156ed989964b42bfd6b5aeb2f062bc14f56e730ee531519c23b94b8879",
+        "model_requests": 0,
+        "phases": [
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "8d4d3243d0625c18fd342455e74ebdfc68fc212b742d3fa611399a0dd5c67cd1",
+        "read_calls": 0,
+        "refusal": {
+          "code": "DSH_MCP_GRANT_REFUSED",
+          "message": "DSH MCP grant binding refused",
+          "name": "Error"
+        },
+        "scenario": "source-mismatch",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-N2fsSp",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "startup-revoked": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          63027,
+          63029
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          63027,
+          63029
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "f1d4ecdebff1057fe6ca01d3bc566ab9790a1da297b3a56f38f1263ae1df57ce",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": true,
+        "projection_sha256": "ca8a6225e6111068777c15ce96873b41e10d20f1974d77eb9a03b3df7288e44b",
+        "read_calls": 0,
+        "refusal": {
+          "code": "DSH_MCP_GRANT_REFUSED",
+          "message": "DSH MCP grant binding refused",
+          "name": "Error"
+        },
+        "scenario": "startup-revoked",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-Bbvmi0",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "target-mismatch": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          62988,
+          62989
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          62988,
+          62989
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "a247b43b89c151a3223bbe241a3f9e570bf0f7b52d5faa6f6db28688ebb76b45",
+        "model_requests": 0,
+        "phases": [],
+        "preflightObserved": false,
+        "projection_sha256": "96d4e45e4361cb4522ca768237be465fad55a08625005e6e5482e22633e833bf",
+        "read_calls": 0,
+        "refusal": {
+          "code": "DSH_MCP_GRANT_REFUSED",
+          "message": "DSH MCP grant binding refused",
+          "name": "Error"
+        },
+        "scenario": "target-mismatch",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-w81HiG",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      },
+      "wrong-version": {
+        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "discovery_pids": [
+          63016,
+          63021
+        ],
+        "exit_code": 0,
+        "fixture_children_absent": true,
+        "fixture_pids": [
+          63016,
+          63021,
+          63023,
+          63025
+        ],
+        "inputs_unchanged": true,
+        "log_sha256": "d3eec1a932d17a8afa12d227bc99300c8a3ca5e62c9bd03b36152eede29eab74",
+        "model_requests": 0,
+        "phases": [
+          "startup",
+          "startup"
+        ],
+        "preflightObserved": false,
+        "projection_sha256": "26dfccabee3bde978864c30a8e7abff337032078016e8c65113ca6cda1e5c9ca",
+        "read_calls": 0,
+        "refusal": {
+          "code": null,
+          "message": "mcp-client(granted): initial connection or tool synchronization failed",
+          "name": "Error"
+        },
+        "scenario": "wrong-version",
+        "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
+        "search_calls": 0,
+        "sourceBinding": {
+          "serverInfo": {
+            "name": "mmx-stdio-fixture",
+            "version": "1"
+          },
+          "source": {
+            "auth_realm": "dedicated-worker-account",
+            "auth_status": "unsupported",
+            "capability_id": "fixture.dsh.read",
+            "execution_surface": "codex-app-server",
+            "grant_digest": "78ffa6d0b06c8b0a28e3c3fabd03ca66c6d091b01e82d157470672e8a3e47b03",
+            "profile_digest": "a8f850ac31b7eef3d4b15296ae8ddcd2c5424eefe8ef04d27b504e2a52e751ac",
+            "profile_id": "fixture.dsh.projection",
+            "tool_schema_digest": "3a9d4094bf73718975c3599bfd27909e9ecc4ce50418ed4509d6ab04c13ff02c"
+          },
+          "target": {
+            "args": [
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-NpntcU",
+              "normal"
+            ],
+            "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+            "serverName": "granted",
+            "transport": "stdio"
+          }
+        },
+        "success": true
+      }
+    },
+    "python_projection": {
+      "exit_code": 0,
+      "log_sha256": "aa147739d47255acd06b79684ded03bee9d0d231e0b67379daa2bbfa4203f514",
+      "passed": 11,
+      "tests": 11
+    },
+    "runtime_projection": {
+      "exit_code": 0,
+      "failed_cases": [],
+      "log_sha256": "df37987a76e46e98d51f3ebd5ab526bc8c7c1c83a548af22045643796df79818",
+      "passed": 18,
+      "tests": 18
+    },
+    "scope": "Existing Python grant/digest projection through built DSH profile; synthetic host witness, no production or ACP admission"
+  },
   "core_supply": {
     "commit": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
     "patched_sha256": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
     "runtime_started": false,
     "source_files": 14
   },
-  "full_local_report_sha256": "cf18019e3631f53790137f33a5d9669b1b14fe7916a8ed1365ef1dbc22b4a3e2",
-  "generated_at": "2026-09-29T10:54:43.313194+00:00",
+  "generated_at": "2026-10-01T07:50:08.102885+00:00",
   "independent_review": "NOT_PERFORMED",
   "input_sha256": {
+    "../../../control_plane/dsh_mcp_client_projection.py": "1ec4d4343dbcaa44ecb2b0191587269e99dd217260d035108081fd601447e1fa",
+    "../../../control_plane/executive_agent_capabilities.py": "fae14caeeb02b97b63cff35f190e68d4b63ea2b183b8f836a288d9cc71fe428b",
     "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
-    "../../../integrations/acp_worker/dsh_tool_profile.mjs": "ea2b80dd28fe6b22584919d02b7998f4c356efaafaf34dc7aad1fa4f071bb57e",
-    "build-profile.mjs": "d966267f285463a2d6a9a7c10391c175848523df0feb27f16ab91c77a3dc3132",
+    "../../../integrations/acp_worker/dsh_mcp_grant.mjs": "34f9a6f17cbf4fdea2c551c4fdd85b10748e9f84b1af5d35ba577b566ba4a40b",
+    "../../../integrations/acp_worker/dsh_tool_profile.mjs": "3fb96c8cde4e3b85dbca888b7d986480f535f3707821d19ec0885a08ef79e59c",
+    "../../../tests/test_dsh_mcp_client_projection.py": "ebf34b7f5254eb4e57161e3eb614edd4f700c43072b50993c1cdbb84956476a0",
+    "build-profile.mjs": "7ddf16f0cb57fbb354e032ab3097294503c5cc909f80fcdb9f779562e614324b",
     "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
+    "grant-admission.test.mjs": "476dc8dd7e33eed0822a904b7723b2eb0559bd61fce081f93447d7e92fded66e",
+    "grant-projection-fixture.py": "d3ca596df2d0abd410193fb9d55beb60268fc37c43fd16f055f9907c40231ec3",
     "mcp-admission.test.mjs": "b2a507738f38a833f237b2cf1b718882f2515962644208425e049e2e8c0407ce",
     "mcp-context-boundary.test.mjs": "db2fd87b4c3271260486b8e10933719073ec6edfda9e5675036aefc473ade9fe",
     "mcp-generation-admission.patch": "68f1bb4a93efde1d2b8a7967ec431f6d00aa9c8ebfa5149b8ffb1a3eadbf23d9",
     "mcp-manifest.json": "9ee81858dbb77fe0698751007d99ea822b8e6a72700fca35d30d1b1c794be594",
     "mcp-preparation.test.py": "6cac00c59fd4a719cc2aba5222fb3468bb8fa3e33e35268e7320d191ff0047f4",
     "mcp-stdio.test.mjs": "cd213490be050c6f4af4cf36bfb537873f73a17beee1c6b89ac7d22a448c2270",
+    "native-grant-canary.mjs": "11b7c349fad8e9e37a09a0802667f0c51616b7965746401f66b62572960b3ce6",
     "native-profile-canary.mjs": "f33dbb82d24d65f801d17bdad7bab9b735572322d6adbbcd6803501db53ffaad",
     "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98",
     "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
@@ -28,7 +606,7 @@
     "stdio-fixture-server.mjs": "7e947f424918be0764aee1e3f7e449849b9ccb9bba0fa540447c7e6c0b9e0d58",
     "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
     "tsconfig.mcp.json": "a12bb6b96171409d82854d1e6f4d10fb9ec1640941032ffa7f68a641b2b52f6c",
-    "verify_mcp.py": "24c09a27d1ea2066b767cd28303cd3ba30f3628a1db8042e28133407c56754ac",
+    "verify_mcp.py": "904f515503694250cee62a83009a057d07be80d81dbafe08bb1c8d299f43f379",
     "vitest.mcp.config.mjs": "0966dae260c8c320381c36c5dd6af5f9bc626bb1d6459655abb9d9b02f14db1a"
   },
   "installed": false,
@@ -47,6 +625,40 @@
   "model_requests": 0,
   "mutations": {
     "connection": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
       "exit_code": 1,
       "failed_cases": [
         "empty admitted tool set does not expose other context channels",
@@ -57,12 +669,46 @@
       "log_sha256": "2571499f4a902945ae391396552bebf56fbbd50dd2e8fed214908bb063a7f539",
       "mutant_sha256": "b30dcd38fa6c2d4adb75f4d4a11512fd62ae628e62295da6ddb805ddb09aadf3",
       "passed": 29,
-      "report_sha256": "4e5ef5e5af00ef99aaefa369bb2982bc9e07ac0fe9eadff11fb05411fc854ff6",
-      "seconds": 1.855,
+      "report_sha256": "d22da1841adbaba4a77ad6567b9f4771f48bb335f1a43256b91314e551855718",
+      "seconds": 1.916,
       "stderr_empty": true,
       "tests": 32
     },
     "context": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
       "exit_code": 1,
       "failed_cases": [
         "empty admitted tool set does not expose other context channels",
@@ -75,12 +721,46 @@
       "log_sha256": "c5752cd538de9a583100ad6b55da5bfe2361b925557c4c1e6508cabf4155e19b",
       "mutant_sha256": "a291bc888d54e022e6adeee051b6519f12715ff3dda8969f1c4c9d7b31d1f7b2",
       "passed": 27,
-      "report_sha256": "a0b8b80fbe8ed25efed712f9234503b0ad50c76a416ebf851e682a6865deb6e6",
-      "seconds": 0.897,
+      "report_sha256": "73d0dce8797d6c16344b8a0c077369fc8de4a0a39a9a9ab41f452d1018e86153",
+      "seconds": 0.969,
       "stderr_empty": true,
       "tests": 32
     },
     "dispatch": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
       "exit_code": 1,
       "failed_cases": [
         "captures the selected guard instead of a mutable grant-property lookup",
@@ -93,12 +773,46 @@
       "log_sha256": "e5b3dea08b2e69d112ace974d0bfcc968dbad056c6ffd1d43b97473a8c4add88",
       "mutant_sha256": "1d3e3006ee9637a924a085e2cbf6851cec98cbeeecc0fc194a957109f246f32b",
       "passed": 27,
-      "report_sha256": "bbfb3f496f4388906b365bad1d4466bbcd250022500eedd4f081bd4af9fa8e94",
-      "seconds": 0.935,
+      "report_sha256": "d39f5f317301a2574a498cc1f592d465fae566c78cb5e22ac8752ebbdb02981a",
+      "seconds": 0.954,
       "stderr_empty": true,
       "tests": 32
     },
     "filter": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
       "exit_code": 1,
       "failed_cases": [
         "allows an explicitly empty selection without inventing a required capability",
@@ -112,23 +826,24 @@
       "log_sha256": "fd19eb186471bd36c2fb986591822192cc17b54d2948c01b307c2d1a442cfe16",
       "mutant_sha256": "e3ab861c002909128d7bcd143eec8ce351c2da0179ed448bfc265c245a76841e",
       "passed": 26,
-      "report_sha256": "67b07bc536ea8a2aa85f4e728e835c8ae1b44d69865bd5ec49503b1f0605371d",
-      "seconds": 0.911,
+      "report_sha256": "c58702b47474ea445f2e4a7fc7cf0f23077412b73c0e083fde9c0bad134fc638",
+      "seconds": 0.94,
       "stderr_empty": true,
       "tests": 32
     }
   },
   "native_artifact": {
     "build": {
-      "artifact": "profile-build-ystdp9/index.mjs",
-      "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+      "artifact": "profile-build-QbGe3m/index.mjs",
+      "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
       "compiler": "8.3.1",
       "files": {
-        "index.mjs": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb"
+        "index.mjs": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4"
       },
       "input_sha256": {
         "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
-        "../../../integrations/acp_worker/dsh_tool_profile.mjs": "ea2b80dd28fe6b22584919d02b7998f4c356efaafaf34dc7aad1fa4f071bb57e",
+        "../../../integrations/acp_worker/dsh_mcp_grant.mjs": "34f9a6f17cbf4fdea2c551c4fdd85b10748e9f84b1af5d35ba577b566ba4a40b",
+        "../../../integrations/acp_worker/dsh_tool_profile.mjs": "3fb96c8cde4e3b85dbca888b7d986480f535f3707821d19ec0885a08ef79e59c",
         ".cache/donor/index.ts": "72bf073000032fa129dc3ee3521c8848e489449b42c07ddc8bbd7b93fc99ed08",
         ".cache/donor/invariant.ts": "919744eaa6c1e6489a68a4ea3be9831e1e6c576a4a2fce96801d0a3a33ac2a79",
         ".cache/donor/json-schema.ts": "13deffdfd34539e23706b0fde235991da45b2f07c5c18dbbf3ca734c1da0c788",
@@ -144,7 +859,7 @@
         ".cache/mcp-donor/server-context.ts": "02ca9fe759891788572385a00f0cc7b6e92d6e98e103c1d00dd99ccec0d6319a",
         ".cache/mcp-donor/tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
         ".cache/mcp-donor/transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f",
-        "build-profile.mjs": "d966267f285463a2d6a9a7c10391c175848523df0feb27f16ab91c77a3dc3132",
+        "build-profile.mjs": "7ddf16f0cb57fbb354e032ab3097294503c5cc909f80fcdb9f779562e614324b",
         "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98"
       },
       "installed": false,
@@ -155,28 +870,28 @@
     },
     "build_run": {
       "exit_code": 0,
-      "log_sha256": "8f2ff88007a7194fe5211e71b75a44acba8d8f07caf61f117924fbe6908d7ed0",
+      "log_sha256": "400495b38f5ba8cd244045df6885d6a5aeec5574161430a8126b10e5b0595a08",
       "stderr_empty": true
     },
     "rebuild_run": {
       "exit_code": 0,
-      "log_sha256": "6f0814e0b834800a95f0838ce35ae73de35b485bad90960d0026494e6e38d818",
+      "log_sha256": "59c652bda1f254af9cc6f9ec8ec9770a7f5594b5a467d6079b2b840aa3557ac7",
       "stderr_empty": true
     },
     "repeat_build_identical": true,
     "scenarios": {
       "disabled-core": {
         "exit_code": 0,
-        "log_sha256": "00b89ab6711b6b481cf228f3694c6a9f030c87bc5a777003b924b8a09c381c38",
+        "log_sha256": "746bb7028ffd4e17bdfadfcf65d9c52d5c3efcbb9af64499f380864bb3e692a9",
         "observation": {
-          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
           "fixture_children_absent": true,
           "fixture_pids": [],
           "inputs_unchanged": true,
           "model_requests": 0,
-          "node": "v26.8.2",
-          "nonce": "cd1f9162-7094-4e68-91a7-44fb3864e406",
-          "parent_pid": 74945,
+          "node": "v26.5.0",
+          "nonce": "0e7830d3-a500-4727-8485-e5b80e3d5485",
+          "parent_pid": 62897,
           "read_calls": 0,
           "refusal": {
             "code": "DSH_DISPATCH_PREFLIGHT_REFUSED",
@@ -188,24 +903,24 @@
           "search_calls": 0,
           "success": true
         },
-        "receipt_sha256": "9a0513f83b94bc4d1a6a044cb0570601aad664f1ecf34c7a5c2962b2da48851a",
+        "receipt_sha256": "70327a49981705e82cd320ca3972ce6f846eb7ca3622f51c1eba62e21e64ca1c",
         "stderr_empty": true
       },
       "normal": {
         "exit_code": 0,
-        "log_sha256": "4d959fbac42c8339c75f367b98e2c10c9d4926adc127125f5ecceb74c0611c8c",
+        "log_sha256": "04e749dd96382132ea813b457dcb79cefb83595f0c11ff742eca6a1de9239234",
         "observation": {
-          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
           "fixture_children_absent": true,
           "fixture_pids": [
-            74929,
-            74939
+            62895,
+            62896
           ],
           "inputs_unchanged": true,
           "model_requests": 0,
-          "node": "v26.8.2",
-          "nonce": "f585e728-6f91-488f-8a45-f4605c4428fc",
-          "parent_pid": 74928,
+          "node": "v26.5.0",
+          "nonce": "d8f44bf2-9ece-4bc1-a0a2-7213dec94fad",
+          "parent_pid": 62890,
           "read_calls": 1,
           "scenario": "normal",
           "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
@@ -214,44 +929,44 @@
           "workload": {
             "read": {
               "file": "memo.txt",
-              "nonce": "f585e728-6f91-488f-8a45-f4605c4428fc",
-              "pid": 74939,
-              "sha256": "7f8fd663efbb77f7eff7c8c9339864b5b296ea9d010eb64d6487382804e8a649",
-              "text": "artifact\nneedle f585e728-6f91-488f-8a45-f4605c4428fc\n"
+              "nonce": "d8f44bf2-9ece-4bc1-a0a2-7213dec94fad",
+              "pid": 62896,
+              "sha256": "0ae753e13f2d904c3c30af64ce3b9232bb5c9c3cb487db2e8f3d535f1c2526ca",
+              "text": "artifact\nneedle d8f44bf2-9ece-4bc1-a0a2-7213dec94fad\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle f585e728-6f91-488f-8a45-f4605c4428fc"
+                  "text": "needle d8f44bf2-9ece-4bc1-a0a2-7213dec94fad"
                 },
                 {
                   "file": "signals.txt",
                   "line": 1,
-                  "text": "needle f585e728-6f91-488f-8a45-f4605c4428fc"
+                  "text": "needle d8f44bf2-9ece-4bc1-a0a2-7213dec94fad"
                 }
               ],
-              "nonce": "f585e728-6f91-488f-8a45-f4605c4428fc",
-              "pid": 74939
+              "nonce": "d8f44bf2-9ece-4bc1-a0a2-7213dec94fad",
+              "pid": 62896
             }
           }
         },
-        "receipt_sha256": "829a02c9c4a5e105c0de95b87fed00eb949f8ccbc30c762db2fd2a87847fd134",
+        "receipt_sha256": "c5c06e6f8cadcc79c519b5f39b7f4708747aa9216327662c709cc4a4c5668078",
         "stderr_empty": true
       },
       "pre-aborted": {
         "exit_code": 0,
-        "log_sha256": "668dcbb32f8cbe953874dede55a117d7f99dc37ff82fe7bc4f6bf479b2c9d304",
+        "log_sha256": "01650c8bcaffc202f82262274bb4bdf03454bfc2717a2dd38823878180a96360",
         "observation": {
-          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
           "fixture_children_absent": true,
           "fixture_pids": [],
           "inputs_unchanged": true,
           "model_requests": 0,
-          "node": "v26.8.2",
-          "nonce": "e4e054a4-f5da-44b0-ada1-930372bca6ff",
-          "parent_pid": 74961,
+          "node": "v26.5.0",
+          "nonce": "52806c6e-1c3d-4dbd-9fa9-c6d11755a3c9",
+          "parent_pid": 62905,
           "read_calls": 0,
           "refusal": {
             "code": 20,
@@ -263,24 +978,24 @@
           "search_calls": 0,
           "success": true
         },
-        "receipt_sha256": "41a8ff1b3f7d2415913f55238aed5df55d2ac65f52212cf2f76e4d1723de9f4d",
+        "receipt_sha256": "5ec7533439725b77cdef8826b6e5f61333196c4afdbf91c876966bd1bcb27580",
         "stderr_empty": true
       },
       "startup-refused": {
         "exit_code": 0,
-        "log_sha256": "aa77d892b6e9cf7eb53b2ae948814dccd5596ee74f43cc579b2d5ee91e17f59a",
+        "log_sha256": "1870349819da6261f030a0091887f6d84813ba963f20f2287aa27d552a0aa3d3",
         "observation": {
-          "artifact_sha256": "d00d3c33e622c004d68eee87f4e49818b48fd6260b4454eb04ec753693ed4ccb",
+          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
           "fixture_children_absent": true,
           "fixture_pids": [
-            74953,
-            74957
+            62899,
+            62900
           ],
           "inputs_unchanged": true,
           "model_requests": 0,
-          "node": "v26.8.2",
-          "nonce": "0b4373e5-d7c1-4cc3-b511-cf317a4916ae",
-          "parent_pid": 74949,
+          "node": "v26.5.0",
+          "nonce": "e944166c-cf32-4c0c-b5ed-441c6044e16f",
+          "parent_pid": 62898,
           "read_calls": 0,
           "refusal": {
             "code": null,
@@ -292,15 +1007,15 @@
           "search_calls": 0,
           "success": true
         },
-        "receipt_sha256": "45d947544aed6c1cff2b18293afa64ace692d4b8c8028e2f8f92b1bf2c0c80af",
+        "receipt_sha256": "2b29441bc454574a6a530d5c9b13842f6937f9760046f947632645c218baabfe",
         "stderr_empty": true
       }
     },
     "scope": "Actual built module imported by plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP"
   },
   "network_transport": "OFFICIAL_IN_MEMORY_MCP_AND_REAL_LOCAL_STDIO",
-  "node": "v26.8.2",
-  "node_sha256": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+  "node": "v26.5.0",
+  "node_sha256": "70851490e028b3d699a8d6d4e1de909af2a989359ae807974c92af9c6580a8e8",
   "observations": [
     {
       "calls": {
@@ -316,12 +1031,12 @@
       "result": {
         "content": [
           {
-            "text": "fe2ddbb8-7306-4d11-b444-f4e641f63802",
+            "text": "68e8654b-241f-4468-b0a7-10fe274b9da9",
             "type": "text"
           }
         ]
       },
-      "sourceNonce": "fe2ddbb8-7306-4d11-b444-f4e641f63802"
+      "sourceNonce": "68e8654b-241f-4468-b0a7-10fe274b9da9"
     },
     {
       "calls": 1,
@@ -331,175 +1046,30 @@
     }
   ],
   "platform": "Darwin",
-  "postrun_census": {
-    "live": [],
-    "observed_at": "2026-09-29T10:57:53.487767+00:00",
-    "scope": "only recorded owned fixture probe/session processes, not arbitrary descendants or fleet health",
-    "unique_pids_checked": 182
-  },
   "preparation": {
     "exit_code": 0,
-    "log_sha256": "f892db62adefc727d7e04e7affbac6a49504b8788e6d8e2691bd0c4e44e87d89",
+    "log_sha256": "40517f57911894bde6f85264ae1402befd4dcdc67652a2dc316fe74c3cc4f333",
     "passed": 6,
     "tests": 6
-  },
-  "repository_test": {
-    "command": "/opt/homebrew/bin/python3 -B -m pytest -q",
-    "diagnostic": "No module named pytest",
-    "exit_code": 1,
-    "log_sha256": "c99d342a1664b93a03868ad56a22451965948da811503ce3b0d29ae5123b9dbb",
-    "result": "NOT_RUN_NO_PYTEST"
   },
   "schema": "mastermind.dsh_mcp_admission_verification.v1",
   "scope": "Real MCP SDK protocol and donor bridge; no model/installed-worker/Executive-parent proof",
   "stdio": {
     "environment_mutant": {
       "all_observed_children_settled": true,
-      "environment_proof": [
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": "fixture-ambient",
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": "fixture-ambient",
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": "--no-warnings"
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": "--no-warnings"
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": "fixture-ambient",
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": "fixture-ambient",
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": false
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        }
+      "cases": [
+        "real stdio subprocess reads and searches two synthetic files through admitted tools",
+        "host-admitted stdio excludes unapproved ambient configuration",
+        "host-admitted stdio excludes ambient Node startup options",
+        "explicit private home and cwd reach the actual child",
+        "legacy transport retains its existing scrubbed ambient behavior",
+        "revoked live grant prevents an actual child request",
+        "instruction and resource channels remain closed over real stdio",
+        "startup discovery rejection settles the real child",
+        "lost response never resends the already-read request",
+        "in-flight cancellation reaches the real server and settles without a second call",
+        "the synthetic fixture never reads a caller-selected outside path",
+        "SDK negotiation probe is reaped before the useful session is ready"
       ],
       "exit_code": 1,
       "failed_cases": [
@@ -509,488 +1079,964 @@
       "killed": true,
       "log_sha256": "d160a48e802cf8715a9688bc8a86f5c54f20c62a5f0b59ea0a1ea3663004e602",
       "mutant_sha256": "83520c0cb0e6dde5f96072feb9b729308485300b2a47b2e75470288f4bfb67e9",
-      "observations_sha256": "a991b8f73cb885ef6add35f83ccce7cf47701b48894a0cf679ecec470d20ecea",
-      "passed": 10,
-      "process_summary": [
+      "observations": [
         {
           "childAbsentAfterDispose": true,
           "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            76539,
-            76585
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            76633,
-            76677
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            76725,
-            76792
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            76836,
-            76874
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            76918,
-            76957
-          ],
-          "strict": false
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            77002,
-            77040
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            77080,
-            77115
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "reject-list",
-          "pids": [
-            77161,
-            77198
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "lost-reply",
-          "pids": [
-            77235,
-            77274
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "wait-cancel",
-          "pids": [
-            77315,
-            77350
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            77399,
-            77440
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            77490,
-            77528
-          ],
-          "strict": true
-        }
-      ],
-      "report_sha256": "488e777da49ba903fa07ef830175f0f6cdf22545964ca91f9ab0aea0d68e3f36",
-      "seconds": 3.463,
-      "stderr_empty": true,
-      "tests": 12,
-      "workload_result": {
-        "read": {
-          "file": "memo.txt",
-          "nonce": "0d5d2015-b47c-44bc-92bd-01656ca109ed",
-          "pid": 76585,
-          "sha256": "9069d3f63071c8b62a5970d4a7a85d24a035f51ff8e0fe658a7453a191cc1381",
-          "text": "Research fixture\nneedle 0d5d2015-b47c-44bc-92bd-01656ca109ed\n"
-        },
-        "search": {
-          "matches": [
+          "events": [
             {
-              "file": "memo.txt",
-              "line": 2,
-              "text": "needle 0d5d2015-b47c-44bc-92bd-01656ca109ed"
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-md0ceF",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-md0ceF/home",
+              "nodeOptions": null,
+              "nonce": "17fc0513-9e9f-48aa-9181-3658c65abe01",
+              "pid": 63297
             },
             {
-              "file": "signals.txt",
-              "line": 3,
-              "text": "needle 0d5d2015-b47c-44bc-92bd-01656ca109ed"
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-md0ceF",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-md0ceF/home",
+              "nodeOptions": null,
+              "nonce": "17fc0513-9e9f-48aa-9181-3658c65abe01",
+              "pid": 63298
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "17fc0513-9e9f-48aa-9181-3658c65abe01",
+              "pid": 63298
+            },
+            {
+              "event": "search",
+              "nonce": "17fc0513-9e9f-48aa-9181-3658c65abe01",
+              "pid": 63298,
+              "query": "17fc0513-9e9f-48aa-9181-3658c65abe01"
             }
           ],
-          "nonce": "0d5d2015-b47c-44bc-92bd-01656ca109ed",
-          "pid": 76585
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "17fc0513-9e9f-48aa-9181-3658c65abe01",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-md0ceF",
+          "strict": true,
+          "workloadEvidence": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "17fc0513-9e9f-48aa-9181-3658c65abe01",
+              "pid": 63298,
+              "sha256": "f9e102bfdd76505e4c19e770d218f2e87971ef4b8a90845f352a3eed824d2687",
+              "text": "Research fixture\nneedle 17fc0513-9e9f-48aa-9181-3658c65abe01\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 17fc0513-9e9f-48aa-9181-3658c65abe01"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 3,
+                  "text": "needle 17fc0513-9e9f-48aa-9181-3658c65abe01"
+                }
+              ],
+              "nonce": "17fc0513-9e9f-48aa-9181-3658c65abe01",
+              "pid": 63298
+            }
+          }
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XezeK7",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XezeK7/home",
+              "nodeOptions": null,
+              "nonce": "d2219b9b-b428-4c8e-99d3-a6d385b7c66a",
+              "pid": 63299
+            },
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XezeK7",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XezeK7/home",
+              "nodeOptions": null,
+              "nonce": "d2219b9b-b428-4c8e-99d3-a6d385b7c66a",
+              "pid": 63300
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "d2219b9b-b428-4c8e-99d3-a6d385b7c66a",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XezeK7",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XgLB2h",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XgLB2h/home",
+              "nodeOptions": "--no-warnings",
+              "nonce": "4c1c15d7-15e4-49d8-bc0f-d2adbd5dcb27",
+              "pid": 63301
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XgLB2h",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XgLB2h/home",
+              "nodeOptions": "--no-warnings",
+              "nonce": "4c1c15d7-15e4-49d8-bc0f-d2adbd5dcb27",
+              "pid": 63302
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "4c1c15d7-15e4-49d8-bc0f-d2adbd5dcb27",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-XgLB2h",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ImElXH",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ImElXH/home",
+              "nodeOptions": null,
+              "nonce": "6d5d0d5c-a3fc-43c8-be56-6e12e1085765",
+              "pid": 63303
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ImElXH",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ImElXH/home",
+              "nodeOptions": null,
+              "nonce": "6d5d0d5c-a3fc-43c8-be56-6e12e1085765",
+              "pid": 63304
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "6d5d0d5c-a3fc-43c8-be56-6e12e1085765",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ImElXH",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Ker4tK",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Ker4tK/home",
+              "nodeOptions": null,
+              "nonce": "daf1dcab-7490-462d-8813-80cbeb88c91d",
+              "pid": 63309
+            },
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Ker4tK",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Ker4tK/home",
+              "nodeOptions": null,
+              "nonce": "daf1dcab-7490-462d-8813-80cbeb88c91d",
+              "pid": 63312
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "daf1dcab-7490-462d-8813-80cbeb88c91d",
+              "pid": 63312
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "daf1dcab-7490-462d-8813-80cbeb88c91d",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Ker4tK",
+          "strict": false,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-faK4fE",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-faK4fE/home",
+              "nodeOptions": null,
+              "nonce": "5173c001-8f70-4a72-859f-f92278ef6ef6",
+              "pid": 63314
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-faK4fE",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-faK4fE/home",
+              "nodeOptions": null,
+              "nonce": "5173c001-8f70-4a72-859f-f92278ef6ef6",
+              "pid": 63319
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "5173c001-8f70-4a72-859f-f92278ef6ef6",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-faK4fE",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TpkYOk",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TpkYOk/home",
+              "nodeOptions": null,
+              "nonce": "9dfed235-18c7-42eb-8372-1da1b96c1cd8",
+              "pid": 63329
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TpkYOk",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TpkYOk/home",
+              "nodeOptions": null,
+              "nonce": "9dfed235-18c7-42eb-8372-1da1b96c1cd8",
+              "pid": 63350
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "9dfed235-18c7-42eb-8372-1da1b96c1cd8",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TpkYOk",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-FeuAn9",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-FeuAn9/home",
+              "nodeOptions": null,
+              "nonce": "457375e2-ca96-4f7e-9def-f592bdc5a2e4",
+              "pid": 63355
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-FeuAn9",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-FeuAn9/home",
+              "nodeOptions": null,
+              "nonce": "457375e2-ca96-4f7e-9def-f592bdc5a2e4",
+              "pid": 63359
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "reject-list",
+          "nonce": "457375e2-ca96-4f7e-9def-f592bdc5a2e4",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-FeuAn9",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Y65xUE",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Y65xUE/home",
+              "nodeOptions": null,
+              "nonce": "3d4432ee-b7f4-4ddf-af72-f43e039a4e9a",
+              "pid": 63364
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Y65xUE",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Y65xUE/home",
+              "nodeOptions": null,
+              "nonce": "3d4432ee-b7f4-4ddf-af72-f43e039a4e9a",
+              "pid": 63372
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "3d4432ee-b7f4-4ddf-af72-f43e039a4e9a",
+              "pid": 63372
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "lost-reply",
+          "nonce": "3d4432ee-b7f4-4ddf-af72-f43e039a4e9a",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Y65xUE",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-kO0MWZ",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-kO0MWZ/home",
+              "nodeOptions": null,
+              "nonce": "8e7be20b-e135-4823-905a-d529b0934ac6",
+              "pid": 63373
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-kO0MWZ",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-kO0MWZ/home",
+              "nodeOptions": null,
+              "nonce": "8e7be20b-e135-4823-905a-d529b0934ac6",
+              "pid": 63376
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "8e7be20b-e135-4823-905a-d529b0934ac6",
+              "pid": 63376
+            },
+            {
+              "event": "cancelled",
+              "nonce": "8e7be20b-e135-4823-905a-d529b0934ac6",
+              "pid": 63376
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "wait-cancel",
+          "nonce": "8e7be20b-e135-4823-905a-d529b0934ac6",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-kO0MWZ",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P1mJEK",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P1mJEK/home",
+              "nodeOptions": null,
+              "nonce": "1676c223-e9f0-42cb-a09b-b1c0b27d90b5",
+              "pid": 63382
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P1mJEK",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P1mJEK/home",
+              "nodeOptions": null,
+              "nonce": "1676c223-e9f0-42cb-a09b-b1c0b27d90b5",
+              "pid": 63383
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "1676c223-e9f0-42cb-a09b-b1c0b27d90b5",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P1mJEK",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Utyi2A",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Utyi2A/home",
+              "nodeOptions": null,
+              "nonce": "df817e18-8405-40ce-a11d-ae115479d8fe",
+              "pid": 63396
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Utyi2A",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Utyi2A/home",
+              "nodeOptions": null,
+              "nonce": "df817e18-8405-40ce-a11d-ae115479d8fe",
+              "pid": 63403
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "df817e18-8405-40ce-a11d-ae115479d8fe",
+              "pid": 63403
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "df817e18-8405-40ce-a11d-ae115479d8fe",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Utyi2A",
+          "strict": true,
+          "workloadEvidence": {}
         }
-      }
+      ],
+      "observations_sha256": "c43eee0e3aa6c1be04a8418e0b530aa523000bc3c1983db3cddd9c48c572d10b",
+      "passed": 10,
+      "report_sha256": "ea6e94ced86b06416dc6d1ba2817d30724f4926749929bbe336e41db655bbe69",
+      "seconds": 3.573,
+      "stderr_empty": true,
+      "tests": 12
     },
     "patched": {
       "all_observed_children_settled": true,
-      "environment_proof": [
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": "fixture-ambient",
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": "fixture-ambient",
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": false
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        },
-        {
-          "environment": [
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            },
-            {
-              "ambient": null,
-              "explicit": "fixture-explicit",
-              "nodeOptions": null
-            }
-          ],
-          "mode": "normal",
-          "strict": true
-        }
+      "cases": [
+        "real stdio subprocess reads and searches two synthetic files through admitted tools",
+        "host-admitted stdio excludes unapproved ambient configuration",
+        "host-admitted stdio excludes ambient Node startup options",
+        "explicit private home and cwd reach the actual child",
+        "legacy transport retains its existing scrubbed ambient behavior",
+        "revoked live grant prevents an actual child request",
+        "instruction and resource channels remain closed over real stdio",
+        "startup discovery rejection settles the real child",
+        "lost response never resends the already-read request",
+        "in-flight cancellation reaches the real server and settles without a second call",
+        "the synthetic fixture never reads a caller-selected outside path",
+        "SDK negotiation probe is reaped before the useful session is ready"
       ],
       "exit_code": 0,
       "failed_cases": [],
       "log_sha256": "331f129c70ddecedf94a0061c250d85440fdbc3f4b797468bd9088ddbc86b563",
-      "observations_sha256": "f9e53e39df76944b7fb4fb052396ccc249cfd50d8a126ac81130d3c621efd211",
-      "passed": 12,
-      "process_summary": [
+      "observations": [
         {
           "childAbsentAfterDispose": true,
           "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            75288,
-            75355
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            75409,
-            75445
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            75487,
-            75524
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            75562,
-            75600
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            75642,
-            75685
-          ],
-          "strict": false
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            75728,
-            75767
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            75819,
-            75866
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "reject-list",
-          "pids": [
-            75906,
-            75944
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "lost-reply",
-          "pids": [
-            75985,
-            76025
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "wait-cancel",
-          "pids": [
-            76074,
-            76113
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            76174,
-            76214
-          ],
-          "strict": true
-        },
-        {
-          "childAbsentAfterDispose": true,
-          "childCount": 2,
-          "inputsUnchanged": true,
-          "mode": "normal",
-          "pids": [
-            76260,
-            76311
-          ],
-          "strict": true
-        }
-      ],
-      "report_sha256": "ed6283fcde19f2238561f16232e3367ca5ef9b147b74a4c4ce5076185c13fd51",
-      "seconds": 3.564,
-      "stderr_empty": true,
-      "tests": 12,
-      "workload_result": {
-        "read": {
-          "file": "memo.txt",
-          "nonce": "36abd20c-745d-4d90-bed4-25469260e585",
-          "pid": 75355,
-          "sha256": "b7e8e900999a61e9902dd87b4787223122a9aa10bcc9fa117efa5c61aa0b6864",
-          "text": "Research fixture\nneedle 36abd20c-745d-4d90-bed4-25469260e585\n"
-        },
-        "search": {
-          "matches": [
+          "events": [
             {
-              "file": "memo.txt",
-              "line": 2,
-              "text": "needle 36abd20c-745d-4d90-bed4-25469260e585"
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-H2hfxV",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-H2hfxV/home",
+              "nodeOptions": null,
+              "nonce": "c1e20467-6178-4af1-8b6e-c174e3e0746c",
+              "pid": 63197
             },
             {
-              "file": "signals.txt",
-              "line": 3,
-              "text": "needle 36abd20c-745d-4d90-bed4-25469260e585"
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-H2hfxV",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-H2hfxV/home",
+              "nodeOptions": null,
+              "nonce": "c1e20467-6178-4af1-8b6e-c174e3e0746c",
+              "pid": 63198
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "c1e20467-6178-4af1-8b6e-c174e3e0746c",
+              "pid": 63198
+            },
+            {
+              "event": "search",
+              "nonce": "c1e20467-6178-4af1-8b6e-c174e3e0746c",
+              "pid": 63198,
+              "query": "c1e20467-6178-4af1-8b6e-c174e3e0746c"
             }
           ],
-          "nonce": "36abd20c-745d-4d90-bed4-25469260e585",
-          "pid": 75355
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "c1e20467-6178-4af1-8b6e-c174e3e0746c",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-H2hfxV",
+          "strict": true,
+          "workloadEvidence": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "c1e20467-6178-4af1-8b6e-c174e3e0746c",
+              "pid": 63198,
+              "sha256": "139413a214ebad1201e30bb55ee0e8aaadd03310a9aee9c1334c0ac3eff73353",
+              "text": "Research fixture\nneedle c1e20467-6178-4af1-8b6e-c174e3e0746c\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle c1e20467-6178-4af1-8b6e-c174e3e0746c"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 3,
+                  "text": "needle c1e20467-6178-4af1-8b6e-c174e3e0746c"
+                }
+              ],
+              "nonce": "c1e20467-6178-4af1-8b6e-c174e3e0746c",
+              "pid": 63198
+            }
+          }
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-RO7SzX",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-RO7SzX/home",
+              "nodeOptions": null,
+              "nonce": "6d06c15d-ddb6-4256-956f-15e8ef174bfa",
+              "pid": 63211
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-RO7SzX",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-RO7SzX/home",
+              "nodeOptions": null,
+              "nonce": "6d06c15d-ddb6-4256-956f-15e8ef174bfa",
+              "pid": 63222
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "6d06c15d-ddb6-4256-956f-15e8ef174bfa",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-RO7SzX",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-bhxYub",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-bhxYub/home",
+              "nodeOptions": null,
+              "nonce": "c9fdf5e8-f8bf-4077-a9dd-60f8675388fc",
+              "pid": 63223
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-bhxYub",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-bhxYub/home",
+              "nodeOptions": null,
+              "nonce": "c9fdf5e8-f8bf-4077-a9dd-60f8675388fc",
+              "pid": 63228
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "c9fdf5e8-f8bf-4077-a9dd-60f8675388fc",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-bhxYub",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oT6pIl",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oT6pIl/home",
+              "nodeOptions": null,
+              "nonce": "7fd3f899-5436-4fea-b85d-561e76d88949",
+              "pid": 63229
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oT6pIl",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oT6pIl/home",
+              "nodeOptions": null,
+              "nonce": "7fd3f899-5436-4fea-b85d-561e76d88949",
+              "pid": 63230
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "7fd3f899-5436-4fea-b85d-561e76d88949",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oT6pIl",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sMXdjp",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sMXdjp/home",
+              "nodeOptions": null,
+              "nonce": "605edc76-3ba2-4f68-b16d-dd759bfa204b",
+              "pid": 63231
+            },
+            {
+              "ambient": "fixture-ambient",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sMXdjp",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sMXdjp/home",
+              "nodeOptions": null,
+              "nonce": "605edc76-3ba2-4f68-b16d-dd759bfa204b",
+              "pid": 63232
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "605edc76-3ba2-4f68-b16d-dd759bfa204b",
+              "pid": 63232
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "605edc76-3ba2-4f68-b16d-dd759bfa204b",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sMXdjp",
+          "strict": false,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-M0bWzc",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-M0bWzc/home",
+              "nodeOptions": null,
+              "nonce": "bf58e2b0-c4d9-411b-be24-b4596dff286b",
+              "pid": 63234
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-M0bWzc",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-M0bWzc/home",
+              "nodeOptions": null,
+              "nonce": "bf58e2b0-c4d9-411b-be24-b4596dff286b",
+              "pid": 63235
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "bf58e2b0-c4d9-411b-be24-b4596dff286b",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-M0bWzc",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TjZUQC",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TjZUQC/home",
+              "nodeOptions": null,
+              "nonce": "a129345a-49a9-4f53-b5c0-ae8508bfb47e",
+              "pid": 63239
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TjZUQC",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TjZUQC/home",
+              "nodeOptions": null,
+              "nonce": "a129345a-49a9-4f53-b5c0-ae8508bfb47e",
+              "pid": 63242
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "a129345a-49a9-4f53-b5c0-ae8508bfb47e",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TjZUQC",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-p4Jk7t",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-p4Jk7t/home",
+              "nodeOptions": null,
+              "nonce": "3801d1d4-314b-459f-af5f-067c3e63af0d",
+              "pid": 63243
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-p4Jk7t",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-p4Jk7t/home",
+              "nodeOptions": null,
+              "nonce": "3801d1d4-314b-459f-af5f-067c3e63af0d",
+              "pid": 63246
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "reject-list",
+          "nonce": "3801d1d4-314b-459f-af5f-067c3e63af0d",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-p4Jk7t",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Sq0EVY",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Sq0EVY/home",
+              "nodeOptions": null,
+              "nonce": "9e4fc554-9d8b-469f-b3bf-0ca690e7d180",
+              "pid": 63268
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Sq0EVY",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Sq0EVY/home",
+              "nodeOptions": null,
+              "nonce": "9e4fc554-9d8b-469f-b3bf-0ca690e7d180",
+              "pid": 63275
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "9e4fc554-9d8b-469f-b3bf-0ca690e7d180",
+              "pid": 63275
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "lost-reply",
+          "nonce": "9e4fc554-9d8b-469f-b3bf-0ca690e7d180",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Sq0EVY",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Qy6NsI",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Qy6NsI/home",
+              "nodeOptions": null,
+              "nonce": "40d832e0-3616-4984-9b75-03bb838b1711",
+              "pid": 63278
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Qy6NsI",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Qy6NsI/home",
+              "nodeOptions": null,
+              "nonce": "40d832e0-3616-4984-9b75-03bb838b1711",
+              "pid": 63279
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "40d832e0-3616-4984-9b75-03bb838b1711",
+              "pid": 63279
+            },
+            {
+              "event": "cancelled",
+              "nonce": "40d832e0-3616-4984-9b75-03bb838b1711",
+              "pid": 63279
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "wait-cancel",
+          "nonce": "40d832e0-3616-4984-9b75-03bb838b1711",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Qy6NsI",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mweBF0",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mweBF0/home",
+              "nodeOptions": null,
+              "nonce": "723d0c29-e76b-42de-97f8-05443ca5ef74",
+              "pid": 63284
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mweBF0",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mweBF0/home",
+              "nodeOptions": null,
+              "nonce": "723d0c29-e76b-42de-97f8-05443ca5ef74",
+              "pid": 63285
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "723d0c29-e76b-42de-97f8-05443ca5ef74",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mweBF0",
+          "strict": true,
+          "workloadEvidence": {}
+        },
+        {
+          "childAbsentAfterDispose": true,
+          "childCount": 2,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TeAnTr",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TeAnTr/home",
+              "nodeOptions": null,
+              "nonce": "07fbb0bc-d037-42b4-9007-63959e7a0737",
+              "pid": 63287
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TeAnTr",
+              "event": "start",
+              "explicit": "fixture-explicit",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TeAnTr/home",
+              "nodeOptions": null,
+              "nonce": "07fbb0bc-d037-42b4-9007-63959e7a0737",
+              "pid": 63288
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "07fbb0bc-d037-42b4-9007-63959e7a0737",
+              "pid": 63288
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "07fbb0bc-d037-42b4-9007-63959e7a0737",
+          "preflightVerified": true,
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-TeAnTr",
+          "strict": true,
+          "workloadEvidence": {}
         }
-      }
+      ],
+      "observations_sha256": "374366f079095e2bdee946adb793847f6a372feab6b02297f131fb863a5727c2",
+      "passed": 12,
+      "report_sha256": "e6d14d030d2122dff3a75e45ad26644936c9eca16ad903af1af277b032961584",
+      "seconds": 3.691,
+      "stderr_empty": true,
+      "tests": 12
     },
     "scope": "Synthetic disk inputs, SDK probe plus session; no model, ACP parent or OS confinement",
     "sdk_executable_sha256": {
@@ -1039,12 +2085,46 @@
       "failed_cases": [],
       "log_sha256": "9f393e69c33f1e9a1b50c6d8c412df7f2d41a26a3df2f20d7503c23a3671fa5c",
       "passed": 32,
-      "report_sha256": "af4c630b763054b0948f5c2a439923950402412e923a9057633fb8b062301960",
-      "seconds": 0.976,
+      "report_sha256": "5278ac8505ef30deb06fad2c6b519343d446f18757235a9f9d6a49b583525d02",
+      "seconds": 0.946,
       "stderr_empty": true,
       "tests": 32
     },
     "pristine": {
+      "cases": [
+        "exposes only admitted tools and returns a real server nonce",
+        "passes immutable complete schemas and actual server identity to admission",
+        "refuses revoked permission after an asynchronous wrapper",
+        "refuses a disconnected connection generation before sending",
+        "retires the old generation when re-admission refuses schema drift",
+        "retires the old generation before a failing list request",
+        "retires the previous generation while refreshed discovery is pending",
+        "retained old definition cannot send after a successful replacement sync",
+        "refuses unlisted tool without exposure or execution",
+        "refuses duplicate selection without exposure or execution",
+        "refuses nonfunction guard without exposure or execution",
+        "refuses async admission without exposure or execution",
+        "requires live connection binding when admission is enabled",
+        "requires a literal true from the final execution guard",
+        "keeps a completed old-generation call attributable without resending it",
+        "preserves the unconfigured legacy bridge behavior",
+        "threads admission through the actual connection startup owner",
+        "rejects a server-identity mismatch before exposing tools",
+        "rejects public display names supplied as raw grant identities",
+        "captures the selected guard instead of a mutable grant-property lookup",
+        "rejects a generation that disconnects while discovery is suspended",
+        "checks currentness again after the admission callback",
+        "lets the owner reject changed output schemas from real tools/list",
+        "allows an explicitly empty selection without inventing a required capability",
+        "uses the same admission hook on actual SDK tool-list notifications",
+        "tool admission does not publish server instructions",
+        "tool admission does not authorize resources/list",
+        "tool admission does not authorize resources/templates/list",
+        "tool admission does not authorize resources/read",
+        "tool-only context restriction preserves a permitted real tool call",
+        "empty admitted tool set does not expose other context channels",
+        "legacy context publication and resource requests stay unchanged"
+      ],
       "exit_code": 1,
       "failed_cases": [
         "allows an explicitly empty selection without inventing a required capability",
@@ -1079,8 +2159,8 @@
       ],
       "log_sha256": "5862bd1eb21b809b078688edcef8ad1d3f62c13777ad031df7b1037c7fc8ea2c",
       "passed": 3,
-      "report_sha256": "31d7d7a1e650b28b7fd264f5efffa0e27be0fec161aba74282cb9f529ea9689c",
-      "seconds": 1.981,
+      "report_sha256": "f78c8122572bf872750da509372162ecde02801dcc5f24a036ddb4ef13801188",
+      "seconds": 1.943,
       "stderr_empty": true,
       "tests": 32
     }
@@ -1091,22 +2171,268 @@
   },
   "upstream": {
     "donor": {
+      "cases": [
+        "exports name, inject, and Config",
+        "Config schema rejects a missing serverName",
+        "Config schema rejects an invalid serverName",
+        "Config schema accepts a valid serverName",
+        "Config schema materializes reconnect defaults and merges partial overrides",
+        "Config schema rejects an invalid reconnect block",
+        "connects without attributed prompt text when server instructions are absent or blank (undefined)",
+        "connects without attributed prompt text when server instructions are absent or blank (\"\")",
+        "connects without attributed prompt text when server instructions are absent or blank (\" \\n\\t\")",
+        "connects, syncs tools under the namespace, and registers a notification handler",
+        "keeps the Cordis plugin loading until initial discovery publishes its tools",
+        "rejects a duplicate serverName at load and leaves the first instance intact",
+        "closes the transport when its owner unloads during initial connection",
+        "allows one serverName in each independent registration scope",
+        "releases the serverName reservation on dispose",
+        "scopes serverName reservations per app root",
+        "logs error and registers no tools when connect fails; dispose closes the client",
+        "rejects activation and still closes the client when startup failure is configured as fatal",
+        "rejects strict startup when the initial tool generation cannot be registered",
+        "preserves strict startup registration when list_changed arrives before connect resolves",
+        "re-syncs tools on ToolListChanged notification",
+        "keeps the previous generation when a re-sync fails",
+        "effect disposer unregisters the CURRENT generation and closes client",
+        "effect disposer handles client.close failure gracefully",
+        "uses streamable-http config path",
+        "counts the complete attributed UTF-8 text before publishing tools",
+        "joins clean names verbatim",
+        "replaces invalid characters and appends an identity hash",
+        "truncates over-long names and appends an identity hash",
+        "is deterministic and collision-free for distinct identities",
+        "registers tools under server-qualified public names",
+        "lets two servers publish the same raw name side by side",
+        "coexists with a native tool of the same raw name",
+        "rejects a tool list where one raw name appears twice",
+        "keeps the previous generation when the fetch phase fails",
+        "rolls back the whole generation when a foreign tool squats on the namespace",
+        "unregisters previous tools before re-syncing",
+        "validates outputs with the complete SDK definition after paginated discovery",
+        "calls MCP callTool with the RAW name and returns text content",
+        "sends the raw name for normalized public names",
+        "joins multiple text blocks with newline",
+        "preserves canonical MCP JSON while admitting an ordered mixed image result",
+        "keeps a valid raw image result while explicitly refusing it without a durable route",
+        "rejects a malformed image batch before storing any member",
+        "rejects unsupported media and base64 aliases as one atomic batch",
+        "does not admit images for a route without declared image input",
+        "refuses images when the exact route is missing, unverifiable, or canceled",
+        "refuses images when attachment storage rejects the admitted batch",
+        "reports attachment policy rejection as image admission rather than storage failure",
+        "keeps admitted images when post-execute shortens only the text",
+        "keeps a dispatch value replacement instead of prepared images",
+        "keeps a dispatch renderer replacement instead of prepared images",
+        "lets post-execute replacement win over a prepared image projection",
+        "lets post-execute value replacement and blocking discard prepared projections",
+        "marks primitive blocks from canonical-value replacement unsupported",
+        "validates structuredContent when the advertised output schema is supported",
+        "falls back to JsonValue for unsupported advertised output schemas",
+        "maps isError to an error result via throw",
+        "rejects tools that require task-based execution",
+        "passes abort signal to callTool",
+        "reports unsupported audio without claiming the raw block was discarded",
+        "reports unsupported embedded resources without discarding the raw block",
+        "preserves resource-link name and URI in the model projection",
+        "diagnoses an incomplete resource link from canonical-value replacement",
+        "diagnoses unknown content types from canonical-value replacement",
+        "diagnoses an image without media type from canonical-value replacement",
+        "diagnoses audio without media type from canonical-value replacement",
+        "diagnoses missing text from canonical-value replacement",
+        "handles empty content array",
+        "handles isError with non-text content (fallback error message)",
+        "uses tool description when provided",
+        "uses empty description when tool has no description",
+        "creates StdioClientTransport for stdio config",
+        "creates StreamableHTTPClientTransport for http config without headers",
+        "creates StreamableHTTPClientTransport for http config with headers",
+        "scrubs sensitive env vars and forwards the rest",
+        "merges explicit env on top of scrubbed ambient env",
+        "coerces null args to empty object for callTool",
+        "coerces primitive string args to empty object for callTool",
+        "keeps a resource-only server connected without requesting tools",
+        "keeps shared resource tools for a configured server without resource capability",
+        "reads resources and preserves explicit list and template cursors through the SDK",
+        "updates tools through the SDK modern list-change subscription",
+        "delivers caller cancellation to an executing modern tool",
+        "keeps instructions withdrawn when disposal interrupts initial discovery",
+        "rejects resource reads while a replacement connection is still negotiating",
+        "reconnects after a transport close, re-syncs tools through the new generation, and serves calls",
+        "stops at the failure cap, unregisters the tools, and reports final failure",
+        "gives up behind an in-flight re-sync and removes the generation it publishes",
+        "does not start a replacement until a failed generation reports that it closed",
+        "stops reconnecting when a failed generation never reports that it closed",
+        "suppresses retry reporting when disposal owns a pending connect rejection",
+        "stops reconnecting when disposal overlaps failed-generation cleanup",
+        "bounds disposal during connect when the transport never reports closure",
+        "bounds disposal during discovery when the transport never reports closure",
+        "closes a transport that attaches after disposal starts",
+        "discards a queued tool refresh when disposal starts before it runs",
+        "dispose during the backoff wait cancels the pending reconnect",
+        "a transport close after dispose schedules nothing",
+        "reconnect disabled keeps the registered tools and reports manual recovery",
+        "reconnect disabled after a failed initial connect reports no registered tools",
+        "an uptime past the stability window resets the attempt budget",
+        "a crash loop with briefly successful connects still exhausts the cap",
+        "a connect rejection racing its own transport close schedules exactly one retry per attempt",
+        "a transport that closes during a resolving connect registers nothing from the dead generation",
+        "dispose during an in-flight initial sync quiesces without leaking tools",
+        "a re-sync failing because dispose closed the transport stays silent",
+        "a stale notification handler from a replaced generation is ignored",
+        "resolves omission to the defaults, frozen",
+        "keeps explicit values",
+        "rejects unknown keys",
+        "rejects out-of-range delays",
+        "rejects an initial delay above the ceiling",
+        "rejects non-positive-integer attempt caps",
+        "apply fails loud at load on a misconfigured reconnect",
+        "publishes literal instructions and withdraws the prompt and resource provider together",
+        "shows scoped server instructions only to the owning scope",
+        "preserves the exact execution, arguments and canonical structured results",
+        "rejects invalid external results before exposing content (null)",
+        "rejects invalid external results before exposing content ({\"content\":[42]})",
+        "rejects invalid external results before exposing content ({\"content\":[{\"type\":\"image\"}]})"
+      ],
       "exit_code": 0,
       "failed_cases": [],
       "log_sha256": "3b36b7291c2d7ec995404baf7ba0f4e49cfddd0b4182cfe81c8817a555b7a02e",
       "passed": 121,
-      "report_sha256": "7b7e96814b19813c9d39a3f52b2656d092ad326a6ea1c41c26d25bcfa0beb208",
-      "seconds": 3.555,
+      "report_sha256": "e3ebf0bd30b4893cc618fe6e149ab754b28bdbf8da87c9a561ca72fbf9ad43f6",
+      "seconds": 3.757,
       "stderr_empty": true,
       "tests": 121
     },
     "pristine": {
+      "cases": [
+        "exports name, inject, and Config",
+        "Config schema rejects a missing serverName",
+        "Config schema rejects an invalid serverName",
+        "Config schema accepts a valid serverName",
+        "Config schema materializes reconnect defaults and merges partial overrides",
+        "Config schema rejects an invalid reconnect block",
+        "connects without attributed prompt text when server instructions are absent or blank (undefined)",
+        "connects without attributed prompt text when server instructions are absent or blank (\"\")",
+        "connects without attributed prompt text when server instructions are absent or blank (\" \\n\\t\")",
+        "connects, syncs tools under the namespace, and registers a notification handler",
+        "keeps the Cordis plugin loading until initial discovery publishes its tools",
+        "rejects a duplicate serverName at load and leaves the first instance intact",
+        "closes the transport when its owner unloads during initial connection",
+        "allows one serverName in each independent registration scope",
+        "releases the serverName reservation on dispose",
+        "scopes serverName reservations per app root",
+        "logs error and registers no tools when connect fails; dispose closes the client",
+        "rejects activation and still closes the client when startup failure is configured as fatal",
+        "rejects strict startup when the initial tool generation cannot be registered",
+        "preserves strict startup registration when list_changed arrives before connect resolves",
+        "re-syncs tools on ToolListChanged notification",
+        "keeps the previous generation when a re-sync fails",
+        "effect disposer unregisters the CURRENT generation and closes client",
+        "effect disposer handles client.close failure gracefully",
+        "uses streamable-http config path",
+        "counts the complete attributed UTF-8 text before publishing tools",
+        "joins clean names verbatim",
+        "replaces invalid characters and appends an identity hash",
+        "truncates over-long names and appends an identity hash",
+        "is deterministic and collision-free for distinct identities",
+        "registers tools under server-qualified public names",
+        "lets two servers publish the same raw name side by side",
+        "coexists with a native tool of the same raw name",
+        "rejects a tool list where one raw name appears twice",
+        "keeps the previous generation when the fetch phase fails",
+        "rolls back the whole generation when a foreign tool squats on the namespace",
+        "unregisters previous tools before re-syncing",
+        "validates outputs with the complete SDK definition after paginated discovery",
+        "calls MCP callTool with the RAW name and returns text content",
+        "sends the raw name for normalized public names",
+        "joins multiple text blocks with newline",
+        "preserves canonical MCP JSON while admitting an ordered mixed image result",
+        "keeps a valid raw image result while explicitly refusing it without a durable route",
+        "rejects a malformed image batch before storing any member",
+        "rejects unsupported media and base64 aliases as one atomic batch",
+        "does not admit images for a route without declared image input",
+        "refuses images when the exact route is missing, unverifiable, or canceled",
+        "refuses images when attachment storage rejects the admitted batch",
+        "reports attachment policy rejection as image admission rather than storage failure",
+        "keeps admitted images when post-execute shortens only the text",
+        "keeps a dispatch value replacement instead of prepared images",
+        "keeps a dispatch renderer replacement instead of prepared images",
+        "lets post-execute replacement win over a prepared image projection",
+        "lets post-execute value replacement and blocking discard prepared projections",
+        "marks primitive blocks from canonical-value replacement unsupported",
+        "validates structuredContent when the advertised output schema is supported",
+        "falls back to JsonValue for unsupported advertised output schemas",
+        "maps isError to an error result via throw",
+        "rejects tools that require task-based execution",
+        "passes abort signal to callTool",
+        "reports unsupported audio without claiming the raw block was discarded",
+        "reports unsupported embedded resources without discarding the raw block",
+        "preserves resource-link name and URI in the model projection",
+        "diagnoses an incomplete resource link from canonical-value replacement",
+        "diagnoses unknown content types from canonical-value replacement",
+        "diagnoses an image without media type from canonical-value replacement",
+        "diagnoses audio without media type from canonical-value replacement",
+        "diagnoses missing text from canonical-value replacement",
+        "handles empty content array",
+        "handles isError with non-text content (fallback error message)",
+        "uses tool description when provided",
+        "uses empty description when tool has no description",
+        "creates StdioClientTransport for stdio config",
+        "creates StreamableHTTPClientTransport for http config without headers",
+        "creates StreamableHTTPClientTransport for http config with headers",
+        "scrubs sensitive env vars and forwards the rest",
+        "merges explicit env on top of scrubbed ambient env",
+        "coerces null args to empty object for callTool",
+        "coerces primitive string args to empty object for callTool",
+        "keeps a resource-only server connected without requesting tools",
+        "keeps shared resource tools for a configured server without resource capability",
+        "reads resources and preserves explicit list and template cursors through the SDK",
+        "updates tools through the SDK modern list-change subscription",
+        "delivers caller cancellation to an executing modern tool",
+        "keeps instructions withdrawn when disposal interrupts initial discovery",
+        "rejects resource reads while a replacement connection is still negotiating",
+        "reconnects after a transport close, re-syncs tools through the new generation, and serves calls",
+        "stops at the failure cap, unregisters the tools, and reports final failure",
+        "gives up behind an in-flight re-sync and removes the generation it publishes",
+        "does not start a replacement until a failed generation reports that it closed",
+        "stops reconnecting when a failed generation never reports that it closed",
+        "suppresses retry reporting when disposal owns a pending connect rejection",
+        "stops reconnecting when disposal overlaps failed-generation cleanup",
+        "bounds disposal during connect when the transport never reports closure",
+        "bounds disposal during discovery when the transport never reports closure",
+        "closes a transport that attaches after disposal starts",
+        "discards a queued tool refresh when disposal starts before it runs",
+        "dispose during the backoff wait cancels the pending reconnect",
+        "a transport close after dispose schedules nothing",
+        "reconnect disabled keeps the registered tools and reports manual recovery",
+        "reconnect disabled after a failed initial connect reports no registered tools",
+        "an uptime past the stability window resets the attempt budget",
+        "a crash loop with briefly successful connects still exhausts the cap",
+        "a connect rejection racing its own transport close schedules exactly one retry per attempt",
+        "a transport that closes during a resolving connect registers nothing from the dead generation",
+        "dispose during an in-flight initial sync quiesces without leaking tools",
+        "a re-sync failing because dispose closed the transport stays silent",
+        "a stale notification handler from a replaced generation is ignored",
+        "resolves omission to the defaults, frozen",
+        "keeps explicit values",
+        "rejects unknown keys",
+        "rejects out-of-range delays",
+        "rejects an initial delay above the ceiling",
+        "rejects non-positive-integer attempt caps",
+        "apply fails loud at load on a misconfigured reconnect",
+        "publishes literal instructions and withdraws the prompt and resource provider together",
+        "shows scoped server instructions only to the owning scope",
+        "preserves the exact execution, arguments and canonical structured results",
+        "rejects invalid external results before exposing content (null)",
+        "rejects invalid external results before exposing content ({\"content\":[42]})",
+        "rejects invalid external results before exposing content ({\"content\":[{\"type\":\"image\"}]})"
+      ],
       "exit_code": 0,
       "failed_cases": [],
       "log_sha256": "a77d8b1109901a64c8e6d60e6372a6829d46cc5e2a34457f46858e596a9576e8",
       "passed": 121,
-      "report_sha256": "e0f46b78ade8f1843383ea9a354f2fc5fd5398dd19cc114b0698e00234eec438",
-      "seconds": 3.675,
+      "report_sha256": "349d026828d1dcbef82c47d9ed35141bd077b638355e5104a1fa1a9fa07a2ae3",
+      "seconds": 3.701,
       "stderr_empty": true,
       "tests": 121
     }
@@ -1115,6 +2441,27 @@
     "mutants": {
       "admission_wiring": {
         "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
         "exit_code": 1,
         "failed_cases": [
           "Mastermind runtime profile performs preflight then activates the actual read process",
@@ -1122,42 +2469,132 @@
           "public admitted plugin activates the real read path with only selected tools"
         ],
         "fixture_pids": [
-          71461,
-          71505,
-          71557,
-          71612,
-          71661,
-          71702,
-          71757,
-          71802,
-          71849,
-          71889,
-          71945,
-          71988,
-          72043,
-          72083,
-          72139,
-          72180,
-          72235,
-          72291,
-          72359,
-          72403,
-          72452,
-          72495
+          62642,
+          62643,
+          62644,
+          62655,
+          62669,
+          62675,
+          62676,
+          62677,
+          62678,
+          62679,
+          62680,
+          62681,
+          62684,
+          62688,
+          62689,
+          62690,
+          62691,
+          62692,
+          62695,
+          62696,
+          62701,
+          62702
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "9b2b224866c866d67fe302fe66221cd0ce3eb2489549262d5f6010d69a419533",
         "mutant_sha256": "1ea7b40144e05be69277f3d4110b709badadebec312ebc462fc4f3d734da2e6a",
-        "observations_sha256": "9dd0a44590c65e151289054e47556946048c4a8d0ecde76aa88566755a02c225",
+        "observations_sha256": "c74cdc78f3eff423652b6321a8d815c41d69637a4b502b911d6f58081af7a00e",
         "passed": 16,
-        "report_sha256": "6da2dc577a0f98cbf1d14a241a46df93589458f9a15f8a457b008e758c44a2f4",
-        "seconds": 3.416,
+        "report_sha256": "f2d90fe0df821b85626c90279c9c7f3c0a461391710e0a37e69977c524b472fa",
+        "seconds": 3.514,
         "stderr_empty": true,
-        "tests": 19
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-wkuI0R",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-wkuI0R/home",
+              "nodeOptions": null,
+              "nonce": "d3e0143c-8509-4805-a488-85acc0fb3787",
+              "pid": 62684
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-wkuI0R",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-wkuI0R/home",
+              "nodeOptions": null,
+              "nonce": "d3e0143c-8509-4805-a488-85acc0fb3787",
+              "pid": 62688
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "d3e0143c-8509-4805-a488-85acc0fb3787",
+              "pid": 62688
+            },
+            {
+              "event": "search",
+              "nonce": "d3e0143c-8509-4805-a488-85acc0fb3787",
+              "pid": 62688,
+              "query": "d3e0143c-8509-4805-a488-85acc0fb3787"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "d3e0143c-8509-4805-a488-85acc0fb3787",
+          "pids": [
+            62684,
+            62688
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "d3e0143c-8509-4805-a488-85acc0fb3787",
+              "pid": 62688,
+              "sha256": "7a720bf1803b4f8aa5932848934a4085f580ab627e0bc7e2569157615de74acc",
+              "text": "profile\nneedle d3e0143c-8509-4805-a488-85acc0fb3787\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle d3e0143c-8509-4805-a488-85acc0fb3787"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle d3e0143c-8509-4805-a488-85acc0fb3787"
+                }
+              ],
+              "nonce": "d3e0143c-8509-4805-a488-85acc0fb3787",
+              "pid": 62688
+            }
+          }
+        }
       },
       "required_preflight": {
         "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
         "exit_code": 1,
         "failed_cases": [
           "Mastermind runtime profile cancellation during preflight never starts a process",
@@ -1166,50 +2603,140 @@
           "Mastermind runtime profile snapshots startup config before asynchronous preflight"
         ],
         "fixture_pids": [
-          72735,
-          72785,
-          72839,
-          72882,
-          72927,
-          72970,
-          73014,
-          73050,
-          73105,
-          73155,
-          73208,
-          73257,
-          73318,
-          73363,
-          73417,
-          73464,
-          73517,
-          73559,
-          73609,
-          73666,
-          73723,
-          73769,
-          73814,
-          73868,
-          73919,
-          73971,
-          74023,
-          74061,
-          74107,
-          74172
+          62708,
+          62711,
+          62714,
+          62716,
+          62717,
+          62728,
+          62739,
+          62741,
+          62742,
+          62747,
+          62748,
+          62749,
+          62750,
+          62751,
+          62762,
+          62773,
+          62778,
+          62780,
+          62781,
+          62782,
+          62784,
+          62785,
+          62787,
+          62788,
+          62793,
+          62794,
+          62799,
+          62801,
+          62803,
+          62804
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "70e0e9650d258716bc4780162c3196a8183367e225a9067e3ddeebf66870f98a",
-        "mutant_sha256": "ef1704e446553f0ef36e48e7f66b7a46e74d65dec4acaa5a74a26e1ecd0fef44",
-        "observations_sha256": "afcb380ac555adad2259ec6d49de3e0cef3b1dd65d17c5c8ed6c2bb796ff3bd5",
+        "mutant_sha256": "47e5d7c1c32ffef85c6bf773f7cd28bfa5bc6ae3dde1c2c1b4838e66cd7c150e",
+        "observations_sha256": "2d113d0341ac58cd67fa7a9402169b4b5a983c7bb23f95c1929567288fbe2d6e",
         "passed": 15,
-        "report_sha256": "0a96fba857e184333d2d92ab5b659d230eecf837b92d5bfd56481430c3bd2002",
-        "seconds": 4.274,
+        "report_sha256": "c6852f428e395718cc1f485d5df6e364b64064f881ba36760b7972a88f882f9b",
+        "seconds": 4.535,
         "stderr_empty": true,
-        "tests": 19
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-fDVToD",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-fDVToD/home",
+              "nodeOptions": null,
+              "nonce": "301fe0f1-736f-49fd-b850-c7e88de94920",
+              "pid": 62750
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-fDVToD",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-fDVToD/home",
+              "nodeOptions": null,
+              "nonce": "301fe0f1-736f-49fd-b850-c7e88de94920",
+              "pid": 62751
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "301fe0f1-736f-49fd-b850-c7e88de94920",
+              "pid": 62751
+            },
+            {
+              "event": "search",
+              "nonce": "301fe0f1-736f-49fd-b850-c7e88de94920",
+              "pid": 62751,
+              "query": "301fe0f1-736f-49fd-b850-c7e88de94920"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "301fe0f1-736f-49fd-b850-c7e88de94920",
+          "pids": [
+            62750,
+            62751
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "301fe0f1-736f-49fd-b850-c7e88de94920",
+              "pid": 62751,
+              "sha256": "149a4b3436359dfd15042a446ec03cfeed4d6e9dccb8775d25db8509d0a9708f",
+              "text": "profile\nneedle 301fe0f1-736f-49fd-b850-c7e88de94920\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 301fe0f1-736f-49fd-b850-c7e88de94920"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle 301fe0f1-736f-49fd-b850-c7e88de94920"
+                }
+              ],
+              "nonce": "301fe0f1-736f-49fd-b850-c7e88de94920",
+              "pid": 62751
+            }
+          }
+        }
       },
       "startup_policy": {
         "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
         "exit_code": 1,
         "failed_cases": [
           "admitted plugin refuses enabled reconnect before process creation",
@@ -1217,90 +2744,249 @@
           "admitted plugin refuses permissive startup before process creation"
         ],
         "fixture_pids": [
-          70029,
-          70079,
-          70138,
-          70185,
-          70235,
-          70286,
-          70337,
-          70386,
-          70441,
-          70484,
-          70525,
-          70566,
-          70621,
-          70679,
-          70706,
-          70736,
-          70767,
-          70797,
-          70826,
-          70853,
-          70889,
-          70916,
-          70948,
-          70972,
-          71003,
-          71042,
-          71087,
-          71124,
-          71167,
-          71210
+          62531,
+          62533,
+          62534,
+          62545,
+          62556,
+          62562,
+          62563,
+          62564,
+          62565,
+          62567,
+          62568,
+          62571,
+          62577,
+          62582,
+          62586,
+          62592,
+          62593,
+          62594,
+          62599,
+          62612,
+          62614,
+          62615,
+          62616,
+          62617,
+          62619,
+          62624,
+          62625,
+          62626,
+          62627,
+          62628
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "6f7e829db88b7d5a9a9e5711ccb64db8af67b66ac0a3384c547d01e345d40101",
         "mutant_sha256": "f39a76eaea8c8e9dc90a0b1acac249dfcbe43515dc0a6b696b6a96d9cbbe2752",
-        "observations_sha256": "04e26e44d5777cc73a659ec21877d1d5177b5e698c76d60407b2c5ae88d6576e",
+        "observations_sha256": "fa141cb3fbbd9ee1506ad77850f279ac28b047dca1662952ea3a45e6e5c5ca06",
         "passed": 16,
-        "report_sha256": "54eeda3c41b4903b9947dfc8696af6f0ee5c6aebe88ae417ab5b44917573692a",
-        "seconds": 4.265,
+        "report_sha256": "2351792bd5f300eb469170cd6a6a26987dda7fa26fd1c1897d56ce1e4af7d6e3",
+        "seconds": 5.047,
         "stderr_empty": true,
-        "tests": 19
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ml5qet",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ml5qet/home",
+              "nodeOptions": null,
+              "nonce": "05b5e236-3b79-493b-86ed-3aabd9132ca9",
+              "pid": 62599
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ml5qet",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ml5qet/home",
+              "nodeOptions": null,
+              "nonce": "05b5e236-3b79-493b-86ed-3aabd9132ca9",
+              "pid": 62612
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "05b5e236-3b79-493b-86ed-3aabd9132ca9",
+              "pid": 62612
+            },
+            {
+              "event": "search",
+              "nonce": "05b5e236-3b79-493b-86ed-3aabd9132ca9",
+              "pid": 62612,
+              "query": "05b5e236-3b79-493b-86ed-3aabd9132ca9"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "05b5e236-3b79-493b-86ed-3aabd9132ca9",
+          "pids": [
+            62599,
+            62612
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "05b5e236-3b79-493b-86ed-3aabd9132ca9",
+              "pid": 62612,
+              "sha256": "c234c48ff1423d1ee82b2e69e9edffeac6e96efd6caa956295c8c3bc0bf5e219",
+              "text": "profile\nneedle 05b5e236-3b79-493b-86ed-3aabd9132ca9\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 05b5e236-3b79-493b-86ed-3aabd9132ca9"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle 05b5e236-3b79-493b-86ed-3aabd9132ca9"
+                }
+              ],
+              "nonce": "05b5e236-3b79-493b-86ed-3aabd9132ca9",
+              "pid": 62612
+            }
+          }
+        }
       },
       "startup_snapshot": {
         "all_recorded_children_absent": true,
+        "cases": [
+          "public admitted plugin activates the real read path with only selected tools",
+          "admitted plugin refuses permissive startup before process creation",
+          "admitted plugin refuses implicit reconnect before process creation",
+          "admitted plugin refuses enabled reconnect before process creation",
+          "public admitted factory rejects missing host permission or cancellation binding",
+          "pre-aborted admitted startup creates no process",
+          "public admitted startup failure rolls back tools and settles all child processes",
+          "public admitted plugin shares namespace ownership with the original plugin",
+          "plugin disposal releases the original namespace for another admitted instance",
+          "owner abort uses existing plugin teardown and removes admitted tools",
+          "Mastermind runtime profile performs preflight then activates the actual read process",
+          "Mastermind runtime profile rejects disabled dispatch enforcement before spawning",
+          "Mastermind runtime profile rejects deny-all false readiness before spawning",
+          "Mastermind runtime profile cancellation during preflight never starts a process",
+          "Mastermind runtime profile snapshots startup config before asynchronous preflight",
+          "legacy experiment import resolves the same runtime preflight implementation",
+          "owner abort during real discovery prevents activation and settles startup processes",
+          "owner abort during an actual profile tool call settles without replay",
+          "admission refusal rolls back namespace so a later explicit instance can activate"
+        ],
         "exit_code": 1,
         "failed_cases": [
           "Mastermind runtime profile snapshots startup config before asynchronous preflight"
         ],
         "fixture_pids": [
-          74424,
-          74474,
-          74533,
-          74582,
-          74630,
-          74673,
-          74726,
-          74767,
-          74812,
-          74854,
-          74856,
-          74857,
-          74858,
-          74861,
-          74864,
-          74866,
-          74867,
-          74871,
-          74876,
-          74877,
-          74878,
-          74892,
-          74904,
-          74905
+          62812,
+          62813,
+          62820,
+          62822,
+          62823,
+          62828,
+          62829,
+          62830,
+          62831,
+          62832,
+          62833,
+          62834,
+          62840,
+          62844,
+          62850,
+          62851,
+          62852,
+          62853,
+          62876,
+          62878,
+          62883,
+          62885,
+          62886,
+          62887
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "397ac039f9cad6794a8ebbaca63fe01d7c8169760a74b8ffb0703f750243bdfa",
-        "mutant_sha256": "2034d7300e4975f849ace4715bd4d436170f1ae8c4c33f473639e5e18bfc9a15",
-        "observations_sha256": "e970a9b9e702c66cbf2e64e7b34bc953eb84208e3bbd5548aacf1452bb8e6190",
+        "mutant_sha256": "883c203101f5a939f734a4bfe358d35b908cf00b25d7b4abcd193655cf1a20ea",
+        "observations_sha256": "f8b069caa5e967cda436d3b3b4d4aec68dc20094b484ad95711383d718fbc97d",
         "passed": 18,
-        "report_sha256": "a53927ee5578fe9843307c830c412a75d2757c9a4f00b65b074c6d9f4a675e55",
-        "seconds": 3.519,
+        "report_sha256": "8fe3dcdb42574c571158198a7beb9f22dc39db53f613b83d04b67f2bede49f96",
+        "seconds": 3.746,
         "stderr_empty": true,
-        "tests": 19
+        "tests": 19,
+        "useful_workload": {
+          "childrenAbsent": true,
+          "events": [
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-2V60ag",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-2V60ag/home",
+              "nodeOptions": null,
+              "nonce": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6",
+              "pid": 62840
+            },
+            {
+              "ambient": null,
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-2V60ag",
+              "event": "start",
+              "explicit": null,
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-2V60ag/home",
+              "nodeOptions": null,
+              "nonce": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6",
+              "pid": 62844
+            },
+            {
+              "event": "read",
+              "file": "memo.txt",
+              "nonce": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6",
+              "pid": 62844
+            },
+            {
+              "event": "search",
+              "nonce": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6",
+              "pid": 62844,
+              "query": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6"
+            }
+          ],
+          "inputsUnchanged": true,
+          "mode": "normal",
+          "nonce": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6",
+          "pids": [
+            62840,
+            62844
+          ],
+          "workload": {
+            "read": {
+              "file": "memo.txt",
+              "nonce": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6",
+              "pid": 62844,
+              "sha256": "9ed27d1a438ab74f24093b3493e8c1c8d1c5287be1f982a9ed053d1d53920c05",
+              "text": "profile\nneedle 33ce4e7c-d09a-4849-ae8f-3802a231e9f6\n"
+            },
+            "search": {
+              "matches": [
+                {
+                  "file": "memo.txt",
+                  "line": 2,
+                  "text": "needle 33ce4e7c-d09a-4849-ae8f-3802a231e9f6"
+                },
+                {
+                  "file": "signals.txt",
+                  "line": 2,
+                  "text": "needle 33ce4e7c-d09a-4849-ae8f-3802a231e9f6"
+                }
+              ],
+              "nonce": "33ce4e7c-d09a-4849-ae8f-3802a231e9f6",
+              "pid": 62844
+            }
+          }
+        }
       }
     },
     "positive": {
@@ -1329,37 +3015,37 @@
       "exit_code": 0,
       "failed_cases": [],
       "fixture_pids": [
-        68710,
-        68737,
-        68767,
-        68783,
-        68810,
-        68855,
-        68924,
-        68971,
-        69030,
-        69084,
-        69138,
-        69182,
-        69237,
-        69281,
-        69337,
-        69380,
-        69437,
-        69479,
-        69533,
-        69574,
-        69627,
-        69672,
-        69721,
-        69768
+        62451,
+        62454,
+        62461,
+        62465,
+        62468,
+        62469,
+        62470,
+        62471,
+        62472,
+        62473,
+        62474,
+        62479,
+        62480,
+        62481,
+        62483,
+        62491,
+        62494,
+        62498,
+        62501,
+        62504,
+        62506,
+        62507,
+        62508,
+        62509
       ],
       "inputs_unchanged": true,
       "log_sha256": "d65ef89ab495de2c5137b0e95733ed1281c92d62466a748d1194c8a44f762d97",
-      "observations_sha256": "e0be0f2e1d62307f4aaf86cf4df5b4115eb9804b5caec10c4c66cbc29da5c044",
+      "observations_sha256": "f80a6f5b2389362143a7589a2c74fbcd6b89c4fd1ee0b3cfcd714bfb79ffe553",
       "passed": 19,
-      "report_sha256": "f7387a7b316fbf546c50d9a1eaad8cd8aa81627d9d1f8368526483e654fae19b",
-      "seconds": 3.591,
+      "report_sha256": "18aa695e005797a33be76cdf6c7bfa27694a43d7d183a9f42e18d89adf9d5eb5",
+      "seconds": 3.773,
       "stderr_empty": true,
       "tests": 19,
       "useful_workload": {
@@ -1367,67 +3053,67 @@
         "events": [
           {
             "ambient": null,
-            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du",
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-7H9aVa",
             "event": "start",
             "explicit": null,
-            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du/home",
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-7H9aVa/home",
             "nodeOptions": null,
-            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
-            "pid": 69237
+            "nonce": "203ab7b8-ebc6-42a4-aa4c-4d584c811705",
+            "pid": 62480
           },
           {
             "ambient": null,
-            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du",
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-7H9aVa",
             "event": "start",
             "explicit": null,
-            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-aTP0Du/home",
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-7H9aVa/home",
             "nodeOptions": null,
-            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
-            "pid": 69281
+            "nonce": "203ab7b8-ebc6-42a4-aa4c-4d584c811705",
+            "pid": 62481
           },
           {
             "event": "read",
             "file": "memo.txt",
-            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
-            "pid": 69281
+            "nonce": "203ab7b8-ebc6-42a4-aa4c-4d584c811705",
+            "pid": 62481
           },
           {
             "event": "search",
-            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
-            "pid": 69281,
-            "query": "91705698-3f26-4bd8-b40a-e53f8869a642"
+            "nonce": "203ab7b8-ebc6-42a4-aa4c-4d584c811705",
+            "pid": 62481,
+            "query": "203ab7b8-ebc6-42a4-aa4c-4d584c811705"
           }
         ],
         "inputsUnchanged": true,
         "mode": "normal",
-        "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
+        "nonce": "203ab7b8-ebc6-42a4-aa4c-4d584c811705",
         "pids": [
-          69237,
-          69281
+          62480,
+          62481
         ],
         "workload": {
           "read": {
             "file": "memo.txt",
-            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
-            "pid": 69281,
-            "sha256": "be4bfdba20bc6a5b790bbde3665b245307c9a0fac5fea9adb0a46968be5600ab",
-            "text": "profile\nneedle 91705698-3f26-4bd8-b40a-e53f8869a642\n"
+            "nonce": "203ab7b8-ebc6-42a4-aa4c-4d584c811705",
+            "pid": 62481,
+            "sha256": "d96351b076379f95c8c3204070988d11b175ceff5b16e4423764e2c6b77a7d52",
+            "text": "profile\nneedle 203ab7b8-ebc6-42a4-aa4c-4d584c811705\n"
           },
           "search": {
             "matches": [
               {
                 "file": "memo.txt",
                 "line": 2,
-                "text": "needle 91705698-3f26-4bd8-b40a-e53f8869a642"
+                "text": "needle 203ab7b8-ebc6-42a4-aa4c-4d584c811705"
               },
               {
                 "file": "signals.txt",
                 "line": 2,
-                "text": "needle 91705698-3f26-4bd8-b40a-e53f8869a642"
+                "text": "needle 203ab7b8-ebc6-42a4-aa4c-4d584c811705"
               }
             ],
-            "nonce": "91705698-3f26-4bd8-b40a-e53f8869a642",
-            "pid": 69281
+            "nonce": "203ab7b8-ebc6-42a4-aa4c-4d584c811705",
+            "pid": 62481
           }
         }
       }
