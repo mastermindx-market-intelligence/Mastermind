@@ -110,11 +110,14 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path):
     fixture = tmp_path / "installer-repo"
     (fixture / "scripts").mkdir(parents=True)
     (fixture / "control_plane").mkdir()
+    (fixture / "common").mkdir()
     for relative in (
         "scripts/install_mastermind_workspace_cli.sh",
         "scripts/mastermind_workspace.py",
         "control_plane/executive_workspace.py",
         "control_plane/__init__.py",
+        "common/__init__.py",
+        "common/commission_ref.py",
     ):
         source = repo_root / relative
         target_file = fixture / relative
@@ -149,6 +152,21 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path):
     )
     wrapper = launcher.read_text(encoding="utf-8")
     assert f"export MASTERMIND_SOURCE_REPO='{fixture.resolve()}'" in wrapper
+    assert (payload / "common" / "__init__.py").is_file()
+    assert (payload / "common" / "commission_ref.py").is_file()
+
+    smoke_env = dict(env)
+    smoke_env["MASTERMIND_PYTHON"] = sys.executable
+    smoke = subprocess.run(
+        [str(launcher), "--help"],
+        env=smoke_env,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert smoke.returncode == 0, smoke.stderr
+    assert "Canonical attended-session workspace route" in smoke.stdout
 
     observed_external = ""
     if Path("/Volumes/Mastermind").is_dir():

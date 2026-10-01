@@ -30,12 +30,13 @@ fi
 
 target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
 payload_root="${MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT:-$HOME/.local/share/mastermind/workspace-cli/$release_sha}"
-mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane"
+mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane" "$payload_root/common"
 cp "$repo/scripts/mastermind_workspace.py" "$payload_root/scripts/mastermind_workspace.py"
 cp "$repo/control_plane/executive_workspace.py" "$payload_root/control_plane/executive_workspace.py"
 cp "$repo/control_plane/__init__.py" "$payload_root/control_plane/__init__.py"
+cp "$repo/common/"*.py "$payload_root/common/"
 chmod 0755 "$payload_root/scripts/mastermind_workspace.py"
-chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py"
+chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py" "$payload_root/common/"*.py
 
 wrapper_tmp="$target.tmp.$$"
 cat > "$wrapper_tmp" <<EOF
