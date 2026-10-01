@@ -95,6 +95,77 @@ def _build_executive_dialogue_wake_carrier(
 
 
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
+
+
+def _validate_subscription_canary_realm_config(config: dict[str, Any]) -> None:
+    """Validate the optional root-owned ``subscription_canary_realm`` block.
+
+    The shape is fixed: exactly ``{binding_id, generation, config_sha256}``
+    and each field passes the same fail-closed check the supervisor and the
+    worker re-apply on disk.  Validation does not rewrite the loaded mapping:
+    fixed-target source identity and hashes continue to cover the exact
+    root-owned bytes.  An ordinary (no realm) configuration remains unchanged.
+    """
+
+    realm = config.get("subscription_canary_realm")
+    if realm is None:
+        return
+    if not isinstance(realm, dict) or set(realm) != {
+        "binding_id", "generation", "config_sha256",
+    }:
+        raise ServiceError(
+            "control config subscription_canary_realm must have exactly "
+            "binding_id, generation, config_sha256"
+        )
+    binding_id = realm["binding_id"]
+    generation = realm["generation"]
+    config_sha = realm["config_sha256"]
+    if (
+        not isinstance(binding_id, str)
+        or not binding_id
+        or binding_id != binding_id.strip()
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.binding_id is invalid"
+        )
+    if (
+        type(generation) is not int
+        or isinstance(generation, bool)
+        or generation < 1
+        or generation >= 2 ** 63
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.generation is invalid"
+        )
+    if (
+        not isinstance(config_sha, str)
+        or config_sha != config_sha.lower()
+        or re.fullmatch(r"[0-9a-f]{64}", config_sha) is None
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.config_sha256 is invalid"
+        )
+    # Final fail-closed review of the binding against the catalog so a typo
+    # in the realm cannot survive even if the three scalar fields look sane.
+    from control_plane.subscription_harness_bindings import (
+        HarnessBindingError,
+        get_binding,
+    )
+    try:
+        binding = get_binding(binding_id)
+    except (HarnessBindingError, ValueError) as exc:
+        raise ServiceError(
+            "control config subscription_canary_realm binding is not reviewed"
+        ) from exc
+    if (
+        binding.adapter_id != "codex-cli"
+        or binding.implementation_state == "SPEC_ONLY"
+        or binding.autonomous_allowed is not False
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm binding is not a "
+            "reviewed codex-cli attended-only implementation"
+        )
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
 )
@@ -143,6 +214,7 @@ _CONFIG_OPTIONAL = frozenset(
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        "coo_principal_armed",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -179,6 +251,10 @@ _CONFIG_OPTIONAL = frozenset(
         "dialogue_observation_peer_uid",
         "dialogue_bridge_armed",
         "dialogue_wake_retry_policy",
+        "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
+        "python_runtime_provenance_digest",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -251,6 +327,11 @@ def _parser() -> argparse.ArgumentParser:
                 choices=["web", "mac"],
                 help="Content profile key (web or mac). Omit for legacy single-profile.",
             )
+
+    readiness = sub.add_parser("check-current-worker-login", help="Read assigned worker login status for one current Attempt.")
+    readiness.add_argument("job_id")
+    readiness.add_argument("attempt_id")
+    readiness.add_argument("fence_generation", type=int)
 
     job = sub.add_parser("job", help="Inspect one Job.")
     job.add_argument("job_id")
@@ -687,6 +768,17 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    arm = config.get("privileged_readiness_armed", False)
+    broker_socket = config.get("privileged_broker_socket_path")
+    if type(arm) is not bool:
+        raise ServiceError("privileged_readiness_armed must be boolean")
+    if (arm and broker_socket != "/var/run/mastermind-executive/privileged.sock") or (not arm and broker_socket is not None):
+        raise ServiceError("privileged readiness requires the armed canonical broker socket")
+    from ops.executive_os.coo_principal_host import validate_control_coo
+    try:
+        validate_control_coo(config)
+    except ValueError:
+        raise ServiceError("COO principal requires explicit Workspace and v2 App composition") from None
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
@@ -876,6 +968,7 @@ def load_control_config(
             raise ServiceError(
                 "control config dialogue_wake_retry_policy is invalid"
             ) from exc
+    _validate_subscription_canary_realm_config(config)
     if enforce_current_uid and config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
@@ -966,6 +1059,13 @@ def load_control_config(
         if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise ServiceError(
                 "control config operator_harness_binary_digest must be SHA-256"
+            )
+    if "python_runtime_provenance_digest" in config:
+        digest = config["python_runtime_provenance_digest"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ServiceError(
+                "control config python_runtime_provenance_digest must be lowercase "
+                "64-hex SHA-256"
             )
     if "operator_harness_version" in config:
         version = config["operator_harness_version"]
@@ -1416,7 +1516,13 @@ def _service_from_config(
     workspace_acquisition_loader: Callable[[], Any] | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
     workspace_bindings_path: Path | None = None,
+    coo_source: Any | None = None,
+    claimed_operator_adapter_factory: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
+    # This is trusted host composition, never a JSON/model-selected factory.
+    if (claimed_operator_adapter_factory is not None
+            and not callable(claimed_operator_adapter_factory)):
+        raise ServiceError("claimed operator factory must be callable")
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
         ExecutiveOperatorSupervisor,
@@ -1455,6 +1561,32 @@ def _service_from_config(
             "armed COO Operator Harness requires an exact installed binary identity"
         )
 
+    realm_raw = raw.get("subscription_canary_realm")
+    realm_binding_id: str | None = None
+    realm_generation: int | None = None
+    realm_config_sha256: str | None = None
+    worker_provider = "codex"
+    worker_type = "codex-cli"
+    worker_model = str(raw.get("model") or "gpt-5.6-sol")
+    if realm_raw is not None:
+        _validate_subscription_canary_realm_config(
+            {"subscription_canary_realm": realm_raw}
+        )
+        # load_control_config has already validated this exact closed object.
+        # Derive worker identity from the reviewed catalog instead of trusting
+        # parallel provider/model fields in root configuration.
+        from control_plane.subscription_harness_bindings import get_binding
+        from control_plane.subscription_provider_profiles import get_profile
+
+        realm_binding_id = str(realm_raw["binding_id"])
+        realm_generation = int(realm_raw["generation"])
+        realm_config_sha256 = str(realm_raw["config_sha256"])
+        reviewed_binding = get_binding(realm_binding_id)
+        reviewed_profile = get_profile(reviewed_binding.profile_id)
+        worker_provider = reviewed_binding.provider
+        worker_type = reviewed_binding.adapter_id
+        worker_model = reviewed_binding.model_for(reviewed_profile)
+
     config = ServiceConfig(
         runtime_root=raw["runtime_root"],
         socket_path=raw["control_socket_path"],
@@ -1468,10 +1600,14 @@ def _service_from_config(
         worker_account_label=str(
             raw.get("worker_account_label") or "dedicated-codex-home"
         ),
+        worker_type=worker_type,
+        provider=worker_provider,
         quota_class=str(raw.get("quota_class") or "codex-native"),
-        model=str(raw.get("model") or "gpt-5.6-sol"),
+        model=worker_model,
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
+        privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
+        privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
@@ -1497,6 +1633,9 @@ def _service_from_config(
         operator_harness_version=binary_version,
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),
         shutdown_grace_seconds=float(raw.get("shutdown_grace_seconds") or 10.0),
+        subscription_canary_realm_binding_id=realm_binding_id,
+        subscription_canary_realm_generation=realm_generation,
+        subscription_canary_realm_config_sha256=realm_config_sha256,
     )
     # A persisted receipt from another service instance is never startup
     # authority. Every new PID starts quarantined and can activate only after a
@@ -1515,6 +1654,29 @@ def _service_from_config(
             client,
             validation_commands_for_spec=validations,
         )
+        # Only the attended subscription-canary lane gets a claim provider;
+        # ordinary composition passes ``None`` so the supervisor never calls
+        # the observation owner and never enriches the LaunchSpec.
+        claim_provider: Callable[[str, str], Mapping[str, Any]] | None = None
+        claim_binding_id: str | None = None
+        if config.subscription_canary_realm() is not None:
+            from control_plane.model_router import observe_subscription_canary_claim
+
+            realm = config.subscription_canary_realm()
+            assert realm is not None
+
+            def claim_provider(
+                attempt_id: str,
+                binding_id: str,
+                _runtime=runtime,
+            ) -> Mapping[str, Any]:
+                return observe_subscription_canary_claim(
+                    _runtime,
+                    attempt_id=attempt_id,
+                    binding_id=binding_id,
+                )
+
+            claim_binding_id = str(realm["binding_id"])
         return ExecutiveSupervisor(
             runtime,
             adapter,
@@ -1535,10 +1697,19 @@ def _service_from_config(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
                 if exact_target_source is not None else None
             ),
+            subscription_canary_claim_provider=claim_provider,
+            subscription_canary_binding_id=claim_binding_id,
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
-        def adapter_factory(turn_input_loader):
+        def primary_factory(attempt, requested, turn_input_loader, *, recovery):
+            # A fixed primary client must never carry another claimed worker.
+            # Multi-worker composition supplies its current owner-bound factory.
+            if (attempt.worker_id != config.worker_id
+                    or requested.worker_id != config.worker_id
+                    or requested.provider != "openai-codex"
+                    or requested.harness_kind != "codex-app-server"):
+                raise ServiceError("claim differs from the configured operator worker")
             return RemoteCodexOperatorAdapter(
                 client,
                 turn_input_loader=turn_input_loader,
@@ -1546,7 +1717,8 @@ def _service_from_config(
 
         return ExecutiveOperatorSupervisor(
             runtime,
-            adapter_factory=adapter_factory,
+            claimed_adapter_factory=(claimed_operator_adapter_factory
+                if claimed_operator_adapter_factory is not None else primary_factory),
             prompt_source=sealed_supervisor,
         )
 
@@ -1617,6 +1789,12 @@ def _service_from_config(
     if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
         # SDK-free canonical projection runs under the existing control uid.
         # The network App has no Runtime database or source-checkout access.
+        # Commission lookup is likewise host-owned. Provider construction is
+        # network-inert; observations occur only during trusted admission.
+        from integrations.mastermind_executive_app.web_commission_source import (
+            GitHubWebCommissionSourceProvider,
+        )
+
         reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
@@ -1723,12 +1901,25 @@ def _service_from_config(
                 # Namespace custody belongs to that service and validates the
                 # exact Runtime supplied by its App request handler.
                 bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
+        coo_factories = {}
+        from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+        from control_plane.coo_principal_host import CooHostProvider
+        if validate_control_coo(raw):
+            if type(coo_source) is not CooInstalledSource or "workspace_read_provider_factory" not in workspace_factories:
+                raise ServiceError("COO principal requires the sealed source and existing Workspace owner")
+            def coo_factory(runtime):
+                return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
+            coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
+                principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
             read_schema=app_read_schema,
-            **content_factories, **workspace_factories,
+            **content_factories, **workspace_factories, **coo_factories,
+        )
+        ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
+            GitHubWebCommissionSourceProvider()
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
@@ -1782,9 +1973,15 @@ def _service_from_config(
                     "terminal-return Relay socket must be distinct from every "
                     "activated listener"
                 )
+    readiness_factory = None
+    if config.privileged_readiness_armed:
+        from control_plane.executive_privileged_authority import PrivilegedReadinessController
+        def readiness_factory(runtime):
+            return PrivilegedReadinessController(runtime, release_sha=config.proof_base_sha)
     service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        privileged_readiness_controller_factory=readiness_factory,
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
@@ -1907,6 +2104,11 @@ async def _serve_from_config(config_path: Path) -> None:
             "content_observer"
         ]
 
+    coo_source = None
+    from ops.executive_os.coo_principal_host import CooInstalledSource, DEFAULT_INSTALL_PATH, validate_control_coo
+    if validate_control_coo(raw):
+        coo_source = CooInstalledSource.from_path(DEFAULT_INSTALL_PATH,
+            Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
     service = _service_from_config(
         raw,
         canary_loader=load_canary,
@@ -1914,6 +2116,7 @@ async def _serve_from_config(config_path: Path) -> None:
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
+        **({"coo_source": coo_source} if coo_source is not None else {}),
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
@@ -1937,6 +2140,9 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         return args.command, {}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
+    if args.command == "check-current-worker-login":
+        return args.command, {"job_id": args.job_id, "attempt_id": args.attempt_id,
+                              "fence_generation": args.fence_generation}
     if args.command == "run-coo-cycle":
         return args.command, {"root_job_id": args.root_job_id}
     if args.command == "attempt":

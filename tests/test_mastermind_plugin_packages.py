@@ -27,6 +27,11 @@ SOL_SKILLS = (
     "review-worker-return",
     "review-pull-request",
     "close-out-program",
+    "mastermind-web-ceo",
+    "mastermind-principal-architect",
+    "mastermind-product-designer",
+    "mastermind-deep-research",
+    "mastermind-recovery",
 )
 OPERATOR_SKILLS = (
     "receive-commission",
@@ -155,7 +160,7 @@ def test_repository_plugin_package_is_valid() -> None:
         "plugins": [
             {
                 "name": "mastermind-sol",
-                "version": "0.1.0",
+                "version": "0.2.0",
                 "manifest": "plugins/mastermind-sol/.codex-plugin/plugin.json",
                 "skills": list(SOL_SKILLS),
             },
@@ -648,9 +653,9 @@ def test_repository_documents_match_the_closed_contract() -> None:
             ("mastermind-dialogue", "integrations/mastermind_company_mcp/schemas.py")
         ],
     }
-    for plugin, display_name in (
-        ("mastermind-sol", "Mastermind Sol"),
-        ("mastermind-operator", "Mastermind Operator"),
+    for plugin, display_name, version, template_version in (
+        ("mastermind-sol", "Mastermind CEO", "0.2.0", "0.1.0"),
+        ("mastermind-operator", "Mastermind Operator", "0.1.0", "0.1.0"),
     ):
         manifest = json.loads(
             (ROOT / "plugins" / plugin / ".codex-plugin/plugin.json").read_text()
@@ -664,7 +669,7 @@ def test_repository_documents_match_the_closed_contract() -> None:
             "interface",
         }
         assert manifest["name"] == plugin
-        assert manifest["version"] == "0.1.0"
+        assert manifest["version"] == version
         assert manifest["author"] == {"name": "Mastermind-X"}
         assert manifest["skills"] == "./skills/"
         assert manifest["interface"]["displayName"] == display_name
@@ -672,12 +677,16 @@ def test_repository_documents_match_the_closed_contract() -> None:
         assert len(manifest["interface"]["longDescription"]) >= 80
         assert manifest["interface"]["capabilities"] == ["Read"]
         assert "apps" not in manifest and "mcpServers" not in manifest
+        if plugin == "mastermind-sol":
+            public_text = json.dumps(manifest["interface"]) + manifest["description"]
+            assert "Mastermind Sol" not in public_text
+            assert "Chairman and Sol" not in public_text
         template = json.loads(
             (ROOT / "plugins" / plugin / "references/app-bindings.template.json").read_text()
         )
         assert template["schema"] == "mastermind.plugin_app_bindings_template.v1"
         assert template["plugin"] == plugin
-        assert template["plugin_version"] == "0.1.0"
+        assert template["plugin_version"] == template_version
         assert template["generated_file"] == ".app.json"
         assert template["generated_by_wave"] == "BSC-U1"
         assert [
@@ -686,6 +695,22 @@ def test_repository_documents_match_the_closed_contract() -> None:
         ] == expected_bindings[plugin]
         assert all(binding["required"] is True for binding in template["bindings"])
         assert all(binding["app_id"] is None for binding in template["bindings"])
+
+
+def test_ceo_skill_package_facing_metadata_is_model_independent() -> None:
+    model_specific = re.compile(r"\bSol\b")
+    for skill in SOL_SKILLS:
+        text = _sol(skill)
+        assert text.startswith("---\n")
+        frontmatter, body = text[4:].split("\n---\n", 1)
+        description = next(
+            line.removeprefix("description:").strip()
+            for line in frontmatter.splitlines()
+            if line.startswith("description:")
+        )
+        heading = next(line.strip() for line in body.splitlines() if line.startswith("# "))
+        assert not model_specific.search(description), (skill, description)
+        assert not model_specific.search(heading), (skill, heading)
 
 
 @pytest.mark.parametrize("skill", SOL_SKILLS)
@@ -740,6 +765,31 @@ def test_key_workflow_semantics_are_explicit() -> None:
     assert "never self-merge" in _operator("finish-operation")
 
 
+def test_personal_ceo_release_preserves_frozen_business_u1_generation_one() -> None:
+    manifest = json.loads(
+        (ROOT / "plugins/mastermind-sol/.codex-plugin/plugin.json").read_text()
+    )
+    template = json.loads(
+        (ROOT / "plugins/mastermind-sol/references/app-bindings.template.json").read_text()
+    )
+    from integrations.business_sol_installation import bindings as business_u1
+
+    assert manifest["name"] == "mastermind-sol"
+    assert manifest["version"] == "0.2.0"
+    assert manifest["interface"]["displayName"] == "Mastermind CEO"
+
+    assert template["plugin"] == "mastermind-sol"
+    assert template["plugin_version"] == "0.1.0"
+    assert template["generated_by_wave"] == "BSC-U1"
+
+    assert business_u1.PLUGIN_NAME == "mastermind-sol"
+    assert business_u1.PLUGIN_DISPLAY_NAME == "Mastermind Sol"
+    assert business_u1.PLUGIN_VERSION == "0.1.0"
+    assert business_u1.PLUGIN_SCOPE == "WORKSPACE"
+    assert business_u1.GENERATION == 1
+    assert business_u1.GENERATED_BY_WAVE == "BSC-U1"
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_code"),
     (
@@ -775,7 +825,7 @@ def test_structural_authority_mutations_are_refused(
         path.write_text(path.read_text().replace("one already-bound operation and dialogue", "work"))
     elif mutation == "wrong_manifest_version":
         value = json.loads(manifest.read_text())
-        value["version"] = "0.2.0"
+        value["version"] = "0.3.0"
         _write_json(manifest, value)
     else:
         extra = tmp_path / "plugins/mastermind-sol/skills/unreviewed-extra/SKILL.md"

@@ -16,7 +16,16 @@ from typing import Any, Mapping, Sequence
 
 VALIDATION_SCHEMA = "mastermind.plugin_package_validation.v1"
 MARKETPLACE_PATH = Path(".agents/plugins/marketplace.json")
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSIONS = {
+    "mastermind-sol": "0.2.0",
+    "mastermind-operator": "0.1.0",
+    "mastermind-cortex": "0.1.0",
+    "mastermind-navigator": "0.1.0",
+}
+BINDING_TEMPLATE_VERSIONS = {
+    "mastermind-sol": "0.1.0",
+    "mastermind-operator": "0.1.0",
+}
 
 SOL_SKILLS = (
     "bootstrap-mastermind",
@@ -26,6 +35,11 @@ SOL_SKILLS = (
     "review-worker-return",
     "review-pull-request",
     "close-out-program",
+    "mastermind-web-ceo",
+    "mastermind-principal-architect",
+    "mastermind-product-designer",
+    "mastermind-deep-research",
+    "mastermind-recovery",
 )
 OPERATOR_SKILLS = (
     "receive-commission",
@@ -68,17 +82,17 @@ MARKETPLACE = {
 MANIFESTS = {
     "mastermind-sol": {
         "name": "mastermind-sol",
-        "version": PLUGIN_VERSION,
+        "version": PLUGIN_VERSIONS["mastermind-sol"],
         "description": (
-            "Governed Chairman and Sol workflows for current-source recovery, "
+            "Governed Chairman and CEO workflows for current-source recovery, "
             "company-state reconciliation, bounded CEO-intent drafting, return review, "
             "pull-request review, and durable closeout."
         ),
         "author": {"name": "Mastermind-X"},
         "skills": "./skills/",
         "interface": {
-            "displayName": "Mastermind Sol",
-            "shortDescription": "Governed Chairman and Sol operating workflows",
+            "displayName": "Mastermind CEO",
+            "shortDescription": "Governed Chairman and CEO operating workflows",
             "longDescription": (
                 "Recover current Mastermind truth, reconcile company state, draft bounded "
                 "CEO intent, review returns and pull requests, and close out accepted work "
@@ -91,7 +105,7 @@ MANIFESTS = {
     },
     "mastermind-operator": {
         "name": "mastermind-operator",
-        "version": PLUGIN_VERSION,
+        "version": PLUGIN_VERSIONS["mastermind-operator"],
         "description": (
             "Governed operator workflows for receiving one bound commission, returning "
             "progress, escalating a decision, and finishing one operation without generic "
@@ -114,7 +128,7 @@ MANIFESTS = {
     },
     "mastermind-cortex": {
         "name": "mastermind-cortex",
-        "version": PLUGIN_VERSION,
+        "version": PLUGIN_VERSIONS["mastermind-cortex"],
         "description": (
             "Read-only specialist orientation for tracing claims to current canonical owners, "
             "preserving unknowns and conflicts, and identifying one justified first read."
@@ -136,7 +150,7 @@ MANIFESTS = {
     },
     "mastermind-navigator": {
         "name": "mastermind-navigator",
-        "version": PLUGIN_VERSION,
+        "version": PLUGIN_VERSIONS["mastermind-navigator"],
         "description": (
             "Role-scoped, owner-preserving navigation from a fresh Mastermind session "
             "to the smallest currently evidenced operator surface."
@@ -162,7 +176,7 @@ TEMPLATES = {
     "mastermind-sol": {
         "schema": "mastermind.plugin_app_bindings_template.v1",
         "plugin": "mastermind-sol",
-        "plugin_version": PLUGIN_VERSION,
+        "plugin_version": BINDING_TEMPLATE_VERSIONS["mastermind-sol"],
         "generated_file": ".app.json",
         "generated_by_wave": "BSC-U1",
         "bindings": [
@@ -183,7 +197,7 @@ TEMPLATES = {
     "mastermind-operator": {
         "schema": "mastermind.plugin_app_bindings_template.v1",
         "plugin": "mastermind-operator",
-        "plugin_version": PLUGIN_VERSION,
+        "plugin_version": BINDING_TEMPLATE_VERSIONS["mastermind-operator"],
         "generated_file": ".app.json",
         "generated_by_wave": "BSC-U1",
         "bindings": [
@@ -1473,7 +1487,7 @@ def _validate_repository_snapshot(
         plugin_rows.append(
             {
                 "name": plugin,
-                "version": PLUGIN_VERSION,
+                "version": PLUGIN_VERSIONS[plugin],
                 "manifest": _relative(root, manifest_path),
                 "skills": list(skills),
             }

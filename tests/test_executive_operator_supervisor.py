@@ -1582,3 +1582,42 @@ def test_restart_commission_refusal_blocks_resume_but_not_later_cancellation(
     assert adapters[0].cancel_calls == 1
     attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
     assert attempt is not None and attempt.status is AttemptStatus.CANCELLED
+
+
+@pytest.mark.parametrize("missing_local_path", [False, True])
+def test_remote_commission_cannot_borrow_control_local_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_local_path: bool
+) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path, commission_content=b"# Exact remote commission\n"
+    )
+    original = Path(planner.worktree)
+    info = original.stat()
+    if missing_local_path:
+        original.rename(original.with_name("remote-only-source"))
+    identity = WorkspaceIdentity(
+        str(original), planner.constraints["base_sha"],
+        info.st_dev, info.st_ino, info.st_uid, info.st_gid,
+    )
+    calls = []
+
+    def forbidden(*_args, **_kwargs):
+        calls.append("unexpected_source_or_provider")
+        raise AssertionError("remote commission must not borrow Control-local source")
+
+    monkeypatch.setattr("control_plane.executive_supervisor._commission_git_probe", forbidden)
+    monkeypatch.setattr("control_plane.executive_supervisor._fetch_remote_commission", forbidden)
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime, claimed_adapter_factory=forbidden,
+        workspace_identity_source=lambda _attempt, _job: identity,
+        prompt_source=_CommissionPromptSource(),
+    )
+    with pytest.raises(ExecutiveOperatorSupervisorError,
+                       match="commission-bound Job has no assigned workspace"):
+        asyncio.run(supervisor.start_cycle_job(
+            planner.job_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        ))
+    assert calls == []
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM harness_session_epochs").fetchone()[0] == 0

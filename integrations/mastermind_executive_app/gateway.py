@@ -46,7 +46,7 @@ import dataclasses
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from control_plane import ceo_boot_packet
 from control_plane import executive_ceo_ingress as ceo_ingress
@@ -56,8 +56,8 @@ from integrations.business_mcp_auth.contracts import (
     VerifiedPrincipal,
     load_resource_policy,
 )
-from integrations.business_mcp_auth.jwks import BoundedJwksCache, HttpxJwksFetcher
-from integrations.business_mcp_auth.jwt_verifier import JwksKeySource, JwtAuthenticator
+if TYPE_CHECKING:
+    from integrations.business_mcp_auth.jwt_verifier import JwksKeySource, JwtAuthenticator
 from integrations.executive_mcp.adapter import ExecutiveMcpGateway, GatewayConfig
 from integrations.executive_mcp.schemas import MODIFYING_TOOL, tool_names
 
@@ -148,6 +148,7 @@ def load_app_policies_from_file(path: "Path | str") -> AppPolicies:
 
 
 def _default_jwks_cache(policy: ResourcePolicy) -> JwksKeySource:
+    from integrations.business_mcp_auth.jwks import BoundedJwksCache, HttpxJwksFetcher
     import time as _time
 
     return BoundedJwksCache(
@@ -197,6 +198,7 @@ def make_jwt_authenticators(
     caches.  A caller-supplied ``jwks_cache`` is reused for both as before.
     """
 
+    from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
     if jwks_cache is None:
         shared_cache = make_shared_jwks_cache(policies)
         if shared_cache is None:
@@ -368,6 +370,22 @@ class CeoIngressClient:
     ) -> CeoIngressResponse:
         """Send exactly one JSON frame; never retries internally."""
 
+        request_ceiling = MAX_REQUEST_BYTES
+        response_ceiling = MAX_RESPONSE_BYTES
+        stream_limit = _STREAM_LIMIT
+        # Only the separately versioned, closed release frame can use the
+        # larger token envelope; every historical schema retains its limits.
+        from control_plane import executive_release_ingress as release_ingress
+        if isinstance(frame, Mapping) and frame.get("schema") == release_ingress.FRAME_SCHEMA:
+            try:
+                release_ingress.validate_frame(frame)
+            except release_ingress.ReleaseIngressError:
+                return CeoIngressResponse(
+                    transport=TRANSPORT_NOT_SENT, detail="release frame is invalid"
+                )
+            request_ceiling = release_ingress.MAX_FRAME_BYTES
+            response_ceiling = release_ingress.MAX_RESPONSE_BYTES
+            stream_limit = response_ceiling + 4096
         try:
             encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
                 "utf-8"
@@ -377,16 +395,16 @@ class CeoIngressClient:
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
             )
         line = encoded + b"\n"
-        if len(line) > MAX_REQUEST_BYTES:
+        if len(line) > request_ceiling:
             # Refuse locally; never put an oversized frame on the wire.
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT,
-                detail=f"frame is {len(line)} bytes, over the {MAX_REQUEST_BYTES}-byte ceiling",
+                detail=f"frame is {len(line)} bytes, over the {request_ceiling}-byte ceiling",
             )
 
         try:
             reader, writer = await asyncio.wait_for(
-                asyncio.open_unix_connection(str(socket_path), limit=_STREAM_LIMIT),
+                asyncio.open_unix_connection(str(socket_path), limit=stream_limit),
                 timeout=self._connect_timeout,
             )
         except (OSError, asyncio.TimeoutError) as exc:
@@ -436,7 +454,7 @@ class CeoIngressClient:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="connection closed with no response"
                 )
-            if len(raw) > MAX_RESPONSE_BYTES:
+            if len(raw) > response_ceiling:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
@@ -570,3 +588,31 @@ async def observe_ingress_grounding(
     if result is None:
         raise GroundingUnavailable("installed grounding is unavailable")
     return result
+
+
+def make_jwt_authenticator_variants(
+    primary: AppPolicies,
+    alternates: tuple[AppPolicies, ...] = (),
+    *,
+    primary_jwks_cache: JwksKeySource | None = None,
+) -> tuple[tuple[JwtAuthenticator, JwtAuthenticator], ...]:
+    """Build exact per-resource authenticator pairs for one Executive service.
+
+    Every resource keeps its own immutable ResourcePolicy pair and therefore
+    retains exact JWT audience validation. This helper groups those exact
+    pairs for one app composition; it never turns the resource claim into a
+    wildcard or list-valued policy. A caller-supplied JWKS cache belongs only
+    to the primary resource. Alternate resources build their own bounded
+    caches so the existing cache-sharing contract is not widened across OAuth
+    resources.
+    """
+
+    if type(primary) is not AppPolicies:
+        raise TypeError("primary must be AppPolicies")
+    if type(alternates) is not tuple or any(
+        type(item) is not AppPolicies for item in alternates
+    ):
+        raise TypeError("alternates must be a tuple of AppPolicies")
+    pairs = [make_jwt_authenticators(primary, jwks_cache=primary_jwks_cache)]
+    pairs.extend(make_jwt_authenticators(item) for item in alternates)
+    return tuple(pairs)

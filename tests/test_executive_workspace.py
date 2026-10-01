@@ -181,11 +181,14 @@ def test_shared_index_stays_group_readable_after_control_cleanliness(
     real_run_bytes = executive_workspace._run_bytes
 
     def observed_run_bytes(argv, *, cwd, env):
-        recorded_envs.append(dict(env))
-        recorded_argv.append(tuple(argv))
-        index = Path(cwd) / ".git" / "index"
-        if index.exists() and not index_mode_before_status:
-            index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
+        # Construction now reads the pinned profile from the source. This
+        # regression guards the distinct post-sharing workspace observations.
+        if Path(cwd) != source:
+            recorded_envs.append(dict(env))
+            recorded_argv.append(tuple(argv))
+            index = Path(cwd) / ".git" / "index"
+            if index.exists() and not index_mode_before_status:
+                index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
         return real_run_bytes(argv, cwd=cwd, env=env)
 
     monkeypatch.setattr(executive_workspace, "_run_bytes", observed_run_bytes)
@@ -510,6 +513,20 @@ def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
 
 
 def test_launch_cleanliness_definition_includes_ignored_untracked_material():
+    # Tracked-status observation must not recursively enumerate untracked files:
+    # the second observation already enumerates every untracked/ignored path.
+    assert executive_workspace.LAUNCH_CLEAN_STATUS_ARGS == (
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+    )
+    assert executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS == (
+        "ls-files",
+        "--others",
+        "-z",
+    )
+
     calls: list[tuple[str, ...]] = []
 
     def observe(arguments):

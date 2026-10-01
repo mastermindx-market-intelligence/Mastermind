@@ -205,8 +205,11 @@ def test_current_installed_selector_adds_v3_without_expanding_old_validator():
     assert v3.validate_installed_mcp_profile_current("legacy") == "legacy"
     assert v3.validate_installed_mcp_profile_current("web_ceo_v2") == "web_ceo_v2"
     assert v3.validate_installed_mcp_profile_current("web_ceo_v3") == "web_ceo_v3"
+    assert v3.validate_installed_mcp_profile_current("personal_read") == "personal_read"
     with pytest.raises(ValueError):
         v2.validate_installed_mcp_profile("web_ceo_v3")
+    with pytest.raises(ValueError):
+        v2.validate_installed_mcp_profile("personal_read")
 
 
 def test_service_owned_session_credential_resolves_without_secret_repr(

@@ -53,9 +53,9 @@ TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Maste
 # Runtime generations are immutable from the perspective of installed seats. A new
 # bridge SHA gets a new directory so one-seat canaries cannot invalidate another
 # seat that still pins the previous bridge bytes.
-PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v3")
+PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v9")
 PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
-PAPER_BRIDGE_SHA256 = "26e3b5e8435d9a44f9476d29ae8d2f55819b9d7c05a0c008fb021da58d96e081"
+PAPER_BRIDGE_SHA256 = "a784fefceb7b1bb1164289700b22a6f53d09ae60d007f506ac015ebaca8c3725"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 PAPER_APP_REL = Path("Applications/Paper.app")
 

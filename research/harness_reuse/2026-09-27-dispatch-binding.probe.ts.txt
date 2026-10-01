@@ -1,0 +1,102 @@
+/**
+ * Proposed M07/M05 expansion for Mastermind #1037.
+ * NOT RUN against DSH. Syntax checking is not donor-runtime qualification.
+ * Place in packages/core/tools/tests/dispatch-binding.spec.ts in the pinned
+ * donor checkout, then run that checkout's declared test runner.
+ * Donor: 21638c56315ae6a2b552d6091945d3144c9af32e.
+ * Uses only in-memory tool bodies; no filesystem, network, or provider calls.
+ */
+import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime, { type ToolDefinition } from '@deepseek-ai/dsh-tools'
+
+type Scenario = 'stable' | 'denied-before-guard' | 'replace-after-guard' | 'revoke-after-guard'
+
+async function exercise(scenario: Scenario) {
+  const ctx = new Context()
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  const trace: string[] = []
+  let approvedCalls = 0
+  let replacementCalls = 0
+  let authorized = scenario !== 'denied-before-guard'
+  const name = 'mcp__fixture__read'
+  const approved: ToolDefinition = {
+    name, description: 'Scoped read fixture',
+    parameters: { type: 'object', properties: {} },
+    output: { schema: { type: 'null' }, render: () => [] },
+    async execute() { approvedCalls++; trace.push('approved-body'); return null },
+  }
+  const replacement: ToolDefinition = {
+    name, description: 'Scoped read fixture',
+    parameters: { type: 'object', properties: {} },
+    output: { schema: { type: 'null' }, render: () => [] },
+    async execute() { replacementCalls++; trace.push('replacement-body'); return null },
+  }
+  let unregister = ctx.tools.register(approved)
+  // Deliberately stronger than a name allowlist: identity plus live permission.
+  const removeGuard = ctx.tools.guard(exec => {
+    const allowed = authorized && ctx.tools.get(exec.name, exec.agent) === approved
+    trace.push(allowed ? 'guard-allow' : 'guard-deny')
+    return allowed ? undefined : 'MASTERMIND_TEST_BINDING_REFUSED'
+  })
+  const removeWrapper = ctx.on('tools/execute', async (_exec, next) => {
+    trace.push('wrapper-enter')
+    // Deterministic async boundary, not a sleep or an assumed timing race.
+    await Promise.resolve().then(() => {
+      if (scenario === 'replace-after-guard') {
+        unregister()
+        unregister = ctx.tools.register(replacement)
+        trace.push('replacement-registered')
+      } else if (scenario === 'revoke-after-guard') {
+        authorized = false
+        trace.push('authorization-revoked')
+      }
+    })
+    return next()
+  })
+  const controller = new AbortController()
+  try {
+    const result = await ctx.tools.execute({
+      signal: controller.signal, callId: ToolCallId('binding-probe'), name, arguments: {},
+    })
+    return { result, trace, approvedCalls, replacementCalls }
+  } finally {
+    controller.abort()
+    removeWrapper()
+    removeGuard()
+    unregister()
+  }
+}
+
+describe('Mastermind exact binding at tool body dispatch', () => {
+  it('allows the unchanged admitted body exactly once', async () => {
+    const observed = await exercise('stable')
+    expect(observed.approvedCalls).toBe(1)
+    expect(observed.replacementCalls).toBe(0)
+    expect(observed.result.isError).not.toBe(true)
+  })
+  it('denies an already-revoked grant before entering the wrapper', async () => {
+    const observed = await exercise('denied-before-guard')
+    expect(observed.approvedCalls + observed.replacementCalls).toBe(0)
+    expect(observed.trace).not.toContain('wrapper-enter')
+    expect(observed.result.isError).toBe(true)
+  })
+  it('does not execute a same-name replacement introduced after guard approval', async () => {
+    const observed = await exercise('replace-after-guard')
+    expect(observed.trace).toContain('guard-allow')
+    expect(observed.trace).toContain('replacement-registered')
+    expect(observed.approvedCalls).toBe(0)
+    expect(observed.replacementCalls).toBe(0)
+    expect(observed.result.isError).toBe(true)
+  })
+  it('does not execute after permission revocation inside the async wrapper', async () => {
+    const observed = await exercise('revoke-after-guard')
+    expect(observed.trace).toContain('guard-allow')
+    expect(observed.trace).toContain('authorization-revoked')
+    expect(observed.approvedCalls + observed.replacementCalls).toBe(0)
+    expect(observed.result.isError).toBe(true)
+  })
+})
