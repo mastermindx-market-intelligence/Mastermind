@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import inspect
 import re
 from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timezone
@@ -67,7 +68,7 @@ from integrations.executive_mcp.schemas import (
     validate_tool_arguments,
 )
 
-__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "run_stdio"]
+__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_session_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "run_stdio"]
 
 _E1_READ_NAMES = tuple(path.rsplit("/", 1)[-1] for path in sorted(E1_READ_PATHS))
 _E1_ENVELOPE_FIELDS = frozenset(
@@ -768,6 +769,8 @@ def _build_profile_mcp_app(
     os_app=None,
     release_profile: bool = False,
     release_tool_names: tuple[str, ...] = (),
+    local_tool_handlers: dict[str, Any] | None = None,
+    local_submit_tool_names: tuple[str, ...] = (),
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -805,6 +808,14 @@ def _build_profile_mcp_app(
                 or len(names) != len(set(names))
                 or not set(release_tool_names) <= set(names)):
             raise ValueError("release tool names must match the fixed operation inventory")
+    local_tool_handlers = dict(local_tool_handlers or {})
+    profile_tool_names = tuple(tool.name for tool in profile_tools)
+    if (type(local_submit_tool_names) is not tuple
+            or any(type(name) is not str for name in local_submit_tool_names)
+            or not set(local_submit_tool_names) <= set(local_tool_handlers)
+            or not set(local_tool_handlers) <= set(profile_tool_names)
+            or any(not callable(handler) for handler in local_tool_handlers.values())):
+        raise ValueError("local authenticated tool composition is invalid")
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
@@ -846,7 +857,7 @@ def _build_profile_mcp_app(
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
             configured.policies.submit
-            if release_profile or tool.name in release_tool_names or tool.name == "submit_ceo_intent"
+            if release_profile or tool.name in release_tool_names or tool.name in local_submit_tool_names or tool.name == "submit_ceo_intent"
             else configured.policies.read
         )
         schemes = oauth_security_schemes(policy.required_scopes)
@@ -901,6 +912,47 @@ def _build_profile_mcp_app(
             validated = profile_validator(name, arguments)
         except GatewayError as exc:
             return result(profile_error(name, exc.code, exc.message))
+        local_handler = local_tool_handlers.get(name)
+        if local_handler is not None:
+            if name in local_submit_tool_names:
+                auth = getattr(request, "auth", None)
+                granted = set(getattr(auth, "scopes", ()) or ())
+                required = set(configured.policies.submit.required_scopes)
+                if not required <= granted:
+                    auth_error = AuthError(AuthErrorCode.SCOPE_REFUSED)
+                    challenge = mcp_auth_error_result(
+                        configured.policies.submit, auth_error,
+                        required_scopes=configured.policies.submit.required_scopes,
+                    )["_meta"]["mcp/www_authenticate"][0]
+                    return result({
+                        "ok": False,
+                        "error": {
+                            "code": auth_error.code.value,
+                            "message": auth_error.public_message,
+                        },
+                    }, challenge=challenge)
+            try:
+                payload = local_handler(validated)
+                if inspect.isawaitable(payload):
+                    payload = await payload
+                canonical_json(payload)
+            except Exception:
+                payload = {
+                    "ok": False,
+                    "error": {
+                        "code": "effect_unknown" if name in local_submit_tool_names else "backend_unavailable",
+                        "message": (
+                            "operation outcome is unknown; reconcile the original operation"
+                            if name in local_submit_tool_names
+                            else "authenticated local tool is unavailable"
+                        ),
+                    },
+                }
+            reply = result(payload)
+            if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
+                reply = result({"ok": False, "error": {"code": "output_too_large", "message": "tool response exceeds the transport budget"}})
+            return reply
+
         is_submit = name == "submit_ceo_intent"
         is_release = release_profile or name in release_tool_names
         request_ref = app_request_ref(validated["operation_key"]) if is_submit else None
@@ -1181,6 +1233,57 @@ def build_web_ceo_v3_mcp_app(
         workspace_app=workspace_app,
         content_app=content_app,
         os_app=os_app,
+    )
+
+
+def build_web_ceo_session_mcp_app(
+    settings: Any,
+    *,
+    audit_sink: Any,
+    session_gateway: Any,
+    workspace_app=None,
+    content_app=None,
+    os_app=None,
+) -> Any:
+    """Authenticated Web-CEO session profile over the static v2 host.
+
+    The three Session Bridge tools are local presentation handlers only. They
+    reuse the incumbent OAuth bearer/scopes and never create another listener,
+    auth realm, queue, lifecycle owner or provider registry. Modifying bridge
+    tools require the existing submit scopes before their handler is entered.
+    """
+    from integrations.executive_mcp.web_ceo import (
+        WEB_CEO_V2_SERVER_NAME,
+        validate_web_ceo_v2_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_web_ceo_v2_app
+    from integrations.session_bridge.schemas import BridgeError, validate_tool_arguments as validate_bridge
+    from integrations.session_bridge.server import build_handlers as build_bridge_handlers
+    from integrations.session_bridge.server import build_tools as build_bridge_tools
+
+    bridge_names = {"session_targets", "session_send", "session_summon"}
+
+    def validate(name: str, arguments: Any) -> dict[str, Any]:
+        if name not in bridge_names:
+            return validate_web_ceo_v2_tool_arguments(name, arguments)
+        try:
+            return validate_bridge(name, arguments)
+        except BridgeError as exc:
+            raise GatewayError(exc.code, exc.message) from None
+
+    return _build_profile_mcp_app(
+        settings,
+        audit_sink=audit_sink,
+        profile_server_name=f"{WEB_CEO_V2_SERVER_NAME}-session",
+        profile_server_version="1.3.0-session",
+        profile_tools=tuple(build_web_ceo_v2_tools() + build_bridge_tools()),
+        profile_validator=validate,
+        profile_create_app=create_web_ceo_v2_app,
+        workspace_app=workspace_app,
+        content_app=content_app,
+        os_app=os_app,
+        local_tool_handlers=build_bridge_handlers(session_gateway),
+        local_submit_tool_names=("session_send", "session_summon"),
     )
 
 
