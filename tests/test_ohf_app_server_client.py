@@ -256,7 +256,7 @@ def test_guarded_send_serializes_actual_notification_enqueue_through_write(tmp_p
         begin_enqueue.set()
         assert attempting.wait(timeout=1)
         assert not acquired.is_set()
-    def send(payload):
+    def send(payload, **kwargs):
         assert client._transport_lock.locked()
         assert not acquired.is_set()
         assert payload["id"] == evidence[0]
@@ -303,3 +303,137 @@ def test_notification_guard_cannot_be_used_for_an_unrelated_method(tmp_path):
     with pytest.raises(JsonRpcError, match="only valid for turn/start"):
         client.request("thread/read", {}, before_send=lambda *args: None)
     assert client._responses == {} and client._next_id == 1
+
+
+
+def test_guarded_large_write_terminates_a_backpressured_transport(tmp_path):
+    import threading
+    marker = tmp_path / "peer-read-first-byte"
+    code = (
+        "import pathlib,sys\n"
+        "sys.stdin.buffer.read(1)\n"
+        "pathlib.Path(sys.argv[1]).write_text('observed')\n"
+        "for i in range(3000):\n"
+        " sys.stdout.write('{\"method\":\"account/update\",\"params\":{\"padding\":\"' + 'x'*256 + '\"}}\\n')\n"
+        " sys.stdout.flush()\n"
+        "sys.stdin.buffer.readline()\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code, str(marker)],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    client.start()
+    rescued = []
+    def rescue():
+        rescued.append(True)
+        if client.proc.poll() is None:
+            client.proc.kill()
+    timer = threading.Timer(2.0, rescue)
+    timer.start()
+    failure = None
+    try:
+        client.request("turn/start", {"input": "x" * 262144}, timeout=0.25,
+                       before_send=lambda *_args: None)
+    except Exception as exc:
+        failure = exc
+    finally:
+        timer.cancel()
+        if client.proc.poll() is None:
+            client.proc.kill()
+        client.close()
+        timer.join(timeout=1)
+    assert marker.exists(), "the peer never consumed the beginning of the actual frame"
+    assert not rescued, "guarded write outlived its deadline and needed external rescue"
+    assert isinstance(failure, JsonRpcError)
+    assert "timeout" in str(failure)
+    assert client._transport_closed and client._responses == {}
+    assert client.proc.poll() is not None
+
+
+def test_guarded_write_lock_uses_the_same_request_deadline(tmp_path):
+    import threading
+    client = _client(tmp_path)
+    client._write_lock.acquire()
+    rescued = []
+    def rescue():
+        rescued.append(True)
+        if client._write_lock.locked():
+            client._write_lock.release()
+    timer = threading.Timer(1.0, rescue)
+    timer.start()
+    failure = None
+    try:
+        client.request("turn/start", {}, timeout=0.02, before_send=lambda *_args: None)
+    except Exception as exc:
+        failure = exc
+    finally:
+        timer.cancel()
+        if client._write_lock.locked():
+            client._write_lock.release()
+        client.close()
+        timer.join(timeout=1)
+    assert not rescued, "write-lock acquisition ignored the request deadline"
+    assert isinstance(failure, JsonRpcError)
+    assert client._responses == {}
+
+
+def test_guard_that_exhausts_the_deadline_cannot_send(tmp_path, monkeypatch):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    clock = [10.0]
+    monkeypatch.setattr(laboratory.time, "monotonic", lambda: clock[0])
+    sends = []
+    client._send = lambda payload, **kwargs: sends.append(payload)
+    def guard(*_args):
+        clock[0] = 11.0
+    with pytest.raises(JsonRpcError, match="timeout"):
+        client.request("turn/start", {}, timeout=0.5, before_send=guard)
+    assert sends == [] and client._responses == {}
+
+
+def test_guarded_response_wait_spends_only_remaining_deadline(tmp_path, monkeypatch):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    clock = [10.0]
+    monkeypatch.setattr(laboratory.time, "monotonic", lambda: clock[0])
+    class CapturingQueue:
+        def __init__(self, maxsize):
+            self.timeout = None
+        def get(self, timeout):
+            self.timeout = timeout
+            return {"result": {"ok": True}}
+    queues = []
+    def make_queue(maxsize):
+        queue = CapturingQueue(maxsize)
+        queues.append(queue)
+        return queue
+    monkeypatch.setattr(laboratory.queue, "Queue", make_queue)
+    def guard(*_args):
+        clock[0] = 10.4
+    client._send = lambda payload, **kwargs: None
+    assert client.request("turn/start", {}, timeout=1, before_send=guard) == {"ok": True}
+    assert queues[0].timeout == pytest.approx(0.6)
+
+
+
+def test_compromised_transport_does_not_block_on_a_full_waiter(tmp_path):
+    import queue
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    ordinary = queue.Queue(maxsize=1)
+    raw = queue.Queue(maxsize=1)
+    ordinary.put({"result": {"already": "received"}})
+    raw.put(None)
+    client._responses[1] = ordinary
+    client._raw_responses[2] = raw
+    client._compromise_transport()
+    assert client._transport_closed
+    assert ordinary.get_nowait() == {"result": {"already": "received"}}
+    assert raw.get_nowait() is None
+
+
+def test_send_deadline_restores_the_pipe_mode_after_success(tmp_path):
+    client = _client(tmp_path)
+    original = os.get_blocking(client.proc.stdin.fileno())
+    try:
+        result = client.request("turn/start", {}, timeout=2, before_send=lambda *_: None)
+        assert isinstance(result, dict)
+        assert os.get_blocking(client.proc.stdin.fileno()) == original
+        assert not client._write_lock.locked()
+    finally:
+        client.close()

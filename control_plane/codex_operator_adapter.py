@@ -2632,6 +2632,11 @@ class CodexOperatorAdapter:
                 result.get("turn") if isinstance(result.get("turn"), Mapping) else {}
             )
             native_turn_id = str(turn_obj.get("id") or "")
+        except CodexAdapterError:
+            # The host-owned send guard reports configuration/authority facts,
+            # not an RPC transport error. Preserve its exact failure taxonomy.
+            self._visible_projection().drop_prebind("turn_start_error")
+            raise
         except Exception as exc:
             self._visible_projection().drop_prebind("turn_start_error")
             raise _rpc_failure(exc, effect_unknown=True) from exc

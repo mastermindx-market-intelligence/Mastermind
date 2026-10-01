@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import queue
+import select
 import signal
 import shutil
 import subprocess
@@ -478,10 +479,13 @@ class AppServerClient:
                 pass
         with self._notification_condition:
             self._transport_closed = True
-            for target in self._responses.values():
-                target.put(dict(_TRANSPORT_FAILURE))
-            for target in self._raw_responses.values():
-                target.put(dict(_TRANSPORT_FAILURE))
+            for target in (*self._responses.values(), *self._raw_responses.values()):
+                try:
+                    target.put_nowait(dict(_TRANSPORT_FAILURE))
+                except queue.Full:
+                    # A previously queued response/terminal marker already
+                    # wakes its owner. Never block teardown behind that owner.
+                    pass
             self._notification_condition.notify_all()
 
     def _read_stderr(self) -> None:
@@ -494,12 +498,51 @@ class AppServerClient:
     def stderr_text(self) -> str:
         return redact_text("".join(self._stderr_chunks))
 
-    def _send(self, payload: Mapping[str, Any]) -> None:
+    def _send(
+        self, payload: Mapping[str, Any], *, deadline: float | None = None
+    ) -> None:
         if self.proc is None or self.proc.stdin is None:
             raise JsonRpcError("app-server stdin is closed")
-        with self._write_lock:
-            self.proc.stdin.write((json.dumps(dict(payload)) + "\n").encode("utf-8"))
-            self.proc.stdin.flush()
+        frame = (json.dumps(dict(payload)) + "\n").encode("utf-8")
+        if deadline is None:
+            with self._write_lock:
+                self.proc.stdin.write(frame)
+                self.proc.stdin.flush()
+            return
+        # Guarded sends hold the notification boundary. A duplex peer may
+        # fill stdout before reading all stdin, so never block indefinitely
+        # while excluding the receiver. Reuse this request's absolute budget.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not self._write_lock.acquire(timeout=remaining):
+            raise JsonRpcError("timeout writing app-server request")
+        fd: int | None = None
+        was_blocking: bool | None = None
+        try:
+            fd = self.proc.stdin.fileno()
+            was_blocking = os.get_blocking(fd)
+            os.set_blocking(fd, False)
+            pending = memoryview(frame)
+            while pending:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise JsonRpcError("timeout writing app-server request")
+                try:
+                    _, writable, _ = select.select([], [fd], [], remaining)
+                    if not writable:
+                        raise JsonRpcError("timeout writing app-server request")
+                    written = os.write(fd, pending)
+                except (BlockingIOError, InterruptedError):
+                    continue
+                if written <= 0:
+                    raise JsonRpcError("app-server write made no progress")
+                pending = pending[written:]
+        finally:
+            if fd is not None and was_blocking is not None:
+                try:
+                    os.set_blocking(fd, was_blocking)
+                except OSError:
+                    pass  # Concurrent closure must not mask the original error.
+            self._write_lock.release()
 
     def notify(self, method: str, params: Mapping[str, Any] | None = None) -> None:
         message: dict[str, Any] = {"method": method}
@@ -524,6 +567,9 @@ class AppServerClient:
     ) -> dict[str, Any]:
         if before_send is not None and (method != "turn/start" or not callable(before_send)):
             raise JsonRpcError("notification guard is only valid for turn/start")
+        deadline = time.monotonic() + timeout if before_send is not None else None
+        guarded_send_started = False
+        guarded_send_completed = False
         response_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=1)
         with self._notification_condition:
             if self._transport_closed:
@@ -548,14 +594,30 @@ class AppServerClient:
                         raise JsonRpcError("app-server exited before guarded turn/start")
                     if len(self._responses) != 1 or self._raw_responses:
                         raise JsonRpcError("guarded turn/start requires an idle request boundary")
+                    assert deadline is not None
+                    if time.monotonic() >= deadline:
+                        raise JsonRpcError("timeout before guarded turn/start")
                     queued = list(self.notifications)
                     self.notifications.clear()
                     before_send(request_id, queued)
+                    if time.monotonic() >= deadline:
+                        raise JsonRpcError("timeout before guarded turn/start")
                     if self.visible_projection is not None:
                         self.visible_projection.arm_prebind(request_id)
-                    self._send(message)
+                    guarded_send_started = True
+                    try:
+                        self._send(message, deadline=deadline)
+                    except BaseException:
+                        # A partial frame must never be followed by a retry on
+                        # this stream. Fence new requests before releasing the
+                        # notification lock; terminate outside it below.
+                        self._transport_closed = True
+                        self._responses.pop(request_id, None)
+                        raise
+                    guarded_send_completed = True
             try:
-                payload = response_queue.get(timeout=timeout)
+                wait_timeout = timeout if deadline is None else max(0.0, deadline - time.monotonic())
+                payload = response_queue.get(timeout=wait_timeout)
             except queue.Empty as exc:
                 if self.visible_projection is not None:
                     self.visible_projection.drop_prebind("response_timeout")
@@ -578,6 +640,10 @@ class AppServerClient:
                 )
             result = payload.get("result")
             return result if isinstance(result, dict) else {"value": result}
+        except BaseException:
+            if guarded_send_started and not guarded_send_completed:
+                self._compromise_transport()
+            raise
         finally:
             if isinstance(payload, dict) and payload.get("_transport_failure"):
                 if self.visible_projection is not None:

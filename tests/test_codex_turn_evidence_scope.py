@@ -391,12 +391,12 @@ def test_interturn_notification_is_generation_only_before_next_provider_start(tm
             state.client.notifications.append(idle)
         send = state.client._send
         witnessed = []
-        def start_after_generation_ingestion(payload):
+        def start_after_generation_ingestion(payload, **kwargs):
             if payload.get("method") == "turn/start":
                 matches = [event for event in state.events if event.kind == idle["method"]]
                 assert len(matches) == 1 and matches[0].turn_id is None
                 witnessed.append(True)
-            return send(payload)
+            return send(payload, **kwargs)
         state.client._send = start_after_generation_ingestion
         _begin(harness, launch, second)
         events, _ = harness.adapter.read_events(_cursor(second))
@@ -416,10 +416,10 @@ def test_interturn_ungranted_helper_refuses_before_next_provider_start(tmp_path)
                 "thread": {"id": "ungranted-idle-helper", "parentThreadId": state.provider_session_id}}})
         send = state.client._send
         started = []
-        def record_request(payload):
+        def record_request(payload, **kwargs):
             if payload.get("method") == "turn/start":
                 started.append(True)
-            return send(payload)
+            return send(payload, **kwargs)
         state.client._send = record_request
         with pytest.raises(CodexAdapterError):
             _begin(harness, launch, second)
@@ -446,14 +446,14 @@ def test_notification_between_old_drain_and_request_send_is_guarded(tmp_path, he
                 with state.client._notification_condition:
                     state.client.notifications.append(notification)
             return request(method, params, **kwargs)
-        def witness_actual_send(payload):
+        def witness_actual_send(payload, **kwargs):
             if payload.get("method") == "turn/start":
                 actual_starts.append(payload["id"])
                 if not helper:
                     matches = [event for event in state.events
                                if event.kind == notification["method"]]
                     assert len(matches) == 1 and matches[0].turn_id is None
-            return send(payload)
+            return send(payload, **kwargs)
         state.client.request = inject_after_adapter_drain
         state.client._send = witness_actual_send
         if helper:
@@ -465,3 +465,34 @@ def test_notification_between_old_drain_and_request_send_is_guarded(tmp_path, he
             events, _ = harness.adapter.read_events(_cursor(second))
             assert len(actual_starts) == 1
             assert not any(event.kind == notification["method"] for event in events)
+
+
+@pytest.mark.parametrize("kind", ["helper", "skills"])
+def test_atomic_guard_preserves_configuration_failure_taxonomy(tmp_path, kind):
+    from control_plane.codex_operator_adapter import AdapterFailureClass
+    with _fixture(tmp_path) as (harness, launch):
+        first, second = _turn(harness, "turn-classification-first"), _turn(harness, "turn-classification-next")
+        _begin(harness, launch, first)
+        harness.adapter.read_events(_cursor(first))
+        state = harness.adapter._generations[first.process_generation_id]
+        if kind == "skills":
+            harness.adapter.skill_canary_binding = object()
+            event = {"method": "skills/changed", "params": {}}
+        else:
+            event = {"method": "thread/started", "params": {"thread": {
+                "id": "ungranted-taxonomy-helper", "parentThreadId": state.provider_session_id}}}
+        with state.client._notification_condition:
+            state.client.notifications.append(event)
+        sends = []
+        original = state.client._send
+        def send(payload, **kwargs):
+            if payload.get("method") == "turn/start":
+                sends.append(payload)
+            return original(payload, **kwargs)
+        state.client._send = send
+        with pytest.raises(CodexAdapterError) as failure:
+            _begin(harness, launch, second)
+        assert failure.value.failure_class is AdapterFailureClass.CONFIG_DRIFT
+        assert failure.value.effect_unknown is True
+        assert sends == [] and state.client._responses == {}
+        assert not state.client._transport_closed
