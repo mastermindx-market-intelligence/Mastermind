@@ -215,6 +215,28 @@ class ExecutiveOperatorHarnessPort:
             lease_token=self.lease_token,
         )
 
+    def begin_operator_domain_consumption_turn(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        *,
+        expected_consumption_projection_digest: str,
+    ) -> TurnRef:
+        self._require_attempt(attempt_id)
+        epoch, stored = self.runtime.operator_harness.generation_refs(
+            generation.process_generation_id
+        )
+        if stored != generation or epoch.attempt_id != attempt_id:
+            raise StateConflict("domain consumption generation belongs to another identity")
+        return self.runtime.operator_harness.reserve_domain_consumption_turn(
+            generation=generation,
+            operation_id=operation_id,
+            fence_generation=self.fence_generation,
+            lease_token=self.lease_token,
+            expected_consumption_projection_digest=expected_consumption_projection_digest,
+        )
+
     def apply_operator_turn(
         self,
         attempt_id: str,

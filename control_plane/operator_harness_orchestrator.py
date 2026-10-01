@@ -116,6 +116,15 @@ class RuntimePort(Protocol):
         operation_id: OperationId,
     ) -> TurnRef: ...
 
+    def begin_operator_domain_consumption_turn(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        *,
+        expected_consumption_projection_digest: str,
+    ) -> TurnRef: ...
+
     def apply_operator_turn(
         self,
         attempt_id: str,
