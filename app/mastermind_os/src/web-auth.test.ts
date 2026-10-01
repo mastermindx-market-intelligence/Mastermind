@@ -17,6 +17,7 @@ import {
   READ_TIMEOUT_MS,
   TOKEN_TIMEOUT_MS,
 } from "./public-config";
+import workUnavailable from "./fixtures/work-service-unavailable.json";
 const response = (data: unknown) =>
   new Response(JSON.stringify(data), {
     headers: { "content-type": "application/json" },
@@ -309,6 +310,7 @@ describe("fixed browser reads", () => {
     e.fetcher.mockImplementation(async () => response({ ok: true }));
     const signal = new AbortController().signal;
     await e.client.readPrograms({ signal });
+    await e.client.readWork({ signal });
     await e.client.readMission({
       work_ref: "WS:ONE",
       root_job_id: "JOB-1",
@@ -318,12 +320,26 @@ describe("fixed browser reads", () => {
     const urls = e.fetcher.mock.calls.slice(2).map((c) => String(c[0]));
     expect(urls).toEqual([
       `${ORIGIN}/workspace/programs/current`,
+      `${ORIGIN}/workspace/work/current`,
       `${ORIGIN}/workspace/mission/current?work_ref=WS%3AONE&root_job_id=JOB-1`,
       `${ORIGIN}/workspace/window/current`,
     ]);
     await expect(
       e.client.readMission({ work_ref: "bad", root_job_id: "JOB-1", signal }),
     ).rejects.toThrow("SELECTION_INVALID");
+  });
+  it("preserves the fixed Work typed-503 document for the closed decoder", async () => {
+    const e = setup();
+    await e.login();
+    e.fetcher.mockResolvedValueOnce(
+      new Response(JSON.stringify(workUnavailable), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    await expect(
+      e.client.readWork({ signal: new AbortController().signal }),
+    ).resolves.toEqual(workUnavailable);
   });
   it("permits >64KiB public JSON while enforcing the 2M byte cap", async () => {
     const e = setup();

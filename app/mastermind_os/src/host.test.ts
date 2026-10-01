@@ -8,6 +8,8 @@ import {
 import current from "./fixtures/mission-v2-current-128c46f6.json";
 import v3Current17 from "./fixtures/mission-v3-design-current-17-slots.json";
 import resultAvailable from "./fixtures/result-design-available-at-16384-socket-bytes.json";
+import workAvailable from "./fixtures/work-service-available.json";
+import workUnavailable from "./fixtures/work-service-unavailable.json";
 const signed: AuthState = {
   status: "signed_in",
   reason: null,
@@ -36,6 +38,7 @@ function raw() {
     signIn: vi.fn(async () => {}),
     signOut: vi.fn(async () => {}),
     readPrograms: vi.fn(async () => ({})),
+    readWork: vi.fn(async () => workAvailable),
     readMission: vi.fn(async () => current),
     readMissionV3: vi.fn(async () => v3Current17),
     readResult: vi.fn(async () => resultAvailable),
@@ -87,6 +90,23 @@ describe("installed typed host", () => {
       signal,
     });
   });
+  it("consumes one decoded Work document and preserves typed unavailability", async () => {
+    const e = raw(),
+      host = bindMissionHost(e.client),
+      signal = new AbortController().signal;
+    const ready = await host.readWork!({ signal });
+    expect(ready).toMatchObject({
+      schema: "mastermind.workspace_work_queue.v1",
+      availability: "AVAILABLE",
+    });
+    e.client.readWork = vi.fn(async () => workUnavailable);
+    const unavailable = await host.readWork!({ signal });
+    expect(unavailable).toMatchObject({
+      availability: "UNAVAILABLE",
+      reason_codes: ["projection_refused"],
+    });
+  });
+
   it("consumes the fixed readResult envelope and preserves source failure without mislabeling cancellation", async () => {
     const e = raw(),
       host = bindMissionHost(e.client);
@@ -135,8 +155,10 @@ describe("installed typed host", () => {
     expect(afterAuth).toBeGreaterThan(first ?? -1);
     const missionHold = deferred<unknown>();
     const windowHold = deferred<unknown>();
+    const workHold = deferred<unknown>();
     e.client.readMissionV3 = () => missionHold.promise;
     e.client.readCurrentWindow = () => windowHold.promise;
+    e.client.readWork = () => workHold.promise;
     const started = host.invalidationGeneration?.() ?? 0;
     const mission = host.readMissionV3!({
       workRef: "WS:B5",
@@ -147,6 +169,13 @@ describe("installed typed host", () => {
     missionHold.resolve(v3Current17);
     await expect(mission).rejects.toThrow("READ_CANCELLED");
     expect(host.invalidationGeneration?.()).not.toBe(started);
+    const workStarted = host.invalidationGeneration?.() ?? 0;
+    const workRead = host.readWork!({ signal: new AbortController().signal });
+    e.notify(out);
+    workHold.resolve(workAvailable);
+    await expect(workRead).rejects.toThrow("READ_CANCELLED");
+    expect(host.invalidationGeneration?.()).not.toBe(workStarted);
+    e.notify(signed);
     const windowStarted = host.invalidationGeneration?.() ?? 0;
     const windowRead = host.readCurrentWindow!({
       signal: new AbortController().signal,
@@ -235,6 +264,7 @@ describe("native fixed command adapter", () => {
     let lastMissionV3: unknown, lastResult: unknown;
     const invoke = vi.fn(async (command: string, args: unknown) => {
       if (command === "auth_status") return signed;
+      if (command === "read_work") return workAvailable;
       if (command === "read_mission_v3") {
         lastMissionV3 = args;
         return v3Current17;
@@ -252,6 +282,11 @@ describe("native fixed command adapter", () => {
         return () => {};
       },
     );
+    const work = await client.readWork!({
+      signal: new AbortController().signal,
+    });
+    expect(work).toMatchObject({ availability: "AVAILABLE" });
+    expect(invoke).toHaveBeenCalledWith("read_work", undefined);
     const v3 = await client.readMissionV3!({
       workRef: "WS:B5",
       rootJobId: "JOB-100",
@@ -294,5 +329,67 @@ describe("native fixed command adapter", () => {
       }),
     ).rejects.toThrow("SELECTION_INVALID");
     expect(listener).toBeTypeOf("function");
+  });
+});
+
+describe("optional orchestrator command binding", () => {
+  const port = {
+    context: () => ({ principalScope: "owner-a", generation: "gen-1" }),
+    prepare: vi.fn(),
+    submit: vi.fn(),
+    readOperation: vi.fn(),
+  };
+  const store = { read: () => null, write: () => {}, clear: () => {} };
+  const complete = {
+    port,
+    store,
+    getView: () => ({ projects: [], profiles: [], session: null }),
+    subscribe: () => () => {},
+    makeLaunchIntent: () => null,
+    makeMessageIntent: () => null,
+    makeStopIntent: () => null,
+  };
+
+  it("omits absent or incomplete bindings and never defaults a catalog", () => {
+    const e = raw();
+    expect(bindMissionHost(e.client).commandBinding).toBeUndefined();
+    expect(
+      bindMissionHost(e.client, { port, store, getView: complete.getView })
+        .commandBinding,
+    ).toBeUndefined();
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(e.client.readPrograms).not.toHaveBeenCalled();
+  });
+
+  it("exposes only a complete injected binding", () => {
+    const e = raw();
+    const host = bindMissionHost(e.client, complete);
+    expect(host.commandBinding).toBe(complete);
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(port.submit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the five-field result selector on the same host", async () => {
+    const e = raw();
+    const host = bindMissionHost(e.client, complete);
+    const signal = new AbortController().signal;
+    await host.readResult!({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    });
+    expect(e.client.readResult).toHaveBeenCalledWith({
+      workRef: "WS:DESIGN",
+      rootJobId: "JOB-001",
+      jobId: "JOB-004",
+      attemptId: "ATT-44444444444444444444444444444444",
+      resultEnvelopeDigest:
+        "390cfeea0f8476caa22dd263a243acf66216ea14d560ad6c908f668f59052a3a",
+      signal,
+    });
   });
 });
