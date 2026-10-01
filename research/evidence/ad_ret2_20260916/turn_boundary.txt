@@ -1,0 +1,39 @@
+{"adapter_count": 1, "begin_turn_calls": 1, "error": "OperatorHarnessOrchestrationError", "event_types": ["JOB_CREATED", "JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "ORCHESTRATION_WORK_ADMITTED", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT", "OHF_CANDIDATE_RESULT_RECORDED", "ATTEMPT_HEARTBEAT", "OHF_RECONCILE_OBSERVED", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_APPLIED", "OHF_EPOCH_ABANDONED", "JOB_FAILED"], "fixture_only": true, "job_status": "FAILED", "kind": "BLOCKED", "proposed_wire": true, "stop_calls": 1}
+F{"adapter_count": 1, "begin_turn_calls": 1, "error": "OperatorHarnessOrchestrationError", "event_types": ["JOB_CREATED", "JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "ORCHESTRATION_WORK_ADMITTED", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT", "OHF_CANDIDATE_RESULT_RECORDED", "ATTEMPT_HEARTBEAT", "OHF_RECONCILE_OBSERVED", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_APPLIED", "OHF_EPOCH_ABANDONED", "JOB_FAILED"], "fixture_only": true, "job_status": "FAILED", "kind": "DECISION_REQUEST", "proposed_wire": true, "stop_calls": 1}
+F{"adapter_count": 1, "begin_turn_calls": 1, "error": null, "event_types": ["JOB_CREATED", "JOB_CLAIMED", "OHF_PROFILE_SEALED", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_INTENT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "OHF_ATTESTATION_OBSERVED", "OHF_LAUNCH_DECISION", "ORCHESTRATION_WORK_ADMITTED", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OHF_PROVIDER_DISPATCH_COMMITTED", "OPERATOR_OPERATION_APPLIED", "ATTEMPT_HEARTBEAT", "OHF_CANDIDATE_RESULT_RECORDED", "ORCHESTRATION_ROLE_RESULT_SEALED", "OPERATOR_OPERATION_INTENT", "ATTEMPT_HEARTBEAT", "OPERATOR_OPERATION_APPLIED", "OHF_EPOCH_ABANDONED", "JOB_COMPLETED"], "fixture_only": true, "job_status": "COMPLETED", "kind": "RESULT", "proposed_wire": false, "stop_calls": 1}
+.
+=================================== FAILURES ===================================
+_ test_capability_completed_native_turn_can_yield_without_attempt_failure[BLOCKED] _
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1305/test_capability_completed_nati0')
+kind = 'BLOCKED'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_capability_completed_native_turn_can_yield_without_attempt_failure(tmp_path, kind):
+        job, adapters, error = completed_turn(tmp_path, kind)
+>       assert job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}, (
+            "NONTERMINAL_CONSUMER_NOT_BUILT: completed native turn follows failure cleanup; " + str(error))
+E       AssertionError: NONTERMINAL_CONSUMER_NOT_BUILT: completed native turn follows failure cleanup; OperatorHarnessOrchestrationError
+E       assert <JobStatus.FAILED: 'FAILED'> in {<JobStatus.CHECKPOINTED: 'CHECKPOINTED'>, <JobStatus.RUNNING: 'RUNNING'>}
+E        +  where <JobStatus.FAILED: 'FAILED'> = Job(job_id='JOB-002', objective='Produce the bounded execution plan for JOB-001: Produce one bounded read-only executi...86feb70f158fe22', plan_attempt_id=None, plan_digest=None, plan_step_id=None, repair_round=None, supersedes_job_id=None).status
+
+research/evidence/ad_ret2_20260916/probe_turn_boundary.py:77: AssertionError
+_ test_capability_completed_native_turn_can_yield_without_attempt_failure[DECISION_REQUEST] _
+
+tmp_path = PosixPath('/private/tmp/pytest-of-chriswong/pytest-1305/test_capability_completed_nati1')
+kind = 'DECISION_REQUEST'
+
+    @pytest.mark.parametrize("kind", ["BLOCKED", "DECISION_REQUEST"])
+    def test_capability_completed_native_turn_can_yield_without_attempt_failure(tmp_path, kind):
+        job, adapters, error = completed_turn(tmp_path, kind)
+>       assert job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}, (
+            "NONTERMINAL_CONSUMER_NOT_BUILT: completed native turn follows failure cleanup; " + str(error))
+E       AssertionError: NONTERMINAL_CONSUMER_NOT_BUILT: completed native turn follows failure cleanup; OperatorHarnessOrchestrationError
+E       assert <JobStatus.FAILED: 'FAILED'> in {<JobStatus.CHECKPOINTED: 'CHECKPOINTED'>, <JobStatus.RUNNING: 'RUNNING'>}
+E        +  where <JobStatus.FAILED: 'FAILED'> = Job(job_id='JOB-002', objective='Produce the bounded execution plan for JOB-001: Produce one bounded read-only executi...2a6e5269c59740f', plan_attempt_id=None, plan_digest=None, plan_step_id=None, repair_round=None, supersedes_job_id=None).status
+
+research/evidence/ad_ret2_20260916/probe_turn_boundary.py:77: AssertionError
+=========================== short test summary info ============================
+FAILED research/evidence/ad_ret2_20260916/probe_turn_boundary.py::test_capability_completed_native_turn_can_yield_without_attempt_failure[BLOCKED]
+FAILED research/evidence/ad_ret2_20260916/probe_turn_boundary.py::test_capability_completed_native_turn_can_yield_without_attempt_failure[DECISION_REQUEST]
+2 failed, 1 passed in 17.02s
