@@ -29,7 +29,9 @@ from typing import Any, Mapping, Sequence
 
 SCHEMA = "mastermind.mini_worktree/v1"
 CONFIG_SCHEMA = "mastermind.mini_worktree_config/v1"
-LOCK_PREFIX = "mastermind-mini-hot:v1"
+LOCK_PREFIX = "mastermind-mini-hot:v2"
+LEGACY_LOCK_PREFIX = "mastermind-mini-hot:v1"
+PREPARED_CONFIG_KEY = "mastermind.miniPrepared"
 SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
 EXACT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -166,12 +168,33 @@ def _free_bytes(path: Path) -> int:
     return int(shutil.disk_usage(probe).free)
 
 
+def _storage_observation(cfg: HostConfig) -> tuple[dict[str, int | None], str | None]:
+    """One read-only observation shared by admission checks and the census."""
+    observed: dict[str, int | None] = {}
+    failures: list[str] = []
+    for label, root in (("HOT", cfg.hot_root), ("STORE", cfg.store_root)):
+        try:
+            free = _free_bytes(root)
+            if type(free) is not int or free < 0:
+                raise ValueError("invalid free-space observation")
+        except (OSError, ValueError, TypeError, OverflowError):
+            observed[label] = None
+            failures.insert(0, f"{label}_STORAGE_OBSERVATION_UNAVAILABLE")
+            continue
+        observed[label] = free
+        if free < cfg.min_free_bytes:
+            failures.append(f"{label}_STORAGE_LOW_SPACE free={free} floor={cfg.min_free_bytes}")
+    return observed, failures[0] if failures else None
+
+
 def require_free_space(cfg: HostConfig) -> int:
-    free = _free_bytes(cfg.hot_root)
-    if free < cfg.min_free_bytes:
-        raise MiniWorktreeError(
-            f"HOT_STORAGE_LOW_SPACE free={free} floor={cfg.min_free_bytes}"
-        )
+    """Observe both allocation targets; this is not a capacity reservation."""
+    observed, failure = _storage_observation(cfg)
+    if failure is not None:
+        raise MiniWorktreeError(failure)
+    free = observed["HOT"]
+    if free is None:
+        raise MiniWorktreeError("HOT_STORAGE_OBSERVATION_UNAVAILABLE")
     return free
 
 
@@ -280,6 +303,7 @@ def bootstrap_repo(cfg: HostConfig, key: str) -> dict[str, Any]:
             env=remote_env,
         )
         created = True
+    require_free_space(cfg)
     _verify_store(spec, store)
     status = _git(store, "status", "--porcelain=v1", "--untracked-files=all")
     if status:
@@ -297,10 +321,12 @@ def bootstrap_repo(cfg: HostConfig, key: str) -> dict[str, Any]:
     if not EXACT_SHA_RE.fullmatch(head):
         raise MiniWorktreeError("resolved default branch is not an exact commit")
     includes = _sparse_include_dirs(store, spec, ref, env=remote_env)
+    require_free_space(cfg)
     if remote_env is None:
         _apply_sparse_profile(store, includes)
     else:
         _apply_sparse_profile(store, includes, env=remote_env)
+    free = require_free_space(cfg)
     return {
         "repository": key,
         "store": str(store),
@@ -344,6 +370,24 @@ def _registered_at(store: Path, destination: Path) -> dict[str, str] | None:
     return None
 
 
+def _preparation_is_complete(path: Path, lock_reason: str) -> bool:
+    """Read v2 construction proof from Git's existing per-worktree config."""
+    try:
+        enabled = _run(
+            ("git", "-C", str(path), "config", "--bool", "--get", "extensions.worktreeConfig"),
+            check=False,
+        )
+        if enabled.returncode != 0 or enabled.stdout.strip() != "true":
+            return False
+        marker = _run(
+            ("git", "-C", str(path), "config", "--worktree", "--get-all", PREPARED_CONFIG_KEY),
+            check=False,
+        )
+        return marker.returncode == 0 and marker.stdout.splitlines() == [lock_reason]
+    except (OSError, MiniWorktreeError):
+        return False
+
+
 def create_worktree(
     cfg: HostConfig,
     key: str,
@@ -357,9 +401,8 @@ def create_worktree(
     spec, store = _repo(cfg, key)
     destination = cfg.hot_root / key / name
     branch = f"mmx/{key}/{name}"
-    lock_reason = (
-        f"{LOCK_PREFIX} repo={key} name={name} session={session_id}"
-    )
+    lock_reason = f"{LOCK_PREFIX} repo={key} name={name} session={session_id}"
+    legacy_lock = f"{LEGACY_LOCK_PREFIX} repo={key} name={name} session={session_id}"
 
     existing = None
     if store.exists():
@@ -367,7 +410,8 @@ def create_worktree(
         existing = _registered_at(store, destination)
     if existing is not None:
         observed_branch = existing.get("branch", "").removeprefix("refs/heads/")
-        if observed_branch != branch or existing.get("locked", "") != lock_reason:
+        observed_lock = existing.get("locked", "")
+        if observed_branch != branch or observed_lock not in {lock_reason, legacy_lock}:
             raise MiniWorktreeError(
                 "existing worktree identity does not match this exact session"
             )
@@ -380,6 +424,11 @@ def create_worktree(
         current_head = _git(destination, "rev-parse", "--verify", "HEAD^{commit}")
         if current_head != existing.get("HEAD"):
             raise MiniWorktreeError("registered workspace source moved during resume")
+        if observed_lock == lock_reason and not _preparation_is_complete(destination, observed_lock):
+            raise MiniWorktreeError("workspace preparation incomplete; reconcile on this host")
+        # Legacy v1 acquired its lock only after hydration. Preserve successful
+        # old sessions without retrofitting their config or requiring free space.
+        lock_reason = observed_lock
         return {
             "repository": key,
             "workspace": str(destination),
@@ -395,6 +444,7 @@ def create_worktree(
     # Re-resolve after bootstrap and before creating a branch/worktree. A host
     # owner may have revoked the identity while the fetch/materialization ran.
     remote_env = _repo_remote_env(spec)
+    require_free_space(cfg)
     destination.parent.mkdir(parents=True, exist_ok=True)
     branch_probe = _run(
         ("git", "-C", str(store), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"),
@@ -413,6 +463,9 @@ def create_worktree(
         "worktree",
         "add",
         "--no-checkout",
+        "--lock",
+        "--reason",
+        lock_reason,
         "--no-track",
         "-b",
         branch,
@@ -428,11 +481,25 @@ def create_worktree(
             _apply_sparse_profile(destination, includes)
         else:
             _apply_sparse_profile(destination, includes, env=remote_env)
-        _git(store, "worktree", "lock", "--reason", lock_reason, str(destination))
     except BaseException:
-        # Never force-remove a partially-created carrier.  Preserve for inspection.
+        # The v2 lock is already held. Preserve incomplete work for reconciliation.
         raise
     head = _git(destination, "rev-parse", "HEAD")
+    registered = _registered_at(store, destination)
+    if (
+        head != base_ref
+        or registered is None
+        or registered.get("HEAD") != base_ref
+        or registered.get("branch") != f"refs/heads/{branch}"
+        or registered.get("locked") != lock_reason
+    ):
+        raise MiniWorktreeError("prepared workspace identity moved; reconcile on this host")
+    require_free_space(cfg)
+    # Git owns the existing per-worktree config and lock. This marker proves only
+    # completed construction; it grants no writer release or cleanup authority.
+    _git(destination, "config", "--worktree", PREPARED_CONFIG_KEY, lock_reason)
+    if not _preparation_is_complete(destination, lock_reason):
+        raise MiniWorktreeError("workspace preparation incomplete; reconcile on this host")
     return {
         "repository": key,
         "workspace": str(destination),
@@ -447,8 +514,20 @@ def create_worktree(
 
 
 def census(cfg: HostConfig) -> dict[str, Any]:
+    observed, failure = _storage_observation(cfg)
+    storage_state = (
+        "UNKNOWN" if any(value is None for value in observed.values())
+        else "LOW_SPACE" if failure is not None else "READY"
+    )
     result: dict[str, Any] = {
-        "free_bytes": _free_bytes(cfg.hot_root),
+        "free_bytes": observed["HOT"],
+        "store_free_bytes": observed["STORE"],
+        "storage": {
+            "state": storage_state,
+            "new_allocation_allowed": failure is None,
+            "reason": failure,
+            "reservation": False,
+        },
         "floor_bytes": cfg.min_free_bytes,
         "resume_bytes": cfg.resume_free_bytes,
         "repositories": {},
@@ -471,6 +550,12 @@ def census(cfg: HostConfig) -> dict[str, Any]:
             null_reason = "GIT_STATUS_UNAVAILABLE"
             if Path(path).is_symlink():
                 null_reason = "WORKTREE_PATH_SYMLINK"
+            elif (
+                path.is_dir()
+                and record.get("locked", "").startswith(LOCK_PREFIX + " ")
+                and not _preparation_is_complete(path, record["locked"])
+            ):
+                null_reason = "WORKTREE_PREPARATION_INCOMPLETE"
             else:
                 try:
                     status_result = _run(

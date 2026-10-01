@@ -1228,12 +1228,12 @@ class CooCycle:
                     return self._block(root_id, selected.job_id, _classify_invalid(exc))
                 return self._outcome(root_id, "REPAIR_CREATED", receipt.job_id, command, receipt)
 
-        # 4. Materialize one lowest-ordinal missing dependency-ready V3 work Job.
+        # 4. Materialize one lowest-ordinal missing dependency-ready V3/V4 work Job.
         if (
             admission is not None
             and plan_body is not None
             and admission.get("schema_version") == "mastermind.coo_plan_admission/v2"
-            and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         ):
             materialized_steps = {
                 str(job.plan_step_id)
@@ -1337,7 +1337,10 @@ class CooCycle:
             work_active
             and queued
             and plan_body is not None
-            and plan_body["schema_version"] == "mastermind.execution_plan/v3"
+            and plan_body["schema_version"] in {
+                "mastermind.execution_plan/v3",
+                "mastermind.execution_plan/v4",
+            }
             and self._ready_frontier_open(work_active, queued, current_by_step)
         ):
             for candidate in queued:
@@ -1390,7 +1393,7 @@ class CooCycle:
                 unavailable.append(candidate.job_id)
                 if not (
                     plan_body is not None
-                    and plan_body["schema_version"] == "mastermind.execution_plan/v3"
+                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                     and all(self._is_read_only_frontier_work(job) for job in queued)
                 ):
                     break

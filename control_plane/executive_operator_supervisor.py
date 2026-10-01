@@ -93,6 +93,9 @@ RemoteAdapterFactory = Callable[
     [Callable[[Any], str]], RemoteCodexOperatorAdapter
 ]
 
+# Installed host observations for the already-claimed Worker; no placement authority.
+ClaimedWorkspaceIdentitySource = Callable[[Attempt, Job], WorkspaceIdentity]
+
 
 class ClaimedOperatorAdapterFactory(Protocol):
     """Host-owned construction, not placement or permission to perform I/O."""
@@ -113,14 +116,22 @@ class ExecutiveOperatorSupervisor:
         prompt_source: ExecutiveSupervisor,
         instance_id: str = "executive-coo-operator",
         claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
+        workspace_identity_source: ClaimedWorkspaceIdentitySource | None = None,
     ) -> None:
         if ((adapter_factory is None) == (claimed_adapter_factory is None)
                 or (adapter_factory is not None and not callable(adapter_factory))
                 or (claimed_adapter_factory is not None and not callable(claimed_adapter_factory))):
             raise ExecutiveOperatorSupervisorError("exactly one callable operator factory is required")
+        if workspace_identity_source is not None and (
+            not callable(workspace_identity_source) or claimed_adapter_factory is None
+        ):
+            raise ExecutiveOperatorSupervisorError(
+                "selected-host workspace identity requires a claim-aware factory"
+            )
         self.runtime = runtime
         self.adapter_factory = adapter_factory
         self._claimed_adapter_factory = claimed_adapter_factory
+        self._workspace_identity_source = workspace_identity_source
         self.prompt_source = prompt_source
         self.instance_id = instance_id
 
@@ -198,7 +209,77 @@ class ExecutiveOperatorSupervisor:
             )
         return value
 
-    def _workspace_identity(self, job: Job) -> WorkspaceIdentity:
+    def _workspace_identity(
+        self, job: Job, attempt: Attempt | None = None
+    ) -> WorkspaceIdentity:
+        source = self._workspace_identity_source
+        if source is not None:
+            # Validate the logical identity without touching the host filesystem.
+            base = job.constraints.get("base_sha")
+            if (type(job.worktree) is not str or not job.worktree
+                    or not Path(job.worktree).is_absolute()
+                    or str(Path(job.worktree)) != job.worktree
+                    or ".." in Path(job.worktree).parts
+                    or job.worktree.startswith("//")
+                    or type(base) is not str
+                    or re.fullmatch(r"[0-9a-f]{40}", base) is None):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity Job is invalid"
+                )
+            # A remote path must never be stat'ed or resolved on the Control host.
+            # The installed owner supplies physical facts from the selected host.
+            if attempt is None:
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity has no claimed Attempt"
+                )
+            current_job = self.runtime.jobs.get_job(job.job_id)
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            keys = ("attempt_id", "job_id", "worker_id", "quota_class",
+                    "fence_generation", "lease_owner", "authority_policy_hash")
+            if (current_job is None or current is None
+                    or current.status is not AttemptStatus.CLAIMED
+                    or any(getattr(current, key) != getattr(attempt, key)
+                           for key in keys)
+                    or current_job.current_attempt_id != current.attempt_id
+                    or current_job.assigned_worker_id != current.worker_id
+                    or current_job.assigned_quota_class != current.quota_class
+                    or current_job.worktree != job.worktree
+                    or current_job.constraints != job.constraints):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity claim is no longer current"
+                )
+            def stable_claim(value: Attempt) -> dict[str, Any]:
+                fields = value.to_dict()
+                for field in ("version", "heartbeat_at", "lease_expires_at"):
+                    fields.pop(field)
+                return fields
+
+            before_job = copy.deepcopy(current_job)
+            before_claim = stable_claim(current)
+            try:
+                observed = source(copy.deepcopy(current), copy.deepcopy(current_job))
+            except Exception:
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity source refused"
+                ) from None
+            after_job = self.runtime.jobs.get_job(job.job_id)
+            after = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if (after_job != before_job or after is None
+                    or stable_claim(after) != before_claim):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace binding moved during observation"
+                )
+            if (type(observed) is not WorkspaceIdentity
+                    or observed.workspace_path != job.worktree
+                    or observed.base_sha != job.constraints.get("base_sha")
+                    or any(type(getattr(observed, field)) is not int
+                           or getattr(observed, field) < 0
+                           for field in ("device", "inode", "uid", "gid"))
+                    or observed.inode == 0):
+                raise ExecutiveOperatorSupervisorError(
+                    "selected-host workspace identity is invalid"
+                )
+            return observed
         if not job.worktree:
             raise ExecutiveOperatorSupervisorError(
                 "operator planner has no assigned workspace"
@@ -384,7 +465,11 @@ class ExecutiveOperatorSupervisor:
             harness_kind=(CLAUDE_OPERATOR_HARNESS_KIND if native_claude_profile_ok else "codex-app-server"),
             harness_binary_digest=harness_digest,
             harness_version=harness_version,
-            workspace=self._workspace_identity(job),
+            workspace=(
+                self._workspace_identity(job, lease.attempt)
+                if self._workspace_identity_source is not None
+                else self._workspace_identity(job)
+            ),
             sandbox_policy="read-only",
             approval_policy="never",
             network_policy=profile.network_policy,

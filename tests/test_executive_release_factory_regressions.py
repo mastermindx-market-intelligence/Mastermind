@@ -186,7 +186,7 @@ def test_staging_directories_require_wheel_group(disk_image, monkeypatch, which)
 
 def test_history_checks_total_resident_deadline_after_legacy_trust(disk_image, monkeypatch):
     clock = [0.0]
-    monkeypatch.setattr(f.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(f.time, 'monotonic_ns', lambda: int(clock[0] * 1_000_000_000))
     root = f.build_release_owner(disk_image['config'])
     # Simulate the already required legacy trust check consuming the remaining budget.
     def slow_trust(config):
@@ -372,12 +372,12 @@ def test_resident_directory_security_and_leaf_changes_still_refuse(disk_image, m
 @pytest.mark.parametrize('step', ['legacy', 'boot'])
 def test_resident_total_budget_covers_late_steps(disk_image, monkeypatch, delay, step):
     clock = [0.0]
-    monkeypatch.setattr(f.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(f.time, 'monotonic_ns', lambda: int(clock[0] * 1_000_000_000))
     root = f.build_release_owner(disk_image['config'])
     original_boot = f._boot_id
-    def delayed(*_args):
+    def delayed(*_args, **deadline):
         clock[0] += delay
-        return original_boot() if step == 'boot' else None
+        return original_boot(**deadline) if step == 'boot' else None
     if step == 'boot':
         monkeypatch.setattr(f, '_boot_id', delayed)
     else:

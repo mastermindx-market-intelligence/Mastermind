@@ -630,3 +630,36 @@ def test_release_transport_call_sites_create_fresh_private_fifteen_second_endpoi
                 broker.read_release_closure(canonical_evidence=ClosureFixture())
         now[0] += 1_000_000
     assert calls[1] - calls[0] == 1_000_000
+
+
+@pytest.mark.parametrize('state',['STARTED','PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING','SUCCEEDED','ROLLED_BACK'])
+def test_publication_protocol_history_has_one_read_and_zero_resend(installed,monkeypatch,state):
+    from tests.test_executive_release_contract import with_publication_protocol
+    args,approval,old,reads=install_history_read_fixture(installed,monkeypatch,'SUCCEEDED')
+    status=with_publication_protocol(old,state)
+    contract.validate_release_terminal_status(status,expected_approval=approval)
+    installed['history_projection'][0]=lambda _:copy.deepcopy(status)
+    before=counts(installed['runtime']);frames=len(installed['transport_calls'])
+    monkeypatch.setattr(client,'send_status',lambda *a,**k:pytest.fail('legacy resend'))
+    result=installed['call']('reconcile_release_transition',{'operation_key':args['operation_key']})
+    assert len(installed['transport_calls'])==frames+1
+    assert installed['transport_calls'][-1]['operation']=='reconcile_release_transition'
+    assert len(reads)==1 and counts(installed['runtime'])==before
+    assert installed['root_broker']._executor.calls==[]
+    if state in ('SUCCEEDED','ROLLED_BACK'):
+        assert result['ok'] and result['broker_status']==status
+    else:
+        assert not result['ok'] and result['effect']=='EFFECT_UNKNOWN'
+        assert result['error']['code']=='RELEASE_EFFECT_IN_PROGRESS'
+
+
+def test_unqualified_v2_epoch_never_attests_success_or_resends(installed,monkeypatch):
+    from tests.test_executive_release_contract import with_publication_protocol
+    args,approval,old,reads=install_history_read_fixture(installed,monkeypatch,'SUCCEEDED')
+    status=with_publication_protocol(old,'SUCCEEDED');status['terminal_receipt']['after_actuator_generation']+=1
+    installed['history_projection'][0]=lambda _:status
+    before=counts(installed['runtime']);frames=len(installed['transport_calls'])
+    result=installed['call']('reconcile_release_transition',{'operation_key':args['operation_key']})
+    assert not result['ok'] and result['effect']=='EFFECT_UNKNOWN'
+    assert len(installed['transport_calls'])==frames+1 and counts(installed['runtime'])==before
+    assert not reads and installed['root_broker']._executor.calls==[]

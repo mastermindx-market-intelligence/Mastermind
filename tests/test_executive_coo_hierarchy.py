@@ -800,7 +800,8 @@ class _R6ADomainAdapter:
 
 
 def _r6a_submit_domain_root(
-    tmp_path: Path,
+    tmp_path: Path, *, business_impact: str = "material",
+    work_placement_union: list[dict[str, str]] | None = None,
 ) -> tuple[Runtime, "type[object]", "type[object]", Path]:
     """Submit a strict-v2 root and create its real COO domain child.
 
@@ -845,7 +846,12 @@ def _r6a_submit_domain_root(
         "operator_harness_version": "0.147.0",
         "operator_harness_armed": True,
     }
-    intent = _v2_intent(intent_id="CEO-R6A-DOMAIN-ADMISSION")
+    if work_placement_union is not None:
+        binding["host_execution_binding_version"] = "mastermind.host_execution_binding/v3"
+        binding["work_placement_union"] = work_placement_union
+    intent = _v2_intent(
+        intent_id="CEO-R6A-DOMAIN-ADMISSION", business_impact=business_impact
+    )
     intent["grounding"] = {"mastermind_sha": "a" * 40, "macro_sha": "b" * 40}
     intent["execution_contract"] = {
         "requested_authorities": ["READ"],
@@ -1517,6 +1523,7 @@ def _r7a_complete_work(
     job = runtime.jobs.get_job(work_outcome.attempt.job_id)
     assert job is not None
     work_body["root_job_id"] = job.root_job_id
+    work_body["plan_step_id"] = job.plan_step_id
     seal, _terminal = _r7a_complete_ohf_role(
         runtime, work_outcome, work_body, identity_seed=identity_seed
     )
@@ -1546,7 +1553,7 @@ def _r7a_complete_review(
         target_result_digest=reviewed_result_digest,
         repair_round=0,
         verdict=verdict,
-        plan_step_id="r6a-step-1",
+        plan_step_id=runtime.jobs.get_job(review_outcome.attempt.job_id).plan_step_id,
     )
     seal, _terminal = _r7a_complete_ohf_role(
         runtime, review_outcome, review_body, identity_seed=identity_seed
@@ -2313,3 +2320,162 @@ class TestReviewedLeafConsumptionProjection:
             )
         assert events_after == events_before_refusal
         assert children_after == children_before_refusal
+
+
+# R8A: a dependent leaf must retain the validated CHECKPOINTED domain lineage.
+def _r8a_chain_domain_envelope(job, attempt, schema_version: str) -> str:
+    steps = []
+    for ordinal in range(2):
+        placement = {"provider_realm": "codex", "quota_class": "codex-coo"}
+        if schema_version.endswith("/v4"):
+            placement["model"] = "gpt-test"
+        steps.append({
+            "ordinal": ordinal,
+            "step_id": f"r8a-step-{ordinal}",
+            "objective": "Produce evidence." if ordinal == 0 else "Consume approved evidence.",
+            "business_impact": "routine",
+            "review_required": ordinal == 0,
+            "requested_authorities": ["READ"],
+            "allowed_write_paths": [],
+            "validation_ids": [],
+            "attempt_limit": 1,
+            "cost_class": "small",
+            "prerequisite_step_ids": [] if ordinal == 0 else ["r8a-step-0"],
+            "placement": placement,
+        })
+    return _canonical_bytes({
+        "schema_version": _RESULT_SCHEMA,
+        "job_id": job.job_id,
+        "run_id": attempt.attempt_id,
+        "worker_id": attempt.worker_id,
+        "role": "plan",
+        "status": "COMPLETED",
+        "role_result": {
+            "schema_version": schema_version,
+            "root_job_id": job.root_job_id,
+            "plan_attempt_id": attempt.attempt_id,
+            "steps": steps,
+        },
+        "summary": "Reviewed prerequisite followed by a dependent leaf.",
+        "current_state": "complete",
+        "next_actions": [], "errors": [], "validations": [],
+    }).decode("utf-8")
+
+
+class _R8AChainDomainAdapter(_R6ADomainAdapter):
+    def _canonical_result(self, turn):
+        attempt = self.runtime.attempts.get_attempt(turn.attempt_id)
+        job = self.runtime.jobs.get_job(attempt.job_id)
+        return _r8a_chain_domain_envelope(job, attempt, self.schema_version)
+
+
+def _r8a_seed_active_domain_with_chain(tmp_path, *, monkeypatch, schema_version):
+    import control_plane.executive_operator_supervisor as supervisor_module
+
+    # Admit placement and impact at root creation; never mutate canonical grants.
+    runtime, root, domain, _workspace = _r6a_submit_domain_root(
+        tmp_path, business_impact="routine",
+        work_placement_union=[{"provider_realm": "codex", "quota_class": "codex-coo"}],
+    )
+    monkeypatch.setattr(supervisor_module, "ExecutionCapabilityRegistry", _R6AFakeRegistryLoader)
+    adapters = []
+
+    def factory(_loader):
+        adapter = _R8AChainDomainAdapter(runtime)
+        adapter.schema_version = schema_version
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = _ExecutiveOperatorSupervisor(
+        runtime, adapter_factory=factory, prompt_source=_R6APromptSource(),
+    )
+    outcome = asyncio.run(supervisor.start_cycle_job(
+        domain.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{domain.job_id}:attempt:1",
+    ))
+    assert outcome.outcome == "ACTIVE"
+    assert runtime.attempts.get_attempt(outcome.attempt.attempt_id).status is _AttemptStatus.CHECKPOINTED
+    return runtime, root, runtime.jobs.get_job(domain.job_id), adapters[0]
+
+
+@pytest.mark.parametrize("schema_version", ["mastermind.execution_plan/v3", "mastermind.execution_plan/v4"])
+def test_checkpointed_domain_deferred_leaf_requires_approved_prerequisite_and_replays(
+    tmp_path, monkeypatch, schema_version,
+):
+    runtime, root, domain, adapter = _r8a_seed_active_domain_with_chain(
+        tmp_path, monkeypatch=monkeypatch, schema_version=schema_version,
+    )
+    _r7a_runtime_with_work_and_review_workers(runtime)
+    plan_attempt_id = domain.current_attempt_id
+    leaves = runtime.jobs.admit_cycle_plan(
+        root.job_id, command_id=f"coo-cycle:{root.job_id}:admit-plan:{plan_attempt_id}",
+    )
+    assert len(leaves) == 1 and leaves[0].plan_step_id == "r8a-step-0"
+    work = leaves[0]
+    plan_digest = _r7a_plan_digest_for_domain(runtime, root.job_id, plan_attempt_id)
+    work_dispatch = _r7a_dispatch_cycle_work(
+        runtime, root_job_id=root.job_id, work_job_id=work.job_id,
+        worker_id="worker-r6a-work", quota_class="codex-coo",
+    )
+    work_seal = _r7a_complete_work(
+        runtime, work_dispatch, plan_attempt_id=plan_attempt_id,
+        plan_digest=plan_digest, identity_seed=8201,
+    )
+    # A work seal alone cannot unlock a prerequisite requiring independent review.
+    before = _r7a_review_replay_counts(runtime, root.job_id)
+    with pytest.raises(StateConflict):
+        runtime.jobs.project_cycle_work_dependency_manifest(root.job_id, "r8a-step-1")
+    assert _r7a_review_replay_counts(runtime, root.job_id) == before
+    review = runtime.jobs.create_cycle_review(
+        root.job_id, work.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-review:{work.job_id}:1",
+    )
+    review_dispatch = runtime.attempts.dispatch_cycle_job(
+        review.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{review.job_id}:attempt:1",
+        worker_id="worker-r6a-review", quota_class="codex-coo",
+    )
+    review_seal = _r7a_complete_review(
+        runtime, review_dispatch, plan_attempt_id=plan_attempt_id,
+        plan_digest=plan_digest, reviewed_job_id=work.job_id,
+        reviewed_attempt_id=work_dispatch.attempt.attempt_id,
+        reviewed_result_digest=work_seal["role_result_digest"], identity_seed=8202,
+    )
+    manifest = runtime.jobs.project_cycle_work_dependency_manifest(root.job_id, "r8a-step-1")
+    assert manifest["prerequisite_step_ids"] == ["r8a-step-0"]
+    assert len(manifest["revisions"]) == 1
+    revision = manifest["revisions"][0]
+    assert revision["current_job_id"] == work.job_id
+    assert revision["current_attempt_id"] == work_dispatch.attempt.attempt_id
+    assert revision["current_result_digest"] == work_seal["role_result_digest"]
+    assert revision["review_required"] is True
+    assert revision["qualifying_review_job_id"] == review.job_id
+    assert revision["qualifying_review_attempt_id"] == review_dispatch.attempt.attempt_id
+    assert revision["qualifying_review_result_digest"] == review_seal["role_result_digest"]
+    command = f"coo-cycle:{root.job_id}:create-work:r8a-step-1:{manifest['dependency_manifest_digest']}"
+    dependent = runtime.jobs.create_cycle_work(
+        root.job_id, "r8a-step-1", dependency_manifest=manifest, command_id=command,
+    )
+    for leaf in (work, review, dependent):
+        assert leaf.parent_job_id == domain.job_id and leaf.root_job_id == root.job_id
+        assert leaf.depth == 2 and leaf.constraints["remaining_depth"] == 0
+    assert dependent.plan_attempt_id == plan_attempt_id and dependent.plan_digest == plan_digest
+    assert dependent.constraints["model"] == "gpt-test"
+    assert dependent.constraints["provider"] == "codex"
+    assert dependent.constraints["eligible_quota_classes"] == ["codex-coo"]
+    if schema_version.endswith("/v4"):
+        assert "manual_model_override" in dependent.constraints["routing_reason_codes"]
+    with runtime.store.read() as connection:
+        creation = connection.execute(
+            "SELECT payload_json FROM events WHERE command_id=?", (command,),
+        ).fetchone()
+    assert json.loads(creation[0])["dependency_manifest"] == manifest
+    before = _r7a_review_replay_counts(runtime, root.job_id)
+    replay = runtime.jobs.create_cycle_work(
+        root.job_id, "r8a-step-1", dependency_manifest=manifest, command_id=command,
+    )
+    assert replay.job_id == dependent.job_id
+    assert _r7a_review_replay_counts(runtime, root.job_id) == before
+    assert runtime.jobs.get_job(domain.job_id).current_attempt_id == plan_attempt_id
+    assert runtime.attempts.get_attempt(plan_attempt_id).status is _AttemptStatus.CHECKPOINTED
+    assert adapter.begin_turn_calls == 1

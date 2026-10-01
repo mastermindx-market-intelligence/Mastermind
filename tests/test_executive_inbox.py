@@ -621,6 +621,43 @@ def inbox_for(root: Path, **kwargs) -> dict:
     return build_inbox(repo_root=root, environ={}, **kwargs)
 
 
+def _quote_identifier(name: str) -> str:
+    """Quote an identifier safely for embedding in a SQL statement."""
+
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _full_table_dump(connection: sqlite3.Connection, table: str) -> list:
+    """Deterministic full-row dump for a table — both WITH and WITHOUT ROWID.
+
+    ``ORDER BY rowid`` is not legal on a WITHOUT ROWID table.  Order by every
+    declared column instead, so SQLite handles NULL/blob/mixed-type ordering
+    rather than Python tuple comparison.  The column list comes from
+    ``PRAGMA table_info``, which is the only authoritative source of column
+    order. SQLite supplies the comparison rules for every stored value.
+    """
+
+    quoted_table = _quote_identifier(table)
+    columns = tuple(
+        str(info[1])
+        for info in connection.execute(f"PRAGMA table_info({quoted_table})")
+    )
+    if not columns:
+        return [
+            tuple(row)
+            for row in connection.execute(f"SELECT * FROM {quoted_table}")
+        ]
+    order_clause = " ORDER BY " + ",".join(
+        f"{_quote_identifier(column)}" for column in columns
+    )
+    return [
+        tuple(row)
+        for row in connection.execute(
+            f"SELECT * FROM {quoted_table}{order_clause}"
+        )
+    ]
+
+
 def logical_dump(db_path: Path) -> dict:
     """Every user table plus ``sqlite_master`` — the whole logical database."""
     connection = sqlite3.connect(db_path)
@@ -640,10 +677,7 @@ def logical_dump(db_path: Path) -> dict:
             )
         ]
         for table in tables:
-            dump[table] = [
-                tuple(row)
-                for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")
-            ]
+            dump[table] = _full_table_dump(connection, table)
         return dump
     finally:
         connection.close()
@@ -1916,3 +1950,66 @@ def test_bound_inbox_real_projection_and_latched_return_refusal(tmp_path, frozen
     assert bad["runtime_counts"] is None
     assert not [x for x in bad["attention"] if x.get("source") == "runtime"]
     assert any("bound" in x.lower() for x in bad["degraded"])
+
+
+# ---------------------------------------------------------------------------
+# logical_dump — deterministic full-row snapshot of the entire logical database
+# ---------------------------------------------------------------------------
+
+def test_logical_dump_covers_populated_without_rowid_ledger_stably(tmp_path):
+    """A populated WITHOUT ROWID table is dumped in full, stably, and mutation is visible."""
+    runtime = Runtime.at(tmp_path)
+    db_path = tmp_path / DB_RELATIVE_PATH
+    raw = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        raw.execute(
+            """
+            CREATE TABLE inbox_ledger_capture (
+                ledger_id TEXT NOT NULL PRIMARY KEY,
+                ordinal INTEGER NOT NULL,
+                payload BLOB,
+                note TEXT
+            ) WITHOUT ROWID
+            """
+        )
+        raw.execute(
+            "INSERT INTO inbox_ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-1", 1, b"\x00\x01\x02", "first"),
+        )
+        raw.execute(
+            "INSERT INTO inbox_ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-2", 2, None, "second"),
+        )
+        raw.execute(
+            "INSERT INTO inbox_ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-3", 3, b"\xff", "third"),
+        )
+    finally:
+        raw.close()
+
+    before = logical_dump(db_path)
+    ledger_rows = before["inbox_ledger_capture"]
+    assert ledger_rows, "WITHOUT ROWID table came back empty"
+    ledger_ids = [row[0] for row in ledger_rows]
+    assert sorted(ledger_ids) == ["row-1", "row-2", "row-3"]
+    by_id = {row[0]: row for row in ledger_rows}
+    assert by_id["row-3"][2] == b"\xff"
+    assert by_id["row-2"][2] is None
+
+    again = logical_dump(db_path)
+    assert again == before
+
+    raw = sqlite3.connect(db_path, isolation_level=None)
+    try:
+        raw.execute(
+            "INSERT INTO inbox_ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-4", 4, b"\x01", "fourth"),
+        )
+    finally:
+        raw.close()
+
+    after = logical_dump(db_path)
+    assert after["inbox_ledger_capture"] != before["inbox_ledger_capture"]
+    after_ids = [row[0] for row in after["inbox_ledger_capture"]]
+    assert "row-4" in after_ids
+    assert len(after["inbox_ledger_capture"]) == len(ledger_rows) + 1

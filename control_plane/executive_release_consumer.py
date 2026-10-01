@@ -810,7 +810,7 @@ class ReleaseControlConsumer:
                     code = "RELEASE_HISTORY_ADMISSION_UNQUALIFIED"
                     if not self._history_admission_matches(approval, status):
                         raise ReleaseConsumerError(code)
-                if status["state"] in {"STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"}:
+                if status["state"] in {"STARTED", "PUBLICATION_INTENT", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"}:
                     code = "RELEASE_EFFECT_IN_PROGRESS"
                     raise ReleaseConsumerError(code)
             except (AttributeError, KeyError, TypeError, ValueError, OSError, RuntimeError, sqlite3.Error):
