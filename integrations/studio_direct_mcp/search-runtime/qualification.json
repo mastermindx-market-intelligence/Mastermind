@@ -1,0 +1,32 @@
+{
+  "schema": "mastermind.issue1027.upstream-qualification.v1",
+  "date": "2026-10-01",
+  "mastermindBase": "b86c309ddf1c337d63e7b84ce93b423d90ee87e4",
+  "donor": "56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66",
+  "patchSHA256": "2202d6a95e58fa7d6d8401330579496891faddccca39445957dc8f910c7cb435",
+  "fullTypescript": "PASS",
+  "fullPackageBuild": "PASS",
+  "upstreamSearchSuites": {
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0
+  },
+  "logSHA256": {
+    "full-typescript.log": "420837bdb23fcdc6d1a9b178c2ee16becdb8b19869f6ea180e4b6c94ef8b64ca",
+    "full-build.log": "16d00ecb8e8a07ad464576f8ba229c1b47c7db205f336ed7c84485ddffa978c6",
+    "upstream-search-tests.log": "90d23655904cffb175f144e2593a52391f19959cc0b3fda482e2a305347bc945",
+    "npm-ci.log": "aa45d282c59b15d97f73a24209770ec85179df824b9a75d17c8743b5af678599"
+  },
+  "installed": false,
+  "independentReview": "PENDING",
+  "remainingIssueGates": [
+    "pre-spawn deadline",
+    "broad-root admission",
+    "ripgrep threads",
+    "host/executor capacity",
+    "duplicate live scans",
+    "owner/operation attribution",
+    "aggregate/native memory",
+    "native installed acceptance"
+  ]
+}
