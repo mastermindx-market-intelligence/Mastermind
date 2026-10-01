@@ -128,7 +128,7 @@ def test_foreign_owner_or_lease_refuses_before_factory_provider_or_credit(tmp_pa
     assert _inventory(rt) == before and not client.calls and not factories
 
 
-@pytest.mark.parametrize('timeout', [True, False, 0, -1, float('inf'), float('nan'), 301, '30', None])
+@pytest.mark.parametrize('timeout', [True, False, 0, -1, float('inf'), float('nan'), 301, '30', None, 10**1000, -(10**1000)])
 def test_invalid_timeout_never_reserves_final(tmp_path, monkeypatch, timeout):
     rt, _, _, _, lease, _, _, sup, client, _, factories, _ = _context(tmp_path, monkeypatch)
     before = _inventory(rt)

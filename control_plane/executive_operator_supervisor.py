@@ -1160,8 +1160,8 @@ class ExecutiveOperatorSupervisor:
         if (type(lease) is not AttemptLease or type(lease.attempt) is not Attempt
                 or type(lease.lease_token) is not str or not lease.lease_token
                 or type(timeout_seconds) not in {int, float}
-                or not math.isfinite(timeout_seconds)
-                or not 0 < timeout_seconds <= 300):
+                or not 0 < timeout_seconds <= 300
+                or not math.isfinite(timeout_seconds)):
             raise ExecutiveOperatorSupervisorError("current-owner consumption inputs are invalid")
         supplied = lease.attempt
         current = self.runtime.attempts.get_attempt(supplied.attempt_id)
