@@ -1,0 +1,73 @@
+{
+  "adversarial_probes": {
+    "errors": 1,
+    "failures": 1,
+    "failures_detail": [
+      "local lost edit: observed EFFECT_NONE, required EFFECT_UNKNOWN",
+      "real MCP registration: InvalidSignature / unresolved CallToolResult annotation"
+    ],
+    "passed": 9,
+    "process_id": 83265,
+    "tests": 11
+  },
+  "capability_state": "QUARANTINED_NOT_INTEGRATED",
+  "integration_patch": {
+    "effect_state": "EFFECT_NONE",
+    "platform_refused_before_dispatch": true,
+    "process_id": null,
+    "retried": false
+  },
+  "live_runtime_changed": false,
+  "mini1_new_evidence": {
+    "interpretation": "Paper internal editor reachability; not evidence of login cause or Ryan tunnel root cause",
+    "process_id": 46334,
+    "source": "Paper main.log, bounded and redacted read",
+    "vendor_error": "Could not find Paper. Is it running?"
+  },
+  "observed_at": "2026-09-29T06:03:04.061476+00:00",
+  "operation_id": "paper-direct-chatgpt-mcp-20260926-sol-001",
+  "paper_document_mutated": false,
+  "production_acceptance": false,
+  "production_candidate": "cf6e9c954fc34d3b7f3f0dfffef6a022652afab2",
+  "production_candidate_ci_job": 109264180868,
+  "production_candidate_ci_result": "SUCCESS",
+  "production_candidate_ci_run": 36524417918,
+  "protected_procedure_sha": "f91847688f8126511c854ab253cd5c3cb67baa4e",
+  "prototype_source_sha256": {
+    "README.md": "e86918a4c5d582dd09537378be6a1ff95b58afdfb3b98dace703d51c5c8216f6",
+    "host_routes.py": "116da034fd018410dd67b070f6d6185674a9c5bf1127683f523206b09c84c7e7",
+    "validation_adversarial.py": "8662051dd0fffc67ac742c6b908bfc2576ab165f7f4c27519384b01eecf0f929",
+    "validation_basic.py": "5cbc504c30d76372bcf98693f31e6e1877491e8294ff753d588fe2be496ac52b"
+  },
+  "quarantine_reproduction": {
+    "adversarial_errors": 1,
+    "adversarial_failures": 1,
+    "adversarial_passed": 9,
+    "adversarial_process_id": 88756,
+    "adversarial_tests": 11,
+    "production_source_diff": "EMPTY",
+    "real_network_contacted": false,
+    "structural_passed": 7,
+    "structural_process_id": 89210,
+    "structural_tests": 7
+  },
+  "review_submission_preflight": {
+    "contract": "submit_ceo_intent explicitly refuses in readonly mode",
+    "generated_at": "2026-09-29T06:02:10Z",
+    "installed_source": "c6497083cbfc74b3ca32bc3afd39890c836c8d1b",
+    "intent_submitted": false,
+    "mode": "readonly",
+    "tool": "Mastermind_Executive_v2.executive_state",
+    "worker_dispatched": false
+  },
+  "schema": "mastermind.paper_source_evidence.v1",
+  "structural_tests": {
+    "passed": 7,
+    "process_id": 79292,
+    "tests": 7
+  },
+  "unchanged_production_source_sha256": {
+    "integrations/paper_desktop/direct_service.py": "923fc079da596db336dc8e0aab0de36e065a897c7dbe19330d75d56698cf5620",
+    "integrations/paper_desktop/mcp_server.py": "83bf802521dee0feae6c366f2e4f2c1ce1e80947b68a4f321c6bc923a6d87fb7"
+  }
+}

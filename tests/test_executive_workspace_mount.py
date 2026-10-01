@@ -418,8 +418,12 @@ def test_installed_launcher_selects_builders(monkeypatch, tmp_path, rsa_key):
     from types import SimpleNamespace
     captured: dict[str, object] = {}
 
+    original_flags = entry.sys.flags
     class Flags:
         isolated = True
+        # Retain unrelated interpreter flags used by argparse and traceback.
+        def __getattr__(self, name):
+            return getattr(original_flags, name)
 
     monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(entry.os, "geteuid", lambda: 458)

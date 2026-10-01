@@ -27,6 +27,7 @@ from ops.executive_os.release_owner_resident_inputs import (
     compile_empty_registry,
     compile_installed_evidence,
     compile_registration,
+    decode_installed_evidence_v2,
     validate_issuer_binding_receipt,
 )
 from ops.executive_os.release_owner_staged_inputs import (
@@ -231,12 +232,15 @@ def _resident_preimage(
     existing_registration_bytes: object | None,
     existing_registry_bytes: object | None,
     existing_installed_evidence_bytes: object | None,
+    physical_evidence: Mapping[str, object] | None = None,
 ) -> str:
     values = (
         existing_registration_bytes,
         existing_registry_bytes,
         existing_installed_evidence_bytes,
     )
+    if physical_evidence is not None and any(value is None for value in values):
+        _fail("BOOTSTRAP_OR_MIGRATION_REQUIRED")
     if all(value is None for value in values):
         return "ABSENT"
     if any(value is None for value in values):
@@ -250,6 +254,13 @@ def _resident_preimage(
     evidence, evidence_raw = _canonical_document(
         existing_installed_evidence_bytes, "EVIDENCE_PREIMAGE_INVALID"
     )
+    if physical_evidence is not None:
+        if evidence.get("schema") == "mastermind.executive_release_owner_installed_evidence/v1":
+            _fail("BOOTSTRAP_OR_MIGRATION_REQUIRED")
+        try:
+            evidence = decode_installed_evidence_v2(evidence_raw)
+        except ReleaseOwnerInputError:
+            _fail("EVIDENCE_PREIMAGE_INVALID")
     expected_registration_document, _ = _canonical_document(
         expected_registration, "REGISTRATION_INVALID"
     )
@@ -305,6 +316,7 @@ def compile_resident_publication_plan(
     existing_registration_bytes: bytes | None = None,
     existing_registry_bytes: bytes | None = None,
     existing_installed_evidence_bytes: bytes | None = None,
+    physical_evidence: Mapping[str, object] | None = None,
 ) -> PublicationPlan:
     """Compile the three resident documents without publishing or enabling them."""
 
@@ -373,6 +385,7 @@ def compile_resident_publication_plan(
             policy=policy,
             app_peer_uid=app_peer_uid,
             _now_seconds=now_seconds,
+            physical_evidence=physical_evidence,
         )
     except (ReleaseOwnerInputError, ReleaseContractError) as error:
         code = getattr(error, "code", "RESIDENT_INPUT_INVALID")
@@ -385,6 +398,7 @@ def compile_resident_publication_plan(
         existing_registration_bytes=existing_registration_bytes,
         existing_registry_bytes=existing_registry_bytes,
         existing_installed_evidence_bytes=existing_installed_evidence_bytes,
+        physical_evidence=physical_evidence,
     )
     payloads = tuple(
         PublicationPayload(path, bytes(raw))

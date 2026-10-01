@@ -214,6 +214,7 @@ _CONFIG_OPTIONAL = frozenset(
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        "coo_principal_armed",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -773,6 +774,11 @@ def load_control_config(
         raise ServiceError("privileged_readiness_armed must be boolean")
     if (arm and broker_socket != "/var/run/mastermind-executive/privileged.sock") or (not arm and broker_socket is not None):
         raise ServiceError("privileged readiness requires the armed canonical broker socket")
+    from ops.executive_os.coo_principal_host import validate_control_coo
+    try:
+        validate_control_coo(config)
+    except ValueError:
+        raise ServiceError("COO principal requires explicit Workspace and v2 App composition") from None
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
@@ -1510,7 +1516,13 @@ def _service_from_config(
     workspace_acquisition_loader: Callable[[], Any] | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
     workspace_bindings_path: Path | None = None,
+    coo_source: Any | None = None,
+    claimed_operator_adapter_factory: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
+    # This is trusted host composition, never a JSON/model-selected factory.
+    if (claimed_operator_adapter_factory is not None
+            and not callable(claimed_operator_adapter_factory)):
+        raise ServiceError("claimed operator factory must be callable")
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
         ExecutiveOperatorSupervisor,
@@ -1690,7 +1702,14 @@ def _service_from_config(
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
-        def adapter_factory(turn_input_loader):
+        def primary_factory(attempt, requested, turn_input_loader, *, recovery):
+            # A fixed primary client must never carry another claimed worker.
+            # Multi-worker composition supplies its current owner-bound factory.
+            if (attempt.worker_id != config.worker_id
+                    or requested.worker_id != config.worker_id
+                    or requested.provider != "openai-codex"
+                    or requested.harness_kind != "codex-app-server"):
+                raise ServiceError("claim differs from the configured operator worker")
             return RemoteCodexOperatorAdapter(
                 client,
                 turn_input_loader=turn_input_loader,
@@ -1698,7 +1717,8 @@ def _service_from_config(
 
         return ExecutiveOperatorSupervisor(
             runtime,
-            adapter_factory=adapter_factory,
+            claimed_adapter_factory=(claimed_operator_adapter_factory
+                if claimed_operator_adapter_factory is not None else primary_factory),
             prompt_source=sealed_supervisor,
         )
 
@@ -1881,12 +1901,22 @@ def _service_from_config(
                 # Namespace custody belongs to that service and validates the
                 # exact Runtime supplied by its App request handler.
                 bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
+        coo_factories = {}
+        from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+        from control_plane.coo_principal_host import CooHostProvider
+        if validate_control_coo(raw):
+            if type(coo_source) is not CooInstalledSource or "workspace_read_provider_factory" not in workspace_factories:
+                raise ServiceError("COO principal requires the sealed source and existing Workspace owner")
+            def coo_factory(runtime):
+                return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
+            coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
+                principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
             read_schema=app_read_schema,
-            **content_factories, **workspace_factories,
+            **content_factories, **workspace_factories, **coo_factories,
         )
         ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
             GitHubWebCommissionSourceProvider()
@@ -2074,6 +2104,11 @@ async def _serve_from_config(config_path: Path) -> None:
             "content_observer"
         ]
 
+    coo_source = None
+    from ops.executive_os.coo_principal_host import CooInstalledSource, DEFAULT_INSTALL_PATH, validate_control_coo
+    if validate_control_coo(raw):
+        coo_source = CooInstalledSource.from_path(DEFAULT_INSTALL_PATH,
+            Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
     service = _service_from_config(
         raw,
         canary_loader=load_canary,
@@ -2081,6 +2116,7 @@ async def _serve_from_config(config_path: Path) -> None:
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
+        **({"coo_source": coo_source} if coo_source is not None else {}),
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
