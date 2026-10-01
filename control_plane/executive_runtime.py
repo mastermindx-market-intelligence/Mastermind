@@ -2014,8 +2014,14 @@ def _coo_domain_admitted(row: sqlite3.Row, *, allow_disabled: bool = False) -> b
     ):
         raise StateConflict("COO domain provenance is not deterministic")
     registry = ExecutionCapabilityRegistry.load()
-    registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
-    profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+    try:
+        profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+        if profile.enabled:
+            registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+        else:
+            registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+    except (KeyError, CapabilityPolicyError) as exc:
+        raise StateConflict("COO domain capability profile is invalid") from exc
     closed = (
         profile.execution_surface == "codex-app-server"
         and profile.auth_realm == "dedicated-worker-account"
@@ -2044,7 +2050,7 @@ def _coo_domain_admitted(row: sqlite3.Row, *, allow_disabled: bool = False) -> b
         raise StateConflict("COO domain delegation envelope is malformed")
     if not closed:
         raise StateConflict("COO domain capability profile is not closed")
-    if not allow_disabled:
+    if not allow_disabled and not profile.enabled:
         raise StateConflict("COO domain execution profile is production-disarmed")
     return True
 
@@ -2079,8 +2085,14 @@ def _coo_provider_budget_body(
 ) -> dict[str, Any]:
     policy = CooCyclePolicy.load()
     registry = ExecutionCapabilityRegistry.load()
-    registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
-    profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+    try:
+        profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+        if profile.enabled:
+            registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+        else:
+            registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+    except (KeyError, CapabilityPolicyError) as exc:
+        raise StateConflict("COO provider budget profile is invalid") from exc
     if (
         policy.schema_version != 2
         or policy.policy_sha256 != EXPECTED_POLICY_SHA256
@@ -19370,6 +19382,7 @@ class OperatorHarnessRegistry:
         *,
         row: sqlite3.Row,
         generation_id: str,
+        allow_domain_plan_seal: bool = False,
     ) -> dict[str, Any] | None:
         """Recompute the additive OHF active-work predicate for direct writes."""
 
@@ -19415,11 +19428,16 @@ class OperatorHarnessRegistry:
             (row["attempt_id"],),
         ).fetchall()
         interactive = _interactive_tx5_admitted(job)
+        domain_plan = (
+            allow_domain_plan_seal
+            and row["status"] == AttemptStatus.CHECKPOINTED.value
+            and _coo_domain_admitted(job)
+        )
         if (
             current is None
             or len(admissions) != 1
             or len(decisions) != 1
-            or (seals and not interactive)
+            or (seals and not (interactive or domain_plan))
         ):
             raise StateConflict("orchestration generation is not active-work admitted")
         admission_event = admissions[0]
@@ -19729,6 +19747,1213 @@ class OperatorHarnessRegistry:
                     "process_generation_id": generation.process_generation_id,
                     "worker_id": row["worker_id"],
                     "provider_session_id": item["provider_session_id"],
+                    "turn_id": turn.turn_id,
+                },
+            )
+        return turn
+
+    def reserve_domain_consumption_turn(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        expected_consumption_projection_digest: str,
+    ) -> TurnRef:
+        """Atomic ledger-validated reservation for the domain actor's later turn.
+
+        This is the sole later-turn consumption surface for the COO domain
+        profile: it binds the *exact* current CHECKPOINTED domain Attempt /
+        OHF G1 / leased writer / ALLOW attestation / v2 root + domain
+        admission, re-validates the immutable root provider budget and the
+        settled reviewed-consumption projection digest, demands exactly one
+        completed initial ``begin_turn`` (INTENT + APPLIED + candidate) for
+        the same epoch/generation/Attempt with no EFFECT_UNKNOWN, then
+        derives a fresh ``TurnRef`` and atomically appends the FINAL charge
+        event, inserts the immutable FINAL ``coo_provider_charges`` row, and
+        appends the v1 ``begin_turn`` INTENT the supervisor will
+        acknowledge — all inside a single transaction.  An exact replay of
+        the same command/refs/digest validates the existing INTENT and
+        FINAL charge event/row and returns the identical ``TurnRef`` with
+        zero mutations; any later APPLIED/EFFECT_UNKNOWN for this command
+        is nonretryable.  No Attempt / epoch / generation / claim / worker
+        or writer transfer is performed; the G2 / recovery branch is
+        intentionally out of scope (require same initial current
+        generation 1).
+        """
+
+        if not isinstance(lease_token, str) or not lease_token:
+            raise StateConflict("domain consumption lease_token is required")
+        if (
+            not isinstance(expected_consumption_projection_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_consumption_projection_digest)
+            is None
+        ):
+            raise StateConflict(
+                "domain consumption projection digest must be a 64-char hex"
+            )
+        with self.store.transaction() as connection:
+            timestamp = self.store.now_ms()
+            # 1. Resolve the exact leased Attempt first, then bind its current
+            # G1 through the same ownership and active-work guards used by
+            # ordinary TX-5 and candidate evidence.
+            provisional = connection.execute(
+                """
+                SELECT e.attempt_id,e.epoch_number
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if provisional is None:
+                raise StateConflict(
+                    "domain consumption requires authoritative owned OHF generation"
+                )
+            row = self._leased(
+                connection,
+                attempt_id=str(provisional["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.CHECKPOINTED},
+            )
+            durable = self._owned_generation(
+                connection,
+                leased=row,
+                epoch=SessionEpochRef(
+                    generation.session_epoch_id,
+                    str(row["attempt_id"]),
+                    str(row["worker_id"]),
+                    int(provisional["epoch_number"]),
+                ),
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            self._require_active_orchestration_generation(
+                connection,
+                row=row,
+                generation_id=generation.process_generation_id,
+                allow_domain_plan_seal=True,
+            )
+            plan_seal = _validated_domain_active_plan_seal(
+                connection,
+                attempt_row=row,
+                job_row=connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+                ).fetchone(),
+            )
+            if (
+                int(durable["generation_number"]) != 1
+                or durable["epoch_number"] != 1
+                or durable["provider_session_id"]
+                != durable["epoch_session"]
+                or not durable["provider_session_id"]
+            ):
+                raise StateConflict(
+                    "domain consumption requires sole-owned current initial G1"
+                )
+            # CCTX0 already bounds the root tree; this later reservation
+            # consumes the same finite lease/effect authority without a new
+            # generation or writer.
+            timestamp = _finite_fresh_effect(
+                self.store, connection, str(row["job_id"])
+            )
+            if timestamp >= int(row["lease_expires_at_ms"]):
+                raise StateConflict("finite reservation current lease has expired")
+            durable = connection.execute(
+                """
+                SELECT g.process_generation_id,g.session_epoch_id,g.generation_number,
+                       g.worker_id,g.executive_writer_held,
+                       e.attempt_id,e.epoch_number,e.state,e.provider_session_id
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if durable is None:
+                raise StateConflict(
+                    "domain consumption requires authoritative owned OHF generation"
+                )
+            # 4. Strict v2 root + domain admission.
+            job_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+            ).fetchone()
+            if (
+                job_row is None
+                or job_row["orchestration_role"] != "plan"
+                or job_row["depth"] != 1
+            ):
+                raise StateConflict(
+                    "domain consumption requires depth-1 plan domain Job"
+                )
+            root_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+            ).fetchone()
+            if (
+                root_row is None
+                or root_row["job_id"] != root_row["root_job_id"]
+                or root_row["depth"] != 0
+                or root_row["parent_job_id"] is not None
+                or root_row["orchestration_role"] != "aggregation"
+            ):
+                raise StateConflict(
+                    "domain consumption requires strict v2 aggregation root"
+                )
+            registry = ExecutionCapabilityRegistry.load()
+            try:
+                profile = (
+                    registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+                    if COO_DOMAIN_EXECUTION_PROFILE in registry.profiles
+                    else None
+                )
+                if profile is None:
+                    raise StateConflict(
+                        "COO domain execution profile is missing"
+                    )
+                if profile.enabled:
+                    registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+                else:
+                    registry.validate_disabled_profile_shape(
+                        COO_DOMAIN_EXECUTION_PROFILE
+                    )
+            except CapabilityPolicyError as exc:
+                raise StateConflict(
+                    "COO domain execution profile is production-disarmed or invalid"
+                ) from exc
+            if not _coo_domain_admitted(job_row):
+                if profile.enabled:
+                    raise StateConflict(
+                        "domain consumption requires an admitted COO domain profile"
+                    )
+                raise StateConflict(
+                    "COO domain execution profile is production-disarmed"
+                )
+            if (
+                row["status"] != AttemptStatus.CHECKPOINTED.value
+                or job_row["current_attempt_id"] != str(row["attempt_id"])
+            ):
+                raise StateConflict(
+                    "domain consumption requires current CHECKPOINTED domain Attempt"
+                )
+            # 5. Budget Event + reservation identity anchor.
+            budget = _validated_coo_provider_budget_event(
+                connection,
+                root_row=root_row,
+                domain_job_id=str(job_row["job_id"]),
+            )
+            reservation_digest = str(budget["reservation_digest"])
+            # 6. Settled reviewed projection digest.
+            projection = _coo_domain_consumption_projection(
+                connection,
+                root_row=root_row,
+                domain_job_id=str(job_row["job_id"]),
+                domain_attempt_id=str(row["attempt_id"]),
+            )
+            if (
+                projection["consumption_projection_digest"]
+                != expected_consumption_projection_digest
+            ):
+                raise StateConflict(
+                    "domain consumption projection digest does not match"
+                )
+            current_projection_digest = str(
+                projection["consumption_projection_digest"]
+            )
+            # 7. Require exactly the completed initial BEGIN_TURN + APPLIED
+            #    + candidate for the same epoch/generation/Attempt; reject
+            #    absent / duplicate / foreign / unacknowledged / interrupted
+            #    or EFFECT_UNKNOWN initial evidence.
+            initial_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            initial_applieds: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            initial_unknowns: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            initial_candidates: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            later_applieds: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            later_unknowns: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            later_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+
+            initial_operation_claims = {
+                str(event["command_id"])
+                for event in connection.execute(
+                    """SELECT command_id FROM events WHERE event_type=?
+                       AND CASE WHEN json_valid(payload_json) THEN
+                           json_extract(payload_json,'$.turn_id') END = ?""",
+                    (OperationReceiptKind.INTENT.value, str(plan_seal["turn_id"])),
+                )
+            }
+            def claims_initial_context(
+                event_row: sqlite3.Row, payload: dict[str, Any]
+            ) -> bool:
+                current_attempt = str(row["attempt_id"])
+                current_job = str(job_row["job_id"])
+                turn_ref = payload.get("turn")
+                candidate_turn = (
+                    turn_ref
+                    if isinstance(turn_ref, dict)
+                    else {
+                        name: payload.get(name)
+                        for name in {
+                            "attempt_id",
+                            "session_epoch_id",
+                            "process_generation_id",
+                            "turn_id",
+                        }
+                    }
+                )
+                return (
+                    event_row["aggregate_id"] in initial_operation_claims
+                    or (isinstance(payload.get("operation_id"), str) and payload["operation_id"] in initial_operation_claims)
+                ) or any(
+                    identity in (
+                        current_attempt,
+                        current_job,
+                        str(durable["session_epoch_id"]),
+                        str(durable["process_generation_id"]),
+                        plan_seal["turn_id"],
+                    )
+                    for identity in (
+                        str(event_row["attempt_id"]),
+                        str(event_row["job_id"]),
+                        payload.get("job_id"),
+                        payload.get("attempt_id"),
+                        payload.get("session_epoch_id"),
+                        payload.get("process_generation_id"),
+                        payload.get("turn_id"),
+                        payload.get("initial_turn_id"),
+                        str(event_row["aggregate_id"]),
+                    )
+                ) or (
+                    isinstance(candidate_turn, dict)
+                    and (
+                        candidate_turn.get("turn_id") == plan_seal["turn_id"]
+                        or candidate_turn.get("attempt_id") == current_attempt
+                        or candidate_turn.get("session_epoch_id")
+                        == str(durable["session_epoch_id"])
+                        or candidate_turn.get("process_generation_id")
+                        == str(durable["process_generation_id"])
+                    )
+                )
+
+            saved_later_intent = self._event(connection, operation_id.command_id)
+            saved_later_turn = None
+            if saved_later_intent is not None:
+                saved_later_payload = _strict_canonical_json_loads(
+                    str(saved_later_intent["payload_json"]),
+                    name="domain consumption saved later intent",
+                )
+                if not isinstance(saved_later_payload, dict):
+                    raise StateConflict("domain consumption replay intent drifted")
+                saved_later_turn = saved_later_payload.get("turn_id")
+
+            def claims_later_operation(
+                event_row: sqlite3.Row, payload: dict[str, Any]
+            ) -> bool:
+                return (
+                    operation_id.command_id in (
+                        str(event_row["aggregate_id"]),
+                        str(event_row["command_id"]),
+                        payload.get("operation_id"),
+                    )
+                    or str(event_row["command_id"]) in (
+                        operation_receipt_command_id(operation_id, OperationReceiptKind.APPLIED),
+                        operation_receipt_command_id(operation_id, OperationReceiptKind.EFFECT_UNKNOWN),
+                    )
+                    or (
+                        isinstance(saved_later_turn, str)
+                        and saved_later_turn in (
+                            payload.get("turn_id"), payload.get("initial_turn_id"),
+                            event_row["aggregate_id"],
+                        )
+                    )
+                )
+
+            def current_nonturn_pair(intent_event):
+                if intent_event is None:
+                    return None
+                start_payload = _strict_canonical_json_loads(
+                    str(intent_event["payload_json"]), name="domain consumption initial launch intent",
+                )
+                try:
+                    start_op = OperationId(str(intent_event["command_id"]))
+                except ValueError:
+                    return None
+                start_applied = self._event(connection, operation_receipt_command_id(start_op, OperationReceiptKind.APPLIED))
+                if start_applied is None:
+                    return None
+                applied_payload = _strict_canonical_json_loads(
+                    str(start_applied["payload_json"]), name="domain consumption initial launch receipt",
+                )
+                expected_start = {
+                    "schema_version": "mastermind.operator_harness_intent/v1",
+                    "operation_kind": "start_session", "attempt_id": str(row["attempt_id"]),
+                    "session_epoch_id": str(durable["session_epoch_id"]),
+                    "process_generation_id": str(durable["process_generation_id"]),
+                    "worker_id": str(row["worker_id"]), "provider_session_id": None,
+                }
+                expected_applied = {
+                    "operation_kind": "start_session",
+                    "provider_session_id": str(durable["provider_session_id"]),
+                    "process_generation_id": str(durable["process_generation_id"]),
+                }
+                headers = all(
+                    event["aggregate_type"] == "operator_operation"
+                    and event["aggregate_id"] == start_op.command_id
+                    and event["job_id"] == str(row["job_id"])
+                    and event["attempt_id"] == str(row["attempt_id"])
+                    and event["worker_id"] == str(row["worker_id"])
+                    and event["quota_class"] == str(row["quota_class"])
+                    and event["actor"] == "supervisor"
+                    for event in (intent_event, start_applied)
+                )
+                if (
+                    not headers or intent_event["event_type"] != OperationReceiptKind.INTENT.value
+                    or start_applied["event_type"] != OperationReceiptKind.APPLIED.value
+                    or self._event(connection, operation_receipt_command_id(start_op, OperationReceiptKind.EFFECT_UNKNOWN)) is not None
+                ):
+                    return None
+                def require_unique_nonturn_inventory():
+                    # An unvalidated command/header/kind cannot hide a receipt
+                    # which independently claims this operation or its paired
+                    # canonical receipt identities.
+                    operation_aliases = (
+                        start_op.command_id,
+                        operation_receipt_command_id(start_op, OperationReceiptKind.APPLIED),
+                        operation_receipt_command_id(start_op, OperationReceiptKind.EFFECT_UNKNOWN),
+                    )
+                    affiliated = []
+                    for evidence in connection.execute(
+                        "SELECT * FROM events WHERE event_type IN (?,?,?)",
+                        (OperationReceiptKind.INTENT.value, OperationReceiptKind.APPLIED.value,
+                         OperationReceiptKind.EFFECT_UNKNOWN.value),
+                    ):
+                        try:
+                            body = json.loads(str(evidence["payload_json"]))
+                        except (json.JSONDecodeError, TypeError):
+                            body = None
+                        # This pass only reconciles identity. The complete
+                        # INTENT/receipt census below validates canonical JSON;
+                        # malformed affiliated headers still count here.
+                        claims = (
+                            evidence["aggregate_id"], evidence["command_id"],
+                            body.get("operation_id") if isinstance(body, dict) else None,
+                            body.get("initial_operation_id") if isinstance(body, dict) else None,
+                            body.get("intent_command_id") if isinstance(body, dict) else None,
+                            body.get("applied_command_id") if isinstance(body, dict) else None,
+                        )
+                        if any(identity in operation_aliases for identity in claims):
+                            affiliated.append(evidence["event_id"])
+                    if sorted(affiliated) != sorted((intent_event["event_id"], start_applied["event_id"])):
+                        raise StateConflict(
+                            "domain consumption nonturn operation evidence is contradictory or unknown"
+                        )
+
+                if start_payload == expected_start and applied_payload == expected_applied:
+                    require_unique_nonturn_inventory()
+                    return ("start_session", None)
+                if not isinstance(start_payload, dict) or not isinstance(applied_payload, dict):
+                    return None
+                sequence = start_payload.get("expected_checkpoint_sequence")
+                if type(sequence) is not int or not 0 < sequence <= int(row["checkpoint_sequence"]):
+                    return None
+                expected_checkpoint = {
+                    "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                    "attempt_id": str(row["attempt_id"]), "worker_id": str(row["worker_id"]),
+                    "session_epoch_id": str(durable["session_epoch_id"]),
+                    "process_generation_id": str(durable["process_generation_id"]),
+                    "provider_session_id": str(durable["provider_session_id"]),
+                    "expected_checkpoint_sequence": sequence,
+                }
+                expected_checkpoint_applied = {
+                    "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+                    "process_generation_id": str(durable["process_generation_id"]),
+                    "checkpoint_sequence": sequence,
+                    "provider_mutated_state": applied_payload.get("provider_mutated_state"),
+                }
+                checkpoint_count = connection.execute(
+                    """SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'
+                       AND aggregate_type='job' AND aggregate_id=? AND job_id=? AND attempt_id=?
+                       AND worker_id=? AND quota_class=? AND CASE WHEN json_valid(payload_json)
+                           THEN json_extract(payload_json,'$.checkpoint_sequence') END = ?""",
+                    (row["job_id"], row["job_id"], row["attempt_id"], row["worker_id"], row["quota_class"], sequence),
+                ).fetchone()[0]
+                if (
+                    start_payload == expected_checkpoint and applied_payload == expected_checkpoint_applied
+                    and type(applied_payload.get("provider_mutated_state")) is bool and checkpoint_count == 1
+                ):
+                    require_unique_nonturn_inventory()
+                    return ("checkpoint", sequence)
+                return None
+
+            current_start_count = 0
+            checkpoint_sequences = set()
+            for prior in connection.execute(
+                """
+                SELECT * FROM events
+                WHERE event_type=?
+                  AND command_id<>?
+                """,
+                (
+                    OperationReceiptKind.INTENT.value,
+                    operation_id.command_id,
+                ),
+            ):
+                try:
+                    payload = _strict_canonical_json_loads(
+                        str(prior["payload_json"]),
+                        name="domain consumption initial",
+                    )
+                except StateConflict as exc:
+                    raise StateConflict(
+                        "domain consumption initial BEGIN_TURN is foreign"
+                    ) from exc
+                if not isinstance(payload, dict):
+                    raise StateConflict(
+                        "domain consumption initial BEGIN_TURN is foreign"
+                    )
+                initial_claim = claims_initial_context(prior, payload)
+                later_claim = claims_later_operation(prior, payload)
+                operation_kind = payload.get("operation_kind")
+                interrupt_claim = operation_kind == "interrupt_turn"
+                known_nonturn = current_nonturn_pair(prior) if initial_claim and not later_claim else None
+                if known_nonturn is not None:
+                    if known_nonturn[0] == "start_session":
+                        current_start_count += 1
+                    elif known_nonturn[1] in checkpoint_sequences:
+                        raise StateConflict("domain consumption checkpoint evidence is not unique")
+                    else:
+                        checkpoint_sequences.add(known_nonturn[1])
+                    continue
+                if not initial_claim and not later_claim:
+                    continue
+                if interrupt_claim and (initial_claim or later_claim):
+                    raise StateConflict("domain consumption evidence was interrupted")
+                if prior["event_type"] == OperationReceiptKind.INTENT.value:
+                    if later_claim and str(prior["command_id"]) != (
+                        operation_id.command_id
+                    ):
+                        later_intents.append((prior, payload))
+                    if (
+                        initial_claim
+                        and str(prior["command_id"])
+                        != operation_id.command_id
+                    ):
+                        initial_intents.append((prior, payload))
+            if current_start_count != 1:
+                raise StateConflict("domain consumption initial launch evidence is not unique")
+            if len(initial_intents) != 1:
+                if later_intents:
+                    raise StateConflict(
+                        "domain consumption later operation has foreign INTENT"
+                    )
+                raise StateConflict(
+                    "domain consumption requires exactly one completed "
+                    "initial BEGIN_TURN"
+                )
+            initial_event, initial_payload = initial_intents[0]
+            initial_turn_id = str(plan_seal["turn_id"])
+            expected_initial_payload = {
+                "schema_version": "mastermind.operator_harness_turn_intent/v1",
+                "operation_kind": OperationKind.BEGIN_TURN.value,
+                "attempt_id": str(row["attempt_id"]),
+                "session_epoch_id": str(durable["session_epoch_id"]),
+                "process_generation_id": str(durable["process_generation_id"]),
+                "worker_id": str(row["worker_id"]),
+                "provider_session_id": str(durable["provider_session_id"]),
+                "turn_id": str(initial_payload.get("turn_id", "")),
+            }
+            if (
+                initial_event["aggregate_id"] != initial_event["command_id"]
+                or initial_event["aggregate_type"] != "operator_operation"
+                or initial_event["event_type"]
+                != OperationReceiptKind.INTENT.value
+                or initial_event["attempt_id"] != str(row["attempt_id"])
+                or initial_event["job_id"] != str(row["job_id"])
+                or initial_event["quota_class"] != str(row["quota_class"])
+                or initial_event["actor"] != "supervisor"
+                or initial_event["worker_id"] != str(row["worker_id"])
+                or initial_payload.get("turn_id") != initial_turn_id
+                or not str(initial_payload.get("turn_id", "")).strip()
+                or initial_payload != expected_initial_payload
+                or not initial_payload.get("provider_session_id")
+            ):
+                raise StateConflict(
+                    "domain consumption initial BEGIN_TURN identity drifted"
+                )
+            try:
+                initial_op = OperationId(str(initial_event["command_id"]))
+            except ValueError as exc:
+                raise StateConflict("domain consumption initial BEGIN_TURN identity drifted") from exc
+            initial_command = str(initial_op.command_id)
+            initial_receipt_query = """
+                SELECT * FROM events
+                WHERE event_type IN (?,?)
+            """
+            for receipt in connection.execute(
+                initial_receipt_query,
+                (
+                    OperationReceiptKind.APPLIED.value,
+                    OperationReceiptKind.EFFECT_UNKNOWN.value,
+                ),
+            ):
+                receipt_payload = _strict_canonical_json_loads(
+                    str(receipt["payload_json"]),
+                    name="domain consumption turn receipt",
+                )
+                if not isinstance(receipt_payload, dict):
+                    raise StateConflict(
+                        "domain consumption turn receipt is malformed"
+                    )
+                later_claim = claims_later_operation(receipt, receipt_payload)
+                initial_claim = (
+                    str(receipt["command_id"]) in (
+                        operation_receipt_command_id(initial_op, OperationReceiptKind.APPLIED),
+                        operation_receipt_command_id(initial_op, OperationReceiptKind.EFFECT_UNKNOWN),
+                    )
+                    or str(receipt["aggregate_id"]) == initial_command
+                    or receipt_payload.get("operation_id") == initial_command
+                    or receipt_payload.get("turn_id") == initial_turn_id
+                    or (
+                        not later_claim and claims_initial_context(receipt, receipt_payload)
+                        and not (
+                            receipt["event_type"] == OperationReceiptKind.APPLIED.value
+                            and str(receipt["aggregate_id"]).startswith("ohf-op:")
+                            and str(receipt["command_id"]) == operation_receipt_command_id(
+                                OperationId(str(receipt["aggregate_id"])), OperationReceiptKind.APPLIED
+                            )
+                            and current_nonturn_pair(self._event(connection, str(receipt["aggregate_id"]))) is not None
+                        )
+                    )
+                )
+                if initial_claim:
+                    if receipt["event_type"] == OperationReceiptKind.APPLIED.value:
+                        initial_applieds.append((receipt, receipt_payload))
+                    else:
+                        initial_unknowns.append((receipt, receipt_payload))
+                if later_claim:
+                    if receipt["event_type"] == OperationReceiptKind.APPLIED.value:
+                        later_applieds.append((receipt, receipt_payload))
+                    else:
+                        later_unknowns.append((receipt, receipt_payload))
+                if (
+                    receipt_payload.get("operation_kind") == "interrupt_turn"
+                    and (
+                        claims_initial_context(receipt, receipt_payload)
+                        or claims_later_operation(receipt, receipt_payload)
+                    )
+                ):
+                    raise StateConflict(
+                        "domain consumption evidence was interrupted"
+                    )
+            if len(initial_applieds) != 1:
+                raise StateConflict(
+                    "domain consumption initial BEGIN_TURN is unacknowledged"
+                )
+            initial_applied, initial_applied_payload = initial_applieds[0]
+            expected_applied_payload = {
+                "schema_version": (
+                    "mastermind.operator_harness_turn_applied/v1"
+                ),
+                "operation_kind": OperationKind.BEGIN_TURN.value,
+                "attempt_id": str(row["attempt_id"]),
+                "session_epoch_id": str(durable["session_epoch_id"]),
+                "process_generation_id": str(durable["process_generation_id"]),
+                "turn_id": str(initial_payload["turn_id"]),
+                "provider_native_turn_id": str(
+                    plan_seal["provider_native_turn_id"]
+                ),
+                "acknowledged": True,
+            }
+            if (
+                initial_applied["command_id"]
+                != operation_receipt_command_id(initial_op, OperationReceiptKind.APPLIED)
+                or initial_applied["aggregate_type"] != "operator_operation"
+                or initial_applied["aggregate_id"] != str(initial_op.command_id)
+                or initial_applied["event_type"]
+                != OperationReceiptKind.APPLIED.value
+                or initial_applied["attempt_id"] != str(row["attempt_id"])
+                or initial_applied["job_id"] != str(row["job_id"])
+                or initial_applied["worker_id"] != str(row["worker_id"])
+                or initial_applied["quota_class"] != str(row["quota_class"])
+                or initial_applied["actor"] != "supervisor"
+                or initial_applied_payload != expected_applied_payload
+                or not expected_applied_payload["provider_native_turn_id"]
+            ):
+                raise StateConflict(
+                    "domain consumption initial BEGIN_TURN acknowledgment drifted"
+                )
+            if initial_unknowns:
+                raise StateConflict(
+                    "domain consumption initial BEGIN_TURN has EFFECT_UNKNOWN"
+                )
+            for initial_candidate in connection.execute(
+                """
+                SELECT * FROM events
+                WHERE event_type='OHF_CANDIDATE_RESULT_RECORDED'
+                """
+            ):
+                candidate_payload = _strict_canonical_json_loads(
+                    str(initial_candidate["payload_json"]),
+                    name="domain consumption initial candidate",
+                )
+                candidate_turn_ref = (
+                    candidate_payload.get("turn")
+                    if isinstance(candidate_payload, dict)
+                    else None
+                )
+                if not isinstance(candidate_payload, dict):
+                    raise StateConflict(
+                        "domain consumption initial candidate is malformed"
+                    )
+                if (
+                    claims_initial_context(initial_candidate, candidate_payload)
+                    or initial_candidate["command_id"] == plan_seal["candidate_event_command_id"]
+                    or initial_candidate["aggregate_id"] == initial_turn_id
+                    or (
+                        isinstance(candidate_turn_ref, dict)
+                        and candidate_turn_ref.get("turn_id")
+                        == initial_turn_id
+                    )
+                ):
+                    initial_candidates.append(
+                        (initial_candidate, candidate_payload)
+                    )
+            if later_intents:
+                raise StateConflict(
+                    "domain consumption later operation has foreign INTENT"
+                )
+            if len(initial_candidates) != 1:
+                raise StateConflict(
+                    "domain consumption initial BEGIN_TURN candidate missing"
+                )
+            initial_candidate, candidate_payload = initial_candidates[0]
+            candidate_turn = candidate_payload.get("turn")
+            if (
+                initial_candidate["aggregate_type"] != "operator_turn"
+                or initial_candidate["aggregate_id"] != initial_turn_id
+                or initial_candidate["command_id"]
+                != f"ohf-candidate:{initial_payload['turn_id']}"
+                or initial_candidate["attempt_id"] != str(row["attempt_id"])
+                or initial_candidate["job_id"] != str(row["job_id"])
+                or initial_candidate["worker_id"] != str(row["worker_id"])
+                or initial_candidate["quota_class"] != str(row["quota_class"])
+                or initial_candidate["actor"] != "supervisor"
+                or not isinstance(candidate_payload, dict)
+                or set(candidate_payload) != {
+                    "schema_version", "turn", "candidate", "events", "cursor",
+                }
+                or candidate_turn
+                != {
+                    "attempt_id": str(row["attempt_id"]),
+                    "session_epoch_id": str(durable["session_epoch_id"]),
+                    "process_generation_id": str(durable["process_generation_id"]),
+                    "turn_id": str(initial_payload["turn_id"]),
+                }
+                or candidate_payload.get("schema_version")
+                != OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
+                or initial_candidate["command_id"]
+                != plan_seal["candidate_event_command_id"]
+                or orchestration_digest(candidate_payload)
+                != plan_seal["candidate_event_digest"]
+                or initial_payload["turn_id"] != plan_seal["turn_id"]
+                or candidate_turn
+                != {
+                    "attempt_id": plan_seal["attempt_id"],
+                    "session_epoch_id": plan_seal["session_epoch_id"],
+                    "process_generation_id": plan_seal[
+                        "process_generation_id"
+                    ],
+                    "turn_id": plan_seal["turn_id"],
+                }
+            ):
+                raise StateConflict(
+                    "domain consumption initial candidate evidence drifted"
+                )
+            # 8. No APPLIED / EFFECT_UNKNOWN for THIS later operation.
+            if later_applieds:
+                raise StateConflict(
+                    "domain consumption later operation already APPLIED"
+                )
+            if later_unknowns:
+                raise StateConflict(
+                    "domain consumption later operation has EFFECT_UNKNOWN"
+                )
+            # 9. Validate the complete root coo_provider_charges inventory
+            #    against authoritative rows: each charge binds to its
+            #    unique event and to actual Attempt / job / worker / quota /
+            #    hierarchy / reservation_digest.  31 ORDINARY max + 1 FINAL
+            #    max with total 32.
+            ordinary = 0
+            finals = 0
+            charge_rows = connection.execute(
+                "SELECT * FROM coo_provider_charges ORDER BY event_id"
+            ).fetchall()
+            # Match every charge Event that claims this root through its
+            # authoritative Job, aggregate or payload. Do not filter on actor
+            # or aggregate_type: those fields are identities to validate, and
+            # a forged/orphan Event cannot disappear from the census.
+            charge_events = connection.execute(
+                """
+                SELECT * FROM events
+                WHERE event_type IN (?,?) ORDER BY event_id
+                """,
+                (
+                    "COO_PROVIDER_CHARGE_RECORDED",
+                    "COO_DOMAIN_CONSUMPTION_CHARGED",
+                ),
+            ).fetchall()
+            # Affiliation is independent of the claimed aggregate type and
+            # root field. Follow all durable identity links before filtering;
+            # then validate the selected rows with the closed v6 contract.
+            def charge_claimed_roots(record, payload):
+                identities = [record["aggregate_id"]] if "aggregate_id" in record.keys() else []
+                for name in ("job_id", "attempt_id", "turn_id", "operation_id"):
+                    if name in record.keys():
+                        identities.append(record[name])
+                for name in (
+                    "root_job_id", "job_id", "domain_job_id", "attempt_id",
+                    "domain_attempt_id", "session_epoch_id", "process_generation_id", "turn_id", "operation_id",
+                ):
+                    identities.append(payload.get(name))
+                roots = set()
+                explicit_root = payload.get("root_job_id")
+                if isinstance(explicit_root, str):
+                    roots.add(explicit_root)
+                for identity in identities:
+                    if not isinstance(identity, str) or not identity:
+                        continue
+                    for linked in connection.execute(
+                        """SELECT root_job_id FROM jobs WHERE job_id=?
+                           UNION SELECT j.root_job_id FROM attempts a
+                               JOIN jobs j ON j.job_id=a.job_id WHERE a.attempt_id=?
+                           UNION SELECT j.root_job_id FROM harness_session_epochs e
+                               JOIN attempts a ON a.attempt_id=e.attempt_id
+                               JOIN jobs j ON j.job_id=a.job_id WHERE e.session_epoch_id=?
+                           UNION SELECT j.root_job_id FROM process_generations g
+                               JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                               JOIN attempts a ON a.attempt_id=e.attempt_id
+                               JOIN jobs j ON j.job_id=a.job_id WHERE g.process_generation_id=?""",
+                        (identity, identity, identity, identity),
+                    ):
+                        roots.add(str(linked["root_job_id"]))
+                # TurnRefs and operation aggregates affiliate through existing
+                # immutable intent/applied/candidate Events even before a ledger
+                # charge exists. Do not trust the charge's root or aggregate tag.
+                for identity in identities:
+                    if not isinstance(identity, str) or not identity:
+                        continue
+                    linked_events = connection.execute(
+                        """SELECT e.job_id,e.attempt_id FROM events e
+                           WHERE e.command_id=? OR e.aggregate_id=?
+                             OR CASE WHEN json_valid(e.payload_json) THEN
+                                 json_extract(e.payload_json,'$.turn_id') END = ?
+                             OR CASE WHEN json_valid(e.payload_json) THEN
+                                 json_extract(e.payload_json,'$.turn.turn_id') END = ?""",
+                        (identity, identity, identity, identity),
+                    ).fetchall()
+                    for linked in linked_events:
+                        for linked_root in connection.execute(
+                            """SELECT root_job_id FROM jobs WHERE job_id=?
+                               UNION SELECT j.root_job_id FROM attempts a
+                                   JOIN jobs j ON j.job_id=a.job_id WHERE a.attempt_id=?""",
+                            (linked["job_id"], linked["attempt_id"]),
+                        ):
+                            roots.add(str(linked_root["root_job_id"]))
+                operation = payload.get("operation_id")
+                if isinstance(operation, str):
+                    for linked in connection.execute(
+                        """SELECT j.root_job_id FROM events e JOIN jobs j
+                               ON j.job_id=e.job_id WHERE e.command_id=?
+                           UNION SELECT j.root_job_id FROM events e
+                               JOIN attempts a ON a.attempt_id=e.attempt_id
+                               JOIN jobs j ON j.job_id=a.job_id WHERE e.command_id=?""",
+                        (operation, operation),
+                    ):
+                        roots.add(str(linked["root_job_id"]))
+                return roots
+
+            ledger_roots = {
+                str(charge["charge_id"]): charge_claimed_roots(charge, dict(charge))
+                for charge in charge_rows
+            }
+            event_roots = {}
+            for charge_event in charge_events:
+                charge_payload = _strict_canonical_json_loads(
+                    str(charge_event["payload_json"]),
+                    name="domain consumption charge event payload",
+                )
+                if not isinstance(charge_payload, dict):
+                    raise StateConflict("domain consumption charge evidence is unclassifiable")
+                roots = charge_claimed_roots(charge_event, charge_payload)
+                for charge in charge_rows:
+                    if (
+                        charge["event_id"] == charge_event["event_id"]
+                        or charge["charge_id"] == charge_payload.get("charge_id")
+                        or charge["operation_id"] == charge_payload.get("operation_id")
+                        or charge["turn_id"] == charge_payload.get("turn_id")
+                    ):
+                        roots.update(ledger_roots[str(charge["charge_id"])])
+                if not roots or not connection.execute(
+                    "SELECT 1 FROM jobs WHERE depth=0 AND job_id IN ("
+                    + ",".join("?" for _ in roots) + ") LIMIT 1", tuple(roots),
+                ).fetchone():
+                    raise StateConflict("domain consumption charge evidence is unclassifiable")
+                event_roots[int(charge_event["event_id"])] = roots
+            selected_charges = []
+            for charge in charge_rows:
+                roots = ledger_roots[str(charge["charge_id"])] | event_roots.get(int(charge["event_id"]), set())
+                if str(root_row["job_id"]) in roots:
+                    if roots != {str(root_row["job_id"])}:
+                        raise StateConflict("domain consumption charge lineage conflicts")
+                    selected_charges.append(charge)
+            charge_rows = selected_charges
+            charged_event_ids = {int(charge["event_id"]) for charge in charge_rows}
+            affiliated_event_ids = set()
+            for event_id, roots in event_roots.items():
+                if str(root_row["job_id"]) in roots:
+                    if roots != {str(root_row["job_id"])}:
+                        raise StateConflict("domain consumption charge lineage conflicts")
+                    affiliated_event_ids.add(event_id)
+            if affiliated_event_ids != charged_event_ids:
+                raise StateConflict("domain consumption found an orphan COO provider charge Event")
+            for charge in charge_rows:
+                effect = str(charge["effect_class"])
+                if effect == "ORDINARY":
+                    ordinary += 1
+                elif effect == "FINAL":
+                    finals += 1
+                else:
+                    raise StateConflict(
+                        f"domain consumption found unknown charge effect {effect!r}"
+                    )
+                if charge["root_job_id"] != str(root_row["job_id"]):
+                    raise StateConflict(
+                        "domain consumption charge root lineage drifted"
+                    )
+                if charge["reservation_identity"] != reservation_digest:
+                    raise StateConflict(
+                        "domain consumption charge reservation_identity drifted"
+                    )
+                charge_event = connection.execute(
+                    "SELECT * FROM events WHERE event_id=?",
+                    (int(charge["event_id"]),),
+                ).fetchone()
+                if (
+                    charge_event is None
+                    or str(charge_event["event_type"]) != (
+                        "COO_DOMAIN_CONSUMPTION_CHARGED"
+                        if effect == "FINAL"
+                        else "COO_PROVIDER_CHARGE_RECORDED"
+                    )
+                    or str(charge_event["aggregate_type"]) != "job"
+                    or str(charge_event["aggregate_id"]) != str(charge["job_id"])
+                    or str(charge_event["actor"]) != "coo"
+                    or str(charge_event["job_id"]) != str(charge["job_id"])
+                    or str(charge_event["attempt_id"]) != str(charge["attempt_id"])
+                    or str(charge_event["worker_id"]) != str(charge["worker_id"])
+                ):
+                    raise StateConflict(
+                        "domain consumption charge event binding drifted"
+                    )
+                attempt_row = connection.execute(
+                    "SELECT * FROM attempts WHERE attempt_id=?",
+                    (str(charge["attempt_id"]),),
+                ).fetchone()
+                if (
+                    attempt_row is None
+                    or str(attempt_row["attempt_id"]) != str(charge["attempt_id"])
+                    or str(attempt_row["job_id"]) != str(charge["job_id"])
+                    or str(attempt_row["worker_id"]) != str(charge["worker_id"])
+                    or str(attempt_row["quota_class"]) != str(charge_event["quota_class"])
+                ):
+                    raise StateConflict(
+                        "domain consumption charge attempt lineage drifted"
+                    )
+                charge_payload = _strict_canonical_json_loads(
+                    str(charge_event["payload_json"]),
+                    name="domain consumption charge event payload",
+                )
+                charge_job = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?",
+                    (str(charge["job_id"]),),
+                ).fetchone()
+                if (
+                    not isinstance(charge_payload, dict)
+                    or set(charge_payload) != {
+                        "charge_id", "root_job_id", "operation_id",
+                        "effect_class", "turn_id", "job_id", "attempt_id",
+                    "worker_id", "reservation_identity",
+                } | (
+                    {
+                        "domain_job_id", "domain_attempt_id",
+                        "session_epoch_id", "process_generation_id",
+                        "consumption_projection_digest",
+                    }
+                    if effect == "FINAL"
+                    else set()
+                )
+                    or charge_job is None
+                    or charge_job["root_job_id"] != str(charge["root_job_id"])
+                    or not (
+                        (
+                            charge_job["job_id"] == job_row["job_id"]
+                            and charge_job["parent_job_id"] == root_row["job_id"]
+                            and int(charge_job["depth"]) == 1
+                            and charge_job["orchestration_role"] == "plan"
+                        )
+                        or (
+                            effect == "ORDINARY"
+                            and charge_job["parent_job_id"] == job_row["job_id"]
+                            and int(charge_job["depth"]) == 2
+                            and charge_job["orchestration_role"]
+                            in {"work", "repair", "review"}
+                        )
+                    )
+                    or str(charge_payload.get("charge_id")) != str(charge["charge_id"])
+                    or str(charge_payload.get("root_job_id"))
+                    != str(charge["root_job_id"])
+                    or str(charge_payload.get("job_id")) != str(charge["job_id"])
+                    or str(charge_payload.get("attempt_id"))
+                    != str(charge["attempt_id"])
+                    or str(charge_payload.get("worker_id"))
+                    != str(charge["worker_id"])
+                    or str(charge_payload.get("operation_id"))
+                    != str(charge["operation_id"])
+                    or str(charge_payload.get("effect_class"))
+                    != str(charge["effect_class"])
+                    or str(charge_payload.get("turn_id")) != str(charge["turn_id"])
+                    or str(charge_payload.get("reservation_identity"))
+                    != str(charge["reservation_identity"])
+                    or (effect == "FINAL" and (
+                        str(charge_payload.get("domain_job_id"))
+                        != str(charge["job_id"])
+                        or str(charge_payload.get("domain_attempt_id"))
+                        != str(charge["attempt_id"])
+                    ))
+                ):
+                    raise StateConflict(
+                        "domain consumption charge event payload drifted"
+                    )
+            if ordinary > 31 or finals > 1 or ordinary + finals > 32:
+                raise StateConflict(
+                    "domain consumption charge ceiling is exhausted"
+                )
+            if finals == 1:
+                # Single FINAL slot already spent; this caller must be the
+                # exact same operation identity or the API refuses.
+                existing_final = connection.execute(
+                    """
+                    SELECT c.* FROM coo_provider_charges c
+                    WHERE c.root_job_id=? AND c.effect_class='FINAL'
+                    """,
+                    (str(root_row["job_id"]),),
+                ).fetchone()
+                assert existing_final is not None  # finals count asserted above
+                existing_final_event = connection.execute(
+                    "SELECT * FROM events WHERE event_id=?",
+                    (int(existing_final["event_id"]),),
+                ).fetchone()
+                assert existing_final_event is not None
+                if (
+                    str(existing_final["operation_id"])
+                    != operation_id.command_id
+                ):
+                    raise StateConflict(
+                        "domain consumption final slot already spent"
+                    )
+            # 10. Deterministic charge_id derived from exact operation identity.
+            charge_id = hashlib.sha256(
+                ("coo-domain-consumption:" + operation_id.command_id)
+                .encode("utf-8")
+            ).hexdigest()
+            turn_id = f"ohf-coo-consumption-turn-{uuid4().hex}"
+            # 11. Exact replay: same operation, same refs, same digest -
+            #     validate the existing FINAL ledger / Event and BEGIN_TURN
+            #     INTENT, then return the identical TurnRef with zero
+            #     mutations.
+            existing_intent = self._event(connection, operation_id.command_id)
+            if existing_intent is not None:
+                payload = _strict_canonical_json_loads(
+                    str(existing_intent["payload_json"]),
+                    name="domain consumption replay intent",
+                )
+                expected_intent_payload = {
+                    "schema_version": (
+                        "mastermind.operator_harness_turn_intent/v1"
+                    ),
+                    "operation_kind": OperationKind.BEGIN_TURN.value,
+                    "attempt_id": str(row["attempt_id"]),
+                    "session_epoch_id": str(durable["session_epoch_id"]),
+                    "process_generation_id": str(durable["process_generation_id"]),
+                    "worker_id": str(row["worker_id"]),
+                    "provider_session_id": str(durable["provider_session_id"]),
+                    "turn_id": str(payload.get("turn_id", turn_id)),
+                }
+                if (
+                    existing_intent["event_type"]
+                    != OperationReceiptKind.INTENT.value
+                    or existing_intent["aggregate_type"] != "operator_operation"
+                    or existing_intent["command_id"] != operation_id.command_id
+                    or existing_intent["aggregate_id"] != operation_id.command_id
+                    or existing_intent["job_id"] != str(row["job_id"])
+                    or not isinstance(payload.get("turn_id"), str)
+                    or not payload["turn_id"]
+                    or existing_intent["attempt_id"] != str(row["attempt_id"])
+                    or existing_intent["worker_id"] != str(row["worker_id"])
+                    or existing_intent["quota_class"] != str(row["quota_class"])
+                    or existing_intent["actor"] != "supervisor"
+                    or payload != expected_intent_payload
+                ):
+                    raise StateConflict(
+                        "domain consumption replay intent drifted"
+                    )
+                existing_final = connection.execute(
+                    """
+                    SELECT * FROM coo_provider_charges
+                    WHERE root_job_id=? AND effect_class='FINAL'
+                    """,
+                    (str(root_row["job_id"]),),
+                ).fetchall()
+                if len(existing_final) != 1:
+                    raise StateConflict(
+                        "domain consumption replay FINAL charge row is not unique"
+                    )
+                existing_final = existing_final[0]
+                if existing_final is None:
+                    raise StateConflict(
+                        "domain consumption replay lost FINAL charge row"
+                    )
+                existing_final_event = connection.execute(
+                    "SELECT * FROM events WHERE event_id=?",
+                    (int(existing_final["event_id"]),),
+                ).fetchone()
+                if existing_final_event is None:
+                    raise StateConflict(
+                        "domain consumption replay lost FINAL charge event"
+                    )
+                replay_charge_payload = {
+                    "charge_id": str(charge_id),
+                    "root_job_id": str(root_row["job_id"]),
+                    "job_id": str(job_row["job_id"]),
+                    "attempt_id": str(row["attempt_id"]),
+                    "worker_id": str(row["worker_id"]),
+                    "domain_job_id": str(job_row["job_id"]),
+                    "domain_attempt_id": str(row["attempt_id"]),
+                    "operation_id": operation_id.command_id,
+                    "effect_class": "FINAL",
+                    "turn_id": str(payload["turn_id"]),
+                    "reservation_identity": reservation_digest,
+                    "session_epoch_id": str(durable["session_epoch_id"]),
+                    "process_generation_id": str(durable["process_generation_id"]),
+                    "consumption_projection_digest": current_projection_digest,
+                }
+                observed_payload = _strict_canonical_json_loads(
+                    str(existing_final_event["payload_json"]),
+                    name="domain consumption replay FINAL payload",
+                )
+                if (
+                    str(existing_final["charge_id"]) != str(charge_id)
+                    or str(existing_final["operation_id"])
+                    != operation_id.command_id
+                    or str(existing_final["turn_id"]) != str(payload["turn_id"])
+                    or str(existing_final["root_job_id"]) != str(root_row["job_id"])
+                    or str(existing_final["job_id"]) != str(job_row["job_id"])
+                    or str(existing_final["attempt_id"])
+                    != str(row["attempt_id"])
+                    or str(existing_final["worker_id"]) != str(row["worker_id"])
+                    or observed_payload != replay_charge_payload
+                ):
+                    raise StateConflict(
+                        "domain consumption replay FINAL ledger drifted"
+                    )
+                return TurnRef(
+                    str(payload["turn_id"]),
+                    str(durable["session_epoch_id"]),
+                    str(durable["process_generation_id"]),
+                    str(row["attempt_id"]),
+                )
+            # 12. Fresh reservation: derive TurnRef, append FINAL charge
+            #    Event + row, then append the v1 BEGIN_TURN INTENT,
+            #    atomically.  The transaction wrapper rolls back every
+            #    append if any later insert fails.
+            turn = TurnRef(
+                turn_id,
+                str(durable["session_epoch_id"]),
+                str(durable["process_generation_id"]),
+                str(row["attempt_id"]),
+            )
+            final_payload = {
+                "charge_id": str(charge_id),
+                "root_job_id": str(root_row["job_id"]),
+                "job_id": str(job_row["job_id"]),
+                "attempt_id": str(row["attempt_id"]),
+                "worker_id": str(row["worker_id"]),
+                "domain_job_id": str(job_row["job_id"]),
+                "domain_attempt_id": str(row["attempt_id"]),
+                "operation_id": operation_id.command_id,
+                "effect_class": "FINAL",
+                "turn_id": turn.turn_id,
+                "reservation_identity": reservation_digest,
+                "session_epoch_id": str(durable["session_epoch_id"]),
+                "process_generation_id": str(durable["process_generation_id"]),
+                "consumption_projection_digest": current_projection_digest,
+            }
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=str(job_row["job_id"]),
+                event_type="COO_DOMAIN_CONSUMPTION_CHARGED",
+                actor="coo",
+                job_id=str(job_row["job_id"]),
+                attempt_id=str(row["attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload=final_payload,
+            )
+            final_event_id = int(
+                connection.execute("SELECT MAX(event_id) FROM events").fetchone()[0]
+            )
+            connection.execute(
+                """
+                INSERT INTO coo_provider_charges(
+                  charge_id,root_job_id,job_id,attempt_id,worker_id,
+                  operation_id,effect_class,turn_id,reservation_identity,
+                  event_id,created_at_ms
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(charge_id),
+                    str(root_row["job_id"]),
+                    str(job_row["job_id"]),
+                    str(row["attempt_id"]),
+                    str(row["worker_id"]),
+                    operation_id.command_id,
+                    "FINAL",
+                    turn.turn_id,
+                    reservation_digest,
+                    final_event_id,
+                    timestamp,
+                ),
+            )
+            self._receipt(
+                connection,
+                op=operation_id,
+                kind=OperationReceiptKind.INTENT,
+                row=row,
+                payload={
+                    "schema_version": (
+                        "mastermind.operator_harness_turn_intent/v1"
+                    ),
+                    "operation_kind": OperationKind.BEGIN_TURN.value,
+                    "attempt_id": str(row["attempt_id"]),
+                    "session_epoch_id": str(durable["session_epoch_id"]),
+                    "process_generation_id": str(durable["process_generation_id"]),
+                    "worker_id": str(row["worker_id"]),
+                    "provider_session_id": str(durable["provider_session_id"]),
                     "turn_id": turn.turn_id,
                 },
             )
