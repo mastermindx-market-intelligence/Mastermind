@@ -233,6 +233,55 @@ def _window(value: Any, now: float) -> dict[str, Any] | None:
             "window_minutes": duration, "resets_at": reset}
 
 
+def reset_credit_inventory(limits: Mapping[str, Any], *, now: float) -> dict[str, Any]:
+    """Project native earned-reset facts; missing details are never zero balance.
+
+    Native availableCount is authoritative: the service may cap detail rows or
+    return null. Opaque IDs are retained for an admitted owner's explicit reset
+    proposal; provider titles/descriptions and all auth material are excluded.
+    This function cannot redeem, authorize, purchase or replenish a reset.
+    """
+    result: dict[str, Any] = {"state": "UNKNOWN", "available_count": None,
+        "details_complete": False, "credits": [], "source": "account/rateLimits/read",
+        "reset_execution_authorized": False}
+    raw = limits.get("rateLimitResetCredits")
+    if not isinstance(raw, Mapping):
+        return result
+    count = raw.get("availableCount")
+    if type(count) is not int or not 0 <= count <= 10000:
+        return result
+    result.update(state="COUNT_OBSERVED", available_count=count)
+    rows = raw.get("credits")
+    if rows is None:
+        return result
+    if not isinstance(rows, list) or len(rows) > 1000:
+        result["state"] = "DETAILS_INVALID"
+        return result
+    parsed, seen = [], set()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            result["state"] = "DETAILS_INVALID"
+            return result
+        ident, expires = row.get("id"), row.get("expiresAt")
+        if (not isinstance(ident, str) or not ident.strip() or len(ident) > 256
+                or any(ord(c) < 32 or ord(c) == 127 for c in ident) or ident in seen
+                or row.get("status") != "available"
+                or row.get("resetType") != "codexRateLimits"
+                or (expires is not None and (type(expires) is not int or expires <= 0))):
+            result["state"] = "DETAILS_INVALID"
+            return result
+        seen.add(ident)
+        parsed.append({"credit_id": ident, "expires_at": expires,
+                       "expiry_state": "UNKNOWN" if expires is None else
+                           ("EXPIRED_OBSERVATION" if expires <= now else "FUTURE")})
+    result["credits"] = sorted(parsed, key=lambda c: (c["expires_at"] is None, c["expires_at"] or 0, c["credit_id"]))
+    consistent = count >= len(parsed) and not any(c["expiry_state"] == "EXPIRED_OBSERVATION" for c in parsed)
+    result["details_complete"] = consistent and len(parsed) == count
+    result["state"] = ("DETAILS_INCONSISTENT" if not consistent else
+                       "DETAILS_OBSERVED" if result["details_complete"] else "DETAILS_PARTIAL")
+    return result
+
+
 def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
                       now: float | None = None, limit_id: str = "codex") -> dict[str, Any]:
     """Projection of provider evidence, not an admission or a quota reservation."""
@@ -240,7 +289,8 @@ def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
     result: dict[str, Any] = {"observed_at_unix": now, "auth_state": "UNKNOWN",
         "capacity_state": "UNKNOWN", "plan_type": None, "windows": {},
         "source": ["account/read", "account/rateLimits/read"],
-        "account_identity_is_cached": True, "admission_granted": False}
+        "account_identity_is_cached": True, "admission_granted": False,
+        "limit_id": limit_id, "reset_credits": reset_credit_inventory({}, now=now)}
     identity = account.get("account")
     if identity is None and "account" in account:
         result["auth_state"] = "LOGIN_REQUIRED"
@@ -251,6 +301,7 @@ def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
         result["auth_state"] = "NATIVE_CHATGPT_AUTH_REQUIRED"
         return result
     result["auth_state"] = "MANAGED_CHATGPT_OBSERVED"
+    result["reset_credits"] = reset_credit_inventory(limits, now=now)
     plan = identity.get("planType")
     if isinstance(plan, str) and len(plan) <= 80:
         result["plan_type"] = plan
