@@ -3097,7 +3097,7 @@ class ExecutiveSupervisor:
             if attempt.status is not AttemptStatus.CANCEL_REQUESTED:
                 try:
                     self._revalidate_recovery_inputs(attempt, spec)
-                except SupervisorError:
+                except RuntimeProofError:
                     # Cancellation may arrive during source reads. This allows
                     # containment, not adoption of another writer's generation.
                     current = self.runtime.attempts.get_attempt(attempt.attempt_id)
@@ -3114,7 +3114,7 @@ class ExecutiveSupervisor:
                         raise SupervisorError(
                             "cancelled recovery binding changed during input validation"
                         )
-        except SupervisorError as exc:
+        except RuntimeProofError as exc:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
                 job_id=attempt.job_id,

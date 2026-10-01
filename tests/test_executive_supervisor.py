@@ -3530,3 +3530,40 @@ def test_cancel_during_input_failure_cannot_adopt_a_newer_writer_fence(tmp_path,
     assert current.lease_owner == "fixture-new-owner"
     assert adapter.start_calls == 0 and adapter.reattach_calls == []
     assert inspector.live and supervisor.take_recovered_runs() == ()
+
+
+@pytest.mark.parametrize("cancel_during_source", [False, True])
+def test_production_target_source_error_preserves_recovery_containment(tmp_path, monkeypatch, cancel_during_source):
+    from test_executive_launchd_config import _hf1b_control_fixture, _hf1b_bind
+    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
+    config_root = tmp_path / "target-config"
+    config_root.mkdir()
+    cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(config_root)
+    raw["exact_worker_claim_target"]["definition"]["job_id"] = planner.job_id
+    payload = json.dumps(raw, sort_keys=True).encode()
+    path.write_bytes(payload)
+    attestation["config_sha256"] = hashlib.sha256(payload).hexdigest()
+    loaded = cli.load_control_config(path)
+    source = _hf1b_bind(cli, loaded, path, attestation)
+    calls = []
+    def fail_actual_source(job_id):
+        calls.append(job_id)
+        if cancel_during_source:
+            runtime.jobs.cancel_job(planner.job_id)
+        path.write_bytes(b"invalid actual target config")
+        return source.for_job(job_id, now_ms=runtime.store.now_ms())
+    supervisor._exact_target_provider = fail_actual_source
+    results = supervisor.reconcile_restart(requeue_lost=False)
+    assert len(results) == 1 and calls == [planner.job_id]
+    assert adapter.start_calls == 0
+    if cancel_during_source:
+        assert results[0].status is ReconcileStatus.LIVE_RECOVERED
+        pending = supervisor.take_recovered_runs()
+        receipt = asyncio.run(supervisor.finish_job(pending[0]))
+        assert receipt.attempt.status is AttemptStatus.CANCELLED
+        assert receipt.attempt.attempt_id == active.lease.attempt.attempt_id
+        assert not inspector.live
+    else:
+        assert results[0].status is ReconcileStatus.LIVE_QUARANTINED
+        assert adapter.reattach_calls == [] and inspector.live
+        assert supervisor.take_recovered_runs() == ()
