@@ -9,8 +9,8 @@ import pytest
 from control_plane import remote_attempt_transport as rt
 from control_plane.executive_runtime import Runtime
 from control_plane.operator_harness_contract import (
-    CapabilityManifest, NativeHelperPolicy, OperationId, RequestedExecutionProfile,
-    WorkspaceIdentity,
+    CapabilityManifest, NativeHelperPolicy, OperationId, ProcessGenerationRef,
+    ProviderSessionHandoff, RequestedExecutionProfile, WorkspaceIdentity,
 )
 from control_plane.remote_codex_operator_adapter import codex_remote_capabilities
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
@@ -93,6 +93,103 @@ def test_runtime_allocated_generation_is_bound_before_remote_start(case):
         'process_generation_id': generation.process_generation_id,
     }
     assert calls == [adapter.client.identity]
+
+
+@pytest.mark.parametrize('case', ['codex', 'claude'], indirect=True)
+def test_recovery_binds_current_runtime_generation_before_first_rpc(case):
+    runtime, job, lease, requested, flat, calls = case
+    sealed = runtime.operator_harness.seal_operator_harness_attempt(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        requested=requested,
+    )
+    operation = OperationId(f'ohf-op:start:{sealed.attempt_id}')
+    epoch, generation = runtime.operator_harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=lease.lease_token,
+        operation_id=operation,
+    )
+    factory = rt.build_claimed_remote_operator_factory(
+        runtime, lambda h, w: binding(case)
+    )
+
+    recovered = factory(sealed, requested, lambda t: 'bounded', recovery=True)
+    expected = {
+        'session_epoch_id': epoch.session_epoch_id,
+        'process_generation_id': generation.process_generation_id,
+    }
+    assert recovered.client.bound_payload_identity == expected
+    with pytest.raises(AssertionError, match='No network is allowed'):
+        recovered.reconcile(generation)
+    assert calls == [recovered.client.identity]
+
+    runtime.jobs.cancel_job(job.job_id)
+    cancelled = runtime.attempts.get_attempt(sealed.attempt_id)
+    recovered_cancel = factory(
+        cancelled, requested, lambda t: 'bounded', recovery=True
+    )
+    assert recovered_cancel.client.bound_payload_identity == expected
+    before = len(calls)
+    with pytest.raises(AssertionError, match='No network is allowed'):
+        recovered_cancel.cancel(
+            generation,
+            reason='bounded recovery cancellation',
+            operation_id=OperationId('ohf-op:recover-cancel:fixture'),
+        )
+    assert len(calls) == before + 1
+
+
+def test_resume_rotates_to_new_generation_scoped_client(case, monkeypatch):
+    runtime, job, lease, requested, flat, calls = case
+    sealed = runtime.operator_harness.seal_operator_harness_attempt(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        requested=requested,
+    )
+    operation = OperationId(f'ohf-op:start:{sealed.attempt_id}')
+    epoch, g1 = runtime.operator_harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=lease.lease_token,
+        operation_id=operation,
+    )
+    factory = rt.build_claimed_remote_operator_factory(
+        runtime, lambda h, w: binding(case)
+    )
+    recovered = factory(sealed, requested, lambda t: 'bounded', recovery=True)
+    old_client = recovered.client
+    g2 = ProcessGenerationRef(
+        'ohf-generation-fixture-g2',
+        epoch.session_epoch_id,
+        2,
+        epoch.worker_id,
+    )
+    monkeypatch.setattr(
+        runtime.operator_harness,
+        'current_writer_generation',
+        lambda observed_epoch: g2 if observed_epoch == epoch else None,
+    )
+
+    with pytest.raises(AssertionError, match='No network is allowed'):
+        recovered.resume_session(
+            operation_id=OperationId('ohf-op:recover-resume:fixture'),
+            epoch=epoch,
+            generation=g2,
+            provider_session=ProviderSessionHandoff('SESSION-G1', epoch.worker_id),
+            requested=requested,
+        )
+    assert old_client.bound_payload_identity == {
+        'session_epoch_id': epoch.session_epoch_id,
+        'process_generation_id': g1.process_generation_id,
+    }
+    assert recovered.client is not old_client
+    assert recovered.client.bound_payload_identity == {
+        'session_epoch_id': epoch.session_epoch_id,
+        'process_generation_id': g2.process_generation_id,
+    }
 
 
 def test_selected_endpoint_uses_existing_transport_and_no_network(case):
