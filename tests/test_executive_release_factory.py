@@ -136,7 +136,9 @@ def image(monkeypatch, inputs):
         transitions=[dict(transition_digest=transition, staging_generation=1, state="STAGED")])))
     class Reader:
         def __init__(self, **kwargs):
-            self.deadline = time.monotonic() + 5
+            self.deadline_monotonic_ns, self.last_monotonic_ns = f._bounded_endpoint(
+                kwargs.get("deadline_monotonic_ns"), 5_000_000_000)
+            self.deadline = self.deadline_monotonic_ns / 1_000_000_000
         check = f._Reader.check
         def observe(self, path, *, directory=False, retain=True, **kwargs):
             if directory:
@@ -153,7 +155,7 @@ def image(monkeypatch, inputs):
     # Darwin filesystem behavior is covered separately, not claimed here.
     monkeypatch.setattr(f, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(f, "_Reader", Reader)
-    monkeypatch.setattr(f, "_boot_id", lambda: boot)
+    monkeypatch.setattr(f, "_boot_id", lambda **kwargs: boot)
     monkeypatch.setattr(f.time, "time", lambda: now[0])
     monkeypatch.setattr(f.time, "time_ns", lambda: now[0] * 1_000_000_000)
     monkeypatch.setattr(broker, "verify_production_trust", lambda config: None)
@@ -548,3 +550,384 @@ def test_v2_existing_installed_factory_still_refuses_unwired_schema(image):
     image["files"][f._EVIDENCE] = raw
     with pytest.raises(ValueError):
         f.build_release_owner(image["config"])
+
+
+# F1: actual factory composition over a synthetic secured image. The private
+# native observation is the only mocked physical boundary; no host proof.
+def _physical_image(image, monkeypatch):
+    from control_plane import executive_release_observation as native
+    evidence=copy.deepcopy(image['evidence'])
+    roles=[]
+    for spec in native._SPECS:
+        config_digest=(evidence['control_config_digest'] if spec.role=='control' else
+                       evidence['broker_config_digest'] if spec.role=='broker' else 'd'*64)
+        content=native._InstalledContent(
+            schema='mastermind.executive_release_service_content/v1',role=spec.role,
+            service_label=spec.label,service_uid=spec.uid,plist_path=spec.plist,
+            config_path=spec.config,executable_path=(native.peer._NETWORK_RUNTIME_LAUNCHER if spec.role=='gateway' else native.peer._PYTHON_LAUNCHER),wrapper_relative=spec.wrapper,
+            release_commit=evidence['release_commit'],release_tree=evidence['release_tree'],
+            installed_manifest_digest=image['effect']['from_installed_manifest_digest'],
+            configuration_digest=config_digest,plist_digest='1'*64,wrapper_digest='2'*64,
+            executable_closure_digest='3'*64)
+        digest=native._digest(native._CONTENT_DOMAIN,dataclasses.asdict(content))
+        roles.append(native._RoleObservation(spec.role,'UNLOADED',digest,content,'launchctl-exact-not-found-113'))
+    before=dict(release_commit=evidence['release_commit'],release_tree=evidence['release_tree'],
+        installed_manifest_digest=image['effect']['from_installed_manifest_digest'],
+        configuration_digest=evidence['installed_configuration_digest'],
+        broker_source_commit=evidence['release_commit'],broker_source_tree=evidence['release_tree'],
+        broker_binary_digest='3'*64,service_generation_digests={r.role:r.service_generation_digest for r in roles})
+    evidence.update(schema='mastermind.executive_release_owner_installed_evidence/v2',
+        actuator_generation=9,before=before,publication_operation_key='physical-factory-fixture',
+        predecessor_evidence_digest='4'*64)
+    image['files'][f._EVIDENCE]=wire(evidence)
+    calls=[]
+    def observe(*,deadline_monotonic_ns):
+        calls.append(deadline_monotonic_ns)
+        now=time.monotonic_ns()
+        return native._ReleaseObservation(evidence['issuer_binding_boot_id'],tuple(roles),'a'*64,
+            native._Freshness(now,now,deadline_monotonic_ns))
+    monkeypatch.setattr(native,'_observe_release',observe)
+    return dict(native=native,evidence=evidence,before=before,roles=roles,calls=calls,observe=observe)
+
+
+def test_f1_actual_factory_derives_physical_snapshot(image,monkeypatch):
+    physical=_physical_image(image,monkeypatch)
+    root=f.build_release_owner(image['config'])
+    endpoint=time.monotonic_ns()+1_000_000_000
+    snap=root._snapshot(image['transition'],deadline_monotonic_ns=endpoint)
+    assert snap.before==physical['before'] and snap.actuator_generation==9
+    assert snap.target_observation_digest=='a'*64
+    assert physical['calls']==[endpoint]
+    assert snap.schema_digest==f._digest({**f._SCHEMA_MAP,'schemas':{
+        **f._SCHEMA_MAP['schemas'],'installed_evidence':physical['evidence']['schema']}})
+    assert all(v is False for k,v in physical['evidence']['production_disarming'].items() if k!='schema')
+
+
+@pytest.mark.parametrize('field',list(('release_commit','release_tree','installed_manifest_digest',
+    'configuration_digest','broker_source_commit','broker_source_tree','broker_binary_digest','service_generation_digests')))
+def test_f1_v2_before_mismatch_never_populates_snapshot(image,monkeypatch,field):
+    physical=_physical_image(image,monkeypatch)
+    value=physical['evidence']
+    value['before'][field]=({**value['before'][field],'worker':'f'*64} if field=='service_generation_digests'
+        else 'f'*len(value['before'][field]))
+    image['files'][f._EVIDENCE]=wire(value)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        root=f.build_release_owner(image['config']);root._snapshot(image['transition'])
+
+
+@pytest.mark.parametrize('generation',[True,False,0,-1,1.5,'9',2**63])
+def test_f1_bad_canonical_generation_refuses(image,monkeypatch,generation):
+    physical=_physical_image(image,monkeypatch);physical['evidence']['actuator_generation']=generation
+    image['files'][f._EVIDENCE]=(json.dumps(physical['evidence'],sort_keys=True,separators=(',',':'))+'\n').encode()
+    with pytest.raises(consumer.ReleaseConsumerError):f.build_release_owner(image['config'])
+
+
+@pytest.mark.parametrize('change',['boot','missing','duplicate','release','manifest','broker_binary','target','deadline','future'])
+def test_f1_native_observation_must_join_secured_resident(image,monkeypatch,change):
+    physical=_physical_image(image,monkeypatch);native=physical['native']
+    def bad(*,deadline_monotonic_ns):
+        observed=physical['observe'](deadline_monotonic_ns=deadline_monotonic_ns)
+        if change=='boot':return dataclasses.replace(observed,boot_id='22222222-2222-4222-8222-222222222222')
+        if change=='missing':return dataclasses.replace(observed,roles=observed.roles[:-1])
+        if change=='duplicate':return dataclasses.replace(observed,roles=observed.roles[:-1]+(observed.roles[0],))
+        if change in ('release','manifest','broker_binary'):
+            key={'release':'release_commit','manifest':'installed_manifest_digest','broker_binary':'executable_closure_digest'}[change]
+            last=observed.roles[-1];content=dataclasses.replace(last.content,**{key:'f'*len(getattr(last.content,key))})
+            return dataclasses.replace(observed,roles=observed.roles[:-1]+(dataclasses.replace(last,content=content),))
+        if change=='target':return dataclasses.replace(observed,target_observation_digest='0'*64)
+        if change=='deadline':return dataclasses.replace(observed,freshness=dataclasses.replace(observed.freshness,deadline_monotonic_ns=deadline_monotonic_ns+1))
+        return dataclasses.replace(observed,freshness=dataclasses.replace(observed.freshness,completed_monotonic_ns=deadline_monotonic_ns-1))
+    monkeypatch.setattr(native,'_observe_release',bad)
+    root=f.build_release_owner(image['config'])
+    with pytest.raises(consumer.ReleaseConsumerError):root._snapshot(image['transition'])
+
+
+def test_f1_rechecks_preimage_after_physical_observation(image,monkeypatch):
+    physical=_physical_image(image,monkeypatch)
+    root=f.build_release_owner(image['config'])
+    def changed(*,deadline_monotonic_ns):
+        result=physical['observe'](deadline_monotonic_ns=deadline_monotonic_ns)
+        value=copy.deepcopy(physical['evidence']);value['actuator_generation']+=1
+        image['files'][f._EVIDENCE]=wire(value)
+        return result
+    monkeypatch.setattr(physical['native'],'_observe_release',changed)
+    with pytest.raises(consumer.ReleaseConsumerError):root._snapshot(image['transition'])
+
+
+def test_f1_v2_history_does_not_require_physical_or_staging_read(image,monkeypatch):
+    _physical_image(image,monkeypatch)
+    root=f.build_release_owner(image['config'])
+    from control_plane import executive_release_observation as native
+    monkeypatch.setattr(native,'_observe_release',lambda **kw:pytest.fail('history invoked physical observation'))
+    for p in list(image['files']):
+        if p.is_relative_to(f._STAGING) or p==f._REGISTRY:del image['files'][p]
+    assert root._history_trust().owner_installation_id==image['reg']['owner_installation_id']
+
+
+def test_f1_composed_factory_to_reserved_start_and_exact_replay(image,monkeypatch,tmp_path):
+    physical=_physical_image(image,monkeypatch)
+    root=f.build_release_owner(image['config'])
+    from control_plane import executive_release_actuator as actuator
+    root._root_journal=actuator._ExecutiveReleaseActuatorJournal._for_tests(tmp_path/'journal')
+    root._root_journal._expected_uid=os.stat(tmp_path).st_uid
+    frame=ingress.project_frame('approve_release_transition',
+        {'operation_key':'physical-chain','action':image['effect']['action'],'transition_digest':image['transition']},
+        principal=image['principal'])
+    approved=root.handle({**frame,'schema':consumer.BROKER_SCHEMA,'approval':None},None)
+    frame=ingress.project_frame('prepare_release_transition',
+        {'operation_key':'physical-chain','approved_transition_ref':f.contract.approval_ref_for('physical-chain')},principal=image['principal'])
+    prepared=root.handle({**frame,'schema':consumer.BROKER_SCHEMA,'approval':approved['approval']},None)
+    frame=ingress.project_frame('commit_prepared_release_transition',
+        {'operation_key':'physical-chain','prepared_token':prepared['result']['prepared_token']},principal=image['principal'])
+    raw={**frame,'schema':consumer.BROKER_SCHEMA,'operation':'reserve_release_prestart','approval':approved['approval']}
+    reserved=root.handle(raw,None)['result']['reservation']
+    approval=f.contract.validate_approval_evidence(approved['approval'])
+    admission=f.contract.validate_admission(dict(schema='mastermind.executive_release_admission/v1',
+        **{k:reserved[k] for k in ('operation_key','approved_transition_ref','target_ref','owner_installation_id','request_fingerprint','effective_grant_digest')},
+        boot_id=reserved['preconditions']['boot_id'], maintenance_sequence=1,admission_event_command_id='p4-admit:'+approval['request_ref'],
+        target_observation_digest='a'*64,admission_contract_digest=reserved['preconditions']['admission_contract_digest']))
+    raw.update(operation='start_reserved_release',reservation=reserved,
+        admission_evidence=dict(approval=approval.to_dict(),admission=admission.to_dict(),
+            preconditions=reserved['preconditions'],root_qualification_digest=f._digest(reserved)))
+    started=root.handle(raw,None);again=root.handle(raw,None)
+    assert started==again and started['ok'] is True
+    stored=root._root_journal.read('physical-chain')
+    assert stored['state']=='STARTED' and stored['before'].to_dict()==physical['before']
+    assert stored['actuator_generation']==9 and stored['journal_generation']==1
+    assert len(list((tmp_path/'journal').glob('*.json')))==2  # reservation + one START
+
+
+@pytest.fixture
+def f1_clock(monkeypatch):
+    now=[1000]
+    monkeypatch.setattr(f,'time',SimpleNamespace(monotonic_ns=lambda:now[0],monotonic=lambda:now[0]/1e9))
+    monkeypatch.setattr(f,'sys',SimpleNamespace(platform='darwin'))
+    return now
+
+@pytest.mark.parametrize('end',[True,False,0,-1,1.5,'2000',2**63])
+def test_f1_deadline_reader_rejects_invalid_endpoint_before_io(f1_clock,end):
+    with pytest.raises(consumer.ReleaseConsumerError):
+        f._Reader(deadline_monotonic_ns=end)
+
+@pytest.mark.parametrize('end',[1,999,1000])
+def test_f1_deadline_reader_refuses_expired_endpoint(f1_clock,end):
+    with pytest.raises(consumer.ReleaseConsumerError):
+        f._Reader(deadline_monotonic_ns=end)
+
+def test_f1_deadline_reader_cannot_renew_endpoint(f1_clock):
+    r=f._Reader(deadline_monotonic_ns=2000)
+    f1_clock[0]=1999;r.check()
+    f1_clock[0]=2000
+    with pytest.raises(consumer.ReleaseConsumerError):r.check()
+
+def test_f1_deadline_reader_retains_local_maximum(f1_clock):
+    r=f._Reader(deadline_monotonic_ns=10**12)
+    f1_clock[0]=5_000_001_000
+    with pytest.raises(consumer.ReleaseConsumerError):r.check()
+
+@pytest.mark.parametrize('end',[True,False,0,-1,1.5,'2000',2**63,999,1000])
+def test_f1_deadline_boot_refuses_without_spawning(f1_clock,monkeypatch,end):
+    seen=[]
+    def spawn(*a,**kw):seen.append((a,kw));raise AssertionError('must refuse before spawn')
+    monkeypatch.setattr(f.subprocess,'Popen',spawn)
+    with pytest.raises(consumer.ReleaseConsumerError):f._boot_id(deadline_monotonic_ns=end)
+    assert seen==[]
+
+
+@pytest.fixture
+def f1_real_reader(monkeypatch, tmp_path, f1_clock):
+    """Real descriptor IO, synthetic trust metadata and deterministic clock."""
+    path = tmp_path / 'payload'
+    path.write_bytes(b'bounded-reader-payload')
+    reader = f._Reader(deadline_monotonic_ns=2000)
+    monkeypatch.setattr(reader, '_trusted', lambda *args, **kwargs: None)
+    native_os = f.os
+    proxy = SimpleNamespace(**vars(native_os))
+    calls, opened, closed = [], [], []
+    for name in ('open', 'stat', 'fstat', 'read'):
+        def wrapped(*args, _name=name, **kwargs):
+            calls.append((_name, f1_clock[0]))
+            value = getattr(native_os, _name)(*args, **kwargs)
+            if _name == 'open':
+                opened.append(value)
+            return value
+        setattr(proxy, name, wrapped)
+    def close(descriptor):
+        closed.append(descriptor)
+        native_os.close(descriptor)
+    proxy.close = close
+    monkeypatch.setattr(f, 'os', proxy)
+    return SimpleNamespace(reader=reader, path=path, proxy=proxy,
+                           calls=calls, opened=opened, closed=closed)
+
+
+@pytest.mark.parametrize('boundary', ['open', 'stat', 'fstat', 'read'])
+def test_f1_reader_expiry_blocks_next_os_operation(f1_real_reader, f1_clock, boundary):
+    c = f1_real_reader
+    original = getattr(c.proxy, boundary)
+    def expires(*args, **kwargs):
+        result = original(*args, **kwargs)
+        f1_clock[0] = 2000
+        return result
+    setattr(c.proxy, boundary, expires)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        c.reader.observe(c.path, maximum=100)
+    assert c.opened and c.closed == list(reversed(c.opened))
+    assert all(stamp < 2000 for _, stamp in c.calls)
+
+
+@pytest.mark.parametrize('primary', [True, False])
+def test_f1_reader_attempts_all_cleanup_preserving_primary(f1_real_reader, primary):
+    c = f1_real_reader
+    original_close = c.proxy.close
+    cleanup_error = OSError('synthetic close failure')
+    primary_error = consumer.ReleaseConsumerError('SYNTHETIC_PRIMARY')
+    def close(descriptor):
+        original_close(descriptor)
+        raise cleanup_error
+    c.proxy.close = close
+    if primary:
+        def read(*args):
+            raise primary_error
+        c.proxy.read = read
+    with pytest.raises(Exception) as result:
+        c.reader.observe(c.path, maximum=100)
+    assert result.value is (primary_error if primary else cleanup_error)
+    assert len(c.opened) > 1 and c.closed == list(reversed(c.opened))
+
+
+def test_f1_reader_cannot_succeed_after_cleanup_consumes_budget(f1_real_reader, f1_clock):
+    c = f1_real_reader
+    original = c.proxy.close
+    def close(descriptor):
+        original(descriptor)
+        f1_clock[0] = 2000
+    c.proxy.close = close
+    with pytest.raises(consumer.ReleaseConsumerError):
+        c.reader.observe(c.path, maximum=100)
+    assert c.closed == list(reversed(c.opened))
+
+
+@pytest.fixture
+def f1_boot_process(monkeypatch, f1_clock):
+    events = []
+    state = SimpleNamespace(expire_at=None, fail_at=None, fail_cleanup=False,
+                            error=ValueError('synthetic primary'), reads=0, waits=0)
+    def event(name, *, cleanup=False):
+        events.append((name, f1_clock[0], cleanup))
+        if name == state.expire_at:
+            f1_clock[0] = 2000
+        if name == state.fail_at:
+            raise state.error
+        if cleanup and state.fail_cleanup:
+            raise OSError('synthetic cleanup')
+    class Stream:
+        def fileno(self): event('fileno'); return 99
+        def close(self): event('stdout-close', cleanup=True)
+    class Process:
+        stdout = Stream()
+        def wait(self, timeout):
+            state.waits += 1
+            event('wait' if timeout != 0.25 else 'reap', cleanup=timeout == 0.25)
+            return 0
+        def poll(self): event('poll', cleanup=True); return None
+        def kill(self): event('kill', cleanup=True)
+    class Selector:
+        def register(self, *args): event('register')
+        def select(self, timeout): event('select'); return [True]
+        def close(self): event('selector-close', cleanup=True)
+    def spawn(*args, **kwargs): event('spawn'); return Process()
+    def read(*args):
+        event('read')
+        state.reads += 1
+        return b'11111111-1111-4111-8111-111111111111\n' if state.reads == 1 else b''
+    monkeypatch.setattr(f, 'subprocess', SimpleNamespace(Popen=spawn, DEVNULL=-1, PIPE=-2))
+    monkeypatch.setattr(f, 'selectors', SimpleNamespace(DefaultSelector=Selector, EVENT_READ=1))
+    monkeypatch.setattr(f, 'os', SimpleNamespace(set_blocking=lambda *args: event('set-blocking'), read=read))
+    state.events = events
+    return state
+
+
+@pytest.mark.parametrize('boundary', ['spawn', 'fileno', 'set-blocking', 'register', 'select', 'read', 'wait'])
+def test_f1_boot_endpoint_blocks_next_io_and_cleans(f1_boot_process, boundary):
+    c = f1_boot_process
+    c.expire_at = boundary
+    with pytest.raises(consumer.ReleaseConsumerError):
+        f._boot_id(deadline_monotonic_ns=2000)
+    assert all(stamp < 2000 for _, stamp, cleanup in c.events if not cleanup)
+    names = [name for name, _, _ in c.events]
+    assert 'stdout-close' in names and 'reap' in names
+    assert 'kill' in names
+
+
+@pytest.mark.parametrize('boundary', ['fileno', 'set-blocking', 'register', 'select', 'read', 'wait'])
+def test_f1_boot_cleanup_errors_do_not_mask_primary(f1_boot_process, boundary):
+    c = f1_boot_process
+    c.fail_at, c.fail_cleanup = boundary, True
+    with pytest.raises(ValueError) as result:
+        f._boot_id(deadline_monotonic_ns=2000)
+    assert result.value is c.error
+    names = [name for name, _, _ in c.events]
+    assert 'stdout-close' in names and 'reap' in names and 'poll' in names
+    if boundary in ('register', 'select', 'read', 'wait'):
+        assert 'selector-close' in names
+
+
+def test_f1_boot_no_success_after_cleanup_expiry(f1_boot_process):
+    c = f1_boot_process
+    c.expire_at = 'selector-close'
+    with pytest.raises(consumer.ReleaseConsumerError):
+        f._boot_id(deadline_monotonic_ns=2000)
+    assert [n for n, _, _ in c.events][-1] == 'reap'
+
+
+def test_f1_boot_no_success_after_cleanup_error(f1_boot_process):
+    c = f1_boot_process
+    c.fail_cleanup = True
+    with pytest.raises(OSError):
+        f._boot_id(deadline_monotonic_ns=2000)
+    assert [n for n, _, _ in c.events][-1] == 'reap'
+
+
+def test_f1_late_native_observation_stops_before_resident_reread(image, monkeypatch):
+    physical = _physical_image(image, monkeypatch)
+    root = f.build_release_owner(image['config'])
+    now = [1000]
+    monkeypatch.setattr(f, 'time', SimpleNamespace(time=lambda: 200, monotonic_ns=lambda: now[0]))
+    calls = []
+    original_read = f._Reader.observe
+    def observe_file(self, *args, **kwargs):
+        calls.append(now[0])
+        return original_read(self, *args, **kwargs)
+    monkeypatch.setattr(f._Reader, 'observe', observe_file)
+    def late(*, deadline_monotonic_ns):
+        result = physical['observe'](deadline_monotonic_ns=deadline_monotonic_ns)
+        now[0] = deadline_monotonic_ns
+        return result
+    monkeypatch.setattr(physical['native'], '_observe_release', late)
+    with pytest.raises(consumer.ReleaseConsumerError):
+        root._snapshot(image['transition'], deadline_monotonic_ns=2000)
+    assert calls and all(stamp < 2000 for stamp in calls)
+
+
+@pytest.mark.parametrize('primary', [True, False])
+def test_f1_directory_cleanup_preserves_primary_and_deadline(f1_clock, monkeypatch, primary):
+    reader = f._Reader(deadline_monotonic_ns=2000)
+    error = ValueError('synthetic scandir primary')
+    events = []
+    class Entries:
+        def __iter__(self): return self
+        def __next__(self):
+            if primary: raise error
+            raise StopIteration
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+        def close(self):
+            events.append('close')
+            if primary: raise OSError('synthetic scandir cleanup')
+            f1_clock[0] = 2000
+    monkeypatch.setattr(f, 'os', SimpleNamespace(scandir=lambda _: Entries()))
+    with pytest.raises(ValueError if primary else consumer.ReleaseConsumerError) as result:
+        reader.names(1, ())
+    if primary: assert result.value is error
+    assert events == ['close']

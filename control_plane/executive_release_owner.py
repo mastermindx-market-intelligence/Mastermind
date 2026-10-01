@@ -167,7 +167,7 @@ def _evidence_digest(reservation):
 
 class ReleaseBrokerOwner:
     """Installed private composition for two closed, non-install operations."""
-    def __init__(self, snapshot: Callable[[str], ReleaseOwnerSnapshot], *,
+    def __init__(self, snapshot: Callable[..., ReleaseOwnerSnapshot], *,
                  history_trust: Callable[[], ReleaseHistoryTrust] | None = None,
                  root_journal: _ExecutiveReleaseActuatorJournal | None = None):
         if not callable(snapshot):
@@ -183,7 +183,7 @@ class ReleaseBrokerOwner:
     def _fresh(self, state, transition, *, deadline_monotonic_ns=None):
         observed = _state_identity(state)
         _check_start_deadline(deadline_monotonic_ns)
-        fresh = self._snapshot(transition)
+        fresh = self._snapshot(transition, **_start_deadline_options(deadline_monotonic_ns))
         if _state_identity(fresh) != observed:
             raise ReleaseConsumerError("RELEASE_PRECONDITIONS_CHANGED")
         _check_start_deadline(deadline_monotonic_ns)
@@ -392,7 +392,9 @@ class ReleaseBrokerOwner:
     def _live_state(self, frame, approval, *, deadline_monotonic_ns=None):
         transition = approval["transition_digest"]
         _check_start_deadline(deadline_monotonic_ns)
-        state = self._snapshot(transition)
+        # Forward the original endpoint to every live snapshot; never retry
+        # an unsupported callback without the endpoint.
+        state = self._snapshot(transition, **_start_deadline_options(deadline_monotonic_ns))
         _state_identity(state)
         effect = contract.validate_normalized_effect(state.effect)
         if _hash(effect) != transition:
