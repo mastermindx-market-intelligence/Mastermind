@@ -713,6 +713,155 @@ class OperatorHarnessOrchestrator:
             candidate=candidate,
         )
 
+    def run_domain_consumption_turn(
+        self,
+        session: OperatorSessionReceipt,
+        *,
+        operation_id: OperationId,
+        expected_consumption_projection_digest: str,
+        cursor: EventCursor | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> OperatorTurnReceipt:
+        """Dedicated FINAL-only domain consumption turn.
+
+        Mirrors :meth:`run_turn` but goes through the dedicated
+        ``begin_operator_domain_consumption_turn`` RuntimePort bridge so the
+        current Runtime's FINAL-only domain consumption reservation is the
+        sole authority for the same Attempt / epoch / generation / writer /
+        ALLOW launch / current-domain admission and / consumption projection
+        digest.  No ordinary ``begin_operator_turn``, no fresh Attempt /
+        epoch / session / writer, no root grant, no second ordinary
+        orchestration plan seal, no ``seal_operator_role_result`` /
+        complete-Job path.
+        """
+
+        self._assert_replayable(operation_id)
+        bounded_timeout = float(timeout_seconds)
+        if (
+            not math.isfinite(bounded_timeout)
+            or bounded_timeout <= 0
+            or bounded_timeout > 300.0
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "turn timeout must be finite and within (0, 300] seconds"
+            )
+        if session.launch.decision is not LaunchDecision.ALLOW:
+            raise OperatorLaunchRefused(
+                "domain consumption turn refused by observed launch comparison: "
+                + session.launch.decision.value
+            )
+        if not isinstance(expected_consumption_projection_digest, str) or len(
+            expected_consumption_projection_digest
+        ) != 64 or any(
+            char not in "0123456789abcdef" for char in expected_consumption_projection_digest
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "domain consumption projection digest must be a 64-char hex"
+            )
+        if (
+            session.epoch.attempt_id != session.attempt_id
+            or session.epoch.session_epoch_id != session.generation.session_epoch_id
+            or session.epoch.worker_id != session.generation.worker_id
+            or (cursor is not None and (
+                cursor.attempt_id != session.attempt_id
+                or cursor.session_epoch_id != session.epoch.session_epoch_id
+                or cursor.process_generation_id != session.generation.process_generation_id
+            ))
+        ):
+            raise OperatorHarnessOrchestrationError("domain consumption session/cursor identity mismatch")
+        turn = self.runtime.begin_operator_domain_consumption_turn(
+            session.attempt_id,
+            session.generation,
+            operation_id,
+            expected_consumption_projection_digest=expected_consumption_projection_digest,
+        )
+        if cursor is not None and cursor.turn_id not in {None, turn.turn_id}:
+            raise OperatorHarnessOrchestrationError("domain consumption cursor turn mismatch")
+        current = EventCursor(
+            attempt_id=session.attempt_id,
+            session_epoch_id=session.epoch.session_epoch_id,
+            process_generation_id=session.generation.process_generation_id,
+            local_sequence=0 if cursor is None else cursor.local_sequence,
+            turn_id=turn.turn_id,
+            provider_replay_cursor=None if cursor is None else cursor.provider_replay_cursor,
+        )
+        self.runtime.extend_operator_lease(session.attempt_id, 90)
+        if not self.runtime.commit_operator_provider_dispatch(
+            session.attempt_id, operation_id, "begin_turn"
+        ):
+            self._effect_unknown.add(operation_id.command_id)
+            raise OperatorEffectUnknown("turn dispatch was previously committed")
+        try:
+            started = self.adapter.begin_turn(
+                operation_id=operation_id,
+                turn=turn,
+                generation=session.generation,
+                launch=session.launch,
+            )
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="begin_turn",
+                error=exc,
+            )
+            raise OperatorEffectUnknown(
+                "begin_turn external effect is unknown"
+            ) from exc
+        if not started.acknowledged:
+            exc = OperatorEffectUnknown("provider did not acknowledge begin_turn")
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="begin_turn_ack",
+                error=exc,
+            )
+            raise OperatorEffectUnknown(
+                "provider did not acknowledge begin_turn"
+            ) from exc
+        try:
+            self.runtime.apply_operator_turn(session.attempt_id, operation_id, started)
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="bind_turn_result",
+                error=exc,
+            )
+            raise OperatorEffectUnknown("turn result could not be bound") from exc
+
+        self.runtime.extend_operator_lease(
+            session.attempt_id, int(math.ceil(bounded_timeout)) + 30
+        )
+        try:
+            events, next_cursor = self.adapter.read_events(
+                current, timeout_seconds=bounded_timeout
+            )
+            candidate = self.adapter.collect_candidate_result(turn)
+            if candidate.complete_job_permitted:
+                raise OperatorHarnessOrchestrationError(
+                    "adapter candidate attempted to claim Executive completion"
+                )
+            self.runtime.finish_operator_candidate(
+                session.attempt_id, turn, candidate, events, next_cursor
+            )
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="collect_turn_result",
+                error=exc,
+            )
+            raise OperatorEffectUnknown("turn result effect is unknown") from exc
+        return OperatorTurnReceipt(
+            attempt_id=session.attempt_id,
+            turn=turn,
+            start=started,
+            events=tuple(events),
+            cursor=next_cursor,
+            candidate=candidate,
+        )
+
     def graceful_stop(
         self,
         session: OperatorSessionReceipt | OperatorStartHandle,

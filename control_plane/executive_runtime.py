@@ -30,7 +30,7 @@ import threading
 from types import MappingProxyType
 from abc import ABC, abstractmethod
 from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import datetime, timezone
 from enum import Enum
 import inspect
@@ -19938,6 +19938,27 @@ class OperatorHarnessRegistry:
         lease_token: str,
         expected_consumption_projection_digest: str,
     ) -> TurnRef:
+        """Reserve FINAL once; APPLIED/UNKNOWN operations remain nonretryable."""
+
+        return self._domain_consumption_turn(
+            generation=generation,
+            operation_id=operation_id,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+            expected_consumption_projection_digest=expected_consumption_projection_digest,
+        )
+
+    def _domain_consumption_turn(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        expected_consumption_projection_digest: str,
+        connection: sqlite3.Connection | None = None,
+        evidence_turn: TurnRef | None = None,
+    ) -> TurnRef:
         """Atomic ledger-validated reservation for the domain actor's later turn.
 
         This is the sole later-turn consumption surface for the COO domain
@@ -19960,6 +19981,8 @@ class OperatorHarnessRegistry:
         generation 1).
         """
 
+        if (connection is None) != (evidence_turn is None):
+            raise StateConflict("domain evidence requires its existing transaction")
         if not isinstance(lease_token, str) or not lease_token:
             raise StateConflict("domain consumption lease_token is required")
         if (
@@ -19970,7 +19993,9 @@ class OperatorHarnessRegistry:
             raise StateConflict(
                 "domain consumption projection digest must be a 64-char hex"
             )
-        with self.store.transaction() as connection:
+        with (
+            self.store.transaction() if connection is None else nullcontext(connection)
+        ) as connection:
             timestamp = self.store.now_ms()
             # 1. Resolve the exact leased Attempt first, then bind its current
             # G1 through the same ownership and active-work guards used by
@@ -20036,9 +20061,13 @@ class OperatorHarnessRegistry:
             # CCTX0 already bounds the root tree; this later reservation
             # consumes the same finite lease/effect authority without a new
             # generation or writer.
-            timestamp = _finite_fresh_effect(
-                self.store, connection, str(row["job_id"])
-            )
+            if evidence_turn is None:
+                timestamp = _finite_fresh_effect(
+                    self.store, connection, str(row["job_id"])
+                )
+            else:
+                _finite_existing_effect(self.store, connection, str(row["job_id"]))
+                timestamp = self.store.now_ms()
             if timestamp >= int(row["lease_expires_at_ms"]):
                 raise StateConflict("finite reservation current lease has expired")
             durable = connection.execute(
@@ -20226,6 +20255,15 @@ class OperatorHarnessRegistry:
                 if not isinstance(saved_later_payload, dict):
                     raise StateConflict("domain consumption replay intent drifted")
                 saved_later_turn = saved_later_payload.get("turn_id")
+
+            if evidence_turn is not None and (
+                saved_later_intent is None
+                or saved_later_turn != evidence_turn.turn_id
+                or evidence_turn.attempt_id != str(row["attempt_id"])
+                or evidence_turn.session_epoch_id != str(durable["session_epoch_id"])
+                or evidence_turn.process_generation_id != str(durable["process_generation_id"])
+            ):
+                raise StateConflict("domain evidence lacks its exact reserved later turn")
 
             def claims_later_operation(
                 event_row: sqlite3.Row, payload: dict[str, Any]
@@ -20586,6 +20624,20 @@ class OperatorHarnessRegistry:
                     raise StateConflict(
                         "domain consumption initial candidate is malformed"
                     )
+                if evidence_turn is not None and (
+                    candidate_turn_ref == _ohf_jsonable(evidence_turn)
+                    and initial_candidate["command_id"] == f"ohf-candidate:{evidence_turn.turn_id}"
+                    and initial_candidate["aggregate_type"] == "operator_turn"
+                    and initial_candidate["aggregate_id"] == evidence_turn.turn_id
+                    and initial_candidate["job_id"] == row["job_id"]
+                    and initial_candidate["attempt_id"] == row["attempt_id"]
+                    and initial_candidate["worker_id"] == row["worker_id"]
+                    and initial_candidate["quota_class"] == row["quota_class"]
+                    and initial_candidate["actor"] == "supervisor"
+                    and set(candidate_payload) == {"schema_version", "turn", "candidate", "events", "cursor"}
+                    and candidate_payload.get("schema_version") == OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
+                ):
+                    continue
                 if (
                     claims_initial_context(initial_candidate, candidate_payload)
                     or initial_candidate["command_id"] == plan_seal["candidate_event_command_id"]
@@ -20651,14 +20703,73 @@ class OperatorHarnessRegistry:
                     "domain consumption initial candidate evidence drifted"
                 )
             # 8. No APPLIED / EFFECT_UNKNOWN for THIS later operation.
-            if later_applieds:
+            if evidence_turn is None and later_applieds:
                 raise StateConflict(
                     "domain consumption later operation already APPLIED"
                 )
+            if evidence_turn is not None and later_applieds:
+                if len(later_applieds) != 1:
+                    raise StateConflict("domain evidence later APPLIED is not unique")
+                applied, body = later_applieds[0]
+                native_turn = body.get("provider_native_turn_id")
+                if (
+                    applied["command_id"] != operation_receipt_command_id(operation_id, OperationReceiptKind.APPLIED)
+                    or applied["aggregate_type"] != "operator_operation"
+                    or applied["aggregate_id"] != operation_id.command_id
+                    or applied["job_id"] != row["job_id"]
+                    or applied["attempt_id"] != row["attempt_id"]
+                    or applied["worker_id"] != row["worker_id"]
+                    or applied["quota_class"] != row["quota_class"]
+                    or applied["actor"] != "supervisor"
+                    or type(native_turn) is not str or not native_turn.strip()
+                    or body != {
+                        "schema_version": "mastermind.operator_harness_turn_applied/v1",
+                        "operation_kind": OperationKind.BEGIN_TURN.value,
+                        "attempt_id": evidence_turn.attempt_id,
+                        "session_epoch_id": evidence_turn.session_epoch_id,
+                        "process_generation_id": evidence_turn.process_generation_id,
+                        "turn_id": evidence_turn.turn_id,
+                        "provider_native_turn_id": native_turn,
+                        "acknowledged": True,
+                    }
+                ):
+                    raise StateConflict("domain evidence later APPLIED provenance drifted")
             if later_unknowns:
                 raise StateConflict(
                     "domain consumption later operation has EFFECT_UNKNOWN"
                 )
+            if evidence_turn is not None:
+                # The evidence phase cannot authorize a provider call. Require
+                # the exact one already committed boundary before any APPLIED
+                # or candidate effect; independent aliases still count.
+                dispatches = []
+                dispatch_id = f"{operation_id.command_id}:dispatch"
+                for event in connection.execute(
+                    "SELECT * FROM events WHERE event_type='OHF_PROVIDER_DISPATCH_COMMITTED'"
+                ):
+                    body = _strict_canonical_json_loads(str(event["payload_json"]), name="domain evidence dispatch")
+                    if event["command_id"] == dispatch_id or event["aggregate_id"] == operation_id.command_id or (
+                        isinstance(body, dict) and body.get("operation_id") == operation_id.command_id
+                    ):
+                        dispatches.append((event, body))
+                if len(dispatches) != 1:
+                    raise StateConflict("domain evidence requires one committed later dispatch")
+                dispatch, body = dispatches[0]
+                if (
+                    dispatch["command_id"] != dispatch_id
+                    or dispatch["aggregate_type"] != "operator_operation"
+                    or dispatch["aggregate_id"] != operation_id.command_id
+                    or dispatch["job_id"] != row["job_id"]
+                    or dispatch["attempt_id"] != row["attempt_id"]
+                    or dispatch["worker_id"] != row["worker_id"]
+                    or dispatch["quota_class"] != row["quota_class"]
+                    or dispatch["actor"] != "supervisor"
+                    or body != {
+                        "schema_version": "mastermind.operator_harness_provider_dispatch/v1",
+                        "operation_kind": OperationKind.BEGIN_TURN.value,
+                    }
+                ):
+                    raise StateConflict("domain evidence committed dispatch provenance drifted")
             # 9. Validate the complete root coo_provider_charges inventory
             #    against authoritative rows: each charge binds to its
             #    unique event and to actual Attempt / job / worker / quota /
@@ -21053,6 +21164,8 @@ class OperatorHarnessRegistry:
                     str(durable["process_generation_id"]),
                     str(row["attempt_id"]),
                 )
+            if evidence_turn is not None:
+                raise StateConflict("domain evidence cannot create a fresh reservation")
             # 12. Fresh reservation: derive TurnRef, append FINAL charge
             #    Event + row, then append the v1 BEGIN_TURN INTENT,
             #    atomically.  The transaction wrapper rolls back every
@@ -21136,6 +21249,64 @@ class OperatorHarnessRegistry:
             )
         return turn
 
+    def _domain_consumption_evidence_admitted(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        row: sqlite3.Row,
+        turn: TurnRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+    ) -> bool:
+        """Read-only validation of the reserved/committed FINAL evidence phase."""
+
+        job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+        if (
+            job is None or row["status"] != AttemptStatus.CHECKPOINTED.value
+            or job["orchestration_role"] != "plan"
+            or connection.execute(
+                "SELECT 1 FROM events WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?",
+                (row["attempt_id"],),
+            ).fetchone() is None
+        ):
+            return False
+        if not _coo_domain_admitted(job):
+            return False
+        charge_events = connection.execute(
+            """SELECT e.payload_json FROM coo_provider_charges c
+               JOIN events e ON e.event_id=c.event_id
+               WHERE c.root_job_id=? AND c.effect_class='FINAL'
+                 AND c.operation_id=?""",
+            (job["root_job_id"], operation_id.command_id),
+        ).fetchall()
+        if len(charge_events) != 1:
+            raise StateConflict("domain evidence requires exact reserved FINAL charge")
+        payload = _strict_canonical_json_loads(str(charge_events[0]["payload_json"]), name="domain evidence FINAL charge")
+        if not isinstance(payload, dict):
+            raise StateConflict("domain evidence FINAL charge is malformed")
+        generation = connection.execute(
+            "SELECT * FROM process_generations WHERE process_generation_id=?",
+            (turn.process_generation_id,),
+        ).fetchone()
+        if generation is None:
+            raise StateConflict("domain evidence generation is absent")
+        validated = self._domain_consumption_turn(
+            generation=ProcessGenerationRef(
+                turn.process_generation_id, turn.session_epoch_id,
+                int(generation["generation_number"]), str(generation["worker_id"]),
+            ),
+            operation_id=operation_id,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+            expected_consumption_projection_digest=payload.get("consumption_projection_digest"),
+            connection=connection,
+            evidence_turn=turn,
+        )
+        if validated != turn:
+            raise StateConflict("domain evidence reserved turn identity drifted")
+        return True
+
     def acknowledge_turn(
         self,
         *,
@@ -21196,11 +21367,22 @@ class OperatorHarnessRegistry:
                 or not durable["executive_writer_held"]
             ):
                 raise StateConflict("TX-5 target mismatch")
+            domain_evidence = self._domain_consumption_evidence_admitted(
+                connection, row=row, turn=turn, operation_id=operation_id,
+                fence_generation=fence_generation, lease_token=lease_token,
+            )
             self._require_active_orchestration_generation(
                 connection,
                 row=row,
                 generation_id=turn.process_generation_id,
+                allow_domain_plan_seal=domain_evidence,
             )
+            if domain_evidence and (
+                observation is None or observation.acknowledged is not True
+                or type(observation.provider_native_turn_id) is not str
+                or not observation.provider_native_turn_id.strip()
+            ):
+                raise StateConflict("domain evidence requires acknowledged native turn")
             applied_payload = {
                 "schema_version": "mastermind.operator_harness_turn_applied/v1",
                 "operation_kind": OperationKind.BEGIN_TURN.value,
@@ -21526,11 +21708,6 @@ class OperatorHarnessRegistry:
                 timestamp=timestamp,
                 statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
             )
-            self._require_active_orchestration_generation(
-                connection,
-                row=row,
-                generation_id=turn.process_generation_id,
-            )
             generation = connection.execute(
                 """
                 SELECT 1 FROM process_generations
@@ -21573,6 +21750,15 @@ class OperatorHarnessRegistry:
             ):
                 raise StateConflict("candidate TX-5 INTENT provenance mismatch")
             operation = OperationId(str(intent["command_id"]))
+            self._require_active_orchestration_generation(
+                connection,
+                row=row,
+                generation_id=turn.process_generation_id,
+                allow_domain_plan_seal=self._domain_consumption_evidence_admitted(
+                    connection, row=row, turn=turn, operation_id=operation,
+                    fence_generation=fence_generation, lease_token=lease_token,
+                ),
+            )
             applied = self._event(
                 connection,
                 operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
