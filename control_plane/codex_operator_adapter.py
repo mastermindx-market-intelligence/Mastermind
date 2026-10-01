@@ -2145,6 +2145,22 @@ class CodexOperatorAdapter:
             return projection.enroll_observer(key, **binding)
         return projection.mint_grant(key)
 
+    @staticmethod
+    def _completed_turn_event_end(state: _GenerationState, turn_id: str) -> int | None:
+        """Locate the existing exact completion; do not create a snapshot store."""
+        native_turn = state.turns.get(turn_id)
+        if native_turn is None:
+            return None
+        for index, event in enumerate(state.events):
+            if (
+                event.turn_id == turn_id
+                and event.kind == "turn/completed"
+                and event.provider_event_id == native_turn
+                and event.native_subordinate_id is None
+            ):
+                return index + 1
+        return None
+
     def _ingest_turn_notifications(
         self,
         state: _GenerationState,
@@ -2152,6 +2168,7 @@ class CodexOperatorAdapter:
         notifications: Sequence[Mapping[str, Any]],
     ) -> None:
         subordinate_ids = state.turn_subordinates.setdefault(turn.turn_id, set())
+        completed = self._completed_turn_event_end(state, turn.turn_id) is not None
 
         def register_subordinate(value: Any) -> str:
             native_id = str(value or "").strip()
@@ -2219,7 +2236,7 @@ class CodexOperatorAdapter:
                         "completion does not match the selected native turn",
                         effect_unknown=True,
                     )
-            if turn.turn_id in state.visible_turns:
+            if not completed and turn.turn_id in state.visible_turns:
                 self._visible_projection().publish(
                     TurnKey(
                         turn.attempt_id,
@@ -2376,13 +2393,21 @@ class CodexOperatorAdapter:
                     attempt_id=turn.attempt_id,
                     session_epoch_id=turn.session_epoch_id,
                     process_generation_id=turn.process_generation_id,
-                    turn_id=turn.turn_id,
+                    # Notifications after exact completion remain generation
+                    # evidence, not fresh evidence of the closed logical turn.
+                    turn_id=None if completed else turn.turn_id,
                     kind=method,
                     provider_event_id=provider_event_id or None,
                     native_subordinate_id=native_subordinate_id,
                     payload_redacted=safe_payload,
                 )
             )
+            if (
+                method == "turn/completed"
+                and provider_event_id == state.turns.get(turn.turn_id)
+                and native_subordinate_id is None
+            ):
+                completed = True
 
     def _audit_native_helper_tree(
         self, state: _GenerationState, turn: TurnRef
@@ -2942,6 +2967,7 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "event cursor is outside its generation scope",
             )
+        endpoint = len(state.events)
         if cursor.turn_id:
             turn = TurnRef(
                 cursor.turn_id,
@@ -2953,50 +2979,50 @@ class CodexOperatorAdapter:
                 raise CodexAdapterError(
                     AdapterFailureClass.SESSION_MISSING, "event cursor turn is missing"
                 )
-            notifications = state.client.drain_notifications()
-            if notifications:
-                self._ingest_turn_notifications(state, turn, notifications)
-            if not any(
-                event.turn_id == cursor.turn_id
-                and event.kind == "turn/completed"
-                and event.provider_event_id == state.turns[cursor.turn_id]
-                and event.native_subordinate_id is None
-                for event in state.events
-            ):
-                try:
-                    completed = state.client.wait_notification(
-                        "turn/completed", timeout=max(0.001, float(timeout_seconds))
+            completed_end = self._completed_turn_event_end(state, cursor.turn_id)
+            # A completed read replays the existing event prefix. It must not
+            # drain new provider events under the identity of a closed turn.
+            if completed_end is None:
+                notifications = state.client.drain_notifications()
+                if notifications:
+                    self._ingest_turn_notifications(state, turn, notifications)
+                completed_end = self._completed_turn_event_end(state, cursor.turn_id)
+                if completed_end is None:
+                    try:
+                        completed = state.client.wait_notification(
+                            "turn/completed", timeout=max(0.001, float(timeout_seconds))
+                        )
+                    except Exception as exc:
+                        raise _rpc_failure(exc, effect_unknown=True) from exc
+                    completed_after = state.client.drain_notifications()
+                    self._ingest_turn_notifications(
+                        state, turn, [*completed_after, completed]
                     )
-                except Exception as exc:
-                    raise _rpc_failure(exc, effect_unknown=True) from exc
-                completed_after = state.client.drain_notifications()
-                self._ingest_turn_notifications(
-                    state, turn, [*completed_after, completed]
-                )
-            if not any(
-                event.turn_id == cursor.turn_id
-                and event.kind == "turn/completed"
-                and event.provider_event_id == state.turns[cursor.turn_id]
-                and event.native_subordinate_id is None
-                for event in state.events
-            ):
+                    completed_end = self._completed_turn_event_end(state, cursor.turn_id)
+            if completed_end is None:
                 raise CodexAdapterError(
                     AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
                     "selected native turn completion is unavailable",
                     effect_unknown=True,
                 )
+            if cursor.local_sequence > completed_end:
+                raise CodexAdapterError(
+                    AdapterFailureClass.VALIDATION_FAILURE,
+                    "event cursor is beyond the selected turn completion",
+                )
             self._audit_native_helper_tree(state, turn)
-        # The cursor stays generation-global. A turn-scoped read exposes only
-        # its own evidence, not older turns still retained in that generation.
+            endpoint = completed_end
+        # Offsets remain generation-global, but a closed turn has an immutable
+        # endpoint even if later generation evidence has already been appended.
         events = tuple(
-            event for event in state.events[cursor.local_sequence :]
+            event for event in state.events[cursor.local_sequence : endpoint]
             if cursor.turn_id is None or event.turn_id in {None, cursor.turn_id}
         )
         return events, EventCursor(
             attempt_id=cursor.attempt_id,
             session_epoch_id=cursor.session_epoch_id,
             process_generation_id=cursor.process_generation_id,
-            local_sequence=len(state.events),
+            local_sequence=endpoint,
             turn_id=cursor.turn_id,
             provider_replay_cursor=None,
         )
