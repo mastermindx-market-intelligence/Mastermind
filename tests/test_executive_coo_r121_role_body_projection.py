@@ -419,21 +419,32 @@ def test_unreviewed_policy_has_canonical_work_and_null_review(tmp_path, monkeypa
     assert _inventory(fixture["runtime"]) == before
 
 
-def test_checkpointed_domain_repair_currently_refuses_without_effects(tmp_path, monkeypatch):
-    """R121 does not repair the separate missing active-domain creation flag.
-
-    This real public negative is a receipted integration gap, not repair
-    consumption acceptance or a SQL-manufactured positive.
-    """
+def test_checkpointed_domain_projects_completed_repair_and_independent_review(tmp_path, monkeypatch):
+    """Public repaired producer bodies replace the rejected original revision."""
+    from tests.test_executive_coo_r122_repair_creation import (
+        _create_repair, _finish_repair_and_review, _domain_identity,
+    )
     fixture = _seeded_runtime(tmp_path, monkeypatch, verdict="reject")
-    runtime, root, work = fixture["runtime"], fixture["root"], fixture["work"]
-    rejected_digest = fixture["review_seal"]["role_result_digest"]
+    runtime = fixture["runtime"]
+    domain_before = _domain_identity(fixture)
+    repair = _create_repair(fixture)
+    completed = _finish_repair_and_review(fixture, repair)
     before = _inventory(runtime)
-    with pytest.raises(StateConflict, match="plan lineage does not name the completed plan child"):
-        runtime.jobs.create_cycle_repair(
-            root.job_id, work.job_id, fixture["review_job"].job_id,
-            command_id=f"coo-cycle:{root.job_id}:create-repair:{work.job_id}:{fixture['review_job'].job_id}:{rejected_digest}:1",
-        )
+    projection = _projection(fixture)
+    entry = projection["revision_results"][0]
+    assert entry["current_job_id"] == repair.job_id
+    assert entry["current_job_id"] != fixture["work"].job_id
+    assert entry["current_attempt_id"] == completed["repair_dispatch"].attempt.attempt_id
+    assert entry["work_result"] == completed["repair_body"]
+    assert entry["work_result"]["artifacts"] and entry["work_result"]["evidence_digests"]
+    assert entry["qualifying_review_job_id"] == completed["review_job"].job_id
+    assert entry["qualifying_review_attempt_id"] == completed["review_dispatch"].attempt.attempt_id
+    assert entry["review_result"] == completed["review_body"]
+    assert entry["review_result"]["reviewed_result_digest"] == completed["repair_seal"]["role_result_digest"]
+    assert projection["consumption_projection_digest"] == orchestration_digest({
+        k: v for k, v in projection.items() if k != "consumption_projection_digest"
+    })
+    assert _domain_identity(fixture) == domain_before
     assert _inventory(runtime) == before
 
 

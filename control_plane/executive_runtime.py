@@ -10936,7 +10936,13 @@ def _assert_orchestration_lineage_for_create(
         ).fetchone()
         if (
             predecessor is None
-            or predecessor["parent_job_id"] != parent_row["job_id"]
+            or (
+                predecessor["parent_job_id"] != parent_row["job_id"]
+                and not (
+                    parent_domain_row is not None
+                    and predecessor["parent_job_id"] == parent_domain_row["job_id"]
+                )
+            )
             or predecessor["root_job_id"] != parent_row["root_job_id"]
             or predecessor["orchestration_role"] not in {"work", "repair"}
             or predecessor["status"] != JobStatus.COMPLETED.value
@@ -14434,6 +14440,7 @@ class JobRegistry:
                     "rejected_review_result_digest": review_result_digest,
                 },
                 parent_domain_row=domain,
+                allow_active_domain_plan=domain is not None,
                 policy=policy,
             )
             created_id = str(row["job_id"])
