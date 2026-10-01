@@ -614,8 +614,15 @@ def build_claimed_remote_operator_factory(
                                                allowed_operations=operations)
 
             class RuntimeGenerationBoundAdapter(RemoteOperatorHarnessAdapter):
-                def _start(self, *, operation_name, operation_id, requested, epoch,
-                           generation, provider_session=None):
+                @staticmethod
+                def _payload_identity(epoch, generation):
+                    return {
+                        "session_epoch_id": epoch.session_epoch_id,
+                        "process_generation_id": generation.process_generation_id,
+                    }
+
+                @staticmethod
+                def _assert_generation(epoch, generation):
                     if (epoch.attempt_id != current.attempt_id
                             or epoch.worker_id != current.worker_id
                             or generation.session_epoch_id != epoch.session_epoch_id
@@ -627,19 +634,85 @@ def build_claimed_remote_operator_factory(
                         raise RemoteAttemptTransportError("STATE_MOVED") from None
                     if canonical != generation:
                         raise RemoteAttemptTransportError("STATE_MOVED")
-                    self.client.bind_payload_identity(
-                        session_epoch_id=epoch.session_epoch_id,
-                        process_generation_id=generation.process_generation_id,
-                    )
+
+                def _bind_initial_generation(self, epoch, generation):
+                    self._assert_generation(epoch, generation)
+                    try:
+                        self.client.bind_payload_identity(
+                            session_epoch_id=epoch.session_epoch_id,
+                            process_generation_id=generation.process_generation_id,
+                        )
+                    except TransportValidationError:
+                        raise RemoteAttemptTransportError("STATE_MOVED") from None
+
+                def _start(self, *, operation_name, operation_id, requested, epoch,
+                           generation, provider_session=None):
+                    self._assert_generation(epoch, generation)
+                    expected = self._payload_identity(epoch, generation)
+                    if self.client.bound_payload_identity != expected:
+                        if not self.client.bound_payload_identity:
+                            self._bind_initial_generation(epoch, generation)
+                        elif operation_name == "ohf-resume":
+                            try:
+                                successor = RemoteWorkerBrokerClient(
+                                    binding.transport,
+                                    identity,
+                                    allowed_operations=operations,
+                                )
+                                successor.bind_payload_identity(
+                                    session_epoch_id=epoch.session_epoch_id,
+                                    process_generation_id=generation.process_generation_id,
+                                )
+                            except (
+                                TransportValidationError,
+                                WorkerBrokerError,
+                                TypeError,
+                                ValueError,
+                            ):
+                                raise RemoteAttemptTransportError(
+                                    "HOST_BINDING_MISMATCH"
+                                ) from None
+                            # Preserve the old generation-scoped client as immutable.
+                            # All subsequent RPCs for the resumed generation use this
+                            # newly bound client instead of retargeting the old one.
+                            self.client = successor
+                        else:
+                            raise RemoteAttemptTransportError("STATE_MOVED")
                     return super()._start(
                         operation_name=operation_name, operation_id=operation_id,
                         requested=requested, epoch=epoch, generation=generation,
                         provider_session=provider_session,
                     )
 
-            return RuntimeGenerationBoundAdapter(
+            adapter = RuntimeGenerationBoundAdapter(
                 client, turn_input_loader=loader, capabilities=binding.capabilities
             )
+            if recovery:
+                with runtime.store.read() as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT e.session_epoch_id,g.process_generation_id
+                        FROM harness_session_epochs e
+                        JOIN process_generations g
+                          ON g.session_epoch_id=e.session_epoch_id
+                        WHERE e.attempt_id=? AND e.state='CURRENT'
+                          AND g.executive_writer_held=1
+                        ORDER BY e.epoch_number,g.generation_number
+                        """,
+                        (current.attempt_id,),
+                    ).fetchall()
+                if len(rows) != 1:
+                    raise RemoteAttemptTransportError("STATE_MOVED")
+                try:
+                    epoch, generation = runtime.operator_harness.generation_refs(
+                        str(rows[0]["process_generation_id"])
+                    )
+                except Exception:
+                    raise RemoteAttemptTransportError("STATE_MOVED") from None
+                if generation.generation_number != 1:
+                    raise RemoteAttemptTransportError("STATE_MOVED")
+                adapter._bind_initial_generation(epoch, generation)
+            return adapter
         except (TypeError, ValueError, WorkerBrokerError):
             raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from None
 

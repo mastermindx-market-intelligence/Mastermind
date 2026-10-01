@@ -173,29 +173,131 @@ def test_recovery_mode_is_not_coerced(case, recovery):
 
 
 @pytest.mark.parametrize('case', ['codex', 'claude'], indirect=True)
-def test_recovery_uses_sealed_original_profile_and_never_allows_start(case):
+def test_recovery_uses_persisted_generation_and_never_allows_start(case):
     runtime, job, lease, requested, flat, calls = case
-    sealed = runtime.operator_harness.seal_operator_harness_attempt(lease.attempt.attempt_id,
-        fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
-        requested=requested)
-    factory = rt.build_claimed_remote_operator_factory(runtime, lambda h, w: binding(case))
+    sealed = runtime.operator_harness.seal_operator_harness_attempt(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        requested=requested,
+    )
+    start = OperationId(f'ohf-op:start:{sealed.attempt_id}')
+    epoch, generation = runtime.operator_harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=lease.lease_token,
+        operation_id=start,
+    )
+    factory = rt.build_claimed_remote_operator_factory(
+        runtime, lambda h, w: binding(case)
+    )
     adapter = factory(sealed, requested, lambda t: '', recovery=True)
+    expected = {
+        'session_epoch_id': epoch.session_epoch_id,
+        'process_generation_id': generation.process_generation_id,
+    }
+    assert adapter.client.bound_payload_identity == expected
     assert 'ohf-start' not in adapter.client.allowed_operations
     assert 'ohf-validate' not in adapter.client.allowed_operations
-    assert ('ohf-resume' in adapter.client.allowed_operations) == (requested.provider == 'openai-codex')
+    assert ('ohf-resume' in adapter.client.allowed_operations) == (
+        requested.provider == 'openai-codex'
+    )
     assert adapter.client.identity['attempt_id'] == lease.attempt.attempt_id
     from control_plane.remote_worker_transport import TransportError
     with pytest.raises(TransportError):
         adapter.client.request_sync('ohf-start', {})
-    assert calls == []
+    with pytest.raises(AssertionError, match='No network is allowed'):
+        adapter.reconcile(generation)
+    assert calls == [adapter.client.identity]
+    calls.clear()
     with pytest.raises(rt.RemoteAttemptTransportError):
-        factory(sealed, dataclasses.replace(requested, requested_model='replacement'),
-            lambda t: '', recovery=True)
+        factory(
+            sealed,
+            dataclasses.replace(requested, requested_model='replacement'),
+            lambda t: '',
+            recovery=True,
+        )
     runtime.jobs.cancel_job(job.job_id)
     cancelled = runtime.attempts.get_attempt(sealed.attempt_id)
     recovery = factory(cancelled, requested, lambda t: '', recovery=True)
+    assert recovery.client.bound_payload_identity == expected
     assert 'ohf-cancel' in recovery.client.allowed_operations
-    assert calls == []
+    with pytest.raises(AssertionError, match='No network is allowed'):
+        recovery.cancel(
+            generation,
+            reason='fixture cancellation',
+            operation_id=OperationId(f'ohf-op:recover-cancel:{sealed.attempt_id}'),
+        )
+    assert calls == [recovery.client.identity]
+
+
+@pytest.mark.parametrize('case', ['codex'], indirect=True)
+def test_recovery_resume_rotates_to_new_generation_scoped_client(case):
+    runtime, job, lease, requested, flat, calls = case
+    requested = dataclasses.replace(requested, expected_config_digest='d' * 64)
+    from control_plane.executive_operator_harness_port import ExecutiveOperatorHarnessPort
+    from control_plane.operator_harness_contract import ProviderSessionHandoff
+    from control_plane.operator_harness_orchestrator import (
+        OperatorEffectUnknown,
+        OperatorHarnessOrchestrator,
+    )
+    from test_ohf_p1b_runtime_orchestrator import FakeAdapter
+
+    seed = FakeAdapter(requested)
+    port = ExecutiveOperatorHarnessPort(runtime, lease)
+    seed_orchestrator = OperatorHarnessOrchestrator(
+        port,
+        seed,
+        attestation_reader=lambda item, generation: item.observed_attestation(
+            generation
+        ),
+    )
+    session = seed_orchestrator.start_attempt(
+        attempt_id=lease.attempt.attempt_id,
+        requested=requested,
+        operation_id=OperationId(f'ohf-op:start:{lease.attempt.attempt_id}'),
+    )
+    seed_orchestrator.reconcile(session)
+
+    current = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    factory = rt.build_claimed_remote_operator_factory(
+        runtime,
+        lambda h, w: binding(
+            case, expected_config_digest=requested.expected_config_digest
+        ),
+    )
+    adapter = factory(current, requested, lambda t: '', recovery=True)
+    g1_client = adapter.client
+    g1_identity = dict(g1_client.bound_payload_identity)
+    assert g1_identity == {
+        'session_epoch_id': session.epoch.session_epoch_id,
+        'process_generation_id': session.generation.process_generation_id,
+    }
+
+    resumed = OperatorHarnessOrchestrator(
+        port,
+        adapter,
+        attestation_reader=lambda item, generation: item.observed_attestation(
+            generation
+        ),
+    )
+    operation = OperationId(f'ohf-op:resume:{lease.attempt.attempt_id}')
+    with pytest.raises(OperatorEffectUnknown, match='resume_session'):
+        resumed.resume(
+            session,
+            operation_id=operation,
+            handoff=ProviderSessionHandoff('S1', WORKER),
+        )
+
+    g2 = runtime.operator_harness.current_writer_generation(session.epoch)
+    assert g2.generation_number == 2
+    assert adapter.client is not g1_client
+    assert g1_client.bound_payload_identity == g1_identity
+    assert adapter.client.bound_payload_identity == {
+        'session_epoch_id': session.epoch.session_epoch_id,
+        'process_generation_id': g2.process_generation_id,
+    }
+    assert calls == [adapter.client.identity]
 
 
 @pytest.mark.parametrize('case', ['codex', 'claude'], indirect=True)
