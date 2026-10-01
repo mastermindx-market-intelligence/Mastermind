@@ -180,7 +180,7 @@ def _storage_status(root: Path) -> dict[str, object]:
     policy, digest = _read_storage_policy(Path(policy_path))
     try:
         mount = Path(str(policy["mount_point"]))
-        if mount.is_symlink() or not mount.is_dir() or not mount.is_mount():
+        if mount.is_symlink() or not mount.is_dir():
             raise WorkspaceError("STORAGE_MOUNT_UNAVAILABLE: enrolled volume is not mounted")
         mount = mount.resolve()
         configured_root = Path(str(policy["root"])).resolve()
@@ -195,8 +195,9 @@ def _storage_status(root: Path) -> dict[str, object]:
         observed = _volume_identity(mount)
         observed_uuid = observed.get("VolumeUUID")
         if (
-            # APFS diskutil output omits Mounted; is_mount() and the exact
-            # MountPoint/UUID above and below supply the positive witness.
+            # APFS Data is a diskutil mount even though pathlib.is_mount()
+            # reports false across the macOS firmlink. Exact native
+            # MountPoint/UUID plus Writable provide the positive witness.
             observed.get("Mounted", True) is not True
             or observed.get("MountPoint") != str(mount)
             or not isinstance(observed_uuid, str)
