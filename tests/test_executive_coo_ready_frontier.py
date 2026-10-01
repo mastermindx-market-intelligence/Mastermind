@@ -8,7 +8,11 @@ import pytest
 
 from control_plane.ceo_intent import submit_intent
 from control_plane.executive_coo_cycle import CooCycle
-from control_plane.executive_orchestration_result import canonical_digest as result_digest
+from control_plane.executive_orchestration_result import (
+    OrchestrationResultError,
+    canonical_digest as result_digest,
+)
+from control_plane.executive_supervisor import _planner_routing_options
 from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
@@ -263,7 +267,12 @@ def test_expired_active_attempt_keeps_reconciliation_priority(tmp_path):
     assert runtime.jobs.get_job(second.job_id).attempt_count == 0
 
 
-def _register_codex_peer(runtime: Runtime, worker_id: str) -> None:
+def _register_codex_peer(
+    runtime: Runtime,
+    worker_id: str,
+    *,
+    model: str = "gpt-5.6-sol",
+) -> None:
     runtime.workers.register_worker(
         worker_id,
         provider="codex",
@@ -275,7 +284,7 @@ def _register_codex_peer(runtime: Runtime, worker_id: str) -> None:
                 "provider": "codex",
                 "capabilities": ["read", "research"],
                 "cost_class": "small",
-                "model": "gpt-5.6-sol",
+                "model": model,
                 "effort": "xhigh",
                 "metadata": {
                     "routing_policy_version": "fph0-routing",
@@ -955,3 +964,184 @@ def test_lost_dispatch_effect_survives_runtime_reopen(tmp_path):
     assert len(reopened.attempts.list_attempts(first.job_id)) == 1
     assert reopened.attempts.list_attempts(second.job_id) == []
     assert reopened.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is None
+
+
+
+def test_v4_mixes_auto_model_and_exact_model_inside_admitted_pool(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    _register_codex_peer(runtime, "worker-terra", model="gpt-5.6-terra")
+
+    placements = [
+        None,
+        {**_CODEX, "model": "gpt-5.6-terra"},
+    ]
+    runtime, root, plan, admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=placements,
+    )
+    by_step = {job.plan_step_id: job for job in admitted}
+    first = by_step["step-0"]
+    second = by_step["step-1"]
+
+    assert plan["schema_version"] == "mastermind.execution_plan/v4"
+    assert "model" not in first.constraints
+    assert first.constraints["provider"] == "codex"
+    assert first.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+    assert "manual_pool_override" not in first.constraints.get("routing_reason_codes", [])
+    assert second.constraints["model"] == "gpt-5.6-terra"
+    assert second.constraints["provider"] == "codex"
+    assert second.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+    assert "manual_pool_override" in second.constraints["routing_reason_codes"]
+    assert "manual_model_override" in second.constraints["routing_reason_codes"]
+
+    _start_first(runtime, root.job_id, first.job_id)
+
+    def dispatch(job_id: str, command_id: str):
+        return runtime.attempts.dispatch_cycle_job(job_id, command_id=command_id)
+
+    outcome = CooCycle(runtime, dispatcher=dispatch).run_once(root.job_id)
+    assert outcome.action == "DISPATCHED"
+    assert outcome.selected_job_id == second.job_id
+    assert outcome.receipt["attempt"]["worker_id"] == "worker-terra"
+    assert outcome.receipt["attempt"]["quota_class"] == "codex-hf1q-step"
+
+
+def test_v4_manual_model_override_never_silently_falls_back(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+
+    runtime, root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=[{**_CODEX, "model": "model-that-is-not-in-this-pool"}],
+    )
+    work = admitted[0]
+    command_id = f"coo-cycle:{root.job_id}:dispatch:{work.job_id}:attempt:1"
+
+    assert runtime.attempts.dispatch_cycle_job(
+        work.job_id,
+        command_id=command_id,
+    ) is None
+    current = runtime.jobs.get_job(work.job_id)
+    assert current is not None
+    assert current.attempt_count == 0
+    assert current.current_attempt_id is None
+
+
+def test_v3_placement_stays_closed_and_cannot_smuggle_model_override(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+
+    with pytest.raises(
+        StateConflict, match="raw orchestration result failed closed validation"
+    ):
+        _admit_v2_plan(
+            runtime,
+            plan_schema_version="mastermind.execution_plan/v3",
+            placements=[{**_CODEX, "model": "gpt-5.6-terra"}],
+        )
+
+
+
+def test_v4_manual_pool_override_does_not_pin_model(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+
+    runtime, _root, _plan, admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=[_CODEX],
+    )
+    work = admitted[0]
+
+    assert work.constraints["provider"] == "codex"
+    assert work.constraints["eligible_quota_classes"] == ["codex-hf1q-step"]
+    assert "model" not in work.constraints
+    assert "manual_pool_override" in work.constraints["routing_reason_codes"]
+    assert "manual_model_override" not in work.constraints["routing_reason_codes"]
+
+
+
+def test_planner_routing_options_expose_pools_models_without_worker_identity(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    _register_codex_peer(runtime, "worker-terra", model="gpt-5.6-terra")
+
+    runtime, root, _plan, _admitted = _admit_v2_plan(
+        runtime,
+        plan_schema_version="mastermind.execution_plan/v4",
+        placements=[_CLAUDE],
+    )
+    planner = next(
+        job
+        for job in runtime.jobs.list_jobs()
+        if job.root_job_id == root.job_id and job.orchestration_role == "plan"
+    )
+
+    options = _planner_routing_options(runtime, planner)
+    assert options is not None
+    assert options["schema_version"] == "mastermind.planner_routing_options/v1"
+    assert options["default_mode"] == "AUTO"
+    assert options["manual_override_plan_schema"] == "mastermind.execution_plan/v4"
+    assert options["default_route"] == {
+        "provider_realm": "codex",
+        "eligible_quota_classes": ["codex-hf1q-step"],
+        "model": None,
+    }
+
+    pools = {
+        (row["provider_realm"], row["quota_class"]): row
+        for row in options["pools"]
+    }
+    codex = pools[("codex", "codex-hf1q-step")]
+    assert codex["registered_capacity_count"] == 2
+    assert codex["available_capacity_count"] == 2
+    assert codex["models"] == [
+        {
+            "model": "gpt-5.6-sol",
+            "registered_capacity_count": 1,
+            "available_capacity_count": 1,
+        },
+        {
+            "model": "gpt-5.6-terra",
+            "registered_capacity_count": 1,
+            "available_capacity_count": 1,
+        },
+    ]
+    assert codex["models_truncated"] is False
+
+    claude = pools[
+        ("claude-compatible-subscription", "claude-hf1q-step")
+    ]
+    assert claude["registered_capacity_count"] == 1
+    assert claude["models"] == []
+
+    encoded = json.dumps(options, sort_keys=True)
+    for forbidden in (
+        "worker-a",
+        "worker-b",
+        "worker-terra",
+        "@company",
+        "account_label",
+        "worker_id",
+        "host",
+        "credential",
+        "session",
+    ):
+        assert forbidden not in encoded
+
+
+def test_non_planner_job_gets_no_planner_routing_options(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    _register_placement_union(runtime)
+    job = runtime.jobs.create_job(
+        "ordinary worker",
+        requested_authorities=["READ"],
+        constraints={
+            "provider": "codex",
+            "eligible_quota_classes": ["codex-hf1q-step"],
+        },
+    )
+    assert _planner_routing_options(runtime, job) is None

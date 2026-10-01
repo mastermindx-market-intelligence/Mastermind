@@ -5441,6 +5441,7 @@ class ExecutiveControlService:
                 expected = _project_work_placement(
                     expected, root.constraints, step["placement"],
                     raw_root_constraints=root.constraints,
+                    plan_schema_version=str(plan["schema_version"]),
                 )
         for key, value in expected.items():
             if job.constraints.get(key) != value:
