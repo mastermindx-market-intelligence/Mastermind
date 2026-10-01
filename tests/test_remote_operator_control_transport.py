@@ -98,3 +98,161 @@ async def test_control_selected_endpoint_crosses_real_mtls_and_fixed_unix(case, 
         assert len(forwarded) == 1
     finally:
         await _close_gateway(fixture)
+
+
+
+def _remote_only_case(tmp_path, provider="codex"):
+    from control_plane.executive_runtime import Runtime
+    from control_plane.operator_harness_contract import (
+        CapabilityManifest, NativeHelperPolicy, RequestedExecutionProfile, WorkspaceIdentity,
+    )
+    from test_remote_attempt_transport import WORKER, QUOTA, _host_binding, _join
+    runtime = Runtime.at(tmp_path / "remote-only-runtime")
+    runtime.workers.register_worker(WORKER, provider=provider, account_label="fixture",
+        worker_type="fixture", capabilities=["research"], quota_classes={QUOTA: {
+            "capabilities": ["research"], "metadata": {"capacity_join": _join()}}})
+    logical = str(tmp_path / "exists-only-on-selected-worker")
+    job = runtime.jobs.create_job("remote workspace connection", requested_authorities=["READ"],
+        worktree=logical, constraints={"base_sha": "b"*40, "eligible_quota_classes": [QUOTA]},
+        attempt_limit=1)
+    lease = runtime.attempts.claim_job(job.job_id, worker_id=WORKER, quota_class=QUOTA,
+                                     lease_owner="remote-workspace-fixture")
+    identity = WorkspaceIdentity(logical, "b"*40, 901, 902, 903, 904)
+    requested = RequestedExecutionProfile(WORKER,
+        "claude" if provider == "claude" else "openai-codex", "fixture-exact-model",
+        "claude-agent-sdk" if provider == "claude" else "codex-app-server",
+        "a"*64, "0.147.0", identity, "read-only", "never", "disabled",
+        CapabilityManifest(), NativeHelperPolicy.DISABLED, lease.attempt.authority_policy_hash,
+        expected_config_digest="e"*64)
+    return runtime, job, lease, requested, _host_binding(tmp_path), []
+
+
+@pytest.mark.parametrize("provider", ["codex", "claude"])
+def test_actual_control_connects_remote_workspace_and_endpoint_from_same_owner(tmp_path, monkeypatch, provider):
+    from pathlib import Path
+    remote = _remote_only_case(tmp_path, provider)
+    runtime, _, lease, requested, flat, calls = remote
+    assert not Path(requested.workspace.workspace_path).exists()
+    observations = []
+    def source(host_ref, worker_id):
+        observations.append((host_ref, worker_id))
+        return binding(remote)
+    _, supervisor, _ = capture(tmp_path, monkeypatch, runtime=runtime,
+                               remote_operator_binding_source=source)
+    current_job = runtime.jobs.get_job(lease.attempt.job_id)
+    observed = supervisor._workspace_identity(current_job, lease.attempt)
+    assert observed == requested.workspace
+    adapter = supervisor._adapter_for_attempt(lease, requested, lambda turn: "fixture", recovery=False)
+    assert adapter.client.identity["worker_id"] == lease.attempt.worker_id
+    assert observations == [(flat.host_ref, lease.attempt.worker_id)] * 2
+    assert calls == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("host_ref", "host-"+"d"*64), ("worker_id", "different-worker"),
+    ("worker_source_config_digest", "e"*64),
+])
+def test_workspace_binding_source_refuses_wrong_selected_identity(tmp_path, field, value):
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    producer = rt.build_claimed_remote_workspace_identity_source(
+        runtime, lambda *args: binding(remote, **{field: value}))
+    with pytest.raises(rt.RemoteAttemptTransportError):
+        producer(lease.attempt, runtime.jobs.get_job(lease.attempt.job_id))
+    assert calls == []
+
+
+def test_workspace_binding_source_cannot_repoint_or_borrow_a_claim(tmp_path):
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    observed = []
+    def source(*args):
+        observed.append(True)
+        return binding(remote)
+    producer = rt.build_claimed_remote_workspace_identity_source(runtime, source)
+    with pytest.raises(rt.RemoteAttemptTransportError):
+        producer(dataclasses.replace(lease.attempt, worker_id="foreign-worker"),
+                 runtime.jobs.get_job(lease.attempt.job_id))
+    assert observed == []
+
+
+def test_workspace_claim_movement_during_binding_read_refuses(tmp_path):
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    def source(*args):
+        runtime.jobs.cancel_job(lease.attempt.job_id)
+        return binding(remote)
+    producer = rt.build_claimed_remote_workspace_identity_source(runtime, source)
+    with pytest.raises(rt.RemoteAttemptTransportError):
+        producer(lease.attempt, runtime.jobs.get_job(lease.attempt.job_id))
+    assert calls == []
+
+
+def test_workspace_source_failure_never_falls_back_to_control_local_path(tmp_path, monkeypatch):
+    from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisorError
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    def source(*args):
+        raise OSError("private source failure")
+    _, supervisor, _ = capture(tmp_path, monkeypatch, runtime=runtime,
+                               remote_operator_binding_source=source)
+    with pytest.raises(ExecutiveOperatorSupervisorError, match="source refused"):
+        supervisor._workspace_identity(runtime.jobs.get_job(lease.attempt.job_id), lease.attempt)
+    assert calls == []
+
+
+def test_endpoint_rechecks_physical_identity_after_workspace_projection(tmp_path, monkeypatch):
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    source_calls = []
+    def source(*args):
+        source_calls.append(True)
+        return binding(remote, workspace=(requested.workspace if len(source_calls) == 1
+                       else dataclasses.replace(requested.workspace, inode=903)))
+    _, supervisor, _ = capture(tmp_path, monkeypatch, runtime=runtime,
+                               remote_operator_binding_source=source)
+    assert supervisor._workspace_identity(runtime.jobs.get_job(lease.attempt.job_id), lease.attempt) == requested.workspace
+    from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisorError
+    with pytest.raises(ExecutiveOperatorSupervisorError, match="claimed operator construction refused"):
+        supervisor._adapter_for_attempt(lease, requested, lambda turn: "fixture", recovery=False)
+    assert len(source_calls) == 2 and calls == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("workspace_path", "/wrong/logical/worktree"), ("base_sha", "f"*40),
+    ("device", True), ("device", -1), ("inode", 0), ("uid", -1), ("gid", False),
+])
+def test_workspace_projection_refuses_wrong_logical_or_physical_facts(tmp_path, field, value):
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    wrong = dataclasses.replace(requested.workspace, **{field: value})
+    producer = rt.build_claimed_remote_workspace_identity_source(
+        runtime, lambda *args: binding(remote, workspace=wrong))
+    with pytest.raises(rt.RemoteAttemptTransportError):
+        producer(lease.attempt, runtime.jobs.get_job(lease.attempt.job_id))
+    assert calls == []
+
+
+def test_workspace_projection_preserves_heartbeat_only_movement(tmp_path):
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    def source(*args):
+        runtime.attempts.heartbeat_attempt(lease.attempt.attempt_id,
+            fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token)
+        return binding(remote)
+    producer = rt.build_claimed_remote_workspace_identity_source(runtime, source)
+    assert producer(lease.attempt, runtime.jobs.get_job(lease.attempt.job_id)) == requested.workspace
+    assert calls == []
+
+
+def test_detached_job_cannot_relabel_the_remote_workspace(tmp_path):
+    remote = _remote_only_case(tmp_path)
+    runtime, _, lease, requested, flat, calls = remote
+    host_reads = []
+    producer = rt.build_claimed_remote_workspace_identity_source(
+        runtime, lambda *args: host_reads.append(args) or binding(remote))
+    wrong = dataclasses.replace(runtime.jobs.get_job(lease.attempt.job_id),
+                                constraints={"base_sha": "f"*40})
+    with pytest.raises(rt.RemoteAttemptTransportError):
+        producer(lease.attempt, wrong)
+    assert host_reads == []

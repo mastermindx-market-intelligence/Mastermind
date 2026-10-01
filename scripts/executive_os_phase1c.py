@@ -1721,12 +1721,20 @@ def _service_from_config(
             )
 
         factory = claimed_operator_adapter_factory
+        workspace_source = None
         if remote_operator_binding_source is not None:
-            from control_plane.remote_attempt_transport import build_claimed_remote_operator_factory
+            from control_plane.remote_attempt_transport import (
+                build_claimed_remote_operator_factory,
+                build_claimed_remote_workspace_identity_source,
+            )
             factory = build_claimed_remote_operator_factory(runtime, remote_operator_binding_source)
+            workspace_source = build_claimed_remote_workspace_identity_source(
+                runtime, remote_operator_binding_source
+            )
         return ExecutiveOperatorSupervisor(
             runtime,
             claimed_adapter_factory=(factory if factory is not None else primary_factory),
+            workspace_identity_source=workspace_source,
             prompt_source=sealed_supervisor,
         )
 

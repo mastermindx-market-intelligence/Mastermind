@@ -456,6 +456,76 @@ class RemoteOperatorHostBinding:
             raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from None
 
 
+def build_claimed_remote_workspace_identity_source(
+    runtime: Runtime,
+    binding_source: Callable[[str, str], RemoteOperatorHostBinding | None],
+) -> Callable[[Attempt, Job], WorkspaceIdentity]:
+    """Feed the existing selected-host workspace hook from the endpoint owner.
+
+    This is a consumer of the same trusted binding, not another observation
+    source, registry or host selector. The later adapter factory independently
+    compares the resulting profile against a freshly resolved exact binding.
+    """
+    if not isinstance(runtime, Runtime) or not callable(binding_source):
+        raise RemoteAttemptTransportError("INVALID_INPUT")
+
+    def source(attempt: Attempt, supplied_job: Job) -> WorkspaceIdentity:
+        import copy
+        if not isinstance(attempt, Attempt) or not isinstance(supplied_job, Job):
+            raise RemoteAttemptTransportError("INVALID_INPUT")
+        before = _read_claim(runtime, job_id=attempt.job_id,
+                             attempt_id=attempt.attempt_id, purpose=RemoteTransportPurpose.LAUNCH)
+        job, current, quota, join = before
+        keys = ("attempt_id", "job_id", "worker_id", "quota_class", "fence_generation",
+                "lease_owner", "authority_policy_hash")
+        if (any(getattr(current, key) != getattr(attempt, key) for key in keys)
+                or supplied_job.job_id != job.job_id
+                or supplied_job.worktree != job.worktree
+                or supplied_job.constraints != job.constraints):
+            raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+        if current.execution_mode is not None:
+            raise RemoteAttemptTransportError("CLAIM_NOT_LAUNCHABLE")
+
+        def signature(snapshot):
+            source_job, source_attempt, source_quota, source_join = snapshot
+            # Heartbeat-only version movement is not a new physical target.
+            return (_claim_signature(source_job, dataclasses.replace(source_attempt, version=0),
+                                     source_quota, source_join),
+                    source_attempt.lease_owner, source_attempt.authority_policy_hash,
+                    source_attempt.execution_mode, source_job.worktree,
+                    copy.deepcopy(source_job.constraints))
+
+        before_signature = signature(before)
+        try:
+            observed = binding_source(join.capacity_join.host_ref, current.worker_id)
+        except Exception:
+            raise RemoteAttemptTransportError("HOST_BINDING_UNAVAILABLE") from None
+        if not isinstance(observed, RemoteOperatorHostBinding):
+            raise RemoteAttemptTransportError("HOST_BINDING_UNAVAILABLE")
+        workspace = observed.workspace
+        if (observed.host_ref != join.capacity_join.host_ref
+                or observed.worker_id != current.worker_id
+                or observed.worker_source_config_digest != join.capacity_join.worker_source_config_digest
+                or (quota.provider, observed.provider, observed.harness_kind) not in {
+                    ("codex", "openai-codex", "codex-app-server"),
+                    ("claude", "claude", "claude-agent-sdk"),
+                }
+                or type(workspace) is not WorkspaceIdentity
+                or workspace.workspace_path != job.worktree
+                or workspace.base_sha != job.constraints.get("base_sha")
+                or any(type(getattr(workspace, key)) is not int or getattr(workspace, key) < 0
+                       for key in ("device", "inode", "uid", "gid"))
+                or workspace.inode == 0):
+            raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
+        after = _read_claim(runtime, job_id=current.job_id,
+                            attempt_id=current.attempt_id, purpose=RemoteTransportPurpose.LAUNCH)
+        if signature(after) != before_signature:
+            raise RemoteAttemptTransportError("STATE_MOVED")
+        return workspace
+
+    return source
+
+
 def build_claimed_remote_operator_factory(
     runtime: Runtime,
     binding_source: Callable[[str, str], RemoteOperatorHostBinding | None],
