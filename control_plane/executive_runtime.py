@@ -2269,7 +2269,118 @@ def _coo_domain_consumption_projection(
         "plan_digest": str(admission["plan_digest"]),
         "revisions": revisions,
     }
-    projection["consumption_projection_digest"] = orchestration_digest(projection)
+    revision_results: list[dict[str, Any]] = []
+    for revision in revisions:
+        work = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?",
+            (str(revision["current_job_id"]),),
+        ).fetchone()
+        if work is None:
+            raise StateConflict("projection revision lost its current Job")
+        work_attempt, work_seal, _work_terminal, work_result_digest = (
+            _validated_role_completion_material(
+                connection,
+                job_row=work,
+                expected_role=str(work["orchestration_role"]),
+                root_job_id=str(root_row["job_id"]),
+            )
+        )
+        if (
+            str(work["job_id"]) != revision["current_job_id"]
+            or str(work_attempt["attempt_id"]) != revision["current_attempt_id"]
+            or work_result_digest != revision["current_result_digest"]
+            or work_attempt["effective_grant_digest"]
+            != revision["effective_grant_digest"]
+            or work_attempt["placement_snapshot_digest"]
+            != revision["placement_snapshot_digest"]
+            or work_attempt["execution_principal_snapshot_digest"]
+            != revision["execution_principal_snapshot_digest"]
+        ):
+            raise StateConflict("projection revision body identity drifted")
+
+        qualifying_review_job_id = revision["qualifying_review_job_id"]
+        qualifying_review_attempt_id = revision["qualifying_review_attempt_id"]
+        qualifying_review_result: dict[str, Any] | None = None
+        if qualifying_review_job_id is not None:
+            review = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?",
+                (str(qualifying_review_job_id),),
+            ).fetchone()
+            if review is None:
+                raise StateConflict("projection review revision lost its Job")
+            review_attempt, review_seal, _review_terminal, review_result_digest = (
+                _validated_role_completion_material(
+                    connection,
+                    job_row=review,
+                    expected_role="review",
+                    root_job_id=str(root_row["job_id"]),
+                )
+            )
+            review_body = review_seal["result_envelope"]["role_result"]
+            if (
+                str(review["job_id"]) != qualifying_review_job_id
+                or str(review_attempt["attempt_id"])
+                != qualifying_review_attempt_id
+                or review_result_digest
+                != revision["qualifying_review_result_digest"]
+                or review_attempt["effective_grant_digest"]
+                != revision["qualifying_review_effective_grant_digest"]
+                or review_attempt["execution_principal_snapshot_digest"]
+                != revision["qualifying_review_principal_snapshot_digest"]
+                or review["reviews_job_id"] != work["job_id"]
+                or review_body.get("reviewed_job_id") != work["job_id"]
+                or review_body.get("reviewed_attempt_id") != work_attempt["attempt_id"]
+                or review_body.get("reviewed_result_digest") != work_result_digest
+                or review_body.get("repair_round") != work["repair_round"]
+                or review_body.get("verdict") != "approve"
+                or not _review_attempt_is_independent(
+                    connection,
+                    review_attempt_id=str(review_attempt["attempt_id"]),
+                    reviewed_attempt_id=str(work_attempt["attempt_id"]),
+                )
+            ):
+                raise StateConflict("projection qualifying review identity drifted")
+            qualifying_review_result = dict(review_body)
+        elif (
+            revision["review_required"]
+            or qualifying_review_attempt_id is not None
+            or revision["qualifying_review_result_digest"] is not None
+            or revision["qualifying_review_effective_grant_digest"] is not None
+            or revision["qualifying_review_principal_snapshot_digest"] is not None
+        ):
+            raise StateConflict("projection revision omitted its qualifying review")
+
+        revision_results.append(
+            {
+                "ordinal": revision["ordinal"],
+                "plan_step_id": revision["plan_step_id"],
+                "current_job_id": revision["current_job_id"],
+                "current_attempt_id": revision["current_attempt_id"],
+                "work_result": dict(
+                    work_seal["result_envelope"]["role_result"]
+                ),
+                "qualifying_review_job_id": qualifying_review_job_id,
+                "qualifying_review_attempt_id": qualifying_review_attempt_id,
+                "review_result": qualifying_review_result,
+            }
+        )
+
+    projection["revision_results_schema_version"] = (
+        "mastermind.executive_coo_domain_revision_results/v1"
+    )
+    projection["revision_results"] = revision_results
+    from control_plane.executive_orchestration_result import (
+        MAX_CANONICAL_RESULT_BYTES,
+        canonical_bytes,
+    )
+
+    try:
+        projection["consumption_projection_digest"] = orchestration_digest(projection)
+        encoded_projection = canonical_bytes(projection)
+    except Exception as exc:
+        raise StateConflict("domain consumption projection is not canonical") from exc
+    if len(encoded_projection) > MAX_CANONICAL_RESULT_BYTES:
+        raise StateConflict("domain consumption projection exceeds its byte ceiling")
     return projection
 
 
