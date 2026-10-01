@@ -75,6 +75,11 @@ def _target_ref(value: Any) -> str:
     return target_ref
 
 
+def validate_target_ref(value: Any) -> str:
+    """Public reuse of the closed target-ref grammar by authenticated hosts."""
+    return _target_ref(value)
+
+
 def _operation_key(value: Any) -> str:
     operation_key = _text(value, "operation_key", max_chars=MAX_OPERATION_KEY_CHARS)
     if _OPERATION_KEY_RE.fullmatch(operation_key) is None:
