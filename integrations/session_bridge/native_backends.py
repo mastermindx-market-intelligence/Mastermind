@@ -99,9 +99,15 @@ class CanonicalReplyCoordinator:
                 "canonical dialogue reply was not proven committed",
             )
 
-        attention = await _maybe_await(
-            self._attention_waker(target_ref, operation_key)
-        )
+        try:
+            attention = await _maybe_await(
+                self._attention_waker(target_ref, operation_key)
+            )
+        except Exception:
+            # The reply is already committed. Retain its exact receipt even
+            # when attention fails; do not retry or expose backend diagnostics.
+            # Cancellation remains cancellation, not an inferred no-effect.
+            attention = {"state": "EFFECT_UNKNOWN"}
         return {
             "target_ref": target_ref,
             "reply_committed": True,
@@ -134,7 +140,21 @@ class CanonicalTargetReader:
             if reader is None:
                 raise BridgeError("invalid_input", "unsupported target kind")
             return reader()
-        return {name: reader() for name, reader in self._readers.items()}
+        values: dict[str, Any] = {}
+        remaining = iter(self._readers.items())
+        for name, reader in remaining:
+            value = reader()
+            if inspect.isawaitable(value):
+                async def finish() -> dict[str, Any]:
+                    values[name] = await value
+                    # Invoke subsequent readers lazily, leaving no unawaited
+                    # sibling coroutine if this read fails or is cancelled.
+                    for next_name, next_reader in remaining:
+                        values[next_name] = await _maybe_await(next_reader())
+                    return values
+                return finish()
+            values[name] = value
+        return values
 
 
 class ExecutiveSummonAdapter:

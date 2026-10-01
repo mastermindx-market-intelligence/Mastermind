@@ -77,6 +77,22 @@ class SessionBridgeGateway:
                 "data": None,
                 "error": {"code": exc.code, "message": exc.message},
             }
+        except Exception:
+            modifying = tool_name in {"session_send", "session_summon"}
+            return {
+                "schema": RESULT_SCHEMA,
+                "server_version": SERVER_VERSION,
+                "tool": tool_name,
+                "ok": False,
+                "data": None,
+                "error": {
+                    "code": "effect_unknown" if modifying else "backend_unavailable",
+                    "message": (
+                        "The operation outcome is unknown; reconcile the original operation before any further submission."
+                        if modifying else "The target projection is unavailable."
+                    ),
+                },
+            }
 
 
 async def _maybe_await(value: Any) -> Any:
