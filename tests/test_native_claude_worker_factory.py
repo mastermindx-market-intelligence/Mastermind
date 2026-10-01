@@ -15,7 +15,8 @@ from scripts import executive_os_phase1c_worker as worker
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from test_executive_agent_capabilities import _claude_candidate_policy, _write
 from test_executive_operator_broker import _reviewed_codex_adapter
-from test_native_worker_factory import native_config
+from test_executive_claude_worker import _fixture_claude_binary
+from test_native_worker_factory import native_config, sealed_claude_config
 
 
 def config(root):
@@ -60,6 +61,84 @@ def prepared(tmp_path, monkeypatch):
         expected_config_digest=profile.expected_config_digest,
     )
     return value, profiles, profile, requested, calls
+
+
+def test_sealed_v7_factory_binds_real_claude_primary_and_codex_validator(
+    tmp_path, monkeypatch
+):
+    from control_plane.claude_worker import (
+        ClaudeCodeWorkerAdapter,
+        ManagedModelPolicyObservation,
+        attest_claude_code_binary,
+    )
+    from control_plane.codex_worker import CodexWorkerAdapter
+
+    root = tmp_path.resolve()
+    value = sealed_claude_config(root)
+    value.update(
+        control_uid=os.geteuid() + 1000,
+        allowed_supplementary_gids=[],
+        claude_sdk_python=str(Path(sys.executable).resolve()),
+    )
+    for field in ("workspace_root", "run_root", "provider_home"):
+        Path(value[field]).mkdir(mode=0o700)
+
+    claude_binary = _fixture_claude_binary(root, version="2.1.275")
+    claude_attestation = attest_claude_code_binary(
+        claude_binary, allowed_versions=frozenset({"2.1.275"})
+    )
+    value["claude_binary"] = claude_attestation.path
+    value["allowed_claude_versions"] = ["2.1.275"]
+
+    reviewed_validation = _reviewed_codex_adapter(root / "validation-codex")
+    validation_attestation = dataclasses.replace(
+        reviewed_validation.binary, team_identifier="2DC432GLL2"
+    )
+    value["validation_codex_binary"] = validation_attestation.path
+    value["validation_allowed_codex_versions"] = [
+        validation_attestation.version
+    ]
+    monkeypatch.setattr(
+        worker, "_load_native_claude_binary", lambda config: claude_attestation
+    )
+    monkeypatch.setattr(
+        worker,
+        "load_codex_attestation_receipt",
+        lambda *args, **kwargs: validation_attestation,
+    )
+
+    class Observer:
+        def __init__(self, *, binary, exact_model, generation, provider_home):
+            self.binary = binary
+            self.exact_model = exact_model
+            self.generation = generation
+            self.provider_home = provider_home
+
+        def observe(self):
+            return ManagedModelPolicyObservation(
+                exact_model=self.exact_model,
+                binary_sha256=self.binary.sha256,
+                binary_version=self.binary.version,
+                generation=self.generation,
+                allow_alternate_models=(),
+                fallback_models=(),
+            )
+
+    monkeypatch.setattr(
+        worker,
+        "_sealed_native_claude_adapter_types",
+        lambda: (ClaudeCodeWorkerAdapter, Observer),
+    )
+
+    broker = worker._build_broker(value, autonomy_guard=None)
+
+    assert type(broker.adapter) is ClaudeCodeWorkerAdapter
+    assert broker.adapter_id == "claude-code"
+    assert type(broker.validation_adapter) is CodexWorkerAdapter
+    assert broker.validation_adapter_id == "codex-cli"
+    assert broker.operator_harness_armed is False
+    assert broker.operator_adapter_factory is None
+    assert broker.adapter.exact_model == "claude-fable-5-1"
 
 
 def test_factory_uses_the_exact_claude_dependencies_without_a_flat_provider(tmp_path, monkeypatch):

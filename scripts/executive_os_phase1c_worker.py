@@ -67,7 +67,7 @@ from control_plane.subscription_harness_bindings import (
     SubscriptionHarnessBinding,
     get_binding,
 )
-from control_plane.worker_adapter import adapter_descriptor
+from control_plane.worker_adapter import adapter_descriptor, construct_reviewed_adapter
 from control_plane.worker_execution_contract import BinaryAttestation
 from control_plane.worker_browser_b1 import BrowserGenerationResource
 
@@ -75,6 +75,10 @@ from control_plane.worker_browser_b1 import BrowserGenerationResource
 CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v4"
 SUBSCRIPTION_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v5"
 NATIVE_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v6"
+SEALED_NATIVE_CONFIG_SCHEMA_VERSION = "mastermind.executive_worker_broker_config/v7"
+_NATIVE_CONFIG_SCHEMA_VERSIONS = frozenset(
+    {NATIVE_CONFIG_SCHEMA_VERSION, SEALED_NATIVE_CONFIG_SCHEMA_VERSION}
+)
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
 )
@@ -114,6 +118,15 @@ _NATIVE_CLAUDE_CONFIG_FIELDS = (_NATIVE_CONFIG_FIELDS - frozenset({
     "codex_binary", "codex_attestation_receipt", "allowed_codex_versions",
     "required_team_identifier",
 })) | frozenset({"claude_binary", "claude_attestation_receipt", "allowed_claude_versions"})
+_SEALED_NATIVE_CLAUDE_CONFIG_FIELDS = _NATIVE_CLAUDE_CONFIG_FIELDS | frozenset({
+    "claude_sdk_python",
+    "sealed_worker_model",
+    "managed_policy_generation",
+    "validation_codex_binary",
+    "validation_codex_attestation_receipt",
+    "validation_allowed_codex_versions",
+    "validation_required_team_identifier",
+})
 _CONTROL_ENV_ATTESTATION_FIELDS = frozenset(
     {
         "schema_version",
@@ -180,16 +193,24 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             if "subscription_realm_enrollment" in value
             else frozenset()
         )
-    elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
-        expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
-                           else _NATIVE_CONFIG_FIELDS)
+    elif schema_version in _NATIVE_CONFIG_SCHEMA_VERSIONS:
+        if schema_version == SEALED_NATIVE_CONFIG_SCHEMA_VERSION:
+            if value.get("native_provider") != "claude":
+                raise WorkerConfigError("sealed native worker supports only Claude")
+            expected_fields = _SEALED_NATIVE_CLAUDE_CONFIG_FIELDS
+        else:
+            expected_fields = (
+                _NATIVE_CLAUDE_CONFIG_FIELDS
+                if value.get("native_provider") == "claude"
+                else _NATIVE_CONFIG_FIELDS
+            )
         if value.get("native_provider") == "claude" and "claude_sdk_python" in value:
             expected_fields = expected_fields | frozenset({"claude_sdk_python"})
     else:
         raise WorkerConfigError("worker config schema version is unsupported")
     if set(value) != expected_fields:
         raise WorkerConfigError("worker config fields do not match the schema")
-    if schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
+    if schema_version in _NATIVE_CONFIG_SCHEMA_VERSIONS:
         if value.get("native_provider") not in {"codex", "claude"}:
             raise WorkerConfigError("native provider is not supported")
         if not isinstance(value.get("native_realm_enrollment"), dict):
@@ -220,6 +241,33 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         raise WorkerConfigError("claude_sdk_python must be an absolute path")
     if provider == "codex" and value.get("required_team_identifier") != _OPENAI_TEAM_IDENTIFIER:
         raise WorkerConfigError("the worker config must require the reviewed OpenAI team")
+    if schema_version == SEALED_NATIVE_CONFIG_SCHEMA_VERSION:
+        model = value.get("sealed_worker_model")
+        generation = value.get("managed_policy_generation")
+        validation_versions = value.get("validation_allowed_codex_versions")
+        if (
+            not isinstance(model, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model)
+            or type(generation) is not int
+            or generation < 1
+            or not isinstance(validation_versions, list)
+            or not validation_versions
+            or len(validation_versions) > 4
+            or any(not isinstance(item, str) or not item for item in validation_versions)
+            or len(validation_versions) != len(set(validation_versions))
+            or value.get("validation_required_team_identifier") != _OPENAI_TEAM_IDENTIFIER
+        ):
+            raise WorkerConfigError("sealed native Claude model/validation policy is invalid")
+        for field in (
+            "validation_codex_binary",
+            "validation_codex_attestation_receipt",
+        ):
+            if not isinstance(value.get(field), str) or not Path(value[field]).is_absolute():
+                raise WorkerConfigError(f"{field} must be an absolute path")
+        if value.get("operator_harness_armed") is not False:
+            raise WorkerConfigError(
+                "sealed native Claude v7 does not arm the rich Operator Harness"
+            )
     if value.get("require_secret_canary") is not True:
         raise WorkerConfigError("production worker config must require the secret canary")
     if not isinstance(value.get("operator_harness_armed"), bool):
@@ -309,7 +357,7 @@ def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
         raise WorkerConfigError("native Claude requires an explicit SDK runtime")
     if (config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION
             and config.get("operator_harness_armed") is not True):
-        raise WorkerConfigError("native service requires current operator autonomy admission")
+        raise WorkerConfigError("native v6 service requires current operator autonomy admission")
     binding = _subscription_binding_for_config(config)
     if binding is None:
         return
@@ -586,10 +634,91 @@ def _native_claude_adapter_types():
     return ClaudeOperatorAdapter, ClaudeReadbackPolicyObserver
 
 
+def _sealed_native_claude_adapter_types():
+    try:
+        from control_plane.claude_worker import (
+            ClaudeCodeWorkerAdapter,
+            PersonalMaxManagedPolicyObserver,
+        )
+    except ImportError:
+        raise WorkerConfigError(
+            "sealed native Claude worker factory is not composed"
+        ) from None
+    return ClaudeCodeWorkerAdapter, PersonalMaxManagedPolicyObserver
+
+
 def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
     _assert_service_activation_allowed(config)
     policy = _broker_policy(config)
     binary = _load_native_claude_binary(config)
+    sweeper = DedicatedUIDSweeper(
+        policy.worker_uid,
+        receipt_path=Path(config["uid_sweep_receipt"]),
+        ambient_classifier=DarwinDistnotedClassifier(),
+    )
+
+    if config.get("schema_version") == SEALED_NATIVE_CONFIG_SCHEMA_VERSION:
+        flat_type, managed_observer_type = _sealed_native_claude_adapter_types()
+        managed_observer = managed_observer_type(
+            binary=binary,
+            exact_model=str(config["sealed_worker_model"]),
+            generation=int(config["managed_policy_generation"]),
+            provider_home=policy.provider_home,
+        )
+        try:
+            flat_adapter = construct_reviewed_adapter(
+                "claude-code",
+                Path(config["claude_binary"]),
+                allowed_versions=frozenset(config["allowed_claude_versions"]),
+                exact_model=str(config["sealed_worker_model"]),
+                max_turns=4,
+                managed_policy_observer=managed_observer,
+            )
+        except Exception:
+            raise WorkerConfigError("sealed native Claude adapter refused") from None
+        if type(flat_adapter) is not flat_type:
+            raise WorkerConfigError(
+                "sealed native Claude adapter is not the reviewed implementation"
+            )
+        if (
+            flat_adapter.binary.sha256 != binary.sha256
+            or flat_adapter.binary.version != binary.version
+            or flat_adapter.binary.real_path != binary.real_path
+        ):
+            raise WorkerConfigError(
+                "sealed native Claude adapter differs from installed attestation"
+            )
+        try:
+            validation_attestation = load_codex_attestation_receipt(
+                Path(config["validation_codex_attestation_receipt"]),
+                expected_binary_path=Path(config["validation_codex_binary"]),
+                expected_owner_gid=policy.worker_gid,
+            )
+            validation_adapter = CodexWorkerAdapter(
+                Path(config["validation_codex_binary"]),
+                codex_home=policy.provider_home,
+                binary_attestation=validation_attestation,
+                allowed_versions=frozenset(
+                    config["validation_allowed_codex_versions"]
+                ),
+                required_team_identifier=str(
+                    config["validation_required_team_identifier"]
+                ),
+            )
+        except Exception:
+            raise WorkerConfigError(
+                "sealed native Claude validation adapter refused"
+            ) from None
+        return ExecutiveWorkerBroker(
+            flat_adapter,
+            policy,
+            sweeper,
+            adapter_id="claude-code",
+            validation_adapter=validation_adapter,
+            validation_adapter_id="codex-cli",
+            operator_harness_armed=False,
+        )
+
     adapter_type, observer_type = _native_claude_adapter_types()
     try:
         registry = ExecutionCapabilityRegistry.load()
@@ -599,25 +728,33 @@ def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
     def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
         matches = []
         for profile in registry.profiles.values():
-            if (not profile.enabled or profile.execution_surface != "claude-agent-sdk"
-                    or requested.provider != "claude"
-                    or requested.harness_kind != "claude-agent-sdk"):
+            if (
+                not profile.enabled
+                or profile.execution_surface != "claude-agent-sdk"
+                or requested.provider != "claude"
+                or requested.harness_kind != "claude-agent-sdk"
+            ):
                 continue
             try:
                 manifest = profile.capability_manifest(
-                    harness_binary_digest=requested.harness_binary_digest)
+                    harness_binary_digest=requested.harness_binary_digest
+                )
             except CapabilityPolicyError:
                 continue
-            if (manifest == requested.capabilities
-                    and profile.sandbox_policy == requested.sandbox_policy
-                    and profile.approval_policy == requested.approval_policy
-                    and profile.network_policy == requested.network_policy
-                    and profile.write_capable == requested.write_capable
-                    and profile.native_helper_policy == requested.native_helper_policy
-                    and profile.expected_config_digest == requested.expected_config_digest):
+            if (
+                manifest == requested.capabilities
+                and profile.sandbox_policy == requested.sandbox_policy
+                and profile.approval_policy == requested.approval_policy
+                and profile.network_policy == requested.network_policy
+                and profile.write_capable == requested.write_capable
+                and profile.native_helper_policy == requested.native_helper_policy
+                and profile.expected_config_digest == requested.expected_config_digest
+            ):
                 matches.append(profile)
         if len(matches) != 1:
-            raise WorkerConfigError("native Claude request does not resolve to one reviewed policy")
+            raise WorkerConfigError(
+                "native Claude request does not resolve to one reviewed policy"
+            )
         profile = matches[0]
         return adapter_type(
             binary_path=Path(config["claude_binary"]),
@@ -635,8 +772,7 @@ def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
     return ExecutiveWorkerBroker(
         None,
         policy,
-        DedicatedUIDSweeper(policy.worker_uid, receipt_path=Path(config["uid_sweep_receipt"]),
-                            ambient_classifier=DarwinDistnotedClassifier()),
+        sweeper,
         adapter_id=None,
         operator_binary_attestation=binary,
         operator_adapter_factory=operator_adapter_factory,
@@ -953,13 +1089,20 @@ def main(argv: list[str] | None = None) -> int:
             if value.get("native_provider") == "claude":
                 _load_native_claude_binary(value)
                 _native_claude_adapter_types()
+                if value.get("schema_version") == SEALED_NATIVE_CONFIG_SCHEMA_VERSION:
+                    _sealed_native_claude_adapter_types()
+                    load_codex_attestation_receipt(
+                        Path(value["validation_codex_attestation_receipt"]),
+                        expected_binary_path=Path(value["validation_codex_binary"]),
+                        expected_owner_gid=int(value["worker_gid"]),
+                    )
             else:
                 load_codex_attestation_receipt(
                     Path(value["codex_attestation_receipt"]),
                     expected_binary_path=Path(value["codex_binary"]),
                     expected_owner_gid=int(value["worker_gid"]),
                 )
-            if value.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION:
+            if value.get("schema_version") in _NATIVE_CONFIG_SCHEMA_VERSIONS:
                 _native_identity_guard(value, Path(args.config))
             print(
                 json.dumps(
@@ -980,7 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
         _assert_service_activation_allowed(config)
         autonomy_guard = None
         native_guard = (_native_identity_guard(config, config_path)
-                        if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION
+                        if config.get("schema_version") in _NATIVE_CONFIG_SCHEMA_VERSIONS
                         else None)
         if config.get("operator_harness_armed") is True:
             own_config_sha256 = sha256_file(config_path)

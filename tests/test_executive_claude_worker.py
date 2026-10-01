@@ -21,6 +21,7 @@ from control_plane.claude_worker import (
     ClaudeAuthObservation,
     ClaudeCodeWorkerAdapter,
     ClaudeWorkerContractError,
+    PersonalMaxManagedPolicyObserver,
     attest_claude_code_binary,
 )
 from control_plane.worker_adapter import (
@@ -76,6 +77,7 @@ def _fixture_claude_binary(
         'if [ "$1" = "--safe-mode" ] && [ "$2" = "--setting-sources" ] && [ -z "$3" ] && [ "$4" = "auth" ] && [ "$5" = "status" ] && [ "$6" = "--json" ] && [ "$#" -eq 6 ]; then\n'
         '  case "$mode" in\n'
         '    auth-ready) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"person@example.invalid","organization":"discard-me","subscriptionType":"discard-me","apiKeySource":"/login managed key"}\\n\'; exit 0 ;;\n'
+        '    auth-max) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"person@example.invalid","subscriptionType":"max","apiKeySource":"/login managed key"}\\n\'; exit 0 ;;\n'
         '    auth-logged-out) printf \'{"loggedIn":false}\\n\'; exit 1 ;;\n'
         '    auth-malformed) printf \'not-json\\n\'; exit 0 ;;\n'
         '    auth-unknown) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","credential":"CREDENTIAL-SENTINEL"}\\n\'; exit 0 ;;\n'
@@ -610,6 +612,86 @@ def test_auth_observation_uses_exact_fenced_argv_and_closed_environment(
     assert "ARBITRARY_AMBIENT_VARIABLE" not in child_environment
     assert "ANTHROPIC_" not in child_environment
     assert "CLAUDE_CODE_" not in child_environment
+
+
+def test_personal_max_managed_policy_observer_projects_only_closed_model_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-max", encoding="utf-8")
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    monkeypatch.setattr(
+        claude_worker, "_darwin_managed_policy_source_present", lambda home: False
+    )
+    observer = PersonalMaxManagedPolicyObserver(
+        binary=attestation,
+        exact_model=_EXACT_MODEL,
+        generation=7,
+        provider_home=tmp_path,
+    )
+
+    observation = observer.observe()
+
+    assert observation.exact_model == _EXACT_MODEL
+    assert observation.binary_sha256 == attestation.sha256
+    assert observation.binary_version == _FIXTURE_VERSION
+    assert observation.generation == 7
+    assert observation.allow_alternate_models == ()
+    assert observation.fallback_models == ()
+    assert "person@example.invalid" not in repr(observation)
+    auth = claude_worker._observe_auth_status_for_binary(
+        attestation, timeout_seconds=1
+    )
+    assert auth.subscription_scope == "personal_max"
+
+
+def test_personal_max_managed_policy_observer_refuses_source_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-max", encoding="utf-8")
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    observations = iter((False, True))
+    monkeypatch.setattr(
+        claude_worker,
+        "_darwin_managed_policy_source_present",
+        lambda home: next(observations),
+    )
+    observer = PersonalMaxManagedPolicyObserver(
+        binary=attestation,
+        exact_model=_EXACT_MODEL,
+        generation=3,
+        provider_home=tmp_path,
+    )
+
+    with pytest.raises(ClaudeWorkerContractError, match="changed during observation"):
+        observer.observe()
+
+
+def test_personal_max_managed_policy_observer_refuses_unqualified_subscription(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = _fixture_claude_binary(tmp_path)
+    (tmp_path / "mode").write_text("auth-ready", encoding="utf-8")
+    attestation = attest_claude_code_binary(
+        binary, allowed_versions=frozenset({_FIXTURE_VERSION})
+    )
+    monkeypatch.setattr(
+        claude_worker, "_darwin_managed_policy_source_present", lambda home: False
+    )
+    observer = PersonalMaxManagedPolicyObserver(
+        binary=attestation,
+        exact_model=_EXACT_MODEL,
+        generation=1,
+        provider_home=tmp_path,
+    )
+
+    with pytest.raises(ClaudeWorkerContractError, match="personal Max"):
+        observer.observe()
 
 
 def test_auth_observation_discards_pii_and_reports_logged_out(
