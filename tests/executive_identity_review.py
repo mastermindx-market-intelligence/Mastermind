@@ -98,7 +98,7 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                          'sites': ((('body', 3, 'body', 1, 'test', 'comparators', 0), 'int', 450, '450'),
                                    (('body', 3, 'orelse', 1, 'test', 'comparators', 0), 'int', 458, '458'))},
  '_inventory_python_base': {'node_type': 'FunctionDef',
-                            'ast_sha256': '596652feb54da86955aedf19d7d4e313205963daaf3d0f2f272c2e0a5269a1b1',
+                            'ast_sha256': 'fa4c9c3d13b53e71660a28e26ffd76824c2dd0574a98426cac4676d4a714f3d8',
                             'sites': ((('body',
                                         5,
                                         'body',
@@ -181,6 +181,11 @@ def reviewed_literal_spans(path: str, source: str):
             REVIEWED_ANCHORS as release_owner_anchors,
         )
         reviewed_anchors = release_owner_anchors
+    elif path == "control_plane/executive_release_observation.py":
+        from tests.executive_release_observation_identity_review import (
+            REVIEWED_ANCHORS as release_observation_anchors,
+        )
+        reviewed_anchors = release_observation_anchors
     else:
         return ()
     # str.splitlines recognizes these separators, while Python source/AST

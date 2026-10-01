@@ -776,7 +776,7 @@ def _build_profile_mcp_app(
     tool call forwards its current raw bearer for independent App verification.
     No installed configuration, public listener, or fixture write is implied.
     """
-    from control_plane.ceo_request import app_request_ref
+    from control_plane.ceo_request import app_request_ref, automated_intent_id
     from integrations.mastermind_executive_app.app import (
         _metadata_policy_and_path, _outcome_response,
     )
@@ -865,9 +865,18 @@ def _build_profile_mcp_app(
         if is_release:
             from integrations.executive_mcp.release_control import unknown_release_result
             return unknown_release_result()
+        if request_ref is None:
+            raise ValueError("CEO recovery requires the original request reference")
+        # The exposed reader accepts an intent id, not an outer request ref.
+        # Reuse the canonical identity owner; never copy its hash derivation.
+        intent_id = automated_intent_id(request_ref)
         response = _outcome_response(AdmissionOutcome(
             status=STATUS_EFFECT_UNKNOWN, request_ref=request_ref, code="effect_unknown",
-            message="the Executive response is unavailable; reconcile the same request_ref before any further submission",
+            message=("the Executive response is unavailable; read ceo_intent_status "
+                     f"with intent_id={intent_id} for this original request. "
+                     "A not_found response does not authorize resubmission. "
+                     "Preserve request_ref and require canonical reconciliation "
+                     "before any further submission."),
         ))
         return json.loads(response.body)
 
@@ -943,6 +952,9 @@ def _build_profile_mcp_app(
                 )
                 if not preflight_error and not _executive_outcome(payload, request_ref, response.status_code):
                     payload = unknown(request_ref, is_release=is_release)
+                elif payload.get("status") == STATUS_EFFECT_UNKNOWN:
+                    # Same closed outcome, now usable through existing MCP tools.
+                    payload = unknown(request_ref, is_release=False)
             elif response.status_code != 200 or not _is_e1_envelope(
                 payload, name, profile_server_version
             ):

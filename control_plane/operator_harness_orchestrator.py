@@ -581,6 +581,20 @@ class OperatorHarnessOrchestrator:
                 "work turn refused by observed launch comparison: "
                 + session.launch.decision.value
             )
+        # The optional owner read keeps ordinary RuntimePort implementations
+        # on their original role-sealing path. Models cannot select this policy.
+        plan_reader = getattr(self.runtime, "existing_interactive_plan_seal", None)
+        if plan_reader is not None and not callable(plan_reader):
+            raise OperatorHarnessOrchestrationError("interactive plan reader is invalid")
+        initial_plan = (
+            plan_reader(session.attempt_id, session.generation)
+            if plan_reader is not None else None
+        )
+        if initial_plan is not None and (
+            type(initial_plan) is not str or len(initial_plan) != 64
+            or any(char not in "0123456789abcdef" for char in initial_plan)
+        ):
+            raise OperatorHarnessOrchestrationError("interactive plan seal is invalid")
         turn = self.runtime.begin_operator_turn(
             session.attempt_id, session.generation, operation_id
         )
@@ -658,7 +672,12 @@ class OperatorHarnessOrchestrator:
                 error=exc,
             )
             raise OperatorEffectUnknown("turn result effect is unknown") from exc
-        if bool(
+        if initial_plan is not None:
+            # The follow-up candidate is already recorded by Runtime. It is
+            # not a new plan and must not replace the initial accepted seal.
+            if plan_reader(session.attempt_id, session.generation) != initial_plan:
+                raise OperatorHarnessOrchestrationError("interactive plan seal changed")
+        elif bool(
             getattr(self.runtime, "operator_principal_required", lambda _value: False)(
                 session.attempt_id
             )

@@ -883,3 +883,31 @@ def observed_at(value: str, now_seconds: int, *, admission: bool) -> int:
     if admission and now_seconds >= observed + _DAY_SECONDS:
         _fail("observed_at", "STALE")
     return observed
+
+
+def _decode_resident_evidence_v2(
+    raw: bytes,
+    expected_evidence_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Pure full-context join; callers still supply unauthenticated evidence.
+
+    This adapter is intentionally not connected to resident/owner construction.
+    The future secured consumer must independently derive every expected field.
+    """
+    from ops.executive_os.release_owner_resident_inputs import (
+        ReleaseOwnerInputError, canonical_file_bytes, decode_installed_evidence_v2,
+    )
+
+    if type(expected_evidence_context) is not dict:
+        _fail("expected_evidence_context", "TYPE")
+    try:
+        evidence = decode_installed_evidence_v2(raw)
+        expected_raw = canonical_file_bytes(expected_evidence_context)
+        decode_installed_evidence_v2(expected_raw)
+    except ReleaseOwnerInputError as error:
+        _fail("installed_evidence", error.code)
+    # Canonical bytes retain every nested JSON type, unlike Python equality
+    # where True == 1 and 1 == 1.0. Closed decoding forbids partial contexts.
+    if raw != expected_raw:
+        _fail("installed_evidence", "MISMATCH")
+    return evidence

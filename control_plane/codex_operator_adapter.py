@@ -2178,6 +2178,47 @@ class CodexOperatorAdapter:
 
         for item in notifications:
             method = str(item.get("method") or "unknown")
+            if method == "turn/completed":
+                completed_params = item.get("params")
+                completed_turn = (
+                    completed_params.get("turn")
+                    if isinstance(completed_params, Mapping) else None
+                )
+                if not isinstance(completed_turn, Mapping):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "completion has no exact native turn identity",
+                        effect_unknown=True,
+                    )
+                outer_thread = completed_params.get("threadId")
+                inner_thread = completed_turn.get("threadId")
+                if any(
+                    value is not None and (
+                        type(value) is not str or not value
+                        or value != value.strip()
+                    )
+                    for value in (outer_thread, inner_thread)
+                ) or (
+                    outer_thread is not None and inner_thread is not None
+                    and outer_thread != inner_thread
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "completion thread identity is malformed or conflicting",
+                        effect_unknown=True,
+                    )
+                completed_thread = outer_thread if outer_thread is not None else inner_thread
+                # Child-thread events retain the existing helper admission
+                # below. They cannot satisfy the parent's terminal check.
+                if completed_thread in {None, "", state.provider_session_id} and (
+                    type(completed_turn.get("id")) is not str
+                    or completed_turn.get("id") != state.turns.get(turn.turn_id)
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "completion does not match the selected native turn",
+                        effect_unknown=True,
+                    )
             if turn.turn_id in state.visible_turns:
                 self._visible_projection().publish(
                     TurnKey(
@@ -2916,7 +2957,10 @@ class CodexOperatorAdapter:
             if notifications:
                 self._ingest_turn_notifications(state, turn, notifications)
             if not any(
-                event.turn_id == cursor.turn_id and event.kind == "turn/completed"
+                event.turn_id == cursor.turn_id
+                and event.kind == "turn/completed"
+                and event.provider_event_id == state.turns[cursor.turn_id]
+                and event.native_subordinate_id is None
                 for event in state.events
             ):
                 try:
@@ -2929,8 +2973,25 @@ class CodexOperatorAdapter:
                 self._ingest_turn_notifications(
                     state, turn, [*completed_after, completed]
                 )
+            if not any(
+                event.turn_id == cursor.turn_id
+                and event.kind == "turn/completed"
+                and event.provider_event_id == state.turns[cursor.turn_id]
+                and event.native_subordinate_id is None
+                for event in state.events
+            ):
+                raise CodexAdapterError(
+                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                    "selected native turn completion is unavailable",
+                    effect_unknown=True,
+                )
             self._audit_native_helper_tree(state, turn)
-        events = tuple(state.events[cursor.local_sequence :])
+        # The cursor stays generation-global. A turn-scoped read exposes only
+        # its own evidence, not older turns still retained in that generation.
+        events = tuple(
+            event for event in state.events[cursor.local_sequence :]
+            if cursor.turn_id is None or event.turn_id in {None, cursor.turn_id}
+        )
         return events, EventCursor(
             attempt_id=cursor.attempt_id,
             session_epoch_id=cursor.session_epoch_id,
@@ -2987,17 +3048,41 @@ class CodexOperatorAdapter:
             )
         except Exception as exc:
             raise _rpc_failure(exc, effect_unknown=True) from exc
-        rows = [row for row in result.get("data", []) if isinstance(row, Mapping)]
-        matching = [row for row in rows if str(row.get("id") or "") == native_turn]
-        if not matching:
+        rows = result.get("data") if isinstance(result, Mapping) else None
+        if (
+            not isinstance(rows, list)
+            or any(not isinstance(row, Mapping) for row in rows)
+            or result.get("nextCursor") is not None
+        ):
             raise CodexAdapterError(
                 AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                "native turn result is missing",
+                "native turn result page is malformed or incomplete",
+                effect_unknown=True,
+            )
+        matching = [row for row in rows if row.get("id") == native_turn]
+        if len(matching) != 1:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "native turn result is missing or ambiguous",
+                effect_unknown=True,
+            )
+        result_status = matching[0].get("status")
+        if result_status is not None and result_status != "completed":
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "native turn result contradicts completed-turn evidence",
                 effect_unknown=True,
             )
         texts = turn_texts(matching)
         summary = redact_evidence_text(texts[-1][:4000]) if texts else None
         artifact_digest = _canonical_digest(matching)
+        previous_digest = state.candidate_artifact_digests.get(turn.turn_id)
+        if previous_digest is not None and artifact_digest != previous_digest:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "native turn result changed after candidate collection",
+                effect_unknown=True,
+            )
         if self.skill_canary_binding is not None:
             self._verify_skill_state_after_turn(state, self.skill_canary_binding)
         state.candidate_artifact_digests[turn.turn_id] = artifact_digest

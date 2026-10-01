@@ -334,11 +334,15 @@ class ReleaseBrokerClient:
         original = _current_commit_approval(detached, approval)
         public = ingress.project_frame(detached.operation, detached.arguments, principal=detached.principal)
         operation = "reserve_release_prestart"
+        # One absolute 15 s endpoint bounds this transport exchange only; it
+        # never renews per stage and cannot resume a lost response.
+        deadline_monotonic_ns = time.monotonic_ns() + 15_000_000_000
         reply = _send_one_frame(
             {"schema": BROKER_SCHEMA, "operation": operation,
              "arguments": public["arguments"], "principal": public["principal"],
              "approval": original.to_dict()},
             socket_path=DEFAULT_SOCKET, timeout_seconds=15, require_root_peer=True,
+            deadline_monotonic_ns=deadline_monotonic_ns,
         )
         result = _private_release_result(reply, operation, original, {"reservation"})
         reservation = contract.validate_release_prestart_reservation(
@@ -360,12 +364,14 @@ class ReleaseBrokerClient:
         frame, approval, reservation, evidence = fresh_admission._consume()
         public = ingress.project_frame(frame.operation, frame.arguments, principal=frame.principal)
         operation = "start_reserved_release"
+        deadline_monotonic_ns = time.monotonic_ns() + 15_000_000_000
         reply = _send_one_frame(
             _bounded_private_payload({"schema": BROKER_SCHEMA, "operation": operation,
              "arguments": public["arguments"], "principal": public["principal"],
              "approval": approval.to_dict(), "reservation": reservation.to_dict(),
              "admission_evidence": json.loads(contract.canonical_release_bytes(evidence))}),
             socket_path=DEFAULT_SOCKET, timeout_seconds=15, require_root_peer=True,
+            deadline_monotonic_ns=deadline_monotonic_ns,
         )
         result = _private_release_result(
             reply, operation, approval, {"reservation", "admission", "start_record"})
@@ -401,10 +407,12 @@ class ReleaseBrokerClient:
         evidence = canonical_evidence._consume()
         original = evidence["approval"]
         operation = "read_release_closure"
+        deadline_monotonic_ns = time.monotonic_ns() + 15_000_000_000
         response = _send_one_frame(
             _bounded_private_payload({"schema": BROKER_SCHEMA, "operation": operation,
              "admission_evidence": json.loads(contract.canonical_release_bytes(evidence))}),
             socket_path=DEFAULT_SOCKET, timeout_seconds=15, require_root_peer=True,
+            deadline_monotonic_ns=deadline_monotonic_ns,
         )
         if (type(response) is not dict or response.get("schema") != BROKER_SCHEMA
                 or response.get("operation") != operation
@@ -439,8 +447,10 @@ class ReleaseBrokerClient:
         public = ingress.project_frame(frame.operation, frame.arguments, principal=frame.principal)
         payload = {**public, "schema": BROKER_SCHEMA,
                    "approval": None if approval is None else approval.to_dict()}
+        deadline_monotonic_ns = time.monotonic_ns() + 15_000_000_000
         response = _send_one_frame(payload, socket_path=DEFAULT_SOCKET,
-                                   timeout_seconds=15, require_root_peer=True)
+                                   timeout_seconds=15, require_root_peer=True,
+                                   deadline_monotonic_ns=deadline_monotonic_ns)
         if (type(response) is not dict or response.get("schema") != BROKER_SCHEMA
                 or response.get("operation") != frame.operation
                 or type(response.get("ok")) is not bool):
