@@ -35,6 +35,27 @@ and merge decisions follow the currently authorized role and operation, not a
 historical session name. Independent review and source/release protections still apply.
 These role descriptions do not themselves grant authority.
 
+### Adaptive engineering delegation
+
+Engineering and operations use `docs/sol_skills/WEB_CEO_DELEGATION.md` and
+`docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md`: optimize total cost per accepted outcome,
+including framing, execution, integration, independent review and repair. Keep cash, API estimates
+and provider-native subscription depletion separate. An admission class such as `small` is not a price.
+
+Use a principal for consequential intent and architecture, a bounded project lead when decomposition
+and integration earn their overhead, and qualified economical workers for independently checkable
+execution. Do not require all three levels for every task or assign rank from a model name.
+Full GLM, Grok, Sol or Opus is not an economical default merely because another principal costs more.
+Prefer admitted, task-qualified economical model/surface combinations; retain stronger execution
+only with a bounded `WHY_STRONG_EXECUTOR` rationale and existing budget authority.
+
+Delegation uses the existing Fabric and admission owner. Neither an instruction nor a native nesting
+flag grants descendants, tools, credentials, scope, capacity or a new budget. Preserve the admitted
+graph, independent review, workspace custody, exact-parent returns and effect reconciliation.
+Return compact artifact/test evidence rather than every transcript; escalate contradictions, not
+routine commands. Portfolio-reasoning model policy below is a separate invocation, not a default
+for engineering workers. Source-policy conformance does not prove installed or fresh-session adoption.
+
 **Source-of-truth order.** When two sources disagree, the higher layer wins:
 
 1. **Charter / constitution** — `research/MASTERMIND_CHARTER_V2.md` (P1–P10).
