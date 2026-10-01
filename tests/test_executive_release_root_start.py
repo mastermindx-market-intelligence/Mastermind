@@ -1009,7 +1009,13 @@ def test_identical_endpoint_across_journal_and_fresh_replay_request(tmp_path, mo
             for item in value.values(): no_deadline(item)
         elif isinstance(value, list):
             for item in value: no_deadline(item)
-    no_deadline(first)
+    recorded = first["result"]["start_record"]
+    assert recorded["start_deadline_monotonic_ns"] == endpoint
+    assert recorded["boot_id"] == recorded["preconditions"]["boot_id"]
+    assert recorded["schema"] == "mastermind.executive_release_actuator_journal/v3"
+    detached = copy.deepcopy(first)
+    del detached["result"]["start_record"]["start_deadline_monotonic_ns"]
+    no_deadline(detached)
     no_deadline(c.frame("start_reserved_release"))
 
 
@@ -1183,3 +1189,43 @@ def test_private_endpoint_validation_prevents_dependent_effects(tmp_path, monkey
         c.owner._start_reserved_release(c.frame("start_reserved_release"), object(), deadline_monotonic_ns=endpoint)
     assert "INVALID" in caught.value.code
     assert not calls
+
+
+@pytest.mark.parametrize('phase',['PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING','SUCCEEDED','ROLLED_BACK'])
+def test_owner_projects_exact_new_protocol_journal_without_effect(tmp_path,monkeypatch,inputs,phase):
+    c=Composition(tmp_path,monkeypatch,inputs);reserved=c.reserve()['result']['reservation']
+    record=c.start()['result']['start_record'];original=dict(record)
+    phases=['PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING']
+    for step in phases:
+        record=c.journal.advance(c.approval['operation_key'],expected_generation=record['journal_generation'],
+            state=step,reservation=reserved,approval=c.approval)
+        if step==phase:break
+    if phase in ('SUCCEEDED','ROLLED_BACK'):
+        before=reserved['before'];after=copy.deepcopy(before)
+        if phase=='SUCCEEDED':
+            effect=c.approval['normalized_requested_effect']
+            after.update(release_commit=effect['to_release_commit'],release_tree=effect['to_release_tree'],
+                broker_source_commit=effect['to_release_commit'],broker_source_tree=effect['to_release_tree'])
+        rollback={'attempted':False} if phase=='SUCCEEDED' else {'attempted':True,'restored_preimage_digest':digest(before)}
+        record=c.journal.advance(c.approval['operation_key'],expected_generation=record['journal_generation'],
+            state=phase,reservation=reserved,approval=c.approval,completed_at_ms=NOW[0]+1,
+            postcondition_digest='f'*64,before=before,after=after,rollback=rollback,
+            after_actuator_generation=record['actuator_generation']+(1 if phase=='SUCCEEDED' else 2))
+    status=c.owner._closure_status(record,reserved,digest(reserved),record['admission'],c.approval)
+    assert status['schema']=='mastermind.executive_release_terminal_status/v2' and status['state']==phase
+    assert status['before']==reserved['before']
+    assert status['start_deadline_monotonic_ns']==original['start_deadline_monotonic_ns']
+    assert status['preconditions']['boot_id']==original['boot_id']
+    if phase in ('SUCCEEDED','ROLLED_BACK'):
+        receipt=status['terminal_receipt']
+        assert receipt['after_actuator_generation']==record['terminal']['after_actuator_generation']
+        assert receipt['publication_intent_digest']==digest(record['publication_intent'])
+
+
+# R2 preserves the original authority deadline during bounded replay.
+def test_owner_shorter_replay_io_budget(tmp_path,monkeypatch,inputs):
+    comp=Composition(tmp_path,monkeypatch,inputs);comp.reserve();first=comp.start();before=(comp.journal._root/comp.journal._name(comp.approval['operation_key'])).read_bytes()
+    record=first['result']['start_record'];shorter=MONOTONIC[0]+1_000_000_000
+    assert shorter<record['start_deadline_monotonic_ns']
+    replay=comp.owner._start_reserved_release(comp.frame('start_reserved_release'),object(),deadline_monotonic_ns=shorter)
+    assert replay==first and (comp.journal._root/comp.journal._name(comp.approval['operation_key'])).read_bytes()==before
