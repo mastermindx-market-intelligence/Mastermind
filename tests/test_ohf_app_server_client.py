@@ -437,3 +437,148 @@ def test_send_deadline_restores_the_pipe_mode_after_success(tmp_path):
         assert not client._write_lock.locked()
     finally:
         client.close()
+
+
+@pytest.mark.parametrize("stage", ["parse", "prebind"])
+def test_guarded_send_waits_for_a_frame_read_but_not_published(tmp_path, monkeypatch, stage):
+    import json
+    import threading
+    entered = threading.Event()
+    release = threading.Event()
+    attempting = threading.Event()
+    sent = threading.Event()
+    marker = "in-flight-reader-marker"
+    code = (
+        "import json,sys\n"
+        "print(json.dumps({'method':'account/update','params':{'marker':'in-flight-reader-marker'}}),flush=True)\n"
+        "for line in sys.stdin:\n"
+        " request=json.loads(line)\n"
+        " print(json.dumps({'id':request['id'],'result':{'ok':True}}),flush=True)\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    original_loads = json.loads
+    def loads(value, *args, **kwargs):
+        if stage == "parse" and isinstance(value, str) and marker in value:
+            entered.set()
+            assert release.wait(timeout=2)
+        return original_loads(value, *args, **kwargs)
+    monkeypatch.setattr(laboratory.json, "loads", loads)
+    class Observer:
+        def active_prebind_request_id(self):
+            return None
+        def prebind_frame(self, request_id, *, method, params):
+            if stage == "prebind" and method == "account/update":
+                entered.set()
+                assert release.wait(timeout=2)
+        def publish_demultiplexed(self, *args, **kwargs):
+            pass
+        def arm_prebind(self, *args):
+            pass
+        def drop_prebind(self, *args):
+            pass
+        def drop_expired_prebind(self):
+            pass
+    if stage == "prebind":
+        client.visible_projection = Observer()
+    original_send = client._send
+    def send(payload, **kwargs):
+        if payload.get("method") == "turn/start":
+            sent.set()
+        return original_send(payload, **kwargs)
+    client._send = send
+    prefixes, results, errors = [], [], []
+    def submit():
+        attempting.set()
+        try:
+            results.append(client.request("turn/start", {}, timeout=1,
+                before_send=lambda request_id, queued: prefixes.append(queued)))
+        except Exception as exc:
+            errors.append(exc)
+    client.start()
+    thread = threading.Thread(target=submit)
+    early_send = False
+    try:
+        assert entered.wait(timeout=1), "fixture did not reach the read-to-publication interval"
+        thread.start()
+        assert attempting.wait(timeout=1)
+        early_send = sent.wait(timeout=0.05)
+    finally:
+        release.set()
+        if thread.ident is not None:
+            thread.join(timeout=2)
+        client.close()
+    assert not thread.is_alive()
+    assert not early_send, "new turn passed an already-read, unclassified frame"
+    assert not errors and results == [{"ok": True}]
+    assert len(prefixes) == 1 and len(prefixes[0]) == 1
+    assert prefixes[0][0]["method"] == "account/update"
+
+
+def test_guarded_send_waits_for_an_already_read_partial_frame(tmp_path):
+    import threading
+    import time
+    marker = tmp_path / "partial-written"
+    finish = tmp_path / "complete-frame"
+    code = (
+        "import json,pathlib,sys,time\n"
+        "sys.stdout.write('{\"method\":\"account/update\",');sys.stdout.flush()\n"
+        "pathlib.Path(sys.argv[1]).write_text('partial')\n"
+        "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.002)\n"
+        "sys.stdout.write('\"params\":{}}\\n');sys.stdout.flush()\n"
+        "for line in sys.stdin:\n"
+        " request=json.loads(line)\n"
+        " print(json.dumps({'id':request['id'],'result':{'ok':True}}),flush=True)\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code, str(marker), str(finish)],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    sent = threading.Event()
+    original_send = client._send
+    def send(payload, **kwargs):
+        if payload.get("method") == "turn/start":
+            sent.set()
+        return original_send(payload, **kwargs)
+    client._send = send
+    errors, prefixes = [], []
+    def submit():
+        try:
+            client.request("turn/start", {}, timeout=1,
+                           before_send=lambda request_id, queued: prefixes.append(queued))
+        except Exception as exc:
+            errors.append(exc)
+    client.start()
+    thread = threading.Thread(target=submit)
+    try:
+        limit = time.monotonic() + 1
+        while not marker.exists() and time.monotonic() < limit:
+            time.sleep(.002)
+        assert marker.exists()
+        # The repaired reader exposes the same parser buffer, not a new queue.
+        if hasattr(client, "_stdout_pending"):
+            while not client._stdout_pending and time.monotonic() < limit:
+                time.sleep(.002)
+            assert client._stdout_pending
+        thread.start()
+        early = sent.wait(timeout=.05)
+    finally:
+        finish.write_text('finish')
+        if thread.ident is not None:
+            thread.join(timeout=2)
+        client.close()
+    assert not thread.is_alive()
+    assert not early, "new turn passed a previously started incoming frame"
+    assert not errors
+    assert prefixes and prefixes[0][0]["method"] == "account/update"
+
+
+
+def test_partial_ingress_timeout_cannot_send_or_discard_the_fragment(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    client._stdout_pending.extend(b'{"method":')
+    sends = []
+    client._send = lambda payload, **kwargs: sends.append(payload)
+    with pytest.raises(JsonRpcError, match="incomplete ingress frame"):
+        client.request("turn/start", {}, timeout=.01, before_send=lambda *_: None)
+    assert sends == [] and client._responses == {}
+    assert client._stdout_pending == b'{"method":'
+    assert not client._transport_closed

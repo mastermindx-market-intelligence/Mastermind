@@ -325,6 +325,7 @@ class AppServerClient:
         self._reader: threading.Thread | None = None
         self._err_reader: threading.Thread | None = None
         self.notifications: list[dict[str, Any]] = []
+        self._stdout_pending = bytearray()  # Private framing buffer owned by the sole reader.
         self._responses: dict[int, queue.Queue[dict[str, Any] | None]] = {}
         self._raw_responses: dict[
             int, queue.Queue[PrivateRawTurnPage | dict[str, str] | None]
@@ -367,102 +368,134 @@ class AppServerClient:
 
     def _read_stdout(self) -> None:
         assert self.proc is not None and self.proc.stdout is not None
-        while True:
-            raw = self.proc.stdout.readline(APP_SERVER_MAX_FRAME_BYTES + 2)
-            if not raw:
-                break
-            if len(raw) > APP_SERVER_MAX_FRAME_BYTES or not raw.endswith(b"\n"):
-                self._compromise_transport()
-                return
-            try:
-                line = raw.decode("utf-8", errors="strict").strip()
-            except UnicodeDecodeError:
-                self._compromise_transport()
-                return
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                if self.visible_projection is not None:
-                    self.visible_projection.record_parser_failure()
+        fd = self.proc.stdout.fileno()
+        was_blocking = os.get_blocking(fd)
+        os.set_blocking(fd, False)
+        try:
+            while True:
+                try:
+                    readable, _, _ = select.select([fd], [], [], 0.1)
+                except (OSError, ValueError):
+                    break
+                if not readable:
+                    if self._transport_closed:
+                        break
+                    continue
+                compromised = False
+                eof = False
                 with self._notification_condition:
-                    raw_pending = bool(self._raw_responses)
-                if raw_pending:
+                    if self._transport_closed:
+                        break
+                    # Read, decode, prebind and publish are one ingress edge.
+                    # No already-read frame can hide outside the send lock.
+                    try:
+                        amount = min(65536, APP_SERVER_MAX_FRAME_BYTES + 1 - len(self._stdout_pending))
+                        chunk = os.read(fd, max(1, amount))
+                    except (BlockingIOError, InterruptedError):
+                        continue
+                    except OSError:
+                        chunk = b""
+                    if not chunk:
+                        eof = True
+                        compromised = bool(self._stdout_pending)
+                    else:
+                        self._stdout_pending.extend(chunk)
+                        while True:
+                            end = self._stdout_pending.find(b"\n")
+                            if end < 0:
+                                break
+                            raw = bytes(self._stdout_pending[: end + 1])
+                            del self._stdout_pending[: end + 1]
+                            if not self._accept_stdout_frame_locked(raw):
+                                compromised = True
+                                break
+                        if len(self._stdout_pending) > APP_SERVER_MAX_FRAME_BYTES:
+                            compromised = True
+                    if compromised:
+                        self._transport_closed = True
+                    self._notification_condition.notify_all()
+                if compromised:
                     self._compromise_transport()
                     return
-                self._stdout.put({"_malformed": True, "raw": redact_text(line)})
-                continue
-            if isinstance(payload, dict):
-                prebind_request_id: int | None = None
-                if self.visible_projection is not None:
+                if eof:
+                    break
+        finally:
+            try:
+                os.set_blocking(fd, was_blocking)
+            except OSError:
+                pass
+            with self._notification_condition:
+                self._transport_closed = True
+                self._stdout_pending.clear()
+                for target in (*self._responses.values(), *self._raw_responses.values()):
                     try:
-                        prebind_request_id = (
-                            self.visible_projection.active_prebind_request_id()
-                        )
-                        self.visible_projection.prebind_frame(
-                            prebind_request_id,
-                            method=payload.get("method"),
-                            params=payload.get("params"),
-                        )
-                    except Exception as exc:
-                        prebind_request_id = None
-                        self._record_observer_fault("prebind_frame", exc)
-                with self._notification_condition:
-                    response_id = payload.get("id")
-                    raw_target = (
-                        self._raw_responses.get(response_id)
-                        if isinstance(response_id, int)
-                        else None
+                        target.put_nowait(None)
+                    except queue.Full:
+                        pass  # Preserve an already-delivered response/failure.
+                self._notification_condition.notify_all()
+
+    def _accept_stdout_frame_locked(self, raw: bytes) -> bool:
+        """Parse and publish one bounded frame under the existing ingress lock."""
+        if len(raw) > APP_SERVER_MAX_FRAME_BYTES or not raw.endswith(b"\n"):
+            return False
+        try:
+            line = raw.decode("utf-8", errors="strict").strip()
+        except UnicodeDecodeError:
+            return False
+        if not line:
+            return True
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            if self.visible_projection is not None:
+                self.visible_projection.record_parser_failure()
+            if self._raw_responses:
+                return False
+            self._stdout.put({"_malformed": True, "raw": redact_text(line)})
+            return True
+        if not isinstance(payload, dict):
+            return True
+        prebind_request_id: int | None = None
+        if self.visible_projection is not None:
+            try:
+                prebind_request_id = self.visible_projection.active_prebind_request_id()
+                self.visible_projection.prebind_frame(
+                    prebind_request_id, method=payload.get("method"), params=payload.get("params")
+                )
+            except Exception as exc:
+                prebind_request_id = None
+                self._record_observer_fault("prebind_frame", exc)
+        response_id = payload.get("id")
+        raw_target = self._raw_responses.get(response_id) if isinstance(response_id, int) else None
+        try:
+            if raw_target is not None:
+                if "error" in payload:
+                    raw_target.put_nowait({"_transport_failure": redact_text(str(
+                        (payload.get("error") or {}).get("message")
+                        if isinstance(payload.get("error"), Mapping) else "raw request failed"
+                    ))})
+                else:
+                    result = payload.get("result")
+                    raw_target.put_nowait(
+                        PrivateRawTurnPage(result, len(raw)) if isinstance(result, dict)
+                        else {"_transport_failure": "raw response is malformed"}
                     )
-                    if raw_target is not None:
-                        if "error" in payload:
-                            raw_target.put(
-                                {
-                                    "_transport_failure": redact_text(
-                                        str(
-                                            (payload.get("error") or {}).get("message")
-                                            if isinstance(payload.get("error"), Mapping)
-                                            else "raw request failed"
-                                        )
-                                    )
-                                }
-                            )
-                        else:
-                            result = payload.get("result")
-                            if not isinstance(result, dict):
-                                raw_target.put(
-                                    {"_transport_failure": "raw response is malformed"}
-                                )
-                            else:
-                                raw_target.put(PrivateRawTurnPage(result, len(raw)))
-                        continue
-                    observed = redact_evidence(payload)
-                    target = (
-                        self._responses.get(response_id)
-                        if isinstance(response_id, int)
-                        else None
-                    )
-                    if target is not None:
-                        target.put(observed)
-                    else:
-                        self.notifications.append(observed)
-                        self._notification_condition.notify_all()
-                if self.visible_projection is not None:
-                    try:
-                        self.visible_projection.publish_demultiplexed(
-                            prebind_request_id,
-                            payload=payload,
-                        )
-                    except Exception as exc:
-                        self._record_observer_fault("publish_demultiplexed", exc)
-        with self._notification_condition:
-            self._transport_closed = True
-            for target in self._responses.values():
-                target.put(None)
-            for target in self._raw_responses.values():
-                target.put(None)
-            self._notification_condition.notify_all()
+                return True
+            observed = redact_evidence(payload)
+            target = self._responses.get(response_id) if isinstance(response_id, int) else None
+            if target is not None:
+                target.put_nowait(observed)
+            else:
+                self.notifications.append(observed)
+                self._notification_condition.notify_all()
+        except queue.Full:
+            return False  # Duplicate response cannot block the sole ingress owner.
+        if self.visible_projection is not None:
+            try:
+                self.visible_projection.publish_demultiplexed(prebind_request_id, payload=payload)
+            except Exception as exc:
+                self._record_observer_fault("publish_demultiplexed", exc)
+        return True
 
     def _record_observer_fault(self, operation: str, exc: Exception) -> None:
         fault = ObserverFault(operation, type(exc).__name__)
@@ -592,9 +625,16 @@ class AppServerClient:
                 with self._notification_condition:
                     if self._transport_closed:
                         raise JsonRpcError("app-server exited before guarded turn/start")
+                    assert deadline is not None
+                    while self._stdout_pending:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise JsonRpcError("timeout waiting for incomplete ingress frame")
+                        self._notification_condition.wait(timeout=remaining)
+                        if self._transport_closed:
+                            raise JsonRpcError("app-server exited before guarded turn/start")
                     if len(self._responses) != 1 or self._raw_responses:
                         raise JsonRpcError("guarded turn/start requires an idle request boundary")
-                    assert deadline is not None
                     if time.monotonic() >= deadline:
                         raise JsonRpcError("timeout before guarded turn/start")
                     queued = list(self.notifications)
