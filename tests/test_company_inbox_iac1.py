@@ -7,22 +7,38 @@ tool surface is frozen in ``integrations/mastermind_company_mcp``.
 """
 from __future__ import annotations
 
+import ast
 import asyncio
+import copy
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
+import re
 import shutil
 import subprocess
+import tempfile
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from common.agent_dialogue_contract_v2 import (
+    PARENT_SCHEMA_V2,
+    TURN_WATCH_MODE_V1,
+    build_parent_v2,
+    render_parent_v2,
+)
 from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_MAX_BYTES,
     CONSULTATION_SCHEMA,
+    CONSULTATION_V2_SCHEMA,
+    RECEIPT_KEYS,
     build_consultation,
     canonical_consultation_json,
+    render_consultation_packet,
 )
 from control_plane.ceo_intent import INTENT_SCHEMA_V2, submit_intent
 from control_plane.company_inbox_projection import (
@@ -45,14 +61,38 @@ from control_plane.operator_harness_contract import (
 )
 from control_plane.wake_ledger import LedgerPhase, attempt_record
 from control_plane.wake_persist import WakeLedgerRepository
+from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
     COMPANY_CONSULTATION_SCHEMA,
     CompanyConsultationGateway,
 )
+from integrations.slack_agent_dialogue.engine import (
+    DialogueEngine,
+    DialoguePolicy,
+    SlackMessage,
+)
+from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
+from integrations.slack_agent_dialogue.fake_slack import InMemorySlackClient
+from integrations.slack_agent_dialogue.service import (
+    AgentDialogueService,
+    CONTROL_VERSION_V2,
+    EXACT_SEND_PROTOCOL,
+    DialogueServiceError,
+    ServiceConfig,
+)
+from integrations.slack_agent_dialogue.slack_web_api import (
+    BoundedHistoryPage,
+    MAX_RESPONSE_BYTES,
+)
+import integrations.company_consultation_dispatch as consultation_dispatch
 from integrations.company_consultation_dispatch import (
+    AgentDialogueConsultationPacketCarrier,
     CallerIdentity,
     ConsultationPacketCarrier,
+    ConsultationPacketCarrierUnknown,
+    ConsultationPacketCommitAborted,
+    ConsultationPacketEffectUnknown,
     ConsultationRefusal,
     InMemoryConsultationPacketCarrier,
     InvocationContext,
@@ -60,10 +100,22 @@ from integrations.company_consultation_dispatch import (
     RecipientBinding,
     REFUSAL_CODES,
     RuntimeConsultationDispatcher,
+    _require_same_dialogue_carrier,
 )
 
 
 PEER_REF = "peer-7bdf4a6f9a664bbcf1a93d67a41ba51d"
+
+
+def test_consultation_packet_carrier_methods_are_async() -> None:
+    carrier = InMemoryConsultationPacketCarrier()
+
+    assert inspect.iscoroutinefunction(carrier.put_question)
+    assert inspect.iscoroutinefunction(carrier.get_question)
+    assert inspect.iscoroutinefunction(carrier.put_answer)
+    assert inspect.iscoroutinefunction(carrier.get_answer)
+    assert "before_commit" in inspect.signature(carrier.put_question).parameters
+    assert "before_commit" in inspect.signature(carrier.put_answer).parameters
 
 _FIXTURE_PARENT_FINGERPRINT = hashlib.sha256(b"iac1-r4a-parent-fingerprint").hexdigest()
 
@@ -107,6 +159,564 @@ def _binding(attempt_epoch: str, generation: int = 1) -> dict[str, object]:
         "binding_generation": generation,
         "reasoning_surface": "codex",
     }
+
+
+def _dialogue_binding(
+    worker: tuple,
+    **overrides: object,
+) -> DialogueBinding:
+    job_id, attempt_id, worker_id, _runtime_binding = worker
+    values: dict[str, object] = {
+        "actor_ref": {
+            "kind": "worker_attempt",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "worker_id": worker_id,
+        },
+        "work_ref": "WS:EXECUTIVE-CAPACITY-FABRIC",
+        "commission_ref": {
+            "repository": "mastermindx-market-intelligence/Mastermind",
+            "commit": "1" * 40,
+            "path": "docs/superpowers/plans/iac1-p1.md",
+            "content_sha256": "2" * 64,
+        },
+        "session_ref": "asd-session-iac1-p1-shared-0001",
+        "operation_key": "iac1-production-packet-carriage-p1-20260925-sol-001",
+        "watch_mode": "turn_watch_v1",
+        "applies_to": {
+            "kind": "executive_attempt",
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "worker_id": worker_id,
+        },
+        "thread_ts": "1787961600.000001",
+        "allowed_message_types": (
+            "ACK",
+            "PROGRESS",
+            "BLOCKED",
+            "DECISION_REQUEST",
+            "RESULT",
+        ),
+    }
+    values.update(overrides)
+    return DialogueBinding(**values)
+
+
+@dataclasses.dataclass
+class _StaticDialogueBindingResolver:
+    binding: DialogueBinding
+    calls: int = 0
+
+    def resolve(self) -> DialogueBinding:
+        self.calls += 1
+        return self.binding
+
+
+class _RecordingPacketService:
+    def __init__(
+        self,
+        *,
+        response: dict[str, Any] | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        self.response = response or {
+            "ok": True,
+            "result": {
+                "action": "POSTED",
+                "message_key": "asd-consultation-packet-carrier-0001",
+                "fingerprint": "f" * 64,
+                "message_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+                "thread_ts": "1787961600.000001",
+                "parent_author_user_id": "U00000002",
+                "parent_fingerprint": "a" * 64,
+            },
+        }
+        self.error_code = error_code
+        self.calls: list[dict[str, Any]] = []
+
+    async def __call__(
+        self,
+        socket_path: Path,
+        request: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "socket_path": socket_path,
+                "request": dict(request),
+                **kwargs,
+            }
+        )
+        before_write = kwargs.get("before_write")
+        if before_write is not None:
+            await before_write()
+        if self.error_code is not None:
+            raise DialogueServiceError(self.error_code)
+        return self.response
+
+
+def _packet_frame(
+    requester: tuple,
+    recipient: tuple,
+    *,
+    purpose: str = "QUESTION",
+) -> dict[str, Any]:
+    question_key = "asd-consultation-packet-carrier-0001"
+    consultation_id = "consult-9bdf4a6f9a664bbcf1a93d67a41ba51d"
+    question = build_consultation(
+        {
+            "schema": CONSULTATION_SCHEMA,
+            "message_key": question_key,
+            "consultation_id": consultation_id,
+            "purpose": "QUESTION",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": requester[0],
+                "attempt_id": requester[1],
+                "worker_id": requester[2],
+            },
+            "recipient_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            "recipient_peer_ref": PEER_REF,
+            "recipient_binding": dict(recipient[3]),
+            "correlation": {
+                "parent_fingerprint": "a" * 64,
+                "request_message_key": question_key,
+                "consultation_id": consultation_id,
+                "requester_actor_digest": "b" * 64,
+                "recipient_actor_digest": "c" * 64,
+            },
+            "question": "Can the trusted Relay carry this packet?",
+            "answer": None,
+            "evidence_refs": [],
+            "artifact_revisions": [
+                {
+                    "repository": "mastermindx-market-intelligence/Mastermind",
+                    "path": "research/commission.md",
+                    "commit": "1" * 40,
+                    "content_sha256": "2" * 64,
+                }
+            ],
+            "valid_until": "2026-09-25T01:00:00Z",
+            "deadline_ms": 60000,
+            "response_budget": {
+                "max_answers": 1,
+                "max_evidence_reads": 2,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 2048,
+            },
+            "supersedes_message_key": None,
+            "receipts": {key: None for key in RECEIPT_KEYS},
+            "fingerprint": "",
+        }
+    )
+    if purpose == "QUESTION":
+        return question
+    answer = copy.deepcopy(question)
+    answer["schema"] = CONSULTATION_V2_SCHEMA
+    answer["message_key"] = "asd-consultation-packet-answer-0001"
+    answer["purpose"] = "ANSWER"
+    answer["question"] = None
+    answer["answer"] = {
+        "text": '{"answer":"bounded"}',
+        "evidence_refs": [],
+    }
+    answer["question_message_key"] = question_key
+    answer["fingerprint"] = ""
+    return build_consultation(answer)
+
+
+@pytest.mark.parametrize(
+    ("purpose", "method_name", "sender_index"),
+    [
+        ("QUESTION", "put_question", 0),
+        ("ANSWER", "put_answer", 1),
+    ],
+)
+def test_agent_dialogue_packet_carrier_uses_trusted_parent_and_callback(
+    purpose: str,
+    method_name: str,
+    sender_index: int,
+) -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    workers = (requester, recipient)
+    frame = _packet_frame(requester, recipient, purpose=purpose)
+    binding = _dialogue_binding(workers[sender_index])
+    resolver = _StaticDialogueBindingResolver(binding)
+    service = _RecordingPacketService(
+        response={
+            "ok": True,
+            "result": {
+                "action": "POSTED",
+                "message_key": frame["message_key"],
+                "fingerprint": frame["fingerprint"],
+                "message_ts": "1787961600.000002",
+                "duplicate_timestamps": [],
+                "thread_ts": binding.thread_ts,
+                "parent_author_user_id": "U00000002",
+                "parent_fingerprint": "a" * 64,
+            },
+        }
+    )
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=resolver,
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=service,
+        timeout_seconds=7.5,
+    )
+    callbacks: list[str] = []
+
+    async def before_commit() -> None:
+        callbacks.append("before_commit")
+
+    _run(
+        getattr(carrier, method_name)(
+            frame["consultation_id"],
+            frame,
+            before_commit=before_commit,
+        )
+    )
+
+    assert callbacks == ["before_commit"]
+    assert resolver.calls == 1
+    assert len(service.calls) == 1
+    call = service.calls[0]
+    assert call["socket_path"] == Path("/private/tmp/iac1-p1-agent-relay.sock")
+    assert call["timeout_seconds"] == 7.5
+    assert call["before_write"] is before_commit
+    assert call["request"] == {
+        "version": CONTROL_VERSION_V2,
+        "operation": "send_consultation_packet",
+        "args": {
+            "context": {
+                "work_ref": binding.work_ref,
+                "commission_ref": dict(binding.commission_ref),
+                "session_ref": binding.session_ref,
+                "operation_key": binding.operation_key,
+                "watch_mode": binding.watch_mode,
+                "actor_ref": dict(binding.actor_ref),
+                "applies_to": dict(binding.applies_to),
+            },
+            "thread_ts": binding.thread_ts,
+            "message": frame,
+            "send_protocol": EXACT_SEND_PROTOCOL,
+        },
+    }
+
+
+def test_agent_dialogue_packet_carrier_reads_exact_packet_or_absence() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    binding = _dialogue_binding(requester)
+    response = {
+        "ok": True,
+        "result": {
+            "packet": frame,
+            "primary_ts": "1787961600.000002",
+            "duplicate_timestamps": [],
+        },
+    }
+    service = _RecordingPacketService(response=response)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(binding),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=service,
+    )
+
+    assert _run(carrier.get_question(frame["consultation_id"])) == frame
+    assert service.calls[0]["request"]["operation"] == "read_consultation_packet"
+    assert service.calls[0]["request"]["args"]["thread_ts"] == binding.thread_ts
+
+    absent = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(binding),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(
+            response={"ok": True, "result": None}
+        ),
+    )
+    assert _run(absent.get_question(frame["consultation_id"])) is None
+
+    unrelated = (
+        "JOB-THIRD",
+        "ATT-THIRD",
+        "consultation-third",
+        _binding("third"),
+    )
+    foreign = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(unrelated)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(response=response),
+    )
+    with pytest.raises(StateConflict, match="party"):
+        _run(foreign.get_question(frame["consultation_id"]))
+
+
+def test_agent_dialogue_packet_carrier_preserves_precommit_abort() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(),
+    )
+
+    async def before_commit() -> None:
+        raise ConsultationPacketCommitAborted("runtime replay closes before COMMIT")
+
+    with pytest.raises(ConsultationPacketCommitAborted, match="runtime replay"):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
+def test_agent_dialogue_packet_carrier_does_not_launder_callback_defects() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(),
+    )
+
+    async def before_commit() -> None:
+        raise AssertionError("runtime programmer defect")
+
+    with pytest.raises(AssertionError, match="programmer defect"):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
+def test_agent_dialogue_packet_carrier_hides_malformed_service_response() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    service = _RecordingPacketService()
+    service.response = []
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=service,
+    )
+
+    async def before_commit() -> None:
+        return None
+
+    with pytest.raises(ConsultationPacketCarrierUnknown):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("service_code", "expected"),
+    [
+        ("SERVICE_UNAVAILABLE", ConsultationPacketCarrierUnknown),
+        ("SEND_EFFECT_UNKNOWN", ConsultationPacketEffectUnknown),
+    ],
+)
+def test_agent_dialogue_packet_carrier_preserves_transport_uncertainty(
+    service_code: str,
+    expected: type[Exception],
+) -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    frame = _packet_frame(requester, recipient)
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(
+            _dialogue_binding(requester)
+        ),
+        socket_path=Path("/private/tmp/iac1-p1-agent-relay.sock"),
+        service_call=_RecordingPacketService(error_code=service_code),
+    )
+
+    async def before_commit() -> None:
+        return None
+
+    with pytest.raises(expected):
+        _run(
+            carrier.put_question(
+                frame["consultation_id"],
+                frame,
+                before_commit=before_commit,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("work_ref", "WS:OTHER"),
+        (
+            "commission_ref",
+            {
+                "repository": "mastermindx-market-intelligence/Mastermind",
+                "commit": "3" * 40,
+                "path": "docs/superpowers/plans/other.md",
+                "content_sha256": "4" * 64,
+            },
+        ),
+        ("session_ref", "asd-session-iac1-p1-other-0001"),
+        ("operation_key", "iac1-p1-other-operation-20260925"),
+        ("watch_mode", None),
+        ("thread_ts", "1787961600.000099"),
+    ],
+)
+def test_same_parent_carrier_refuses_one_field_drift(
+    field: str,
+    value: object,
+) -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-200", "ATT-200", "codex-recipient", _binding("recipient"))
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(recipient, **{field: value})
+
+    with pytest.raises(StateConflict, match="same exact parent"):
+        _require_same_dialogue_carrier(
+            caller_binding,
+            recipient_binding,
+            caller_actor_ref=caller_binding.actor_ref,
+            recipient_actor_ref=recipient_binding.actor_ref,
+        )
+
+
+def test_same_parent_carrier_accepts_distinct_jobs_on_one_parent() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-201", "ATT-200", "codex-recipient", _binding("recipient"))
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(recipient)
+
+    _require_same_dialogue_carrier(
+        caller_binding,
+        recipient_binding,
+        caller_actor_ref=caller_binding.actor_ref,
+        recipient_actor_ref=recipient_binding.actor_ref,
+    )
+
+
+def test_dialogue_carrier_refuses_actor_applicability_mismatch() -> None:
+    requester = ("JOB-200", "ATT-100", "codex-requester", _binding("requester"))
+    recipient = ("JOB-201", "ATT-200", "codex-recipient", _binding("recipient"))
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(
+        recipient,
+        applies_to={
+            "kind": "executive_attempt",
+            "job_id": "JOB-OTHER",
+            "attempt_id": "ATT-OTHER",
+            "worker_id": "worker-other",
+        },
+    )
+
+    with pytest.raises(StateConflict, match="applicability carrier is invalid"):
+        _require_same_dialogue_carrier(
+            caller_binding,
+            recipient_binding,
+            caller_actor_ref=caller_binding.actor_ref,
+            recipient_actor_ref=recipient_binding.actor_ref,
+        )
+
+
+class _DialogueRequiredCarrier(InMemoryConsultationPacketCarrier):
+    requires_dialogue_binding = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_calls = 0
+
+    async def put_question(self, consultation_id, frame, **kwargs):
+        self.put_calls += 1
+        return await super().put_question(consultation_id, frame, **kwargs)
+
+
+def test_same_parent_carrier_drift_refuses_before_runtime_or_wake(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "same-parent-refusal")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "same-parent-refusal-repo"
+    )
+    carrier = _DialogueRequiredCarrier()
+    caller_binding = _dialogue_binding(requester)
+    recipient_binding = _dialogue_binding(
+        recipient, thread_ts="1787961600.000099"
+    )
+    caller = CallerIdentity(
+        job_id=requester[0],
+        worker_id=requester[2],
+        attempt_id=requester[1],
+        reasoning_surface="codex",
+        binding=requester[3],
+        dialogue_binding=caller_binding,
+    )
+
+    def resolve(_peer_ref: str) -> RecipientBinding:
+        return RecipientBinding(
+            actor_ref={
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            recipient_binding=dict(recipient[3]),
+            dialogue_binding=recipient_binding,
+        )
+
+    dispatcher = RuntimeConsultationDispatcher(
+        runtime=runtime,
+        repository_root=fixture_repo,
+        caller=caller,
+        recipients=resolve,
+        packets=carrier,
+        invocations=_StaticInvocations(_default_invocation()),
+        _clock=_ManualClock("2026-09-14T00:00:00Z"),
+    )
+
+    with pytest.raises(ConsultationRefusal) as exc:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Cross-parent consultation must fail before INTENT.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert exc.value.code == "NOT_A_PARTY"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+    assert carrier.put_calls == 0
 
 
 def _profile(lease):
@@ -706,6 +1316,9 @@ def _gateway_with_dispatcher(
 def _run(coroutine):
     return asyncio.run(coroutine)
 
+async def _packet_commit_noop() -> None:
+    return None
+
 
 def _run_dispatcher(dispatcher, tool_name, request):
     """Call the dispatcher's ``__call__`` directly so ``ConsultationRefusal``
@@ -1149,11 +1762,11 @@ def test_a_b_a_journey_with_full_credit_and_consumption(tmp_path: Path) -> None:
     assert len(evidence.get("CONSUMED_BY_REQUESTER", [])) == 0
 
     # Explicit consume_answer: first call inserts, second call is idempotent.
-    first_consume = a_dispatcher.consume_answer(consultation_id)
+    first_consume = _run(a_dispatcher.consume_answer(consultation_id))
     assert first_consume["state"] == "CONSUMED"
     assert first_consume["inserted"] is True
 
-    second_consume = a_dispatcher.consume_answer(consultation_id)
+    second_consume = _run(a_dispatcher.consume_answer(consultation_id))
     assert second_consume["state"] == "CONSUMED"
     assert second_consume["inserted"] is False
 
@@ -1426,7 +2039,7 @@ def test_session_rotation_observes_existing_runtime_rule(tmp_path: Path) -> None
     )
     assert reply_envelope["ok"] is True
 
-    answer_frame = shared_carrier.get_answer(consultation_id)
+    answer_frame = _run(shared_carrier.get_answer(consultation_id))
     assert answer_frame is not None
 
     rotated_attempt = (
@@ -1856,20 +2469,20 @@ def test_explicit_consumption_appends_once_and_retry_reconciles(
     )
     assert reply_envelope["ok"] is True
 
-    first = a_dispatcher.consume_answer(consultation_id)
+    first = _run(a_dispatcher.consume_answer(consultation_id))
     assert first["state"] == "CONSUMED"
     assert first["inserted"] is True
     events = _evidence_for(runtime, consultation_id)
     assert len(events["CONSUMED_BY_REQUESTER"]) == 1
 
-    second = a_dispatcher.consume_answer(consultation_id)
+    second = _run(a_dispatcher.consume_answer(consultation_id))
     assert second["state"] == "CONSUMED"
     assert second["inserted"] is False
     events = _evidence_for(runtime, consultation_id)
     assert len(events["CONSUMED_BY_REQUESTER"]) == 1
 
     with pytest.raises(ConsultationRefusal) as excinfo:
-        b_dispatcher.consume_answer(consultation_id)
+        _run(b_dispatcher.consume_answer(consultation_id))
     assert excinfo.value.code == "NOT_A_PARTY"
     events = _evidence_for(runtime, consultation_id)
     assert len(events["CONSUMED_BY_REQUESTER"]) == 1
@@ -2158,15 +2771,16 @@ def test_fresh_dispatcher_reads_same_packets_from_injected_carrier_only(
     assert read_digest["data"]["question_digest"] != ""
 
 
-def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
-    """A read result that exceeds 60_000 bytes returns digests only.
+def test_oversized_body_returns_digests_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The zero-write read edge degrades to digests at its own body budget.
 
-    The answer text is forced near the runtime cap so the assembled read
-    result (projection row + question body + answer body + body_status)
-    crosses the 60_000-byte body budget; the dispatcher must then return
-    digests only with ``body_status == 'UNAVAILABLE'`` and
-    ``blocker == 'BODY_OVER_BUDGET'``. Zero events appended.
+    P1 separately constrains every physical packet to 4500 bytes, so this
+    projection test lowers only the read-result threshold instead of creating
+    an impossible oversized packet.
     """
+    monkeypatch.setattr(consultation_dispatch, "_BODY_BUDGET_BYTES", 512)
     runtime = _runtime_at(tmp_path / "oversized")
     _consultations(runtime, tmp_path / "oversized")
     requester, recipient, _third, _root = _workers(runtime)
@@ -2193,7 +2807,7 @@ def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
     )
     b_gateway = _gateway_with_dispatcher(b_dispatcher)
 
-    long_question = "q" * 15_960
+    long_question = "q" * 200
     consult_envelope = _run(
         a_gateway.call("company.consult", _consult_args(
             question=long_question,
@@ -2204,7 +2818,7 @@ def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
     consultation_id = consult_envelope["data"]["consultation_ref"]
     _deliver_and_ack_wake_path(runtime, consultation_id)
 
-    long_answer = "a" * 15_960
+    long_answer = "a" * 200
     reply_envelope = _run(
         b_gateway.call(
             "company.reply",
@@ -2228,16 +2842,11 @@ def test_oversized_body_returns_digests_only(tmp_path: Path) -> None:
     )
     assert a_read["ok"] is True
     body = a_read["data"]
-    if len(json.dumps(body, sort_keys=True).encode("utf-8")) > 60_000:
-        assert body["body_status"] == "UNAVAILABLE"
-        assert body["blocker"] == "BODY_OVER_BUDGET"
-        assert body["question"] is None
-        assert body["answer"] is None
-        assert body["question_digest"] != ""
-    else:
-        assert body["body_status"] == "AVAILABLE"
-        assert body["question"]["text"] == long_question
-        assert body["answer"]["text"] == long_answer
+    assert body["body_status"] == "UNAVAILABLE"
+    assert body["blocker"] == "BODY_OVER_BUDGET"
+    assert body["question"] is None
+    assert body["answer"] is None
+    assert body["question_digest"] != ""
 
     events_after_read = runtime.events.list_events(
         aggregate_type="consultation", aggregate_id=consultation_id
@@ -3462,12 +4071,16 @@ class _TamperedQuestionCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._marker = marker
 
-    def put_question(self, consultation_id, frame):
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
         # Consume the consult call but keep the original frame.
-        super().put_question(consultation_id, frame)
+        await super().put_question(
+            consultation_id, frame, before_commit=before_commit
+        )
 
-    def get_question(self, consultation_id):
-        frame = super().get_question(consultation_id)
+    async def get_question(self, consultation_id):
+        frame = await super().get_question(consultation_id)
         if frame is None:
             return None
         tampered = dict(frame)
@@ -3486,7 +4099,7 @@ class _ForeignQuestionCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._foreign_id: str | None = None
 
-    def install_foreign(
+    async def install_foreign(
         self,
         foreign_consultation_id: str,
         frame: Mapping[str, Any],
@@ -3494,12 +4107,16 @@ class _ForeignQuestionCarrier(InMemoryConsultationPacketCarrier):
         self._foreign_id = foreign_consultation_id
         # Stash the foreign frame under the real consultation_id key so
         # the dispatcher's get_question returns it.
-        super().put_question(foreign_consultation_id, frame)
+        await super().put_question(
+            foreign_consultation_id,
+            frame,
+            before_commit=_packet_commit_noop,
+        )
 
-    def get_question(self, consultation_id):
+    async def get_question(self, consultation_id):
         if self._foreign_id is not None and self._foreign_id == consultation_id:
-            return super().get_question(consultation_id)
-        frame = super().get_question(consultation_id)
+            return await super().get_question(consultation_id)
+        frame = await super().get_question(consultation_id)
         return frame
 
 
@@ -3516,8 +4133,8 @@ class _TamperedAnswerCarrier(InMemoryConsultationPacketCarrier):
         super().__init__()
         self._marker = marker
 
-    def get_answer(self, consultation_id):
-        frame = super().get_answer(consultation_id)
+    async def get_answer(self, consultation_id):
+        frame = await super().get_answer(consultation_id)
         if frame is None:
             return None
         tampered = dict(frame)
@@ -3658,9 +4275,9 @@ def test_foreign_consultation_packet_is_not_exposed_on_detail(
     foreign_consultation_id = foreign_envelope["data"]["consultation_ref"]
     assert foreign_consultation_id != first_consultation_id
 
-    real_first_frame = first_carrier.get_question(first_consultation_id)
+    real_first_frame = _run(first_carrier.get_question(first_consultation_id))
     assert real_first_frame is not None
-    foreign_frame = foreign_carrier.get_question(foreign_consultation_id)
+    foreign_frame = _run(foreign_carrier.get_question(foreign_consultation_id))
     assert foreign_frame is not None
 
     # Build a FOREIGN carrier that returns the FOREIGN frame when asked
@@ -3668,8 +4285,8 @@ def test_foreign_consultation_packet_is_not_exposed_on_detail(
     # under the real consultation_id so the dispatcher's get_question
     # returns it for that ref.
     cross_carrier = _ForeignQuestionCarrier()
-    cross_carrier.install_foreign(first_consultation_id, foreign_frame)
-    cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame))
+    _run(cross_carrier.install_foreign(first_consultation_id, foreign_frame))
+    _run(cross_carrier.put_question(foreign_consultation_id, dict(real_first_frame), before_commit=_packet_commit_noop))
 
     cross_dispatcher = _make_dispatcher(
         runtime,
@@ -3886,7 +4503,7 @@ def test_replay_with_changed_evidence_refs_alone_conflicts(
     )
     consultation_id = original_envelope["data"]["consultation_ref"]
     assert original_envelope["data"]["state"] == "INTENDED"
-    original_question_frame = shared_carrier.get_question(consultation_id)
+    original_question_frame = _run(shared_carrier.get_question(consultation_id))
     assert original_question_frame is not None
 
     repository = WakeLedgerRepository(runtime)
@@ -3920,7 +4537,7 @@ def test_replay_with_changed_evidence_refs_alone_conflicts(
 
     # Carrier question packet is unchanged — the dispatcher refused
     # before any put_question could overwrite it.
-    after_question_frame = shared_carrier.get_question(consultation_id)
+    after_question_frame = _run(shared_carrier.get_question(consultation_id))
     assert after_question_frame == original_question_frame
 
     # Zero new wake records.
@@ -4003,16 +4620,21 @@ def test_replay_with_changed_artifact_revisions_conflicts(
 
 
 class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
-    """Counting answer carrier; optionally raises on ``put_answer`` once."""
+    """Count COMMIT-authorized answer writes; optionally lose one response."""
 
     def __init__(self, raise_on_put_n: int | None = None) -> None:
         super().__init__()
+        self.put_answer_attempts = 0
         self.put_answer_calls = 0
         self.get_answer_calls = 0
         self._raise_on_put_n = raise_on_put_n
         self._raised = False
 
-    def put_answer(self, consultation_id, frame):
+    async def put_answer(
+        self, consultation_id, frame, *, before_commit
+    ):
+        self.put_answer_attempts += 1
+        await before_commit()
         self.put_answer_calls += 1
         if (
             self._raise_on_put_n is not None
@@ -4020,12 +4642,14 @@ class _CountingAnswerCarrier(InMemoryConsultationPacketCarrier):
             and self.put_answer_calls == self._raise_on_put_n
         ):
             self._raised = True
-            raise RuntimeError("synthetic carrier write failure")
-        super().put_answer(consultation_id, frame)
+            raise ConsultationPacketEffectUnknown(
+                "synthetic lost answer COMMIT response"
+            )
+        self._answers[consultation_id] = dict(frame)
 
-    def get_answer(self, consultation_id):
+    async def get_answer(self, consultation_id):
         self.get_answer_calls += 1
-        return super().get_answer(consultation_id)
+        return await super().get_answer(consultation_id)
 
 
 def test_identical_reply_replay_does_not_write_carrier_twice(
@@ -4154,9 +4778,11 @@ def test_accepted_answer_with_lost_carrier_write_is_reconciliation_required(
         "evidence_refs": [],
     }
     first = _run(b_gateway.call("company.reply", reply_args))
-    assert first["ok"] is False
-    assert first["error"]["code"] == "EFFECT_UNKNOWN"
-    assert first["data"] is None
+    assert first["ok"] is True
+    assert first["data"]["state"] == "ANSWER_AVAILABLE"
+    assert first["data"]["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert first["data"]["wake_state"] == "RECONCILIATION_REQUIRED"
+    assert first["data"]["attention_requested"] is None
 
     events_after_first = _evidence_for(runtime, consultation_id)
     assert len(events_after_first.get("ANSWER_AVAILABLE", [])) == 1
@@ -4266,12 +4892,12 @@ def test_known_same_packet_readback_returns_without_second_write(
     # identical reply must reconcile without any runtime or carrier
     # writes.
     counting_carrier = _CountingAnswerCarrier()
-    admitted_packet = shared_carrier.get_answer(consultation_id)
+    admitted_packet = _run(shared_carrier.get_answer(consultation_id))
     assert admitted_packet is not None
-    counting_carrier.put_answer(consultation_id, dict(admitted_packet))
-    admitted_question = shared_carrier.get_question(consultation_id)
+    _run(counting_carrier.put_answer(consultation_id, dict(admitted_packet), before_commit=_packet_commit_noop))
+    admitted_question = _run(shared_carrier.get_question(consultation_id))
     assert admitted_question is not None
-    counting_carrier.put_question(consultation_id, dict(admitted_question))
+    _run(counting_carrier.put_question(consultation_id, dict(admitted_question), before_commit=_packet_commit_noop))
     puts_before = counting_carrier.put_answer_calls
 
     restarted_b_dispatcher = _make_dispatcher(
@@ -4324,13 +4950,20 @@ class _MissingInvocations:
 class _RaisingPacketCarrier(InMemoryConsultationPacketCarrier):
     """In-memory carrier whose ``put_question`` always raises."""
 
-    def __init__(self, exc_type: type[Exception] = RuntimeError) -> None:
+    def __init__(
+        self,
+        exc_type: type[Exception] = ConsultationPacketCarrierUnknown,
+    ) -> None:
         super().__init__()
         self._exc_type = exc_type
         self.put_question_calls = 0
 
-    def put_question(
-        self, consultation_id: str, frame: Mapping[str, Any]
+    async def put_question(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit,
     ) -> None:
         self.put_question_calls += 1
         raise self._exc_type("simulated carrier write failure")
@@ -4545,7 +5178,11 @@ def test_no_wake_request_without_admitted_intent(tmp_path: Path) -> None:
         "conflicting replay must not add a second WAKE_REQUESTED"
     )
 
-    # --- (c) Carrier put_question raises ---
+    # --- (c) Carrier refuses before the Runtime callback ---
+    c_events_before = tuple(
+        runtime.events.list_events(aggregate_type="consultation")
+    )
+    c_wake_before = WakeLedgerRepository(runtime).list_wake_events()
     carrier_c = _RaisingPacketCarrier()
     invocations_c = _StaticInvocations(
         _default_invocation(invocation_id="iac1-r4c2-carrier-raise")
@@ -4569,22 +5206,16 @@ def test_no_wake_request_without_admitted_intent(tmp_path: Path) -> None:
             ),
         )
     )
-    assert c_env["ok"] is True
-    c_data = c_env["data"]
-    c_consultation_id = c_data["consultation_ref"]
-    assert c_data["attention_requested"] is False
-    assert c_data["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
-    # INTENT must be durable (committed effect, not hidden) but
-    # WAKE_REQUESTED must be absent for this consultation_id.
-    c_obligation_id = _obligation_id_for_intent(runtime, c_consultation_id)
-    c_records = WakeLedgerRepository(runtime).list_records(c_obligation_id)
-    assert c_records == (), (
-        "carrier write failure must not create a WAKE_REQUESTED; the "
-        "INTENT itself stays durable but the wake is suppressed"
-    )
-    # And the runtime still holds the admitted INTENT event.
-    intent_event = _find_consultation_event(runtime, c_consultation_id, "INTENT")
-    assert intent_event is not None
+    assert c_env["ok"] is False
+    assert c_env["error"]["code"] == "EFFECT_UNKNOWN"
+    assert c_env["data"] is None
+    assert carrier_c.put_question_calls == 1
+    # READY was never followed by the Runtime callback, so this definitive
+    # pre-COMMIT failure creates neither INTENT nor Wake state.
+    assert tuple(
+        runtime.events.list_events(aggregate_type="consultation")
+    ) == c_events_before
+    assert WakeLedgerRepository(runtime).list_wake_events() == c_wake_before
 
 
 def _find_consultation_event(runtime: Runtime, consultation_id: str, event_type: str):
@@ -4748,16 +5379,21 @@ def test_wake_request_survives_dispatcher_restart(tmp_path: Path) -> None:
 
 
 class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
-    """Counting question carrier; optionally raises on ``put_question`` once."""
+    """Count COMMIT-authorized question writes; optionally lose one response."""
 
     def __init__(self, raise_on_put_n: int | None = None) -> None:
         super().__init__()
+        self.put_question_attempts = 0
         self.put_question_calls = 0
         self.get_question_calls = 0
         self._raise_on_put_n = raise_on_put_n
         self._raised = False
 
-    def put_question(self, consultation_id, frame):
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        self.put_question_attempts += 1
+        await before_commit()
         self.put_question_calls += 1
         if (
             self._raise_on_put_n is not None
@@ -4765,12 +5401,14 @@ class _CountingQuestionCarrier(InMemoryConsultationPacketCarrier):
             and self.put_question_calls == self._raise_on_put_n
         ):
             self._raised = True
-            raise RuntimeError("synthetic carrier write failure")
-        super().put_question(consultation_id, frame)
+            raise ConsultationPacketEffectUnknown(
+                "synthetic lost question COMMIT response"
+            )
+        self._questions[consultation_id] = dict(frame)
 
-    def get_question(self, consultation_id):
+    async def get_question(self, consultation_id):
         self.get_question_calls += 1
-        return super().get_question(consultation_id)
+        return await super().get_question(consultation_id)
 
 
 class _ClockAdvancingQuestionCarrier(_CountingQuestionCarrier):
@@ -4783,8 +5421,12 @@ class _ClockAdvancingQuestionCarrier(_CountingQuestionCarrier):
         self._clock = clock
         self._advance_to = advance_to
 
-    def put_question(self, consultation_id, frame):
-        super().put_question(consultation_id, frame)
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        await super().put_question(
+            consultation_id, frame, before_commit=before_commit
+        )
         self._clock.value = self._advance_to
 
 
@@ -4800,15 +5442,18 @@ class _RaceQuestionCarrier(_CountingQuestionCarrier):
         self._hook_ran = False
         self._hide = hide_readback_after_hook
 
-    def get_question(self, consultation_id):
+    async def get_question(self, consultation_id):
         if not self._hook_ran:
             self._hook_ran = True
-            self._hook()
-            return None
+            await self._hook()
+            if self._hide:
+                self.get_question_calls += 1
+                return None
+            return await super().get_question(consultation_id)
         if self._hide:
             self.get_question_calls += 1
             return None
-        return super().get_question(consultation_id)
+        return await super().get_question(consultation_id)
 
 
 class _ThrowBeforeCommitRepository(WakeLedgerRepository):
@@ -4968,7 +5613,7 @@ def test_exact_expiry_boundary_is_admitted(tmp_path: Path) -> None:
     assert data["blocker"] is None
     assert data["deadline"] == "2026-09-14T00:00:01Z"
     assert carrier.put_question_calls == 1
-    assert carrier.get_question(consultation_id) is not None
+    assert _run(carrier.get_question(consultation_id)) is not None
     assert _requested_count(runtime, consultation_id) == 1
 
 
@@ -5015,7 +5660,7 @@ def test_expiry_between_publication_and_request_creates_no_wake(
     assert data["blocker"] == "EXPIRED"
     assert _intent_count(runtime, consultation_id) == 1
     assert carrier.put_question_calls == 1
-    assert carrier.get_question(consultation_id) is not None
+    assert _run(carrier.get_question(consultation_id)) is not None
     assert _requested_count(runtime, consultation_id) == 0
     assert WakeLedgerRepository(runtime).list_wake_events() == ()
 
@@ -5077,7 +5722,7 @@ def test_expired_replay_cannot_originate_publication_or_wake(
     assert data["blocker"] == "EXPIRED"
     assert data["attention_requested"] is False
     assert carrier.put_question_calls == 1
-    assert carrier.get_question(consultation_id) is None
+    assert _run(carrier.get_question(consultation_id)) is None
     assert _intent_count(runtime, consultation_id) == 1
     assert _requested_count(runtime, consultation_id) == 0
 
@@ -5170,7 +5815,7 @@ def test_known_exact_packet_reconciles_to_single_request(tmp_path: Path) -> None
     # exact packet; a fresh dispatcher replays the identical consult.
     restarted_carrier = _CountingQuestionCarrier()
     restarted_carrier._questions[consultation_id] = dict(
-        first_carrier.get_question(consultation_id)
+        _run(first_carrier.get_question(consultation_id))
     )
     replay = _run(
         _gateway_with_dispatcher(
@@ -5221,7 +5866,7 @@ def test_intent_insertion_race_loser_cannot_publish(
     )
     results: dict[str, Any] = {}
 
-    def _winner_consults() -> None:
+    async def _winner_consults() -> None:
         winner = _make_dispatcher(
             runtime,
             fixture_repo,
@@ -5230,7 +5875,7 @@ def test_intent_insertion_race_loser_cannot_publish(
             packets=carrier,
             invocations=invocations,
         )
-        results["winner"] = _drive_sync(winner.__call__("company.consult", envelope))
+        results["winner"] = await winner.__call__("company.consult", envelope)
 
     carrier = _RaceQuestionCarrier(
         _winner_consults, hide_readback_after_hook=hide_readback
@@ -5395,13 +6040,18 @@ class _VisibleThenLostPutCarrier(_CountingQuestionCarrier):
         self._hook = hook
         self._hooked = False
 
-    def put_question(self, consultation_id, frame):
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
         self.put_question_calls += 1
+        await before_commit()
         self._questions[consultation_id] = dict(frame)
         if not self._hooked:
             self._hooked = True
-            self._hook()
-            raise RuntimeError("synthetic lost put_question response")
+            await self._hook()
+            raise ConsultationPacketEffectUnknown(
+                "synthetic lost put_question response"
+            )
 
 
 class _HookAfterPutCarrier(_CountingQuestionCarrier):
@@ -5412,9 +6062,15 @@ class _HookAfterPutCarrier(_CountingQuestionCarrier):
         super().__init__()
         self._hook = hook
 
-    def put_question(self, consultation_id, frame):
-        super().put_question(consultation_id, frame)
-        self._hook()
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        await super().put_question(
+            consultation_id, frame, before_commit=before_commit
+        )
+        hook_result = self._hook()
+        if inspect.isawaitable(hook_result):
+            await hook_result
 
 
 def _release_writer_for_attempt(runtime: Runtime, attempt_id: str) -> None:
@@ -5458,7 +6114,7 @@ def test_lost_put_response_after_concurrent_wake_reports_existing_request(
     )
     results: dict[str, Any] = {}
 
-    def _concurrent_identical_call() -> None:
+    async def _concurrent_identical_call() -> None:
         other = _make_dispatcher(
             runtime,
             fixture_repo,
@@ -5467,7 +6123,7 @@ def test_lost_put_response_after_concurrent_wake_reports_existing_request(
             packets=carrier,
             invocations=invocations,
         )
-        results["other"] = _drive_sync(other.__call__("company.consult", envelope))
+        results["other"] = await other.__call__("company.consult", envelope)
 
     carrier = _VisibleThenLostPutCarrier(_concurrent_identical_call)
     first_dispatcher = _make_dispatcher(
@@ -5632,7 +6288,7 @@ def test_reply_creates_one_requester_answer_attention_and_replay_is_sticky(
     assert replay["data"]["blocker"] is None
     assert len(_answer_attention_requested_records(runtime)) == 1
 
-    consumed = a_dispatcher.consume_answer(consultation_id)
+    consumed = _run(a_dispatcher.consume_answer(consultation_id))
     assert consumed["inserted"] is True
     post_consume_dispatcher = _make_dispatcher(
         runtime,
@@ -5656,11 +6312,17 @@ class _ConsumeDuringAnswerPutCarrier(_CountingAnswerCarrier):
         super().__init__()
         self.after_put = None
 
-    def put_answer(self, consultation_id, frame):
-        super().put_answer(consultation_id, frame)
+    async def put_answer(
+        self, consultation_id, frame, *, before_commit
+    ):
+        await super().put_answer(
+            consultation_id, frame, before_commit=before_commit
+        )
         callback = self.after_put
         if callback is not None:
-            callback(consultation_id)
+            callback_result = callback(consultation_id)
+            if inspect.isawaitable(callback_result):
+                await callback_result
 
 
 def test_consumed_between_carrier_write_and_first_answer_wake_creates_no_request(
@@ -5723,3 +6385,1686 @@ def test_consumed_between_carrier_write_and_first_answer_wake_creates_no_request
     assert reply["data"]["wake_state"] is None
     assert reply["data"]["blocker"] == "ANSWER_ALREADY_CONSUMED"
     assert _answer_attention_requested_records(runtime) == ()
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1 Task 7 — READY / Runtime / COMMIT and packet-safe budgets
+# ---------------------------------------------------------------------------
+
+
+class _PacketWireCountingQuestionCarrier(_CountingQuestionCarrier):
+    requires_packet_wire = True
+
+
+class _RuntimeOrderingCarrier(InMemoryConsultationPacketCarrier):
+    """Record the durable Runtime count immediately around COMMIT authority."""
+
+    requires_packet_wire = True
+
+    def __init__(self, runtime: Runtime) -> None:
+        super().__init__()
+        self.runtime = runtime
+        self.timeline: list[tuple[str, int]] = []
+        self.put_answer_calls = 0
+
+    def _count(self, consultation_id: str, event_type: str) -> int:
+        return sum(
+            1
+            for event in self.runtime.events.list_events(
+                aggregate_type="consultation",
+                aggregate_id=consultation_id,
+            )
+            if event.event_type == event_type
+        )
+
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        self.timeline.append(
+            ("question_before_commit", self._count(consultation_id, "INTENT"))
+        )
+        await before_commit()
+        self.timeline.append(
+            ("question_after_commit", self._count(consultation_id, "INTENT"))
+        )
+        self._questions[consultation_id] = dict(frame)
+
+    async def put_answer(
+        self, consultation_id, frame, *, before_commit
+    ):
+        self.put_answer_calls += 1
+        self.timeline.append(
+            (
+                "answer_before_commit",
+                self._count(consultation_id, "ANSWER_AVAILABLE"),
+            )
+        )
+        await before_commit()
+        self.timeline.append(
+            (
+                "answer_after_commit",
+                self._count(consultation_id, "ANSWER_AVAILABLE"),
+            )
+        )
+        self._answers[consultation_id] = dict(frame)
+
+
+class _ToggleUnknownCarrier(InMemoryConsultationPacketCarrier):
+    requires_packet_wire = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.question_unknown = False
+        self.answer_unknown = False
+
+    async def get_question(self, consultation_id):
+        if self.question_unknown:
+            raise ConsultationPacketCarrierUnknown("question history unknown")
+        return await super().get_question(consultation_id)
+
+    async def get_answer(self, consultation_id):
+        if self.answer_unknown:
+            raise ConsultationPacketCarrierUnknown("answer history unknown")
+        return await super().get_answer(consultation_id)
+
+
+def _consultation_event_count(
+    runtime: Runtime, consultation_id: str, event_type: str
+) -> int:
+    return sum(
+        1
+        for event in runtime.events.list_events(
+            aggregate_type="consultation", aggregate_id=consultation_id
+        )
+        if event.event_type == event_type
+    )
+
+
+def _ascii_answer_for_canonical_budget(max_bytes: int) -> tuple[str, str]:
+    overhead = len(
+        canonical_consultation_json(
+            {"text": "", "evidence_refs": []}
+        ).encode("utf-8")
+    )
+    admitted = "x" * max(1, max_bytes - overhead)
+    while len(
+        canonical_consultation_json(
+            {"text": admitted, "evidence_refs": []}
+        ).encode("utf-8")
+    ) > max_bytes:
+        admitted = admitted[:-1]
+    refused = admitted + "x"
+    assert len(
+        canonical_consultation_json(
+            {"text": admitted, "evidence_refs": []}
+        ).encode("utf-8")
+    ) <= max_bytes
+    assert len(
+        canonical_consultation_json(
+            {"text": refused, "evidence_refs": []}
+        ).encode("utf-8")
+    ) > max_bytes
+    return admitted, refused
+
+
+def _pattern_text_at_semantic_budget(
+    pattern: str,
+    *,
+    max_bytes: int,
+    evidence_refs: list[str],
+) -> str:
+    best = ""
+    low = 0
+    high = max_bytes
+    while low <= high:
+        repeats = (low + high) // 2
+        candidate = pattern * repeats
+        size = len(
+            canonical_consultation_json(
+                {"text": candidate, "evidence_refs": evidence_refs}
+            ).encode("utf-8")
+        )
+        if size <= max_bytes:
+            best = candidate
+            low = repeats + 1
+        else:
+            high = repeats - 1
+    return best
+
+
+def _p1_invocations(
+    *,
+    max_evidence_reads: int = 1,
+    max_payload_bytes: int = 32_768,
+) -> _StaticInvocations:
+    return _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": max_evidence_reads,
+                "max_forward_hops": 0,
+                "max_payload_bytes": max_payload_bytes,
+            }
+        )
+    )
+
+
+def test_oversize_question_packet_refuses_before_runtime_or_wake(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-question-budget")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-question-budget-repo"
+    )
+    carrier = _PacketWireCountingQuestionCarrier()
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_p1_invocations(),
+    )
+
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Q" * 16_000,
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert len(runtime.events.list_events(aggregate_type="consultation")) == 0
+    assert carrier.put_question_calls == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_question_runtime_intent_is_created_inside_carrier_commit_gate(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-question-order")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-question-order-repo"
+    )
+    carrier = _RuntimeOrderingCarrier(runtime)
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_p1_invocations(),
+    )
+
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Commit the INTENT only after Relay READY.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+
+    assert envelope["ok"] is True
+    assert carrier.timeline[:2] == [
+        ("question_before_commit", 0),
+        ("question_after_commit", 1),
+    ]
+
+
+def test_question_clamps_answer_budget_to_renderable_packet(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-budget")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-budget-repo"
+    )
+    carrier = _RuntimeOrderingCarrier(runtime)
+    invocations = _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": 1,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 32_768,
+            }
+        )
+    )
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="What answer payload can the exact packet carry?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert consult["ok"] is True
+    consultation_id = consult["data"]["consultation_ref"]
+    question_frame = _run(carrier.get_question(consultation_id))
+    assert question_frame is not None
+    safe_limit = consultation_dispatch._packet_safe_answer_payload_limit(
+        question_frame
+    )
+    persisted_limit = int(question_frame["response_budget"]["max_payload_bytes"])
+    assert question_frame["response_budget"]["max_evidence_reads"] == 1
+    assert 0 < persisted_limit == safe_limit < 32_768
+
+    admitted_text, refused_text = _ascii_answer_for_canonical_budget(
+        persisted_limit
+    )
+    admitted_frame = consultation_dispatch._build_answer_frame(
+        question_frame,
+        answer_text=admitted_text,
+        evidence_refs=[],
+        supersedes=None,
+    )
+    assert len(render_consultation_packet(admitted_frame).encode("utf-8")) <= (
+        CONSULTATION_PACKET_MAX_BYTES
+    )
+
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            b_dispatcher,
+            "company.reply",
+            {
+                "schema": COMPANY_CONSULTATION_SCHEMA,
+                "operation": "reply",
+                "semantic": {
+                    "consultation_ref": consultation_id,
+                    "answer": refused_text,
+                    "supersedes_message_key": None,
+                    "evidence_refs": [],
+                },
+            },
+        )
+    assert excinfo.value.code == "INVALID_REQUEST"
+    assert _consultation_event_count(
+        runtime, consultation_id, "ANSWER_AVAILABLE"
+    ) == 0
+    assert carrier.put_answer_calls == 0
+
+
+def test_answer_runtime_fact_is_created_inside_carrier_commit_gate(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-order")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-order-repo"
+    )
+    carrier = _RuntimeOrderingCarrier(runtime)
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Commit ANSWER_AVAILABLE only after Relay READY.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    carrier.timeline.clear()
+
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "The Relay READY gate now owns the ordering.",
+                "evidence_refs": [],
+            },
+        )
+    )
+
+    assert reply["ok"] is True
+    assert carrier.timeline[:2] == [
+        ("answer_before_commit", 0),
+        ("answer_after_commit", 1),
+    ]
+
+
+def test_zero_write_detail_read_reports_carrier_unknown_without_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-read-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-read-unknown-repo"
+    )
+    carrier = _ToggleUnknownCarrier()
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    gateway = _gateway_with_dispatcher(a_dispatcher)
+    consult = _run(
+        gateway.call(
+            "company.consult",
+            _consult_args(
+                question="Will an uncertain read stay zero-effect?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    before = _canonical_event_digest(runtime, consultation_id)
+    carrier.question_unknown = True
+
+    read = _run(
+        gateway.call(
+            "company.consultation",
+            {"consultation_ref": consultation_id},
+        )
+    )
+
+    assert read["ok"] is True
+    assert read["data"]["question"] is None
+    assert read["data"]["answer"] is None
+    assert read["data"]["body_status"] == "UNAVAILABLE"
+    assert read["data"]["blocker"] == "PENDING_RETRYABLE"
+    assert read["data"]["carrier_blocker"] == (
+        "CARRIER_RECONCILIATION_REQUIRED"
+    )
+    assert _canonical_event_digest(runtime, consultation_id) == before
+
+
+class _ConcurrentQuestionWinnerCarrier(InMemoryConsultationPacketCarrier):
+    """A concurrent winner creates Runtime+packet before the loser callback."""
+
+    requires_packet_wire = True
+
+    def __init__(
+        self,
+        *,
+        consultations: ConsultationRuntime,
+        requester_attempt_id: str,
+        repository_root: Path,
+        observed_at: str,
+    ) -> None:
+        super().__init__()
+        self.consultations = consultations
+        self.requester_attempt_id = requester_attempt_id
+        self.repository_root = repository_root
+        self.observed_at = observed_at
+        self.winner_inserted: bool | None = None
+        self.loser_callback_calls = 0
+
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        result = self.consultations.intent(
+            frame,
+            requester_attempt_id=self.requester_attempt_id,
+            carrier_ref=f"company-mcp://{consultation_id}",
+            observed_at=self.observed_at,
+            repository_root=self.repository_root,
+        )
+        self.winner_inserted = result.inserted
+        self._questions[consultation_id] = dict(frame)
+        # Relay returns DUPLICATE before invoking this caller's callback.
+        assert before_commit is not None
+
+
+class _ConcurrentAnswerWinnerCarrier(InMemoryConsultationPacketCarrier):
+    """A concurrent winner admits/stores ANSWER before the loser callback."""
+
+    requires_packet_wire = True
+
+    def __init__(self, *, consultations: ConsultationRuntime, observed_at: str) -> None:
+        super().__init__()
+        self.consultations = consultations
+        self.observed_at = observed_at
+        self.winner_inserted: bool | None = None
+
+    async def put_answer(
+        self, consultation_id, frame, *, before_commit
+    ):
+        result = self.consultations.answer_available(
+            frame,
+            observed_at=self.observed_at,
+        )
+        self.winner_inserted = result.inserted
+        self._answers[consultation_id] = dict(frame)
+        # Relay returns DUPLICATE before invoking this caller's callback.
+        assert before_commit is not None
+
+
+def test_question_duplicate_before_callback_reconciles_concurrent_winner(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-question-duplicate-before-callback")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-question-duplicate-before-callback-repo"
+    )
+    carrier = _ConcurrentQuestionWinnerCarrier(
+        consultations=_consultations(runtime, fixture_repo),
+        requester_attempt_id=requester[1],
+        repository_root=fixture_repo,
+        observed_at="2026-09-14T00:00:00Z",
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_p1_invocations(),
+    )
+
+    envelope = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Concurrent winner already committed this packet?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+
+    assert envelope["ok"] is True
+    assert envelope["data"]["state"] == "ALREADY_INTENDED"
+    assert envelope["data"]["is_already_intended"] is True
+    assert envelope["data"]["blocker"] is None
+    assert envelope["data"]["attention_requested"] is True
+    assert carrier.winner_inserted is True
+    assert len(
+        runtime.events.list_events(aggregate_type="consultation")
+    ) == 1
+    consultation_id = envelope["data"]["consultation_ref"]
+    obligation_id = _obligation_id_for_intent(runtime, consultation_id)
+    assert len(WakeLedgerRepository(runtime).list_records(obligation_id)) == 1
+
+
+def test_answer_duplicate_before_callback_reconciles_concurrent_winner(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-duplicate-before-callback")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-duplicate-before-callback-repo"
+    )
+    carrier = _ConcurrentAnswerWinnerCarrier(
+        consultations=_consultations(runtime, fixture_repo),
+        observed_at="2026-09-14T00:04:00Z",
+    )
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Concurrent answer winner?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "A concurrent recipient already admitted this answer.",
+                "evidence_refs": [],
+            },
+        )
+    )
+
+    assert reply["ok"] is True
+    assert reply["data"]["state"] == "ANSWER_AVAILABLE"
+    assert reply["data"]["inserted"] is False
+    assert reply["data"]["reconciled"] is True
+    assert reply["data"]["attention_requested"] is True
+    assert reply["data"]["blocker"] is None
+    assert carrier.winner_inserted is True
+    assert _consultation_event_count(
+        runtime, consultation_id, "ANSWER_AVAILABLE"
+    ) == 1
+    assert len(_answer_attention_requested_records(runtime)) == 1
+
+
+def test_high_requested_budget_replays_the_same_clamped_question(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-clamped-replay")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-clamped-replay-repo"
+    )
+    carrier = _PacketWireCountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": 1,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 32_768,
+            }
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    gateway = _gateway_with_dispatcher(dispatcher)
+    args = _consult_args(
+        question="Replay the exact clamped packet.",
+        evidence_refs=[],
+        artifact_revisions=[fixture_revision],
+    )
+
+    first = _run(gateway.call("company.consult", args))
+    second = _run(gateway.call("company.consult", args))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert first["data"]["state"] == "INTENDED"
+    assert second["data"]["state"] == "ALREADY_INTENDED"
+    assert carrier.put_question_calls == 1
+    consultation_id = first["data"]["consultation_ref"]
+    assert _consultation_event_count(runtime, consultation_id, "INTENT") == 1
+
+
+def test_tiny_answer_budget_refuses_question_before_runtime_or_carrier(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-tiny-budget")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-tiny-budget-repo"
+    )
+    carrier = _PacketWireCountingQuestionCarrier()
+    invocations = _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": 0,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 1,
+            }
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="No valid answer can fit a one-byte semantic budget.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert carrier.put_question_attempts == 0
+    assert carrier.put_question_calls == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_unrepresentable_evidence_budget_refuses_without_silent_narrowing(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-evidence-budget-refusal")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-evidence-budget-refusal-repo"
+    )
+    carrier = _PacketWireCountingQuestionCarrier()
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_p1_invocations(max_evidence_reads=4),
+    )
+
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Four maximum evidence references cannot fit this wire.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert excinfo.value.code == "BODY_OVER_BUDGET"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert carrier.put_question_attempts == 0
+    assert carrier.put_question_calls == 0
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_packet_safe_limit_includes_maximum_admitted_evidence_amplification(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-evidence-amplification")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-evidence-amplification-repo"
+    )
+    carrier = _RuntimeOrderingCarrier(runtime)
+    invocations = _StaticInvocations(
+        _default_invocation(
+            response_budget={
+                "max_answers": 1,
+                "max_evidence_reads": 1,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 32_768,
+            }
+        )
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Budget worst-case evidence amplification.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    question = _run(carrier.get_question(consult["data"]["consultation_ref"]))
+    assert question is not None
+    budget = dict(question["response_budget"])
+    refs = consultation_dispatch._max_length_packet_evidence_refs(
+        int(budget["max_evidence_reads"])
+    )
+    for pattern in ('x', '"', "\\", "界", "😀"):
+        text = _pattern_text_at_semantic_budget(
+            pattern,
+            max_bytes=int(budget["max_payload_bytes"]),
+            evidence_refs=refs,
+        )
+        frame = consultation_dispatch._build_answer_frame(
+            question,
+            answer_text=text,
+            evidence_refs=refs,
+            supersedes=None,
+        )
+        assert len(render_consultation_packet(frame).encode("utf-8")) <= (
+            CONSULTATION_PACKET_MAX_BYTES
+        )
+    if refs:
+        with pytest.raises(ConsultationRefusal) as excinfo:
+            _run_dispatcher(
+                _make_dispatcher(
+                    runtime,
+                    fixture_repo,
+                    requester=recipient,
+                    recipient=requester,
+                    packets=carrier,
+                    invocations=invocations,
+                ),
+                "company.reply",
+                {
+                    "schema": COMPANY_CONSULTATION_SCHEMA,
+                    "operation": "reply",
+                    "semantic": {
+                        "consultation_ref": consult["data"]["consultation_ref"],
+                        "answer": "bounded",
+                        "supersedes_message_key": None,
+                        "evidence_refs": refs + [
+                            "https://github.com/mastermindx-market-intelligence/"
+                            "Mastermind/commit/" + "f" * 40
+                        ],
+                    },
+                },
+            )
+        assert excinfo.value.code == "INVALID_REQUEST"
+
+
+class _AbortBeforeQuestionCommitCarrier(InMemoryConsultationPacketCarrier):
+    requires_packet_wire = True
+
+    async def put_question(
+        self, consultation_id, frame, *, before_commit
+    ):
+        raise ConsultationPacketCommitAborted(
+            "synthetic abort before Runtime callback"
+        )
+
+
+def test_carrier_abort_before_callback_never_returns_committed_shape(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-abort-before-callback")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-abort-before-callback-repo"
+    )
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=_AbortBeforeQuestionCommitCarrier(),
+        invocations=_p1_invocations(),
+    )
+
+    with pytest.raises(ConsultationRefusal) as excinfo:
+        _run_dispatcher(
+            dispatcher,
+            "company.consult",
+            _dispatch_consult_envelope(
+                question="Abort before Runtime callback.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+
+    assert excinfo.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+    assert runtime.events.list_events(aggregate_type="consultation") == []
+    assert WakeLedgerRepository(runtime).list_wake_events() == ()
+
+
+def test_answer_read_unknown_preserves_question_and_canonical_runtime_facts(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-read-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-read-unknown-repo"
+    )
+    carrier = _ToggleUnknownCarrier()
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Preserve this question when ANSWER history is unknown.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    reply_args = {
+        "consultation_ref": consultation_id,
+        "answer": "This answer is durable but its carrier read is unavailable.",
+        "evidence_refs": [],
+    }
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply", reply_args
+        )
+    )
+    assert reply["ok"] is True
+    before = _canonical_event_digest(runtime, consultation_id)
+    carrier.answer_unknown = True
+
+    read = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consultation",
+            {"consultation_ref": consultation_id},
+        )
+    )
+
+    assert read["ok"] is True
+    assert read["data"]["question"]["text"] == (
+        "Preserve this question when ANSWER history is unknown."
+    )
+    assert read["data"]["answer"] is None
+    assert read["data"]["body_status"] == "UNAVAILABLE"
+    assert read["data"]["carrier_blocker"] == (
+        "CARRIER_RECONCILIATION_REQUIRED"
+    )
+    assert _canonical_event_digest(runtime, consultation_id) == before
+
+
+def test_answer_read_unknown_blocks_consume_and_replay_without_new_effect(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "p1-answer-consume-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(
+        tmp_path / "p1-answer-consume-unknown-repo"
+    )
+    carrier = _ToggleUnknownCarrier()
+    invocations = _p1_invocations()
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Unknown answer read must not consume or resend.",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    reply_request = {
+        "schema": COMPANY_CONSULTATION_SCHEMA,
+        "operation": "reply",
+        "semantic": {
+            "consultation_ref": consultation_id,
+            "answer": "One admitted answer.",
+            "supersedes_message_key": None,
+            "evidence_refs": [],
+        },
+    }
+    first = _run_dispatcher(b_dispatcher, "company.reply", reply_request)
+    assert first["result"]["state"] == "ANSWER_AVAILABLE"
+    before = _canonical_event_digest(runtime, consultation_id)
+    carrier.answer_unknown = True
+
+    with pytest.raises(ConsultationRefusal) as consume_exc:
+        _run(a_dispatcher.consume_answer(consultation_id))
+    assert consume_exc.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+
+    with pytest.raises(ConsultationRefusal) as replay_exc:
+        _run_dispatcher(b_dispatcher, "company.reply", reply_request)
+    assert replay_exc.value.code == "CARRIER_RECONCILIATION_REQUIRED"
+    assert _canonical_event_digest(runtime, consultation_id) == before
+    assert _consultation_event_count(
+        runtime, consultation_id, "CONSUMED_BY_REQUESTER"
+    ) == 0
+    assert _consultation_event_count(
+        runtime, consultation_id, "ANSWER_AVAILABLE"
+    ) == 1
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1 Task 8 — real AF_UNIX Relay restart journey
+# ---------------------------------------------------------------------------
+
+
+class _ExactRelayAuthorityPolicy:
+    def minimum_authority(self, *, request, option) -> str:
+        return "WITHIN_COMMISSION"
+
+    def allows_continuation(self, *, request, reply) -> bool:
+        return True
+
+
+class _BoundedInMemorySlackClient(InMemorySlackClient):
+    """Hermetic Slack transport with exact raw-page byte facts."""
+
+    @staticmethod
+    def _raw_message(message: SlackMessage) -> dict[str, object]:
+        value: dict[str, object] = {
+            "ts": message.ts,
+            "user": message.author_user_id,
+            "text": message.text,
+        }
+        if message.thread_ts is not None:
+            value["thread_ts"] = message.thread_ts
+        if message.edited:
+            value["edited"] = {"ts": message.ts}
+        if message.deleted:
+            value["subtype"] = "tombstone"
+        return value
+
+    async def fetch_thread(
+        self, *, channel_id: str, thread_ts: str, limit: int
+    ) -> BoundedHistoryPage:
+        page = await super().fetch_thread(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            limit=limit,
+        )
+        raw = json.dumps(
+            {
+                "ok": True,
+                "messages": [
+                    self._raw_message(message) for message in page.messages
+                ],
+                "has_more": False,
+                "response_metadata": {"next_cursor": ""},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+        assert 0 < len(raw) <= MAX_RESPONSE_BYTES
+        return BoundedHistoryPage(
+            messages=page.messages,
+            complete=page.complete,
+            mutation_evidence_complete=page.mutation_evidence_complete,
+            response_page_bytes=(len(raw),),
+            response_byte_limit=MAX_RESPONSE_BYTES,
+        )
+
+
+def _relay_policy() -> DialoguePolicy:
+    return DialoguePolicy(
+        workspace_id="T0BRD2AQXQV",
+        channel_id="C0BRUL9F2V7",
+        relay_bot_user_id="U0BST4WG996",
+        allowed_sol_user_ids=("U0BRETDUAS2",),
+        allowed_parent_user_ids=("U0BRETDUAS2",),
+        max_channel_history=100,
+        max_thread_history=100,
+        poll_interval_seconds=0,
+        method_timeout_seconds=1,
+    )
+
+
+def _relay_parent(binding: DialogueBinding, policy: DialoguePolicy) -> SlackMessage:
+    parent = build_parent_v2(
+        {
+            "schema": PARENT_SCHEMA_V2,
+            "work_ref": binding.work_ref,
+            "commission_ref": dict(binding.commission_ref),
+            "session_ref": binding.session_ref,
+            "operation_key": binding.operation_key,
+            "watch_mode": TURN_WATCH_MODE_V1,
+            "allowed_sol_user_ids": list(policy.allowed_sol_user_ids),
+            "created_at": "2026-09-25T00:00:00Z",
+        }
+    )
+    return SlackMessage(
+        ts=binding.thread_ts,
+        author_user_id=policy.relay_bot_user_id,
+        text=render_parent_v2(parent),
+    )
+
+
+def _relay_service(
+    *,
+    socket_path: Path,
+    client: _BoundedInMemorySlackClient,
+) -> AgentDialogueService:
+    policy = _relay_policy()
+    authority = _ExactRelayAuthorityPolicy()
+    return AgentDialogueService(
+        ServiceConfig(
+            socket_path=socket_path,
+            allowed_peer_uids=(os.geteuid(),),
+            request_timeout_seconds=2,
+        ),
+        DialogueEngine(
+            policy,
+            client,
+            authority_policy=authority,
+        ),
+        engine_v2=DialogueEngineV2(
+            policy,
+            client,
+            authority_policy=authority,
+        ),
+    )
+
+
+async def _start_relay_service(
+    *,
+    socket_path: Path,
+    client: _BoundedInMemorySlackClient,
+) -> tuple[AgentDialogueService, asyncio.Task[None]]:
+    service = _relay_service(socket_path=socket_path, client=client)
+    task = asyncio.create_task(service.serve_forever())
+    for _attempt in range(200):
+        if socket_path.exists():
+            return service, task
+        if task.done():
+            await task
+        await asyncio.sleep(0.005)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    raise AssertionError("Agent Relay service did not bind its AF_UNIX socket")
+
+
+async def _stop_relay_service(
+    service: AgentDialogueService,
+    task: asyncio.Task[None],
+) -> None:
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await service.close()
+    assert not service.config.socket_path.exists()
+
+
+def _relay_dispatcher(
+    runtime: Runtime,
+    repository_root: Path,
+    *,
+    caller: tuple,
+    recipient: tuple,
+    caller_dialogue: DialogueBinding,
+    recipient_dialogue: DialogueBinding,
+    socket_path: Path,
+    invocations: InvocationContextSource,
+) -> RuntimeConsultationDispatcher:
+    carrier = AgentDialogueConsultationPacketCarrier(
+        binding_resolver=_StaticDialogueBindingResolver(caller_dialogue),
+        socket_path=socket_path,
+        timeout_seconds=2,
+    )
+
+    def resolve_recipient(_peer_ref: str) -> RecipientBinding:
+        return RecipientBinding(
+            actor_ref={
+                "kind": "worker_attempt",
+                "job_id": recipient[0],
+                "attempt_id": recipient[1],
+                "worker_id": recipient[2],
+            },
+            recipient_binding=dict(recipient[3]),
+            dialogue_binding=recipient_dialogue,
+        )
+
+    return RuntimeConsultationDispatcher(
+        runtime=runtime,
+        repository_root=repository_root,
+        caller=CallerIdentity(
+            job_id=caller[0],
+            worker_id=caller[2],
+            attempt_id=caller[1],
+            reasoning_surface="codex",
+            binding=dict(caller[3]),
+            dialogue_binding=caller_dialogue,
+        ),
+        recipients=resolve_recipient,
+        packets=carrier,
+        invocations=invocations,
+        _clock=_ManualClock("2026-09-14T00:00:00Z"),
+    )
+
+
+def test_real_af_unix_relay_survives_service_and_dispatcher_restarts(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        runtime = _runtime_at(tmp_path / "p1-real-relay-runtime")
+        requester, recipient, _third, _root = _workers(runtime)
+        fixture_repo, fixture_revision = _fixture_repo(
+            tmp_path / "p1-real-relay-repo"
+        )
+        invocations = _p1_invocations()
+        requester_dialogue = _dialogue_binding(requester)
+        recipient_dialogue = _dialogue_binding(recipient)
+        _require_same_dialogue_carrier(
+            requester_dialogue,
+            recipient_dialogue,
+            caller_actor_ref=dict(requester_dialogue.actor_ref),
+            recipient_actor_ref=dict(recipient_dialogue.actor_ref),
+        )
+
+        socket_root = Path(
+            tempfile.mkdtemp(prefix="iac1-p1-relay-", dir="/tmp")
+        )
+        socket_path = socket_root / "relay.sock"
+        client = _BoundedInMemorySlackClient(
+            relay_bot_user_id=_relay_policy().relay_bot_user_id,
+            next_timestamp=Decimal("1787961600.000002"),
+        )
+        client.add_parent(_relay_parent(requester_dialogue, _relay_policy()))
+
+        try:
+            service_1, service_task_1 = await _start_relay_service(
+                socket_path=socket_path,
+                client=client,
+            )
+            a_dispatcher = _relay_dispatcher(
+                runtime,
+                fixture_repo,
+                caller=requester,
+                recipient=recipient,
+                caller_dialogue=requester_dialogue,
+                recipient_dialogue=recipient_dialogue,
+                socket_path=socket_path,
+                invocations=invocations,
+            )
+            consultation = await _gateway_with_dispatcher(a_dispatcher).call(
+                "company.consult",
+                _consult_args(
+                    question="Can this QUESTION survive a real Relay restart?",
+                    evidence_refs=[],
+                    artifact_revisions=[fixture_revision],
+                ),
+            )
+            assert consultation["ok"] is True
+            consultation_id = consultation["data"]["consultation_ref"]
+            await _stop_relay_service(service_1, service_task_1)
+
+            service_2, service_task_2 = await _start_relay_service(
+                socket_path=socket_path,
+                client=client,
+            )
+            b_dispatcher = _relay_dispatcher(
+                runtime,
+                fixture_repo,
+                caller=recipient,
+                recipient=requester,
+                caller_dialogue=recipient_dialogue,
+                recipient_dialogue=requester_dialogue,
+                socket_path=socket_path,
+                invocations=invocations,
+            )
+            b_gateway = _gateway_with_dispatcher(b_dispatcher)
+            b_read = await b_gateway.call(
+                "company.consultation",
+                {"consultation_ref": consultation_id},
+            )
+            assert b_read["ok"] is True
+            assert b_read["data"]["question"]["text"] == (
+                "Can this QUESTION survive a real Relay restart?"
+            )
+            _deliver_and_ack_wake_path(runtime, consultation_id)
+            answer = await b_gateway.call(
+                "company.reply",
+                {
+                    "consultation_ref": consultation_id,
+                    "answer": "Yes. The same physical thread carries the ANSWER.",
+                    "evidence_refs": [],
+                },
+            )
+            assert answer["ok"] is True
+            await _stop_relay_service(service_2, service_task_2)
+
+            service_3, service_task_3 = await _start_relay_service(
+                socket_path=socket_path,
+                client=client,
+            )
+            a_dispatcher_after_restart = _relay_dispatcher(
+                runtime,
+                fixture_repo,
+                caller=requester,
+                recipient=recipient,
+                caller_dialogue=requester_dialogue,
+                recipient_dialogue=recipient_dialogue,
+                socket_path=socket_path,
+                invocations=invocations,
+            )
+            a_gateway_after_restart = _gateway_with_dispatcher(
+                a_dispatcher_after_restart
+            )
+            a_read = await a_gateway_after_restart.call(
+                "company.consultation",
+                {"consultation_ref": consultation_id},
+            )
+            assert a_read["ok"] is True
+            assert a_read["data"]["answer"]["text"] == (
+                "Yes. The same physical thread carries the ANSWER."
+            )
+            consumed = await a_dispatcher_after_restart.consume_answer(
+                consultation_id
+            )
+            assert consumed["state"] == "CONSUMED"
+            await _stop_relay_service(service_3, service_task_3)
+
+            packet_replies = [
+                message
+                for message in client.thread_messages[
+                    requester_dialogue.thread_ts
+                ]
+                if message.text.startswith(
+                    "MMX/AGENT_DIALOGUE_CONSULTATION_PACKET_V1"
+                )
+            ]
+            assert len(packet_replies) == 2
+            assert _consultation_event_count(
+                runtime, consultation_id, "INTENT"
+            ) == 1
+            assert _consultation_event_count(
+                runtime, consultation_id, "ANSWER_AVAILABLE"
+            ) == 1
+            assert _consultation_event_count(
+                runtime, consultation_id, "CONSUMED_BY_REQUESTER"
+            ) == 1
+            question_obligation_id = _obligation_id_for_intent(
+                runtime, consultation_id
+            )
+            question_records = WakeLedgerRepository(runtime).list_records(
+                question_obligation_id
+            )
+            assert sum(
+                1
+                for item in question_records
+                if item.record.phase is LedgerPhase.WAKE_REQUESTED
+            ) == 1
+            assert len(_answer_attention_requested_records(runtime)) == 1
+        finally:
+            shutil.rmtree(socket_root, ignore_errors=True)
+
+    _run(scenario())
+
+
+_P1_PROTECTED_BASE = "a29161fa0a44cca9927afe042b5f7ea25aae1736"
+_P1_PRODUCTION_PATHS = (
+    "common/agent_dialogue_consultation_contract.py",
+    "integrations/slack_agent_dialogue/engine.py",
+    "integrations/slack_agent_dialogue/engine_v2.py",
+    "integrations/slack_agent_dialogue/service.py",
+    "integrations/slack_agent_dialogue/slack_web_api.py",
+    "integrations/slack_agent_dialogue/turn_observer.py",
+    "integrations/company_consultation_dispatch.py",
+)
+
+
+def _p1_base_source(path: str) -> str:
+    result = subprocess.run(
+        ["git", "show", f"{_P1_PROTECTED_BASE}:{path}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def _top_level_symbols(source: str) -> set[str]:
+    tree = ast.parse(source)
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def test_p1_adds_no_parallel_packet_control_plane() -> None:
+    root = Path(__file__).resolve().parents[1]
+    forbidden_symbol = re.compile(
+        r"(Store|Cache|Registry|Queue|Retry|Scheduler|Daemon|Listener|Server)$"
+    )
+    forbidden_added_text = (
+        "sqlite3",
+        "CREATE TABLE",
+        "ALTER TABLE",
+        "DROP TABLE",
+        "SlackWebApiDialogueClient(",
+        "asyncio.start_unix_server(",
+        "launchctl",
+        ".plist",
+        "token_file",
+    )
+    for path in _P1_PRODUCTION_PATHS:
+        current = (root / path).read_text()
+        base = _p1_base_source(path)
+        new_symbols = _top_level_symbols(current) - _top_level_symbols(base)
+        assert not {
+            name for name in new_symbols if forbidden_symbol.search(name)
+        }, (path, new_symbols)
+
+    diff = subprocess.run(
+        ["git", "diff", "--unified=0", _P1_PROTECTED_BASE, "--", *_P1_PRODUCTION_PATHS],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=root,
+    ).stdout
+    added = "\n".join(
+        line[1:]
+        for line in diff.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+    for forbidden in forbidden_added_text:
+        assert forbidden not in added, forbidden
+
+
+# ---------------------------------------------------------------------------
+# IAC-P1 canonical C-C-R donor-property adjudication
+# ---------------------------------------------------------------------------
+
+
+class _CanonicalCommittedThenLostQuestionCarrier(_CountingQuestionCarrier):
+    """QUESTION commits to the carrier, then its return is lost exactly once."""
+
+    async def put_question(self, consultation_id, frame, *, before_commit):
+        self.put_question_attempts += 1
+        await before_commit()
+        self.put_question_calls += 1
+        self._questions[consultation_id] = dict(frame)
+        if not self._raised:
+            self._raised = True
+            raise ConsultationPacketEffectUnknown(
+                "synthetic committed question response lost"
+            )
+
+
+class _CanonicalCommittedThenLostAnswerCarrier(_CountingAnswerCarrier):
+    """ANSWER commits to the carrier, then its return is lost exactly once."""
+
+    async def put_answer(self, consultation_id, frame, *, before_commit):
+        self.put_answer_attempts += 1
+        await before_commit()
+        self.put_answer_calls += 1
+        self._answers[consultation_id] = dict(frame)
+        if not self._raised:
+            self._raised = True
+            raise ConsultationPacketEffectUnknown(
+                "synthetic committed answer response lost"
+            )
+
+
+class _CanonicalUncertainQuestionReadCarrier(
+    _CanonicalCommittedThenLostQuestionCarrier
+):
+    async def get_question(self, consultation_id):
+        self.get_question_calls += 1
+        if self.put_question_calls:
+            raise ConsultationPacketCarrierUnknown("synthetic uncertain readback")
+        return await InMemoryConsultationPacketCarrier.get_question(
+            self, consultation_id
+        )
+
+
+class _CanonicalUncertainAnswerReadCarrier(
+    _CanonicalCommittedThenLostAnswerCarrier
+):
+    async def get_answer(self, consultation_id):
+        self.get_answer_calls += 1
+        if self.put_answer_calls:
+            raise ConsultationPacketCarrierUnknown("synthetic uncertain readback")
+        return await InMemoryConsultationPacketCarrier.get_answer(
+            self, consultation_id
+        )
+
+
+def test_canonical_lost_question_return_validated_readback_continues_one_wake(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-question-valid")
+    _consultations(runtime, tmp_path / "ccr-question-valid")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-question-valid-repo")
+    carrier = _CanonicalCommittedThenLostQuestionCarrier()
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_StaticInvocations(
+            _default_invocation(invocation_id="iac1-canonical-ccr-question")
+        ),
+    )
+    result = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Did the committed question survive the lost return?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert result["ok"] is True
+    data = result["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["blocker"] is None
+    assert data["attention_requested"] is True
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question_calls == 2
+    assert _intent_count(runtime, consultation_id) == 1
+    assert _requested_count(runtime, consultation_id) == 1
+
+
+def test_canonical_lost_question_return_uncertain_readback_keeps_barrier(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-question-unknown")
+    _consultations(runtime, tmp_path / "ccr-question-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-question-unknown-repo")
+    carrier = _CanonicalUncertainQuestionReadCarrier()
+    dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=_StaticInvocations(
+            _default_invocation(invocation_id="iac1-canonical-ccr-question-unknown")
+        ),
+    )
+    result = _run(
+        _gateway_with_dispatcher(dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Does uncertain readback preserve the barrier?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    assert result["ok"] is True
+    data = result["data"]
+    consultation_id = data["consultation_ref"]
+    assert data["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert data["attention_requested"] is False
+    assert carrier.put_question_calls == 1
+    assert carrier.get_question_calls == 2
+    assert _requested_count(runtime, consultation_id) == 0
+
+
+def test_canonical_lost_answer_return_validated_readback_continues_requester_attention(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-answer-valid")
+    _consultations(runtime, tmp_path / "ccr-answer-valid")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-answer-valid-repo")
+    carrier = _CanonicalCommittedThenLostAnswerCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Will the answer return be reconciled?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "Committed answer survived.",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply["ok"] is True
+    data = reply["data"]
+    assert data["blocker"] is None
+    assert data["attention_requested"] is True
+    assert carrier.put_answer_calls == 1
+    assert carrier.get_answer_calls == 1
+    assert len(_answer_attention_requested_records(runtime)) == 1
+
+
+def test_canonical_lost_answer_return_uncertain_readback_keeps_barrier(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_at(tmp_path / "ccr-answer-unknown")
+    _consultations(runtime, tmp_path / "ccr-answer-unknown")
+    requester, recipient, _third, _root = _workers(runtime)
+    fixture_repo, fixture_revision = _fixture_repo(tmp_path / "ccr-answer-unknown-repo")
+    carrier = _CanonicalUncertainAnswerReadCarrier()
+    invocations = _StaticInvocations(_default_invocation())
+    a_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=requester,
+        recipient=recipient,
+        packets=carrier,
+        invocations=invocations,
+    )
+    b_dispatcher = _make_dispatcher(
+        runtime,
+        fixture_repo,
+        requester=recipient,
+        recipient=requester,
+        packets=carrier,
+        invocations=invocations,
+    )
+    consult = _run(
+        _gateway_with_dispatcher(a_dispatcher).call(
+            "company.consult",
+            _consult_args(
+                question="Will uncertain answer readback stay blocked?",
+                evidence_refs=[],
+                artifact_revisions=[fixture_revision],
+            ),
+        )
+    )
+    consultation_id = consult["data"]["consultation_ref"]
+    _deliver_and_ack_wake_path(runtime, consultation_id)
+    reply = _run(
+        _gateway_with_dispatcher(b_dispatcher).call(
+            "company.reply",
+            {
+                "consultation_ref": consultation_id,
+                "answer": "Uncertain carrier read.",
+                "evidence_refs": [],
+            },
+        )
+    )
+    assert reply["ok"] is True
+    data = reply["data"]
+    assert data["blocker"] == "CARRIER_RECONCILIATION_REQUIRED"
+    assert data["attention_requested"] is None
+    assert carrier.put_answer_calls == 1
+    assert carrier.get_answer_calls == 1
+    assert len(_answer_attention_requested_records(runtime)) == 0

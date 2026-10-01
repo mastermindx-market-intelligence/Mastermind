@@ -26,9 +26,27 @@ def test_official_anthropic_compatibility_profiles_pin_supported_models():
     assert get_profile("glm-coding-plan").model_for("subagent") == "GLM-5.3-Flash"
     assert get_profile("glm-coding-plan").model_for("hard") == "GLM-5.3"
     assert get_profile("glm-coding-plan").model_for("fast") == "GLM-5.3-Flash"
-    assert get_profile("alibaba-token-plan-personal").model_for() == "qwen3.8-max"
-    assert get_profile("alibaba-token-plan-personal").model_for("subagent") == "qwen3.7-max"
+    assert get_profile("alibaba-token-plan-personal").model_for() == "qwen3.8-flash"
+    assert get_profile("alibaba-token-plan-personal").model_for("routine") == "qwen3.8-flash"
+    assert get_profile("alibaba-token-plan-personal").model_for("fast") == "qwen3.8-flash"
+    assert get_profile("alibaba-token-plan-personal").model_for("subagent") == "qwen3.8-flash"
+    assert get_profile("alibaba-token-plan-personal").model_for("hard") == "qwen3.8-max"
     assert get_profile("minimax-token-plan").model_for() == "MiniMax-M3"
+
+
+def test_default_model_class_cannot_be_promoted_to_hard():
+    catalog = _catalog()
+    catalog["profiles"]["glm-coding-plan"]["default_model_class"] = "hard"
+    with pytest.raises(ProviderProfileError, match="default model class must remain routine"):
+        validate_profiles(catalog)
+
+
+def test_subagent_topology_cannot_silently_upgrade_model():
+    catalog = _catalog()
+    catalog["profiles"]["alibaba-token-plan-personal"]["models"]["subagent"] = "qwen3.8-max"
+    with pytest.raises(ProviderProfileError, match="subagent topology cannot select a different model"):
+        validate_profiles(catalog)
+
 
 
 def test_purchased_subscription_profiles_are_not_eligible_for_unattended_production():
@@ -366,6 +384,6 @@ def test_closed_model_entry_and_empty_metadata_are_accepted():
     catalog = _catalog()
     catalog["metadata"] = {}
     catalog["profiles"]["glm-coding-plan"]["metadata"] = {}
-    catalog["profiles"]["glm-coding-plan"]["models"]["routine"] = {"id": "GLM-5.3"}
+    catalog["profiles"]["glm-coding-plan"]["models"]["routine"] = {"id": "GLM-5.3-Flash"}
     validate_profiles(catalog)
-    assert get_profile("glm-coding-plan", document=catalog).model_for("routine") == "GLM-5.3"
+    assert get_profile("glm-coding-plan", document=catalog).model_for("routine") == "GLM-5.3-Flash"

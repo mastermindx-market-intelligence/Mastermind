@@ -179,6 +179,18 @@ def test_installer_pins_host_root_and_refuses_missing_mount(
         ["/bin/sh", "-n", str(launcher)], capture_output=True, text=True, check=False,
     )
     assert syntax.returncode == 0, syntax.stderr
+    assert (payload / "common" / "__init__.py").is_file()
+    assert (payload / "common" / "commission_ref.py").is_file()
+
+    # Preserve #1120's real installed-package smoke before the argv probe below.
+    smoke_env = dict(env)
+    smoke_env["MASTERMIND_PYTHON"] = sys.executable
+    smoke = subprocess.run(
+        [str(launcher), "--help"], env=smoke_env, check=False,
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert smoke.returncode == 0, smoke.stderr
+    assert "Canonical attended-session workspace route" in smoke.stdout
 
     observed_external = ""
     if Path("/Volumes/Mastermind").is_dir():

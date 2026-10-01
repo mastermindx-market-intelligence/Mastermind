@@ -58,11 +58,9 @@ mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_p
 cp "$repo/scripts/mastermind_workspace.py" "$payload_root/scripts/mastermind_workspace.py"
 cp "$repo/control_plane/executive_workspace.py" "$payload_root/control_plane/executive_workspace.py"
 cp "$repo/control_plane/__init__.py" "$payload_root/control_plane/__init__.py"
-cp "$repo/common/commission_ref.py" "$payload_root/common/commission_ref.py"
-cp "$repo/common/__init__.py" "$payload_root/common/__init__.py"
+cp "$repo/common/"*.py "$payload_root/common/"
 chmod 0755 "$payload_root/scripts/mastermind_workspace.py"
-chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py" \
-  "$payload_root/common/commission_ref.py" "$payload_root/common/__init__.py"
+chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py" "$payload_root/common/"*.py
 
 # Emit path values as POSIX shell literals, including embedded apostrophes.
 shell_quote() {

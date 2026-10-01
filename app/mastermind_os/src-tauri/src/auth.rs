@@ -71,12 +71,7 @@ struct Inner {
 impl Inner {
     fn new(client: Option<&str>) -> Self {
         let client_id = client
-            .filter(|s| {
-                !s.is_empty()
-                    && s.len() <= 128
-                    && s.bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
-            })
+            .filter(|value| crate::native_client::validate_native_client_id(value).is_ok())
             .map(str::to_owned);
         Self {
             client_id,
@@ -829,6 +824,42 @@ mod tests {
         let mut i = Inner::new(None);
         assert_eq!(i.status().status, "unconfigured");
         assert!(i.transaction(Resource::Acquisition).is_err());
+    }
+    #[test]
+    fn native_client_identity_uses_the_closed_shared_grammar() {
+        for invalid in [
+            "",
+            "invalid client",
+            "client/slash",
+            "client.dot",
+            "client:colon",
+            "client\nnewline",
+        ] {
+            assert_eq!(Inner::new(Some(invalid)).status().status, "unconfigured");
+        }
+        assert_eq!(
+            Inner::new(Some(&"a".repeat(129))).status().status,
+            "unconfigured"
+        );
+        assert_eq!(
+            Inner::new(Some(&"a".repeat(128))).status().status,
+            "signed_out"
+        );
+        assert_eq!(
+            Inner::new(Some("tpc_A1_-valid")).status().status,
+            "signed_out"
+        );
+    }
+    #[test]
+    fn native_client_identity_constructor_is_wired_to_shared_validator() {
+        let source = include_str!("auth.rs");
+        let constructor = source
+            .split_once("fn new(client: Option<&str>) -> Self {")
+            .and_then(|(_, rest)| rest.split_once("\n    fn token"))
+            .map(|(body, _)| body)
+            .expect("Inner::new source must remain present");
+        assert!(constructor.contains("crate::native_client::validate_native_client_id"));
+        assert!(!constructor.contains("is_ascii_alphanumeric"));
     }
     #[test]
     fn separate_authorizations_have_exact_custom_scope_and_s256() {

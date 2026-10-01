@@ -16,22 +16,26 @@ store or mailbox table may be added here.
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import datetime as dt
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
+from common.agent_dialogue_contract import DialogueContractError
 from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_MAX_BYTES,
     CONSULTATION_SCHEMA,
     CONSULTATION_V2_SCHEMA,
     GROK_CONSULTATION_SCHEMA,
     RECEIPT_KEYS,
     build_consultation,
     canonical_consultation_json,
+    render_consultation_packet,
     validate_consultation,
 )
 from control_plane.company_inbox_projection import (
@@ -40,6 +44,7 @@ from control_plane.company_inbox_projection import (
 )
 from control_plane.consultation_runtime import (
     ConsultationConflict,
+    ConsultationEventResult,
     ConsultationRuntime,
 )
 from control_plane.executive_runtime import Runtime, StateConflict
@@ -50,8 +55,19 @@ from control_plane.wake_ledger import (
     requested_record,
 )
 from control_plane.wake_persist import WakeLedgerRepository
+from integrations.mastermind_company_mcp.adapter import (
+    DialogueBinding,
+    DialogueBindingResolver,
+)
 from integrations.mastermind_company_mcp.consultation import (
     validate_company_consult_dispatch_request,
+)
+from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
+from integrations.slack_agent_dialogue.service import (
+    CONTROL_VERSION_V2,
+    EXACT_SEND_PROTOCOL,
+    DialogueServiceError,
+    call_service,
 )
 from integrations.slack_agent_dialogue.persisted_wake_carrier import (
     ConsultationWakeExtension,
@@ -110,69 +126,379 @@ _DEFAULT_RESPONSE_BUDGET = {
 }
 
 
+PacketCommitHook = Callable[[], Awaitable[None]]
+ServiceCall = Callable[..., Awaitable[dict[str, Any]]]
+
+
+class ConsultationPacketCarrierUnknown(RuntimeError):
+    """The existing carrier could not prove packet presence or absence."""
+
+
+class ConsultationPacketEffectUnknown(RuntimeError):
+    """The exact carrier COMMIT crossed but could not be reconciled."""
+
+
+class ConsultationPacketCommitAborted(RuntimeError):
+    """The caller deliberately closed after READY without COMMIT."""
+
+
+async def _noop_packet_commit() -> None:
+    return None
+
+
 class ConsultationPacketCarrier(Protocol):
-    """Single injected port for QUESTION/ANSWER bodies.
+    """Single injected port for QUESTION/ANSWER bodies."""
 
-    The recipient dispatcher ``put_question``s the exact validated QUESTION
-    frame after the runtime admitted the INTENT (inserted or replayed); the
-    recipient dispatcher ``put_answer``s the exact admitted ANSWER frame
-    after the runtime admitted a non-historical ``ANSWER_AVAILABLE``. The
-    requester dispatcher reads the bodies via ``get_question`` /
-    ``get_answer``; the dispatcher never reads bodies from any other
-    location.
-    """
-
-    def put_question(
-        self, consultation_id: str, frame: Mapping[str, Any]
+    async def put_question(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None: ...
 
-    def get_question(
+    async def get_question(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None: ...
 
-    def put_answer(
-        self, consultation_id: str, frame: Mapping[str, Any]
+    async def put_answer(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None: ...
 
-    def get_answer(
+    async def get_answer(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None: ...
 
 
 class InMemoryConsultationPacketCarrier:
-    """TEST-ONLY carrier — hermetic in-memory carrier for tests.
+    """TEST-ONLY hermetic packet carrier."""
 
-    This implementation is not a production body source. The production
-    owner is the existing dialogue carrier lineage (issues #611, #719,
-    #738) and PRODUCTION_PACKET_CARRIAGE is declared ``UNAVAILABLE`` in
-    this slice.
-    """
+    requires_dialogue_binding = False
+    requires_packet_wire = False
 
     def __init__(self) -> None:
         self._questions: dict[str, dict[str, Any]] = {}
         self._answers: dict[str, dict[str, Any]] = {}
 
-    def put_question(
-        self, consultation_id: str, frame: Mapping[str, Any]
+    async def put_question(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None:
+        await before_commit()
         self._questions[consultation_id] = dict(frame)
 
-    def get_question(
+    async def get_question(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None:
         frame = self._questions.get(consultation_id)
         return dict(frame) if frame is not None else None
 
-    def put_answer(
-        self, consultation_id: str, frame: Mapping[str, Any]
+    async def put_answer(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
     ) -> None:
+        await before_commit()
         self._answers[consultation_id] = dict(frame)
 
-    def get_answer(
+    async def get_answer(
         self, consultation_id: str
     ) -> Mapping[str, Any] | None:
         frame = self._answers.get(consultation_id)
         return dict(frame) if frame is not None else None
+
+
+def _dialogue_carrier_identity(binding: DialogueBinding) -> tuple[object, ...]:
+    """Return the incumbent Relay parent identity, not one child Attempt.
+
+    Every worker context remains bound to its own exact ``actor_ref`` and
+    ``applies_to`` Attempt.  The shared physical parent is separately keyed by
+    work/commission/session/operation/watch/thread; requiring the child Job to
+    match would make two simultaneously current Runtime Attempts impossible.
+    """
+
+    if not isinstance(binding, DialogueBinding):
+        raise StateConflict("trusted dialogue binding is unavailable")
+    actor = dict(binding.actor_ref)
+    applies_to = dict(binding.applies_to)
+    if (
+        actor.get("kind") != "worker_attempt"
+        or applies_to.get("kind") != "executive_attempt"
+        or any(
+            not isinstance(actor.get(field), str)
+            or not actor.get(field)
+            or actor.get(field) != applies_to.get(field)
+            for field in ("job_id", "attempt_id", "worker_id")
+        )
+    ):
+        raise StateConflict("dialogue binding applicability carrier is invalid")
+    return (
+        binding.work_ref,
+        canonical_consultation_json(dict(binding.commission_ref)),
+        binding.session_ref,
+        binding.operation_key,
+        binding.watch_mode,
+        binding.thread_ts,
+    )
+
+
+def _require_same_dialogue_carrier(
+    caller_binding: DialogueBinding | None,
+    recipient_binding: DialogueBinding | None,
+    *,
+    caller_actor_ref: Mapping[str, Any],
+    recipient_actor_ref: Mapping[str, Any],
+) -> None:
+    if not isinstance(caller_binding, DialogueBinding) or not isinstance(
+        recipient_binding, DialogueBinding
+    ):
+        raise StateConflict("same exact parent dialogue binding is unavailable")
+    if dict(caller_binding.actor_ref) != dict(caller_actor_ref):
+        raise StateConflict("caller dialogue binding actor is not trusted")
+    if dict(recipient_binding.actor_ref) != dict(recipient_actor_ref):
+        raise StateConflict("recipient dialogue binding actor is not trusted")
+    if _dialogue_carrier_identity(caller_binding) != _dialogue_carrier_identity(
+        recipient_binding
+    ):
+        raise StateConflict("parties do not share the same exact parent carrier")
+
+
+class AgentDialogueConsultationPacketCarrier:
+    """Adapter over the incumbent authenticated Agent Relay AF_UNIX service."""
+
+    requires_dialogue_binding = True
+    requires_packet_wire = True
+
+    def __init__(
+        self,
+        *,
+        binding_resolver: DialogueBindingResolver,
+        socket_path: Path,
+        service_call: ServiceCall = call_service,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        if not isinstance(socket_path, Path) or not socket_path.is_absolute():
+            raise TypeError("socket_path must be an absolute Path")
+        if not callable(getattr(binding_resolver, "resolve", None)):
+            raise TypeError("binding_resolver must resolve the current binding")
+        if not callable(service_call):
+            raise TypeError("service_call must be callable")
+        if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        self._binding_resolver = binding_resolver
+        self._socket_path = socket_path
+        self._service_call = service_call
+        self._timeout_seconds = float(timeout_seconds)
+
+    def _binding(self) -> DialogueBinding:
+        try:
+            binding = self._binding_resolver.resolve()
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "current Agent Relay binding is unavailable"
+            ) from exc
+        if not isinstance(binding, DialogueBinding):
+            raise ConsultationPacketCarrierUnknown(
+                "current Agent Relay binding is unavailable"
+            )
+        return binding
+
+    @staticmethod
+    def _context(binding: DialogueBinding) -> dict[str, Any]:
+        return DialogueContextV2(
+            work_ref=binding.work_ref,
+            commission_ref=dict(binding.commission_ref),
+            session_ref=binding.session_ref,
+            operation_key=binding.operation_key,
+            watch_mode=binding.watch_mode,
+            actor_ref=dict(binding.actor_ref),
+            applies_to=dict(binding.applies_to),
+        ).normalized()
+
+    @staticmethod
+    def _sender_actor(frame: Mapping[str, Any]) -> Mapping[str, Any]:
+        if frame["purpose"] == "QUESTION":
+            return frame["requester_actor_ref"]
+        if frame["purpose"] == "ANSWER":
+            return frame["recipient_actor_ref"]
+        raise StateConflict("consultation packet purpose is not sendable")
+
+    @staticmethod
+    def _assert_current_party(
+        binding: DialogueBinding, frame: Mapping[str, Any]
+    ) -> None:
+        actor = dict(binding.actor_ref)
+        parties = (
+            dict(frame["requester_actor_ref"]),
+            dict(frame["recipient_actor_ref"]),
+        )
+        if actor not in parties:
+            raise StateConflict("current dialogue binding is not a packet party")
+
+    async def _call(
+        self,
+        request: Mapping[str, Any],
+        *,
+        before_write: PacketCommitHook | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return await self._service_call(
+                self._socket_path,
+                request,
+                timeout_seconds=self._timeout_seconds,
+                before_write=before_write,
+            )
+        except ConsultationPacketCommitAborted:
+            raise
+        except DialogueServiceError as exc:
+            if exc.code == "SEND_EFFECT_UNKNOWN":
+                raise ConsultationPacketEffectUnknown(
+                    "consultation packet effect remains unknown"
+                ) from exc
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet carrier is unavailable"
+            ) from exc
+
+    async def _put(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        purpose: str,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        item = validate_consultation(frame)
+        if (
+            consultation_id != item["consultation_id"]
+            or item["purpose"] != purpose
+        ):
+            raise StateConflict("consultation packet identity disagrees")
+        binding = self._binding()
+        if dict(binding.actor_ref) != dict(self._sender_actor(item)):
+            raise StateConflict("current dialogue binding is not the packet sender")
+        response = await self._call(
+            {
+                "version": CONTROL_VERSION_V2,
+                "operation": "send_consultation_packet",
+                "args": {
+                    "context": self._context(binding),
+                    "thread_ts": binding.thread_ts,
+                    "message": item,
+                    "send_protocol": EXACT_SEND_PROTOCOL,
+                },
+            },
+            before_write=before_commit,
+        )
+        result = response.get("result") if isinstance(response, Mapping) else None
+        if (
+            not isinstance(response, Mapping)
+            or response.get("ok") is not True
+            or not isinstance(result, Mapping)
+            or result.get("message_key") != item["message_key"]
+            or result.get("fingerprint") != item["fingerprint"]
+            or result.get("thread_ts") != binding.thread_ts
+        ):
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet receipt is invalid"
+            )
+
+    async def put_question(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        await self._put(
+            consultation_id,
+            frame,
+            purpose="QUESTION",
+            before_commit=before_commit,
+        )
+
+    async def put_answer(
+        self,
+        consultation_id: str,
+        frame: Mapping[str, Any],
+        *,
+        before_commit: PacketCommitHook,
+    ) -> None:
+        await self._put(
+            consultation_id,
+            frame,
+            purpose="ANSWER",
+            before_commit=before_commit,
+        )
+
+    async def _get(
+        self, consultation_id: str, *, purpose: str
+    ) -> Mapping[str, Any] | None:
+        if _CONSULTATION_REF_RE.fullmatch(consultation_id) is None:
+            raise StateConflict("consultation packet identity is invalid")
+        binding = self._binding()
+        response = await self._call(
+            {
+                "version": CONTROL_VERSION_V2,
+                "operation": "read_consultation_packet",
+                "args": {
+                    "context": self._context(binding),
+                    "thread_ts": binding.thread_ts,
+                    "consultation_id": consultation_id,
+                    "purpose": purpose,
+                },
+            }
+        )
+        if not isinstance(response, Mapping) or response.get("ok") is not True:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            )
+        result = response.get("result")
+        if result is None:
+            return None
+        if not isinstance(result, Mapping) or set(result) != {
+            "packet",
+            "primary_ts",
+            "duplicate_timestamps",
+        }:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            )
+        packet = result.get("packet")
+        try:
+            item = validate_consultation(packet)
+        except Exception as exc:
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is invalid"
+            ) from exc
+        if (
+            item["consultation_id"] != consultation_id
+            or item["purpose"] != purpose
+            or result.get("duplicate_timestamps") != []
+        ):
+            raise ConsultationPacketCarrierUnknown(
+                "Agent Relay packet read is conflicting"
+            )
+        self._assert_current_party(binding, item)
+        return item
+
+    async def get_question(
+        self, consultation_id: str
+    ) -> Mapping[str, Any] | None:
+        return await self._get(consultation_id, purpose="QUESTION")
+
+    async def get_answer(
+        self, consultation_id: str
+    ) -> Mapping[str, Any] | None:
+        return await self._get(consultation_id, purpose="ANSWER")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -188,6 +514,7 @@ class CallerIdentity:
     attempt_id: str
     reasoning_surface: str
     binding: Mapping[str, Any]
+    dialogue_binding: DialogueBinding | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -196,6 +523,7 @@ class RecipientBinding:
 
     actor_ref: Mapping[str, Any]
     recipient_binding: Mapping[str, Any]
+    dialogue_binding: DialogueBinding | None = None
 
 
 RecipientResolver = Callable[[str], RecipientBinding]
@@ -628,6 +956,136 @@ def _canonical_size(value: Mapping[str, Any]) -> int:
     return len(canonical_consultation_json(value).encode("utf-8"))
 
 
+def _max_length_packet_evidence_refs(count: int) -> list[str]:
+    """Return deterministic distinct valid evidence refs at the 500-char ceiling."""
+
+    refs: list[str] = []
+    for index in range(count):
+        prefix = (
+            "https://github.com/mastermindx-market-intelligence/Mastermind/blob/"
+            f"{index + 1:040x}/"
+        )
+        suffix = f"-{index:02d}"
+        filler = "a" * (500 - len(prefix) - len(suffix))
+        refs.append(prefix + filler + suffix)
+    return refs
+
+
+_PACKET_BUDGET_TEXT_PATTERNS = ("x", '"', "\\", "界", "😀")
+
+
+def _max_pattern_text_for_semantic_budget(
+    pattern: str,
+    *,
+    semantic_budget: int,
+    evidence_refs: list[str],
+) -> str | None:
+    """Largest repetition of one hostile text pattern within semantic bytes."""
+
+    best: str | None = None
+    low = 0
+    high = semantic_budget
+    while low <= high:
+        repeats = (low + high) // 2
+        candidate = pattern * repeats
+        semantic_bytes = len(
+            canonical_consultation_json(
+                {"text": candidate, "evidence_refs": evidence_refs}
+            ).encode("utf-8")
+        )
+        if semantic_bytes <= semantic_budget:
+            best = candidate
+            low = repeats + 1
+        else:
+            high = repeats - 1
+    return best
+
+
+def _packet_safe_answer_payload_limit(
+    question_frame: Mapping[str, Any],
+) -> int:
+    """Largest semantic-answer byte budget safe for hostile valid text.
+
+    The complete ANSWER packet is probed with maximum-length admitted evidence
+    references and text classes that maximize each JSON/UTF-8 amplification
+    boundary: plain ASCII, quote, backslash, BMP Unicode, and astral Unicode.
+    """
+
+    question = validate_consultation(copy.deepcopy(dict(question_frame)))
+    evidence_count = int(question["response_budget"]["max_evidence_reads"])
+    evidence_refs = _max_length_packet_evidence_refs(evidence_count)
+    requested = int(question["response_budget"]["max_payload_bytes"])
+    minimum = len(
+        canonical_consultation_json(
+            {"text": "", "evidence_refs": evidence_refs}
+        ).encode("utf-8")
+    )
+    if requested < minimum:
+        return 0
+    best = 0
+    low = minimum
+    high = requested
+    while low <= high:
+        semantic_budget = (low + high) // 2
+        safe = True
+        for pattern in _PACKET_BUDGET_TEXT_PATTERNS:
+            answer_text = _max_pattern_text_for_semantic_budget(
+                pattern,
+                semantic_budget=semantic_budget,
+                evidence_refs=evidence_refs,
+            )
+            if answer_text is None:
+                safe = False
+                break
+            try:
+                answer = _build_answer_frame(
+                    question,
+                    answer_text=answer_text,
+                    evidence_refs=evidence_refs,
+                    supersedes=None,
+                )
+                render_consultation_packet(answer)
+            except (DialogueContractError, ValueError, TypeError):
+                safe = False
+                break
+        if safe:
+            best = semantic_budget
+            low = semantic_budget + 1
+        else:
+            high = semantic_budget - 1
+    return best
+
+
+def _packet_safe_question_frame(
+    question_frame: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Clamp only payload bytes; never silently narrow evidence semantics.
+
+    The first measurement includes the caller's original numeric budget in
+    every candidate ANSWER frame. Replacing it with an equal-or-smaller value
+    cannot increase canonical packet bytes, so one conservative measurement is
+    sufficient and no unstable refinement loop is needed.
+    """
+
+    question = validate_consultation(copy.deepcopy(dict(question_frame)))
+    requested = dict(question["response_budget"])
+    requested_payload = int(requested["max_payload_bytes"])
+    safe_limit = _packet_safe_answer_payload_limit(question)
+    next_limit = min(requested_payload, safe_limit)
+    if next_limit <= 0:
+        raise DialogueContractError("FRAME_TOO_LARGE")
+
+    candidate = copy.deepcopy(question)
+    candidate["response_budget"] = {
+        **requested,
+        "max_payload_bytes": next_limit,
+    }
+    candidate["fingerprint"] = ""
+    candidate = build_consultation(candidate)
+    render_consultation_packet(candidate)
+    return candidate
+
+
 class RuntimeConsultationDispatcher:
     """Async gateway dispatcher; delegates durable effects to ConsultationRuntime.
 
@@ -689,7 +1147,7 @@ class RuntimeConsultationDispatcher:
 
     # -- explicit authenticated consumption seam (NOT reachable via __call__) --
 
-    def consume_answer(self, consultation_ref: str) -> dict[str, Any]:
+    async def consume_answer(self, consultation_ref: str) -> dict[str, Any]:
         """Append one exact ``CONSUMED_BY_REQUESTER`` event for the requester.
 
         This is the only Python seam that appends ``CONSUMED_BY_REQUESTER``
@@ -713,7 +1171,16 @@ class RuntimeConsultationDispatcher:
                 "NOT_A_PARTY",
                 detail="caller is not the requester Runtime Attempt",
             )
-        answer_frame = self.packets.get_answer(consultation_ref)
+        try:
+            answer_frame = await self.packets.get_answer(consultation_ref)
+        except (
+            ConsultationPacketCarrierUnknown,
+            ConsultationPacketEffectUnknown,
+        ) as exc:
+            raise ConsultationRefusal(
+                "CARRIER_RECONCILIATION_REQUIRED",
+                detail="ANSWER carrier history is unavailable",
+            ) from exc
         if answer_frame is None:
             raise ConsultationRefusal(
                 "CARRIER_UNAVAILABLE",
@@ -791,6 +1258,25 @@ class RuntimeConsultationDispatcher:
                 detail=f"recipient binding normalization failed: {type(exc).__name__}",
             ) from exc
 
+        if getattr(self.packets, "requires_dialogue_binding", False):
+            try:
+                _require_same_dialogue_carrier(
+                    self.caller.dialogue_binding,
+                    recipient.dialogue_binding,
+                    caller_actor_ref={
+                        "kind": "worker_attempt",
+                        "job_id": self.caller.job_id,
+                        "attempt_id": self.caller.attempt_id,
+                        "worker_id": self.caller.worker_id,
+                    },
+                    recipient_actor_ref=recipient_actor_ref,
+                )
+            except StateConflict as exc:
+                raise ConsultationRefusal(
+                    "NOT_A_PARTY",
+                    detail="consultation parties do not share one Agent Relay parent",
+                ) from exc
+
         if recipient_actor_ref["worker_id"] == self.caller.worker_id:
             raise ConsultationRefusal(
                 "INVALID_REQUEST",
@@ -843,22 +1329,31 @@ class RuntimeConsultationDispatcher:
             "recipient_actor_digest": recipient_actor_digest,
         }
 
-        question_frame = _build_question_frame(
-            caller=self.caller,
-            requester_actor_ref=requester_actor_ref,
-            recipient_actor_ref=recipient_actor_ref,
-            recipient_peer_ref=peer_ref,
-            recipient_binding=normalized_recipient_binding,
-            correlation=correlation,
-            question_text=semantic["question"],
-            evidence_refs=list(semantic.get("evidence_refs", [])),
-            artifact_revisions=list(semantic.get("artifact_revisions", [])),
-            message_key=message_key,
-            consultation_id=consultation_id,
-            valid_until=valid_until,
-            deadline_ms=ctx.deadline_ms,
-            response_budget=response_budget,
-        )
+        try:
+            question_frame = _build_question_frame(
+                caller=self.caller,
+                requester_actor_ref=requester_actor_ref,
+                recipient_actor_ref=recipient_actor_ref,
+                recipient_peer_ref=peer_ref,
+                recipient_binding=normalized_recipient_binding,
+                correlation=correlation,
+                question_text=semantic["question"],
+                evidence_refs=list(semantic.get("evidence_refs", [])),
+                artifact_revisions=list(semantic.get("artifact_revisions", [])),
+                message_key=message_key,
+                consultation_id=consultation_id,
+                valid_until=valid_until,
+                deadline_ms=ctx.deadline_ms,
+                response_budget=response_budget,
+            )
+            if getattr(self.packets, "requires_packet_wire", False):
+                question_frame = _packet_safe_question_frame(question_frame)
+                render_consultation_packet(question_frame)
+        except (DialogueContractError, TypeError, ValueError) as exc:
+            raise ConsultationRefusal(
+                "BODY_OVER_BUDGET",
+                detail="QUESTION packet exceeds the bounded Relay wire",
+            ) from exc
 
         # If an INTENT for this consultation_id already exists, reconcile
         # the entire normalized semantic request against the persisted
@@ -880,8 +1375,41 @@ class RuntimeConsultationDispatcher:
         existing_intent = _find_consultation_event(
             self.runtime, consultation_id, "INTENT"
         )
-        carrier_question_frame = self.packets.get_question(consultation_id)
+        try:
+            carrier_question_frame = await self.packets.get_question(consultation_id)
+        except (
+            ConsultationPacketCarrierUnknown,
+            ConsultationPacketEffectUnknown,
+        ) as exc:
+            if existing_intent is not None:
+                return {
+                    "ok": True,
+                    "result": _committed_consult_result(
+                        consultation_id=consultation_id,
+                        valid_until=str(existing_intent.payload.get("valid_until", valid_until)),
+                        carrier_ref=f"company-mcp://{consultation_id}",
+                        intent_inserted=False,
+                        attention_requested=self._existing_wake_request(existing_intent),
+                        wake_state=None,
+                        blocker="CARRIER_RECONCILIATION_REQUIRED",
+                    ),
+                }
+            raise ConsultationRefusal(
+                "CARRIER_RECONCILIATION_REQUIRED",
+                detail="QUESTION carrier history is unavailable before INTENT",
+            ) from exc
         carrier_holds_packet = carrier_question_frame is not None
+        # The carrier read is an await boundary. Re-read canonical Runtime
+        # before classifying a visible packet as orphaned; an identical
+        # concurrent caller may have committed INTENT and packet meanwhile.
+        existing_intent = _find_consultation_event(
+            self.runtime, consultation_id, "INTENT"
+        )
+        if existing_intent is None and carrier_holds_packet:
+            raise ConsultationRefusal(
+                "CONFLICT",
+                detail="orphan QUESTION packet exists without canonical INTENT",
+            )
         if existing_intent is not None:
             persisted_payload = existing_intent.payload
             candidate = _build_question_frame(
@@ -982,69 +1510,49 @@ class RuntimeConsultationDispatcher:
             )
 
         carrier_ref = f"company-mcp://{consultation_id}"
+        intent_result: Any | None = None
+        intent_event: Any | None = None
 
-        try:
-            intent_result = self._consultations.intent(
-                question_frame,
-                requester_attempt_id=self.caller.attempt_id,
-                carrier_ref=carrier_ref,
-                observed_at=ctx.issued_at,
-                repository_root=self.repository_root,
-            )
-        except ConsultationConflict as exc:
-            raise ConsultationRefusal(
-                "CONFLICT", detail=type(exc).__name__
-            ) from exc
-        except StateConflict as exc:
-            raise ConsultationRefusal(
-                "CONFLICT", detail=type(exc).__name__
-            ) from exc
+        def _append_intent() -> Any:
+            try:
+                return self._consultations.intent(
+                    question_frame,
+                    requester_attempt_id=self.caller.attempt_id,
+                    carrier_ref=carrier_ref,
+                    observed_at=ctx.issued_at,
+                    repository_root=self.repository_root,
+                )
+            except (ConsultationConflict, StateConflict) as exc:
+                raise ConsultationRefusal(
+                    "CONFLICT", detail=type(exc).__name__
+                ) from exc
 
-        # IAC-1 r4d-N2: publication is authorized ONLY by the uniquely
-        # inserted INTENT. ``inserted=False`` (replay, or the loser of an
-        # insertion race) never publishes: it reads the carrier back and
-        # validates the packet against the persisted INTENT; a missing or
-        # invalid readback is a reconciliation barrier for the existing
-        # same-carrier recovery owner, never a licence to resend.
-        intent_event = _find_consultation_event(
-            self.runtime, consultation_id, "INTENT"
-        )
-        if intent_event is None:
-            raise ConsultationRefusal(
-                "CONFLICT", detail="INTENT missing after intent() returned"
+        if existing_intent is not None:
+            # Canonical Runtime already owns this identity. Reconcile the
+            # idempotent Runtime edge directly and require exact physical
+            # readback; a replay never authorizes a resend.
+            intent_result = _append_intent()
+            intent_event = _find_consultation_event(
+                self.runtime, consultation_id, "INTENT"
             )
-        if intent_result.inserted:
             try:
-                self.packets.put_question(consultation_id, question_frame)
-            except Exception:
-                # INTENT is durable but this caller's carrier response is
-                # lost. Unique INTENT insertion granted the initial
-                # publication only — not exclusive ownership of what
-                # follows: an identical concurrent call may already have
-                # read the visible packet and recorded the single Wake.
-                # ``attention_requested`` therefore comes from the same
-                # ledger readback (True / proven-absent False / unknown
-                # None), never a hardcoded False. No resend.
-                return {
-                    "ok": True,
-                    "result": _committed_consult_result(
-                        consultation_id=consultation_id,
-                        valid_until=valid_until,
-                        carrier_ref=carrier_ref,
-                        intent_inserted=True,
-                        attention_requested=self._existing_wake_request(
-                            intent_event
-                        ),
-                        wake_state=None,
-                        blocker="CARRIER_RECONCILIATION_REQUIRED",
-                    ),
-                }
-        else:
-            try:
-                readback = self.packets.get_question(consultation_id)
-            except Exception:
-                readback = None
-            if _validated_question_frame(intent_event.payload, readback) is None:
+                carrier_question_frame = await self.packets.get_question(
+                    consultation_id
+                )
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ):
+                carrier_question_frame = None
+            carrier_holds_packet = carrier_question_frame is not None
+            if (
+                intent_event is None
+                or not carrier_holds_packet
+                or _validated_question_frame(
+                    intent_event.payload, carrier_question_frame
+                )
+                is None
+            ):
                 return {
                     "ok": True,
                     "result": _committed_consult_result(
@@ -1052,13 +1560,217 @@ class RuntimeConsultationDispatcher:
                         valid_until=valid_until,
                         carrier_ref=carrier_ref,
                         intent_inserted=False,
-                        attention_requested=self._existing_wake_request(
-                            intent_event
+                        attention_requested=(
+                            self._existing_wake_request(intent_event)
+                            if intent_event is not None
+                            else None
                         ),
                         wake_state=None,
                         blocker="CARRIER_RECONCILIATION_REQUIRED",
                     ),
                 }
+        else:
+            intent_box: dict[str, Any] = {}
+            runtime_refusal: ConsultationRefusal | None = None
+
+            async def _commit_intent_after_ready() -> None:
+                nonlocal runtime_refusal
+                try:
+                    result = _append_intent()
+                except ConsultationRefusal as exc:
+                    runtime_refusal = exc
+                    raise ConsultationPacketCommitAborted(
+                        "Runtime INTENT refused before Relay COMMIT"
+                    ) from exc
+                intent_box["result"] = result
+                if not result.inserted:
+                    raise ConsultationPacketCommitAborted(
+                        "Runtime INTENT replay/race loser cannot Relay COMMIT"
+                    )
+
+            try:
+                await self.packets.put_question(
+                    consultation_id,
+                    question_frame,
+                    before_commit=_commit_intent_after_ready,
+                )
+            except ConsultationPacketCommitAborted:
+                if runtime_refusal is not None:
+                    raise runtime_refusal
+                intent_result = intent_box.get("result")
+                intent_event = _find_consultation_event(
+                    self.runtime, consultation_id, "INTENT"
+                )
+                try:
+                    readback = await self.packets.get_question(consultation_id)
+                except (
+                    ConsultationPacketCarrierUnknown,
+                    ConsultationPacketEffectUnknown,
+                ):
+                    readback = None
+                if intent_event is None:
+                    if readback is not None:
+                        raise ConsultationRefusal(
+                            "CONFLICT",
+                            detail="orphan QUESTION packet exists without canonical INTENT",
+                        )
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="Relay COMMIT aborted before canonical INTENT",
+                    )
+                if (
+                    _validated_question_frame(intent_event.payload, readback)
+                    is None
+                ):
+                    return {
+                        "ok": True,
+                        "result": _committed_consult_result(
+                            consultation_id=consultation_id,
+                            valid_until=valid_until,
+                            carrier_ref=carrier_ref,
+                            intent_inserted=False,
+                            attention_requested=self._existing_wake_request(
+                                intent_event
+                            ),
+                            wake_state=None,
+                            blocker="CARRIER_RECONCILIATION_REQUIRED",
+                        ),
+                    }
+            except ConsultationPacketEffectUnknown:
+                intent_result = intent_box.get("result")
+                intent_event = _find_consultation_event(
+                    self.runtime, consultation_id, "INTENT"
+                )
+                if intent_event is None:
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="Relay COMMIT is uncertain and INTENT is unavailable",
+                    )
+                # One same-carrier readback may prove that the uncertain COMMIT
+                # actually landed. It never authorizes a resend. Continue to
+                # the owed Wake only when the exact persisted QUESTION validates.
+                try:
+                    readback = await self.packets.get_question(consultation_id)
+                except (
+                    ConsultationPacketCarrierUnknown,
+                    ConsultationPacketEffectUnknown,
+                ):
+                    readback = None
+                existing_wake = self._existing_wake_request(intent_event)
+                if (
+                    _validated_question_frame(intent_event.payload, readback)
+                    is None
+                    or existing_wake is True
+                ):
+                    return {
+                        "ok": True,
+                        "result": _committed_consult_result(
+                            consultation_id=consultation_id,
+                            valid_until=valid_until,
+                            carrier_ref=carrier_ref,
+                            intent_inserted=bool(
+                                getattr(intent_result, "inserted", False)
+                            ),
+                            attention_requested=existing_wake,
+                            wake_state=None,
+                            blocker="CARRIER_RECONCILIATION_REQUIRED",
+                        ),
+                    }
+                # Validated readback proves the packet is already committed.
+                # Fall through to the single existing Wake creation path.
+            except ConsultationPacketCarrierUnknown as exc:
+                intent_result = intent_box.get("result")
+                intent_event = _find_consultation_event(
+                    self.runtime, consultation_id, "INTENT"
+                )
+                if intent_event is not None:
+                    return {
+                        "ok": True,
+                        "result": _committed_consult_result(
+                            consultation_id=consultation_id,
+                            valid_until=valid_until,
+                            carrier_ref=carrier_ref,
+                            intent_inserted=bool(
+                                getattr(intent_result, "inserted", False)
+                            ),
+                            attention_requested=self._existing_wake_request(intent_event),
+                            wake_state=None,
+                            blocker="CARRIER_RECONCILIATION_REQUIRED",
+                        ),
+                    }
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="Relay packet carrier unavailable before INTENT",
+                ) from exc
+
+
+            intent_result = intent_box.get("result")
+            intent_event = _find_consultation_event(
+                self.runtime, consultation_id, "INTENT"
+            )
+
+            if intent_result is None:
+                try:
+                    readback = await self.packets.get_question(consultation_id)
+                except (
+                    ConsultationPacketCarrierUnknown,
+                    ConsultationPacketEffectUnknown,
+                ):
+                    if intent_event is not None:
+                        return {
+                            "ok": True,
+                            "result": _committed_consult_result(
+                                consultation_id=consultation_id,
+                                valid_until=valid_until,
+                                carrier_ref=carrier_ref,
+                                intent_inserted=False,
+                                attention_requested=self._existing_wake_request(
+                                    intent_event
+                                ),
+                                wake_state="RECONCILIATION_REQUIRED",
+                                blocker="CARRIER_RECONCILIATION_REQUIRED",
+                            ),
+                        }
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="Relay duplicate returned without Runtime/readback",
+                    )
+                if intent_event is None:
+                    if readback is not None:
+                        raise ConsultationRefusal(
+                            "CONFLICT",
+                            detail="orphan QUESTION packet exists without canonical INTENT",
+                        )
+                    raise ConsultationRefusal(
+                        "CARRIER_RECONCILIATION_REQUIRED",
+                        detail="Relay returned without Runtime INTENT or packet",
+                    )
+                if (
+                    _validated_question_frame(intent_event.payload, readback)
+                    is None
+                ):
+                    return {
+                        "ok": True,
+                        "result": _committed_consult_result(
+                            consultation_id=consultation_id,
+                            valid_until=valid_until,
+                            carrier_ref=carrier_ref,
+                            intent_inserted=False,
+                            attention_requested=self._existing_wake_request(
+                                intent_event
+                            ),
+                            wake_state="RECONCILIATION_REQUIRED",
+                            blocker="CARRIER_RECONCILIATION_REQUIRED",
+                        ),
+                    }
+                intent_result = ConsultationEventResult(
+                    event=intent_event, inserted=False
+                )
+
+        if intent_result is None or intent_event is None:
+            raise ConsultationRefusal(
+                "CONFLICT", detail="INTENT missing after Relay/Runtime composition"
+            )
 
         # IAC-1 r4c2: the production dispatcher creates exactly one
         # durable WAKE_REQUESTED per admitted consult. The recipe
@@ -1237,7 +1949,16 @@ class RuntimeConsultationDispatcher:
                 detail="caller RuntimeBinding does not match persisted recipient_binding",
             )
 
-        question_frame = self.packets.get_question(consultation_ref)
+        try:
+            question_frame = await self.packets.get_question(consultation_ref)
+        except (
+            ConsultationPacketCarrierUnknown,
+            ConsultationPacketEffectUnknown,
+        ) as exc:
+            raise ConsultationRefusal(
+                "CARRIER_RECONCILIATION_REQUIRED",
+                detail="QUESTION carrier history is unavailable",
+            ) from exc
         if question_frame is None:
             raise ConsultationRefusal(
                 "CARRIER_UNAVAILABLE",
@@ -1269,14 +1990,31 @@ class RuntimeConsultationDispatcher:
                 detail="carrier QUESTION frame fields disagree with persisted INTENT",
             )
 
-        # Enforce response_budget.max_payload_bytes on the canonical answer JSON.
+        # Enforce the persisted packet-safe response budget before any
+        # ANSWER_AVAILABLE append. Both semantic-answer bytes and the complete
+        # nested ANSWER packet must fit the frozen Relay wire.
         answer_text = str(semantic.get("answer", ""))
         evidence_refs = list(semantic.get("evidence_refs", []))
+        response_budget = dict(intent.payload.get("response_budget", {}))
+        max_evidence_reads = int(
+            response_budget.get(
+                "max_evidence_reads",
+                _DEFAULT_RESPONSE_BUDGET["max_evidence_reads"],
+            )
+        )
+        packet_wire_required = getattr(
+            self.packets, "requires_packet_wire", False
+        )
+        if packet_wire_required and len(evidence_refs) > max_evidence_reads:
+            raise ConsultationRefusal(
+                "INVALID_REQUEST",
+                detail=f"answer evidence exceeds {max_evidence_reads} references",
+            )
         answer_canonical = canonical_consultation_json(
             {"text": answer_text, "evidence_refs": evidence_refs}
         )
         max_payload_bytes = int(
-            intent.payload.get("response_budget", {}).get(
+            response_budget.get(
                 "max_payload_bytes", _DEFAULT_RESPONSE_BUDGET["max_payload_bytes"]
             )
         )
@@ -1293,6 +2031,13 @@ class RuntimeConsultationDispatcher:
                 evidence_refs=evidence_refs,
                 supersedes=semantic.get("supersedes_message_key"),
             )
+            if packet_wire_required:
+                render_consultation_packet(answer_frame)
+        except DialogueContractError as exc:
+            raise ConsultationRefusal(
+                "INVALID_REQUEST",
+                detail="complete ANSWER packet exceeds the bounded Relay wire",
+            ) from exc
         except Exception as exc:
             raise ConsultationRefusal(
                 "CONFLICT",
@@ -1368,7 +2113,16 @@ class RuntimeConsultationDispatcher:
                     "CONFLICT",
                     detail="second answer differs from the admitted answer",
                 )
-            packet = self.packets.get_answer(consultation_ref)
+            try:
+                packet = await self.packets.get_answer(consultation_ref)
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ) as exc:
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="admitted ANSWER carrier history is unavailable",
+                ) from exc
             validated = _validated_answer_frame(
                 intent.payload, reserved, packet
             )
@@ -1379,68 +2133,111 @@ class RuntimeConsultationDispatcher:
                 )
             return _reconciled_envelope(reserved, validated)
 
-        try:
-            answer = self._consultations.answer_available(
-                answer_frame, observed_at=self._clock()
+        answer_box: dict[str, Any] = {}
+        runtime_refusal: ConsultationRefusal | None = None
+
+        def _answer_event_facts(result: Any) -> tuple[Any, str, Any, bool]:
+            event = result.event
+            event_type = getattr(event, "event_type", "")
+            payload_fact = (
+                event.payload.get("fact")
+                if hasattr(event, "payload")
+                else None
             )
-        except ConsultationConflict as exc:
-            raise ConsultationRefusal(
-                "CONFLICT", detail=type(exc).__name__
-            ) from exc
-        except StateConflict as exc:
-            message = str(exc)
-            if "TARGET_ACKNOWLEDGED" in message:
-                raise ConsultationRefusal(
-                    "WAKE_NOT_ACKNOWLEDGED",
-                    detail="answer requires TARGET_ACKNOWLEDGED Wake evidence",
+            historical = bool(event.payload.get("historical", False))
+            return event, event_type, payload_fact, historical
+
+        async def _commit_answer_after_ready() -> None:
+            nonlocal runtime_refusal
+            try:
+                result = self._consultations.answer_available(
+                    answer_frame, observed_at=self._clock()
+                )
+            except ConsultationConflict as exc:
+                runtime_refusal = ConsultationRefusal(
+                    "CONFLICT", detail=type(exc).__name__
+                )
+                raise ConsultationPacketCommitAborted(
+                    "Runtime ANSWER_AVAILABLE refused before Relay COMMIT"
                 ) from exc
-            raise ConsultationRefusal(
-                "CONFLICT", detail=type(exc).__name__
-            ) from exc
+            except StateConflict as exc:
+                message = str(exc)
+                code = (
+                    "WAKE_NOT_ACKNOWLEDGED"
+                    if "TARGET_ACKNOWLEDGED" in message
+                    else "CONFLICT"
+                )
+                runtime_refusal = ConsultationRefusal(
+                    code, detail=type(exc).__name__
+                )
+                raise ConsultationPacketCommitAborted(
+                    "Runtime ANSWER_AVAILABLE refused before Relay COMMIT"
+                ) from exc
 
-        event = answer.event
-        event_type = getattr(event, "event_type", "")
-        payload_fact = (
-            event.payload.get("fact") if hasattr(event, "payload") else None
-        )
-        if event_type == "ANSWER_REFUSED" or payload_fact == "ANSWER_REFUSED":
-            raise ConsultationRefusal(
-                "CONFLICT", detail="ANSWER_REFUSED"
+            answer_box["result"] = result
+            event, event_type, payload_fact, historical = _answer_event_facts(result)
+            if event_type == "ANSWER_REFUSED" or payload_fact == "ANSWER_REFUSED":
+                runtime_refusal = ConsultationRefusal(
+                    "CONFLICT", detail="ANSWER_REFUSED"
+                )
+                raise ConsultationPacketCommitAborted(
+                    "Runtime refused the answer before Relay COMMIT"
+                )
+            if historical or not result.inserted:
+                raise ConsultationPacketCommitAborted(
+                    "historical/replayed answer cannot Relay COMMIT"
+                )
+
+        try:
+            await self.packets.put_answer(
+                consultation_ref,
+                answer_frame,
+                before_commit=_commit_answer_after_ready,
             )
+        except ConsultationPacketCommitAborted:
+            if runtime_refusal is not None:
+                raise runtime_refusal
+            answer = answer_box.get("result")
+            if answer is None:
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="Relay COMMIT aborted without a canonical answer fact",
+                )
+            event, event_type, payload_fact, historical = _answer_event_facts(answer)
+            if historical:
+                return {
+                    "ok": True,
+                    "result": {
+                        "schema": _INBOX_SCHEMA,
+                        "consultation_ref": consultation_ref,
+                        "state": "ANSWER_HISTORICAL",
+                        "answer_fingerprint": event.payload.get(
+                            "answer_fingerprint", ""
+                        ),
+                        "semantic_answer_digest": event.payload.get(
+                            "semantic_answer_digest", ""
+                        ),
+                        "historical": True,
+                        "inserted": bool(answer.inserted),
+                        "attention_requested": False,
+                        "wake_state": None,
+                        "blocker": None,
+                    },
+                }
 
-        historical = bool(event.payload.get("historical", False))
-        if historical:
-            # Historical answer is not put on the carrier; never labelled
-            # current.
-            return {
-                "ok": True,
-                "result": {
-                    "schema": _INBOX_SCHEMA,
-                    "consultation_ref": consultation_ref,
-                    "state": "ANSWER_HISTORICAL",
-                    "answer_fingerprint": event.payload.get(
-                        "answer_fingerprint", ""
-                    ),
-                    "semantic_answer_digest": event.payload.get(
-                        "semantic_answer_digest", ""
-                    ),
-                    "historical": True,
-                    "inserted": bool(answer.inserted),
-                    "attention_requested": False,
-                    "wake_state": None,
-                    "blocker": None,
-                },
-            }
-
-        # Race path: the runtime did not append a new event because it
-        # returned the already-reserved event (``inserted=False``). Take
-        # the same readback path as the early reserved check — no
-        # ``put_answer``.
-        if not answer.inserted:
             current_reserved = _non_historical_answer_event(
                 self.runtime, consultation_ref
             )
-            packet = self.packets.get_answer(consultation_ref)
+            try:
+                packet = await self.packets.get_answer(consultation_ref)
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ) as exc:
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="replayed ANSWER carrier history is unavailable",
+                ) from exc
             validated = _validated_answer_frame(
                 intent.payload, current_reserved, packet
             )
@@ -1450,24 +2247,173 @@ class RuntimeConsultationDispatcher:
                     detail="replay ANSWER_AVAILABLE admitted but carrier frame is missing or fails validation",
                 )
             return _reconciled_envelope(current_reserved, validated)
-
-        # Admitted only: cache the exact admitted frame for the
-        # requester dispatcher to drive ``consume_answer``. The runtime
-        # event is the durable source of truth; a lost carrier write
-        # here is the lost-write barrier — we raise
-        # CARRIER_RECONCILIATION_REQUIRED and never retry inside this
-        # call.
-        if (
-            event_type == "ANSWER_AVAILABLE"
-            and payload_fact == "ANSWER_AVAILABLE"
-        ):
-            try:
-                self.packets.put_answer(consultation_ref, answer_frame)
-            except Exception as exc:
+        except ConsultationPacketEffectUnknown:
+            answer = answer_box.get("result")
+            current_reserved = _non_historical_answer_event(
+                self.runtime, consultation_ref
+            )
+            if answer is None or current_reserved is None:
                 raise ConsultationRefusal(
                     "CARRIER_RECONCILIATION_REQUIRED",
-                    detail="runtime event admitted but carrier write failed",
-                ) from exc
+                    detail="Relay ANSWER COMMIT is uncertain without canonical readback",
+                )
+            # Reconcile the exact admitted answer once on the same carrier.
+            # A validated readback proves the COMMIT landed and allows the
+            # existing requester-attention path below to continue. Any absent,
+            # uncertain, or mismatched readback preserves the barrier.
+            try:
+                packet = await self.packets.get_answer(consultation_ref)
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ):
+                packet = None
+            if (
+                _validated_answer_frame(
+                    intent.payload, current_reserved, packet
+                )
+                is None
+            ):
+                event, _event_type, _payload_fact, historical = _answer_event_facts(
+                    answer
+                )
+                return {
+                    "ok": True,
+                    "result": {
+                        "schema": _INBOX_SCHEMA,
+                        "consultation_ref": consultation_ref,
+                        "state": (
+                            "ANSWER_HISTORICAL"
+                            if historical
+                            else "ANSWER_AVAILABLE"
+                        ),
+                        "answer_fingerprint": event.payload.get(
+                            "answer_fingerprint", ""
+                        ),
+                        "semantic_answer_digest": event.payload.get(
+                            "semantic_answer_digest", ""
+                        ),
+                        "historical": historical,
+                        "inserted": bool(answer.inserted),
+                        "attention_requested": None,
+                        "wake_state": "RECONCILIATION_REQUIRED",
+                        "blocker": "CARRIER_RECONCILIATION_REQUIRED",
+                    },
+                }
+            # Exact readback proves the answer is already on the carrier.
+            # Fall through to the single existing requester-attention path.
+        except ConsultationPacketCarrierUnknown as exc:
+            answer = answer_box.get("result")
+            current_reserved = _non_historical_answer_event(
+                self.runtime, consultation_ref
+            )
+            if answer is not None and current_reserved is not None:
+                event, _event_type, _payload_fact, historical = _answer_event_facts(answer)
+                return {
+                    "ok": True,
+                    "result": {
+                        "schema": _INBOX_SCHEMA,
+                        "consultation_ref": consultation_ref,
+                        "state": (
+                            "ANSWER_HISTORICAL"
+                            if historical
+                            else "ANSWER_AVAILABLE"
+                        ),
+                        "answer_fingerprint": event.payload.get(
+                            "answer_fingerprint", ""
+                        ),
+                        "semantic_answer_digest": event.payload.get(
+                            "semantic_answer_digest", ""
+                        ),
+                        "historical": historical,
+                        "inserted": bool(answer.inserted),
+                        "attention_requested": None,
+                        "wake_state": "RECONCILIATION_REQUIRED",
+                        "blocker": "CARRIER_RECONCILIATION_REQUIRED",
+                    },
+                }
+            raise ConsultationRefusal(
+                "CARRIER_RECONCILIATION_REQUIRED",
+                detail="Relay packet carrier unavailable before ANSWER_AVAILABLE",
+            ) from exc
+
+
+        answer = answer_box.get("result")
+        if answer is None:
+            current_reserved = _non_historical_answer_event(
+                self.runtime, consultation_ref
+            )
+            try:
+                packet = await self.packets.get_answer(consultation_ref)
+            except (
+                ConsultationPacketCarrierUnknown,
+                ConsultationPacketEffectUnknown,
+            ):
+                if current_reserved is not None:
+                    return {
+                        "ok": True,
+                        "result": {
+                            "schema": _INBOX_SCHEMA,
+                            "consultation_ref": consultation_ref,
+                            "state": "ANSWER_AVAILABLE",
+                            "answer_fingerprint": current_reserved.payload.get(
+                                "answer_fingerprint", ""
+                            ),
+                            "semantic_answer_digest": current_reserved.payload.get(
+                                "semantic_answer_digest", ""
+                            ),
+                            "historical": False,
+                            "inserted": False,
+                            "reconciled": True,
+                            "attention_requested": None,
+                            "wake_state": "RECONCILIATION_REQUIRED",
+                            "blocker": "CARRIER_RECONCILIATION_REQUIRED",
+                        },
+                    }
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="Relay duplicate returned without Runtime/readback",
+                )
+            if current_reserved is None:
+                if packet is not None:
+                    raise ConsultationRefusal(
+                        "CONFLICT",
+                        detail="orphan ANSWER packet exists without canonical ANSWER_AVAILABLE",
+                    )
+                raise ConsultationRefusal(
+                    "CARRIER_RECONCILIATION_REQUIRED",
+                    detail="Relay returned without ANSWER_AVAILABLE or packet",
+                )
+            validated = _validated_answer_frame(
+                intent.payload, current_reserved, packet
+            )
+            if validated is None:
+                return {
+                    "ok": True,
+                    "result": {
+                        "schema": _INBOX_SCHEMA,
+                        "consultation_ref": consultation_ref,
+                        "state": "ANSWER_AVAILABLE",
+                        "answer_fingerprint": current_reserved.payload.get(
+                            "answer_fingerprint", ""
+                        ),
+                        "semantic_answer_digest": current_reserved.payload.get(
+                            "semantic_answer_digest", ""
+                        ),
+                        "historical": False,
+                        "inserted": False,
+                        "reconciled": True,
+                        "attention_requested": None,
+                        "wake_state": "RECONCILIATION_REQUIRED",
+                        "blocker": "CARRIER_RECONCILIATION_REQUIRED",
+                    },
+                }
+            return _reconciled_envelope(current_reserved, validated)
+        event, event_type, payload_fact, historical = _answer_event_facts(answer)
+        if historical or not answer.inserted:
+            raise ConsultationRefusal(
+                "CONFLICT", detail="Relay committed a non-inserted or historical answer"
+            )
 
         attention_requested, wake_state, blocker = (
             self._request_answer_attention(answer_frame, intent)
@@ -1614,8 +2560,24 @@ class RuntimeConsultationDispatcher:
             self._clock(),
         )
 
-        question_frame = self.packets.get_question(consultation_ref)
-        answer_frame = self.packets.get_answer(consultation_ref)
+        question_carrier_unknown = False
+        answer_carrier_unknown = False
+        try:
+            question_frame = await self.packets.get_question(consultation_ref)
+        except (
+            ConsultationPacketCarrierUnknown,
+            ConsultationPacketEffectUnknown,
+        ):
+            question_frame = None
+            question_carrier_unknown = True
+        try:
+            answer_frame = await self.packets.get_answer(consultation_ref)
+        except (
+            ConsultationPacketCarrierUnknown,
+            ConsultationPacketEffectUnknown,
+        ):
+            answer_frame = None
+            answer_carrier_unknown = True
 
         # Validate every carrier frame against the persisted INTENT and
         # (for answers) the admitted non-historical ANSWER_AVAILABLE
@@ -1648,7 +2610,16 @@ class RuntimeConsultationDispatcher:
         result["question"] = question_body
         result["answer"] = answer_body
         result["body_status"] = body_status
-        if body_blocker is not None:
+        if question_carrier_unknown or answer_carrier_unknown:
+            if question_carrier_unknown:
+                result["question"] = None
+            if answer_carrier_unknown:
+                result["answer"] = None
+            result["body_status"] = "UNAVAILABLE"
+            result["carrier_blocker"] = "CARRIER_RECONCILIATION_REQUIRED"
+            if row.get("blocker") is None:
+                result["blocker"] = "CARRIER_RECONCILIATION_REQUIRED"
+        elif body_blocker is not None:
             result["blocker"] = body_blocker
         elif row.get("blocker") is None:
             result["blocker"] = None
@@ -1956,8 +2927,12 @@ def _body_status_for(
 
 
 __all__ = [
+    "AgentDialogueConsultationPacketCarrier",
     "CallerIdentity",
     "ConsultationPacketCarrier",
+    "ConsultationPacketCarrierUnknown",
+    "ConsultationPacketCommitAborted",
+    "ConsultationPacketEffectUnknown",
     "ConsultationRefusal",
     "InMemoryConsultationPacketCarrier",
     "InvocationContext",

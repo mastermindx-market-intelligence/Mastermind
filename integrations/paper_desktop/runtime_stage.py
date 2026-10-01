@@ -37,6 +37,21 @@ REVIEWED_GENERATIONS = {
     "v4": {
         "bridge.py": "0d889a071cc7add29a98d8418ab48300b8fe65f9460174a7e552ff9b0f4dac27",
     },
+    "v5": {
+        "bridge.py": "d3301a1466d46ae081ded963f438c019fabf39c9bccfc8c669f16562a52bf7f6",
+    },
+    "v6": {
+        "bridge.py": "938c45356f95f3a57df2290e2da045eae9a6c4a0c3507dfff81c40a87e85b72a",
+    },
+    "v7": {
+        "bridge.py": "a7977f45ebae7cc405cf2a7b81744712089ef9a243512b867dd738f07031072d",
+    },
+    "v8": {
+        "bridge.py": "e7eec115f783c3c734d541225931edcd82b17fd143f9810d03877f75c11b1602",
+    },
+    "v9": {
+        "bridge.py": "a784fefceb7b1bb1164289700b22a6f53d09ae60d007f506ac015ebaca8c3725",
+    },
 }
 
 

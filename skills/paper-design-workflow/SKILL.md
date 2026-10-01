@@ -1,6 +1,6 @@
 ---
 name: paper-design-workflow
-description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind guarded adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. ChatGPT Web prefers Studio Direct's Paper actions; an independently authorized Remote Desktop Commander carrier may invoke the same protected bridge only when the exact host and Paper action are already within current authority. Studio absence never grants that authority. Neither path creates a second Paper gateway. Requires Paper Desktop plus exact document identity; setup, login and worker grants remain separate gates.
+description: Use Paper.design to inspect, prototype, refine, review and extract JSX from editable design files through the Mastermind guarded adapter. Use for Paper design requests, Figma-to-Paper migration, or design-to-code workflows. ChatGPT Web uses private Mastermind Paper after Business enrollment and direct-path acceptance; legacy/non-migrated seats prefer Studio Direct's Paper actions; an independently authorized Remote Desktop Commander carrier may invoke the same protected bridge only when the exact host and Paper action are already within current authority. Studio absence never grants that authority. Neither path creates a second Paper gateway. Requires Paper Desktop plus exact document identity; setup, login and worker grants remain separate gates.
 ---
 
 # Paper design workflow
@@ -16,15 +16,49 @@ the generic file/process tools that happened to be visible first.
 For an attended ChatGPT Paper task, discover the **exact Paper action family** on the current tool
 surface before making a capability claim.
 
+**Business direct route.** After explicit enrollment and accepted scratch-file proof, use the private
+Mastermind Paper app as this workspace's normal Paper carrier. Read
+`docs/PAPER_DIRECT_CHATGPT.md` for its exact staged/accepted tool set. Never infer enrollment from
+source, a healthy tunnel, or a plugin name. The direct Business build exposes inspect/catalog/read/prepare/edit. Its direct `paper_prepare`
+is an explicit-file binding step: it returns the target file's guarded snapshot without requiring
+the user-viewed Paper file to switch and never forwards raw `open_file` or a host helper. Paper's
+write tools already require explicit `fileId`, and direct edits validate/post-read that exact target.
+All denial and original-carrier reconciliation fences below apply equally to the direct app.
+If the accepted source/runtime contract advertises target-scoped multi-writer collaboration but
+the current ChatGPT app action snapshot still contains older file-exclusive wording, classify
+**DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. A stale tool description is transport/publication
+metadata, not a new document lease and not authority to undo current Chairman/source policy. Refresh
+the **same Mastermind Paper app's** approved action snapshot after the accepted runtime is deployed;
+do not create a duplicate app/tunnel, switch carriers, or replay any Paper effect merely to refresh
+tool metadata.
+Multiple accepted Business ChatGPT seats may each have a distinct Secure MCP Tunnel transport,
+but they all terminate in the same guarded Paper bridge and the same per-OS-user desktop mutex;
+this is one Paper execution plane, not multiple gateways or Paper identities. Transport singleton
+state is per ChatGPT seat while Paper-call serialization remains global. The numbered Studio/RDC
+procedure below is for legacy/non-migrated seats, not a fallback after a denied or effect-unknown
+direct call. A commissioning canary uses the explicitly assigned direct carrier before it becomes
+the workspace's accepted primary route.
+
 1. **Studio Direct first when Paper actions are exposed.** Look specifically for
    `paper_inspect`, `paper_catalog`, `paper_read`, and `paper_edit`; use
    `paper_prepare` when that action is actually exposed. Call `paper_inspect` before declaring
    connection state. The presence of generic Studio `read_file` / `start_process` actions says
    nothing about whether the Paper family is available.
-2. **Do not over-block on `paper_prepare`.** Its absence alone does not make Paper unavailable.
-   If the intended file is already active, inspect/read/edit may still be usable. If a different file
-   must be focused, use `paper_prepare` when exposed; otherwise use only an independently authorized
-   host carrier or surface the exact missing file-transition action.
+2. **Do not over-block on `paper_prepare`, and do not emulate it.** Its absence alone does not make Paper unavailable;
+   it may block only the exact file-transition step. Current-file Paper reads/edits can remain usable. If another exact file must be focused, first call
+   `paper_inspect`. A current gateway may return
+   `gateway_surface.gateway_advertises=[paper_inspect,paper_catalog,paper_read,paper_prepare,paper_edit]`.
+   When that contract lists `paper_prepare` but the ChatGPT tool surface omits it, classify
+   **STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Do **not** use generic Studio
+   `start_process`, filesystem tools, Desktop Commander, raw `open_file`, shell, or UI automation
+   to reproduce the transition. ChatGPT MCP apps use an admin-approved **frozen tool snapshot**;
+   server-side tool additions do not automatically appear in chats. Recover the **same Studio Direct
+   app** through its workspace action-catalog ceremony: for a draft/dev app, re-scan/recreate it as
+   needed; for a published Business app, current OpenAI behavior requires recreate + republish rather
+   than assuming an in-place server update will refresh actions. Then start a fresh chat/tool selection,
+   re-run `paper_inspect`, and invoke the surfaced `paper_prepare(file_id)` directly. Only after
+   that same-app publication path is actually unavailable or explicitly refused is file transition
+   an exact human/platform gate. Re-inspect the target file before any edit.
 3. **Desktop Commander is a real guarded-bridge alternative, never authority by fallback.**
    Technical absence or unserviceability of the Studio Direct Paper family may justify considering
    RDC **before any Paper mutation**, but does not authorize it. Require
@@ -38,11 +72,13 @@ surface before making a capability claim.
    organizational denial ends that action. Tool absence is not proof that a denied permission may be
    recovered elsewhere. Do not switch to Desktop Commander, another mode, account, or provider to
    obtain the denied effect.
-5. **Bind mutations to one carrier.** Select the modifying carrier before the first edit. A
+5. **Bind each logical mutation to one carrier.** Select the modifying carrier before that edit. A
    pre-dispatch technical absence with proven `EFFECT_NONE` may justify choosing the other lawful
    carrier only when that carrier is already independently authorized. Once a Paper edit is dispatched,
    keep that logical mutation and its reconciliation on the original carrier. On `EFFECT_UNKNOWN`,
-   stop writes and inspect the original file; never replay the edit through the other carrier.
+   stop that target's writes and inspect the original file; never replay the edit through another
+   carrier. This fence is operation/target-scoped, not a file-wide lease: other admitted sessions may
+   concurrently modify disjoint targets in the same `fileId` or page on their own carriers.
 
 For native MCP clients, use only the Paper actions exposed and approved in that client. Tool discovery
 never grants permission, and sealed workers do not inherit ambient plugins or Executive grants.
@@ -53,8 +89,10 @@ never grants permission, and sealed workers do not inherit ambient plugins or Ex
 Define the user's task, primary persona, target screen, meaningful states and
 acceptance before editing. Preserve original product ambition; do not replace a
 working workflow with a prettier but incomplete mockup. Use our own/licensed assets.
-Keep one designer assigned to the active desktop document. Other agents may do
-research or review screenshots without becoming concurrent canvas writers.
+Multiple designers may modify the same exact Paper `fileId` across hosts, including
+the same page. Prefer disjoint board/artboard/node target sets. For known same-board
+overlap, partition node targets and re-read/re-plan before the next bounded edit rather
+than acquiring a file-wide or page-wide lease.
 
 ## Inspect, design and verify
 
@@ -65,8 +103,10 @@ research or review screenshots without becoming concurrent canvas writers.
    active page or file after an earlier capability probe.
 2. Read the live catalog once for exact upstream schemas. Never guess Paper tool
    argument names. Prefer existing tokens and components over arbitrary styles.
-3. Plan small, useful visual changes. Get a fresh snapshot guard before an edit and
-   give the operation a stable correlation ID. The guard is NOT a revision or grant.
+3. Plan small, useful visual changes. Get a fresh snapshot guard immediately before each bounded
+   edit and give the operation a stable correlation ID. Another concurrent writer may invalidate
+   an older observation; re-read and re-plan the next operation instead of claiming ownership.
+   The guard is NOT a revision, collaboration lock or grant.
 4. Edit through the modifying tool/CLI only with current permission. Do not send
    edits through read tools, native path-export or deletion bypasses. Use bounded
    HTML/CSS changes; do not introduce remote assets without authorization.
