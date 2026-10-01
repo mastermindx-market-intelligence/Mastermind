@@ -110,6 +110,7 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
         (3, "ohf_session_epochs_and_process_generations"),
         (4, "executive_phase1fc_orchestration_contract"),
         (5, "executive_finite_drive_arm_contract"),
+        (6, "executive_coo_provider_charge_identity"),
     ]
     assert all(len(row[2]) == 64 for row in migrations)
 
@@ -809,7 +810,7 @@ def test_v4_runtime_normal_open_refuses_existing_v2_without_v3_artifacts(
     assert "execution_mode" not in columns
 
 
-def test_v5_fresh_schema_pins_vector_fingerprint_and_finite_arm_index_ddl(tmp_path):
+def test_v6_fresh_schema_retains_v5_finite_arm_index_and_charge_ddl(tmp_path):
     runtime = _runtime(tmp_path)
     with runtime.store.read() as connection:
         vector = connection.execute(
@@ -820,13 +821,14 @@ def test_v5_fresh_schema_pins_vector_fingerprint_and_finite_arm_index_ddl(tmp_pa
             "SELECT sql FROM sqlite_master WHERE type='index' "
             "AND name='events_one_coo_finite_drive_arm_per_root'"
         ).fetchone()
-    assert [tuple(row)[:2] for row in vector][-1] == (
+    assert [tuple(row)[:2] for row in vector][-2] == (
         5,
         "executive_finite_drive_arm_contract",
     )
-    assert vector[-1][2] == executive_runtime._migration_checksum(
+    assert vector[-2][2] == executive_runtime._migration_checksum(
         executive_runtime._MIGRATIONS[4][2]
     )
+    assert [tuple(row)[:2] for row in vector][-1] == (6, "executive_coo_provider_charge_identity")
     assert index_row is not None
     assert executive_runtime._normalize_schema_sql(str(index_row[0])) == (
         executive_runtime._normalize_schema_sql(
@@ -834,7 +836,7 @@ def test_v5_fresh_schema_pins_vector_fingerprint_and_finite_arm_index_ddl(tmp_pa
             "ON events(job_id) WHERE event_type='COO_FINITE_DRIVE_ARMED'"
         )
     )
-    assert fresh_digest == executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST
+    assert fresh_digest == executive_runtime._NORMALIZED_V6_SCHEMA_DIGEST
     # The historical v4 fingerprint stays frozen for prior-version verification.
     assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
         "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
@@ -1951,7 +1953,7 @@ def test_c2_r1a_second_root_refuses_existing_generation_one_carrier_before_c1(
 # schema v5 carries only the finite-arm index; this synthetic fixture defers
 # the inactive candidate to the next synthetic version 6 and changes the three
 # coupled expectations, with real verifiers.
-_M2_V5_VECTOR = executive_runtime._MIGRATIONS
+_M2_V5_VECTOR = executive_runtime._MIGRATIONS[:5]
 _M2_V5_DIGEST = getattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', None)
 _M2_V6_CANDIDATE_DIGEST = '2618959767e49acc70db044ee1e86441feb2bd39ed413afe0c86e455ea0b21b4'
 _M2_CANDIDATE_CHECKSUM = '9bee01a6ee1f129a9c6b6fb24f52012d2cb790c39057722c5a6867163055b3d8'
@@ -1971,7 +1973,7 @@ def m2_store(tmp_path, monkeypatch):
     monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V5_VECTOR + (
         (6, 'synthetic_m2_physical_resources', candidate),))
     monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 6)
-    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', _M2_V6_CANDIDATE_DIGEST)
+    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V6_SCHEMA_DIGEST', _M2_V6_CANDIDATE_DIGEST)
     contexts = {}
     def admission(self, request, caller_context, *, connection=None, stage='entry'):
         context = contexts[str(self.store.path)]
@@ -2016,17 +2018,18 @@ def _m2_reserve(runtime, request):
     return runtime.broker.reserve_physical(request, caller_context=None)
 
 
-def test_m2_default_runtime_keeps_exact_v5_vector_and_has_no_candidate_tables(tmp_path):
+def test_m2_default_runtime_keeps_v6_charge_and_excludes_physical_candidate(tmp_path):
     runtime = Runtime.at(tmp_path)
-    assert executive_runtime.SCHEMA_VERSION == 5
-    assert executive_runtime._MIGRATIONS == _M2_V5_VECTOR
+    assert executive_runtime.SCHEMA_VERSION == 6
+    assert executive_runtime._MIGRATIONS[:5] == _M2_V5_VECTOR
     assert executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST == _M2_V5_DIGEST
     assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
         '56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4'
     )
     with runtime.store.read() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name LIKE 'physical_resource_%'").fetchall() == []
-        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 5
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 6
+        assert connection.execute("SELECT name FROM sqlite_master WHERE name='coo_provider_charges'").fetchone() is not None
 
 
 def test_m2_default_resource_entry_refuses_before_database_open(tmp_path):
@@ -3737,7 +3740,7 @@ def _c2_enable_physical_candidate_schema(monkeypatch):
     monkeypatch.setattr(executive_runtime, "SCHEMA_VERSION", 6)
     monkeypatch.setattr(
         executive_runtime,
-        "_NORMALIZED_V5_SCHEMA_DIGEST",
+        "_NORMALIZED_V6_SCHEMA_DIGEST",
         _M2_V6_CANDIDATE_DIGEST,
     )
 

@@ -105,7 +105,7 @@ from control_plane.operator_harness_contract import (
 )
 from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
@@ -302,6 +302,9 @@ _NORMALIZED_V4_SCHEMA_DIGEST = (
 )
 _NORMALIZED_V5_SCHEMA_DIGEST = (
     "b2fe4455306b2bdcf4f698d958e420e4f885e941dc1f0b8db602cbb39edcedbd"
+)
+_NORMALIZED_V6_SCHEMA_DIGEST = (
+    "36ce034ea1587c5ba311a4160e96dae0bd646905102969a770d22ae739aa8f28"
 )
 _V2_ROOT_CREATION_CAPABILITY = object()
 _COO_CYCLE_PLANNER_CREATION_CAPABILITY = object()
@@ -3169,12 +3172,150 @@ _MIGRATION_5: tuple[str, ...] = (
     """,
 )
 
+# Migration 6 is an additive, immutable provider charge identity ledger.  Each
+# row independently exposes root, Job, Attempt, worker, operation, effect,
+# TurnRef, reservation, and Event identity without depending on later Event
+# type, command header, job header, or payload projections.  It carries no
+# provider execution behavior.
+_MIGRATION_6: tuple[str, ...] = (
+    """
+    CREATE TABLE coo_provider_charges (
+      charge_id TEXT NOT NULL PRIMARY KEY
+        CHECK(length(charge_id) BETWEEN 1 AND 128),
+      root_job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE RESTRICT,
+      job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE RESTRICT,
+      attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE RESTRICT,
+      worker_id TEXT NOT NULL REFERENCES workers(worker_id) ON DELETE RESTRICT,
+      operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 256),
+      effect_class TEXT NOT NULL CHECK(effect_class IN ('ORDINARY','FINAL')),
+      turn_id TEXT NOT NULL CHECK(length(turn_id) BETWEEN 1 AND 128),
+      reservation_identity TEXT NOT NULL CHECK(length(reservation_identity) BETWEEN 1 AND 256),
+      event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE RESTRICT,
+      created_at_ms INTEGER NOT NULL CHECK(created_at_ms >= 0),
+      UNIQUE(root_job_id, turn_id),
+      UNIQUE(root_job_id, operation_id),
+      UNIQUE(charge_id, event_id),
+      UNIQUE(event_id)
+    ) WITHOUT ROWID
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_lineage_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NOT EXISTS (
+      SELECT 1 FROM jobs
+      WHERE job_id=NEW.job_id AND root_job_id=NEW.root_job_id
+    ) OR NOT EXISTS (
+      SELECT 1 FROM attempts
+      WHERE attempt_id=NEW.attempt_id AND job_id=NEW.job_id
+        AND worker_id=NEW.worker_id
+    )
+    BEGIN SELECT RAISE(ABORT, 'COO provider charge lineage is invalid'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_identity_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN EXISTS (
+      SELECT 1 FROM coo_provider_charges
+      WHERE charge_id=NEW.charge_id OR event_id=NEW.event_id
+         OR (root_job_id=NEW.root_job_id AND
+             (turn_id=NEW.turn_id OR operation_id=NEW.operation_id))
+    )
+    BEGIN SELECT RAISE(ABORT, 'duplicate COO provider charge identity'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_hierarchy_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NOT EXISTS (
+      SELECT 1 FROM jobs AS root
+      JOIN jobs AS charged ON charged.job_id=NEW.job_id
+      LEFT JOIN jobs AS domain ON domain.job_id=charged.parent_job_id
+      WHERE root.job_id=NEW.root_job_id
+        AND root.root_job_id=root.job_id
+        AND root.parent_job_id IS NULL
+        AND root.depth=0 AND root.orchestration_role='aggregation'
+        AND charged.root_job_id=root.job_id
+        AND (
+          (charged.depth=1 AND charged.parent_job_id=root.job_id
+           AND charged.orchestration_role='plan'
+           AND json_extract(charged.constraints_json,'$.execution_profile_id')
+               ='operator.coo.domain.readonly.v1')
+          OR
+          (charged.depth=2 AND charged.orchestration_role IN ('work','review')
+           AND domain.depth=1 AND domain.parent_job_id=root.job_id
+           AND domain.root_job_id=root.job_id
+           AND domain.orchestration_role='plan'
+           AND json_extract(domain.constraints_json,'$.execution_profile_id')
+               ='operator.coo.domain.readonly.v1')
+        )
+        AND (NEW.effect_class='ORDINARY' OR charged.depth=1)
+    )
+    BEGIN SELECT RAISE(ABORT, 'COO provider charge hierarchy is invalid'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_event_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NOT EXISTS (
+      SELECT 1 FROM events AS e
+      JOIN attempts AS a ON a.attempt_id=NEW.attempt_id
+      WHERE e.event_id=NEW.event_id
+        AND e.aggregate_type='job' AND e.aggregate_id=NEW.job_id
+        AND e.job_id=NEW.job_id AND e.attempt_id=NEW.attempt_id
+        AND e.worker_id=NEW.worker_id AND e.quota_class=a.quota_class
+        AND e.actor='coo'
+        AND e.event_type=CASE NEW.effect_class
+            WHEN 'FINAL' THEN 'COO_DOMAIN_CONSUMPTION_CHARGED'
+            ELSE 'COO_PROVIDER_CHARGE_RECORDED' END
+        AND json_extract(e.payload_json,'$.charge_id')=NEW.charge_id
+        AND json_extract(e.payload_json,'$.root_job_id')=NEW.root_job_id
+        AND json_extract(e.payload_json,'$.operation_id')=NEW.operation_id
+        AND json_extract(e.payload_json,'$.effect_class')=NEW.effect_class
+        AND json_extract(e.payload_json,'$.turn_id')=NEW.turn_id
+        AND json_extract(e.payload_json,'$.reservation_identity')
+            =NEW.reservation_identity
+        AND (NEW.effect_class='ORDINARY' OR
+             (json_extract(e.payload_json,'$.domain_job_id')=NEW.job_id
+              AND json_extract(e.payload_json,'$.domain_attempt_id')
+                  =NEW.attempt_id))
+    )
+    BEGIN SELECT RAISE(ABORT, 'COO provider charge Event binding is invalid'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_immutable_update
+    BEFORE UPDATE ON coo_provider_charges
+    BEGIN SELECT RAISE(ABORT, 'COO provider charges are immutable'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_immutable_delete
+    BEFORE DELETE ON coo_provider_charges
+    BEGIN SELECT RAISE(ABORT, 'COO provider charges are immutable'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_ordinary_ceiling_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NEW.effect_class='ORDINARY'
+     AND (SELECT COUNT(*) FROM coo_provider_charges
+          WHERE root_job_id=NEW.root_job_id AND effect_class='ORDINARY') >= 31
+    BEGIN SELECT RAISE(ABORT, 'root ordinary COO provider charge ceiling is exhausted'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_final_identity_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NEW.effect_class='FINAL'
+     AND EXISTS (
+       SELECT 1 FROM coo_provider_charges
+       WHERE root_job_id=NEW.root_job_id AND effect_class='FINAL'
+     )
+    BEGIN SELECT RAISE(ABORT, 'root already has a final COO provider charge'); END
+    """,
+)
+
 _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (1, "executive_runtime_core", _MIGRATION_1),
     (2, "durable_parent_child_review_contract", _MIGRATION_2),
     (3, "ohf_session_epochs_and_process_generations", _MIGRATION_3),
     (4, "executive_phase1fc_orchestration_contract", _MIGRATION_4),
     (5, "executive_finite_drive_arm_contract", _MIGRATION_5),
+    (6, "executive_coo_provider_charge_identity", _MIGRATION_6),
 )
 
 
@@ -4004,9 +4145,9 @@ class RuntimeStore:
         """Mutation-free preflight for every normal writable existing-store open.
 
         This runs before chmod, WAL selection, directory creation, or a writable
-        SQLite connection.  Exact v1-v4 stores are therefore routed only to the
-        separately explicit offline upgrade API; ordinary startup cannot append
-        migration 5 or create a sidecar as a by-product of discovering staleness.
+        SQLite connection.  Exact pre-v6 stores are therefore routed only to
+        separately explicit offline upgrade APIs; ordinary startup cannot append
+        migration 6 or create a sidecar as a by-product of discovering staleness.
         """
 
         connection: sqlite3.Connection | None = None
@@ -4053,7 +4194,9 @@ class RuntimeStore:
         current = versions[-1]
         if current < SCHEMA_VERSION:
             required_upgrade = (
-                "upgrade_v4_to_v5" if current == 4 else "upgrade_v3_to_v4"
+                "upgrade_v5_to_v6" if current == 5
+                else "upgrade_v4_to_v5" if current == 4
+                else "upgrade_v3_to_v4"
             )
             raise ExecutiveSchemaUpgradeRequired(
                 f"existing Executive schema v{current} requires explicit offline "
@@ -4063,9 +4206,9 @@ class RuntimeStore:
             raise PersistenceError(
                 f"executive runtime schema v{current} is unsupported by v{SCHEMA_VERSION} code"
             )
-        if schema_digest != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if schema_digest != _NORMALIZED_V6_SCHEMA_DIGEST:
             raise PersistenceError(
-                "existing Executive schema v5 does not match the exact reviewed DDL"
+                "existing Executive schema v6 does not match the exact reviewed DDL"
             )
         if self._upgrade_barrier_present():
             raise PersistenceError(
@@ -4240,9 +4383,9 @@ class RuntimeStore:
                 raise PersistenceError(
                     f"migration {version} checksum/name does not match code"
                 )
-        if _normalized_schema_digest(connection) != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if _normalized_schema_digest(connection) != _NORMALIZED_V6_SCHEMA_DIGEST:
             raise PersistenceError(
-                "executive runtime schema v5 does not match the exact reviewed DDL"
+                "executive runtime schema v6 does not match the exact reviewed DDL"
             )
 
     def _open_existing_writable(self) -> sqlite3.Connection:
@@ -4369,7 +4512,7 @@ class RuntimeStore:
     def _migrate(self, connection: sqlite3.Connection) -> None:
         if not self._database_was_absent:
             raise PersistenceError(
-                "generic migration is fresh-database-only under schema v5"
+                "generic migration is fresh-database-only under schema v6"
             )
         try:
             connection.execute("BEGIN EXCLUSIVE")
@@ -4391,7 +4534,7 @@ class RuntimeStore:
             }
             if existing:
                 raise ExecutiveSchemaUpgradeRequired(
-                    "generic migration refuses a pre-existing migration vector under schema v5"
+                "generic migration refuses a pre-existing migration vector under schema v6"
                 )
             known_versions = {version for version, _, _ in _MIGRATIONS}
             unknown = sorted(set(existing) - known_versions)
