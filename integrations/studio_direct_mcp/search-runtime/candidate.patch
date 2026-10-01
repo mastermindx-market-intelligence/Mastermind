@@ -1,6 +1,13 @@
 --- a/src/search-manager.ts
 +++ b/src/search-manager.ts
-@@ -7,7 +7,9 @@
+@@ -2,12 +2,16 @@
+ import { constants } from 'buffer';
+ import { once } from 'events';
+ import path from 'path';
++import os from 'node:os';
++import { performance } from 'node:perf_hooks';
+ import fs from 'fs/promises';
+ import { validatePath } from './tools/filesystem.js';
  import { capture } from './utils/capture.js';
  import { logger } from './utils/logger.js';
  import { getRipgrepPath } from './utils/ripgrep-resolver.js';
@@ -11,7 +18,7 @@
  
  export interface SearchResult {
    file: string;
-@@ -29,6 +31,13 @@
+@@ -29,6 +33,13 @@
    buffer: string;  // The line of ripgrep output being received (see processOutput)
    skippingLine?: boolean;  // That line is longer than MAX_OUTPUT_LINE_CHARS: it is dropped up to its end
    skippedLines: Map<string, number>;  // Lines too long to process, counted by file
@@ -25,7 +32,27 @@
    totalMatches: number;
    totalContextLines: number;  // Track context lines separately
    wasIncomplete?: boolean;  // NEW: Track if search was incomplete due to permissions/access issues
-@@ -63,12 +72,22 @@
+@@ -59,16 +70,42 @@
+   literalSearch?: boolean;     // Force literal string matching (-F flag) instead of regex
+ }
+ 
++type SearchStart = {
++  sessionId: string; isComplete: boolean; isError: boolean;
++  results: SearchResult[]; totalResults: number; runtime: number;
++};
++type SearchAdmission = {
++  deadline: number; stopped: boolean; session?: SearchSession;
++  promise: Promise<SearchStart>; settled: Promise<void>;
++  release: () => void; stop: (reason: 'deadline' | 'disposed') => void;
++};
++export class SearchAdmissionError extends Error {
++  constructor(public readonly code: 'search_deadline' | 'search_capacity' |
++    'search_retention' | 'search_root' | 'search_input' | 'search_disposed') {
++    super(code); this.name = 'SearchAdmissionError';
++  }
++}
++
+ /**
   * Default time limit of a file search for an exact filename ("package.json"):
   * a quick lookup of one known file, which gives up rather than walk a huge tree.
   * A content search for the same text looks for every reference to that file,
@@ -51,7 +78,7 @@
  
  /** The extensions of the files the Excel and DOCX searches are for (see targetsOfficeFiles) */
  const EXCEL_EXTENSIONS = ['.xlsx', '.xls', '.xlsm', '.xlsb'];
-@@ -91,10 +110,6 @@
+@@ -91,10 +128,6 @@
    | { kind: 'match' | 'context'; result: SearchResult }
    | { kind: 'begin' | 'end'; file: string }
    | { kind: 'summary' };
@@ -62,7 +89,7 @@
  
  /** Answers show this many characters of a result's text, then '...' if there is more */
  export const SHOWN_TEXT_CHARS = 100;
-@@ -109,81 +124,8 @@
+@@ -109,81 +142,8 @@
  const keptText = (text: string | undefined): string | undefined =>
    text === undefined ? undefined : Buffer.from(text.slice(0, SHOWN_TEXT_CHARS + 1), 'utf16le').toString('utf16le');
  
@@ -146,10 +173,34 @@
  
  /** The most of ripgrep's error output (stderr) a session keeps, in characters */
  const MAX_KEPT_ERROR_CHARS = 64 * 1024;
-@@ -209,6 +151,15 @@
-     totalResults: number;
-     runtime: number;
-   }> {
+@@ -193,6 +153,9 @@
+  * Supports both file search and content search with progressive results
+  */export class SearchManager {
+   private sessions = new Map<string, SearchSession>();
++  // Existing backend-local SearchManager owns all live and preparing work.
++  // This is not a host-wide scheduler or an Executive capacity grant.
++  private admissions = new Map<string, SearchAdmission>();
+   private sessionCounter = 0;
+   private cleanupTimer: NodeJS.Timeout | null = null;
+ 
+@@ -201,18 +164,111 @@
+    * Returns immediately with initial state and results
+    */
+ 
+-  async startSearch(options: SearchSessionOptions): Promise<{
+-    sessionId: string;
+-    isComplete: boolean;
+-    isError: boolean;
+-    results: SearchResult[];
+-    totalResults: number;
+-    runtime: number;
+-  }> {
++  startSearch(options: SearchSessionOptions): Promise<SearchStart> {
++    if (typeof options.rootPath !== 'string' || options.rootPath.length > 4096 ||
++        typeof options.pattern !== 'string' || options.pattern.length > 4096 ||
++        (options.filePattern !== undefined && (typeof options.filePattern !== 'string' || options.filePattern.length > 8192))) {
++      return Promise.reject(new SearchAdmissionError('search_input'));
++    }
 +    options = {
 +      ...options,
 +      maxResults: finiteLimit(options.maxResults, DEFAULT_MAX_RESULTS, MAX_RESULTS),
@@ -159,10 +210,161 @@
 +      contextLines: options.contextLines === 0 || options.contextLines === undefined
 +        ? 0 : finiteLimit(options.contextLines, 0, 20)
 +    };
++    const expanded = options.rootPath === '~' ? os.homedir() :
++      options.rootPath.startsWith('~/') ? path.join(os.homedir(), options.rootPath.slice(2)) : options.rootPath;
++    options = { ...options, rootPath: path.resolve(expanded) };
++    const key = JSON.stringify([options.rootPath, options.pattern, options.searchType,
++      options.filePattern ?? '', options.ignoreCase !== false, options.includeHidden === true,
++      options.maxResults, options.contextLines, options.timeout,
++      options.earlyTermination === true, options.literalSearch === true]);
++    const existing = this.admissions.get(key);
++    if (existing) return existing.promise; // reconcile the SAME live handle; never restart it
++    if (this.admissions.size >= 2) return Promise.reject(new SearchAdmissionError('search_capacity'));
++    const preparing = [...this.admissions.values()].filter(a => !a.session).length;
++    if (this.sessions.size + preparing >= 32) return Promise.reject(new SearchAdmissionError('search_retention'));
++
++    let resolve!: (value: SearchStart) => void, reject!: (reason: Error) => void;
++    let markSettled!: () => void;
++    const promise = new Promise<SearchStart>((yes, no) => { resolve = yes; reject = no; });
++    const settled = new Promise<void>(yes => { markSettled = yes; });
++    let released = false;
++    let timer: NodeJS.Timeout;
++    const admission: SearchAdmission = {
++      deadline: performance.now() + options.timeout!, stopped: false, promise, settled,
++      release: () => {
++        if (released) return;
++        released = true; clearTimeout(timer);
++        if (this.admissions.get(key) === admission) this.admissions.delete(key);
++        markSettled();
++      },
++      stop: reason => {
++        if (released || admission.stopped) return;
++        admission.stopped = true;
++        if (admission.session) {
++          const session = admission.session;
++          if (reason === 'deadline') session.timedOut = true;
++          else session.cancelled = true;
++          this.stopSources(session);
++          resolve(this.startSnapshot(session)); // retain a native handle for settling work
++        } else {
++          reject(new SearchAdmissionError(reason === 'deadline' ? 'search_deadline' : 'search_disposed'));
++        }
++      }
++    };
++    this.admissions.set(key, admission); // reserve synchronously, before any asynchronous validation
++    timer = setTimeout(() => admission.stop('deadline'), options.timeout!);
++    // A timed-out preflight keeps its permit until the real promise settles.
++    // Its late resolution cannot spawn: every pre-spawn await has an expiry fence.
++    void this.startAdmittedSearch(options, admission).then(resolve, error => {
++      if (admission.session) this.stopSources(admission.session);
++      reject(error instanceof Error ? error : new Error(String(error)));
++    }).finally(() => {
++      if (!admission.session) admission.release();
++    });
++    return promise;
++  }
++
++  private assertAdmission(admission: SearchAdmission): void {
++    if (!admission.stopped && performance.now() >= admission.deadline) admission.stop('deadline');
++    if (admission.stopped) throw new SearchAdmissionError('search_deadline');
++  }
++
++  private assertNarrowRoot(root: string): void {
++    const canonical = (value: string) => {
++      const resolved = path.resolve(value);
++      return process.platform === 'darwin' ? resolved.replace(/^\/private(?=\/(?:tmp|var)(?:\/|$))/, '') : resolved;
++    };
++    const value = canonical(root);
++    const broad = [path.parse(value).root, os.homedir(), os.tmpdir(),
++      '/tmp', '/var/tmp', '/Users', '/home', '/Volumes',
++      path.join(os.homedir(), 'Documents'), path.join(os.homedir(), 'Desktop'), path.join(os.homedir(), 'Downloads')];
++    if (broad.some(item => canonical(item) === value) ||
++        ['agent-workspaces', 'worktrees', 'repos'].includes(path.basename(value)) ||
++        ['/Users', '/home', '/Volumes'].includes(path.dirname(value))) {
++      throw new SearchAdmissionError('search_root');
++    }
++  }
++
++  private startSnapshot(session: SearchSession): SearchStart {
++    return { sessionId: session.id, isComplete: session.isComplete, isError: session.isError,
++      results: [...session.results], totalResults: session.totalMatches,
++      runtime: Date.now() - session.startTime };
++  }
++
++  private async startAdmittedSearch(options: SearchSessionOptions, admission: SearchAdmission): Promise<SearchStart> {
++    const startedAt = Date.now();
++    this.assertNarrowRoot(options.rootPath);
      const sessionId = `search_${++this.sessionCounter}_${Date.now()}`;
      
      // Validate path first
-@@ -293,14 +244,7 @@
+     const validPath = await validatePath(options.rootPath);
++    this.assertAdmission(admission);
++    this.assertNarrowRoot(validPath);
+ 
+     // Build ripgrep arguments
+     const args = this.buildRipgrepArgs({ ...options, rootPath: validPath });
+@@ -221,6 +277,7 @@
+     let rgPath: string;
+     try {
+       rgPath = await getRipgrepPath();
++      this.assertAdmission(admission);
+     } catch (err) {
+       throw new Error(`Failed to locate ripgrep binary: ${err instanceof Error ? err.message : String(err)}`);
+     }
+@@ -230,11 +287,11 @@
+     // that can't be stat'ed (missing...) can't be searched: start_search answers
+     // with why, as for any search that can't start.
+     const rootIsDirectory = (await fs.stat(validPath)).isDirectory();
++    this.assertAdmission(admission);
+     const rgProcess = spawn(rgPath, args, {
+       windowsHide: true,  // Prevent visible console windows on Windows
+       cwd: rootIsDirectory ? validPath : undefined
+     });
+-    await this.whenStarted(rgProcess);
+ 
+     // Create session
+     let markCompleted!: () => void;
+@@ -245,7 +302,7 @@
+       results: [],
+       isComplete: false,
+       isError: false,
+-      startTime: Date.now(),
++      startTime: startedAt,
+       lastReadTime: Date.now(),
+       options,
+       buffer: '',
+@@ -259,6 +316,8 @@
+     };
+ 
+     this.sessions.set(sessionId, session);
++    admission.session = session;
++    void session.completed.then(admission.release);
+ 
+     // Set up process event handlers
+     this.setupProcessHandlers(session);
+@@ -266,16 +325,11 @@
+     // Start cleanup interval now that we have a session
+     this.startCleanupIfNeeded();
+ 
+-    // Set up the time limit, if any: it stops every source still running.
+-    // For exact filename file searches, use a shorter default timeout
+-    const timeoutMs = options.timeout ??
+-      (this.isExactFilenameSearch(options) ? EXACT_FILENAME_SEARCH_TIMEOUT_MS : undefined);
+-    if (timeoutMs) {
+-      session.timeoutTimer = setTimeout(() => {
+-        session.timedOut = true;
+-        this.stopSources(session);
+-      }, Math.min(timeoutMs, LONGEST_TIMER_MS));
+-    }
++    // Handlers and ownership are attached before waiting for spawn acknowledgement.
++    // The admission timer already covers validation, resolver, stat and this wait.
++    await this.whenStarted(rgProcess);
++    this.assertAdmission(admission);
++    const timeoutMs = options.timeout!;
+ 
+     capture('search_session_started', {
+       sessionId,
+@@ -293,14 +347,7 @@
        this.targetsOfficeFiles(EXCEL_EXTENSIONS, options.filePattern, validPath);
  
      if (shouldSearchExcel) {
@@ -178,7 +380,7 @@
      }
  
      // For content searches, also search DOCX files
-@@ -308,14 +252,7 @@
+@@ -308,14 +355,7 @@
        this.targetsOfficeFiles(DOCX_EXTENSIONS, options.filePattern, validPath);
  
      if (shouldSearchDocx) {
@@ -194,7 +396,7 @@
      }
  
      // Wait for first chunk of data or early completion instead of fixed delay
-@@ -362,6 +299,10 @@
+@@ -362,6 +402,10 @@
      runtime: number;
      wasIncomplete?: boolean;      // NEW: Indicates if search was incomplete due to permissions
      maxResultsReached: boolean;   // Search stopped at maxResults matches; more may exist
@@ -205,7 +407,7 @@
      timedOut: boolean;            // Search stopped at its time limit before it finished; more may exist
      skippedLines: Array<{ file: string; count: number }>;  // Lines too long to process (MAX_OUTPUT_LINE_CHARS), by file
    } {
-@@ -391,6 +332,10 @@
+@@ -391,6 +435,10 @@
          wasIncomplete: session.wasIncomplete,
          maxResultsReached: !!session.maxResultsReached,
          timedOut: !!session.timedOut,
@@ -216,7 +418,7 @@
          skippedLines: this.skippedLinesOf(session)
        };
      }
-@@ -414,6 +359,10 @@
+@@ -414,6 +462,10 @@
        wasIncomplete: session.wasIncomplete,
        maxResultsReached: !!session.maxResultsReached,
        timedOut: !!session.timedOut,
@@ -227,7 +429,7 @@
        skippedLines: this.skippedLinesOf(session)
      };
    }
-@@ -459,6 +408,7 @@
+@@ -459,6 +511,7 @@
        return false;
      }
  
@@ -235,7 +437,7 @@
      this.stopSources(session);
  
      // Don't delete session immediately - let user read final results
-@@ -472,15 +422,18 @@
+@@ -472,15 +525,20 @@
     * For owners that tear the search manager down (shutdown, tests); a later
     * startSearch() starts afresh.
     */
@@ -246,6 +448,8 @@
 -    this.sessions.clear();
 -
 +  async dispose(): Promise<void> {
++    const admissions = [...this.admissions.values()];
++    for (const admission of admissions) admission.stop('disposed');
 +    const owned = [...this.sessions.values()];
 +    for (const session of owned) this.stopSources(session);
      if (this.cleanupTimer) {
@@ -254,13 +458,13 @@
 +    }
 +    // Retain ownership until actual close/finally; callers may await teardown.
 +    // A subsequent start is independent and must not be deleted by this disposal.
-+    await Promise.all(owned.map(session => session.completed));
++    await Promise.all([...owned.map(session => session.completed), ...admissions.map(a => a.settled)]);
 +    for (const session of owned) {
 +      if (this.sessions.get(session.id) === session) this.sessions.delete(session.id);
      }
    }
  
-@@ -522,21 +475,86 @@
+@@ -522,21 +580,86 @@
     * collected as it finds them, until it has searched every file or the session
     * stops it (stop_search, timeout, maxResults).
     */
@@ -350,7 +554,7 @@
        .catch((err) => {
          // Log Office search errors but don't fail the whole search
          const message = err instanceof Error ? err.message : String(err);
-@@ -547,192 +565,6 @@
+@@ -547,192 +670,6 @@
    }
  
    /**
@@ -543,13 +747,10 @@
     * Whether a content search runs the Excel or DOCX search, the one for files
     * with these extensions. Only when contextually relevant: the rootPath is
     * such a file, or a filePattern alternative targets them ("*.xlsx",
-@@ -746,136 +578,6 @@
-       .map(pattern => pattern.toLowerCase());
-     return extensions.some(ext => lowerRootPath.endsWith(ext) ||
-       targetingPatterns.some(pattern => pattern.includes(`*${ext}`) || pattern.endsWith(ext)));
--  }
--
--  /**
+@@ -749,136 +686,6 @@
+   }
+ 
+   /**
 -   * Search DOCX files for content matches
 -   * Extracts <w:t> text from document.xml and searches it
 -   */
@@ -677,10 +878,22 @@
 -    if (end < text.length) context = context + '...';
 -
 -    return context;
-   }
- 
-   /**
-@@ -1068,6 +770,7 @@
+-  }
+-
+-  /**
+    * Clean up completed sessions older than specified time
+    * Called automatically by cleanup interval
+    */
+@@ -956,7 +763,7 @@
+     // These arguments are the whole search: the user's ripgrep config file
+     // (RIPGREP_CONFIG_PATH) must not add flags such as --hidden, --glob,
+     // --max-count or --null that change what is found or the output parsed here
+-    const args: string[] = ['--no-config'];
++    const args: string[] = ['--no-config', '--threads', '2'];
+     
+     if (options.searchType === 'content') {
+       // Content search mode
+@@ -1068,6 +875,7 @@
      });
  
      process.stderr?.on('data', (data: string | Buffer) => {
@@ -688,7 +901,7 @@
        const errorText = data.toString();
  
        // Store error text for potential user display (bounded: see keepErrorOutput)
-@@ -1137,9 +840,10 @@
+@@ -1137,9 +945,10 @@
      });
  
      process.on('error', (error: Error) => {
@@ -700,7 +913,7 @@
      });
    }
  
-@@ -1149,6 +853,7 @@
+@@ -1149,6 +958,7 @@
     */
    private finishSource(session: SearchSession, source: SearchSource): void {
      session.pendingSources.delete(source);
@@ -708,7 +921,7 @@
      if (session.pendingSources.size > 0 || session.isComplete) return;
  
      // If we have results, don't mark as error even if there were permission issues
-@@ -1185,19 +890,40 @@
+@@ -1185,19 +995,40 @@
    }
  
    /**
@@ -753,7 +966,7 @@
      }
    }
  
-@@ -1209,6 +935,13 @@
+@@ -1209,6 +1040,13 @@
     * complete as it is.
     */
    private processOutput(session: SearchSession, text: string, isFinal: boolean = false): void {
@@ -767,7 +980,7 @@
      const pieces = text.split('\n');
      const lines: string[] = [];
      pieces.forEach((piece, i) => {
-@@ -1227,15 +960,12 @@
+@@ -1227,15 +1065,12 @@
     * the rest of it dropped as it arrives.
     */
    private appendToLine(session: SearchSession, text: string): void {
@@ -785,7 +998,7 @@
    }
  
    /** The line being received, now complete; undefined if it was skipped */
-@@ -1301,13 +1031,13 @@
+@@ -1301,13 +1136,13 @@
     * is kept as context, like grep -m - and ripgrep is stopped when it ends.
     */
    private collectRipgrepLine(session: SearchSession, line: RipgrepLine): void {
@@ -801,7 +1014,7 @@
        } else {
          // Note where this match's trailing context ends, in case it is the last match
          const contextLines = session.options.contextLines ?? 0;
-@@ -1320,8 +1050,7 @@
+@@ -1320,8 +1155,7 @@
        const trailing = session.trailingContext;
        const lineNumber = line.result.line;
        if (trailing && line.result.file === trailing.file && lineNumber !== undefined && lineNumber <= trailing.lastLine) {
@@ -811,7 +1024,7 @@
          if (lineNumber === trailing.lastLine) {
            session.trailingContext = undefined;
          }
-@@ -1338,10 +1067,38 @@
+@@ -1338,10 +1172,38 @@
     * The one place a session counts a match - from ripgrep, Excel or DOCX alike -
     * so maxResults caps the TOTAL number of matches a search returns.
     */
@@ -855,6 +1068,12 @@
      const { maxResults } = session.options;
 --- a/src/handlers/search-handlers.ts
 +++ b/src/handlers/search-handlers.ts
+@@ -1,4 +1,4 @@
+-import { searchManager, SHOWN_TEXT_CHARS, MAX_OUTPUT_LINE_CHARS } from '../search-manager.js';
++import { SearchAdmissionError, searchManager, SHOWN_TEXT_CHARS, MAX_OUTPUT_LINE_CHARS } from '../search-manager.js';
+ import {
+   StartSearchArgsSchema,
+   GetMoreSearchResultsArgsSchema,
 @@ -34,6 +34,7 @@
        literalSearch: parsed.data.literalSearch,
      });
@@ -863,10 +1082,14 @@
      const searchTypeText = parsed.data.searchType === 'content' ? 'content search' : 'file search';
      
      let output = `Started ${searchTypeText} session: ${result.sessionId}\n`;
-@@ -65,9 +66,15 @@
+@@ -65,9 +66,21 @@
        output += `\n🔄 Search in progress. Use get_more_search_results to get more results.`;
      }
  
++    if (limits.stopping) output += `\nStop requested; waiting for owned sources to settle.`;
++    if (limits.cancelled) output += `\nSearch cancelled. Results are incomplete.`;
++    if (limits.timedOut) output += `\nSearch deadline reached. Results are incomplete.`;
++    if (limits.maxResultsReached) output += `\nSearch result limit reached. Results are incomplete.`;
 +    if (limits.resourceLimit) output += `\nSearch stopped at resource limit: ${limits.resourceLimit}. Results are incomplete.`;
 +
      return {
@@ -876,10 +1099,20 @@
 +        retainedTextBytes: limits.retainedTextBytes,
 +        cancelled: limits.cancelled,
 +        stopping: limits.stopping,
++        timedOut: limits.timedOut,
++        maxResultsReached: limits.maxResultsReached,
          sessionId: result.sessionId,
          isComplete: result.isComplete,
          totalResults: result.totalResults,
-@@ -182,6 +189,11 @@
+@@ -79,6 +92,7 @@
+     
+     return {
+       content: [{ type: "text", text: `Error starting search session: ${errorMessage}` }],
++      ...(error instanceof SearchAdmissionError ? { structuredContent: { admissionRefusal: error.code } } : {}),
+       isError: true,
+     };
+   }
+@@ -182,6 +196,12 @@
          output += `\n⚠️  Warning: Some files were inaccessible due to permissions. Results may be incomplete.`;
        }
      }
@@ -887,11 +1120,12 @@
 +    if (results.stopping) output += `\nStop requested; waiting for owned sources to settle.`;
 +    if (results.cancelled) output += `\nSearch cancelled. Results may be incomplete.`;
 +    if (results.timedOut) output += `\nSearch deadline reached. Results may be incomplete.`;
++    if (results.maxResultsReached) output += `\nSearch result limit reached. Results are incomplete.`;
 +    if (results.resourceLimit) output += `\nSearch stopped at resource limit: ${results.resourceLimit}. Results are incomplete.`;
  
      return {
        content: [{ type: "text", text: output }],
-@@ -195,6 +207,10 @@
+@@ -195,6 +215,10 @@
          wasIncomplete: results.wasIncomplete ?? false,
          maxResultsReached: results.maxResultsReached,
          timedOut: results.timedOut,
@@ -902,7 +1136,7 @@
        },
      };
    } catch (error) {
-@@ -226,7 +242,9 @@
+@@ -226,7 +250,9 @@
        return {
          content: [{
            type: "text",

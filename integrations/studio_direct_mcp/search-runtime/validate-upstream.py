@@ -6,7 +6,8 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+import shutil
+from owned_command import run
 import tarfile
 import urllib.request
 
@@ -19,7 +20,7 @@ TESTS = [
     "test-search-files-literal.js", "test-search-files-file-pattern.js",
     "test-search-file-pattern.js", "test-search-office-any-folder.js",
     "test-search-error-output.js", "test-search-process-exit.js",
-    "test-search-stopped-not-failed.js",
+    "test-search-stopped-not-failed.js", "test-issue1027-admission.mjs", "test-issue1027-office.mjs",
 ]
 
 class LimitedReader:
@@ -31,11 +32,6 @@ class LimitedReader:
         if self.count > 128 * 1024 * 1024:
             raise RuntimeError("compressed upstream source exceeds 128 MiB")
         return data
-
-def run(argv, root, log):
-    with log.open("w") as output:
-        subprocess.run(argv, cwd=root, stdout=output, stderr=subprocess.STDOUT,
-                       timeout=180, check=True)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -74,6 +70,8 @@ def main():
     run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
         root, output / "npm-ci.log")
     run(["npm", "run", "build"], root, output / "build.log")
+    for name in ('test-issue1027-admission.mjs', 'test-issue1027-office.mjs'):
+        shutil.copyfile(Path(__file__).with_name(name), root / 'test' / name)
     # Upstream runner isolates configuration/home and disables telemetry.
     run(["node", "test/run-all-tests.js", *TESTS], root, output / "tests.log")
     report = {"donor": PIN, "patchSHA256": hashlib.sha256(patch.read_bytes()).hexdigest(),

@@ -1,38 +1,53 @@
-# #1027 bounded search candidate — source qualification
+# #1027 bounded search candidate — deadline/admission qualification
 
-This package retains mihailt's PR768/PR779 composition and applies the reviewed-artifact V3 candidate to the exact upstream donor. It is a draft integration input, **not an installed backend or release-ready repair**.
+This draft extends the existing Desktop Commander search owner. It preserves mihailt's PR768/PR779 composition and MIT attribution. It is **source-qualified, not installed and not a complete #1027 release**.
 
-- Upstream: wonderwhy-er/DesktopCommanderMCP, commit `56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66`.
-- PR779 already contains PR768 `7cc1ff30646ef294cee4a1daa04470c27aebea30`; do not cherry-pick it again.
-- Upstream MIT license and ownership are preserved in `LICENSE.upstream`.
-- Patch SHA256: `2202d6a95e58fa7d6d8401330579496891faddccca39445957dc8f910c7cb435`.
-- Carrier: https://github.com/mastermindx-market-intelligence/Mastermind/issues/1027#issuecomment-5923687741
+Donor: `wonderwhy-er/DesktopCommanderMCP@56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66`. PR779 already contains PR768 `7cc1ff30646ef294cee4a1daa04470c27aebea30`; do not cherry-pick it again. License: `LICENSE.upstream`.
 
 ## Reproduce
 
-Use Node/npm, Python 3, patch and existing ripgrep. Select a **new disposable evidence directory**, not an installed package or Git checkout:
+Use Node/npm, Python 3, patch and existing ripgrep on an admitted POSIX execution host. Choose a new disposable evidence directory, not an installed package or Git checkout:
 
 ```sh
+python3 test_owned_command.py
 python3 validate-upstream.py --output /approved/evidence/new-issue1027-build
+python3 test_mutations.py --upstream /approved/evidence/new-issue1027-build/upstream
 ```
 
-The script materializes bounded build inputs from the pinned archive, verifies exact donor blobs, applies the six-file patch, installs lockfile dependencies with lifecycle scripts disabled, runs the actual upstream package build, then seven upstream suites. The upstream runner uses temporary isolated configuration and disables telemetry. Build outputs are deliberately outside source. No native app, installed setting, credential or service is changed.
+The recipe materializes bounded build inputs from the pinned archive, verifies donor blobs, applies the six-file patch, installs locked dependencies with lifecycle scripts disabled, builds the actual upstream package, and runs nine suites. The upstream runner isolates configuration/home and disables telemetry. Each build/test command has its own POSIX session/process group and finite timeout, TERM/KILL teardown and observed empty-group settlement. A successful direct process with lingering children is an error. This does not supervise programs that deliberately escape their owned session.
 
-## Implemented and verified
+No installed setting, account permission, credential or service is changed. The patch preserves original unified-diff whitespace; its local Git attribute applies only to this byte-pinned artifact.
 
-V3 adds finite default result/deadline budgets, shared retained-text/context/output caps, terminal guards, truthful settlement, exact-handle ripgrep TERM/KILL escalation, and session-owned Node Workers for existing ExcelJS/PizZip parsing. One unacknowledged IPC record prevents producer flooding; completion waits for actual Worker exit.
+## Candidate behavior
 
-Preserved V3 evidence: 22/22 deterministic checks, 4/4 handler checks, 16/16 real Office checks, 17 worker exits, zero residual workers/processes, 11/11 mutation discriminators. These are prior artifact checks, not claimed rerun by this script. The immutable artifact includes their detailed harness and V2 control; ZIP SHA256 `eb5f5995d4b6f4eab504fa1ac72c11aed4a60ad79ff733fc5c5e50a27365f2ae`.
+V3's finite budgets and Worker isolation remain: 100 default/500 maximum matches; 15-second maximum/default deadline (1.5 seconds for exact filenames); context/output/retained-text limits; exact-handle ripgrep escalation; bounded one-record Worker IPC; actual exit before completion.
 
-New integration evidence: actual full TypeScript and package builds pass; seven upstream search suites pass with zero skips, including genuine XLSX/DOCX parsing. See `qualification.json`.
+The new source delta adds:
 
-## Release blockers
+- Deadline reservation before path validation, binary resolution, stat and spawn acknowledgement. Expired asynchronous preflight cannot later spawn. Pending preflight still consumes its permit until actual settlement.
+- At most two preparing/live searches per existing backend-local SearchManager. Completion/cancellation releases a permit only after owned sources settle.
+- Identical normalized live requests reuse their existing promise/native handle. This is exact normalized request deduplication, not semantic equivalence across every filesystem alias.
+- At most 32 retained/preparing sessions; excess work is refused without evicting unread handles. Existing cleanup remains the retention owner.
+- Broad root refusal before validation and again after canonical path validation: filesystem/home/temp roots, host collections and workspace/repository collections. Narrow fixture/project/file access still uses existing path admission.
+- Fixed two-thread ripgrep execution and bounded input strings.
+- Typed admission refusal on the existing start handler. Initial responses preserve deadline/result-limit flags and incomplete-result text; later result pages disclose the result cap too.
 
-This candidate does **not** yet implement pre-validation/pre-spawn deadline coverage, broad-root refusal, bounded ripgrep thread count, host/executor-wide live-work admission, identical-live-scan reconciliation or operation/native-handle attribution. Retained-text and Worker V8 heap budgets do not bound aggregate/native RSS. These remain explicit #1027 acceptance gates, not suppressed tests.
+These guards live in the existing SearchManager, not a separate scheduler, permission plane or result store. They do not grant host-wide Executive admission.
 
-Independent admitted non-Codex Fabric review is pending; the current exposed Executive route reports readonly. Registration is source custody, not independent review or installer authority. Full vendor suite, native schema/transport acceptance and exact installed-generation canary remain pending.
+## Evidence and review repairs
 
-The existing Studio installer owns gateway/account state and seals the configured backend identity; it is not the vendor updater and refuses changed backend identity. Existing backend bytes are outside the observed allowed paths. Do not hot-edit them, widen permissions, modify credentials, change security settings or restart active work. Resolve backend updater/preimage access through the existing installer owner before planning a quiesced canary and rollback. Executive/Capacity and BackendOwner retain their current responsibilities.
+`qualification.json` binds the current patch and evidence digests. New execution: full upstream package build; nine suites with zero skips; 14 deadline/admission/response checks; 16 real Office checks with 17 actual worker exits and zero residual workers/processes; seven new causal mutations; three owned-command tests.
 
+The Office suite now runs against the real compiled upstream dependency graph, rather than the earlier outer-integration stubs. Hard parser-preemption checks still use a bounded two-second injected stall at actual parser match-context entry, not huge resource stress.
 
-The patch is byte-pinned, including original unified-diff context whitespace. The local Git attribute exempts only this patch artifact from whitespace diagnostics; generated TypeScript is still compiled and tested.
+ChatGPT3's review of predecessor `aea331f6ad2d3fe50c6a647caa1b307ae835774c` identified two defects. P1 is covered by before-return cap/deadline settlement and text/structured-output assertions. P2 is covered by a harmless TERM-resistant parent/child/grandchild timeout, observed zero survivors, an unaffected sentinel, and failure when children outlive an otherwise successful command. Exact new-head delta review is still required.
+
+Prior V3 22 deterministic checks and earlier mutation evidence remain separately attributed to the previous artifact; they are not claimed rerun by this recipe.
+
+## Remaining gates
+
+Host-wide/Executive admission and authenticated operation attribution remain with their existing owners. The backend-local limits do not replace those controls. Worker V8 limits and retained-text accounting do not prove aggregate/native RSS bounds or interruption of arbitrary kernel I/O. The complete upstream suite, required CI, independent delta review and native installed-generation canary remain pending.
+
+Protected REVIEW_RETURN Step 8B permits clean same-PR procedural release when the technical writer gate is unavailable. RULES_ABSENT requires fresh exact-head re-proof and procedural custody; it is not a requirement to change rules or invent fencing. No release authority is claimed by the receipt itself.
+
+The smallest installer dependency is the existing vendor-owner's admitted preimage/update/rollback route for the manifest-pinned Desktop Commander backend. Those installed bytes are outside the observed connector paths. The Studio gateway installer owns account/gateway staging and seals backend identity; it is not the vendor updater. Keep installation held until that route, quiescence, source/review gates and rollback are verified. Do not hot-edit vendor bytes, widen permissions, change credentials/security settings or restart active work.

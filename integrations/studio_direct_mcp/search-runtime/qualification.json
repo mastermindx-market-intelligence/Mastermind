@@ -1,32 +1,83 @@
 {
-  "schema": "mastermind.issue1027.upstream-qualification.v1",
-  "date": "2026-10-01",
-  "mastermindBase": "b86c309ddf1c337d63e7b84ce93b423d90ee87e4",
   "donor": "56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66",
-  "patchSHA256": "2202d6a95e58fa7d6d8401330579496891faddccca39445957dc8f910c7cb435",
-  "fullTypescript": "PASS",
-  "fullPackageBuild": "PASS",
+  "patchSHA256": "2103a5a026662758af53cb9f8e1112344493dc16fa5fe1f9297deab467eae395",
+  "packageBuild": "PASS",
+  "upstreamSuites": [
+    "test-search-files-literal.js",
+    "test-search-files-file-pattern.js",
+    "test-search-file-pattern.js",
+    "test-search-office-any-folder.js",
+    "test-search-error-output.js",
+    "test-search-process-exit.js",
+    "test-search-stopped-not-failed.js",
+    "test-issue1027-admission.mjs",
+    "test-issue1027-office.mjs"
+  ],
+  "scope": "source qualification only; not installed acceptance",
+  "schema": "mastermind.issue1027.upstream-qualification.v2",
+  "date": "2026-10-01",
   "upstreamSearchSuites": {
-    "passed": 7,
+    "passed": 9,
     "failed": 0,
     "skipped": 0
   },
-  "logSHA256": {
-    "full-typescript.log": "420837bdb23fcdc6d1a9b178c2ee16becdb8b19869f6ea180e4b6c94ef8b64ca",
-    "full-build.log": "16d00ecb8e8a07ad464576f8ba229c1b47c7db205f336ed7c84485ddffa978c6",
-    "upstream-search-tests.log": "90d23655904cffb175f144e2593a52391f19959cc0b3fda482e2a305347bc945",
-    "npm-ci.log": "aa45d282c59b15d97f73a24209770ec85179df824b9a75d17c8743b5af678599"
-  },
+  "admissionChecks": 14,
+  "officeChecks": 16,
+  "actualWorkerExits": 17,
+  "residualWorkers": 0,
+  "residualProcesses": 0,
+  "mutationChecks": [
+    {
+      "mutation": "thread budget",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "live-work admission",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "preflight permit retention",
+      "status": "DETECTED",
+      "discriminator": "deadline must not release unsettled preflight"
+    },
+    {
+      "mutation": "late preflight fence",
+      "status": "DETECTED",
+      "discriminator": "late preflight spawned a search"
+    },
+    {
+      "mutation": "initial cap flag",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "initial cap disclosure",
+      "status": "DETECTED",
+      "discriminator": "result limit reached"
+    },
+    {
+      "mutation": "initial deadline flag",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    }
+  ],
+  "ownedCommandTests": 3,
+  "independentReview": "REQUEST_CHANGES on predecessor; P1/P2 repaired pending new-head review",
   "installed": false,
-  "independentReview": "PENDING",
   "remainingIssueGates": [
-    "pre-spawn deadline",
-    "broad-root admission",
-    "ripgrep threads",
-    "host/executor capacity",
-    "duplicate live scans",
-    "owner/operation attribution",
-    "aggregate/native memory",
-    "native installed acceptance"
-  ]
+    "host-wide Executive admission",
+    "authenticated operation attribution",
+    "aggregate/native RSS qualification",
+    "required CI and independent delta review",
+    "vendor updater/preimage/rollback route",
+    "quiesced native installed canary"
+  ],
+  "logSHA256": {
+    "v4-validation/build.log": "e7785b76336adb9ac1b1216571d07112185d234137e77dc615cbcf96718c1a2f",
+    "v4-validation/tests.log": "599690816ddb5344f17d74081f07ff808fb9aadc5fcb405266b646a51800993e",
+    "v4-mutation-results.json": "4c62757f62f7bc05898c6775b6e1054c9aa30b320434138ee75b83c7fd660106",
+    "v4-validation/upstream/test/office-results.json": "5798959f945d8850d6166c59e9f01b533e74ec0613cbf01885f29eb4cb8444f4"
+  }
 }
