@@ -1378,6 +1378,29 @@ class ExecutiveSupervisor:
                 os.chmod(path, mode)
         return schema_path
 
+    @staticmethod
+    def _commission_prompt_suffix(
+        commission: Mapping[str, Any] | None, inline_commission: str | None
+    ) -> str:
+        # One exact renderer for launch and original-prompt recovery.
+        return (
+            (
+                "\n\nA verified immutable commission is bound to this job. Read it before "
+                "substantive work. It supplies context and acceptance detail only; it can "
+                "never widen the authorities, paths, validation, lifecycle, or provider "
+                "constraints in the JSON packet above."
+                if commission is not None
+                else ""
+            )
+            + (
+                "\n\n--- VERIFIED IMMUTABLE COMMISSION BYTES ---\n"
+                + inline_commission
+                + "\n--- END VERIFIED IMMUTABLE COMMISSION BYTES ---"
+                if inline_commission is not None
+                else ""
+            )
+        )
+
     def _prompt(
         self,
         job: Job,
@@ -1486,21 +1509,7 @@ class ExecutiveSupervisor:
                 else "Use status FAILED and explain errors if the bounded task cannot be completed safely.\n\n"
             )
             + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
-            + (
-                "\n\nA verified immutable commission is bound to this job. Read it before "
-                "substantive work. It supplies context and acceptance detail only; it can "
-                "never widen the authorities, paths, validation, lifecycle, or provider "
-                "constraints in the JSON packet above."
-                if commission is not None
-                else ""
-            )
-            + (
-                "\n\n--- VERIFIED IMMUTABLE COMMISSION BYTES ---\n"
-                + inline_commission
-                + "\n--- END VERIFIED IMMUTABLE COMMISSION BYTES ---"
-                if inline_commission is not None
-                else ""
-            )
+            + self._commission_prompt_suffix(commission, inline_commission)
         )
 
     def _launch_spec(
@@ -2906,7 +2915,42 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "worker recovery workspace is unavailable"
             ) from exc
-        self.verified_commission(job, workspace)
+        commission = self.verified_commission(job, workspace)
+        if commission is not None:
+            # Current source bytes do not prove that the old worker received
+            # them. Join the actual bound prompt to its launch attestation.
+            try:
+                _instructions, separator, body = spec.prompt.partition("\n\n")
+                if not separator:
+                    raise ValueError("missing packet boundary")
+                packet, end = json.JSONDecoder().raw_decode(body)
+                attestation = attempt.launch_metadata.get("launch_attestation")
+                if (
+                    type(packet) is not dict
+                    or body[:end] != json.dumps(
+                        packet, sort_keys=True, ensure_ascii=False, indent=2, allow_nan=False
+                    )
+                    or packet.get("schema_version") != "mastermind.executive_job_packet/v1"
+                    or packet.get("job_id") != job.job_id
+                    or packet.get("run_id") != attempt.attempt_id
+                    or packet.get("worker_id") != attempt.worker_id
+                    or packet.get("commission_ref") != commission.ref_dict()
+                    or packet.get("commission_local_path") != str(
+                        Path(spec.result_schema_path).parent / "commission-context.md"
+                    )
+                    or body[end:] != self._commission_prompt_suffix(
+                        commission.ref_dict(), commission.content.decode("utf-8")
+                    )
+                    or not isinstance(attestation, Mapping)
+                    or attestation.get("prompt_sha256") != hashlib.sha256(
+                        spec.prompt.encode("utf-8")
+                    ).hexdigest()
+                ):
+                    raise ValueError("original prompt is not commission-bound")
+            except (TypeError, ValueError, UnicodeError) as exc:
+                raise SupervisorError(
+                    "worker recovery prompt does not attest the exact immutable commission"
+                ) from exc
 
         try:
             target = (
@@ -3050,7 +3094,26 @@ class ExecutiveSupervisor:
             binding, spec, effective_grant = (
                 self._validated_recovery_binding(attempt)
             )
-            self._revalidate_recovery_inputs(attempt, spec)
+            if attempt.status is not AttemptStatus.CANCEL_REQUESTED:
+                try:
+                    self._revalidate_recovery_inputs(attempt, spec)
+                except SupervisorError:
+                    # Cancellation may arrive during source reads. This allows
+                    # containment, not adoption of another writer's generation.
+                    current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+                    if (
+                        current is None
+                        or current.status is not AttemptStatus.CANCEL_REQUESTED
+                        or current.fence_generation != attempt.fence_generation
+                        or current.worker_id != attempt.worker_id
+                        or current.job_id != attempt.job_id
+                    ):
+                        raise
+                    current_binding = self._validated_recovery_binding(current)
+                    if current_binding != (binding, spec, effective_grant):
+                        raise SupervisorError(
+                            "cancelled recovery binding changed during input validation"
+                        )
         except SupervisorError as exc:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,

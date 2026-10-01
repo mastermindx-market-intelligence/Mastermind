@@ -3418,3 +3418,115 @@ def test_restart_unbound_claim_partial_identity_never_grants_cleanup(tmp_path, m
     assert client.cancelled == []
     monkeypatch.setattr(runtime.attempts, "list_attempts", original_list)
     _assert_unbound_claim_fenced(runtime, attempt, command, work, adapter, supervisor)
+
+
+class CommissionRecoverableAdapter(RestartCapableFakeAdapter):
+    async def start(self, spec):
+        ref = await super().start(spec)
+        self.ref = dataclasses.replace(ref, base_sha=spec.expected_base_sha)
+        return self.ref
+
+    def reattach(self, spec, binding):
+        assert binding.recover_launch_spec(type(spec)) == spec
+        self.spec, self.ref = spec, binding.process_ref
+        self.reattach_calls.append((spec, binding))
+        return self.ref
+
+
+def _commission_recovery_fixture(tmp_path, monkeypatch, mode="valid"):
+    # This campaign exercises actual recovery/containment with a controlled
+    # canonical commission result; strict-v2 resolver tests remain separate.
+    from control_plane.executive_supervisor import VerifiedCommission
+    runtime, job_id, workspace = _runtime_and_job(tmp_path)
+    planner = runtime.jobs.get_job(job_id)
+    content = b"# Exact persisted commission\n"
+    commission = VerifiedCommission("mastermindx-market-intelligence/Mastermind",
+        "c" * 40, "research/commission.md", hashlib.sha256(content).hexdigest(), content)
+    inspector = FakeInspector()
+    first_adapter = CommissionRecoverableAdapter(inspector)
+    first = _supervisor(runtime, tmp_path, first_adapter)
+    monkeypatch.setattr(first, "verified_commission", lambda *_: commission)
+    original_prompt = first._prompt
+    if mode == "pre-feature":
+        monkeypatch.setattr(first, "verified_commission", lambda *_: None)
+    elif mode != "valid":
+        def changed_prompt(*args, **kwargs):
+            if mode == "missing-inline": kwargs["inline_commission"] = None
+            elif mode == "wrong-inline": kwargs["inline_commission"] = "different commission"
+            elif mode == "wrong-ref":
+                kwargs["commission"] = dict(kwargs["commission"], content_sha256="f" * 64)
+            return original_prompt(*args, **kwargs)
+        monkeypatch.setattr(first, "_prompt", changed_prompt)
+    active = asyncio.run(first.start_job(planner.job_id))
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    second = CommissionRecoverableAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, second)
+    monkeypatch.setattr(restarted, "verified_commission", lambda *_: commission)
+    return reopened, planner, active, inspector, second, restarted
+
+
+@pytest.mark.parametrize("mode", ["valid", "pre-feature", "missing-inline", "wrong-inline", "wrong-ref"])
+def test_recovery_attests_the_original_strict_commission_prompt(tmp_path, monkeypatch, mode):
+    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch, mode)
+    result = supervisor.reconcile_restart(requeue_lost=False)
+    expected = ReconcileStatus.LIVE_RECOVERED if mode == "valid" else ReconcileStatus.LIVE_QUARANTINED
+    assert [item.status for item in result] == [expected]
+    assert adapter.start_calls == 0
+    assert len(adapter.reattach_calls) == (1 if mode == "valid" else 0)
+    if mode != "valid":
+        assert runtime.attempts.get_attempt(active.lease.attempt.attempt_id).fence_generation == active.lease.attempt.fence_generation
+        assert supervisor.take_recovered_runs() == ()
+
+
+@pytest.mark.parametrize("unavailable", ["commission", "target", "cancel-during-read"])
+def test_cancelled_recovery_does_not_depend_on_fresh_launch_inputs(tmp_path, monkeypatch, unavailable):
+    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
+    if unavailable != "cancel-during-read": runtime.jobs.cancel_job(planner.job_id)
+    calls = []
+    def refused(*args):
+        calls.append(unavailable)
+        if unavailable == "cancel-during-read": runtime.jobs.cancel_job(planner.job_id)
+        raise SupervisorError("fixture launch input unavailable")
+    if unavailable == "target": supervisor._exact_target_provider = refused
+    else: monkeypatch.setattr(supervisor, "verified_commission", refused)
+    result = supervisor.reconcile_restart(requeue_lost=False)
+    assert [item.status for item in result] == [ReconcileStatus.LIVE_RECOVERED]
+    pending = supervisor.take_recovered_runs()
+    assert len(pending) == 1 and adapter.start_calls == 0
+    receipt = asyncio.run(supervisor.finish_job(pending[0]))
+    assert receipt.attempt.attempt_id == active.lease.attempt.attempt_id
+    assert receipt.attempt.status is AttemptStatus.CANCELLED
+    assert receipt.job.status is JobStatus.CANCELLED
+    assert not inspector.live
+    assert calls == ([unavailable] if unavailable == "cancel-during-read" else [])
+
+
+def test_recovered_commission_prompt_must_match_launch_attestation(tmp_path, monkeypatch):
+    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
+    attempt = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    metadata = copy.deepcopy(attempt.launch_metadata)
+    metadata["launch_attestation"]["prompt_sha256"] = "0" * 64
+    tampered = dataclasses.replace(attempt, launch_metadata=metadata)
+    result = supervisor._recover_existing_attempt(tampered, presence=ProcessPresence.LIVE)
+    assert result.status is ReconcileStatus.LIVE_QUARANTINED
+    assert adapter.start_calls == 0 and adapter.reattach_calls == []
+    assert supervisor.take_recovered_runs() == ()
+
+
+def test_cancel_during_input_failure_cannot_adopt_a_newer_writer_fence(tmp_path, monkeypatch):
+    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
+    original = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    def owner_changed(*_args):
+        runtime.attempts.adopt_attempt(original.attempt_id,
+            expected_fence_generation=original.fence_generation,
+            lease_owner="fixture-new-owner")
+        runtime.jobs.cancel_job(planner.job_id)
+        raise SupervisorError("fixture input failed after owner changed")
+    monkeypatch.setattr(supervisor, "verified_commission", owner_changed)
+    result = supervisor.reconcile_restart(requeue_lost=False)
+    assert [row.status for row in result] == [ReconcileStatus.LIVE_QUARANTINED]
+    current = runtime.attempts.get_attempt(original.attempt_id)
+    assert current.fence_generation == original.fence_generation + 1
+    assert current.lease_owner == "fixture-new-owner"
+    assert adapter.start_calls == 0 and adapter.reattach_calls == []
+    assert inspector.live and supervisor.take_recovered_runs() == ()
