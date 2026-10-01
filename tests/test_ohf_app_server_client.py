@@ -228,3 +228,78 @@ def test_ordered_notification_wait_fails_on_closed_transport(tmp_path):
     client._transport_closed = True
     with pytest.raises(JsonRpcError, match="exited"):
         client.wait_notifications_through("turn/completed", timeout=0.01)
+
+
+
+def test_guarded_send_serializes_actual_notification_enqueue_through_write(tmp_path):
+    import threading
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    old = {"method": "before"}
+    new = {"method": "after"}
+    client.notifications.append(old)
+    begin_enqueue = threading.Event()
+    attempting = threading.Event()
+    acquired = threading.Event()
+    evidence = []
+    def enqueue():
+        assert begin_enqueue.wait(timeout=1)
+        attempting.set()
+        with client._notification_condition:
+            client.notifications.append(new)
+            acquired.set()
+    thread = threading.Thread(target=enqueue)
+    thread.start()
+    def guard(request_id, queued):
+        assert queued == [old]
+        assert client._transport_lock.locked()
+        evidence.append(request_id)
+        begin_enqueue.set()
+        assert attempting.wait(timeout=1)
+        assert not acquired.is_set()
+    def send(payload):
+        assert client._transport_lock.locked()
+        assert not acquired.is_set()
+        assert payload["id"] == evidence[0]
+        client._responses[payload["id"]].put({"result": {"sent": True}})
+    client._send = send
+    try:
+        assert client.request("turn/start", {}, before_send=guard) == {"sent": True}
+    finally:
+        begin_enqueue.set()
+        thread.join(timeout=1)
+    assert not thread.is_alive() and acquired.is_set()
+    assert client.drain_notifications() == [new]
+    assert client._responses == {}
+
+
+def test_guard_refusal_cannot_send_or_leave_a_pending_request(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    sends = []
+    client._send = lambda payload: sends.append(payload)
+    def refuse(request_id, queued):
+        raise ValueError("known guard refusal")
+    with pytest.raises(ValueError, match="known guard refusal"):
+        client.request("turn/start", {}, before_send=refuse)
+    assert sends == [] and client._responses == {}
+
+
+@pytest.mark.parametrize("raw", [False, True])
+def test_guarded_send_refuses_an_existing_request_without_replacing_it(tmp_path, raw):
+    import queue
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    existing = queue.Queue()
+    owner = client._raw_responses if raw else client._responses
+    owner[999] = existing
+    sends, guards = [], []
+    client._send = lambda payload: sends.append(payload)
+    with pytest.raises(JsonRpcError, match="idle request boundary"):
+        client.request("turn/start", {}, before_send=lambda *args: guards.append(args))
+    assert sends == [] and guards == [] and owner[999] is existing
+    assert set(client._responses) == (set() if raw else {999})
+
+
+def test_notification_guard_cannot_be_used_for_an_unrelated_method(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    with pytest.raises(JsonRpcError, match="only valid for turn/start"):
+        client.request("thread/read", {}, before_send=lambda *args: None)
+    assert client._responses == {} and client._next_id == 1

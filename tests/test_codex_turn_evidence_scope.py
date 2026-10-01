@@ -389,15 +389,15 @@ def test_interturn_notification_is_generation_only_before_next_provider_start(tm
         idle = {"method": "account/rateLimits/updated", "params": {}}
         with state.client._notification_condition:
             state.client.notifications.append(idle)
-        request = state.client.request
+        send = state.client._send
         witnessed = []
-        def start_after_generation_ingestion(method, params, **kwargs):
-            if method == "turn/start":
+        def start_after_generation_ingestion(payload):
+            if payload.get("method") == "turn/start":
                 matches = [event for event in state.events if event.kind == idle["method"]]
                 assert len(matches) == 1 and matches[0].turn_id is None
                 witnessed.append(True)
-            return request(method, params, **kwargs)
-        state.client.request = start_after_generation_ingestion
+            return send(payload)
+        state.client._send = start_after_generation_ingestion
         _begin(harness, launch, second)
         events, _ = harness.adapter.read_events(_cursor(second))
         assert witnessed == [True]
@@ -414,13 +414,54 @@ def test_interturn_ungranted_helper_refuses_before_next_provider_start(tmp_path)
         with state.client._notification_condition:
             state.client.notifications.append({"method": "thread/started", "params": {
                 "thread": {"id": "ungranted-idle-helper", "parentThreadId": state.provider_session_id}}})
-        request = state.client.request
+        send = state.client._send
         started = []
-        def record_request(method, params, **kwargs):
-            if method == "turn/start":
+        def record_request(payload):
+            if payload.get("method") == "turn/start":
                 started.append(True)
-            return request(method, params, **kwargs)
-        state.client.request = record_request
+            return send(payload)
+        state.client._send = record_request
         with pytest.raises(CodexAdapterError):
             _begin(harness, launch, second)
         assert started == []
+
+
+@pytest.mark.parametrize("helper", [False, True], ids=["ordinary", "ungranted-helper"])
+def test_notification_between_old_drain_and_request_send_is_guarded(tmp_path, helper):
+    with _fixture(tmp_path) as (harness, launch):
+        first, second = _turn(harness, "turn-before-race"), _turn(harness, "turn-after-race")
+        _begin(harness, launch, first)
+        harness.adapter.read_events(_cursor(first))
+        state = harness.adapter._generations[first.process_generation_id]
+        notification = (
+            {"method": "thread/started", "params": {"thread": {
+                "id": "ungranted-race-helper", "parentThreadId": state.provider_session_id}}}
+            if helper else {"method": "c3/interturn-race", "params": {}}
+        )
+        request = state.client.request
+        send = state.client._send
+        actual_starts = []
+        def inject_after_adapter_drain(method, params, **kwargs):
+            if method == "turn/start":
+                with state.client._notification_condition:
+                    state.client.notifications.append(notification)
+            return request(method, params, **kwargs)
+        def witness_actual_send(payload):
+            if payload.get("method") == "turn/start":
+                actual_starts.append(payload["id"])
+                if not helper:
+                    matches = [event for event in state.events
+                               if event.kind == notification["method"]]
+                    assert len(matches) == 1 and matches[0].turn_id is None
+            return send(payload)
+        state.client.request = inject_after_adapter_drain
+        state.client._send = witness_actual_send
+        if helper:
+            with pytest.raises(CodexAdapterError):
+                _begin(harness, launch, second)
+            assert actual_starts == []
+        else:
+            _begin(harness, launch, second)
+            events, _ = harness.adapter.read_events(_cursor(second))
+            assert len(actual_starts) == 1
+            assert not any(event.kind == notification["method"] for event in events)

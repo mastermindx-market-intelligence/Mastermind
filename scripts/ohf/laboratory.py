@@ -15,7 +15,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from scripts.ohf.redaction import redact_evidence, redact_text
 
@@ -520,7 +520,10 @@ class AppServerClient:
         params: Mapping[str, Any] | None = None,
         *,
         timeout: float = 15.0,
+        before_send: Callable[[int, list[dict[str, Any]]], None] | None = None,
     ) -> dict[str, Any]:
+        if before_send is not None and (method != "turn/start" or not callable(before_send)):
+            raise JsonRpcError("notification guard is only valid for turn/start")
         response_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=1)
         with self._notification_condition:
             if self._transport_closed:
@@ -533,7 +536,24 @@ class AppServerClient:
             message["params"] = dict(params)
         payload: dict[str, Any] | None = None
         try:
-            self._send(message)
+            if before_send is None:
+                self._send(message)
+            else:
+                # This is the existing notification owner's send boundary, not
+                # a caller-side drain followed by an unprotected request. The
+                # callback must not re-enter client I/O; it receives the queue
+                # prefix and exact request id directly. Waiting is outside.
+                with self._notification_condition:
+                    if self._transport_closed:
+                        raise JsonRpcError("app-server exited before guarded turn/start")
+                    if len(self._responses) != 1 or self._raw_responses:
+                        raise JsonRpcError("guarded turn/start requires an idle request boundary")
+                    queued = list(self.notifications)
+                    self.notifications.clear()
+                    before_send(request_id, queued)
+                    if self.visible_projection is not None:
+                        self.visible_projection.arm_prebind(request_id)
+                    self._send(message)
             try:
                 payload = response_queue.get(timeout=timeout)
             except queue.Empty as exc:

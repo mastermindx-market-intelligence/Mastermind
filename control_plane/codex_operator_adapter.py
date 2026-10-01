@@ -2595,34 +2595,28 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "turn input loader returned an unsupported input type",
             )
-        # Classify the already-queued interval before arming/sending this turn.
-        # It belongs to the generation, never to the not-yet-started turn.
-        queued = state.client.drain_notifications()
-        if queued:
-            previous_id = next(reversed(state.turns), None)
-            context_turn = (
-                TurnRef(previous_id, turn.session_epoch_id,
-                        turn.process_generation_id, turn.attempt_id)
-                if previous_id is not None else turn
-            )
-            self._ingest_turn_notifications(
-                state, context_turn, queued, generation_only=True
-            )
-        if self.skill_canary_binding is not None and state.skills_changed:
-            raise CodexAdapterError(
-                AdapterFailureClass.CONFIG_DRIFT,
-                "skills_changed_during_canary",
-                effect_unknown=True,
-            )
+        def prepare_send(request_id: int, queued: list[dict[str, Any]]) -> None:
+            # Runs inside the client's existing notification/send critical
+            # section. Never re-enter client I/O from this closed callback.
+            if queued:
+                previous_id = next(reversed(state.turns), None)
+                context_turn = (
+                    TurnRef(previous_id, turn.session_epoch_id,
+                            turn.process_generation_id, turn.attempt_id)
+                    if previous_id is not None else turn
+                )
+                self._ingest_turn_notifications(
+                    state, context_turn, queued, generation_only=True
+                )
+            if self.skill_canary_binding is not None and state.skills_changed:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "skills_changed_during_canary",
+                    effect_unknown=True,
+                )
+            state.pending_prebind_request_id = request_id
+
         try:
-            next_request_id = getattr(state.client, "next_request_id", None)
-            if callable(next_request_id):
-                state.pending_prebind_request_id = next_request_id()
-                prebind_armer = getattr(state.client, "arm_prebind", None)
-                if callable(prebind_armer):
-                    prebind_armer(state.pending_prebind_request_id)
-            else:
-                state.pending_prebind_request_id = None
             result = state.client.request(
                 "turn/start",
                 {
@@ -2632,6 +2626,7 @@ class CodexOperatorAdapter:
                     "approvalPolicy": state.requested.approval_policy,
                 },
                 timeout=60.0,
+                before_send=prepare_send,
             )
             turn_obj = (
                 result.get("turn") if isinstance(result.get("turn"), Mapping) else {}

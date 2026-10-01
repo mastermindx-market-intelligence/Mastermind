@@ -1339,7 +1339,7 @@ class _ScriptedCanaryClient:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    def request(self, method, params=None, *, timeout: float = 15.0):
+    def request(self, method, params=None, *, timeout: float = 15.0, before_send=None):
         self.calls.append((method, dict(params or {})))
         if method == "skills/extraRoots/set" and self._force_post_clear_nonempty:
             if isinstance(params, dict) and params.get("extraRoots") == []:
@@ -1362,7 +1362,8 @@ class _ScriptedCanaryClient:
             self._turn_start_calls += 1
             if self._fail_turn_start_at == self._turn_start_calls:
                 raise ConnectionError("synthetic transport failure")
-        result = self._inner.request(method, params, timeout=timeout)
+        kwargs = {} if before_send is None else {"before_send": before_send}
+        result = self._inner.request(method, params, timeout=timeout, **kwargs)
         if (
             method == "turn/start"
             and self._inject_skills_changed_after_turn_starts == self._turn_start_calls
