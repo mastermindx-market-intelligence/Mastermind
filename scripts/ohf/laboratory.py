@@ -635,13 +635,35 @@ class AppServerClient:
     def wait_notification(
         self, method: str, *, timeout: float = 15.0
     ) -> dict[str, Any]:
+        return self._wait_notification_prefix(
+            method, timeout=timeout, include_preceding=False
+        )[0]
+
+    def wait_notifications_through(
+        self, method: str, *, timeout: float = 15.0
+    ) -> list[dict[str, Any]]:
+        """Consume the ordered queue prefix through a matching notification.
+
+        The same queue/condition remains the sole notification owner. Later
+        frames stay queued; no adapter has to reconstruct their arrival order.
+        """
+        return self._wait_notification_prefix(
+            method, timeout=timeout, include_preceding=True
+        )
+
+    def _wait_notification_prefix(
+        self, method: str, *, timeout: float, include_preceding: bool
+    ) -> list[dict[str, Any]]:
         deadline = time.monotonic() + timeout
         with self._notification_condition:
             while True:
-                for existing in self.notifications:
+                for index, existing in enumerate(self.notifications):
                     if existing.get("method") == method:
-                        self.notifications.remove(existing)
-                        return existing
+                        if include_preceding:
+                            prefix = self.notifications[: index + 1]
+                            del self.notifications[: index + 1]
+                            return prefix
+                        return [self.notifications.pop(index)]
                 if self._transport_closed:
                     raise JsonRpcError(f"app-server exited before {method}")
                 remaining = deadline - time.monotonic()

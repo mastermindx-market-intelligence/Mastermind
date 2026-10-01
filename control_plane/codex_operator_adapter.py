@@ -2166,9 +2166,11 @@ class CodexOperatorAdapter:
         state: _GenerationState,
         turn: TurnRef,
         notifications: Sequence[Mapping[str, Any]],
+        *,
+        generation_only: bool = False,
     ) -> None:
         subordinate_ids = state.turn_subordinates.setdefault(turn.turn_id, set())
-        completed = self._completed_turn_event_end(state, turn.turn_id) is not None
+        completed = generation_only or self._completed_turn_event_end(state, turn.turn_id) is not None
 
         def register_subordinate(value: Any) -> str:
             native_id = str(value or "").strip()
@@ -2593,6 +2595,25 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "turn input loader returned an unsupported input type",
             )
+        # Classify the already-queued interval before arming/sending this turn.
+        # It belongs to the generation, never to the not-yet-started turn.
+        queued = state.client.drain_notifications()
+        if queued:
+            previous_id = next(reversed(state.turns), None)
+            context_turn = (
+                TurnRef(previous_id, turn.session_epoch_id,
+                        turn.process_generation_id, turn.attempt_id)
+                if previous_id is not None else turn
+            )
+            self._ingest_turn_notifications(
+                state, context_turn, queued, generation_only=True
+            )
+        if self.skill_canary_binding is not None and state.skills_changed:
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "skills_changed_during_canary",
+                effect_unknown=True,
+            )
         try:
             next_request_id = getattr(state.client, "next_request_id", None)
             if callable(next_request_id):
@@ -2989,15 +3010,12 @@ class CodexOperatorAdapter:
                 completed_end = self._completed_turn_event_end(state, cursor.turn_id)
                 if completed_end is None:
                     try:
-                        completed = state.client.wait_notification(
+                        prefix = state.client.wait_notifications_through(
                             "turn/completed", timeout=max(0.001, float(timeout_seconds))
                         )
                     except Exception as exc:
                         raise _rpc_failure(exc, effect_unknown=True) from exc
-                    completed_after = state.client.drain_notifications()
-                    self._ingest_turn_notifications(
-                        state, turn, [*completed_after, completed]
-                    )
+                    self._ingest_turn_notifications(state, turn, prefix)
                     completed_end = self._completed_turn_event_end(state, cursor.turn_id)
             if completed_end is None:
                 raise CodexAdapterError(
@@ -3016,7 +3034,7 @@ class CodexOperatorAdapter:
         # endpoint even if later generation evidence has already been appended.
         events = tuple(
             event for event in state.events[cursor.local_sequence : endpoint]
-            if cursor.turn_id is None or event.turn_id in {None, cursor.turn_id}
+            if cursor.turn_id is None or event.turn_id == cursor.turn_id
         )
         return events, EventCursor(
             attempt_id=cursor.attempt_id,

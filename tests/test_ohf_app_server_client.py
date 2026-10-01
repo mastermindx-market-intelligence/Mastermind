@@ -188,3 +188,43 @@ def test_request_preserves_typed_timeout_before_payload_exists(monkeypatch):
         client.request("account/read", timeout=0.001)
 
     assert client._responses == {}
+
+
+# Ordered-prefix consumption uses the same queue and condition as legacy waits.
+def test_ordered_notification_wait_preserves_before_and_after_completion(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    before = {"method": "item/completed", "params": {"item": {"id": "before"}}}
+    completed = {"method": "turn/completed", "params": {"turn": {"id": "done"}}}
+    after = {"method": "account/rateLimits/updated", "params": {}}
+    with client._notification_condition:
+        client.notifications.extend([before, completed, after])
+    assert client.wait_notifications_through("turn/completed", timeout=0.01) == [before, completed]
+    assert client.drain_notifications() == [after]
+
+
+def test_legacy_selected_notification_wait_keeps_its_existing_contract(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    before = {"method": "before"}
+    completed = {"method": "turn/completed"}
+    after = {"method": "after"}
+    with client._notification_condition:
+        client.notifications.extend([before, completed, after])
+    assert client.wait_notification("turn/completed", timeout=0.01) == completed
+    assert client.drain_notifications() == [before, after]
+
+
+def test_ordered_notification_wait_timeout_preserves_queued_evidence(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    queued = {"method": "item/completed"}
+    with client._notification_condition:
+        client.notifications.append(queued)
+    with pytest.raises(JsonRpcError, match="timeout"):
+        client.wait_notifications_through("turn/completed", timeout=0)
+    assert client.drain_notifications() == [queued]
+
+
+def test_ordered_notification_wait_fails_on_closed_transport(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    client._transport_closed = True
+    with pytest.raises(JsonRpcError, match="exited"):
+        client.wait_notifications_through("turn/completed", timeout=0.01)

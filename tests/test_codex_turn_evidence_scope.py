@@ -104,9 +104,9 @@ def test_foreign_or_missing_completion_never_finishes_current_turn(
             delivered.append(True)
             return pending + ([completion] if edge == "drain" else [])
         def wait(method, *, timeout):
-            return completion
+            return [completion]
         state.client.drain_notifications = drain
-        state.client.wait_notification = wait
+        state.client.wait_notifications_through = wait
         with pytest.raises(CodexAdapterError) as failure:
             harness.adapter.read_events(_cursor(turn), timeout_seconds=0.01)
         assert failure.value.effect_unknown is True
@@ -348,3 +348,79 @@ def test_post_completion_skill_invalidation_is_not_discarded(tmp_path):
         harness.adapter._ingest_turn_notifications(state, turn, [
             _completion(state, started), {"method": "skills/changed", "params": {}}])
         assert state.skills_changed is True
+
+
+
+def test_waited_completion_preserves_actual_queue_order(tmp_path):
+    with _fixture(tmp_path, delayed=True) as (harness, launch):
+        turn = _turn(harness, "turn-ordered-wait")
+        started = _begin(harness, launch, turn)
+        state = harness.adapter._generations[turn.process_generation_id]
+        state.client.drain_notifications()
+        before = {"method": "item/completed", "params": {
+            "threadId": state.provider_session_id,
+            "item": {"id": "before-waited-completion", "type": "agentMessage"}}}
+        after = {"method": "account/rateLimits/updated", "params": {}}
+        # Exercise the old method on the RED source and the ordered owner on
+        # repaired source; both inject the identical actual notification queue.
+        wait_name = ("wait_notifications_through"
+                     if hasattr(state.client, "wait_notifications_through")
+                     else "wait_notification")
+        real_wait = getattr(state.client, wait_name)
+        def enqueue_then_wait(method, *, timeout):
+            with state.client._notification_condition:
+                state.client.notifications.extend([before, _completion(state, started), after])
+            return real_wait(method, timeout=timeout)
+        setattr(state.client, wait_name, enqueue_then_wait)
+        events, end = harness.adapter.read_events(_cursor(turn), timeout_seconds=0.01)
+        assert any(event.provider_event_id == "before-waited-completion" for event in events)
+        assert events[-1].kind == "turn/completed"
+        assert not any(event.kind == after["method"] for event in events)
+        assert state.client.drain_notifications() == [after]
+        assert harness.adapter.read_events(_cursor(turn)) == (events, end)
+
+
+def test_interturn_notification_is_generation_only_before_next_provider_start(tmp_path):
+    with _fixture(tmp_path) as (harness, launch):
+        first, second = _turn(harness, "turn-before-idle"), _turn(harness, "turn-after-idle")
+        _begin(harness, launch, first)
+        first_snapshot = harness.adapter.read_events(_cursor(first))
+        state = harness.adapter._generations[first.process_generation_id]
+        idle = {"method": "account/rateLimits/updated", "params": {}}
+        with state.client._notification_condition:
+            state.client.notifications.append(idle)
+        request = state.client.request
+        witnessed = []
+        def start_after_generation_ingestion(method, params, **kwargs):
+            if method == "turn/start":
+                matches = [event for event in state.events if event.kind == idle["method"]]
+                assert len(matches) == 1 and matches[0].turn_id is None
+                witnessed.append(True)
+            return request(method, params, **kwargs)
+        state.client.request = start_after_generation_ingestion
+        _begin(harness, launch, second)
+        events, _ = harness.adapter.read_events(_cursor(second))
+        assert witnessed == [True]
+        assert not any(event.kind == idle["method"] for event in events)
+        assert harness.adapter.read_events(_cursor(first)) == first_snapshot
+
+
+def test_interturn_ungranted_helper_refuses_before_next_provider_start(tmp_path):
+    with _fixture(tmp_path) as (harness, launch):
+        first, second = _turn(harness, "turn-helper-before"), _turn(harness, "turn-helper-after")
+        _begin(harness, launch, first)
+        harness.adapter.read_events(_cursor(first))
+        state = harness.adapter._generations[first.process_generation_id]
+        with state.client._notification_condition:
+            state.client.notifications.append({"method": "thread/started", "params": {
+                "thread": {"id": "ungranted-idle-helper", "parentThreadId": state.provider_session_id}}})
+        request = state.client.request
+        started = []
+        def record_request(method, params, **kwargs):
+            if method == "turn/start":
+                started.append(True)
+            return request(method, params, **kwargs)
+        state.client.request = record_request
+        with pytest.raises(CodexAdapterError):
+            _begin(harness, launch, second)
+        assert started == []
