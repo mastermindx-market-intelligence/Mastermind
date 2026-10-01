@@ -28,8 +28,8 @@ to re-prove the route.
 
 The action remains a bounded explicit-file binding, not a host-control escape hatch: callers provide
 one exact bare Paper file ID, a fresh source snapshot, and a stable operation ID; URL/path/page
-overrides, shell/process control, and unrestricted raw `open_file` are not exposed. Paper 0.5.12 can
-address another file directly by `fileId`, including an already-open or background file, while another file remains user-active. Prepare therefore
+overrides, shell/process control, and unrestricted raw `open_file` are not exposed. Qualified Paper Desktop
+schemas can address another file directly by `fileId`, including an already-open or background file, while another file remains user-active. Prepare therefore
 performs no UI-focus/open effect; it validates the explicit target and returns that target snapshot
 for the subsequent edit.
 
@@ -38,6 +38,16 @@ not current service liveness, and `LOCAL_STDIO_PROVEN` still proves only initial
 discovery. Current fleet truth is narrower: Ryan Business has the accepted live direct-app
 prepare/edit journey; C1/C2/C3/C4/Chris Admin host tunnel services are live/ready but each still
 requires its own attended ChatGPT app enrollment before that seat's direct app is accepted.
+
+## Paper release compatibility — 2026-09-30
+
+Write qualification must not lock to a Paper release number. The bridge records the observed
+`server_version` for diagnostics, requires the `paper-desktop` server identity, and gates writes on
+the exact reviewed full catalog digest. Paper 0.5.14 was observed with the same reviewed
+`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb` catalog previously
+qualified on 0.5.12, so runtime v9 / bridge 0.1.3 admits it without weakening schema checks.
+A changed catalog remains read-only until separately reviewed. Deploying v9 to an existing seat is
+still a distinct immutable-runtime effect; source merge alone does not update a running tunnel.
 
 ## Implementation
 

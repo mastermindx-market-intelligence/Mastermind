@@ -1824,3 +1824,285 @@ def test_prestart_original_grant_expiry_is_not_the_shorter_prepared_expiry():
         validate_test_cancellation(a, r, ad, t)
     t["reason"] = "PREPARED_TOKEN_EXPIRED"
     validate_test_cancellation(a, r, ad, t)
+
+
+# Publication intent and recovery-origin evidence vectors; structural only.
+def publication_fixture():
+    _, effect, _, approval, _ = fixtures()
+    before = dict(
+        release_commit=effect["from_release_commit"],
+        release_tree=effect["from_release_tree"],
+        installed_manifest_digest=effect["from_installed_manifest_digest"],
+        configuration_digest="e" * 64,
+        broker_source_commit=effect["from_release_commit"],
+        broker_source_tree=effect["from_release_tree"],
+        broker_binary_digest="b" * 64,
+        service_generation_digests={
+            key: format(index, "064x")
+            for index, key in enumerate(
+                ("control", "worker", "relay", "gateway", "broker"), 100
+            )
+        },
+    )
+    start = dict(
+        schema="mastermind.executive_release_publication_start/v1",
+        operation_key=approval["operation_key"],
+        request_fingerprint="1" * 64,
+        root_qualification_digest="2" * 64,
+        actuator_generation=1,
+        started_at_ms=2000,
+        start_deadline_monotonic_ns=3000000000,
+        before=before,
+    )
+    intent = dict(
+        schema="mastermind.executive_release_publication_intent/v1",
+        operation_key=start["operation_key"],
+        request_fingerprint=start["request_fingerprint"],
+        root_qualification_digest=start["root_qualification_digest"],
+        start_actuator_generation=1,
+        target_actuator_generation=2,
+        rollback_actuator_generation=3,
+        before_digest=digest(before),
+        original_deadline_monotonic_ns=start["start_deadline_monotonic_ns"],
+        intent_at_ms=2100,
+        intent_monotonic_ns=2100000000,
+        intent_journal_generation=2,
+    )
+    origins = {
+        state: dict(
+            schema="mastermind.executive_release_recovery_origin/v1",
+            operation_key=start["operation_key"],
+            request_fingerprint=start["request_fingerprint"],
+            publication_intent_digest=digest(intent),
+            from_state=state,
+            from_journal_generation=generation,
+        )
+        for state, generation in (
+            ("PUBLICATION_INTENT", 2),
+            ("PUBLISHED", 3),
+            ("BROKER_RESTART_PENDING", 4),
+        )
+    }
+    return start, intent, origins
+
+
+def test_publication_records_validate_and_are_detached():
+    start, intent, origin = publication_fixture()
+    start_record = c._freeze(start)
+    validated_intent = c.validate_release_publication_intent(
+        intent, expected_start=start
+    )
+    start["before"]["broker_binary_digest"] = "changed"
+    assert validated_intent.to_dict() == intent
+    assert c.validate_release_publication_intent(
+        validated_intent, expected_start=start_record) == validated_intent
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_publication_intent(validated_intent, expected_start=start)
+    assert c.validate_release_recovery_origin(
+        origin["PUBLICATION_INTENT"],
+        expected_intent=validated_intent,
+        expected_start=start_record,
+    ).to_dict() == origin["PUBLICATION_INTENT"]
+
+
+@pytest.mark.parametrize("field", list(publication_fixture()[0]) + ["extra"])
+def test_publication_start_fields_are_closed(field):
+    start, intent, _ = publication_fixture()
+    value = copy.deepcopy(start)
+    if field == "extra":
+        value[field] = "untrusted"
+    else:
+        del value[field]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_publication_intent(intent, expected_start=value)
+
+
+@pytest.mark.parametrize("field", list(publication_fixture()[1]) + ["extra"])
+def test_publication_intent_fields_are_closed(field):
+    start, intent, _ = publication_fixture()
+    value = copy.deepcopy(intent)
+    if field == "extra":
+        value[field] = "untrusted"
+    else:
+        del value[field]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_publication_intent(value, expected_start=start)
+
+
+@pytest.mark.parametrize(
+    "kind,field,bad",
+    [
+        ("start", "request_fingerprint", None),
+        ("start", "root_qualification_digest", "A" * 64),
+        ("start", "actuator_generation", False),
+        ("start", "actuator_generation", 0),
+        ("start", "started_at_ms", -1),
+        ("start", "start_deadline_monotonic_ns", 0),
+        ("intent", "before_digest", ""),
+        ("intent", "start_actuator_generation", True),
+        ("intent", "start_actuator_generation", 2),
+        ("intent", "target_actuator_generation", 4),
+        ("intent", "rollback_actuator_generation", 4),
+        ("intent", "original_deadline_monotonic_ns", 2999999999),
+        ("intent", "intent_at_ms", 1999),
+        ("intent", "intent_monotonic_ns", 0),
+        ("intent", "intent_monotonic_ns", 3000000000),
+        ("intent", "intent_journal_generation", 1),
+        ("intent", "start_actuator_generation", c._MAX_INT - 1),
+    ],
+)
+def test_publication_type_overflow_and_before_mutations(kind, field, bad):
+    start, intent, _ = publication_fixture()
+    if kind == "intent" and field == "before_digest":
+        start["before"]["broker_binary_digest"] = bad
+    else:
+        value = intent if kind == "intent" else start
+        value[field] = bad
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_publication_intent(intent, expected_start=start)
+
+
+def test_publication_intent_digest_binds_exact_before_bytes():
+    start, intent, _ = publication_fixture()
+    for value in (
+        copy.deepcopy(start["before"]),
+        {key: start["before"][key] for key in reversed(list(start["before"]))},
+    ):
+        reordered = dict(value)
+        if "broker_binary_digest" in reordered:
+            reordered["broker_binary_digest"] = "9" * 64
+        intent["before_digest"] = digest(reordered)
+        with pytest.raises(c.ReleaseContractError):
+            c.validate_release_publication_intent(intent, expected_start=start)
+
+
+@pytest.mark.parametrize("field", list(list(publication_fixture()[2].values())[0]) + ["extra"])
+def test_recovery_origin_fields_are_closed(field):
+    start, intent, origins = publication_fixture()
+    value = copy.deepcopy(origins["PUBLISHED"])
+    if field == "extra":
+        value[field] = "untrusted"
+    else:
+        del value[field]
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_recovery_origin(
+            value, expected_intent=intent, expected_start=start
+        )
+
+
+@pytest.mark.parametrize(
+    "state,generation",
+    [
+        ("PUBLICATION_INTENT", 3),
+        ("PUBLISHED", 2),
+        ("BROKER_RESTART_PENDING", 5),
+        ("RECOVERING", 5),
+    ],
+)
+def test_recovery_origin_phase_mapping_is_closed(state, generation):
+    start, intent, origins = publication_fixture()
+    origin = copy.deepcopy(origins["PUBLISHED"])
+    origin["from_state"] = state
+    origin["from_journal_generation"] = generation
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_recovery_origin(
+            origin, expected_intent=intent, expected_start=start
+        )
+
+
+def test_recovery_origin_rejects_intent_digest_and_join_mutations():
+    start, intent, origins = publication_fixture()
+    for field, bad in (
+        ("operation_key", "changed"),
+        ("request_fingerprint", "9" * 64),
+        ("publication_intent_digest", "8" * 64),
+    ):
+        origin = copy.deepcopy(origins["PUBLICATION_INTENT"])
+        origin[field] = bad
+        with pytest.raises(c.ReleaseContractError):
+            c.validate_release_recovery_origin(
+                origin, expected_intent=intent, expected_start=start
+            )
+    intent["rollback_actuator_generation"] = 4
+    with pytest.raises(c.ReleaseContractError):
+        c.validate_release_recovery_origin(
+            origins["PUBLISHED"], expected_intent=intent, expected_start=start
+        )
+
+
+def with_publication_protocol(status, state, *, recovery_from='PUBLICATION_INTENT'):
+    """Synthetic v2 vector builder, never a production record migration."""
+    s=copy.deepcopy(status);before=copy.deepcopy(s['terminal_receipt']['before'])
+    s.update(schema='mastermind.executive_release_terminal_status/v2',state=state,
+             before=before,start_deadline_monotonic_ns=300000000000,
+             root_qualification_digest='7'*64)
+    n=s['actuator_generation'];gen={'STARTED':1,'PUBLICATION_INTENT':2,'PUBLISHED':3,'BROKER_RESTART_PENDING':4}
+    s['journal_generation']=gen.get(state,gen[recovery_from]+(1 if state=='RECOVERING' else 2))
+    if state!='STARTED':
+        s['publication_intent']=dict(schema='mastermind.executive_release_publication_intent/v1',
+            operation_key=s['operation_key'],request_fingerprint=s['request_fingerprint'],
+            root_qualification_digest=s['root_qualification_digest'],start_actuator_generation=n,
+            target_actuator_generation=n+1,rollback_actuator_generation=n+2,before_digest=digest(before),
+            original_deadline_monotonic_ns=s['start_deadline_monotonic_ns'],
+            intent_at_ms=s['started_at_ms']+1,intent_monotonic_ns=2200000000,intent_journal_generation=2)
+    if state in ('RECOVERING','SUCCEEDED','ROLLED_BACK'):
+        s['recovery_origin']=dict(schema='mastermind.executive_release_recovery_origin/v1',
+            operation_key=s['operation_key'],request_fingerprint=s['request_fingerprint'],
+            publication_intent_digest=digest(s['publication_intent']),from_state=recovery_from,
+            from_journal_generation=gen[recovery_from])
+    if state in ('SUCCEEDED','ROLLED_BACK'):
+        r=s['terminal_receipt'];r.update(schema='mastermind.executive_release_terminal_receipt/v2',
+            outcome=state,journal_generation=s['journal_generation'],
+            after_actuator_generation=n+(1 if state=='SUCCEEDED' else 2),
+            publication_intent_digest=digest(s['publication_intent']),recovery_origin_digest=digest(s['recovery_origin']))
+        if state=='ROLLED_BACK':
+            r['after']=copy.deepcopy(before);r['rollback']={'attempted':True,'restored_preimage_digest':digest(before)}
+    else:s.pop('terminal_receipt')
+    return s
+
+
+@pytest.mark.parametrize('state',['STARTED','PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING','SUCCEEDED','ROLLED_BACK'])
+def test_v2_status_closed_fields_and_detached_phase_evidence(state):
+    approval,legacy=terminal_fixture('SUCCEEDED');s=with_publication_protocol(legacy,state)
+    validated=c.validate_release_terminal_status(s,expected_approval=approval)
+    assert validated.to_dict()==s
+    for field in s:
+        changed=copy.deepcopy(s);changed.pop(field)
+        with pytest.raises(c.ReleaseContractError):c.validate_release_terminal_status(changed,expected_approval=approval)
+    changed=copy.deepcopy(s);changed['unexpected']=False
+    with pytest.raises(c.ReleaseContractError):c.validate_release_terminal_status(changed,expected_approval=approval)
+    if 'terminal_receipt' in s:
+        assert c.validate_release_terminal_receipt(s['terminal_receipt'],expected_status=s,expected_approval=approval)==validated['terminal_receipt']
+    s['before']['service_generation_digests']['control']='9'*64
+    assert validated['before']['service_generation_digests']['control']!='9'*64
+
+
+@pytest.mark.parametrize('state',['SUCCEEDED','ROLLED_BACK'])
+@pytest.mark.parametrize('field,value',[('after_actuator_generation',True),('after_actuator_generation',7),
+    ('publication_intent_digest','0'*64),('recovery_origin_digest','0'*64),('schema','mastermind.executive_release_terminal_receipt/v1')])
+def test_v2_receipt_cannot_substitute_epoch_or_ancestry(state,field,value):
+    approval,old=terminal_fixture('SUCCEEDED');s=with_publication_protocol(old,state)
+    s['terminal_receipt'][field]=value
+    with pytest.raises(c.ReleaseContractError):c.validate_release_terminal_status(s,expected_approval=approval)
+    with pytest.raises(c.ReleaseContractError):c.validate_release_terminal_receipt(s['terminal_receipt'],expected_status=s,expected_approval=approval)
+
+
+@pytest.mark.parametrize('phase',['PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING'])
+def test_v2_recovery_origin_records_actual_phase_not_invented_publication(phase):
+    approval,old=terminal_fixture('SUCCEEDED');s=with_publication_protocol(old,'ROLLED_BACK',recovery_from=phase)
+    assert c.validate_release_terminal_status(s,expected_approval=approval)['recovery_origin']['from_state']==phase
+    s['recovery_origin']['from_journal_generation']+=1
+    s['terminal_receipt']['recovery_origin_digest']=digest(s['recovery_origin'])
+    with pytest.raises(c.ReleaseContractError):c.validate_release_terminal_status(s,expected_approval=approval)
+
+
+@pytest.mark.parametrize('field',['request_fingerprint','root_qualification_digest'])
+def test_publication_zero_identity_cannot_self_join(field):
+    start,intent,_=publication_fixture();start[field]=intent[field]='0'*64
+    with pytest.raises(c.ReleaseContractError):c.validate_release_publication_intent(intent,expected_start=start)
+
+
+@pytest.mark.parametrize('field',['broker_source_commit','broker_source_tree'])
+def test_publication_before_cannot_self_consistently_misbind_broker(field):
+    start,intent,_=publication_fixture();start['before'][field]='9'*40;intent['before_digest']=digest(start['before'])
+    with pytest.raises(c.ReleaseContractError):c.validate_release_publication_intent(intent,expected_start=start)

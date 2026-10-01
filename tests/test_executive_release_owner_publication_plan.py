@@ -388,3 +388,184 @@ def test_stage_manifest_names_predicates_without_claiming_they_pass(image):
     assert "fsync_staging_root_after_rename" in manifest["predicates"]
     assert "release_commit_remains_permanently_disarmed" in manifest["predicates"]
     assert "approved" not in plan.manifest_bytes.decode().lower()
+
+
+def _v2_replay_values(physical):
+    # Construct hypothetical already-installed bytes through the existing pure
+    # compiler. The planner itself must never bootstrap a v2 installation.
+    values = _resident_values()
+    payloads = _payloads(subject.compile_resident_publication_plan(**values))
+    keys = ("release_commit", "release_tree", "control_config_bytes", "broker_config_bytes",
+            "authority_map_bytes", "python_runtime_provenance_digest", "provider_attestation_bytes",
+            "provider_attestation_observed_at", "issuer_binding_receipt", "issuer_binding_observed_at",
+            "boot_id", "policy", "app_peer_uid")
+    evidence = resident.compile_installed_evidence(
+        registration=json.loads(payloads[subject._REGISTRATION_PATH]),
+        **{key: values[key] for key in keys}, physical_evidence=physical,
+        _now_seconds=values["now_seconds"],
+    )
+    return {**values, "physical_evidence": physical,
+            "existing_registration_bytes": payloads[subject._REGISTRATION_PATH],
+            "existing_registry_bytes": payloads[subject._REGISTRY_PATH],
+            "existing_installed_evidence_bytes": evidence}
+
+
+def _physical_evidence():
+    """Return synthetic v2 additions bound to the resident fixture."""
+    values = _resident_values()
+    control = values["control_config_bytes"]
+    policy = values["policy"]
+    broker = values["broker_config_bytes"]
+    authority_map = values["authority_map_bytes"]
+    configuration_files = [
+        {"path": "config/control.json", "sha256": hashlib.sha256(control).hexdigest()},
+        {"path": "config/authority_map.yml", "sha256": hashlib.sha256(authority_map).hexdigest()},
+        {"path": "config/privileged-broker.json", "sha256": hashlib.sha256(broker).hexdigest()},
+    ]
+    return {
+        "actuator_generation": 7,
+        "before": {
+            "release_commit": values["release_commit"],
+            "release_tree": values["release_tree"],
+            "installed_manifest_digest": "d" * 64,
+            "configuration_digest": hashlib.sha256(canonical_release_bytes({
+                "schema": "mastermind.executive_installed_configuration_set/v1",
+                "files": configuration_files,
+            })).hexdigest(),
+            "broker_source_commit": values["release_commit"],
+            "broker_source_tree": values["release_tree"],
+            "broker_binary_digest": "f" * 64,
+            "service_generation_digests": {
+                "control": "1" * 64,
+                "worker": "2" * 64,
+                "relay": "3" * 64,
+                "gateway": "4" * 64,
+                "broker": "5" * 64,
+            },
+        },
+        "publication_operation_key": "release-resident-v2-test-001",
+        "predecessor_evidence_digest": "6" * 64,
+    }
+
+
+def test_v2_plan_compiles_exact_canonical_test_payload_and_truthful_metadata():
+    physical = _physical_evidence()
+    plan = subject.compile_resident_publication_plan(
+        **_v2_replay_values(physical)
+    )
+    payloads = _payloads(plan)
+    raw = payloads[subject._EVIDENCE_PATH]
+    decoded = json.loads(raw)
+    assert decoded["schema"] == (
+        "mastermind.executive_release_owner_installed_evidence/v2"
+    )
+    assert decoded["actuator_generation"] == 7
+    assert decoded["before"] == physical["before"]
+    assert decoded["publication_operation_key"] == "release-resident-v2-test-001"
+    assert raw == canonical_release_bytes(decoded) + b"\n"
+    assert _manifest(plan)["production_disarming"]["installer_arming"] is False
+    assert _manifest(plan)["context"]["resident_preimage"] == "EXACT"
+    assert plan == subject.compile_resident_publication_plan(
+        **_v2_replay_values(physical)
+    )
+
+
+@pytest.mark.parametrize(
+    "existing",
+    [
+        (None, None, None),
+        (b"one", None, None),
+        (b"one", b"two", None),
+    ],
+)
+def test_v2_planner_refuses_absent_and_partial_bootstrap_or_v1(existing):
+    physical = _physical_evidence()
+    with pytest.raises(
+        subject.PublicationPlanError, match="^BOOTSTRAP_OR_MIGRATION_REQUIRED$"
+    ):
+        subject.compile_resident_publication_plan(
+            **_resident_values(
+                physical_evidence=physical,
+                existing_registration_bytes=existing[0],
+                existing_registry_bytes=existing[1],
+                existing_installed_evidence_bytes=existing[2],
+            )
+        )
+
+
+def test_v2_exact_replay_refuses_coherent_mismatches():
+    physical = _physical_evidence()
+    values = _v2_replay_values(physical)
+    plan = subject.compile_resident_publication_plan(**values)
+    payloads = _payloads(plan)
+    exact = dict(values)
+    exact.update(
+        existing_registration_bytes=payloads[subject._REGISTRATION_PATH],
+        existing_registry_bytes=payloads[subject._REGISTRY_PATH],
+        existing_installed_evidence_bytes=payloads[subject._EVIDENCE_PATH],
+    )
+    assert subject.compile_resident_publication_plan(**exact) == plan
+
+    changed_physical = copy.deepcopy(physical)
+    changed_physical["actuator_generation"] = 8
+    with pytest.raises(subject.PublicationPlanError, match="^EVIDENCE_PREIMAGE_MISMATCH$"):
+        subject.compile_resident_publication_plan(
+            **{**exact, "physical_evidence": changed_physical}
+        )
+    changed_before = copy.deepcopy(physical)
+    changed_before["before"]["installed_manifest_digest"] = "9" * 64
+    with pytest.raises(subject.PublicationPlanError, match="^EVIDENCE_PREIMAGE_MISMATCH$"):
+        subject.compile_resident_publication_plan(
+            **{**exact, "physical_evidence": changed_before}
+        )
+    with pytest.raises(subject.PublicationPlanError, match="^EVIDENCE_PREIMAGE_MISMATCH$"):
+        subject.compile_resident_publication_plan(
+            **{
+                **exact,
+                "physical_evidence": {
+                    **physical,
+                    "publication_operation_key": "release-resident-v2-other",
+                },
+            }
+        )
+    with pytest.raises(subject.PublicationPlanError, match="^EVIDENCE_PREIMAGE_MISMATCH$"):
+        subject.compile_resident_publication_plan(
+            **{
+                **exact,
+                "physical_evidence": {
+                    **physical,
+                    "predecessor_evidence_digest": "7" * 64,
+                },
+            }
+        )
+    changed_configuration = copy.deepcopy(physical)
+    changed_configuration["before"]["configuration_digest"] = "8" * 64
+    with pytest.raises(subject.PublicationPlanError, match="^EVIDENCE_CONFIG_JOIN$"):
+        subject.compile_resident_publication_plan(
+            **{**values, "physical_evidence": changed_configuration}
+        )
+    mixed_schema = json.loads(payloads[subject._EVIDENCE_PATH])
+    mixed_schema["schema"] = (
+        "mastermind.executive_release_owner_installed_evidence/v1"
+    )
+    with pytest.raises(
+        subject.PublicationPlanError, match="^BOOTSTRAP_OR_MIGRATION_REQUIRED$"
+    ):
+        subject.compile_resident_publication_plan(
+            **{
+                **exact,
+                "existing_installed_evidence_bytes": canonical_release_bytes(
+                    mixed_schema
+                ) + b"\n",
+            }
+        )
+
+
+def test_v2_payloads_and_physical_input_are_detached():
+    physical = _physical_evidence()
+    plan = subject.compile_resident_publication_plan(
+        **_v2_replay_values(physical)
+    )
+    before = tuple(payload.data for payload in plan.payloads)
+    physical["before"]["installed_manifest_digest"] = "changed"
+    assert tuple(payload.data for payload in plan.payloads) == before

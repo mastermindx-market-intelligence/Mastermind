@@ -497,3 +497,54 @@ def test_factory_armed_journal_keeps_default_snapshot_and_cannot_start(image):
             },
             None,
         )
+
+
+def _v2_evidence_fixture():
+    from tests.test_executive_release_owner_resident_inputs import _v2_installed_raw
+    raw = _v2_installed_raw()
+    return raw, json.loads(raw)
+
+
+def test_v2_adapter_joins_all_fields_and_returns_detached_evidence(monkeypatch):
+    raw, expected = _v2_evidence_fixture()
+    # The pure adapter must not reach any installed/read/publication path.
+    def forbidden(*args, **kwargs):
+        pytest.fail("v2 pure adapter performed an installed read")
+    monkeypatch.setattr(f, "_Reader", forbidden)
+    result = f._decode_resident_evidence_v2(raw, expected)
+    assert result == expected and result is not expected
+    result["before"]["service_generation_digests"]["worker"] = "changed"
+    assert expected["before"]["service_generation_digests"]["worker"] == "2" * 64
+    assert f._decode_resident_evidence_v2(raw, expected)["before"] == expected["before"]
+
+
+@pytest.mark.parametrize("mutation", ["empty", "missing", "extra", "bool_generation", "float_generation", "nested_bool", "wrong_manifest", "wrong_epoch", "wrong_operation", "wrong_predecessor"])
+def test_v2_adapter_refuses_partial_or_type_and_value_mismatched_context(mutation):
+    raw, expected = _v2_evidence_fixture()
+    if mutation == "empty": expected = {}
+    elif mutation == "missing": expected.pop("before")
+    elif mutation == "extra": expected["extra"] = 1
+    elif mutation == "bool_generation": expected["actuator_generation"] = True
+    elif mutation == "float_generation": expected["actuator_generation"] = 7.0
+    elif mutation == "nested_bool": expected["production_disarming"]["installer_arming"] = 0
+    elif mutation == "wrong_manifest": expected["before"]["installed_manifest_digest"] = "9" * 64
+    elif mutation == "wrong_epoch": expected["actuator_generation"] = 8
+    elif mutation == "wrong_operation": expected["publication_operation_key"] = "another-operation"
+    elif mutation == "wrong_predecessor": expected["predecessor_evidence_digest"] = "9" * 64
+    with pytest.raises(f.FactoryInputError):
+        f._decode_resident_evidence_v2(raw, expected)
+
+
+def test_v2_adapter_refuses_legacy_mixed_or_malformed_raw():
+    from tests.test_executive_release_owner_resident_inputs import _installed
+    raw, expected = _v2_evidence_fixture()
+    for invalid in (wire(_installed()), b"{}\n", raw[:-1], raw + b"\n", bytearray(raw)):
+        with pytest.raises(f.FactoryInputError):
+            f._decode_resident_evidence_v2(invalid, expected)
+
+
+def test_v2_existing_installed_factory_still_refuses_unwired_schema(image):
+    raw, _ = _v2_evidence_fixture()
+    image["files"][f._EVIDENCE] = raw
+    with pytest.raises(ValueError):
+        f.build_release_owner(image["config"])

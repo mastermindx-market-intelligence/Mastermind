@@ -23,6 +23,9 @@ from control_plane.claude_operator_helper_protocol import (
     INTERFACE_VERSION, security_settings, EXECUTIVE_PLAN_CONTRACT, native_plan_contract,
 )
 from control_plane.executive_agent_capabilities import claude_security_config_digest
+from control_plane.claude_worker import (
+    ClaudeWorkerContractError, _validate_exact_model, _validate_known_model_runtime,
+)
 from control_plane.codex_operator_adapter import _default_base_sha, _default_process_identity
 from control_plane.executive_orchestration_result import RawRoleResultObservation, parse_canonical_json
 from control_plane.executive_orchestration_principal import (
@@ -200,6 +203,12 @@ class ClaudeOperatorAdapter:
 
     def validate_requested_profile(self, requested: RequestedExecutionProfile) -> ProfileValidation:
         reasons = []
+        try:
+            model = _validate_exact_model(requested.requested_model)
+            # The constructor's qualified version, never a caller's replacement.
+            _validate_known_model_runtime(model, self.expected_harness_version)
+        except ClaudeWorkerContractError:
+            reasons.append("native model/runtime is not qualified")
         expected = ((requested.worker_id, self.worker_id), (requested.provider, "claude"),
                     (requested.harness_kind, "claude-agent-sdk"), (requested.harness_version, self.expected_harness_version),
                     (requested.harness_binary_digest, self.binary_digest),

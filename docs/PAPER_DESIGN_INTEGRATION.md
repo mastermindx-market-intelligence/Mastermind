@@ -110,6 +110,25 @@ may make an **independently authorized** RDC carrier eligible under the separate
 law; absence itself never supplies permission. After edit dispatch, timeout/lost response
 remains `EFFECT_UNKNOWN` on the original carrier and forbids cross-carrier replay.
 
+### Paper release-version compatibility ruling — 2026-09-30
+
+Paper Desktop's reported release version is now **observational metadata, not a write-admission
+boundary**. The guarded bridge still requires the exact `paper-desktop` server identity and the
+reviewed full tool-catalog digest before a write. A release-number change by itself therefore does
+not force Paper into read-only mode when the effective catalog is byte-for-byte compatible.
+
+Live Studio observation on 2026-09-30 reported Paper **0.5.14** with catalog digest
+`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb`, exactly the already
+reviewed catalog qualified below for 0.5.12. Runtime **v9** / bridge **0.1.3**
+(`a784fefceb7b1bb1164289700b22a6f53d09ae60d007f506ac015ebaca8c3725`) encodes that policy. If the server identity changes or the catalog digest changes,
+writes still fail closed as `UPSTREAM_SCHEMA_UNREVIEWED` until that schema is reviewed. Do not
+weaken this to tool-name subset matching or auto-accept a changed catalog.
+
+This fixes compatibility admission only. Existing installed v5/v8/direct bundles do not become v9
+merely because source changed; normal immutable-runtime staging/deployment and route readback remain
+separate effects. Because the public Paper action schemas are unchanged, a version-only runtime
+upgrade does not by itself require a duplicate app/tunnel or an action-snapshot republish.
+
 ### Paper 0.5.12 catalog drift qualification — 2026-09-26
 
 A later Paper 0.5.12 observation changed the full upstream catalog digest from
