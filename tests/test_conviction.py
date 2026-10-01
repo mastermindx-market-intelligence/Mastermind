@@ -270,3 +270,73 @@ def test_candidates_seed_respects_manual_exclude(monkeypatch):
     monkeypatch.setattr("brain.ledger.all_theses", lambda: [])
     cands = conviction.candidates()
     assert "NVDA" not in cands and "GOODX" in cands
+
+
+def test_context_only_altdata_cannot_enter_conviction_candidate_pool(monkeypatch):
+    """Research-visible Article-3-refused alt-data may not originate a position candidate."""
+    from brain import intake
+    from portfolio import prophet_feed
+
+    artifact = {
+        "brain_usable": True,
+        "is_context_only": True,
+        "article3": {"granted": False, "reason": "insufficient-n"},
+        "signals": [{
+            "ticker": "CTXX",
+            "signal_score": 90,
+            "action": "ACCUMULATE",
+            "channels": ["patent_cluster"],
+        }],
+    }
+    monkeypatch.setattr(
+        intake, "_read",
+        lambda rel: artifact if rel == "altdata/mastermind.json" else None,
+    )
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("altdata",))
+    monkeypatch.setattr(intake, "_LOADERS", {"altdata": "_from_altdata"})
+    monkeypatch.setattr(conviction, "regime_seed", lambda: [])
+    monkeypatch.setattr(conviction, "universe", lambda: [])
+    monkeypatch.setattr(conviction, "nw_universe_scan", lambda: [])
+    monkeypatch.setattr("brain.ledger.all_theses", lambda: [])
+    monkeypatch.setattr(prophet_feed, "candidate_tickers", lambda: [])
+
+    research = intake.queue(limit=5)
+    assert research[0]["ticker"] == "CTXX" and research[0]["score"] == 0.8
+    assert research[0]["candidacy_score"] == 0.0
+    assert "CTXX" not in conviction.candidates()
+
+
+
+def test_context_only_salience_cannot_replace_conviction_candidate_at_cutoff(monkeypatch):
+    """Exercise the real 60-name intake cutoff consumed by the conviction pool."""
+    from brain import intake
+    from portfolio import prophet_feed
+
+    artifacts = {}
+    monkeypatch.setattr(intake, "_read", lambda rel: artifacts.get(rel))
+    monkeypatch.setattr(intake, "_from_briefing", lambda: ({}, {}, {}))
+    monkeypatch.setattr(intake, "_SIMPLE_SOURCES", ("radar", "altdata"))
+    monkeypatch.setattr(intake, "_LOADERS", {"radar": "_from_radar", "altdata": "_from_altdata"})
+    # 60 eligible names plus one equally eligible tail name. No market data is used.
+    names = [f"Q{chr(65 + i // 26)}{chr(65 + i % 26)}" for i in range(60)] + ["ZZZ"]
+    radar = [{"ticker": t, "state": "POSITIVE_DIVERGENCE", "edge_score": 45} for t in names]
+    artifacts["basketdata/radar_ticker.json"] = {"tickers": radar}
+    monkeypatch.setattr(conviction, "regime_seed", lambda: [])
+    monkeypatch.setattr(conviction, "universe", lambda: [])
+    monkeypatch.setattr(conviction, "nw_universe_scan", lambda: [])
+    monkeypatch.setattr(conviction, "_MANUAL_EXCLUDE", set())
+    monkeypatch.setattr("brain.ledger.all_theses", lambda: [])
+    monkeypatch.setattr(prophet_feed, "candidate_tickers", lambda: [])
+    before = conviction.candidates()
+    assert before == sorted(names[:-1])
+    artifacts["altdata/mastermind.json"] = {
+        "brain_usable": True, "is_context_only": True,
+        "article3": {"granted": False, "reason": "insufficient-n"},
+        "signals": [{"ticker": "ZZZ", "signal_score": 99,
+                     "action": "ACCUMULATE", "channels": ["patent_cluster"]}],
+    }
+    research = intake.queue(limit=1)
+    assert research[0]["ticker"] == "ZZZ"
+    assert research[0]["candidacy_score"] == 0.45
+    assert conviction.candidates() == before
