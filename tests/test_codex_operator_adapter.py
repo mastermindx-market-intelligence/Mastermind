@@ -1435,13 +1435,13 @@ def test_blocked_read_events_and_interrupt_demultiplex_response_and_completion(
     )
     client = harness.adapter._state(harness.generation).client
     entered_wait = threading.Event()
-    original_wait = client.wait_notification
+    original_wait = client.wait_notifications_through
 
     def wait_notification(method: str, *, timeout: float = 15.0):
         entered_wait.set()
         return original_wait(method, timeout=timeout)
 
-    client.wait_notification = wait_notification  # type: ignore[method-assign]
+    client.wait_notifications_through = wait_notification  # type: ignore[method-assign]
     result: dict[str, object] = {}
 
     def read() -> None:
