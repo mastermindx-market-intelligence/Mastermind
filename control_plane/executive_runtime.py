@@ -12546,6 +12546,22 @@ def _finite_charged_reservation(
     return timestamp
 
 
+
+def _coo_validate_raw_role_result_observation(observation: Any) -> None:
+    """Revalidate native typed ingress; frozen labels alone are not authority."""
+    from control_plane.executive_orchestration_result import RawRoleResultObservation
+    if type(observation) is not RawRoleResultObservation:
+        raise StateConflict("domain consumption requires an actual typed raw observation")
+    try:
+        fields = {field.name: getattr(observation, field.name)
+                  for field in dataclasses.fields(RawRoleResultObservation)}
+        if type(fields["canonical_result_byte_length"]) is not int:
+            raise ValueError("byte length must be an exact integer")
+        RawRoleResultObservation(**fields)
+    except Exception:
+        raise StateConflict("domain consumption raw observation failed ingress validation") from None
+
+
 class JobRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -13406,26 +13422,719 @@ class JobRegistry:
         domain_attempt_id: str,
         observation: Any,
         command_id: str,
+        turn: TurnRef | None = None,
+        fence_generation: int | None = None,
+        lease_token: str | None = None,
     ) -> dict[str, Any]:
-        """Fail closed until exact subsequent domain-consumption turn integration.
+        """Typed later domain-consumption result seal for the root Job header.
 
-        The removed acceptance path keyed on the mere existence of an
-        OHF_CANDIDATE_RESULT_RECORDED row for the attempt.  Any planning,
-        stale, sibling, or fabricated candidate event satisfies such a query,
-        so it is not evidence of observed subsequent domain-consumption turn
-        integration and must never seal caller text as actor consumption.
+        Extends the public fail-closed stub with typed exact later TurnRef,
+        current fence_generation and lease_token authority; preserves the
+        missing-authority / caller-text legacy refusal.  Only an actual
+        ``RawRoleResultObservation`` (revalidated on ingress — exact integer
+        UTF-8 byte count, schema/digest/canonical body, and immutable
+        identity even if the frozen dataclass labels are altered) may seal.
 
-        This API therefore refuses every invocation, before any transaction or
-        event append, until a separate actual actor-turn source integration
-        supplies and validates exact turn provenance.
+        One Runtime transaction:
+
+        * Resolve the unique actual FINAL ``coo_provider_charges`` row and
+          derive the operation it claims;
+        * Invoke the existing full R124 evidence validator on the same
+          transaction / current lease (``_domain_consumption_evidence_admitted``
+          reuses ``_domain_consumption_turn`` for read-only validation — it
+          must not reserve or dispatch new work);
+        * Require the exact later TurnRef and the unique APPLIED native
+          acknowledgement plus the actual candidate/Event/cursor/artifact
+          provenance matching the raw observation;
+        * Re-read the actual sealed work / repair / independent-review body
+          projection through ``_coo_domain_consumption_projection``; the
+          projection itself re-validates every revision's identity and the
+          ``consumption_projection_digest`` — never treat candidate presence
+          as observed body;
+        * Parse the six-field canonical body via
+          ``parse_and_validate_domain_consumption`` against derived
+          root/domain/current attempt/projection digest.
+
+        Appends exactly one canonical versioned ``COO_DOMAIN_CONSUMPTION_SEALED``
+        event at the root Job header with actual domain Attempt / worker /
+        quota, full ``consumed_result``, exact raw / native / candidate /
+        INTENT / dispatch / APPLIED / FINAL / initial-plan / current-body
+        identities and digests, plus a finite explicit UTF-8 receipt byte
+        ceiling.  No truncation, redaction-as-mutation, second role seal,
+        terminalization, Job result mutation, stop/release/transfer, new
+        credit / lease / session / Attempt / grant or provider operation.
+
+        Exact replay revalidates the original full receipt, current native
+        and canonical inventory and returns the identical payload with all
+        durable tables unchanged; changed command / body / native / turn /
+        digest / projection or UNKNOWN refuses.  A second domain seal,
+        alias, duplicate / orphan / malformed evidence refuses.  The current
+        aggregation's existence-only join (``event_type='COO_DOMAIN_CONSUMPTION_SEALED'``
+        AND ``job_id=?``) remains UNQUALIFIED; this seam must not claim
+        runtime qualification or broaden it.
         """
 
-        raise StateConflict(
-            "domain consumption seal requires observed subsequent "
-            "domain-consumption turn integration; existence-only candidate "
-            "event evidence is insufficient. This fail-closed API refuses "
-            "every invocation until that actor-turn integration exists."
+        from control_plane.executive_orchestration_result import (
+            DOMAIN_CONSUMPTION_SCHEMA,
+            MAX_CANONICAL_RESULT_BYTES,
+            RAW_OBSERVATION_SCHEMA,
+            RawRoleResultObservation,
+            canonical_bytes,
+            canonical_digest,
+            parse_and_validate_domain_consumption,
         )
+
+        if turn is None or fence_generation is None or lease_token is None:
+            raise StateConflict(
+                "domain consumption seal requires observed subsequent domain-consumption "
+                "turn integration; existence-only candidate event evidence is insufficient"
+            )
+        if type(turn) is not TurnRef:
+            raise StateConflict("domain consumption seal requires typed later TurnRef")
+        try:
+            TurnRef(**{field.name: getattr(turn, field.name)
+                       for field in dataclasses.fields(TurnRef)})
+        except Exception:
+            raise StateConflict("domain consumption TurnRef failed ingress validation") from None
+        if not isinstance(domain_attempt_id, str) or domain_attempt_id != turn.attempt_id:
+            raise StateConflict("domain consumption caller Attempt does not match its turn")
+        if (
+            not isinstance(fence_generation, int)
+            or isinstance(fence_generation, bool)
+        ):
+            raise StateConflict(
+                "domain consumption seal requires integer fence_generation"
+            )
+        if not isinstance(lease_token, str) or not lease_token:
+            raise StateConflict(
+                "domain consumption seal requires current lease_token authority"
+            )
+        if not isinstance(root_job_id, str) or not root_job_id.strip():
+            raise StateConflict("domain consumption seal requires a root Job")
+        root_token = str(root_job_id).strip()
+        _coo_validate_raw_role_result_observation(observation)
+        assert isinstance(observation, RawRoleResultObservation)
+        expected_command_id = (
+            f"coo-cycle:{root_token}:domain-consumption-seal:"
+            f"{turn.attempt_id}:{turn.turn_id}"
+        )
+        if not isinstance(command_id, str) or command_id != expected_command_id:
+            raise StateConflict("domain consumption seal command is not its exact canonical identity")
+        registry = OperatorHarnessRegistry(self.store)
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            # 1. Locate the unique actual FINAL row for the attempt.
+            final_rows = connection.execute(
+                """
+                SELECT * FROM coo_provider_charges
+                WHERE attempt_id=? AND effect_class='FINAL'
+                ORDER BY event_id
+                """,
+                (turn.attempt_id,),
+            ).fetchall()
+            if len(final_rows) != 1:
+                raise StateConflict(
+                    "domain consumption seal requires its exact FINAL charge"
+                )
+            final_row = final_rows[0]
+            if str(final_row["root_job_id"]) != root_token:
+                raise StateConflict(
+                    "domain consumption seal FINAL charge is foreign to root"
+                )
+            operation_id = OperationId(str(final_row["operation_id"]))
+            # 2. Resolve root + domain + leased Attempt + plan seal.
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,),
+            ).fetchone()
+            if root is None:
+                raise StateConflict(
+                    "domain consumption seal root does not exist"
+                )
+            domain = _coo_domain_row(connection, root, required=True)
+            if domain is None:
+                raise StateConflict(
+                    "domain consumption seal requires an admitted domain"
+                )
+            if str(final_row["job_id"]) != str(domain["job_id"]):
+                raise StateConflict(
+                    "domain consumption seal FINAL job does not match domain"
+                )
+            if str(final_row["attempt_id"]) != str(domain["current_attempt_id"]):
+                raise StateConflict(
+                    "domain consumption seal FINAL attempt is not current domain attempt"
+                )
+            if turn.attempt_id != str(domain["current_attempt_id"]):
+                raise StateConflict(
+                    "domain consumption seal TurnRef attempt is not current domain attempt"
+                )
+            row = registry._leased(
+                connection,
+                attempt_id=turn.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            # 3. Full R124 evidence validator on the SAME transaction /
+            #    current lease — read-only; never reserves or dispatches.
+            admitted = registry._domain_consumption_evidence_admitted(
+                connection,
+                row=row,
+                turn=turn,
+                operation_id=operation_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+            )
+            if admitted is not True:
+                raise StateConflict("domain consumption lacks admitted FINAL evidence")
+            stored_generation = connection.execute(
+                "SELECT g.provider_session_id,e.provider_session_id AS epoch_provider_session_id "
+                "FROM process_generations g JOIN harness_session_epochs e "
+                "ON e.session_epoch_id=g.session_epoch_id "
+                "WHERE g.process_generation_id=? AND g.session_epoch_id=?",
+                (turn.process_generation_id, turn.session_epoch_id),
+            ).fetchone()
+            # 4. Bind raw observation to the exact later turn.
+            if (
+                stored_generation is None
+                or observation.provider_session_id != stored_generation["provider_session_id"]
+                or observation.provider_session_id != stored_generation["epoch_provider_session_id"]
+                or observation.attempt_id != turn.attempt_id
+                or observation.session_epoch_id != turn.session_epoch_id
+                or observation.process_generation_id
+                != turn.process_generation_id
+                or observation.turn_id != turn.turn_id
+            ):
+                raise StateConflict(
+                    "raw role result observation is outside the later turn"
+                )
+            # 5. Required unique APPLIED receipt for the operation, with
+            #    the same native acknowledgement the raw observation binds.
+            applied_event = registry._event(
+                connection,
+                operation_receipt_command_id(
+                    operation_id, OperationReceiptKind.APPLIED
+                ),
+            )
+            if applied_event is None:
+                raise StateConflict(
+                    "domain consumption seal requires its APPLIED receipt"
+                )
+            applied_payload = _strict_canonical_json_loads(
+                str(applied_event["payload_json"]),
+                name="domain consumption APPLIED receipt",
+            )
+            if (
+                not isinstance(applied_payload, dict)
+                or applied_payload.get("operation_kind")
+                != OperationKind.BEGIN_TURN.value
+                or applied_payload.get("attempt_id") != turn.attempt_id
+                or applied_payload.get("session_epoch_id")
+                != turn.session_epoch_id
+                or applied_payload.get("process_generation_id")
+                != turn.process_generation_id
+                or applied_payload.get("turn_id") != turn.turn_id
+                or applied_payload.get("acknowledged") is not True
+                or applied_payload.get("provider_native_turn_id")
+                != observation.provider_native_turn_id
+            ):
+                raise StateConflict(
+                    "domain consumption seal APPLIED receipt identity drifted"
+                )
+            # 6. Unique committed dispatch for the operation.
+            dispatch_id = f"{operation_id.command_id}:dispatch"
+            dispatches: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+            for event in connection.execute(
+                "SELECT * FROM events WHERE event_type='OHF_PROVIDER_DISPATCH_COMMITTED'"
+            ):
+                body = _strict_canonical_json_loads(
+                    str(event["payload_json"]),
+                    name="domain consumption seal dispatch",
+                )
+                if (
+                    event["command_id"] == dispatch_id
+                    or event["aggregate_id"] == operation_id.command_id
+                    or (
+                        isinstance(body, dict)
+                        and body.get("operation_id") == operation_id.command_id
+                    )
+                ):
+                    dispatches.append((event, body))
+            if len(dispatches) != 1:
+                raise StateConflict(
+                    "domain consumption seal requires one committed later dispatch"
+                )
+            dispatch_event, dispatch_body = dispatches[0]
+            if (
+                dispatch_event["command_id"] != dispatch_id
+                or dispatch_event["aggregate_type"] != "operator_operation"
+                or dispatch_event["aggregate_id"] != operation_id.command_id
+                or dispatch_event["job_id"] != str(row["job_id"])
+                or dispatch_event["attempt_id"] != turn.attempt_id
+                or dispatch_event["worker_id"] != str(row["worker_id"])
+                or dispatch_event["quota_class"] != str(row["quota_class"])
+                or dispatch_event["actor"] != "supervisor"
+                or not isinstance(dispatch_body, dict)
+                or dispatch_body.get("schema_version")
+                != "mastermind.operator_harness_provider_dispatch/v1"
+                or dispatch_body.get("operation_kind")
+                != OperationKind.BEGIN_TURN.value
+            ):
+                raise StateConflict(
+                    "domain consumption seal dispatch provenance drifted"
+                )
+            # 7. Unique candidate Event for the later turn, with artifact
+            #    / native / cursor / turn identity matching the observation.
+            later_candidate = None
+            for event in connection.execute(
+                """
+                SELECT * FROM events
+                WHERE event_type='OHF_CANDIDATE_RESULT_RECORDED'
+                  AND attempt_id=?
+                ORDER BY event_id
+                """,
+                (turn.attempt_id,),
+            ):
+                payload = _strict_canonical_json_loads(
+                    str(event["payload_json"]),
+                    name="domain consumption seal candidate Event",
+                )
+                turn_ref = (
+                    payload.get("turn")
+                    if isinstance(payload, dict)
+                    else None
+                )
+                if (
+                    isinstance(payload, dict)
+                    and isinstance(turn_ref, dict)
+                    and turn_ref.get("attempt_id") == turn.attempt_id
+                    and turn_ref.get("session_epoch_id")
+                    == turn.session_epoch_id
+                    and turn_ref.get("process_generation_id")
+                    == turn.process_generation_id
+                    and turn_ref.get("turn_id") == turn.turn_id
+                ):
+                    if later_candidate is not None:
+                        raise StateConflict(
+                            "domain consumption seal later candidate is not unique"
+                        )
+                    later_candidate = (event, payload)
+            if later_candidate is None:
+                raise StateConflict(
+                    "domain consumption seal requires its exact later candidate"
+                )
+            candidate_event, candidate_payload = later_candidate
+            candidate = (
+                candidate_payload.get("candidate")
+                if isinstance(candidate_payload, dict)
+                else None
+            )
+            cursor_block = (
+                candidate_payload.get("cursor")
+                if isinstance(candidate_payload, dict)
+                else None
+            )
+            if (
+                not isinstance(candidate, dict)
+                or candidate.get("artifact_digest")
+                != observation.provider_turn_artifact_digest
+                or candidate.get("attempt_id") != turn.attempt_id
+                or candidate.get("session_epoch_id")
+                != turn.session_epoch_id
+                or candidate.get("process_generation_id")
+                != turn.process_generation_id
+                or not isinstance(cursor_block, dict)
+                or cursor_block.get("turn_id") != turn.turn_id
+                or cursor_block.get("attempt_id") != turn.attempt_id
+                or cursor_block.get("session_epoch_id")
+                != turn.session_epoch_id
+                or cursor_block.get("process_generation_id")
+                != turn.process_generation_id
+            ):
+                raise StateConflict(
+                    "domain consumption seal candidate / cursor binding drifted"
+                )
+            from control_plane.operator_harness_wire import (
+                candidate_result, event_cursor, normalized_event, to_wire,
+            )
+            try:
+                typed_candidate = candidate_result(candidate)
+                typed_cursor = event_cursor(cursor_block)
+                if not isinstance(candidate_payload.get("events"), list):
+                    raise ValueError("candidate events must be a list")
+                typed_events = tuple(normalized_event(value) for value in candidate_payload["events"])
+            except Exception:
+                raise StateConflict("domain consumption candidate wire is invalid") from None
+            if (
+                candidate_event["command_id"] != f"ohf-candidate:{turn.turn_id}"
+                or candidate_event["aggregate_type"] != "operator_turn"
+                or candidate_event["aggregate_id"] != turn.turn_id
+                or candidate_event["job_id"] != row["job_id"]
+                or candidate_event["attempt_id"] != row["attempt_id"]
+                or candidate_event["worker_id"] != row["worker_id"]
+                or candidate_event["quota_class"] != row["quota_class"]
+                or candidate_event["actor"] != "supervisor"
+                or set(candidate_payload) != {"schema_version", "turn", "candidate", "events", "cursor"}
+                or candidate_payload["schema_version"] != OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
+                or candidate_payload["turn"] != _ohf_jsonable(turn)
+                or typed_candidate.complete_job_permitted is not False
+                or to_wire(typed_candidate) != candidate
+                or to_wire(typed_cursor) != cursor_block
+                or type(typed_cursor.local_sequence) is not int
+                or to_wire(typed_events) != candidate_payload["events"]
+                or any(event.attempt_id != turn.attempt_id
+                       or event.session_epoch_id != turn.session_epoch_id
+                       or event.process_generation_id != turn.process_generation_id
+                       or event.turn_id not in {None, turn.turn_id}
+                       for event in typed_events)
+            ):
+                raise StateConflict("domain consumption candidate provenance drifted")
+            # 8. Bind the initial plan seal identity (typed planner seal
+            #    already validated by ``_domain_consumption_evidence_admitted``).
+            plan_seal_events = connection.execute(
+                """
+                SELECT * FROM events
+                WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED'
+                  AND attempt_id=?
+                ORDER BY event_id
+                """,
+                (turn.attempt_id,),
+            ).fetchall()
+            if len(plan_seal_events) != 1:
+                raise StateConflict(
+                    "domain consumption seal requires initial plan seal"
+                )
+            plan_seal_payload = _strict_canonical_json_loads(
+                str(plan_seal_events[0]["payload_json"]),
+                name="domain consumption seal plan seal",
+            )
+            if (
+                not isinstance(plan_seal_payload, dict)
+                or plan_seal_payload.get("attempt_id") != turn.attempt_id
+                or plan_seal_payload.get("job_id") != str(row["job_id"])
+                or plan_seal_payload.get("worker_id") != str(row["worker_id"])
+                or plan_seal_payload.get("quota_class")
+                != str(row["quota_class"])
+                or plan_seal_payload.get("orchestration_role") != "plan"
+            ):
+                raise StateConflict(
+                    "domain consumption seal plan seal identity drifted"
+                )
+            initial_plan_attempt_id = str(
+                plan_seal_payload.get("attempt_id")
+            )
+            initial_plan_digest = str(
+                plan_seal_payload.get("role_result_digest")
+            )
+            # 9. Re-read the actual sealed work / repair / independent
+            #    review body projection; the projection re-validates every
+            #    revision's identity and recomputes the canonical digest.
+            projection = _coo_domain_consumption_projection(
+                connection,
+                root_row=root,
+                domain_job_id=str(domain["job_id"]),
+                domain_attempt_id=str(domain["current_attempt_id"]),
+            )
+            current_projection_schema_version = str(
+                projection["schema_version"]
+            )
+            current_projection_digest = str(
+                projection["consumption_projection_digest"]
+            )
+            if current_projection_schema_version != (
+                "mastermind.executive_coo_domain_consumption_projection/v1"
+            ):
+                raise StateConflict(
+                    "domain consumption projection schema is unsupported"
+                )
+            # 10. Validate the six-field canonical body against derived
+            #     root / domain / current attempt / projection digest.
+            try:
+                consumed = parse_and_validate_domain_consumption(
+                    observation.canonical_result_json,
+                    expected_root_job_id=root_token,
+                    expected_domain_job_id=str(domain["job_id"]),
+                    expected_domain_attempt_id=str(
+                        domain["current_attempt_id"]
+                    ),
+                    expected_projection_digest=current_projection_digest,
+                )
+            except Exception:
+                raise StateConflict(
+                    "domain consumption canonical body failed closed validation"
+                ) from None
+            consumed_result_text = str(consumed["consumed_result"])
+            consumed_result_bytes = consumed_result_text.encode("utf-8")
+            consumed_result_byte_length = len(consumed_result_bytes)
+            if consumed_result_byte_length > MAX_CANONICAL_RESULT_BYTES:
+                raise StateConflict(
+                    "domain consumption canonical result exceeds 8 MiB"
+                )
+            consumed_body_canonical = canonical_bytes(consumed)
+            if len(consumed_body_canonical) > MAX_CANONICAL_RESULT_BYTES:
+                raise StateConflict(
+                    "domain consumption canonical body exceeds 8 MiB"
+                )
+            consumed_body_digest = canonical_digest(consumed)
+            consumed_result_digest = hashlib.sha256(
+                consumed_result_bytes
+            ).hexdigest()
+            # 11. Build the seal payload and enforce an explicit finite
+            #     UTF-8 receipt byte ceiling (no truncation, no
+            #     redaction-as-mutation).
+            final_event_payload = _strict_canonical_json_loads(
+                str(
+                    connection.execute(
+                        "SELECT payload_json FROM events WHERE event_id=?",
+                        (int(final_row["event_id"]),),
+                    ).fetchone()["payload_json"]
+                ),
+                name="domain consumption FINAL charge payload",
+            )
+            intent_event = registry._event(connection, operation_id.command_id)
+            if intent_event is None:
+                raise StateConflict("domain consumption INTENT disappeared")
+            intent_payload = _strict_canonical_json_loads(str(intent_event["payload_json"]), name="domain seal INTENT")
+            seal_payload: dict[str, Any] = {
+                "schema_version": (
+                    "mastermind.executive_coo_domain_consumption_seal/v1"
+                ),
+                "root_job_id": root_token,
+                "domain_job_id": str(domain["job_id"]),
+                "domain_attempt_id": str(domain["current_attempt_id"]),
+                "domain_worker_id": str(row["worker_id"]),
+                "domain_quota_class": str(row["quota_class"]),
+                "operation_id": operation_id.command_id,
+                "turn_id": turn.turn_id,
+                "session_epoch_id": turn.session_epoch_id,
+                "process_generation_id": turn.process_generation_id,
+                "fence_generation": int(fence_generation),
+                "lease_authority_digest": hashlib.sha256(lease_token.encode("utf-8")).hexdigest(),
+                "command_id": command_id,
+                "consumption_result": consumed,
+                "selected_revisions": projection["revisions"],
+                "selected_revision_result_identities": [
+                    {key: value for key, value in result.items()
+                     if key not in {"work_result", "review_result"}}
+                    for result in projection["revision_results"]
+                ],
+                "consumed_result_byte_length": consumed_result_byte_length,
+                "consumed_result_digest": consumed_result_digest,
+                "consumed_body_digest": consumed_body_digest,
+                "consumed_body_byte_length": len(consumed_body_canonical),
+                "raw_observation_digest": canonical_digest(
+                    observation.to_dict()
+                ),
+                "raw_observation_byte_length": (
+                    observation.canonical_result_byte_length
+                ),
+                "provider_session_id": observation.provider_session_id,
+                "provider_native_turn_id": (
+                    observation.provider_native_turn_id
+                ),
+                "provider_turn_artifact_digest": (
+                    observation.provider_turn_artifact_digest
+                ),
+                "raw_observation_schema_version": (
+                    observation.schema_version
+                ),
+                "consumed_body_schema_version": DOMAIN_CONSUMPTION_SCHEMA,
+                "candidate_event_command_id": str(
+                    candidate_event["command_id"]
+                ),
+                "candidate_event_digest": canonical_digest(candidate_payload),
+                "applied_event_command_id": str(applied_event["command_id"]),
+                "applied_event_digest": canonical_digest(applied_payload),
+                "dispatch_event_command_id": str(dispatch_event["command_id"]),
+                "dispatch_event_digest": canonical_digest(dispatch_body),
+                "intent_event_command_id": operation_id.command_id,
+                "intent_event_digest": canonical_digest(intent_payload),
+                "initial_plan_event_digest": canonical_digest(plan_seal_payload),
+                "final_charge_id": final_row["charge_id"],
+                "reservation_identity": final_row["reservation_identity"],
+                "final_event_id": int(final_row["event_id"]),
+                "final_event_digest": canonical_digest(final_event_payload),
+                "initial_plan_event_command_id": str(
+                    plan_seal_events[0]["command_id"]
+                ),
+                "initial_plan_attempt_id": initial_plan_attempt_id,
+                "initial_plan_digest": initial_plan_digest,
+                "current_projection_schema_version": (
+                    current_projection_schema_version
+                ),
+                "current_projection_digest": current_projection_digest,
+            }
+            from scripts.ohf.redaction import evidence_contains_secret
+            if evidence_contains_secret(consumed):
+                raise StateConflict("domain consumption result contains sensitive evidence")
+            # The full observed body is already <=8MiB. Bound finite receipt
+            # metadata separately to64KiB; do not duplicate or truncate bodies.
+            metadata = {key: value for key, value in seal_payload.items()
+                        if key != "consumption_result"}
+            if len(canonical_bytes(metadata)) > 64 * 1024:
+                raise StateConflict("domain consumption seal metadata exceeds64KiB")
+            encoded_seal = canonical_bytes(seal_payload)
+            if len(encoded_seal) > MAX_CANONICAL_RESULT_BYTES + 64 * 1024:
+                raise StateConflict(
+                    "domain consumption seal receipt exceeds 8 MiB"
+                )
+            seal_receipt_digest = hashlib.sha256(encoded_seal).hexdigest()
+            seal_payload["seal_receipt_digest"] = seal_receipt_digest
+            seal_payload["seal_receipt_byte_length"] = len(encoded_seal)
+            # The receipt digest must be reproducible from the canonical
+            # body sans the digest / byte length identity fields.
+            materialised_digest = hashlib.sha256(
+                canonical_bytes(
+                    {
+                        key: value
+                        for key, value in seal_payload.items()
+                        if key
+                        not in {
+                            "seal_receipt_digest",
+                            "seal_receipt_byte_length",
+                        }
+                    }
+                )
+            ).hexdigest()
+            if materialised_digest != seal_receipt_digest:
+                raise StateConflict(
+                    "domain consumption seal receipt digest is not self-consistent"
+                )
+            if len(canonical_bytes(seal_payload)) > MAX_CANONICAL_RESULT_BYTES + 64 * 1024:
+                raise StateConflict("domain consumption full receipt exceeds its byte ceiling")
+            # Reconcile all independent header/payload links BEFORE replay.
+            seal_events = []
+            for event in connection.execute(
+                "SELECT * FROM events WHERE event_type='COO_DOMAIN_CONSUMPTION_SEALED'"
+            ):
+                body = _strict_canonical_json_loads(str(event["payload_json"]), name="domain seal census")
+                if not isinstance(body, dict):
+                    raise StateConflict("domain seal census is malformed")
+                # Follow independent identity links even when an orphan has
+                # null/foreign headers or contradictory top-level identities.
+                # Shared worker/quota/artifact values are not affiliation.
+                identity_keys = (
+                    "root_job_id", "domain_job_id", "domain_attempt_id",
+                    "operation_id", "turn_id", "session_epoch_id",
+                    "process_generation_id", "command_id",
+                    "candidate_event_command_id", "applied_event_command_id",
+                    "dispatch_event_command_id", "intent_event_command_id",
+                    "initial_plan_event_command_id", "initial_plan_attempt_id",
+                    "final_charge_id", "reservation_identity", "final_event_id",
+                    "current_projection_digest", "consumed_body_digest",
+                    "candidate_event_digest", "applied_event_digest",
+                    "intent_event_digest", "initial_plan_event_digest",
+                    "final_event_digest", "raw_observation_digest",
+                    "initial_plan_digest", "seal_receipt_digest",
+                )
+                nested = body.get("consumption_result")
+                nested_link = isinstance(nested, dict) and any(
+                    nested.get(key) == consumed[key]
+                    for key in (
+                        "root_job_id", "domain_job_id", "domain_attempt_id",
+                        "consumption_projection_digest",
+                    )
+                )
+                native_link = (
+                    body.get("provider_session_id") == observation.provider_session_id
+                    and body.get("provider_native_turn_id") == observation.provider_native_turn_id
+                )
+                if (
+                    # Aggregate/header identities may independently point
+                    # at any exact owner-specific receipt or operation link.
+                    any(event[key] in {str(seal_payload[name]) for name in identity_keys}
+                        for key in ("job_id", "aggregate_id", "attempt_id"))
+                    or any(body.get(key) == seal_payload[key] for key in identity_keys)
+                    or nested_link or native_link
+                ):
+                    seal_events.append(event)
+            if len(seal_events) > 1:
+                raise StateConflict("domain consumption seal census is not unique")
+            if seal_events and seal_events[0]["command_id"] != command_id:
+                raise StateConflict("domain consumption seal has an alias or foreign prior receipt")
+            # 12. Reject any prior COO_DOMAIN_CONSUMPTION_SEALED row for
+            #     this root or a duplicate/alias command_id before any
+            #     append.  Idempotent replay: identical command_id with
+            #     an identical payload returns the same payload.
+            existing = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (command_id,),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["event_type"] != "COO_DOMAIN_CONSUMPTION_SEALED"
+                    or existing["job_id"] != root_token
+                    or existing["aggregate_id"] != root_token
+                    or existing["aggregate_type"] != "job"
+                    or existing["actor"] != "coo"
+                    or existing["attempt_id"] != row["attempt_id"]
+                    or existing["worker_id"] != row["worker_id"]
+                    or existing["quota_class"] != row["quota_class"]
+                ):
+                    raise StateConflict(
+                        "domain consumption seal command is owned by another action"
+                    )
+                existing_payload = _strict_canonical_json_loads(
+                    str(existing["payload_json"]),
+                    name="domain consumption seal replay payload",
+                )
+                numeric_keys = (
+                    "fence_generation", "consumed_result_byte_length",
+                    "consumed_body_byte_length", "raw_observation_byte_length",
+                    "final_event_id", "seal_receipt_byte_length",
+                )
+                if any(type(existing_payload.get(key)) is not int for key in numeric_keys):
+                    raise StateConflict("domain consumption seal replay numeric types drifted")
+                stored_material = canonical_bytes({
+                    key: value for key, value in existing_payload.items()
+                    if key not in {"seal_receipt_digest", "seal_receipt_byte_length"}
+                })
+                if (hashlib.sha256(stored_material).hexdigest()
+                        != existing_payload.get("seal_receipt_digest")
+                        or len(stored_material) != existing_payload["seal_receipt_byte_length"]):
+                    raise StateConflict("domain consumption seal replay digest or byte length drifted")
+                if canonical_bytes(existing_payload) != canonical_bytes(seal_payload):
+                    raise StateConflict(
+                        "domain consumption seal replay payload drifted"
+                    )
+                return dict(existing_payload)
+            prior_seal = connection.execute(
+                "SELECT 1 FROM events WHERE event_type=? AND job_id=?",
+                ("COO_DOMAIN_CONSUMPTION_SEALED", root_token),
+            ).fetchone()
+            if prior_seal is not None:
+                raise StateConflict(
+                    "domain consumption seal is already recorded for root"
+                )
+            foreign_seal = connection.execute(
+                "SELECT 1 FROM events WHERE event_type=? AND job_id=? AND command_id<>?",
+                (
+                    "COO_DOMAIN_CONSUMPTION_SEALED",
+                    root_token,
+                    command_id,
+                ),
+            ).fetchone()
+            if foreign_seal is not None:
+                raise StateConflict(
+                    "domain consumption seal has a foreign prior row"
+                )
+            _finite_existing_effect(self.store, connection, root_token)
+            self.store.append_event(
+                connection,
+                aggregate_type="job",
+                aggregate_id=root_token,
+                event_type="COO_DOMAIN_CONSUMPTION_SEALED",
+                actor="coo",
+                job_id=root_token,
+                attempt_id=str(domain["current_attempt_id"]),
+                worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                command_id=command_id,
+                payload=seal_payload,
+                timestamp_ms=timestamp,
+            )
+            return dict(seal_payload)
 
     def admit_cycle_plan(
         self,
