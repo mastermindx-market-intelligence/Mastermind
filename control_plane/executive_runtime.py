@@ -13035,11 +13035,70 @@ class JobRegistry:
             policy = CooCyclePolicy.load()
         except CooCyclePolicyError as exc:
             raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
+        # Creation never upgrades an immutable root pin to current policy.
+        # Only the old unbound, disarmed metadata path remains compatible.
+        registry = ExecutionCapabilityRegistry.load()
+        root_constraints = dict(root.constraints)
+        pin_keys = (
+            "capability_policy_version", "capability_policy_digest",
+            "execution_profile_id", "execution_profile_digest",
+        )
+        try:
+            profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+            normalized = _normalise_constraints(root_constraints)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StateConflict("domain root capability binding is malformed") from exc
+        checked_keys = set(pin_keys) | set(OPERATOR_HARNESS_BINDING_KEYS)
+        checked_keys.add("base_sha")
+        if any(
+            normalized.get(key) != root_constraints.get(key)
+            for key in checked_keys
+        ):
+            raise StateConflict("domain root capability binding is not canonical")
+
+        def require_current_pin(prefix: str) -> None:
+            values = [root_constraints.get(prefix + key) for key in pin_keys]
+            if not all(isinstance(value, str) and value for value in values):
+                raise StateConflict("domain creation requires a complete immutable "
+                                    + prefix + "capability binding")
+            version, digest, profile_id, profile_digest = values
+            if version != registry.policy_version or digest != registry.policy_digest:
+                raise StateConflict("domain immutable " + prefix
+                                    + "capability policy pin is no longer current")
+            try:
+                selected = registry.profiles[profile_id]
+                if profile_id == COO_DOMAIN_EXECUTION_PROFILE and not selected.enabled:
+                    registry.validate_disabled_profile_shape(profile_id)
+                else:
+                    selected = registry.resolve(profile_id)
+            except (KeyError, CapabilityPolicyError) as exc:
+                raise StateConflict("domain immutable " + prefix
+                                    + "selected profile is not admissible") from exc
+            if profile_digest != selected.profile_digest:
+                raise StateConflict("domain immutable " + prefix
+                                    + "selected profile pin is no longer current")
+
+        if (
+            profile.enabled
+            or set(pin_keys) & set(root_constraints)
+            or set(OPERATOR_HARNESS_BINDING_KEYS) & set(root_constraints)
+        ):
+            require_current_pin("")
+        if root_constraints.get("operator_harness_armed") is True:
+            # Validate the whole sealed binding before the helper can fall back.
+            binding_keys = set(OPERATOR_HARNESS_BINDING_KEYS) | {"base_sha"}
+            if not all(root_constraints.get(key) for key in binding_keys):
+                raise StateConflict("domain creation requires a complete armed "
+                                    "operator binding")
+            require_current_pin("operator_")
+        # Registry loading enforces the same closed read-only ceiling in both
+        # states. Disabled metadata creates no dispatch permission.
+        if profile.enabled:
+            profile = registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+        else:
+            registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
         constraints = self._operator_child_constraints(root)
         constraints["execution_profile_id"] = COO_DOMAIN_EXECUTION_PROFILE
-        registry = ExecutionCapabilityRegistry.load()
-        registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
-        profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
         constraints["execution_profile_digest"] = profile.profile_digest
         constraints["capability_policy_version"] = registry.policy_version
         constraints["capability_policy_digest"] = registry.policy_digest

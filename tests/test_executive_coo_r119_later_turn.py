@@ -49,7 +49,8 @@ from control_plane.executive_runtime import (
     orchestration_digest,
 )
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
-from tests.test_executive_coo_hierarchy import _r7a_seed_active_domain_with_review
+from control_plane.ceo_intent import submit_intent
+from tests.test_executive_coo_hierarchy import _r7a_seed_active_domain_with_review, _v2_intent
 from tests.test_executive_coo_r116_charge_schema import CHARGE_COLUMNS
 
 
@@ -1712,11 +1713,40 @@ def _replace_test_event(runtime, event_id, **changes):
             connection.execute(trigger_sql)
 
 
-def test_genuine_enabled_pin_exposes_current_pre_dispatch_domain_creation_gate(tmp_path, monkeypatch):
-    from control_plane.executive_agent_capabilities import DEFAULT_CAPABILITY_POLICY_PATH, CapabilityPolicyError
+def test_genuine_enabled_pin_admits_causal_creation_with_conserved_root_budget(tmp_path, monkeypatch):
+    """R120 accepted causal creation control.
+
+    After the R120 gate fix, the genuine-enabled current pin creates a
+    depth1 domain through the public ``create_cycle_domain`` path with the
+    canonical root budget conserved and the immutable root constraints
+    unchanged.  No Attempt / harness_session_epochs / process_generation
+    effects accompany creation; the canonical production JSON stays
+    ``enabled=False``.  The exact deterministic creation replay retains
+    identities with no duplicate budget.
+    """
+
+    from control_plane.executive_agent_capabilities import DEFAULT_CAPABILITY_POLICY_PATH
     from control_plane.executive_runtime import JobRegistry
+
     canonical_bytes = DEFAULT_CAPABILITY_POLICY_PATH.read_bytes()
-    observed = {}
+
+    # Genuine-enabled JSON loaded through the real registry BEFORE submit
+    # so the immutable root capability binding reflects the enabled pin.
+    raw = json.loads(canonical_bytes)
+    raw["profiles"][COO_DOMAIN_EXECUTION_PROFILE]["enabled"] = True
+    policy_path = tmp_path / "genuine-enabled-capability-policy.json"
+    policy_path.write_text(json.dumps(raw), encoding="utf-8")
+    real_loader = ExecutionCapabilityRegistry.load
+    enabled_registry = real_loader(policy_path)
+    assert enabled_registry.policy_digest != real_loader().policy_digest
+    enabled_profile = enabled_registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+
+    monkeypatch.setattr(
+        ExecutionCapabilityRegistry, "load",
+        classmethod(lambda cls, *args, **kwargs: enabled_registry),
+    )
+
+    observed: dict = {}
     original_create = JobRegistry.create_cycle_domain
 
     def observe_creation(self, root_id, **kwargs):
@@ -1725,20 +1755,95 @@ def test_genuine_enabled_pin_exposes_current_pre_dispatch_domain_creation_gate(t
         return original_create(self, root_id, **kwargs)
 
     monkeypatch.setattr(JobRegistry, "create_cycle_domain", observe_creation)
-    with pytest.raises(CapabilityPolicyError, match="is not disabled"):
-        _seeded_domain(tmp_path, monkeypatch, genuine_enabled=True)
-    registry = ExecutionCapabilityRegistry.load()
-    root = observed["root"]
-    assert root.constraints["capability_policy_digest"] == registry.policy_digest
-    assert root.constraints["execution_profile_digest"] == registry.resolve(COO_DOMAIN_EXECUTION_PROFILE).profile_digest
+
+    # Build the host execution binding from the genuine-enabled registry so
+    # the public root's immutable capability pins match the loaded registry.
+    binding = {
+        "eligible_quota_classes": ["codex-coo", "codex-coo-default"],
+        "provider": "codex",
+        "model": "gpt-test",
+        "effort": "low",
+        "cost_class": "small",
+        "base_sha": "a" * 40,
+        "routing_policy_version": "test-routing",
+        "execution_profile_id": COO_DOMAIN_EXECUTION_PROFILE,
+        "execution_profile_digest": enabled_profile.profile_digest,
+        "capability_policy_version": enabled_registry.policy_version,
+        "capability_policy_digest": enabled_registry.policy_digest,
+        "operator_eligible_quota_classes": ["codex-coo-operator"],
+        "operator_provider": "codex",
+        "operator_model": "gpt-test",
+        "operator_effort": "low",
+        "operator_cost_class": "small",
+        "operator_routing_policy_version": "test-routing",
+        "operator_execution_profile_id": COO_DOMAIN_EXECUTION_PROFILE,
+        "operator_execution_profile_digest": enabled_profile.profile_digest,
+        "operator_capability_policy_version": enabled_registry.policy_version,
+        "operator_capability_policy_digest": enabled_registry.policy_digest,
+        "operator_harness_binary_digest": "a" * 64,
+        "operator_harness_version": "0.147.0",
+        "operator_harness_armed": True,
+    }
+    intent = _v2_intent(intent_id="CEO-R120-GENUINE-ENABLED")
+    intent["execution_contract"] = {
+        "requested_authorities": ["READ"],
+        "attempt_limit": 2,
+    }
+
+    runtime = Runtime.at(tmp_path)
+    receipt = submit_intent(runtime, intent, execution_binding=binding)
+    root_id = receipt["job_id"]
+    root_before = runtime.jobs.get_job(root_id)
+    constraints_before = dict(root_before.constraints)
+    assert root_before.constraints["capability_policy_digest"] == enabled_registry.policy_digest
+    assert root_before.constraints["execution_profile_digest"] == enabled_profile.profile_digest
+
+    # Public causal creation: the genuine-enabled current pin creates a
+    # depth1 domain with the canonical root budget conserved.
+    domain = runtime.jobs.create_cycle_domain(
+        root_id, command_id=f"coo-cycle:{root_id}:create-domain:0",
+    )
+    assert domain.parent_job_id == root_id
+    assert domain.depth == 1
+    assert domain.constraints["execution_profile_id"] == COO_DOMAIN_EXECUTION_PROFILE
+    assert domain.constraints["execution_profile_digest"] == enabled_profile.profile_digest
+    assert domain.constraints["capability_policy_version"] == enabled_registry.policy_version
+    assert domain.constraints["capability_policy_digest"] == enabled_registry.policy_digest
+    assert domain.constraints["remaining_depth"] == 1
+
+    # Immutable root constraints unchanged.
+    root_after = runtime.jobs.get_job(root_id)
+    assert dict(root_after.constraints) == constraints_before
+
+    # Inventory: only the new depth1 domain was added; no
+    # Attempt / harness_session_epochs / process_generation effects.
+    with observed["registry"].store.read() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root_id,)
+        ).fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM harness_session_epochs"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM process_generations"
+        ).fetchone()[0] == 0
+
+    # Canonical production JSON bytes unchanged.
     assert DEFAULT_CAPABILITY_POLICY_PATH.read_bytes() == canonical_bytes
     assert json.loads(canonical_bytes)["profiles"][COO_DOMAIN_EXECUTION_PROFILE]["enabled"] is False
+    assert json.loads(canonical_bytes).get("production_armed") is False
+
+    # Exact deterministic creation replay retains identities / no duplicate budget.
+    replay = runtime.jobs.create_cycle_domain(
+        root_id, command_id=f"coo-cycle:{root_id}:create-domain:0",
+    )
+    assert replay.job_id == domain.job_id
     with observed["registry"].store.read() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root.job_id,)).fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM harness_session_epochs").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM process_generations").fetchone()[0] == 0
-    # This proves an existing pre-dispatch gate, not enabled-runtime admission.
+        assert connection.execute(
+            "SELECT COUNT(*) FROM jobs WHERE parent_job_id=? AND job_id<>?",
+            (root_id, root_id),
+        ).fetchone()[0] == 1
 
 
 @pytest.mark.parametrize("receipt_kind", ["OPERATOR_OPERATION_APPLIED", "OPERATOR_OPERATION_EFFECT_UNKNOWN"])
