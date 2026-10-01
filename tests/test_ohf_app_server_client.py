@@ -582,3 +582,62 @@ def test_partial_ingress_timeout_cannot_send_or_discard_the_fragment(tmp_path):
     assert sends == [] and client._responses == {}
     assert client._stdout_pending == b'{"method":'
     assert not client._transport_closed
+
+
+
+def test_guarded_send_waits_for_selected_but_unread_ingress(tmp_path, monkeypatch):
+    import threading
+    entered = threading.Event()
+    release = threading.Event()
+    attempted = threading.Event()
+    sent = threading.Event()
+    code = (
+        "import json,sys\n"
+        "print(json.dumps({'method':'thread/started','params':{'thread':{'id':'ungranted-selected-helper'}}}),flush=True)\n"
+        "for line in sys.stdin:\n"
+        " request=json.loads(line)\n"
+        " print(json.dumps({'id':request['id'],'result':{'ok':True}}),flush=True)\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    original_select = laboratory.select.select
+    def select_and_pause(read, write, error, timeout=None):
+        result = original_select(read, write, error, timeout)
+        if (threading.current_thread() is client._reader and result[0]
+                and not entered.is_set()):
+            entered.set()
+            assert release.wait(timeout=2)
+        return result
+    monkeypatch.setattr(laboratory.select, "select", select_and_pause)
+    original_send = client._send
+    def send(payload, **kwargs):
+        sent.set()
+        return original_send(payload, **kwargs)
+    client._send = send
+    errors, prefixes = [], []
+    def refuse_pending_helper(request_id, queued):
+        prefixes.append(queued)
+        if queued:
+            raise ValueError("ungranted helper before send")
+    def submit():
+        attempted.set()
+        try:
+            client.request("turn/start", {}, timeout=1, before_send=refuse_pending_helper)
+        except Exception as exc:
+            errors.append(exc)
+    client.start()
+    thread = threading.Thread(target=submit)
+    try:
+        assert entered.wait(timeout=1), "reader did not select the real frame"
+        thread.start()
+        assert attempted.wait(timeout=1)
+        early = sent.wait(timeout=.05)
+    finally:
+        release.set()
+        if thread.ident is not None:
+            thread.join(timeout=2)
+        client.close()
+    assert not thread.is_alive()
+    assert not early and not sent.is_set()
+    assert len(errors) == 1 and str(errors[0]) == "ungranted helper before send"
+    assert prefixes and prefixes[0][0]["method"] == "thread/started"

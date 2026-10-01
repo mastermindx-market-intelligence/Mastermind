@@ -434,6 +434,23 @@ class AppServerClient:
                         pass  # Preserve an already-delivered response/failure.
                 self._notification_condition.notify_all()
 
+    def _ingress_pending_locked(self) -> bool:
+        """Observe unread ingress without becoming a second stdout reader.
+
+        The sole reader may have selected input and been descheduled before
+        taking this lock. Readability still belongs to that reader and must
+        settle before a guarded send can pass an empty published queue.
+        """
+        if self._stdout_pending:
+            return True
+        if self.proc is None or self.proc.stdout is None:
+            return False
+        try:
+            readable, _, _ = select.select([self.proc.stdout.fileno()], [], [], 0)
+        except (OSError, ValueError) as exc:
+            raise JsonRpcError("app-server ingress is unavailable") from exc
+        return bool(readable)
+
     def _accept_stdout_frame_locked(self, raw: bytes) -> bool:
         """Parse and publish one bounded frame under the existing ingress lock."""
         if len(raw) > APP_SERVER_MAX_FRAME_BYTES or not raw.endswith(b"\n"):
@@ -626,10 +643,10 @@ class AppServerClient:
                     if self._transport_closed:
                         raise JsonRpcError("app-server exited before guarded turn/start")
                     assert deadline is not None
-                    while self._stdout_pending:
+                    while self._ingress_pending_locked():
                         remaining = deadline - time.monotonic()
                         if remaining <= 0:
-                            raise JsonRpcError("timeout waiting for incomplete ingress frame")
+                            raise JsonRpcError("timeout waiting for incomplete ingress frame or pending input")
                         self._notification_condition.wait(timeout=remaining)
                         if self._transport_closed:
                             raise JsonRpcError("app-server exited before guarded turn/start")
