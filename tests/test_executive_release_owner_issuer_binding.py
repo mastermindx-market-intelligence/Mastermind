@@ -242,7 +242,6 @@ def test_expectation_type_is_frozen_closed_and_private():
         ("app_peer_uid", 0),
         ("app_peer_uid", -1),
         ("app_peer_uid", "458"),
-        ("app_peer_uid", 450),
         ("issued_at_ms", True),
         ("issued_at_ms", 0),
         ("issued_monotonic_ns", False),
@@ -441,7 +440,7 @@ def test_altered_receipt_bytes_refuse_consume(captured, monkeypatch):
 def test_wrong_uid_role_boot_release_config_refuse(captured, monkeypatch):
     first, _second = captured
     cases = [
-        ({"euid": 451}, "ISSUER_CONTROL_UID_MISMATCH"),
+        ({"euid": 451}, "SERVICE_PEER_IDENTITY_MISMATCH"),
         ({"service_label": "com.mastermind.executive.gateway"}, "ISSUER_ROLE_LABEL_MISMATCH"),
         ({"boot_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, "ISSUER_BOOT_MISMATCH"),
         ({"release_commit": "a" * 40}, "ISSUER_RELEASE_MISMATCH"),
@@ -458,10 +457,15 @@ def test_wrong_uid_role_boot_release_config_refuse(captured, monkeypatch):
 
 def test_app_uid_invalid_refuses_expectation_and_join(captured, monkeypatch):
     first, _second = captured
-    for bad in (0, -1, True, "458", 450):
+    for bad in (0, -1, True, "458"):
         with pytest.raises(m.IssuerBindingError) as caught:
             _expectation(app_peer_uid=bad)
         assert caught.value.code == "ISSUER_EXPECTATION_APP_UID"
+    same_uid = _expectation(app_peer_uid=450)
+    _seam_qualify(monkeypatch)
+    with pytest.raises(m.IssuerBindingError) as caught:
+        m._produce_issuer_receipt(first, same_uid)
+    assert caught.value.code == "ISSUER_APP_PEER_UID_INVALID"
     expected = _expectation()
     _seam_qualify(monkeypatch)
     observation = m._produce_issuer_receipt(first, expected)

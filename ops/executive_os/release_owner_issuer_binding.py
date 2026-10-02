@@ -50,7 +50,6 @@ from ops.executive_os.release_owner_resident_inputs import (
 
 __all__: list[str] = []
 
-_CONTROL_UID = 450
 _ROLE = "control"
 _SCHEMA = "mastermind.executive_release_issuer_binding/v1"
 _EVIDENCE_SCHEMA = "mastermind.executive_release_issuer_binding_evidence/v1"
@@ -183,8 +182,6 @@ class _ReleaseOwnerExpectation:
             maximum=_MAX_INT,
             code="ISSUER_EXPECTATION_APP_UID",
         )
-        if app_uid == _CONTROL_UID:
-            raise _refuse("ISSUER_EXPECTATION_APP_UID")
         if type(self.policy) is not ReleaseControllerPolicy:
             raise _refuse("ISSUER_EXPECTATION_POLICY")
         issued_ms = _strict_int(
@@ -226,6 +223,7 @@ class _QualifiedFacts:
     service_label: str
     installed_release: str
     config_digest: str
+    control_uid: int
     binding_evidence_digest: str
 
 
@@ -292,7 +290,7 @@ def _binding_evidence_document(
         "release_tree": expected.release_tree,
         "control_config_digest": expected.control_config_digest,
         "app_peer_uid": expected.app_peer_uid,
-        "control_uid": _CONTROL_UID,
+        "control_uid": capture.euid,
         "role": _ROLE,
     }
 
@@ -311,11 +309,15 @@ def _join_facts(
         raise _refuse("ISSUER_CAPTURE_REQUIRED")
     if type(context) is not TrustedServicePeerContext:
         raise _refuse("ISSUER_CONTEXT_REQUIRED")
-    if capture.euid != _CONTROL_UID:
-        raise _refuse("ISSUER_CONTROL_UID_MISMATCH")
+    control_uid = _strict_int(
+        capture.euid,
+        minimum=1,
+        maximum=_MAX_INT,
+        code="ISSUER_CONTROL_UID_INVALID",
+    )
     if type(expected.app_peer_uid) is not int or expected.app_peer_uid <= 0:
         raise _refuse("ISSUER_APP_PEER_UID_INVALID")
-    if expected.app_peer_uid == _CONTROL_UID:
+    if expected.app_peer_uid == control_uid:
         raise _refuse("ISSUER_APP_PEER_UID_INVALID")
     if context.service_label != _role_label():
         raise _refuse("ISSUER_ROLE_LABEL_MISMATCH")
@@ -336,6 +338,7 @@ def _join_facts(
         service_label=context.service_label,
         installed_release=context.installed_release,
         config_digest=context.config_digest,
+        control_uid=control_uid,
         binding_evidence_digest=_digest_facts(document),
     )
 
@@ -370,7 +373,7 @@ def _issuer_receipt_mapping(
         "release_tree": expected.release_tree,
         "boot_id": expected.boot_id,
         "role": _ROLE,
-        "control_uid": _CONTROL_UID,
+        "control_uid": facts.control_uid,
         "app_peer_uid": expected.app_peer_uid,
         "policy": _policy_mapping(expected.policy),
         "binding_evidence_digest": facts.binding_evidence_digest,
@@ -422,8 +425,6 @@ def _produce_issuer_receipt(
     except PeerIdentityError as error:
         raise _refuse(error.code or "ISSUER_CAPTURE_UNAVAILABLE") from None
     _check_clocks(expected)
-    if capture.euid != _CONTROL_UID:
-        raise _refuse("ISSUER_CONTROL_UID_MISMATCH")
     facts_first = _qualify_once(capture, expected, endpoint_ns)
     _check_clocks(expected)
     facts_second = _qualify_once(capture, expected, endpoint_ns)
@@ -442,7 +443,7 @@ def _produce_issuer_receipt(
             release_tree=expected.release_tree,
             boot_id=expected.boot_id,
             policy=expected.policy,
-            control_uid=_CONTROL_UID,
+            control_uid=facts_first.control_uid,
             app_peer_uid=expected.app_peer_uid,
             _now_seconds=now_seconds,
         )
@@ -557,7 +558,7 @@ def _consume_issuer_receipt(
             document, owner_installation_id=expected.owner_installation_id,
             target_ref=expected.target_ref, release_commit=expected.release_commit,
             release_tree=expected.release_tree, boot_id=expected.boot_id,
-            policy=expected.policy, control_uid=_CONTROL_UID,
+            policy=expected.policy, control_uid=fresh_facts.control_uid,
             app_peer_uid=expected.app_peer_uid, _now_seconds=int(time.time()),
         )
     except ReleaseOwnerInputError:
