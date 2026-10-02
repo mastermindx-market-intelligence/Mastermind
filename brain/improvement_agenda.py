@@ -1,7 +1,9 @@
-"""The Improvement Agenda — the system critiques itself (W-L / L3; design §2).
+"""The Improvement Agenda — the portfolio/intelligence stack critiques itself (W-L / L3; design §2).
 
-The weekly self-audit that answers the user's standing question: *"what should we tell the AI to
-fix?"* It is the fusion engine over EVERY accountability artifact the stack already produces —
+The weekly self-audit answers the bounded question: *"what should we tell the portfolio/intelligence
+system to fix?"* It ranks evidence-backed self-improvement candidates inside that domain; current
+Strategic State owns the company-level portfolio and resource orientation. It is the fusion engine
+over the accountability artifacts this stack already produces —
 
     · per-seat calibration deltas (brain/calibration.py, via cio.review)
     · journal lesson clusters — ≥2 seats logging the same `why_wrong` taxonomy = a SYSTEMIC item
@@ -52,8 +54,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 _OUT = _ROOT / "data" / "agenda"
 _VALIDATION_DIR = _ROOT / "research" / "eyes" / "validation_runs"
 
-# Agent OS contributes dependency/readiness only.  The Improvement Agenda remains
-# the sole priority engine: this payload is joined after rank/age have been frozen.
+# Agent OS contributes dependency/readiness only. The Improvement Agenda remains
+# the sole priority engine inside its portfolio/intelligence self-improvement domain;
+# it is not the company-wide portfolio. This payload is joined after rank/age freeze.
 READINESS_SCHEMA = "agentos.readiness.v1"
 _READINESS_STATES = {"ready", "blocked", "in_progress", "done", "unknown"}
 
