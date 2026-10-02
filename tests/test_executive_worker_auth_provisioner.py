@@ -419,10 +419,10 @@ def test_preinstall_codex_path_retains_full_staging_attestation() -> None:
 
 def test_metadata_pinning_and_login_status_remain_strict_and_non_disclosing() -> None:
     source = _source()
-    assert 'CODEX_VERSION="0.147.0"' in source
+    assert 'CODEX_VERSION="0.159.2"' in source
     assert 'CODEX_TEAM_ID="2DC432GLL2"' in source
     assert (
-        'CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"'
+        'CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"'
         in source
     )
     assert "/usr/bin/codesign --verify --strict" in source

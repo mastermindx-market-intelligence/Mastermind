@@ -62,7 +62,7 @@ Plist parsing is in-process, and only validated projections enter the receipt.
 Unknown fields are deliberately not projected.
 
 The worker configuration and Codex attestation identify the installer's fixed
-destination, `/Library/Application Support/MastermindExecutive/bin/codex-0.147.0`.
+destination, `/Library/Application Support/MastermindExecutive/bin/codex-0.159.2`.
 The Homebrew executable is installer input, not the installed worker identity.
 
 Private config, tokens, keys, canaries, provider auth, DR, job, backup, relay,

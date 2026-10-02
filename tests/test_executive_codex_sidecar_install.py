@@ -122,13 +122,13 @@ def harness(tmp_path):
         '  /bin/launchctl disable', 1)[0]
     setup = {
         "SYSTEM_ROOT": str(system), "CODEX_BINARY": str(binary),
-        "CODEX_VERSION": "0.147.0", "CODEX_SHA256": hashlib.sha256(MAIN).hexdigest(),
+        "CODEX_VERSION": "0.159.2", "CODEX_SHA256": hashlib.sha256(MAIN).hexdigest(),
         "CODEX_CODE_MODE_HOST_SHA256": hashlib.sha256(HELPER).hexdigest(),
         "CODEX_CODE_MODE_HOST_TEMP": "",
         "PYTHON_BINARY": sys.executable,
     }
 
-    def run(*, fault="", target="", tamper=False, race=False, version="0.147.0", real_acl=False):
+    def run(*, fault="", target="", tamper=False, race=False, version="0.159.2", real_acl=False):
         setup["CODEX_VERSION"] = version
         script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in setup.items())
         observed_functions = functions if real_acl else functions.replace(
@@ -150,8 +150,8 @@ def harness(tmp_path):
 
 def test_exact_official_package_and_pre_mutation_wiring():
     text = INSTALL.read_text()
-    assert 'CODEX_CODE_MODE_HOST_SHA256="a059beb029cdbc989e72e23f8680be9f703cb6cf83d9598d91041f82178d018d"' in text
-    assert 'CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"' in text
+    assert 'CODEX_CODE_MODE_HOST_SHA256="ed79fbc9e1683feb29d73fb421f3e16932d178a459f63741754014c6c7ea6107"' in text
+    assert 'CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"' in text
     preflight = text.index('verify_codex_component "$CODEX_CODE_MODE_HOST_BINARY"')
     assert preflight < text.index('trap leave_installed_services_stopped EXIT')
     assert text.index('install_codex_code_mode_host || exit 65') < text.index('INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"')

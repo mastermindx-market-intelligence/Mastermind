@@ -12,9 +12,9 @@ WORKER_GID="451"
 CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"
 PROVIDER_HOME="/var/db/mastermind-executive/workers/codex-01/provider-home"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-CODEX_VERSION="0.147.0"
+CODEX_VERSION="0.159.2"
 CODEX_TEAM_ID="2DC432GLL2"
-CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 SYSTEM_BIN="$SYSTEM_ROOT/bin"
 SYSTEM_CONFIG="$SYSTEM_ROOT/config"
@@ -442,7 +442,7 @@ else
   }
   OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
   [ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
-    /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+    /bin/echo "Codex binary bytes do not match the exact reviewed 0.159.2 allowlist" >&2
     exit 65
   }
   OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
