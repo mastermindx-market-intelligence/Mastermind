@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import os
+import pwd
 import subprocess
 import sys
 from pathlib import Path
@@ -66,9 +67,10 @@ def prepared(tmp_path, monkeypatch):
 def test_sealed_v7_factory_binds_real_claude_primary_and_codex_validator(
     tmp_path, monkeypatch
 ):
+    import control_plane.claude_worker as claude_worker
     from control_plane.claude_worker import (
         ClaudeCodeWorkerAdapter,
-        ManagedModelPolicyObservation,
+        PersonalMaxManagedPolicyObserver,
         attest_claude_code_binary,
     )
     from control_plane.codex_worker import CodexWorkerAdapter
@@ -82,8 +84,11 @@ def test_sealed_v7_factory_binds_real_claude_primary_and_codex_validator(
     )
     for field in ("workspace_root", "run_root", "provider_home"):
         Path(value[field]).mkdir(mode=0o700)
+    provider_home = Path(value["provider_home"])
+    (provider_home / ".claude").mkdir(mode=0o700)
 
     claude_binary = _fixture_claude_binary(root, version="2.1.275")
+    (root / "mode").write_text("auth-max-worker-context", encoding="utf-8")
     claude_attestation = attest_claude_code_binary(
         claude_binary, allowed_versions=frozenset({"2.1.275"})
     )
@@ -106,28 +111,15 @@ def test_sealed_v7_factory_binds_real_claude_primary_and_codex_validator(
         "load_codex_attestation_receipt",
         lambda *args, **kwargs: validation_attestation,
     )
-
-    class Observer:
-        def __init__(self, *, binary, exact_model, generation, provider_home):
-            self.binary = binary
-            self.exact_model = exact_model
-            self.generation = generation
-            self.provider_home = provider_home
-
-        def observe(self):
-            return ManagedModelPolicyObservation(
-                exact_model=self.exact_model,
-                binary_sha256=self.binary.sha256,
-                binary_version=self.binary.version,
-                generation=self.generation,
-                allow_alternate_models=(),
-                fallback_models=(),
-            )
-
+    monkeypatch.setattr(
+        claude_worker,
+        "_darwin_managed_policy_source_present",
+        lambda home: False,
+    )
     monkeypatch.setattr(
         worker,
         "_sealed_native_claude_adapter_types",
-        lambda: (ClaudeCodeWorkerAdapter, Observer),
+        lambda: (ClaudeCodeWorkerAdapter, PersonalMaxManagedPolicyObserver),
     )
 
     broker = worker._build_broker(value, autonomy_guard=None)
@@ -139,6 +131,13 @@ def test_sealed_v7_factory_binds_real_claude_primary_and_codex_validator(
     assert broker.operator_harness_armed is False
     assert broker.operator_adapter_factory is None
     assert broker.adapter.exact_model == "claude-fable-5-1"
+    child_environment = (root / "environment").read_text(encoding="utf-8")
+    assert f"CLAUDE_CONFIG_DIR={provider_home / '.claude'}" in child_environment
+    assert "HOME=/var/empty" in child_environment
+    principal = pwd.getpwuid(os.geteuid()).pw_name
+    assert f"USER={principal}" in child_environment
+    assert f"LOGNAME={principal}" in child_environment
+    assert broker.adapter._configuration.native_config_dir == provider_home / ".claude"
 
 
 def test_factory_uses_the_exact_claude_dependencies_without_a_flat_provider(tmp_path, monkeypatch):

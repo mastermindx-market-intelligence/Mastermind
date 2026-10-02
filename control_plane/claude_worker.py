@@ -259,6 +259,7 @@ class _ClaudeConfiguration:
     max_turns: int
     managed_observation: ManagedModelPolicyObservation
     managed_policy_generation: int
+    native_config_dir: Path | None
 
 
 @dataclasses.dataclass
@@ -708,11 +709,15 @@ def _provider_environment_key_is_denied(key: str) -> bool:
     )
 
 
-def _closed_auth_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+def _closed_auth_environment(
+    source: Mapping[str, str] | None = None,
+    *,
+    provider_home: Path | None = None,
+) -> dict[str, str]:
     incoming = os.environ if source is None else source
     if any(not isinstance(key, str) or _provider_environment_key_is_denied(key) for key in incoming):
         raise ClaudeAuthStatusError("provider credential environment is refused")
-    return {
+    result = {
         "HOME": "/var/empty",
         "PATH": _SAFE_PATH,
         "LANG": "C",
@@ -720,10 +725,39 @@ def _closed_auth_environment(source: Mapping[str, str] | None = None) -> dict[st
         "TMPDIR": "/tmp",
         "TZ": "UTC",
     }
+    if provider_home is not None:
+        home = Path(provider_home)
+        try:
+            principal_name = pwd.getpwuid(os.geteuid()).pw_name
+            canonical_home = home.resolve(strict=True)
+            config_dir = (canonical_home / ".claude").resolve(strict=True)
+        except (KeyError, OSError):
+            raise ClaudeAuthStatusError("worker auth context is unavailable") from None
+        if (
+            not principal_name
+            or _CONTROL_RE.search(principal_name)
+            or not canonical_home.is_absolute()
+            or config_dir != canonical_home / ".claude"
+        ):
+            raise ClaudeAuthStatusError("worker auth context is unavailable")
+        result.update(
+            {
+                "USER": principal_name,
+                "LOGNAME": principal_name,
+                "CLAUDE_CONFIG_DIR": str(config_dir),
+            }
+        )
+    return result
 
 
-def _closed_launch_environment(home: Path, tmp: Path, spec: WorkerLaunchSpec) -> dict[str, str]:
-    return {
+def _closed_launch_environment(
+    home: Path,
+    tmp: Path,
+    spec: WorkerLaunchSpec,
+    *,
+    native_config_dir: Path | None = None,
+) -> dict[str, str]:
+    result = {
         "HOME": str(home),
         "TMPDIR": str(tmp),
         "PATH": _SAFE_PATH,
@@ -739,6 +773,9 @@ def _closed_launch_environment(home: Path, tmp: Path, spec: WorkerLaunchSpec) ->
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_OPTIONAL_LOCKS": "0",
     }
+    if native_config_dir is not None:
+        result["CLAUDE_CONFIG_DIR"] = str(native_config_dir)
+    return result
 
 
 def _redacted_launch_argv(argv: Sequence[str]) -> tuple[str, ...]:
@@ -1004,7 +1041,10 @@ def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mappin
 
 
 def _observe_auth_status_for_binary(
-    binary: BinaryAttestation, *, timeout_seconds: float = 15.0
+    binary: BinaryAttestation,
+    *,
+    timeout_seconds: float = 15.0,
+    provider_home: Path | None = None,
 ) -> ClaudeAuthObservation:
     """Observe native auth while projecting only non-identifying readiness facts."""
 
@@ -1023,7 +1063,7 @@ def _observe_auth_status_for_binary(
             "--json",
         ),
         timeout=timeout,
-        env=_closed_auth_environment(),
+        env=_closed_auth_environment(provider_home=provider_home),
     )
     parsed = _strict_json(
         stdout, maximum=_MAX_AUTH_JSON_BYTES, error_type=ClaudeAuthStatusError
@@ -1096,6 +1136,42 @@ def _observe_auth_status_for_binary(
     )
 
 
+def _darwin_managed_preferences_present(defaults: Path) -> bool:
+    """Distinguish a missing managed-preference domain from probe failure."""
+
+    if not defaults.is_file():
+        raise ClaudeWorkerContractError(
+            "managed Claude preference source is not observable"
+        )
+    try:
+        stdout, stderr, returncode = _run_bounded_auth_status(
+            (str(defaults), "read", "com.anthropic.claudecode"),
+            timeout=5.0,
+            env={"PATH": _SAFE_PATH, "LANG": "C", "LC_ALL": "C", "TZ": "UTC"},
+        )
+    except ClaudeAuthStatusError:
+        raise ClaudeWorkerContractError(
+            "managed Claude preference source is not observable"
+        ) from None
+    if returncode == 0:
+        return True
+    try:
+        diagnostic = stderr.decode("utf-8", "strict")
+    except UnicodeDecodeError:
+        raise ClaudeWorkerContractError(
+            "managed Claude preference source is ambiguous"
+        ) from None
+    if (
+        returncode == 1
+        and not stdout
+        and "Domain com.anthropic.claudecode does not exist" in diagnostic
+    ):
+        return False
+    raise ClaudeWorkerContractError(
+        "managed Claude preference source is ambiguous"
+    )
+
+
 def _darwin_managed_policy_source_present(provider_home: Path) -> bool:
     """Observe only source presence; never read managed-policy contents."""
 
@@ -1119,36 +1195,7 @@ def _darwin_managed_policy_source_present(provider_home: Path) -> bool:
             ) from None
         return True
 
-    defaults = Path("/usr/bin/defaults")
-    if not defaults.is_file():
-        raise ClaudeWorkerContractError(
-            "managed Claude preference source is not observable"
-        )
-    try:
-        completed = subprocess.run(
-            (str(defaults), "read", "com.anthropic.claudecode"),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=5.0,
-            check=False,
-            env={"PATH": _SAFE_PATH, "LANG": "C", "LC_ALL": "C", "TZ": "UTC"},
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise ClaudeWorkerContractError(
-            "managed Claude preference source is not observable"
-        ) from None
-    if len(completed.stdout) > _MAX_AUTH_JSON_BYTES or len(completed.stderr) > _MAX_STDERR_BYTES:
-        raise ClaudeWorkerContractError(
-            "managed Claude preference observation exceeded its bound"
-        )
-    if completed.returncode == 0:
-        return True
-    if completed.returncode != 1:
-        raise ClaudeWorkerContractError(
-            "managed Claude preference source is ambiguous"
-        )
-    return False
+    return _darwin_managed_preferences_present(Path("/usr/bin/defaults"))
 
 
 class PersonalMaxManagedPolicyObserver:
@@ -1192,7 +1239,11 @@ class PersonalMaxManagedPolicyObserver:
             raise ClaudeWorkerContractError(
                 "managed Claude policy source is present for the sealed worker"
             )
-        auth = _observe_auth_status_for_binary(self.binary, timeout_seconds=15.0)
+        auth = _observe_auth_status_for_binary(
+            self.binary,
+            timeout_seconds=15.0,
+            provider_home=self.provider_home,
+        )
         if (
             not auth.ready
             or auth.authenticated is not True
@@ -1345,6 +1396,19 @@ class ClaudeCodeWorkerAdapter:
             generation=generation,
             stage="configured",
         )
+        config_dir = None
+        if type(managed_policy_observer) is PersonalMaxManagedPolicyObserver:
+            candidate = managed_policy_observer.provider_home / ".claude"
+            try:
+                config_dir = candidate.resolve(strict=True)
+            except OSError:
+                raise ClaudeWorkerContractError(
+                    "native Claude config directory is unavailable"
+                ) from None
+            if not candidate.is_absolute() or config_dir != candidate:
+                raise ClaudeWorkerContractError(
+                    "native Claude config directory must be canonical"
+                )
         object.__setattr__(
             self,
             "_configuration",
@@ -1355,6 +1419,7 @@ class ClaudeCodeWorkerAdapter:
                 max_turns=max_turns,
                 managed_observation=observation,
                 managed_policy_generation=generation,
+                native_config_dir=config_dir,
             ),
         )
         object.__setattr__(self, "_managed_policy_observer", managed_policy_observer)
@@ -1854,7 +1919,12 @@ class ClaudeCodeWorkerAdapter:
             require_passed=bool(spec.require_secret_canary),
         )
         argv = self._launch_argv(spec, schema)
-        environment = _closed_launch_environment(home, tmp, spec)
+        environment = _closed_launch_environment(
+            home,
+            tmp,
+            spec,
+            native_config_dir=self._configuration.native_config_dir,
+        )
         stdout_path = run_dir / "logs" / "stdout.json"
         stderr_path = run_dir / "logs" / "stderr.log"
         result_path = run_dir / "output" / "result.json"
