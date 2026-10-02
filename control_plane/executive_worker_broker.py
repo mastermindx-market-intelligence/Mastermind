@@ -467,7 +467,9 @@ class OperatorAttemptResource(Protocol):
 
     def stop(self) -> None: ...
 
-    def seal_after_uid_sweep(self, sweep: UIDSweepReceipt) -> BrowserReviewReceipt: ...
+    def seal_after_uid_sweep(
+        self, sweep: UIDSweepReceipt
+    ) -> BrowserReviewReceipt | None: ...
 
 
 OperatorAdapterFactory = Callable[
@@ -2901,28 +2903,29 @@ class ExecutiveWorkerBroker:
                     state.resource.seal_after_uid_sweep,
                     sweep,
                 )
-                if not isinstance(artifact_receipt, BrowserReviewReceipt):
-                    raise BrokerStateError(
-                        "browser resource returned an untyped artifact receipt"
-                    )
-                try:
-                    artifact_receipt = browser_review_receipt(
-                        artifact_receipt.to_wire()
-                    )
-                except BrowserReviewError as exc:
-                    raise BrokerStateError(
-                        "browser resource returned an invalid closed artifact receipt"
-                    ) from exc
-                if (
-                    artifact_receipt.attempt_id != state.epoch.attempt_id
-                    or artifact_receipt.session_epoch_id
-                    != state.epoch.session_epoch_id
-                    or artifact_receipt.process_generation_id
-                    != state.generation.process_generation_id
-                ):
-                    raise BrokerStateError(
-                        "browser receipt generation identity drifted"
-                    )
+                if artifact_receipt is not None:
+                    if not isinstance(artifact_receipt, BrowserReviewReceipt):
+                        raise BrokerStateError(
+                            "operator resource returned an untyped artifact receipt"
+                        )
+                    try:
+                        artifact_receipt = browser_review_receipt(
+                            artifact_receipt.to_wire()
+                        )
+                    except BrowserReviewError as exc:
+                        raise BrokerStateError(
+                            "browser resource returned an invalid closed artifact receipt"
+                        ) from exc
+                    if (
+                        artifact_receipt.attempt_id != state.epoch.attempt_id
+                        or artifact_receipt.session_epoch_id
+                        != state.epoch.session_epoch_id
+                        or artifact_receipt.process_generation_id
+                        != state.generation.process_generation_id
+                    ):
+                        raise BrokerStateError(
+                            "browser receipt generation identity drifted"
+                        )
             await self._remember_operator_terminal(
                 state, observation, artifact_receipt
             )

@@ -717,6 +717,75 @@ def test_browser_resource_is_generation_bound_and_sealed_only_after_uid_sweep(
     asyncio.run(scenario())
 
 
+def test_nonartifact_operator_resource_seals_after_uid_sweep(
+    tmp_path: Path,
+) -> None:
+    lifecycle: list[str] = []
+
+    class Resource:
+        def start(self) -> None:
+            lifecycle.append("resource_start")
+
+        def stop(self) -> None:
+            lifecycle.append("resource_stop")
+
+        def seal_after_uid_sweep(self, sweep):
+            assert sweep.passed is True
+            lifecycle.append("receipt_seal")
+            return None
+
+    async def scenario() -> None:
+        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+
+        def resource_factory(_workspace, requested, _epoch, _generation):
+            assert requested == profile
+            adapters[-1].lifecycle = lifecycle
+            return Resource()
+
+        broker.operator_resource_factory = resource_factory
+        sweeper.lifecycle = lifecycle
+        epoch = SessionEpochRef("epoch-gui", "ATT-GUI", "codex-01", 1)
+        generation = ProcessGenerationRef(
+            "generation-gui", "epoch-gui", 1, "codex-01"
+        )
+        await broker.execute(
+            _request(
+                "ohf-start",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:start:ATT-GUI")),
+                    "requested": to_wire(profile),
+                    "epoch": to_wire(epoch),
+                    "generation": to_wire(generation),
+                },
+                "start-gui",
+            ),
+            peer=peer,
+        )
+        stopped = await broker.execute(
+            _request(
+                "ohf-stop",
+                {
+                    "operation_id": to_wire(OperationId("ohf-op:stop-gui")),
+                    "generation": to_wire(generation),
+                },
+                "stop-gui",
+            ),
+            peer=peer,
+        )
+        assert lifecycle == [
+            "resource_start",
+            "resource_bind",
+            "provider_start",
+            "provider_stop",
+            "resource_stop",
+            "uid_sweep:operator_terminal",
+            "receipt_seal",
+        ]
+        assert stopped["result"]["artifact_receipt"] is None
+
+    asyncio.run(scenario())
+
+
 def test_browser_receipt_is_not_sealed_when_uid_sweep_is_not_passing(
     tmp_path: Path,
 ) -> None:
