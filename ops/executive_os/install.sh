@@ -38,9 +38,9 @@ PINNED_PYTHON_RUNTIME_ROOT="/Library/Frameworks/Python.framework/Versions/3.12"
 PINNED_PYTHON_BINARY="$PINNED_PYTHON_RUNTIME_ROOT/bin/python3.12"
 PYTHON_RUNTIME_RECEIPT="/Library/Application Support/MastermindExecutive/python-runtime.json"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-CODEX_CODE_MODE_HOST_SHA256="a059beb029cdbc989e72e23f8680be9f703cb6cf83d9598d91041f82178d018d"
-CODEX_VERSION="0.147.0"
-CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+CODEX_CODE_MODE_HOST_SHA256="ed79fbc9e1683feb29d73fb421f3e16932d178a459f63741754014c6c7ea6107"
+CODEX_VERSION="0.159.2"
+CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 
 usage() {
   /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
@@ -377,7 +377,7 @@ PY
 }
 # --- BEGIN Codex package component validation ---
 # Codex resolves this native helper beside its executable. Both hashes come
-# from the same signed @openai/codex@0.147.0-darwin-arm64 package.
+# from the same signed @openai/codex@0.159.2-darwin-arm64 package.
 verify_codex_no_acl() {
   local acl_listing
   # Darwin stat reports POSIX mode bits only. ls -e emits ACL entries on
@@ -475,8 +475,8 @@ PY
 # --- END Codex package component validation ---
 
 # Check the complete package before stopping any service, even on reinstall.
-[ "$CODEX_VERSION" = "0.147.0" ] || {
-  /bin/echo "Codex package version differs from the reviewed 0.147.0 allowlist" >&2
+[ "$CODEX_VERSION" = "0.159.2" ] || {
+  /bin/echo "Codex package version differs from the reviewed 0.159.2 allowlist" >&2
   exit 65
 }
 CODEX_CODE_MODE_HOST_BINARY="$(/usr/bin/dirname "$CODEX_BINARY")/codex-code-mode-host"
@@ -942,7 +942,7 @@ INSTALLED_VERSION="$("$INSTALLED_CODEX" --version 2>/dev/null | /usr/bin/awk '$1
 }
 INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{print $1}')"
 [ "$INSTALLED_HASH" = "$CODEX_SHA256" ] || {
-  /bin/echo "installed Codex bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+  /bin/echo "installed Codex bytes do not match the exact reviewed 0.159.2 allowlist" >&2
   exit 65
 }
 [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$INSTALLED_CODEX")" = "0:0:555" ] || {

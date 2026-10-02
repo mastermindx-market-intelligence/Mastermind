@@ -775,21 +775,28 @@
   function openBinding(binding, statusNode, trigger, targetSurface) {
     if (!binding || !binding.binding_id) return Promise.resolve();
     if (trigger) trigger.disabled = true;
-    if (statusNode) statusNode.textContent = targetSurface === "desktop" ? "Opening in Desktop…" : "Opening…";
+    if (statusNode) {
+      statusNode.className = "ccr-binding-meta ccr-navigation-status";
+      statusNode.textContent = targetSurface === "desktop" ? "Opening in Desktop…" : "Opening…";
+    }
     var request = { binding_id: binding.binding_id };
     if (targetSurface) request.target_surface = targetSurface;
     return postJSON("/api/open", request).then(function (outcome) {
       if (outcome && outcome.ok) {
-        if (statusNode) statusNode.textContent = "Opened · " + safeText(outcome.action, "provider action");
+        if (statusNode) statusNode.textContent = outcome.action === "opened_desktop"
+          ? "Desktop handoff accepted; visible app state not checked."
+          : "Opened · " + safeText(outcome.action, "provider action");
       } else if (statusNode) {
-        statusNode.textContent = "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
-        statusNode.className = "ccr-binding-meta ccr-problem";
+        statusNode.textContent = outcome && outcome.failure_kind === "effect_unknown"
+          ? "Handoff uncertain. Inspect the bound session before retrying."
+          : "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
+        statusNode.className = "ccr-binding-meta ccr-navigation-status ccr-problem";
       }
       return outcome;
     }).catch(function () {
       if (statusNode) {
-        statusNode.textContent = "Did not open · local server unavailable";
-        statusNode.className = "ccr-binding-meta ccr-problem";
+        statusNode.textContent = "Open outcome unknown: response unavailable. Inspect the bound session before retrying.";
+        statusNode.className = "ccr-binding-meta ccr-navigation-status ccr-problem";
       }
       return null;
     }).finally(function () {
@@ -799,9 +806,18 @@
 
   function openBindingButton(binding, label, targetSurface) {
     var confidence = bindingConfidence(binding);
+    var status = document.createElement("span");
+    status.className = "ccr-binding-meta ccr-navigation-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
     var btn = button(label || OPEN_LABEL[binding.role] || "Open", "ccr-open-button", function (event) {
       event.stopPropagation();
-      openBinding(binding, null, btn, targetSurface).then(function () { loadState(); });
+      if (!status.parentNode && btn.parentNode) btn.parentNode.appendChild(status);
+      return openBinding(binding, status, btn, targetSurface).then(function (outcome) {
+        // Keep failure/uncertainty visible. A refresh used to discard it.
+        if (outcome && outcome.ok) loadState();
+        return outcome;
+      });
     });
     btn.disabled = !confidence.openable;
     return btn;
@@ -865,10 +881,12 @@
         copy.appendChild(el("div", { text: workTitle(binding.work_ref), className: "ccr-destination-title" }));
         copy.appendChild(el("div", { text: safeText(binding.work_ref) + " · " + bindingConfidence(binding).state, className: "ccr-destination-sub" }));
         row.appendChild(copy);
-        row.appendChild(openBindingButton(binding, "Open"));
+        var actions = el("div", { className: "ccr-navigation-actions" });
+        actions.appendChild(openBindingButton(binding, "Open"));
         if (binding.provider === "claude_code") {
-          row.appendChild(openBindingButton(binding, "Desktop", "desktop"));
+          actions.appendChild(openBindingButton(binding, "Desktop", "desktop"));
         }
+        row.appendChild(actions);
         list.appendChild(row);
       });
       details.appendChild(list);

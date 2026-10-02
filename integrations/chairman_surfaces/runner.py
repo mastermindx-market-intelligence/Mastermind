@@ -14,6 +14,7 @@ argv never touches the OS.
 from __future__ import annotations
 
 import errno
+import math
 import os
 import pty
 import select
@@ -96,118 +97,123 @@ def run_argv(argv: list[str], *, timeout: float = 20.0, max_bytes: int | None = 
     }
 
 
+class _BoundedPTYOutput:
+    """Keep a bounded prefix while still draining the child to prevent blockage."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.data = bytearray()
+        self.truncated = False
+
+    def append(self, chunk: bytes) -> None:
+        remaining = self.limit - len(self.data)
+        self.data.extend(chunk[:remaining])
+        self.truncated = self.truncated or len(chunk) > remaining
+
+
+def _stop_pty_process(process) -> bool:
+    """Bounded cleanup of our private process group; report direct-child reap only.
+
+    A descendant may retain the PTY after the direct child exits. Signal the
+    private group on failure even in that case. Reaping this child does not
+    attest that a separately launched Desktop app was stopped or never opened.
+    """
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, sig)
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=1.0)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+    return process.poll() is not None
+
+
 def run_argv_pty(
     argv: list[str], *, timeout: float = 20.0, max_bytes: int | None = None,
     cwd: str | None = None,
 ) -> dict:
-    """Run ``argv`` attached to a real PTY and return bounded combined output.
+    """Run native handoff argv with a PTY, bounded capture and bounded draining.
 
-    Some provider-native handoff commands deliberately refuse redirected stdio.
-    This runner is the single subprocess boundary for those commands: the child
-    receives one private PTY for stdin/stdout/stderr, while the parent captures
-    only bounded output. ``cwd`` is optional and must be an absolute path.
+    The original four result fields are retained. ``started`` reports only
+    successful Popen, never the app handoff. ``output_truncated`` is explicit;
+    ``process_reaped`` covers the direct child, not arbitrary app processes.
+    The deadline covers post-exit draining too; failure cleanup has at most
+    two additional one-second waits. No command is retried.
     """
-    validated = _validate_argv(argv)
+    validated = list(_validate_argv(argv))
     if cwd is not None:
         if (not isinstance(cwd, str) or not os.path.isabs(cwd)
                 or "\x00" in cwd or "\n" in cwd):
             raise ValueError("cwd must be an absolute path string without NUL/newline")
+    if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+            or timeout <= 0):
+        raise ValueError("timeout must be finite and positive")
+    limit = _MAX_BYTES if max_bytes is None else max_bytes
+    if type(limit) is not int or limit < 0:
+        raise ValueError("max_bytes must be a non-negative integer")
 
     master_fd = slave_fd = None
     process = None
-    output = bytearray()
-    timed_out = False
+    output = _BoundedPTYOutput(limit)
+
+    def outcome(code=None, *, timed_out=False, error="", reaped=True):
+        return {
+            "code": code,
+            "stdout": _cap(bytes(output.data), limit),
+            "stderr": _cap(error, limit),
+            "timed_out": timed_out,
+            "started": process is not None,
+            "output_truncated": output.truncated,
+            "process_reaped": reaped,
+        }
+
     try:
+        deadline = time.monotonic() + timeout
         master_fd, slave_fd = pty.openpty()
         process = subprocess.Popen(
-            validated,
-            shell=False,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            cwd=cwd,
-            close_fds=True,
-            start_new_session=True,
+            validated, shell=False, stdin=slave_fd, stdout=slave_fd,
+            stderr=slave_fd, cwd=cwd, close_fds=True, start_new_session=True,
         )
         os.close(slave_fd)
         slave_fd = None
-        deadline = time.monotonic() + timeout
         eof = False
-
         while True:
-            if not eof:
-                remaining = max(0.0, deadline - time.monotonic())
-                readable, _, _ = select.select([master_fd], [], [], min(0.05, remaining))
-                if readable:
-                    try:
-                        chunk = os.read(master_fd, 4096)
-                    except OSError as exc:
-                        if exc.errno != errno.EIO:
-                            raise
-                        chunk = b""
-                    if chunk:
-                        output.extend(chunk)
-                    else:
-                        eof = True
-
             code = process.poll()
-            if code is not None:
-                # Darwin PTYs commonly raise EIO after the slave closes. One
-                # bounded drain keeps the final provider receipt if it arrived
-                # immediately before process exit.
-                if not eof:
-                    while True:
-                        readable, _, _ = select.select([master_fd], [], [], 0)
-                        if not readable:
-                            break
-                        try:
-                            chunk = os.read(master_fd, 4096)
-                        except OSError as exc:
-                            if exc.errno == errno.EIO:
-                                break
-                            raise
-                        if not chunk:
-                            break
-                        output.extend(chunk)
-                return {
-                    "code": code,
-                    "stdout": _cap(bytes(output), max_bytes),
-                    "stderr": "",
-                    "timed_out": False,
-                }
-
-            if time.monotonic() >= deadline:
-                timed_out = True
+            if code is not None and eof:
+                return outcome(code)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return outcome(timed_out=True, reaped=_stop_pty_process(process))
+            if eof:
+                # EOF does not imply exit. Avoid a busy spin if the child has
+                # closed its descriptors but continues running.
                 try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except OSError:
-                    pass
-                try:
-                    process.wait(timeout=1.0)
+                    process.wait(timeout=min(0.05, remaining))
                 except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-                    process.wait(timeout=1.0)
-                return {
-                    "code": None,
-                    "stdout": _cap(bytes(output), max_bytes),
-                    "stderr": "",
-                    "timed_out": timed_out,
-                }
+                    pass
+                continue
+            readable, _, _ = select.select([master_fd], [], [], min(0.05, remaining))
+            if readable:
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError as exc:
+                    if exc.errno != errno.EIO:
+                        raise
+                    chunk = b""
+                if chunk:
+                    output.append(chunk)
+                else:
+                    eof = True
     except OSError as exc:
-        if process is not None and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
-                pass
-        return {
-            "code": None,
-            "stdout": _cap(bytes(output), max_bytes),
-            "stderr": _cap(str(exc), max_bytes),
-            "timed_out": False,
-        }
+        reaped = process is None or _stop_pty_process(process)
+        return outcome(error=str(exc), reaped=reaped)
+    except BaseException:
+        # Interrupts propagate, but never abandon a direct child we created.
+        if process is not None:
+            _stop_pty_process(process)
+        raise
     finally:
         for fd in (slave_fd, master_fd):
             if fd is not None:

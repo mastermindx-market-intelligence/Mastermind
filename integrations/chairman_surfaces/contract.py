@@ -102,7 +102,9 @@ def safe_abs_dir(path: object) -> bool:
 # OpenOutcome
 # ---------------------------------------------------------------------------
 
-#: Closed vocabulary of OpenOutcome failure kinds.
+#: Closed vocabulary of OpenOutcome failure kinds. ``effect_unknown`` means
+#: navigation may have occurred: inspect the original target before retrying.
+#: It does not claim a Runtime effect, liveness, or a provider model turn.
 #:
 #: ``unsupported_surface`` (Sol architecture correction, MAS-113,
 #: 2026-08-22): the provider's installed official surface set documents no
@@ -113,7 +115,7 @@ def safe_abs_dir(path: object) -> bool:
 FAILURE_KINDS = frozenset({
     "invalid_binding", "unsafe_token", "disallowed_target", "not_installed",
     "not_running", "not_found", "ambiguous", "runner_error", "refused",
-    "unsupported_surface",
+    "unsupported_surface", "effect_unknown",
 })
 
 
@@ -147,7 +149,7 @@ def _outcome(
 
 
 def refused(provider: str, binding_id: str | None, failure_kind: str, detail: str) -> dict:
-    """Build a refusal :class:`OpenOutcome`. Never invokes the runner.
+    """Build an unsuccessful :class:`OpenOutcome`; this helper performs no I/O.
 
     Always ``verified=False`` — a refusal never proves anything.
     """
