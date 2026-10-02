@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import re
 import subprocess
@@ -499,6 +500,25 @@ class ExecutiveOperatorSupervisor:
         )
 
     @staticmethod
+    def _turn_operation_id(
+        attempt_id: str,
+        prompt: str,
+        commission: VerifiedCommission | None,
+    ) -> OperationId:
+        """Bind commission-bearing TX-5 to the exact model-visible input.
+
+        Source-free jobs retain their historical operation identity. A strict
+        immutable commission changes the operation identity to the exact prompt
+        digest, so a pre-feature turn cannot later inherit newly available
+        commission bytes during recovery.
+        """
+
+        if commission is None:
+            return OperationId(f"ohf-op:turn:{attempt_id}")
+        prompt_digest = hashlib.sha256(prompt.encode("utf-8", errors="strict")).hexdigest()
+        return OperationId(f"ohf-op:turn-input:{prompt_digest}")
+
+    @staticmethod
     def _terminal_payload(
         *,
         job: Job,
@@ -685,7 +705,7 @@ class ExecutiveOperatorSupervisor:
         lease: AttemptLease,
         *,
         require_turn: bool = True,
-    ) -> tuple[OperatorSessionReceipt, TurnRef | None]:
+    ) -> tuple[OperatorSessionReceipt, TurnRef | None, OperationId | None]:
         """Reconstruct exact CURRENT G1, optionally before its first turn."""
 
         profile_raw = lease.attempt.requested_execution_profile
@@ -798,7 +818,7 @@ class ExecutiveOperatorSupervisor:
                 "operator recovery has invalid begin-turn INTENT cardinality"
             )
         if not turn_matches:
-            return session, None
+            return session, None, None
         turn_event, turn_payload = turn_matches[0]
         operation = OperationId(str(turn_event["command_id"]))
         applied = self.runtime.events.get_event_by_command_id(
@@ -843,7 +863,7 @@ class ExecutiveOperatorSupervisor:
             process_generation_id=generation.process_generation_id,
             attempt_id=lease.attempt.attempt_id,
         )
-        return session, turn
+        return session, turn, operation
 
     def _cleanup_failed_session(
         self,
@@ -948,7 +968,11 @@ class ExecutiveOperatorSupervisor:
         orchestrator = self._orchestrator(lease, adapter)
         attempt_id = lease.attempt.attempt_id
         start_operation = OperationId(f"ohf-op:start:{attempt_id}")
-        turn_operation = OperationId(f"ohf-op:turn:{attempt_id}")
+        turn_operation = self._turn_operation_id(
+            attempt_id,
+            prompt_by_turn["pending"],
+            verified_commission,
+        )
         stop_operation = OperationId(f"ohf-op:stop:{attempt_id}")
         session: OperatorSessionReceipt | None = None
         try:
@@ -1147,7 +1171,7 @@ class ExecutiveOperatorSupervisor:
                 )
         process_was_live = False
         try:
-            session, existing_turn = self._recovery_session(
+            session, existing_turn, existing_turn_operation = self._recovery_session(
                 lease,
                 require_turn=False,
             )
@@ -1166,10 +1190,27 @@ class ExecutiveOperatorSupervisor:
                         f"operator immutable commission verification failed: {exc}"
                     ) from exc
             # Cancellation/containment of an already-live writer must never depend
-            # on later availability of the immutable commission.  No new/resumed
-            # turn is permitted without verification; the source-free prompt here
-            # is only a loader placeholder for reconcile/cancel mechanics.
+            # on later availability of the immutable commission. No new/resumed
+            # turn is permitted without verification; this source-free prompt is
+            # only a loader placeholder for reconcile/cancel mechanics.
             prompt = self._prompt(job, lease, verified_commission)
+            expected_turn_operation = (
+                self._turn_operation_id(attempt_id, prompt, verified_commission)
+                if verified_commission is not None
+                else None
+            )
+            if (
+                expected_turn_operation is not None
+                and existing_turn is not None
+                and (
+                    existing_turn_operation is None
+                    or existing_turn_operation.command_id
+                    != expected_turn_operation.command_id
+                )
+            ):
+                raise ExecutiveOperatorSupervisorError(
+                    "operator recovery turn input is not bound to the verified commission"
+                )
             adapter = self._adapter_for_attempt(
                 lease, session.launch.requested, lambda _turn: prompt, recovery=True
             )
@@ -1294,8 +1335,12 @@ class ExecutiveOperatorSupervisor:
                 if existing_turn is None:
                     turn = orchestrator.run_turn(
                         session,
-                        operation_id=OperationId(
-                            f"ohf-op:recover-first-turn:{attempt_id}"
+                        operation_id=(
+                            expected_turn_operation
+                            if expected_turn_operation is not None
+                            else OperationId(
+                                f"ohf-op:recover-first-turn:{attempt_id}"
+                            )
                         ),
                         timeout_seconds=300.0,
                     )
@@ -1354,8 +1399,12 @@ class ExecutiveOperatorSupervisor:
                 )
                 turn = orchestrator.run_turn(
                     resumed,
-                    operation_id=OperationId(
-                        f"ohf-op:recover-turn:{attempt_id}"
+                    operation_id=(
+                        expected_turn_operation
+                        if expected_turn_operation is not None
+                        else OperationId(
+                            f"ohf-op:recover-turn:{attempt_id}"
+                        )
                     ),
                     timeout_seconds=300.0,
                 )

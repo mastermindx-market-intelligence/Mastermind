@@ -529,6 +529,7 @@ def _seed_dispatchable_operator_planner(
     commission_content: bytes | None = None,
     commission_repository: str = "mastermindx-market-intelligence/Mastermind",
     commission_ref_commit: str | None = None,
+    clock: _Clock | None = None,
 ):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
@@ -565,7 +566,10 @@ def _seed_dispatchable_operator_planner(
         text=True,
     ).stdout.strip()
 
-    runtime = Runtime.at(tmp_path / "runtime")
+    runtime = Runtime.at(
+        tmp_path / "runtime",
+        **({"clock": clock, "lease_seconds": 2} if clock is not None else {}),
+    )
     router = ModelRouter.load()
     sealed = router.model_aliases["coo.sealed"]
     operator = router.model_aliases["coo.operator.readonly"]
@@ -659,6 +663,214 @@ def _seed_dispatchable_operator_planner(
         command_id=f"coo-cycle:{root.job_id}:create-planner:0",
     )
     return runtime, root, planner
+
+
+
+def _seed_commission_bound_legacy_turn(tmp_path: Path):
+    """Create the exact pre-feature hazard: valid commission, legacy TX-5 id."""
+
+    clock = _Clock()
+    commission = b"# Legacy Operator commission\n\nUse this exact immutable brief.\n"
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path,
+        commission_content=commission,
+        clock=clock,
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    assert dispatch.lease_token is not None
+
+    # _requested_profile reads only lease.attempt. Keep the fixture on the real
+    # production constructor without introducing a second profile builder.
+    class _LeaseView:
+        attempt = dispatch.attempt
+
+    seed_supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=lambda _loader: None,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+    profile = seed_supervisor._requested_profile(planner, _LeaseView())  # type: ignore[arg-type]
+    harness = runtime.operator_harness
+    sealed = harness.seal_operator_harness_attempt(
+        dispatch.attempt.attempt_id,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+    )
+    start_op = OperationId("ohf-op:p1-legacy-start")
+    epoch, g1 = harness.reserve_start(
+        sealed.attempt_id,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        operation_id=start_op,
+    )
+    process = ProcessIdentityObservation(4101, 4101, "start-4101", "boot-test")
+    harness.bind_start_result(
+        epoch=epoch,
+        generation=g1,
+        operation_id=start_op,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        provider_session_id="SESSION-G1",
+        process=process,
+    )
+    principal = OperatorPrincipalObservation(
+        attempt_id=sealed.attempt_id,
+        worker_id="worker-a",
+        process_generation_id=g1.process_generation_id,
+        provider_session_id="SESSION-G1",
+        process_identity={
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        },
+        os_principal_name="fixture-principal",
+        os_principal_uid=os.getuid(),
+        provider_home_identity={
+            "path": "/tmp/mastermind-g2-provider-home",
+            "device": 3,
+            "inode": 4,
+            "uid": os.getuid(),
+            "gid": os.getgid(),
+            "mode": 0o700,
+        },
+        observed_at_ms=runtime.store.now_ms(),
+    )
+    harness.seal_attestation(
+        generation=g1,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        requested=profile,
+        attestation=_attestation(profile),
+        principal_observation=principal,
+    )
+
+    # This is exactly the pre-fix operation identity. It proves only that a turn
+    # happened; it carries no evidence of which immutable commission was sent.
+    legacy_turn_op = OperationId(f"ohf-op:turn:{dispatch.attempt.attempt_id}")
+    turn = harness.reserve_turn(
+        epoch=epoch,
+        generation=g1,
+        operation_id=legacy_turn_op,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    harness.acknowledge_turn(
+        turn=turn,
+        operation_id=legacy_turn_op,
+        fence_generation=sealed.fence_generation,
+        lease_token=dispatch.lease_token,
+        observation=TurnStartObservation("NATIVE-G1", True),
+    )
+    return clock, runtime, planner, dispatch, profile, commission, turn
+
+
+def test_recovery_quarantines_legacy_commission_turn_without_original_input_binding(
+    tmp_path: Path,
+) -> None:
+    clock, runtime, planner, dispatch, profile, _commission, _turn = (
+        _seed_commission_bound_legacy_turn(tmp_path)
+    )
+    clock.advance(3)
+    adapters: list[_RecoveryAdapter] = []
+
+    def factory(loader):
+        adapter = _RecoveryAdapter(runtime, profile, loader, live_existing=True)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
+    assert adapters == [], "legacy turn must be rejected before any provider read/resume"
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.status in {
+        AttemptStatus.CLAIMED,
+        AttemptStatus.RUNNING,
+        AttemptStatus.CHECKPOINTED,
+    }
+
+
+def test_recovery_quarantines_legacy_sealed_result_without_original_input_binding(
+    tmp_path: Path,
+) -> None:
+    clock, runtime, planner, dispatch, profile, _commission, turn = (
+        _seed_commission_bound_legacy_turn(tmp_path)
+    )
+    seed_adapter = _RecoveryAdapter(
+        runtime,
+        profile,
+        lambda _turn: "legacy prompt without commission binding",
+        live_existing=True,
+    )
+    cursor = EventCursor(
+        turn.attempt_id,
+        turn.session_epoch_id,
+        turn.process_generation_id,
+        turn_id=turn.turn_id,
+    )
+    events, next_cursor = seed_adapter.read_events(cursor, timeout_seconds=1.0)
+    candidate = seed_adapter.collect_candidate_result(turn)
+    runtime.operator_harness.record_candidate_evidence(
+        turn=turn,
+        candidate=candidate,
+        events=events,
+        cursor=next_cursor,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    raw = seed_adapter.observe_raw_role_result(turn)
+    runtime.operator_harness.seal_orchestration_role_result(
+        turn=turn,
+        observation=raw,
+        fence_generation=dispatch.attempt.fence_generation,
+        lease_token=dispatch.lease_token,
+    )
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            """SELECT COUNT(*) FROM events
+               WHERE attempt_id=? AND event_type='ORCHESTRATION_ROLE_RESULT_SEALED'""",
+            (dispatch.attempt.attempt_id,),
+        ).fetchone()[0] == 1
+
+    clock.advance(3)
+    adapters: list[_RecoveryAdapter] = []
+
+    def factory(loader):
+        adapter = _RecoveryAdapter(runtime, profile, loader, live_existing=True)
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+    )
+
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
+    assert adapters == [], "legacy sealed result must be rejected before provider recovery"
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None
+    assert attempt.status in {
+        AttemptStatus.CLAIMED,
+        AttemptStatus.RUNNING,
+        AttemptStatus.CHECKPOINTED,
+    }
 
 
 class _ActiveAdapter(_RecoveryAdapter):
@@ -793,6 +1005,24 @@ def test_fresh_operator_consumes_persisted_verified_commission_before_provider_t
     prompt = adapters[0].prompts[0]
     assert commission.decode("utf-8") in prompt
     assert '"path": "research/operator-commission.md"' in prompt
+    expected_turn_operation = (
+        "ohf-op:turn-input:"
+        + hashlib.sha256(prompt.encode("utf-8", errors="strict")).hexdigest()
+    )
+    with runtime.store.read() as connection:
+        rows = connection.execute(
+            """SELECT command_id,payload_json FROM events
+               WHERE attempt_id=? AND aggregate_type='operator_operation'
+                 AND event_type=? ORDER BY event_id""",
+            (outcome.attempt.attempt_id, OperationReceiptKind.INTENT.value),
+        ).fetchall()
+    turn_rows = [
+        row
+        for row in rows
+        if json.loads(str(row["payload_json"])).get("operation_kind") == "begin_turn"
+    ]
+    assert len(turn_rows) == 1
+    assert turn_rows[0]["command_id"] == expected_turn_operation
     assert planner.requested_authorities == ["READ"]
     assert planner.allowed_write_paths == []
 
