@@ -50,7 +50,10 @@ REVIEWED_GENERATIONS = {
         "bridge.py": "e7eec115f783c3c734d541225931edcd82b17fd143f9810d03877f75c11b1602",
     },
     "v9": {
-        "bridge.py": "6125fdad9299e92c144442916ea82e8c277e89459e9c23ebfc82a23e4b64d3e0",
+        "bridge.py": "a784fefceb7b1bb1164289700b22a6f53d09ae60d007f506ac015ebaca8c3725",
+    },
+    "v10": {
+        "bridge.py": "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
     },
 }
 

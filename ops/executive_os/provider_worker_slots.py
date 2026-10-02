@@ -36,6 +36,12 @@ WORKER_GROUP = "_mastermind_worker"
 WORKER_GID = 451
 _SLOT_ID_RE = re.compile(r"^codex(?:-pro)?-[0-9]{2}$")
 _WORKER_USER_RE = re.compile(r"^_mastermind_[a-z0-9_]+$")
+# Accepted local labels, not enrolled Workers or provider-capacity identities.
+# The legacy label remains compatible; new labels never select a numbered login.
+_NATIVE_CLAUDE_SLOT_IDS = frozenset({
+    "claude8-native-01", "claude-native-01", "claude-native-02",
+    "claude-native-03", "claude-native-04",
+})
 
 
 class SlotCatalogError(ValueError):
@@ -197,8 +203,9 @@ def native_slot_from_config(config: Mapping[str, Any]) -> ProviderWorkerSlot:
     provisioned host state; they are never new source-code defaults.
     """
     enrollment = config.get("native_realm_enrollment")
-    if (config.get("native_provider") != "claude" or not isinstance(enrollment, Mapping)
-            or enrollment.get("slot_id") != "claude8-native-01"):
+    slot_id = enrollment.get("slot_id") if isinstance(enrollment, Mapping) else None
+    if (config.get("native_provider") != "claude"
+            or type(slot_id) is not str or slot_id not in _NATIVE_CLAUDE_SLOT_IDS):
         raise SlotCatalogError("native_slot_inventory_invalid")
     worker_user = config.get("worker_user")
     worker_uid, worker_gid = config.get("worker_uid"), config.get("worker_gid")
@@ -214,7 +221,8 @@ def native_slot_from_config(config: Mapping[str, Any]) -> ProviderWorkerSlot:
         provider_home=RUNTIME_WORKER_ROOT / enrollment["slot_id"] / "provider-home",
         readiness_receipt=SYSTEM_CONFIG_ROOT / f"provider-readiness-{enrollment['slot_id']}.json",
         workspace_binding_class="native_claude_subscription",
-        allowed_credential_kinds=("claudeai-subscription",), oauth_seat_ref="claude8",
+        allowed_credential_kinds=("claudeai-subscription",),
+        oauth_seat_ref="claude8" if slot_id == "claude8-native-01" else None,
         provider_family="anthropic",
     )
     for field in ("slot_id", "worker_user", "worker_group", "worker_uid", "worker_gid",

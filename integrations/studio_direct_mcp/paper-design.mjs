@@ -25,7 +25,7 @@ export const PAPER_INSPECT_TOOL = Object.freeze({
   description:
     'Read Paper Desktop availability and default active-design identity through the guarded Mastermind adapter. ' +
     'DOCUMENT_UNAVAILABLE means the default active context is unavailable; it does not prove Paper Desktop or a known exact file is unavailable. ' +
-    'If an exact fileId is already known, one read-only paper_read get_basic_info(fileId) may still prove that target readable; otherwise use paper_read with tool=list_files, then paper_prepare. ' +
+    'If an exact fileId is already known, one read-only paper_read get_basic_info(fileId) may still prove that target readable; if the fileId is unknown, stop at a typed binding gap rather than guessing or invoking blocked resource discovery. ' +
     'The response also declares the gateway Paper surface contract. If paper_prepare is listed there but absent from the current client tool surface, ' +
     'treat that as client publication drift and review/refresh the same Studio Direct app\'s approved action snapshot before file-transition work; a reconnect alone is not proof of refresh. ' +
     'Do not emulate prepare through generic process or desktop commands. ' +
@@ -64,7 +64,7 @@ export const PAPER_READ_TOOL = Object.freeze({
   description:
     'Run one allowed read-only Paper operation through the guarded adapter. ' +
     'When an upstream read accepts fileId, it may read that exact target even if default active-file inspection is unavailable; this proves read serviceability, not write readiness. ' +
-    'Use tool=list_files when the target file id is unknown; then call paper_prepare before editing another file. ' +
+    'The current reviewed catalog does not expose file discovery; when the target file id is unknown, obtain the exact file identity from already accepted task context or stop rather than guessing. ' +
     'Examples include node inspection, screenshots and JSX extraction. Unknown or modifying upstream tools are refused.',
   inputSchema: {
     type: 'object',
@@ -95,7 +95,7 @@ export const PAPER_PREPARE_TOOL = Object.freeze({
   title: 'Prepare Paper File',
   description:
     'Launch or focus the host-pinned Paper Desktop app on one exact Paper file id, then verify the active file and current write-schema qualification. ' +
-    'Use paper_read with tool=list_files first when the file id is unknown. This changes desktop focus but does not edit design content. ' +
+    'The fileId must already be known from accepted task context or an exact-file read; resource discovery remains blocked. ' +
     'Multiple admitted sessions may modify the same file/page across hosts; coordinate by board/artboard/node target. ' +
     'The operation/carrier fence is target-scoped, not a file-wide lease.',
   inputSchema: {
@@ -104,7 +104,7 @@ export const PAPER_PREPARE_TOOL = Object.freeze({
       file_id: {
         type: 'string',
         pattern: '^[0-9A-HJKMNP-TV-Z]{26}$',
-        description: 'Exact Paper file id returned by list_files or paper_inspect.',
+        description: 'Exact Paper file id from accepted task context, paper_inspect, or a prior exact-file read.',
       },
     },
     required: ['file_id'],

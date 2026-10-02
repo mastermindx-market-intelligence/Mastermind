@@ -23,6 +23,20 @@ OPERATION_KEY = "test-operation"
 POSTCONDITION = "f" * 64
 
 
+@pytest.fixture(autouse=True)
+def publication_clock(monkeypatch):
+    from types import SimpleNamespace
+    real = actuator.time
+    monkeypatch.setattr(actuator, "time", SimpleNamespace(
+        monotonic=real.monotonic, sleep=real.sleep,
+        time_ns=lambda: 2_200_000_000, monotonic_ns=lambda: 2_200_000_000))
+
+
+def _ancestry(operation_key=OPERATION_KEY):
+    reservation, approval, _, _ = _reservation_fixture(operation_key)
+    return {"reservation": reservation, "approval": approval}
+
+
 def _hex64(value: int) -> str:
     return format(value, "064x")
 
@@ -467,12 +481,12 @@ def _target(record):
 
 
 def _to_recovering(journal, record):
-    for state in ("PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"):
+    for state in ("PUBLICATION_INTENT", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"):
         record = journal.advance(
             record["operation_key"],
             expected_generation=record["journal_generation"],
             state=state,
-        )
+         **_ancestry(record["operation_key"]))
     return record
 
 
@@ -504,7 +518,7 @@ def _terminal(journal, record, state):
         rollback=rollback,
         reservation=reservation,
         approval=approval,
-    )
+     after_actuator_generation=(9 if state == "ROLLED_BACK" else 8))
 
 
 def _record_path(root: Path, operation_key: str = OPERATION_KEY) -> Path:
@@ -537,8 +551,8 @@ def _process_start(root: str, queue) -> None:
 def _process_advance(root: str, queue) -> None:
     try:
         value = _journal(Path(root)).advance(
-            OPERATION_KEY, expected_generation=1, state="PUBLISHED"
-        )
+            OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT"
+        , **_ancestry(OPERATION_KEY))
         queue.put(("ok", value.to_dict()))
     except actuator.ExecutiveReleaseActuatorJournalError as exc:
         queue.put(("error", exc.code))
@@ -559,12 +573,12 @@ def test_all_states_restart_and_embedded_records_are_exact(tmp_path):
         preconditions
     )
     assert record["admission"] == contract.validate_admission(admission)
-    for state in ("PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"):
+    for state in ("PUBLICATION_INTENT", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"):
         record = journal.advance(
             OPERATION_KEY,
             expected_generation=record["journal_generation"],
             state=state,
-        )
+         **_ancestry(OPERATION_KEY))
         observed.append(state)
         assert _journal(root).read(OPERATION_KEY) == record
         assert record["preconditions"] == contract.validate_precondition_manifest(
@@ -573,7 +587,7 @@ def test_all_states_restart_and_embedded_records_are_exact(tmp_path):
         assert record["admission"] == contract.validate_admission(admission)
     record = _terminal(journal, record, "SUCCEEDED")
     observed.append(record["state"])
-    assert observed == list(actuator._STATES[:5])
+    assert observed == list(actuator._STATES[:6])
     assert _journal(root).read(OPERATION_KEY) == record
 
 
@@ -630,7 +644,7 @@ def test_same_operation_immutable_mismatch_is_conflict(
         }
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         _start(_journal(root), **changes)
-    assert caught.value.code in {"CONFLICT", "ADMISSION_JOIN_MISMATCH", "RESERVATION_MISMATCH"}
+    assert caught.value.code in {"CONFLICT", "ADMISSION_JOIN_MISMATCH", "RESERVATION_MISMATCH", "INVALID_BEFORE"}
 
 
 @pytest.mark.parametrize(
@@ -645,7 +659,7 @@ def test_start_generation_and_time_are_immutable(tmp_path, changes):
     _start(_journal(root))
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         _start(_journal(root), **changes)
-    assert caught.value.code in {"CONFLICT", "ADMISSION_JOIN_MISMATCH", "RESERVATION_MISMATCH"}
+    assert caught.value.code in {"CONFLICT", "ADMISSION_JOIN_MISMATCH", "RESERVATION_MISMATCH", "INVALID_BEFORE"}
 
 
 @pytest.mark.parametrize(
@@ -679,17 +693,17 @@ def test_state_and_generation_fencing(tmp_path):
         with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
             journal.advance(
                 OPERATION_KEY, expected_generation=1, state=state
-            )
+            , **_ancestry(OPERATION_KEY))
         assert caught.value.code == "INVALID_TRANSITION"
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
-        journal.advance(OPERATION_KEY, expected_generation=2, state="PUBLISHED")
+        journal.advance(OPERATION_KEY, expected_generation=2, state="PUBLISHED", **_ancestry(OPERATION_KEY))
     assert caught.value.code == "GENERATION_MISMATCH"
     record = journal.advance(
-        OPERATION_KEY, expected_generation=1, state="PUBLISHED"
-    )
+        OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT"
+    , **_ancestry(OPERATION_KEY))
     assert record["journal_generation"] == 2
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
-        journal.advance(OPERATION_KEY, expected_generation=2, state="PUBLISHED")
+        journal.advance(OPERATION_KEY, expected_generation=2, state="PUBLICATION_INTENT", **_ancestry(OPERATION_KEY))
     assert caught.value.code == "INVALID_TRANSITION"
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         journal.advance(
@@ -697,7 +711,7 @@ def test_state_and_generation_fencing(tmp_path):
             expected_generation=2,
             state="BROKER_RESTART_PENDING",
             completed_at_ms=3_000,
-        )
+         **_ancestry(OPERATION_KEY))
     assert caught.value.code == "TERMINAL_ARGUMENTS"
 
 
@@ -705,9 +719,14 @@ def test_state_and_generation_fencing(tmp_path):
 def test_each_terminal_truth_and_terminal_immutability(tmp_path, state):
     journal = _journal(tmp_path / state)
     record = _to_recovering(journal, _start(journal))
+    if state == "FAILED_NOT_APPLIED":
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="NO_APPLY_PROOF_UNAVAILABLE"):
+            _terminal(journal, record, state)
+        assert journal.read(OPERATION_KEY) == record
+        return
     terminal = _terminal(journal, record, state)
     assert terminal["state"] == state
-    assert terminal["journal_generation"] == 5
+    assert terminal["journal_generation"] == 6
     assert _journal(tmp_path / state).read(OPERATION_KEY) == terminal
     reservation, approval, _preconds, _prep = _reservation_fixture()
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
@@ -722,7 +741,7 @@ def test_each_terminal_truth_and_terminal_immutability(tmp_path, state):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "TERMINAL_IMMUTABLE"
 
 
@@ -755,8 +774,8 @@ def test_terminal_truth_refusals(tmp_path, state, after_kind, rollback):
             rollback=rollback,
             reservation=reservation,
             approval=approval,
-        )
-    assert caught.value.code == "INVALID_TERMINAL_TRUTH"
+         after_actuator_generation=(9 if state == "ROLLED_BACK" else 8))
+    assert caught.value.code == ("NO_APPLY_PROOF_UNAVAILABLE" if state == "FAILED_NOT_APPLIED" else "INVALID_TERMINAL_TRUTH")
 
 
 def test_terminal_time_and_closed_rollback_union(tmp_path):
@@ -774,15 +793,15 @@ def test_terminal_time_and_closed_rollback_union(tmp_path):
             journal.advance(
                 OPERATION_KEY,
                 expected_generation=record["journal_generation"],
-                state="FAILED_NOT_APPLIED",
+                state="SUCCEEDED",
                 completed_at_ms=completed,
                 postcondition_digest=POSTCONDITION,
                 before=before,
-                after=before,
+                after=_target(record),
                 rollback=rollback,
                 reservation=reservation,
                 approval=approval,
-            )
+             after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
 
 
 def test_terminal_after_missing_field_refuses(tmp_path):
@@ -804,7 +823,7 @@ def test_terminal_after_missing_field_refuses(tmp_path):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "INVALID_AFTER"
 
 
@@ -827,7 +846,7 @@ def test_terminal_after_extra_field_refuses(tmp_path):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "INVALID_AFTER"
 
 
@@ -852,7 +871,7 @@ def test_terminal_after_partial_service_roles_refuses(tmp_path):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "INVALID_AFTER"
 
 
@@ -875,7 +894,7 @@ def test_terminal_after_extra_service_role_refuses(tmp_path):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "INVALID_AFTER"
 
 
@@ -898,7 +917,7 @@ def test_terminal_after_broker_source_mismatch_refuses(tmp_path):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "INVALID_AFTER"
 
 
@@ -913,7 +932,7 @@ def test_terminal_before_broker_source_mismatch_refuses(tmp_path):
         journal.advance(
             OPERATION_KEY,
             expected_generation=record["journal_generation"],
-            state="FAILED_NOT_APPLIED",
+            state="SUCCEEDED",
             completed_at_ms=3_000,
             postcondition_digest=POSTCONDITION,
             before=before,
@@ -921,7 +940,7 @@ def test_terminal_before_broker_source_mismatch_refuses(tmp_path):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "BEFORE_MISMATCH"
 
 
@@ -951,7 +970,7 @@ def test_terminal_rolled_back_preimage_hash_over_8_fields(tmp_path):
             },
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "ROLLED_BACK" == "ROLLED_BACK" else 8))
     assert caught.value.code == "BEFORE_MISMATCH"
 
 
@@ -970,7 +989,7 @@ def test_terminal_legacy_4_field_shape_refuses(tmp_path):
         journal.advance(
             OPERATION_KEY,
             expected_generation=record["journal_generation"],
-            state="FAILED_NOT_APPLIED",
+            state="SUCCEEDED",
             completed_at_ms=3_000,
             postcondition_digest=POSTCONDITION,
             before=legacy_before,
@@ -978,7 +997,7 @@ def test_terminal_legacy_4_field_shape_refuses(tmp_path):
             rollback={"attempted": False},
             reservation=reservation,
             approval=approval,
-        )
+         after_actuator_generation=(9 if "SUCCEEDED" == "ROLLED_BACK" else 8))
     assert caught.value.code == "BEFORE_MISMATCH"
 
 
@@ -989,18 +1008,18 @@ def test_nonterminal_advance_rejects_terminal_arguments(tmp_path):
         journal.advance(
             OPERATION_KEY,
             expected_generation=1,
-            state="PUBLISHED",
+            state="PUBLICATION_INTENT",
             completed_at_ms=2_500,
-        )
+         **_ancestry(OPERATION_KEY))
     assert caught.value.code == "TERMINAL_ARGUMENTS"
     before = {"release_commit": "1" * 40}
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
         journal.advance(
             OPERATION_KEY,
             expected_generation=1,
-            state="PUBLISHED",
+            state="PUBLICATION_INTENT",
             before=before,
-        )
+         **_ancestry(OPERATION_KEY))
     assert caught.value.code == "TERMINAL_ARGUMENTS"
 
 
@@ -1016,7 +1035,7 @@ def test_terminal_advance_requires_caller_supplied_before(tmp_path):
             postcondition_digest=POSTCONDITION,
             after=_before(record),
             rollback={"attempted": False},
-        )
+         **_ancestry(OPERATION_KEY))
     assert caught.value.code == "TERMINAL_ARGUMENTS"
 
 
@@ -1146,7 +1165,7 @@ def test_atomic_replace_failure_preserves_prior_record_and_cleans_temp(
 
     monkeypatch.setattr(actuator.os, "replace", refuse_replace)
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
-        journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLISHED")
+        journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT", **_ancestry(OPERATION_KEY))
     assert caught.value.code == "RECORD_REPLACE"
     assert journal.read(OPERATION_KEY) == original
     assert not list(root.glob("*.tmp"))
@@ -1159,9 +1178,9 @@ def test_temporary_path_replacement_before_publish_refuses(tmp_path, monkeypatch
     original_read = journal._read_file
     replaced = False
 
-    def replace_temporary_after_first_read(root_descriptor, name, *, required):
+    def replace_temporary_after_first_read(root_descriptor, name, *, required, **deadline):
         nonlocal replaced
-        result = original_read(root_descriptor, name, required=required)
+        result = original_read(root_descriptor, name, required=required, **deadline)
         if name.endswith(".tmp") and not replaced:
             replaced = True
             os.unlink(name, dir_fd=root_descriptor)
@@ -1180,8 +1199,8 @@ def test_temporary_path_replacement_before_publish_refuses(tmp_path, monkeypatch
 
     monkeypatch.setattr(journal, "_read_file", replace_temporary_after_first_read)
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
-        journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLISHED")
-    assert caught.value.code == "TEMP_REPLACED"
+        journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT", **_ancestry(OPERATION_KEY))
+    assert caught.value.code == "RECORD_REPLACED"
     assert journal.read(OPERATION_KEY) == original
     assert len(list(root.glob("*.tmp"))) == 1
 
@@ -1194,7 +1213,7 @@ def test_stale_temporary_file_refuses_without_changing_record(tmp_path):
     temporary.write_bytes(b"stale")
     os.chmod(temporary, 0o600)
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
-        journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLISHED")
+        journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT", **_ancestry(OPERATION_KEY))
     assert caught.value.code == "RECORD_EXISTS"
     assert journal.read(OPERATION_KEY) == original
 
@@ -1208,8 +1227,8 @@ def test_thread_concurrency_serializes_start_and_generation_cas(tmp_path):
     def advance(_):
         try:
             return _journal(root).advance(
-                OPERATION_KEY, expected_generation=1, state="PUBLISHED"
-            )
+                OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT"
+            , **_ancestry(OPERATION_KEY))
         except actuator.ExecutiveReleaseActuatorJournalError as exc:
             return exc.code
 
@@ -1280,8 +1299,8 @@ def test_record_bytes_are_bound_to_requested_operation(tmp_path, method):
             journal.read("operation-a")
         else:
             journal.advance(
-                "operation-a", expected_generation=1, state="PUBLISHED"
-            )
+                "operation-a", expected_generation=1, state="PUBLICATION_INTENT"
+            , **_ancestry("operation-a"))
     assert caught.value.code == "OPERATION_MISMATCH"
     assert path_a.read_bytes() == original
 
@@ -1301,15 +1320,20 @@ def test_exact_start_replay_after_progress_returns_current_record(tmp_path, stat
     root = tmp_path / state
     journal = _journal(root)
     current = _start(journal)
-    for next_state in ("PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"):
+    for next_state in ("PUBLICATION_INTENT", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING"):
         current = journal.advance(
             OPERATION_KEY,
             expected_generation=current["journal_generation"],
             state=next_state,
-        )
+         **_ancestry(OPERATION_KEY))
         if next_state == state:
             break
-    if state in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+    if state == "FAILED_NOT_APPLIED":
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="NO_APPLY_PROOF_UNAVAILABLE"):
+            _terminal(journal, current, state)
+        assert _start(_journal(root)) == current
+        return
+    if state in {"SUCCEEDED", "ROLLED_BACK"}:
         current = _terminal(journal, current, state)
     path = _record_path(root)
     raw = path.read_bytes()
@@ -1373,6 +1397,8 @@ def test_linked_start_crash_state_is_recovered_only_for_exact_candidate(tmp_path
             "journal_generation": 1,
             "started_at_ms": 2_001,
             "root_qualification_digest": _root_digest(reservation),
+            "before": reservation["before"],
+            "start_deadline_monotonic_ns": reservation["prepared_payload"]["expires_monotonic_ns"],
         }
     )
     raw = contract.canonical_release_bytes(candidate)
@@ -1497,8 +1523,8 @@ def test_advance_cleanup_never_adopts_replacement_inode(tmp_path, monkeypatch):
     actual_write_new = journal._write_new
     held_descriptors = []
 
-    def replace_after_write(root_descriptor, name, raw):
-        created_identity = actual_write_new(root_descriptor, name, raw)
+    def replace_after_write(root_descriptor, name, raw, **deadline):
+        created_identity = actual_write_new(root_descriptor, name, raw, **deadline)
         if name.endswith(".tmp"):
             held_descriptors.append(
                 os.open(name, os.O_RDONLY, dir_fd=root_descriptor)
@@ -1522,8 +1548,8 @@ def test_advance_cleanup_never_adopts_replacement_inode(tmp_path, monkeypatch):
             journal.advance(
                 OPERATION_KEY,
                 expected_generation=1,
-                state="PUBLISHED",
-            )
+                state="PUBLICATION_INTENT",
+             **_ancestry(OPERATION_KEY))
         assert journal.read(OPERATION_KEY) == current
         assert temporary.exists()
         assert temporary.read_bytes() == b"foreign-temp"
@@ -1558,8 +1584,8 @@ def test_held_process_lock_times_out_without_record_effect(tmp_path):
         assert ready.wait(2)
         with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
             _journal(root, lock_timeout=0.1).advance(
-                OPERATION_KEY, expected_generation=1, state="PUBLISHED"
-            )
+                OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT"
+            , **_ancestry(OPERATION_KEY))
         assert caught.value.code == "LOCK_TIMEOUT"
         assert path.read_bytes() == raw
     finally:
@@ -1792,21 +1818,22 @@ def test_cancellation_refuses_after_final_start(tmp_path):
     journal = _journal(root)
     record = _start(journal)
     # Walk to terminal SUCCEEDED to assert cancellation refuses after final.
+    record = journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT", **_ancestry())
     record = journal.advance(
         OPERATION_KEY,
         expected_generation=record["journal_generation"],
         state="PUBLISHED",
-    )
+     **_ancestry(OPERATION_KEY))
     record = journal.advance(
         OPERATION_KEY,
         expected_generation=record["journal_generation"],
         state="BROKER_RESTART_PENDING",
-    )
+     **_ancestry(OPERATION_KEY))
     record = journal.advance(
         OPERATION_KEY,
         expected_generation=record["journal_generation"],
         state="RECOVERING",
-    )
+     **_ancestry(OPERATION_KEY))
     _terminal(journal, record, "SUCCEEDED")
     reservation, approval, _preconds, _prep = _reservation_fixture()
     cancellation, _r, admission, _a = _cancellation_fixture()
@@ -1837,6 +1864,8 @@ def test_cancellation_refuses_after_staged_start(tmp_path):
             "journal_generation": 1,
             "started_at_ms": 2_001,
             "root_qualification_digest": _hex64(99),
+            "before": reservation["before"],
+            "start_deadline_monotonic_ns": reservation["prepared_payload"]["expires_monotonic_ns"],
         }
     )
     raw = contract.canonical_release_bytes(candidate)
@@ -2375,8 +2404,8 @@ def test_sidecar_write_readback_refuses_replacement_inode(
         journal.reserve_prestart(reservation=reservation, approval=approval)
     original = journal._write_new
 
-    def swap(root_descriptor, name, raw):
-        identity = original(root_descriptor, name, raw)
+    def swap(root_descriptor, name, raw, **deadline):
+        identity = original(root_descriptor, name, raw, **deadline)
         path = root / name
         replacement = root / (name + ".foreign")
         replacement.write_bytes(raw)
@@ -2494,6 +2523,7 @@ def _r9_terminal_kwargs(record, reservation, approval, *, before=None, after=Non
         "before": before,
         "after": after,
         "rollback": rollback,
+        "after_actuator_generation": record["actuator_generation"] + (2 if state == "ROLLED_BACK" else 1),
         "reservation": reservation,
         "approval": approval,
     }
@@ -2588,24 +2618,27 @@ def test_terminal_advance_refuses_when_root_qualification_digest_mismatches(
 ):
     journal = _journal(tmp_path / "root-mismatch")
     _start(journal)
+    record = journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT", **_ancestry())
     record = journal.advance(
-        OPERATION_KEY, expected_generation=1, state="PUBLISHED")
+        OPERATION_KEY, expected_generation=2, state="PUBLISHED", **_ancestry(OPERATION_KEY))
     record = journal.advance(
         OPERATION_KEY,
         expected_generation=record["journal_generation"],
         state="BROKER_RESTART_PENDING",
-    )
+     **_ancestry(OPERATION_KEY))
     record = journal.advance(
         OPERATION_KEY,
         expected_generation=record["journal_generation"],
         state="RECOVERING",
-    )
+     **_ancestry(OPERATION_KEY))
     reservation, approval, _preconds, _prep = _reservation_fixture()
     stem = _stem(OPERATION_KEY)
     journal_path = Path(tmp_path / "root-mismatch") / (stem + ".json")
     record_raw = journal_path.read_bytes()
     tampered = contract.parse_release_json(record_raw).to_dict()
     tampered["root_qualification_digest"] = _hex64(99)
+    tampered["publication_intent"]["root_qualification_digest"] = _hex64(99)
+    tampered["recovery_origin"]["publication_intent_digest"] = _canonical_hash(tampered["publication_intent"])
     journal_path.write_bytes(contract.canonical_release_bytes(tampered))
     os.chmod(journal_path, 0o600)
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
@@ -2627,6 +2660,10 @@ def test_terminal_advance_refuses_when_start_reservation_join_mismatches(
     record_raw = journal_path.read_bytes()
     tampered = contract.parse_release_json(record_raw).to_dict()
     tampered["before_release_commit"] = "0" * 40
+    tampered["before"]["release_commit"] = "0" * 40
+    tampered["before"]["broker_source_commit"] = "0" * 40
+    tampered["publication_intent"]["before_digest"] = _canonical_hash(tampered["before"])
+    tampered["recovery_origin"]["publication_intent_digest"] = _canonical_hash(tampered["publication_intent"])
     journal_path.write_bytes(contract.canonical_release_bytes(tampered))
     os.chmod(journal_path, 0o600)
     with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
@@ -2662,27 +2699,16 @@ def test_terminal_advance_refuses_when_before_differs_in_one_service_role(
     assert caught.value.code == "BEFORE_MISMATCH"
 
 
-def test_nonterminal_advance_rejects_reservation_and_approval_arguments(tmp_path):
+def test_nonterminal_advance_requires_reservation_and_approval_arguments(tmp_path):
     journal = _journal(tmp_path / "nonterminal-ancestry")
-    _start(journal)
-    reservation, approval, _preconds, _prep = _reservation_fixture()
-    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
-        journal.advance(
-            OPERATION_KEY,
-            expected_generation=1,
-            state="PUBLISHED",
-            reservation=reservation,
-            approval=approval,
-        )
-    assert caught.value.code == "ANCESTRY_ARGUMENTS"
-    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
-        journal.advance(
-            OPERATION_KEY,
-            expected_generation=1,
-            state="PUBLISHED",
-            reservation=reservation,
-        )
-    assert caught.value.code == "ANCESTRY_ARGUMENTS"
+    record = _start(journal)
+    reservation, approval, _, _ = _reservation_fixture()
+    for kwargs in ({}, {"reservation": reservation}, {"approval": approval}):
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="ANCESTRY_ARGUMENTS"):
+            journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT", **kwargs)
+        assert journal.read(OPERATION_KEY) == record
+    assert journal.advance(OPERATION_KEY, expected_generation=1, state="PUBLICATION_INTENT",
+        reservation=reservation, approval=approval)["state"] == "PUBLICATION_INTENT"
 
 
 def test_terminal_advance_never_writes_when_ancestry_fails(tmp_path):
@@ -2750,8 +2776,8 @@ def test_terminal_refuses_sidecar_drift_after_staging(tmp_path, monkeypatch, kin
     ).read_bytes()
     original_write_new = journal._write_new
 
-    def drift(root_descriptor, name, raw):
-        identity = original_write_new(root_descriptor, name, raw)
+    def drift(root_descriptor, name, raw, **deadline):
+        identity = original_write_new(root_descriptor, name, raw, **deadline)
         if name.endswith(".tmp"):
             _mutate_reservation_sidecar(path, kind, approval=approval)
         return identity
@@ -2796,8 +2822,8 @@ def test_terminal_refuses_inode_only_reservation_replacement_after_staging(
     ).read_bytes()
     original_write_new = journal._write_new
 
-    def swap_inode(root_descriptor, name, raw):
-        identity = original_write_new(root_descriptor, name, raw)
+    def swap_inode(root_descriptor, name, raw, **deadline):
+        identity = original_write_new(root_descriptor, name, raw, **deadline)
         if name.endswith(".tmp"):
             replacement = path.with_suffix(".replacement")
             replacement.write_bytes(original_raw)
@@ -2843,6 +2869,11 @@ def test_competing_terminal_writers_only_one_generation(tmp_path, state):
     kwargs = _r9_terminal_kwargs(
         record, reservation, approval, state=state, after=after
     )
+    if state == "FAILED_NOT_APPLIED":
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match="NO_APPLY_PROOF_UNAVAILABLE"):
+            journal.advance(**kwargs)
+        assert journal.read(record["operation_key"]) == record
+        return
     gate = threading.Barrier(2)
 
     def run():
@@ -2867,14 +2898,14 @@ def test_competing_terminal_writers_only_one_generation(tmp_path, state):
 @pytest.fixture
 def request_deadline_clock(monkeypatch):
     from types import SimpleNamespace
-    clock = [1_000_000_000]
+    clock = [2_200_000_000]
     sleeps = []
     def sleep(seconds):
         sleeps.append(seconds)
         clock[0] += int(seconds * 1_000_000_000)
     monkeypatch.setattr(actuator, "time", SimpleNamespace(
         monotonic_ns=lambda: clock[0], monotonic=lambda: clock[0] / 1e9,
-        sleep=sleep))
+        sleep=sleep, time_ns=lambda: 2_200_000_000))
     return clock, sleeps
 
 
@@ -2984,8 +3015,8 @@ def test_request_deadline_late_stage_remains_for_exact_reconciliation(
     journal = _journal(tmp_path / "journal")
     end = clock[0] + 1_000_000
     original = journal._write_new
-    def late(root, name, raw):
-        result = original(root, name, raw)
+    def late(root, name, raw, **deadline):
+        result = original(root, name, raw, **deadline)
         if name.endswith(".start"):
             clock[0] = end
         return result
@@ -2998,7 +3029,7 @@ def test_request_deadline_late_stage_remains_for_exact_reconciliation(
     assert before and not path.exists()
     monkeypatch.setattr(journal, "_write_new", original)
     # A fresh legacy test call reconciles the exact candidate; no second stage.
-    recovered = _start(journal)
+    recovered = _start(journal, publication_deadline_monotonic_ns=end)
     assert recovered["journal_generation"] == 1
     assert path.read_bytes() == before
     assert not staged.exists()
@@ -3012,7 +3043,7 @@ def test_request_deadline_success_and_missing_option_remain_compatible(
     record = _start(journal, deadline_monotonic_ns=end)
     assert journal.read(OPERATION_KEY, deadline_monotonic_ns=end) == record
     assert journal.read(OPERATION_KEY) == record
-    assert _start(journal) == record
+    assert _start(journal, publication_deadline_monotonic_ns=end) == record
 
 
 @pytest.mark.parametrize("error", [
@@ -3182,7 +3213,7 @@ def test_request_deadline_nested_post_effect_reads_retain_unknown_classification
 
         monkeypatch.setattr(journal, "_unlink_owned", interrupted_unlink)
         with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError):
-            _start(journal)
+            _start(journal, publication_deadline_monotonic_ns=end)
         monkeypatch.setattr(journal, "_unlink_owned", unlink)
         assert final.stat().st_nlink == 2
     tripped = []
@@ -3205,3 +3236,366 @@ def test_request_deadline_nested_post_effect_reads_retain_unknown_classification
     assert tripped
     assert final.exists() or final.with_suffix(".start").exists()
     assert not actuator._LOCAL_LOCK.locked()
+
+
+"""Pre-start phase/ancestry/epoch/legacy acceptance. Parent integration only."""
+import copy
+import hashlib
+import pytest
+from control_plane import executive_release_actuator as a
+from control_plane import executive_release_contract as c
+
+@pytest.fixture
+def j1_ctx(tmp_path,monkeypatch):
+    monkeypatch.setattr(a.time,'time_ns',lambda:2200*1000000)
+    monkeypatch.setattr(a.time,'monotonic_ns',lambda:2200000000)
+    j=_journal(tmp_path/'journal');r=_start(j);res,app,_,_=_reservation_fixture()
+    return j,r,res,app
+
+def _j1_advance(j1_ctx,state,**kw):
+    j,r,res,app=j1_ctx
+    n=j.advance(r['operation_key'],expected_generation=r['journal_generation'],state=state,
+        reservation=res,approval=app,**kw)
+    return (j,n,res,app)
+
+def test_j1_intent_required_and_full_before_retained(j1_ctx):
+    j,r,res,app=j1_ctx
+    assert r['schema']=='mastermind.executive_release_actuator_journal/v3'
+    assert c.canonical_release_bytes(r['before'])==c.canonical_release_bytes(res['before'])
+    with pytest.raises(a.ExecutiveReleaseActuatorJournalError):_j1_advance(j1_ctx,'PUBLISHED')
+    j1_ctx=_j1_advance(j1_ctx,'PUBLICATION_INTENT');i=j1_ctx[1]['publication_intent']
+    assert i['start_actuator_generation']==7 and i['target_actuator_generation']==8 and i['rollback_actuator_generation']==9
+    assert j1_ctx[1]['journal_generation']==2
+    j1_ctx=_j1_advance(j1_ctx,'RECOVERING')
+    assert j1_ctx[1]['recovery_origin']['from_state']=='PUBLICATION_INTENT'
+    assert j1_ctx[1]['publication_intent']==i
+    assert j1_ctx[1]['started_at_ms']==r['started_at_ms']
+
+@pytest.mark.parametrize('phase',['STARTED','PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING'])
+def test_j1_no_unproven_not_applied_from_any_phase(j1_ctx,phase):
+    order=['STARTED','PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING']
+    for step in order[1:order.index(phase)+1]:j1_ctx=_j1_advance(j1_ctx,step)
+    j,r,res,app=j1_ctx;raw=c.canonical_release_bytes(j.read(r['operation_key']))
+    with pytest.raises(a.ExecutiveReleaseActuatorJournalError):
+        _j1_advance(j1_ctx,'FAILED_NOT_APPLIED',completed_at_ms=3000,postcondition_digest='f'*64,
+                before=res['before'],after=res['before'],rollback={'attempted':False},after_actuator_generation=7)
+    assert c.canonical_release_bytes(j.read(r['operation_key']))==raw
+
+@pytest.mark.parametrize('outcome,epoch',[('SUCCEEDED',8),('ROLLED_BACK',9)])
+def test_j1_terminal_epoch_and_immutable_origin(j1_ctx,outcome,epoch):
+    j1_ctx=_j1_advance(_j1_advance(j1_ctx,'PUBLICATION_INTENT'),'RECOVERING');j,r,res,app=j1_ctx
+    before=res['before'];after=_target(r) if outcome=='SUCCEEDED' else before
+    rollback={'attempted':False} if outcome=='SUCCEEDED' else {'attempted':True,'restored_preimage_digest':hashlib.sha256(c.canonical_release_bytes(before)).hexdigest()}
+    kw=dict(completed_at_ms=3000,postcondition_digest='f'*64,before=before,after=after,rollback=rollback)
+    with pytest.raises(a.ExecutiveReleaseActuatorJournalError):_j1_advance(j1_ctx,outcome,after_actuator_generation=epoch+1,**kw)
+    final=_j1_advance(j1_ctx,outcome,after_actuator_generation=epoch,**kw)[1]
+    assert final['terminal']['after_actuator_generation']==epoch
+    assert final['recovery_origin']==r['recovery_origin'] and final['publication_intent']==r['publication_intent']
+    assert final['actuator_generation']==7
+
+
+def test_j1_intent_expiry_before_write_leaves_original(j1_ctx,monkeypatch):
+    j,r,_,_=j1_ctx;old=c.canonical_release_bytes(r)
+    monkeypatch.setattr(a.time,'monotonic_ns',lambda:r['start_deadline_monotonic_ns'])
+    with pytest.raises(a.ExecutiveReleaseActuatorJournalError):_j1_advance(j1_ctx,'PUBLICATION_INTENT')
+    assert c.canonical_release_bytes(j.read(r['operation_key']))==old
+
+
+@pytest.mark.parametrize('terminal',[False,True])
+def test_j1_legacy_records_remain_readable_immutable_without_migration(tmp_path,terminal):
+    j=_journal(tmp_path/'legacy');new=_start(j);old=new.to_dict()
+    old['schema']=actuator._LEGACY_SCHEMA
+    old.pop('before');old.pop('start_deadline_monotonic_ns')
+    if terminal:
+        old.update(state='FAILED_NOT_APPLIED',journal_generation=5)
+        old['terminal']=dict(completed_at_ms=3000,postcondition_digest=POSTCONDITION,
+            before=_before(new),after=_before(new),rollback={'attempted':False})
+    raw=contract.canonical_release_bytes(old);path=_record_path(j._root);path.write_bytes(raw)
+    before=path.stat();assert j.read(OPERATION_KEY).to_dict()==old
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,
+                       match='TERMINAL_IMMUTABLE' if terminal else 'LEGACY_RECOVERY_UNAVAILABLE'):
+        j.advance(OPERATION_KEY,expected_generation=old['journal_generation'],state='PUBLICATION_INTENT',**_ancestry())
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,match='CONFLICT'):_start(j)
+    assert path.read_bytes()==raw and path.stat().st_mtime_ns==before.st_mtime_ns
+    assert not list(j._root.glob('*.tmp'))
+
+
+@pytest.mark.parametrize('after_replace',[False,True])
+def test_j1_publication_intent_crash_reconciles_durable_phase(j1_ctx,monkeypatch,after_replace):
+    j,start,_,_=j1_ctx;replace=actuator.os.replace
+    def fail(*args,**kwargs):
+        if after_replace:replace(*args,**kwargs)
+        raise OSError(errno.EIO,'synthetic phase fault')
+    monkeypatch.setattr(actuator.os,'replace',fail)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,match='RECORD_REPLACE'):
+        _j1_advance(j1_ctx,'PUBLICATION_INTENT')
+    observed=j.read(OPERATION_KEY)
+    assert observed['state']==('PUBLICATION_INTENT' if after_replace else 'STARTED')
+    assert observed['journal_generation']==(2 if after_replace else 1)
+    monkeypatch.setattr(actuator.os,'replace',replace)
+    if after_replace:
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,match='GENERATION_MISMATCH'):
+            _j1_advance(j1_ctx,'PUBLICATION_INTENT')
+        recovered=_j1_advance((j,observed,j1_ctx[2],j1_ctx[3]),'RECOVERING')[1]
+        assert recovered['recovery_origin']['from_state']=='PUBLICATION_INTENT'
+    assert not list(j._root.glob('*.tmp'))
+
+
+def test_j1_nested_read_primary_error_survives_deadline_and_close_failure(j1_ctx,monkeypatch):
+    j,start,_,_=j1_ctx;original=RuntimeError('primary synthetic error');real_close=actuator.os.close
+    def fail_read(*args,**kwargs):
+        monkeypatch.setattr(actuator.time,'monotonic_ns',lambda:start['start_deadline_monotonic_ns'])
+        raise original
+    def close_then_fail(fd):
+        real_close(fd)
+        raise OSError('secondary synthetic close error')
+    monkeypatch.setattr(j,'_read_prestart_snapshot',fail_read)
+    monkeypatch.setattr(actuator.os,'close',close_then_fail)
+    # First record read also closes a descriptor. Install the close failure only
+    # inside the sidecar fault so the intended primary happens first.
+    monkeypatch.setattr(actuator.os,'close',real_close)
+    def primary(*args,**kwargs):
+        monkeypatch.setattr(actuator.os,'close',close_then_fail)
+        return fail_read(*args,**kwargs)
+    monkeypatch.setattr(j,'_read_prestart_snapshot',primary)
+    with pytest.raises(RuntimeError) as caught:_j1_advance(j1_ctx,'PUBLICATION_INTENT')
+    assert caught.value is original and not actuator._LOCAL_LOCK.locked()
+    monkeypatch.setattr(actuator.os,'close',real_close)
+    assert _record_path(j._root).read_bytes()==contract.canonical_release_bytes(start)
+
+
+@pytest.mark.parametrize('phase',['reservation','temporary','final'])
+def test_j1_nested_io_crossing_original_deadline_has_no_success(j1_ctx,monkeypatch,phase):
+    j,start,_,_=j1_ctx;read=j._read_file;sidecar=j._read_prestart_snapshot;tripped=[]
+    def late_read(root,name,**kwargs):
+        result=read(root,name,**kwargs)
+        hit=name.endswith('.tmp') if phase=='temporary' else name.endswith('.json') and bool(tripped)
+        if phase=='final':
+            # Select final journal read after os.replace through actual content.
+            hit=name.endswith('.json') and b'"state":"PUBLICATION_INTENT"' in (result[0] or b'')
+        if hit and not tripped:
+            tripped.append(name);monkeypatch.setattr(actuator.time,'monotonic_ns',lambda:start['start_deadline_monotonic_ns'])
+        return result
+    def late_sidecar(*args,**kwargs):
+        result=sidecar(*args,**kwargs)
+        if not tripped:
+            tripped.append('reservation');monkeypatch.setattr(actuator.time,'monotonic_ns',lambda:start['start_deadline_monotonic_ns'])
+        return result
+    monkeypatch.setattr(j,'_read_prestart_snapshot' if phase=='reservation' else '_read_file',late_sidecar if phase=='reservation' else late_read)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:_j1_advance(j1_ctx,'PUBLICATION_INTENT')
+    assert caught.value.code==('DEADLINE_EXCEEDED' if phase=='reservation' else 'DEADLINE_EFFECT_UNKNOWN')
+    assert tripped and not actuator._LOCAL_LOCK.locked()
+    stored=contract.parse_release_json(_record_path(j._root).read_bytes())
+    assert stored['state']==('PUBLICATION_INTENT' if phase=='final' else 'STARTED')
+
+
+# R2 independent deadline regressions, retained in shipping tests.
+from types import SimpleNamespace
+R2_PHASES=["STARTED","PUBLICATION_INTENT","PUBLISHED","BROKER_RESTART_PENDING","RECOVERING"]
+
+@pytest.fixture
+def r2_ctx(tmp_path,monkeypatch):
+    clock=[2_200_000_000];real=actuator.time
+    monkeypatch.setattr(a,'time',SimpleNamespace(monotonic=real.monotonic,sleep=real.sleep,time_ns=lambda:2_200_000_000,monotonic_ns=lambda:clock[0]))
+    j=_journal(tmp_path/'journal');r=_start(j);res,app,_,_=_reservation_fixture()
+    return j,r,res,app,clock
+
+
+def _r2_adv(r2_ctx,state,**kw):
+    j,r,res,app,clock=r2_ctx
+    record=j.advance(r['operation_key'],expected_generation=r['journal_generation'],state=state,reservation=res,approval=app,**kw)
+    return j,record,res,app,clock
+
+
+def _r2_at(r2_ctx,state):
+    for p in R2_PHASES[1:R2_PHASES.index(state)+1]:r2_ctx=_r2_adv(r2_ctx,p)
+    return r2_ctx
+
+
+def _r2_raw(r2_ctx):return _record_path(r2_ctx[0]._root).read_bytes()
+
+
+@pytest.mark.parametrize('phase',R2_PHASES)
+def test_shorter_replay_io_budget_preserves_original_start(r2_ctx,phase):
+    r2_ctx=_r2_at(r2_ctx,phase);j,r,_,_,clock=r2_ctx;before=_r2_raw(r2_ctx)
+    shorter=clock[0]+1_000_000_000
+    assert shorter<r['start_deadline_monotonic_ns']
+    replay=_start(j,publication_deadline_monotonic_ns=r['start_deadline_monotonic_ns'],deadline_monotonic_ns=shorter)
+    assert replay==r and _r2_raw(r2_ctx)==before
+
+
+@pytest.mark.parametrize('phase',['STARTED','PUBLISHED'])
+@pytest.mark.parametrize('target',['journal','reservation','temporary','final'])
+def test_nested_read_stops_at_io_deadline(r2_ctx,monkeypatch,phase,target):
+    r2_ctx=_r2_at(r2_ctx,phase);j,r,res,app,clock=r2_ctx
+    endpoint=clock[0]+500_000_000;old_read=actuator.os.read;old_replace=actuator.os.replace
+    replaced=[];hit=[];extra=[]
+    def rep(*args,**kw):
+        result=old_replace(*args,**kw);replaced.append(True);return result
+    def read(fd,count):
+        actual=os.fstat(fd)
+        matches=[]
+        for p in j._root.iterdir():
+            if p.is_file() and p.stat().st_ino==actual.st_ino:matches.append(p.name)
+        selected=bool(matches) and ((target=='journal' and matches[0].endswith('.json') and not matches[0].endswith('.reservation.json') and not replaced)
+            or (target=='reservation' and matches[0].endswith('.reservation.json'))
+            or (target=='temporary' and matches[0].endswith('.tmp'))
+            or (target=='final' and replaced and matches[0].endswith('.json')))
+        if selected and hit:extra.append('read after deadline')
+        data=old_read(fd,count)
+        if selected and not hit and data:hit.append(True);clock[0]=endpoint
+        return data
+    monkeypatch.setattr(actuator.os,'read',read);monkeypatch.setattr(actuator.os,'replace',rep)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError) as caught:
+        _r2_adv(r2_ctx,'PUBLICATION_INTENT' if phase=='STARTED' else 'RECOVERING',deadline_monotonic_ns=endpoint)
+    assert caught.value.code in {'DEADLINE_EXCEEDED','DEADLINE_EFFECT_UNKNOWN'}
+    assert hit and not actuator._LOCAL_LOCK.locked()
+    assert not extra,extra
+
+
+
+def test_r2_fresh_start_cannot_exceed_request_endpoint(tmp_path):
+    journal=_journal(tmp_path/'journal')
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,match='INVALID_ORIGINAL_DEADLINE'):
+        _start(journal,deadline_monotonic_ns=3_000_000_000,
+               publication_deadline_monotonic_ns=4_000_000_000)
+    assert not _record_path(journal._root).exists()
+    assert not list(journal._root.glob('*.start'))
+
+
+def test_r2_exact_durable_stage_recovery_can_use_shorter_io_budget(tmp_path,monkeypatch):
+    journal=_journal(tmp_path/'journal');link=actuator.os.link
+    def interrupted(*args,**kwargs):raise OSError(errno.EIO,'before hardlink')
+    monkeypatch.setattr(actuator.os,'link',interrupted)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError,match='RECORD_PUBLISH'):
+        _start(journal,deadline_monotonic_ns=4_000_000_000)
+    staged=_record_path(journal._root).with_suffix('.start');before=staged.read_bytes()
+    assert not _record_path(journal._root).exists()
+    monkeypatch.setattr(actuator.os,'link',link)
+    result=_start(journal,publication_deadline_monotonic_ns=4_000_000_000,
+                  deadline_monotonic_ns=3_000_000_000)
+    assert result['start_deadline_monotonic_ns']==4_000_000_000
+    assert _record_path(journal._root).read_bytes()==before
+
+
+@pytest.mark.parametrize('phase', ['STARTED', 'PUBLISHED'])
+def test_r3_partial_stage_write_stops_at_original_endpoint(r2_ctx, monkeypatch, phase):
+    ctx = _r2_at(r2_ctx, phase)
+    journal, record, reservation, approval, clock = ctx
+    before = _r2_raw(ctx)
+    endpoint = clock[0] + 500_000_000
+    write = actuator.os.write
+    calls = []
+    def partial(descriptor, data):
+        calls.append(clock[0])
+        written = write(descriptor, data[:1])
+        clock[0] = endpoint
+        return written
+    monkeypatch.setattr(actuator.os, 'write', partial)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match='DEADLINE_EFFECT_UNKNOWN'):
+        _r2_adv(ctx, 'PUBLICATION_INTENT' if phase == 'STARTED' else 'RECOVERING',
+                deadline_monotonic_ns=endpoint)
+    assert calls == [endpoint - 500_000_000]
+    assert _r2_raw(ctx) == before and not list(journal._root.glob('*.tmp'))
+    assert not actuator._LOCAL_LOCK.locked()
+
+
+def test_r3_start_staging_uses_same_endpoint(tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / 'journal')
+    reservation, approval, _, _ = _reservation_fixture()
+    journal.reserve_prestart(reservation=reservation, approval=approval)
+    endpoint = clock[0] + 1_000_000
+    write = actuator.os.write
+    calls = []
+    def partial(descriptor, data):
+        calls.append(clock[0])
+        written = write(descriptor, data[:1])
+        clock[0] = endpoint
+        return written
+    monkeypatch.setattr(actuator.os, 'write', partial)
+    with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match='DEADLINE_EFFECT_UNKNOWN'):
+        _start(journal, deadline_monotonic_ns=endpoint)
+    assert len(calls) == 1 and calls[0] < endpoint
+    assert not _record_path(journal._root).exists()
+    assert not list(journal._root.glob('*.start'))
+    assert not actuator._LOCAL_LOCK.locked()
+
+
+@pytest.mark.parametrize('boundary', ['open', 'fchmod', 'fstat', 'acl', 'write', 'file-fsync', 'path-stat', 'directory-fsync'])
+def test_r3_write_primitive_bounds_every_returned_step(tmp_path, monkeypatch, request_deadline_clock, boundary):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / 'journal')
+    _start(journal)
+    native_os = actuator.os
+    root = native_os.open(journal._root, native_os.O_RDONLY | native_os.O_DIRECTORY)
+    endpoint = clock[0] + 1_000_000
+    proxy = SimpleNamespace(**vars(native_os))
+    events, opened, closed = [], [], []
+    triggered = []
+    def after(name):
+        events.append((name, clock[0]))
+        if name == boundary and not triggered:
+            triggered.append(name)
+            clock[0] = endpoint
+    for name in ('open', 'fchmod', 'fstat', 'write', 'stat', 'fsync'):
+        def call(*args, _name=name, **kwargs):
+            result = getattr(native_os, _name)(*args, **kwargs)
+            label = _name
+            if _name == 'open': opened.append(result)
+            if _name == 'stat': label = 'path-stat'
+            if _name == 'fsync': label = 'directory-fsync' if args[0] == root else 'file-fsync'
+            after(label)
+            return result
+        setattr(proxy, name, call)
+    def close(descriptor):
+        closed.append(descriptor)
+        native_os.close(descriptor)
+    proxy.close = close
+    def acl(*args, **kwargs): after('acl'); return False
+    monkeypatch.setattr(actuator, 'os', proxy)
+    monkeypatch.setattr(actuator, 'has_macos_acl', acl)
+    try:
+        with pytest.raises(actuator.ExecutiveReleaseActuatorJournalError, match='DEADLINE_EFFECT_UNKNOWN'):
+            journal._write_new(root, 'bounded.tmp', b'payload', deadline_monotonic_ns=endpoint)
+        assert triggered == [boundary]
+        # Descriptor/path reads and directory fsync after expiry are solely
+        # necessary owned-inode cleanup. No further data, mode or ACL work.
+        assert not [(name, stamp) for name, stamp in events
+                    if stamp >= endpoint and name in ('open', 'fchmod', 'write', 'acl', 'file-fsync')]
+        assert closed == opened
+        assert not (journal._root / 'bounded.tmp').exists()
+    finally:
+        native_os.close(root)
+
+
+def test_r3_partial_write_primary_survives_cleanup_fsync_and_close_failures(tmp_path, monkeypatch, request_deadline_clock):
+    clock, _ = request_deadline_clock
+    journal = _journal(tmp_path / 'journal')
+    _start(journal)
+    native_os = actuator.os
+    root = native_os.open(journal._root, native_os.O_RDONLY | native_os.O_DIRECTORY)
+    endpoint = clock[0] + 1_000_000
+    proxy = SimpleNamespace(**vars(native_os))
+    primary = RuntimeError('synthetic partial-write primary')
+    closed = []
+    def write(descriptor, data):
+        native_os.write(descriptor, data[:1])
+        clock[0] = endpoint
+        raise primary
+    def fsync(descriptor):
+        if descriptor == root: raise OSError('synthetic cleanup fsync')
+        native_os.fsync(descriptor)
+    def close(descriptor):
+        closed.append(descriptor)
+        native_os.close(descriptor)
+        raise OSError('synthetic cleanup close')
+    proxy.write, proxy.fsync, proxy.close = write, fsync, close
+    monkeypatch.setattr(actuator, 'os', proxy)
+    try:
+        with pytest.raises(RuntimeError) as caught:
+            journal._write_new(root, 'bounded.tmp', b'payload', deadline_monotonic_ns=endpoint)
+        assert caught.value is primary and len(closed) == 1
+        assert not (journal._root / 'bounded.tmp').exists()
+    finally:
+        native_os.close(root)

@@ -183,20 +183,32 @@ class CoreTests(unittest.TestCase):
             self.call(expected_snapshot=b.digest(self.client.info), arguments={"fileId": "file-a"}, _catalog_pin="0" * 64)
         self.assertNotIn("create_artboard", self.client.calls)
 
-    def test_current_server_pin_accepts_0512_and_refuses_0511(self):
-        self.client.info = {"fileId": "file-a", "artboards": []}
-        self.client.server = {"name": "paper-desktop", "version": "0.5.12"}
+    def test_default_server_policy_accepts_release_version_drift_when_catalog_matches(self):
         catalog_pin = b.digest(self.client.catalog())
-        result = self.call(
-            expected_snapshot=b.digest(self.client.info),
-            arguments={"fileId": "file-a"},
-            _server_pin=b.SUPPORTED_SERVER,
-            _catalog_pin=catalog_pin,
-        )
-        self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        for version in ("0.5.12", "0.5.14"):
+            with self.subTest(version=version):
+                self.client.info = {"fileId": "file-a", "artboards": []}
+                self.client.calls.clear()
+                self.client.server = {"name": "paper-desktop", "version": version}
+                schema = b.schema_receipt(
+                    self.client,
+                    self.client.catalog(),
+                    server_pin=b.SUPPORTED_SERVER,
+                    catalog_pin=catalog_pin,
+                )
+                self.assertTrue(schema["accepted_for_write"])
+                self.assertEqual(schema["server_version_policy"], "OBSERVED_NOT_PINNED")
+                result = self.call(
+                    expected_snapshot=b.digest(self.client.info),
+                    arguments={"fileId": "file-a"},
+                    _server_pin=b.SUPPORTED_SERVER,
+                    _catalog_pin=catalog_pin,
+                )
+                self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+
         self.client.info = {"fileId": "file-a", "artboards": []}
         self.client.calls.clear()
-        self.client.server = {"name": "paper-desktop", "version": "0.5.11"}
+        self.client.server = {"name": "not-paper-desktop", "version": "0.5.14"}
         with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
             self.call(
                 expected_snapshot=b.digest(self.client.info),
@@ -206,49 +218,8 @@ class CoreTests(unittest.TestCase):
             )
         self.assertNotIn("create_artboard", self.client.calls)
 
-    def test_default_server_set_accepts_0512_and_0514_only_with_exact_catalog(self):
-        catalog_pin = b.digest(self.client.catalog())
-        for version in ("0.5.12", "0.5.14"):
-            with self.subTest(version=version):
-                self.client.info = {"fileId": "file-a", "artboards": []}
-                self.client.calls.clear()
-                self.client.server = {"name": "paper-desktop", "version": version}
-                result = self.call(
-                    expected_snapshot=b.digest(self.client.info),
-                    arguments={"fileId": "file-a"},
-                    _server_pin=b.SUPPORTED_SERVERS,
-                    _catalog_pin=catalog_pin,
-                )
-                self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
-        self.client.info = {"fileId": "file-a", "artboards": []}
-        self.client.calls.clear()
-        self.client.server = {"name": "paper-desktop", "version": "0.5.13"}
-        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-            self.call(
-                expected_snapshot=b.digest(self.client.info),
-                arguments={"fileId": "file-a"},
-                _server_pin=b.SUPPORTED_SERVERS,
-                _catalog_pin=catalog_pin,
-            )
-
-    def test_schema_receipt_reports_all_accepted_server_identities(self):
-        self.client.server = {"name": "paper-desktop", "version": "0.5.14"}
-        catalog = self.client.catalog()
-        receipt = b.schema_receipt(
-            self.client,
-            catalog,
-            server_pin=b.SUPPORTED_SERVERS,
-            catalog_pin=b.digest(catalog),
-        )
-        self.assertTrue(receipt["accepted_for_write"])
-        self.assertIsNone(receipt["expected_server"])
-        self.assertEqual(
-            receipt["expected_servers"],
-            [["paper-desktop", "0.5.12"], ["paper-desktop", "0.5.14"]],
-        )
-
     def test_current_safe_tool_classes(self):
-        for name in ["list_files", "find_nodes", "get_tokens",
+        for name in ["find_nodes", "get_tokens",
                      "list_comment_threads", "get_comment_thread",
                      "list_comment_thread_authors"]:
             self.assertIn(name, b.READ_TOOLS)
@@ -256,12 +227,45 @@ class CoreTests(unittest.TestCase):
                      "set_comment_thread_status"]:
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
-                     "export_combined_pdf", "rename_pages"]:
+                     "export_combined_pdf", "rename_pages", "list_files",
+                     "list_resources", "rename_resource"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
         self.assertEqual(
             b.SUPPORTED_CATALOG_SHA256,
-            "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+            "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
         )
+
+    def test_reviewed_full_catalog_fixture_and_descriptor_mutations_fail_closed(self):
+        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "ac18857_full_catalog.json"
+        catalog = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(b.digest(catalog), b.SUPPORTED_CATALOG_SHA256)
+        self.assertIn("write_html", catalog)
+        self.assertIn("rename_pages", catalog)
+        self.assertNotIn("list_files", catalog)
+
+        class CatalogFake(Fake):
+            def __init__(self, value):
+                super().__init__()
+                self.value = value
+                self.server = {"name": "paper-desktop", "version": "0.5.14"}
+            def catalog(self):
+                return copy.deepcopy(self.value)
+
+        for tool_name in ("write_html", "rename_pages"):
+            with self.subTest(tool_name=tool_name):
+                mutated = copy.deepcopy(catalog)
+                mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
+                self.assertNotEqual(b.digest(mutated), b.SUPPORTED_CATALOG_SHA256)
+                client = CatalogFake(mutated)
+                with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                    self.call(
+                        client=client,
+                        expected_snapshot=b.digest(client.info),
+                        arguments={"fileId": "file-fixture"},
+                        _server_pin=b.SUPPORTED_SERVER,
+                        _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
+                    )
+                self.assertNotIn("create_artboard", client.calls)
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}

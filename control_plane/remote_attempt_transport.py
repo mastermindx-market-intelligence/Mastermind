@@ -17,7 +17,14 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from enum import Enum
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+from control_plane.operator_harness_contract import (
+    HarnessAdapterCapabilities, RequestedExecutionProfile, WorkspaceIdentity,
+)
+
+if TYPE_CHECKING:
+    from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
 
 from control_plane.executive_capacity_join import (
     CapacityJoinError,
@@ -404,6 +411,314 @@ def build_attempt_bound_worker_fleet(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class RemoteOperatorHostBinding:
+    """Trusted host facts for one existing rich-worker endpoint, never a registry.
+
+    The installed owner supplies these observations for the already-claimed
+    Worker. A config digest, provider, workspace or binary mismatch refuses;
+    request content cannot choose a different endpoint or concrete factory.
+    """
+
+    host_ref: str
+    worker_id: str
+    transport: BrokerTransportBinding
+    worker_source_config_digest: str
+    provider: str
+    harness_kind: str
+    harness_binary_digest: str
+    harness_version: str
+    expected_config_digest: str
+    workspace: WorkspaceIdentity
+    capabilities: HarnessAdapterCapabilities
+
+    def __post_init__(self) -> None:
+        import re
+        try:
+            validate_host_ref(self.host_ref)
+            _require_identity(self.worker_id)
+            if (not isinstance(self.transport, BrokerTransportBinding)
+                    or not isinstance(self.workspace, WorkspaceIdentity)
+                    or not isinstance(self.capabilities, HarnessAdapterCapabilities)
+                    or (self.provider, self.harness_kind) not in {
+                        ("openai-codex", "codex-app-server"),
+                        ("claude", "claude-agent-sdk"),
+                    }):
+                raise ValueError("invalid operator binding")
+            for digest in (self.worker_source_config_digest,
+                           self.harness_binary_digest, self.expected_config_digest):
+                if type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                    raise ValueError("invalid operator digest")
+            _require_identity(self.harness_version)
+            if self.provider == "claude" and self.capabilities.supports_native_resume is not False:
+                raise ValueError("native Claude resume is not qualified")
+        except (TypeError, ValueError, RemoteAttemptTransportError):
+            raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from None
+
+
+def build_claimed_remote_workspace_identity_source(
+    runtime: Runtime,
+    binding_source: Callable[[str, str], RemoteOperatorHostBinding | None],
+) -> Callable[[Attempt, Job], WorkspaceIdentity]:
+    """Feed the existing selected-host workspace hook from the endpoint owner.
+
+    This is a consumer of the same trusted binding, not another observation
+    source, registry or host selector. The later adapter factory independently
+    compares the resulting profile against a freshly resolved exact binding.
+    """
+    if not isinstance(runtime, Runtime) or not callable(binding_source):
+        raise RemoteAttemptTransportError("INVALID_INPUT")
+
+    def source(attempt: Attempt, supplied_job: Job) -> WorkspaceIdentity:
+        import copy
+        if not isinstance(attempt, Attempt) or not isinstance(supplied_job, Job):
+            raise RemoteAttemptTransportError("INVALID_INPUT")
+        before = _read_claim(runtime, job_id=attempt.job_id,
+                             attempt_id=attempt.attempt_id, purpose=RemoteTransportPurpose.LAUNCH)
+        job, current, quota, join = before
+        keys = ("attempt_id", "job_id", "worker_id", "quota_class", "fence_generation",
+                "lease_owner", "authority_policy_hash")
+        if (any(getattr(current, key) != getattr(attempt, key) for key in keys)
+                or supplied_job.job_id != job.job_id
+                or supplied_job.worktree != job.worktree
+                or supplied_job.constraints != job.constraints):
+            raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+        if current.execution_mode is not None:
+            raise RemoteAttemptTransportError("CLAIM_NOT_LAUNCHABLE")
+
+        def signature(snapshot):
+            source_job, source_attempt, source_quota, source_join = snapshot
+            # Heartbeat-only version movement is not a new physical target.
+            return (_claim_signature(source_job, dataclasses.replace(source_attempt, version=0),
+                                     source_quota, source_join),
+                    source_attempt.lease_owner, source_attempt.authority_policy_hash,
+                    source_attempt.execution_mode, source_job.worktree,
+                    copy.deepcopy(source_job.constraints))
+
+        before_signature = signature(before)
+        try:
+            observed = binding_source(join.capacity_join.host_ref, current.worker_id)
+        except Exception:
+            raise RemoteAttemptTransportError("HOST_BINDING_UNAVAILABLE") from None
+        if not isinstance(observed, RemoteOperatorHostBinding):
+            raise RemoteAttemptTransportError("HOST_BINDING_UNAVAILABLE")
+        workspace = observed.workspace
+        if (observed.host_ref != join.capacity_join.host_ref
+                or observed.worker_id != current.worker_id
+                or observed.worker_source_config_digest != join.capacity_join.worker_source_config_digest
+                or (quota.provider, observed.provider, observed.harness_kind) not in {
+                    ("codex", "openai-codex", "codex-app-server"),
+                    ("claude", "claude", "claude-agent-sdk"),
+                }
+                or type(workspace) is not WorkspaceIdentity
+                or workspace.workspace_path != job.worktree
+                or workspace.base_sha != job.constraints.get("base_sha")
+                or any(type(getattr(workspace, key)) is not int or getattr(workspace, key) < 0
+                       for key in ("device", "inode", "uid", "gid"))
+                or workspace.inode == 0):
+            raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
+        after = _read_claim(runtime, job_id=current.job_id,
+                            attempt_id=current.attempt_id, purpose=RemoteTransportPurpose.LAUNCH)
+        if signature(after) != before_signature:
+            raise RemoteAttemptTransportError("STATE_MOVED")
+        return workspace
+
+    return source
+
+
+def build_claimed_remote_operator_factory(
+    runtime: Runtime,
+    binding_source: Callable[[str, str], RemoteOperatorHostBinding | None],
+) -> Callable[..., Any]:
+    """Connect the existing claim-aware Control seam to the existing mTLS proxy.
+
+    This factory has no default/fallback host and does not enumerate, register,
+    rank or claim Workers. Construction performs zero network/provider calls.
+    Runtime/OHF still owns final admission, generation and effect receipts.
+    """
+    if not isinstance(runtime, Runtime) or not callable(binding_source):
+        raise RemoteAttemptTransportError("INVALID_INPUT")
+
+    def factory(attempt: Attempt, requested: RequestedExecutionProfile,
+                loader: Callable[..., str], *, recovery: bool) -> "RemoteOperatorHarnessAdapter":
+        from control_plane.operator_harness_wire import to_wire
+        from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+
+        if (not isinstance(attempt, Attempt)
+                or not isinstance(requested, RequestedExecutionProfile)
+                or type(recovery) is not bool or not callable(loader)):
+            raise RemoteAttemptTransportError("INVALID_INPUT")
+        purpose = RemoteTransportPurpose.RECOVERY if recovery else RemoteTransportPurpose.LAUNCH
+        before = _read_claim(runtime, job_id=attempt.job_id,
+                             attempt_id=attempt.attempt_id, purpose=purpose)
+        job, current, quota, join = before
+        keys = ("attempt_id", "job_id", "worker_id", "quota_class", "fence_generation",
+                "lease_owner", "authority_policy_hash")
+        if (any(getattr(current, k) != getattr(attempt, k) for k in keys)
+                or requested.worker_id != current.worker_id
+                or requested.authority_policy_hash != current.authority_policy_hash
+                or current.execution_mode not in (None, "OPERATOR_HARNESS")):
+            raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+        if recovery and (current.execution_mode != "OPERATOR_HARNESS"
+                         or current.requested_execution_profile != to_wire(requested)):
+            raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+        if not recovery and current.execution_mode is not None:
+            # A sealed/previously attempted operator must enter recovery. Never
+            # mint a fresh-start-capable client to disguise a lost start reply.
+            raise RemoteAttemptTransportError("CLAIM_NOT_LAUNCHABLE")
+        try:
+            binding = binding_source(join.capacity_join.host_ref, current.worker_id)
+        except Exception:
+            raise RemoteAttemptTransportError("HOST_BINDING_UNAVAILABLE") from None
+        if not isinstance(binding, RemoteOperatorHostBinding):
+            raise RemoteAttemptTransportError("HOST_BINDING_UNAVAILABLE")
+        if (binding.host_ref != join.capacity_join.host_ref
+                or binding.worker_id != current.worker_id
+                or binding.worker_source_config_digest != join.capacity_join.worker_source_config_digest
+                or (quota.provider, binding.provider, binding.harness_kind) not in {
+                    ("codex", "openai-codex", "codex-app-server"),
+                    ("claude", "claude", "claude-agent-sdk"),
+                }
+                or any(getattr(binding, k) != getattr(requested, k) for k in (
+                    "provider", "harness_kind", "harness_binary_digest", "harness_version",
+                    "expected_config_digest", "workspace"))):
+            raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
+        after = _read_claim(runtime, job_id=current.job_id,
+                            attempt_id=current.attempt_id, purpose=purpose)
+        def operator_signature(snapshot):
+            source_job, source_attempt, source_quota, source_join = snapshot
+            # A heartbeat changes version, not the chosen endpoint or authority.
+            stable_attempt = dataclasses.replace(source_attempt, version=0)
+            return (_claim_signature(source_job, stable_attempt, source_quota, source_join),
+                    source_attempt.lease_owner, source_attempt.authority_policy_hash,
+                    source_attempt.execution_mode, source_attempt.requested_execution_profile_digest,
+                    source_attempt.effective_grant_digest, source_attempt.placement_snapshot_digest,
+                    source_attempt.execution_principal_snapshot_digest)
+        if operator_signature(before) != operator_signature(after):
+            raise RemoteAttemptTransportError("STATE_MOVED")
+        operations = {
+            "ohf-identity", "ohf-materialization-status", "ohf-begin-turn",
+            "ohf-collect-turn", "ohf-interrupt", "ohf-stop", "ohf-cancel",
+            "ohf-reconcile", "ohf-reconcile-absence",
+        }
+        if recovery:
+            if binding.capabilities.supports_native_resume:
+                operations.add("ohf-resume")
+        else:
+            operations.update({"ohf-validate", "ohf-start"})
+        identity = dict(host_ref=binding.host_ref, job_id=current.job_id,
+                        attempt_id=current.attempt_id, worker_id=current.worker_id,
+                        operation_id=current.attempt_id)
+        try:
+            client = RemoteWorkerBrokerClient(binding.transport, identity,
+                                               allowed_operations=operations)
+
+            class RuntimeGenerationBoundAdapter(RemoteOperatorHarnessAdapter):
+                @staticmethod
+                def _payload_identity(epoch, generation):
+                    return {
+                        "session_epoch_id": epoch.session_epoch_id,
+                        "process_generation_id": generation.process_generation_id,
+                    }
+
+                @staticmethod
+                def _assert_generation(epoch, generation):
+                    if (epoch.attempt_id != current.attempt_id
+                            or epoch.worker_id != current.worker_id
+                            or generation.session_epoch_id != epoch.session_epoch_id
+                            or generation.worker_id != current.worker_id):
+                        raise RemoteAttemptTransportError("CLAIM_MISMATCH")
+                    try:
+                        canonical = runtime.operator_harness.current_writer_generation(epoch)
+                    except Exception:
+                        raise RemoteAttemptTransportError("STATE_MOVED") from None
+                    if canonical != generation:
+                        raise RemoteAttemptTransportError("STATE_MOVED")
+
+                def _bind_initial_generation(self, epoch, generation):
+                    self._assert_generation(epoch, generation)
+                    try:
+                        self.client.bind_payload_identity(
+                            session_epoch_id=epoch.session_epoch_id,
+                            process_generation_id=generation.process_generation_id,
+                        )
+                    except TransportValidationError:
+                        raise RemoteAttemptTransportError("STATE_MOVED") from None
+
+                def _start(self, *, operation_name, operation_id, requested, epoch,
+                           generation, provider_session=None):
+                    self._assert_generation(epoch, generation)
+                    expected = self._payload_identity(epoch, generation)
+                    if self.client.bound_payload_identity != expected:
+                        if not self.client.bound_payload_identity:
+                            self._bind_initial_generation(epoch, generation)
+                        elif operation_name == "ohf-resume":
+                            try:
+                                successor = RemoteWorkerBrokerClient(
+                                    binding.transport,
+                                    identity,
+                                    allowed_operations=operations,
+                                )
+                                successor.bind_payload_identity(
+                                    session_epoch_id=epoch.session_epoch_id,
+                                    process_generation_id=generation.process_generation_id,
+                                )
+                            except (
+                                TransportValidationError,
+                                WorkerBrokerError,
+                                TypeError,
+                                ValueError,
+                            ):
+                                raise RemoteAttemptTransportError(
+                                    "HOST_BINDING_MISMATCH"
+                                ) from None
+                            # Preserve the old generation-scoped client as immutable.
+                            # All subsequent RPCs for the resumed generation use this
+                            # newly bound client instead of retargeting the old one.
+                            self.client = successor
+                        else:
+                            raise RemoteAttemptTransportError("STATE_MOVED")
+                    return super()._start(
+                        operation_name=operation_name, operation_id=operation_id,
+                        requested=requested, epoch=epoch, generation=generation,
+                        provider_session=provider_session,
+                    )
+
+            adapter = RuntimeGenerationBoundAdapter(
+                client, turn_input_loader=loader, capabilities=binding.capabilities
+            )
+            if recovery:
+                with runtime.store.read() as connection:
+                    rows = connection.execute(
+                        """
+                        SELECT e.session_epoch_id,g.process_generation_id
+                        FROM harness_session_epochs e
+                        JOIN process_generations g
+                          ON g.session_epoch_id=e.session_epoch_id
+                        WHERE e.attempt_id=? AND e.state='CURRENT'
+                          AND g.executive_writer_held=1
+                        ORDER BY e.epoch_number,g.generation_number
+                        """,
+                        (current.attempt_id,),
+                    ).fetchall()
+                if len(rows) != 1:
+                    raise RemoteAttemptTransportError("STATE_MOVED")
+                try:
+                    epoch, generation = runtime.operator_harness.generation_refs(
+                        str(rows[0]["process_generation_id"])
+                    )
+                except Exception:
+                    raise RemoteAttemptTransportError("STATE_MOVED") from None
+                if generation.generation_number != 1:
+                    raise RemoteAttemptTransportError("STATE_MOVED")
+                adapter._bind_initial_generation(epoch, generation)
+            return adapter
+        except (TypeError, ValueError, WorkerBrokerError):
+            raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH") from None
+
+    return factory
+
+
 class _UnavailableAttemptBoundRemoteInspector:
     """Fail closed: remote process identity is owned by the broker controller."""
 
@@ -713,6 +1028,8 @@ class AttemptBoundRemoteWorkerAdapter:
 
 
 __all__ = [
+    "RemoteOperatorHostBinding",
+    "build_claimed_remote_operator_factory",
     "REMOTE_RECOVERY_OPERATIONS",
     "REMOTE_WORKER_OPERATIONS",
     "AttemptBoundRemoteWorkerAdapter",

@@ -241,6 +241,9 @@ def open_binding(
     mlx_profiles_root: str | None = None,
     gologin_profiles_root: str | None = None,
     process_args_reader=None,
+    target_surface: str | None = None,
+    claude_desktop_cli: str | None = None,
+    claude_desktop_handoff_runner=None,
 ) -> dict:
     """Re-validate ``binding`` then dispatch to the owning provider adapter.
 
@@ -292,6 +295,17 @@ def open_binding(
     if problems:
         return refused(provider_label, binding_id, "invalid_binding", "the binding failed re-validation")
 
+    if target_surface not in (None, "default", "desktop"):
+        return refused(
+            provider_label, binding_id, "unsupported_surface",
+            "the requested navigation target is not supported",
+        )
+    if target_surface == "desktop" and provider != "claude_code":
+        return refused(
+            provider_label, binding_id, "unsupported_surface",
+            "the requested Desktop handoff is only supported for Claude Code sessions",
+        )
+
     # Deferred import: the adapter modules import this module at their own
     # top level (for the gates/outcome helpers above), so importing them
     # back at contract.py's module scope would be circular. Importing here,
@@ -309,6 +323,19 @@ def open_binding(
             process_args_reader=process_args_reader,
         )
     if provider == "claude_code":
+        if target_surface == "desktop":
+            if claude_desktop_handoff_runner is None:
+                return refused(
+                    provider_label, binding_id, "not_installed",
+                    "the Claude Desktop handoff runner is not configured",
+                )
+            return _claude.open_claude_code_in_desktop(
+                binding,
+                runner,
+                claude_desktop_handoff_runner,
+                claude_projects_dir=claude_projects_dir,
+                claude_cli_path=claude_desktop_cli,
+            )
         return _claude.open_claude_code(binding, runner, claude_projects_dir=claude_projects_dir)
     if provider == "claude_desktop":
         return _claude.open_claude_desktop(binding, runner)

@@ -49,6 +49,7 @@ test('paper tools expose discovery, bounded prepare, reads and one explicit cont
   assert.match(PAPER_DESIGN_TOOLS[0].description, /DOCUMENT_UNAVAILABLE/);
   assert.match(PAPER_DESIGN_TOOLS[0].description, /does not prove Paper Desktop or a known exact file is unavailable/);
   assert.match(PAPER_DESIGN_TOOLS[2].description, /exact target even if default active-file inspection is unavailable/);
+  for (const tool of PAPER_DESIGN_TOOLS) assert.doesNotMatch(tool.description, /list_files/);
   assert.match(PAPER_DESIGN_TOOLS[3].description, /same file\/page across hosts/);
   assert.match(PAPER_DESIGN_TOOLS[4].description, /board\/artboard\/node/);
   assert.match(PAPER_DESIGN_TOOLS[4].description, /target-scoped, not a file-wide lease/);

@@ -1,7 +1,7 @@
 """Bounded Paper target preparation through explicit file binding, not host control.
 
 Reuses bridge.py's transport, desktop mutex, target snapshots and exact schema pin.
-Reviewed Paper Desktop generations can address files directly by fileId even when another file remains
+Qualified Paper Desktop schemas can address files directly by fileId even when another file remains
 user-active. This projection accepts only one bare Paper ULID, checks a fresh exact-target
 snapshot, validates the target read, and returns its snapshot for a subsequent
 explicit-file edit. It never calls raw vendor open_file, shell, app launchers, paths,
@@ -26,7 +26,7 @@ def _file_id(observation: dict | None) -> str | None:
 
 def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
                      allow_prepare: bool = False, client=None, lock_root=None, execution_binding=None,
-                     _server_pin=bridge.SUPPORTED_SERVERS,
+                     _server_pin=bridge.SUPPORTED_SERVER,
                      _catalog_pin=bridge.SUPPORTED_CATALOG_SHA256,
                      _sleep=time.sleep) -> dict:
     """One opt-in, serialized target-binding operation with no Paper mutation.
@@ -69,7 +69,7 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
             "coordination_scope": "BOARD_ARTBOARD_NODE",
         }
 
-        # Reviewed Paper Desktop generations address files directly by fileId, including files that are
+        # Qualified Paper Desktop schemas address files directly by fileId, including files that are
         # not user-active. Do not use vendor open_file as a focus surrogate and do
         # not query unrelated active context merely to qualify this target. Active
         # state is therefore intentionally unknown rather than guessed.

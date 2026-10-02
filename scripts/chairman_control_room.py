@@ -63,8 +63,9 @@ repair, 2026-08-22)
   map — a request path is only ever used as a dict LOOKUP key, never
   concatenated into a filesystem path, so path traversal has no code path to
   reach;
-* ``POST /api/open`` accepts only a ``binding_id`` — never a URL, argv, path,
-  or profile from the browser; the actual navigation argv is built entirely
+* ``POST /api/open`` accepts a ``binding_id`` plus an optional closed
+  ``target_surface`` discriminator — never a URL, argv, path, session id, or
+  profile from the browser; the actual navigation argv is built entirely
   server-side by :mod:`integrations.chairman_surfaces`.
 
 Usage
@@ -111,6 +112,11 @@ DEFAULT_STATIC_DIR = _REPO_ROOT / "app" / "static" / "chairman_control"
 
 #: Default ephemeral loopback port.
 DEFAULT_PORT = 8787
+
+#: Isolated Claude Code runtime used only for CLI -> Desktop session handoff.
+#: Keeping it outside ~/.local/bin preserves the independently attested
+#: Executive Claude worker runtime.
+DEFAULT_CLAUDE_DESKTOP_CLI = "~/.local/share/mastermind/claude-desktop-bridge-install/.local/bin/claude"
 
 #: Host is hard-coded, never a flag — see module docstring / architecture §8.2.
 HOST = "127.0.0.1"
@@ -384,8 +390,8 @@ _DEFAULT_CWD_RUNNER_MAX_BYTES = 65536
 #: organizational data (measured 112,569 bytes in Wave D live proof — see
 #: the fix commission) and must never be silently truncated before
 #: ``json.loads`` sees it. 4 MiB is a generous multiple of that measured
-#: size, not a guess; ``integrations/chairman_surfaces/runner.py`` itself is
-#: NOT touched — its 64 KiB cap stays exactly as-is for every adapter call,
+#: size, not a guess; ``integrations/chairman_surfaces/runner.py`` keeps its
+#: 64 KiB cap exactly as-is for every non-PTY adapter call,
 #: whose outputs are tiny (osascript/open exit codes and short strings) by
 #: design.
 _REFRESH_BUILDS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
@@ -421,10 +427,10 @@ def default_runner(
     ever needs to widen it on this branch too.
 
     Only ``/api/refresh-builds`` (invoking Macro's active-build compiler
-    script) needs a working directory, and ``run_argv`` has no ``cwd``
-    parameter — that module is outside this packet's edit scope (see the
-    build commission's OWNED FILES). This branch reuses ``run_argv``'s own
-    argv-validation gate (:func:`integrations.chairman_surfaces.runner.
+    script) needs a captured-output working directory, and ``run_argv`` has
+    no ``cwd`` parameter. (The separate Desktop handoff uses
+    ``surfaces_runner.run_argv_pty`` directly.) This branch reuses
+    ``run_argv``'s own argv-validation gate (:func:`integrations.chairman_surfaces.runner.
     _validate_argv`) and reproduces its exact safety properties (``shell=
     False``, never raising on subprocess failure), but takes an explicit
     ``max_bytes`` output cap (default matches ``run_argv``'s own 64 KiB;
@@ -509,6 +515,7 @@ class ServerConfig:
     port: int
     static_dir: Path = DEFAULT_STATIC_DIR
     runner: Callable[..., dict] = default_runner
+    claude_desktop_handoff_runner: Callable[..., dict] = surfaces_runner.run_argv_pty
     now_fn: Callable[[], str] = _utc_now_z
     open_binding_fn: Callable[..., dict] = contract.open_binding
     #: Server-only elapsed source validity; no fallback and no browser authority.
@@ -519,6 +526,9 @@ class ServerConfig:
     #: (``~/.claude/projects`` / ``~/.codex/sessions``). Tests inject a
     #: ``tmp_path`` here instead.
     claude_projects_dir: str | None = None
+    #: Separate interactive Claude CLI path for exact CLI -> Desktop handoff.
+    #: This is intentionally distinct from Executive's provider-worker binary.
+    claude_desktop_cli: str | None = None
     codex_sessions_dir: str | None = None
     #: CAP-C1: optional path to a placement-selection facts document,
     #: passed straight through to ``ccr.build_control_room``'s own
@@ -1256,12 +1266,15 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         data, err = self._read_json_body()
         if err:
             return self._bad_request(err)
-        unknown = _unknown_key(data, {"binding_id", "owed_context"})
+        unknown = _unknown_key(data, {"binding_id", "owed_context", "target_surface"})
         if unknown is not None:
             return self._bad_request(f"unknown key: {unknown!r}")
         binding_id = data.get("binding_id")
         if not isinstance(binding_id, str) or not binding_id:
             return self._bad_request("binding_id: required (non-empty string)")
+        target_surface = data.get("target_surface")
+        if target_surface is not None and target_surface not in {"default", "desktop"}:
+            return self._bad_request("target_surface: must be 'default' or 'desktop'")
         owed_route = "owed_context" in data
         if owed_route and not _owed_context_shape(data["owed_context"]):
             return self._owed_open_refused()
@@ -1270,6 +1283,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         open_fn = config.open_binding_fn
         provider_runner = config.runner
         provider_options = dict(claude_projects_dir=config.claude_projects_dir,
+                                claude_desktop_cli=config.claude_desktop_cli,
+                                claude_desktop_handoff_runner=config.claude_desktop_handoff_runner,
+                                target_surface=target_surface,
                                 codex_sessions_dir=config.codex_sessions_dir,
                                 mlx_profiles_root=config.mlx_profiles_root,
                                 gologin_profiles_root=config.gologin_profiles_root)
@@ -1569,6 +1585,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--macro-root", default=None, help="Macro checkout root (default: auto-resolved)")
     parser.add_argument("--bindings-path", default=None, help="surface_bindings.json path (default: platform default)")
     parser.add_argument(
+        "--claude-desktop-cli", default=DEFAULT_CLAUDE_DESKTOP_CLI,
+        help="isolated Claude Code CLI used for exact session handoff into Claude Desktop",
+    )
+    parser.add_argument(
         "--placement-selection", default=None,
         help="CAP-C1: path to a placement-selection facts document (default: no placement_selection "
              "section composed)",
@@ -1600,6 +1620,7 @@ def _build_config(args: argparse.Namespace) -> ServerConfig:
         repo_root=repo_root,
         macro_root=macro_root,
         bindings_path=bindings_path,
+        claude_desktop_cli=(str(Path(args.claude_desktop_cli).expanduser()) if args.claude_desktop_cli else None),
         placement_selection_path=placement_selection_path,
         token=token,
         origin=f"http://{HOST}:{args.port}",

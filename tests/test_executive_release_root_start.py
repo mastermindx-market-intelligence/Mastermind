@@ -93,7 +93,7 @@ def fixture(inputs):
             },
         })
 
-    def state_factory(transition):
+    def state_factory(transition, *, deadline_monotonic_ns=None):
         assert transition == digest(snapshot.effect)
         return snapshot
 
@@ -231,7 +231,7 @@ class Composition:
             tmp_path / "journal")
         self.peer_calls = []
         self.owner = ReleaseBrokerOwner(
-            state_factory if not snapshot_changes else (lambda transition: snapshot),
+            state_factory if not snapshot_changes else (lambda transition, *, deadline_monotonic_ns=None: snapshot),
             root_journal=self.journal)
         self._monkeypatch = monkeypatch
         monkeypatch.setattr(
@@ -325,7 +325,7 @@ def test_expiry_during_runtime_read_prevents_durable_start(
         NOW[0] = composition.prepared["expires_at_ms"] - 1
         MONOTONIC[0] = composition.prepared["expires_monotonic_ns"] - 1_000_000
 
-        def delayed_snapshot(_transition, _state=None):
+        def delayed_snapshot(_transition, _state=None, *, deadline_monotonic_ns=None):
             evidence = copy.deepcopy(composition.evidence)
             if clock == "wall":
                 NOW[0] = composition.prepared["expires_at_ms"] + past
@@ -352,7 +352,7 @@ def test_physical_snapshot_drift_during_runtime_read_prevents_start(
     real_snapshot = composition.owner._snapshot
     calls = {"count": 0}
 
-    def drift_snapshot(transition):
+    def drift_snapshot(transition, *, deadline_monotonic_ns=None):
         calls["count"] += 1
         # The first outer private-inputs call still sees the original
         # snapshot; the drift becomes visible to the second call (which
@@ -368,7 +368,7 @@ def test_physical_snapshot_drift_during_runtime_read_prevents_start(
             else:
                 changed = "0" * 64
             return replace(composition.snapshot, **{field: changed})
-        return real_snapshot(transition)
+        return real_snapshot(transition, deadline_monotonic_ns=deadline_monotonic_ns)
 
     composition.owner._snapshot = drift_snapshot
     with pytest.raises(consumer.ReleaseConsumerError):
@@ -477,7 +477,7 @@ def test_start_rejects_changed_reservation_admission_or_target_observation(tmp_p
         composition.start(composition.frame("start_reserved_release", admission_evidence=evidence))
     snapshot = replace(composition.snapshot, target_observation_digest="7" * 64)
     composition.snapshot = snapshot
-    composition.owner._snapshot = lambda transition: snapshot
+    composition.owner._snapshot = lambda transition, *, deadline_monotonic_ns=None: snapshot
     with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_RESERVATION_MISMATCH"):
         composition.start()
 
@@ -491,7 +491,7 @@ def test_start_rejects_changed_policy_principal_or_dependency_defaults(tmp_path,
     foreign["principal"]["subject_digest"] = "9" * 64
     with pytest.raises(Exception, match="RELEASE_PRINCIPAL_NOT_AUTHORIZED"):
         composition.start(foreign)
-    composition.owner._snapshot = lambda transition: composition.snapshot
+    composition.owner._snapshot = lambda transition, *, deadline_monotonic_ns=None: composition.snapshot
     with pytest.raises(consumer.ReleaseConsumerError, match="RELEASE_ROOT_OWNER_UNAVAILABLE"):
         changed = Composition(tmp_path, monkeypatch, inputs, actuator_generation=0)
         changed.reserve()
@@ -732,13 +732,13 @@ def test_start_refuses_peer_invalidation_during_final_owner_snapshots(
         private_calls += 1
         return real_inputs(frame, raw, **kwargs)
 
-    def invalidating_snapshot_call(transition):
+    def invalidating_snapshot_call(transition, *, deadline_monotonic_ns=None):
         nonlocal final_snapshot_calls, peer_valid
         if private_calls == 2:
             final_snapshot_calls += 1
             if final_snapshot_calls == invalidating_snapshot:
                 peer_valid = False
-        return real_snapshot(transition)
+        return real_snapshot(transition, deadline_monotonic_ns=deadline_monotonic_ns)
 
     def qualify(_connection, role):
         assert role == "control"
@@ -796,11 +796,11 @@ def test_start_rejects_owner_drift_at_final_qualifier(
     real_snapshot = composition.owner._snapshot
     drift_calls = {"count": 0}
 
-    def drift(transition):
+    def drift(transition, *, deadline_monotonic_ns=None):
         drift_calls["count"] += 1
         if drift_calls["count"] == 2:
             return replace(composition.snapshot, target_observation_digest="0" * 64)
-        return real_snapshot(transition)
+        return real_snapshot(transition, deadline_monotonic_ns=deadline_monotonic_ns)
 
     composition.owner._snapshot = drift
     with pytest.raises(consumer.ReleaseConsumerError):
@@ -1009,7 +1009,13 @@ def test_identical_endpoint_across_journal_and_fresh_replay_request(tmp_path, mo
             for item in value.values(): no_deadline(item)
         elif isinstance(value, list):
             for item in value: no_deadline(item)
-    no_deadline(first)
+    recorded = first["result"]["start_record"]
+    assert recorded["start_deadline_monotonic_ns"] == endpoint
+    assert recorded["boot_id"] == recorded["preconditions"]["boot_id"]
+    assert recorded["schema"] == "mastermind.executive_release_actuator_journal/v3"
+    detached = copy.deepcopy(first)
+    del detached["result"]["start_record"]["start_deadline_monotonic_ns"]
+    no_deadline(detached)
     no_deadline(c.frame("start_reserved_release"))
 
 
@@ -1018,9 +1024,9 @@ def test_cumulative_snapshots_do_not_reset_request_budget(tmp_path, monkeypatch,
     c.reserve()
     original = c.owner._snapshot
     count = []
-    def delayed(transition):
+    def delayed(transition, *, deadline_monotonic_ns=None):
         count.append(1)
-        result = original(transition)
+        result = original(transition, deadline_monotonic_ns=deadline_monotonic_ns)
         MONOTONIC[0] += BUDGET // 4
         return result
     monkeypatch.setattr(c.owner, "_snapshot", delayed)
@@ -1183,3 +1189,67 @@ def test_private_endpoint_validation_prevents_dependent_effects(tmp_path, monkey
         c.owner._start_reserved_release(c.frame("start_reserved_release"), object(), deadline_monotonic_ns=endpoint)
     assert "INVALID" in caught.value.code
     assert not calls
+
+
+@pytest.mark.parametrize('phase',['PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING','SUCCEEDED','ROLLED_BACK'])
+def test_owner_projects_exact_new_protocol_journal_without_effect(tmp_path,monkeypatch,inputs,phase):
+    c=Composition(tmp_path,monkeypatch,inputs);reserved=c.reserve()['result']['reservation']
+    record=c.start()['result']['start_record'];original=dict(record)
+    phases=['PUBLICATION_INTENT','PUBLISHED','BROKER_RESTART_PENDING','RECOVERING']
+    for step in phases:
+        record=c.journal.advance(c.approval['operation_key'],expected_generation=record['journal_generation'],
+            state=step,reservation=reserved,approval=c.approval)
+        if step==phase:break
+    if phase in ('SUCCEEDED','ROLLED_BACK'):
+        before=reserved['before'];after=copy.deepcopy(before)
+        if phase=='SUCCEEDED':
+            effect=c.approval['normalized_requested_effect']
+            after.update(release_commit=effect['to_release_commit'],release_tree=effect['to_release_tree'],
+                broker_source_commit=effect['to_release_commit'],broker_source_tree=effect['to_release_tree'])
+        rollback={'attempted':False} if phase=='SUCCEEDED' else {'attempted':True,'restored_preimage_digest':digest(before)}
+        record=c.journal.advance(c.approval['operation_key'],expected_generation=record['journal_generation'],
+            state=phase,reservation=reserved,approval=c.approval,completed_at_ms=NOW[0]+1,
+            postcondition_digest='f'*64,before=before,after=after,rollback=rollback,
+            after_actuator_generation=record['actuator_generation']+(1 if phase=='SUCCEEDED' else 2))
+    status=c.owner._closure_status(record,reserved,digest(reserved),record['admission'],c.approval)
+    assert status['schema']=='mastermind.executive_release_terminal_status/v2' and status['state']==phase
+    assert status['before']==reserved['before']
+    assert status['start_deadline_monotonic_ns']==original['start_deadline_monotonic_ns']
+    assert status['preconditions']['boot_id']==original['boot_id']
+    if phase in ('SUCCEEDED','ROLLED_BACK'):
+        receipt=status['terminal_receipt']
+        assert receipt['after_actuator_generation']==record['terminal']['after_actuator_generation']
+        assert receipt['publication_intent_digest']==digest(record['publication_intent'])
+
+
+def test_f1_start_forwards_exact_one_endpoint_to_every_snapshot(tmp_path,monkeypatch,inputs):
+    c=Composition(tmp_path,monkeypatch,inputs);c.reserve();calls=[]
+    def snapshot(transition,*,deadline_monotonic_ns=None):
+        calls.append(deadline_monotonic_ns);return c.snapshot
+    monkeypatch.setattr(c.owner,'_snapshot',snapshot)
+    expected=MONOTONIC[0]+owner._START_REQUEST_BUDGET_NS
+    result=c.start()
+    assert result['ok'] is True
+    assert len(calls)>=2
+    assert set(calls)=={expected}
+
+def test_f1_snapshot_typeerror_is_not_replayed_without_deadline(tmp_path,monkeypatch,inputs):
+    c=Composition(tmp_path,monkeypatch,inputs);c.reserve();calls=[]
+    def unsupported(transition,**kwargs):
+        calls.append(kwargs)
+        if kwargs:raise TypeError('no deadline support')
+        return c.snapshot
+    before={p.name:p.read_bytes() for p in c.journal._root.iterdir() if p.is_file()}
+    monkeypatch.setattr(c.owner,'_snapshot',unsupported)
+    with pytest.raises((TypeError,owner.ReleaseConsumerError)):c.start()
+    assert len(calls)==1 and 'deadline_monotonic_ns' in calls[0]
+    assert {p.name:p.read_bytes() for p in c.journal._root.iterdir() if p.is_file()}==before
+
+
+# R2 preserves the original authority deadline during bounded replay.
+def test_owner_shorter_replay_io_budget(tmp_path,monkeypatch,inputs):
+    comp=Composition(tmp_path,monkeypatch,inputs);comp.reserve();first=comp.start();before=(comp.journal._root/comp.journal._name(comp.approval['operation_key'])).read_bytes()
+    record=first['result']['start_record'];shorter=MONOTONIC[0]+1_000_000_000
+    assert shorter<record['start_deadline_monotonic_ns']
+    replay=comp.owner._start_reserved_release(comp.frame('start_reserved_release'),object(),deadline_monotonic_ns=shorter)
+    assert replay==first and (comp.journal._root/comp.journal._name(comp.approval['operation_key'])).read_bytes()==before

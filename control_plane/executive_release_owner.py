@@ -167,7 +167,7 @@ def _evidence_digest(reservation):
 
 class ReleaseBrokerOwner:
     """Installed private composition for two closed, non-install operations."""
-    def __init__(self, snapshot: Callable[[str], ReleaseOwnerSnapshot], *,
+    def __init__(self, snapshot: Callable[..., ReleaseOwnerSnapshot], *,
                  history_trust: Callable[[], ReleaseHistoryTrust] | None = None,
                  root_journal: _ExecutiveReleaseActuatorJournal | None = None):
         if not callable(snapshot):
@@ -183,7 +183,7 @@ class ReleaseBrokerOwner:
     def _fresh(self, state, transition, *, deadline_monotonic_ns=None):
         observed = _state_identity(state)
         _check_start_deadline(deadline_monotonic_ns)
-        fresh = self._snapshot(transition)
+        fresh = self._snapshot(transition, **_start_deadline_options(deadline_monotonic_ns))
         if _state_identity(fresh) != observed:
             raise ReleaseConsumerError("RELEASE_PRECONDITIONS_CHANGED")
         _check_start_deadline(deadline_monotonic_ns)
@@ -256,7 +256,7 @@ class ReleaseBrokerOwner:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_INVALID_RECORD")
         state = journal_record["state"]
         if state not in {
-            "STARTED", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
+            "STARTED", "PUBLICATION_INTENT", "PUBLISHED", "BROKER_RESTART_PENDING", "RECOVERING",
             "SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
             raise ReleaseConsumerError("RELEASE_ROOT_JOURNAL_INVALID_RECORD")
         if journal_record["root_qualification_digest"] != reservation_digest:
@@ -318,6 +318,14 @@ class ReleaseBrokerOwner:
             else dict(journal_admission),
             "admission_digest": _hash(journal_admission),
         }
+        new_protocol = journal_record["schema"] == "mastermind.executive_release_actuator_journal/v3"
+        if new_protocol:
+            status["schema"] = "mastermind.executive_release_terminal_status/v2"
+            for key in ("before", "start_deadline_monotonic_ns", "root_qualification_digest"):
+                status[key] = journal_record[key]
+            for key in ("publication_intent", "recovery_origin"):
+                if key in journal_record:
+                    status[key] = journal_record[key]
         if state in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
             terminal = journal_record["terminal"]
             # terminal.before byte-equals reservation.before, immutable.
@@ -343,6 +351,13 @@ class ReleaseBrokerOwner:
                 "after": dict(terminal["after"]),
                 "rollback": dict(terminal["rollback"]),
             }
+            if new_protocol:
+                status["terminal_receipt"].update({
+                    "schema": "mastermind.executive_release_terminal_receipt/v2",
+                    "after_actuator_generation": terminal["after_actuator_generation"],
+                    "publication_intent_digest": _hash(journal_record["publication_intent"]),
+                    "recovery_origin_digest": _hash(journal_record["recovery_origin"]),
+                })
         try:
             validated_status = contract.validate_release_terminal_status(
                 status, expected_approval=approval)
@@ -377,7 +392,9 @@ class ReleaseBrokerOwner:
     def _live_state(self, frame, approval, *, deadline_monotonic_ns=None):
         transition = approval["transition_digest"]
         _check_start_deadline(deadline_monotonic_ns)
-        state = self._snapshot(transition)
+        # Forward the original endpoint to every live snapshot; never retry
+        # an unsupported callback without the endpoint.
+        state = self._snapshot(transition, **_start_deadline_options(deadline_monotonic_ns))
         _state_identity(state)
         effect = contract.validate_normalized_effect(state.effect)
         if _hash(effect) != transition:
@@ -750,6 +767,14 @@ class ReleaseBrokerOwner:
             "boot_id": reservation["preconditions"]["boot_id"],
         }
         _check_start_deadline(deadline_monotonic_ns)
+        if existing_start is not None and existing_start["schema"] != "mastermind.executive_release_actuator_journal/v3":
+            # Historical v2 is readable only. A repeated client request cannot
+            # reinterpret or rewrite it into the new publication protocol.
+            raise ReleaseConsumerError("RELEASE_LEGACY_EFFECT_UNKNOWN")
+        publication_deadline = (
+            existing_start["start_deadline_monotonic_ns"] if existing_start is not None
+            else min(payload["expires_monotonic_ns"], deadline_monotonic_ns)
+            if deadline_monotonic_ns is not None else payload["expires_monotonic_ns"])
         try:
             start_record = self._root_journal.create(
                 actuator_generation=state.actuator_generation,
@@ -762,6 +787,7 @@ class ReleaseBrokerOwner:
                 started_at_ms=(now if existing_start is None
                                else existing_start["started_at_ms"]),
                 commit_qualifier=qualify_locked_start,
+                publication_deadline_monotonic_ns=publication_deadline,
                 **options,
             )
         except ExecutiveReleaseActuatorJournalError as exc:

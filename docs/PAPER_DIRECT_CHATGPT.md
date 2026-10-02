@@ -28,8 +28,8 @@ to re-prove the route.
 
 The action remains a bounded explicit-file binding, not a host-control escape hatch: callers provide
 one exact bare Paper file ID, a fresh source snapshot, and a stable operation ID; URL/path/page
-overrides, shell/process control, and unrestricted raw `open_file` are not exposed. Paper 0.5.12 can
-address another file directly by `fileId`, including an already-open or background file, while another file remains user-active. Prepare therefore
+overrides, shell/process control, and unrestricted raw `open_file` are not exposed. Qualified Paper Desktop
+schemas can address another file directly by `fileId`, including an already-open or background file, while another file remains user-active. Prepare therefore
 performs no UI-focus/open effect; it validates the explicit target and returns that target snapshot
 for the subsequent edit.
 
@@ -38,6 +38,20 @@ not current service liveness, and `LOCAL_STDIO_PROVEN` still proves only initial
 discovery. Current fleet truth is narrower: Ryan Business has the accepted live direct-app
 prepare/edit journey; C1/C2/C3/C4/Chris Admin host tunnel services are live/ready but each still
 requires its own attended ChatGPT app enrollment before that seat's direct app is accepted.
+
+## Paper release compatibility — 2026-10-01
+
+Write qualification does not lock to a Paper release number. The bridge records the observed
+`server_version` for diagnostics, requires the `paper-desktop` server identity, and gates writes on
+the exact reviewed full catalog digest. Paper 0.5.14 now reports catalog
+`ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`. Exact canonical
+reconstruction from the previously accepted `ca90...` and `8cd...` catalogs proves the only delta
+from accepted `8cd...` is removal of read tool `list_files` and addition of blocked tools
+`list_resources` and `rename_resource`; all surviving tool descriptors, including blocked
+`rename_pages`, are byte-equivalent under the bridge encoding. Bridge 0.1.4 therefore removes
+`list_files` from the read allowlist without exposing either replacement resource tool. Runtime v10
+owns these new bridge bytes; v9 remains immutable historical evidence. A future catalog change still
+returns read-only until separately reviewed, and source merge alone never updates a running seat.
 
 ## Implementation
 
@@ -190,20 +204,6 @@ discovery before their seat can claim direct-app acceptance.
 Global repository CI, independent exact-head review and protected source convergence remain separate
 from runtime acceptance. No source merge is implied by a live canary, and no newly staged seat is
 accepted merely by running `stage`, `probe` or `doctor`.
-
-## Paper 0.5.14 compatibility gate — 2026-09-30
-
-Ryan's tunnel transport was repaired without changing its tunnel identity. The next live
-read reached Paper Desktop 0.5.14 and returned the exact MASTERMIND PAGES target, but the
-protected v8 bridge correctly held writes because its reviewed server identity was 0.5.12.
-The full upstream catalog digest is unchanged at
-`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb`.
-
-Bridge 0.1.3 / runtime v9 therefore adds only the exact reviewed 0.5.14 server identity;
-the catalog pin, read/edit allowlists, blocked tools, target guards, desktop mutex and
-effect semantics are unchanged. Do not weaken this to a version range or catalog-family
-check. A runtime rollout still requires exact-head review/CI and real-route readback before
-calling Ryan write-capable again.
 
 ## Official sources rechecked 2026-09-26
 

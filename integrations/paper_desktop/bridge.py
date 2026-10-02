@@ -20,20 +20,19 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
 PRIVATE_DIR_MODE = 0o700
 DESKTOP_LOCK_WAIT_SECONDS = 30.0
 DESKTOP_LOCK_POLL_SECONDS = 0.05
-SUPPORTED_SERVER = ("paper-desktop", "0.5.12")
-SUPPORTED_SERVERS = frozenset({SUPPORTED_SERVER, ("paper-desktop", "0.5.14")})
-SUPPORTED_CATALOG_SHA256 = "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb"
+SUPPORTED_SERVER = ("paper-desktop", None)
+SUPPORTED_CATALOG_SHA256 = "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9"
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
     "get_tree_summary", "get_screenshot", "get_jsx", "get_computed_styles",
-    "get_fill_image", "get_font_family_info", "get_guide", "list_files",
+    "get_fill_image", "get_font_family_info", "get_guide",
     "find_nodes", "get_tokens", "list_comment_threads", "get_comment_thread",
     "list_comment_thread_authors",
 })
@@ -403,38 +402,31 @@ def same_document(identity, info):
     return (info.get("fileName") == identity["file"] and info.get("pageName") == identity["page"]
             and any(isinstance(b, dict) and b.get("id") == identity["anchor"] for b in info.get("artboards", [])))
 
-def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVERS,
+def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
                    catalog_pin=SUPPORTED_CATALOG_SHA256):
     server = client.server if isinstance(client.server, dict) else {}
     actual = {"server_name": server.get("name"), "server_version": server.get("version"),
               "catalog_sha256": digest(catalog)}
-    if server_pin is None:
-        expected_servers = None
-        server_ok = True
-    elif (isinstance(server_pin, tuple) and len(server_pin) == 2
-          and all(isinstance(value, str) for value in server_pin)):
-        expected_servers = (server_pin,)
-        server_ok = (actual["server_name"], actual["server_version"]) == server_pin
-    else:
-        try:
-            expected_servers = tuple(sorted(tuple(value) for value in server_pin))
-        except (TypeError, ValueError) as exc:
-            raise Refusal("INVALID_SERVER_PIN") from exc
-        if not expected_servers or any(len(value) != 2 or not all(isinstance(item, str) for item in value)
-                                       for value in expected_servers):
-            raise Refusal("INVALID_SERVER_PIN")
-        server_ok = (actual["server_name"], actual["server_version"]) in expected_servers
+    expected_name = server_pin[0] if server_pin else None
+    expected_version = server_pin[1] if server_pin and len(server_pin) > 1 else None
+    server_name_ok = expected_name is None or actual["server_name"] == expected_name
+    # Paper's release version is diagnostic metadata, not a write-compatibility
+    # boundary. Exact reviewed tool schemas remain the fail-closed write gate.
+    server_version_ok = expected_version is None or actual["server_version"] == expected_version
     catalog_ok = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
-    return {**actual, "accepted_for_write": bool(server_ok and catalog_ok),
-            "expected_server": list(expected_servers[0]) if expected_servers and len(expected_servers) == 1 else None,
-            "expected_servers": [list(value) for value in expected_servers] if expected_servers else None,
+    return {**actual, "accepted_for_write": bool(server_name_ok and server_version_ok and catalog_ok),
+            "expected_server": [expected_name, expected_version] if server_pin else None,
+            "server_name_compatible": server_name_ok,
+            "server_version_compatible": server_version_ok,
+            "server_version_policy": "EXACT" if expected_version is not None else "OBSERVED_NOT_PINNED",
+            "catalog_compatible": catalog_ok,
             "expected_catalog_sha256": catalog_pin}
 
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
             expected_snapshot: str | None = None, operation_id: str | None = None,
             allow_write=False, client=None, lock_root=None, execution_binding=None,
-            _server_pin=SUPPORTED_SERVERS, _catalog_pin=SUPPORTED_CATALOG_SHA256):
+            _server_pin=SUPPORTED_SERVER, _catalog_pin=SUPPORTED_CATALOG_SHA256):
     """One serialized operation. Snapshot hash is a drift guard, NOT authorization.
 
     Local edits outside this adapter can race; no transaction/isolation claim is made.
@@ -474,7 +466,7 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS),
                     "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
         if editing and not schema["accepted_for_write"]:
-            raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server/catalog changed; inspect read-only and review a new exact pin before editing.")
+            raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server identity or catalog schema changed; inspect read-only and review compatibility before editing.")
         if tool not in catalog:
             raise Refusal("TOOL_NOT_AVAILABLE")
         supplied_file = arguments.get("fileId")
