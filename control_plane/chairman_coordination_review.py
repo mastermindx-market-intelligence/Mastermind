@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from control_plane.chairman_coordination import render_coordination_brief
+from control_plane.chairman_coordination_work import _assignment_digest
 from control_plane.chairman_coordination_host import (
     CoordinationWorkSources, _consume_job_result, _freeze_sources, _revalidate_sources,
 )
@@ -98,11 +99,6 @@ def _selection(runtime: Runtime, sources: CoordinationWorkSources, root_job_id: 
     if len(work_attempts) != 1 or type(work_attempts[0]) is not Attempt:
         raise SupervisorError("reviewed work Attempt is unavailable")
     return review, matches[0], work, work_attempts[0], receipt
-
-
-def _assignment_digest(job: Job, attempt: Attempt) -> str:
-    # An integrity comparison between owner reads, not authentication or a lease.
-    return hashlib.sha256(canonical_json_bytes({"job": job.to_dict(), "attempt": attempt.to_dict()})).hexdigest()
 
 
 def _same_selection(before, after) -> None:

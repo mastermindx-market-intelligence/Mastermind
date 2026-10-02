@@ -13,7 +13,7 @@ from tests.test_fabric_result_projection import _bound_reader, _release
 from tests.test_executive_supervisor import _p2_grant_fixture
 from control_plane.ceo_intent import submit_intent
 from control_plane.executive_coo_cycle import CooCycle
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import Runtime, JobStatus
 from control_plane.executive_orchestration_result import canonical_bytes, canonical_digest, parse_and_validate_envelope
 from control_plane.chairman_cognition import ChairmanCognitionError
 
@@ -275,3 +275,54 @@ def test_bounded_return_closes_namespace_before_candidate_review(completed,monke
     monkeypatch.setattr(module,"evaluate_coordination_candidate",observed)
     read(p,x,parts)
     assert called==[True] and ns.entries==entries+1 and ns.exits==ns.entries
+
+
+def test_assignment_cancelled_during_request_rendering_is_not_returned_as_current(
+    active_work, monkeypatch,
+):
+    p, x, _, b, value = active_work
+    runtime, _, dispatch, _, _, _, _ = value
+    module = importlib.import_module("control_plane.chairman_coordination_work")
+    original = module.render_coordination_work_request
+    def cancelled(*args, **kwargs):
+        result = original(*args, **kwargs)
+        runtime.jobs.cancel_job(dispatch.attempt.job_id)
+        return result
+    monkeypatch.setattr(module, "render_coordination_work_request", cancelled)
+    with pytest.raises(ChairmanCognitionError):
+        load(p, x, b, value)
+    assert runtime.jobs.get_job(dispatch.attempt.job_id).status is JobStatus.CANCEL_REQUESTED
+
+
+def test_current_work_request_binds_complete_assignment_without_changing_runtime(active_work):
+    p, x, _, b, value = active_work
+    runtime, _, dispatch, _, namespace, _, _ = value
+    job = runtime.jobs.get_job(dispatch.attempt.job_id)
+    before = job.to_dict()
+    request = load(p, x, b, value)
+    module = importlib.import_module("control_plane.chairman_coordination_work")
+    review = importlib.import_module("control_plane.chairman_coordination_review")
+    assert request["assignment_digest"] == module._assignment_digest(job, dispatch.attempt)
+    assert review._assignment_digest is module._assignment_digest
+    body = dict(request)
+    claimed_digest = body.pop("request_digest")
+    assert claimed_digest == hashlib.sha256(canonical_bytes(body)).hexdigest()
+    assert runtime.jobs.get_job(job.job_id).to_dict() == before
+    assert not namespace.active and namespace.entries == namespace.exits
+
+
+def test_read_namespace_loss_during_request_rendering_is_not_reacquired(active_work, monkeypatch):
+    p, x, _, b, value = active_work
+    module = importlib.import_module("control_plane.chairman_coordination_work")
+    original = module.render_coordination_work_request
+    renders = []
+    def invalidated(*args, **kwargs):
+        result = original(*args, **kwargs)
+        renders.append(True)
+        value[4].invalid = True
+        return result
+    monkeypatch.setattr(module, "render_coordination_work_request", invalidated)
+    with pytest.raises(ChairmanCognitionError):
+        load(p, x, b, value)
+    assert renders == [True]
+    assert value[0].jobs.get_job(value[2].attempt.job_id).status is JobStatus.RUNNING

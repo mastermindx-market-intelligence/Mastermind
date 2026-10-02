@@ -37,6 +37,36 @@ from control_plane.wake_events import canonical_json_bytes
 _ARTIFACT_LIMIT = 128 * 1024
 
 
+def _assignment_digest(job: Job, attempt: Attempt) -> str:
+    # Equality between owner observations, not authentication or a launch lease.
+    return hashlib.sha256(canonical_json_bytes({
+        "job": job.to_dict(), "attempt": attempt.to_dict(),
+    })).hexdigest()
+
+
+def _current_work_assignment(
+    runtime: Runtime, *, root_job_id: str, job_id: str,
+    expected_attempt_id: str, project_ref: str,
+) -> tuple[Job, Attempt, Mapping[str, Any]]:
+    """Select from the existing bounded root reader without creating an owner."""
+    from control_plane.workspace_source_join import _root_evidence
+
+    try:
+        jobs, attempts, provenance, receipt = _root_evidence(runtime, root_job_id)
+    except Exception as exc:
+        raise ChairmanCognitionError("current root observation is unavailable") from exc
+    root_source = provenance.get(root_job_id)
+    if not isinstance(root_source, Mapping) or root_source.get("workstream") != project_ref:
+        raise ChairmanCognitionError("task root does not belong to this project")
+    selected_jobs = [job for job in jobs if job.job_id == job_id]
+    selected_attempts = [attempt for attempt in attempts
+                         if attempt.attempt_id == expected_attempt_id and attempt.job_id == job_id]
+    if (len(selected_jobs) != 1 or len(selected_attempts) != 1
+            or type(selected_jobs[0]) is not Job or type(selected_attempts[0]) is not Attempt):
+        raise ChairmanCognitionError("exact work Job and Attempt are not in the selected root")
+    return selected_jobs[0], selected_attempts[0], receipt
+
+
 def _artifact_path(value: Any) -> str:
     if (type(value) is not str or not value or len(value) > 1024
             or value != value.strip() or "\\" in value
@@ -207,32 +237,25 @@ def read_coordination_work_request(
     owner supplies its authorization decision; this function neither loads new
     authority nor claims that the read fence lasts until a later dispatch.
     """
-    from control_plane.workspace_source_join import _root_evidence
-
     if type(runtime) is not Runtime or not isinstance(context, Mapping):
         raise ChairmanCognitionError("current bound Runtime and project context are required")
     for identity in (root_job_id, job_id, expected_attempt_id):
         if type(identity) is not str or not identity or identity != identity.strip():
             raise ChairmanCognitionError("exact Runtime selection is required")
-    try:
-        jobs, attempts, provenance, receipt = _root_evidence(runtime, root_job_id)
-    except Exception as exc:
-        raise ChairmanCognitionError("current root observation is unavailable") from exc
-    root_source = provenance.get(root_job_id)
-    if (not isinstance(root_source, Mapping)
-            or root_source.get("workstream") != context.get("project_ref")):
-        raise ChairmanCognitionError("task root does not belong to this project")
-    selected_jobs = [job for job in jobs if job.job_id == job_id]
-    selected_attempts = [attempt for attempt in attempts
-                         if attempt.attempt_id == expected_attempt_id and attempt.job_id == job_id]
-    if len(selected_jobs) != 1 or len(selected_attempts) != 1:
-        raise ChairmanCognitionError("exact work Job and Attempt are not in the selected root")
+    selection = dict(root_job_id=root_job_id, job_id=job_id,
+                     expected_attempt_id=expected_attempt_id, project_ref=context.get("project_ref"))
+    job, attempt, _ = _current_work_assignment(runtime, **selection)
+    assignment = _assignment_digest(job, attempt)
     result = render_coordination_work_request(
         document, context=context, context_bundle=context_bundle,
-        bundle_source_ref=bundle_source_ref, job=selected_jobs[0],
-        attempt=selected_attempts[0], authority_decision=authority_decision,
+        bundle_source_ref=bundle_source_ref, job=job,
+        attempt=attempt, authority_decision=authority_decision,
         artifact_path=artifact_path,
     )
+    current_job, current_attempt, receipt = _current_work_assignment(runtime, **selection)
+    if _assignment_digest(current_job, current_attempt) != assignment:
+        raise ChairmanCognitionError("work assignment changed during task composition")
+    result["assignment_digest"] = assignment
     result["project_ref"] = context["project_ref"]
     result["source_generation"] = dict(receipt)
     del result["request_digest"]

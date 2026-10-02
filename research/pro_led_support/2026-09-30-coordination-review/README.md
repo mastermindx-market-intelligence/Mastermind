@@ -2,6 +2,11 @@
 
 **State: BUILT_NOT_PROVEN. MISSION_COMPLETE:false.**
 
+**Latest follow-on qualification:** the work-assignment/total-prompt repair below
+passes 146 affected-path cases, including ten new cases. The earlier 55-case
+section records the original `58cea1c` review/parent delivery, not an additional
+current campaign. Neither result proves an actual model or Web Pro round trip.
+
 Delivery #1056; draft source #1059; operation
 `mastermind-pro-led-project-delivery-20260929-sol-001`. This is direct continuation
 from published source `759cb423931214bfcd56f80bfaa966939faf2ca3`, not a restarted
@@ -111,3 +116,49 @@ real parent. Missing active-build coverage stays explicit until its existing own
 supplies it. Actual Web Pro input/turn/return remains separately owed. Do not repeat
 completed R1–R3 research, unchanged old test campaigns or native ACL diagnostics,
 and do not invent a dispatch route to evade read-only ingress.
+
+
+## Follow-on: complete work-assignment and prompt-bound repair
+
+Recovery found local and remote already at `58cea1c0469f33f58df1ae05284e7fa8bea96a4f`.
+The stale checkpoint and PR description did not justify recreating the completed
+review/parent modules. This repair instead closes newly reproduced work-input
+failures before live-model qualification.
+
+Six test-first cases exposed missing refusals for stale objective/plan-step data,
+combined prompt overflow, cancellation during request rendering, and cancellation
+or namespace loss during final source validation. The request and host now compare
+complete Job/Attempt snapshots using the same pure digest helper already used by
+review and parent. Current reads still belong to the original bounded Runtime.
+The host rejects changes after source validation and checks the complete UTF-8
+prompt, not only the appended evidence. No fallback, re-acquisition, truncation,
+new authority or change to the original launch fence is introduced.
+
+Fresh affected coverage: **146 passed, zero failures/errors/skips** — 41 work,
+50 host, 36 review, 17 parent and two concrete-acquisition guards. Ten cases are
+new: six test-first failures and four supplementary positive/boundary checks.
+All selected source hashes stayed fixed during the run, and all owned test
+processes were subsequently absent. No historical 682-case or unchanged native
+permission campaign was repeated, and no permission or source guard was weakened.
+The prior work/review/parent fixture protocol remains valid on the repaired code.
+
+Evidence: `research/evidence/pro-led-coordination-assignment-integrity.json`.
+SHA256: `497d14d1a810bdd63b02cc6ef0a9f3354a01414b4ef70cbe788b0069d46a2c7e`.
+
+At protected procedure pin `cfd3b996a2bf286f86375a5243232e027d58f724`, eleven of
+twelve selected direct Runtime/Supervisor/source-reader methods were AST-identical.
+The twelfth adds routing information only for plan Jobs; its complete helper
+returns immediately for work/review/aggregation. This bounded comparison is NOT
+whole-dependency or latest-base integrated-candidate acceptance.
+
+Runtime, Supervisor, identity, admission, compiler and memory owners were not
+modified. The existing assignment-digest helper moved into the work module and
+is imported unchanged by review; parent keeps the same helper binding. Its digest
+is integrity data, not authentication or a continuing lease.
+
+Review this exact source repair and its RED/GREEN evidence before release.
+The observed installed ingress remains read-only; no submit or model launch was
+attempted. Independent source review, accepted release/install, current host
+bindings, real model usefulness, real parent consumption and actual Web Pro
+input/turn/return remain distinct, unfulfilled gates. Pro remains the substantive
+product/design/research/planning principal. No base-team assignment is created.

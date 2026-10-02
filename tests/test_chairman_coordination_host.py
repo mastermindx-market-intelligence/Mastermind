@@ -413,3 +413,100 @@ def test_failed_native_execution_is_not_a_coordination_review_or_acceptance(host
     execution,review=run_review(host,reader=lambda *a,**k:reads.append(1))
     assert execution.job.status is JobStatus.FAILED and review is None
     assert reads==[] and len(host["calls"])==1 and host["adapter"].start_count==1
+
+
+@pytest.fixture
+def claimed_work(host):
+    """Claim only in the temporary Runtime; never invoke the model adapter."""
+    outcome = host["runtime"].attempts.dispatch_cycle_job(
+        host["work"].job_id, command_id=command(host),
+        worker_id="worker-a", quota_class="default")
+    return host["runtime"].jobs.get_job(host["work"].job_id), outcome.attempt
+
+
+@pytest.mark.parametrize("field,value", [
+    ("objective", "Unrelated replacement goal"),
+    ("plan_step_id", "foreign-step"),
+])
+def test_stale_outer_work_assignment_cannot_pollute_prompt(host, claimed_work, field, value):
+    job, attempt = claimed_work
+    stale = dataclasses.replace(job, **{field: value})
+    sup = supervisor(host)
+    with pytest.raises(SupervisorError, match="coordination task composition refused"):
+        sup._prompt(stale, attempt, attempt.effective_grant)
+    assert host["adapter"].start_count == 0
+
+
+def test_combined_work_prompt_bound_covers_original_contract_and_appended_evidence(
+    host, claimed_work, monkeypatch,
+):
+    job, attempt = claimed_work
+    sup = supervisor(host)
+    original = ExecutiveSupervisor._prompt(sup, job, attempt, attempt.effective_grant)
+    complete_prompt = sup._prompt(job, attempt, attempt.effective_grant)
+    extra = complete_prompt[len(original):]
+    # Both components fit; only their real UTF-8 concatenation is over budget.
+    bound = max(len(original.encode("utf-8")), len(extra.encode("utf-8"))) + 1
+    assert len(complete_prompt.encode("utf-8")) > bound
+    monkeypatch.setattr(host_module(), "_MAX_PROMPT_BYTES", bound, raising=False)
+    with pytest.raises(SupervisorError, match="coordination task composition refused"):
+        sup._prompt(job, attempt, attempt.effective_grant)
+    assert host["adapter"].start_count == 0
+
+
+@pytest.mark.parametrize("change", ["cancel", "namespace_lost"])
+def test_assignment_is_reobserved_after_final_source_revalidation(
+    host, claimed_work, change,
+):
+    job, attempt = claimed_work
+    validations = []
+    def sources(current_job, current_attempt):
+        source = host["config"]["coordination_sources"](current_job, current_attempt)
+        def revalidate():
+            validations.append(True)
+            if len(validations) == 2:
+                if change == "cancel":
+                    host["runtime"].jobs.cancel_job(job.job_id)
+                else:
+                    host["namespace"].invalid = True
+        return dataclasses.replace(source, revalidate=revalidate)
+    sup = supervisor(host, coordination_sources=sources)
+    with pytest.raises(SupervisorError, match="coordination task composition refused"):
+        sup._prompt(job, attempt, attempt.effective_grant)
+    assert len(validations) == 2
+    assert host["adapter"].start_count == 0
+    if change == "cancel":
+        assert host["runtime"].jobs.get_job(job.job_id).status is JobStatus.CANCEL_REQUESTED
+
+
+def test_combined_work_prompt_bound_is_exact_utf8_and_does_not_truncate(
+    host, claimed_work, monkeypatch,
+):
+    job, attempt = claimed_work
+    sup = supervisor(host)
+    original = ExecutiveSupervisor._prompt
+    marker = "Unicode boundary: " + "\u03bb" * 20
+    def unicode_contract(self, *args, **kwargs):
+        return original(self, *args, **kwargs) + "\n" + marker
+    monkeypatch.setattr(ExecutiveSupervisor, "_prompt", unicode_contract)
+    expected = sup._prompt(job, attempt, attempt.effective_grant)
+    size = len(expected.encode("utf-8"))
+    assert size > len(expected) and marker in expected
+    monkeypatch.setattr(host_module(), "_MAX_PROMPT_BYTES", size)
+    assert sup._prompt(job, attempt, attempt.effective_grant) == expected
+    monkeypatch.setattr(host_module(), "_MAX_PROMPT_BYTES", size - 1)
+    with pytest.raises(SupervisorError, match="coordination task composition refused"):
+        sup._prompt(job, attempt, attempt.effective_grant)
+    assert host["adapter"].start_count == 0
+
+
+def test_unselected_work_prompt_remains_byte_identical_and_does_not_acquire_sources(
+    host, claimed_work,
+):
+    job, attempt = claimed_work
+    def forbidden(*args):
+        raise AssertionError("unselected work acquired coordination sources")
+    sup = supervisor(host, coordination_job_id="JOB-999", coordination_sources=forbidden)
+    assert sup._prompt(job, attempt, attempt.effective_grant) == ExecutiveSupervisor._prompt(
+        sup, job, attempt, attempt.effective_grant)
+    assert host["adapter"].start_count == 0

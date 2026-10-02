@@ -558,3 +558,55 @@ principal, and return it through its real parent. Actual Web Pro input/turn/retu
 and a verified current target remain separate obligations. Missing active-build
 coverage must stay explicit until its existing owner supplies it. No base-builder
 handoff is reintroduced by this continuation.
+
+
+## Post-recovery work-assignment integrity qualification
+
+Recovery confirmed that review and parent delivery were already published at
+`58cea1c0469f33f58df1ae05284e7fa8bea96a4f`; neither component is rebuilt. This
+follow-on repairs the older work-input boundary before any admitted live-model
+qualification. It preserves the original operation, workspace and all release
+holds above.
+
+The acquired work request now includes an `assignment_digest` over the complete
+canonical Job and Attempt. The same pure equality helper is shared by work,
+review and parent; it is not authentication, permission, a source owner, a lease
+or proof of live identity. The request reads its exact root/project/Job/Attempt
+through the original bounded Runtime reader before and after rendering. A
+changed assignment or lost namespace refuses without reacquisition or retargeting.
+
+The work host compares that acquired assignment with the complete outer assignment
+before composing the original Supervisor prompt. After original-prompt and source
+revalidation, it reads the same canonical assignment again and compares both owner
+and caller observations with the original digest. A source revalidator remains a
+void-or-raise read contract; returning successfully is not evidence that Runtime
+has not changed. These checks end at prompt return. The original supervisor and
+exact-target owner still enforce the later dispatch/launch boundary.
+
+The final combined work prompt, including the original grant/role contract and
+all appended evidence, must fit 768 KiB of UTF-8. Exactly the bound is allowed;
+one byte above it refuses. Content is never truncated or replaced with a generic
+prompt. Unselected Jobs retain the original byte-identical prompt without
+acquiring coordination sources. Review and aggregation role schemas and their
+existing physical-independence/acceptance predicates remain unchanged.
+
+Six test-first falsifiers demonstrated the prior missing refusals: stale outer
+objective, stale plan step, total prompt overflow, cancellation during rendering,
+and cancellation or namespace loss at the final source-validation boundary.
+All six failed with the intended missing exception before the repair. Four
+additional cases cover exact UTF-8 boundaries, unselected parity, complete request
+digest/read-only behavior, and rendering-time namespace loss without reacquisition.
+
+The affected qualification ran **146 cases: 41 work, 50 host, 36 review, 17 parent,
+and two concrete-acquisition integration guards; all passed with zero failures,
+errors or skips**. Source hashes were stable during the run. This is ten new
+cases within changed-dependency coverage, not a repeated or cumulative 682-case
+campaign. Model/compiler/independent-principal evidence remains explicitly fake;
+real temporary Runtime, concrete readers, canonical handoff and parent sealing
+remain in the exercised path.
+
+Evidence: `research/evidence/pro-led-coordination-assignment-integrity.json`.
+Its exact hashes, RED/GREEN receipts, fixture parent joins and remaining proof
+obligations are part of the review packet. Independent source review, accepted
+release/install, actual model usefulness, actual parent consumption and actual
+Web Pro input/turn/return remain owed. No live ingress was widened or bypassed.

@@ -13,13 +13,15 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from control_plane.chairman_coordination_work import (
-    _artifact_path, read_coordination_work_request, read_coordination_work_return,
+    _artifact_path, _assignment_digest, _current_work_assignment,
+    read_coordination_work_request, read_coordination_work_return,
 )
 from control_plane.executive_runtime import Attempt, AttemptStatus, Job, JobStatus, Runtime, OrchestrationDispatchOutcome, _require_exact_worker_target
 from control_plane.executive_supervisor import ExecutiveSupervisor, SupervisorError, SupervisorReceipt
 from control_plane.fabric_result_projection import project_fabric_role_result
 
 _ARTIFACT_BYTES_LIMIT = 128 * 1024
+_MAX_PROMPT_BYTES = 768 * 1024
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
@@ -90,12 +92,12 @@ class CoordinationWorkSupervisor(ExecutiveSupervisor):
 
     def _prompt(self, job: Job, attempt: Attempt,
                 effective_grant: Mapping[str, Any] | None = None) -> str:
-        original = super()._prompt(job, attempt, effective_grant)
         if job.job_id != self._coordination_job_id:
-            return original
+            return super()._prompt(job, attempt, effective_grant)
         try:
             if effective_grant is None or dict(effective_grant) != attempt.effective_grant:
                 raise SupervisorError("coordination task requires original effective grant")
+            assignment = _assignment_digest(job, attempt)
             sources = _freeze_sources(self._coordination_sources(job, attempt))
             _revalidate_sources(sources)
             request = read_coordination_work_request(
@@ -107,14 +109,25 @@ class CoordinationWorkSupervisor(ExecutiveSupervisor):
                 artifact_path=sources.artifact_path,
             )
             if (request["job_id"] != job.job_id or request["attempt_id"] != attempt.attempt_id
-                    or request["effective_grant_digest"] != attempt.effective_grant_digest):
+                    or request["effective_grant_digest"] != attempt.effective_grant_digest
+                    or request["assignment_digest"] != assignment):
                 raise SupervisorError("coordination assignment changed during composition")
+            original = super()._prompt(job, attempt, effective_grant)
             _revalidate_sources(sources)
+            current_job, current_attempt, _ = _current_work_assignment(
+                self._coordination_runtime, root_job_id=job.root_job_id, job_id=job.job_id,
+                expected_attempt_id=attempt.attempt_id, project_ref=sources.context["project_ref"])
+            if (_assignment_digest(current_job, current_attempt) != assignment
+                    or _assignment_digest(job, attempt) != assignment):
+                raise SupervisorError("coordination assignment changed before prompt return")
+            prompt = original + "\n\nAdditional task content for this exact admitted work Job:\n" + request["prompt"]
+            if len(prompt.encode("utf-8")) > _MAX_PROMPT_BYTES:
+                raise SupervisorError("complete coordination work prompt exceeds its bound")
+            return prompt
         except Exception as exc:
             # Do not expose source-provider details or silently send a generic
             # prompt when a selected coordination request cannot be grounded.
             raise SupervisorError("coordination task composition refused") from exc
-        return original + "\n\nAdditional task content for this exact admitted work Job:\n" + request["prompt"]
 
 
     async def run_coordination_once(
