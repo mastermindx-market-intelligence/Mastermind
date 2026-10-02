@@ -42,6 +42,7 @@ from control_plane import executive_dialogue_observation as dialogue_observation
 from control_plane import executive_ceo_ingress as ceo_ingress
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
+    COO_DOMAIN_EXECUTION_PROFILE,
     adapter_supports_execution_surface,
     is_sealed_worker_execution_surface,
 )
@@ -1363,6 +1364,8 @@ class ServiceConfig:
     coo_autonomy_armed: bool = False
     ceo_submit_armed: bool = False
     coo_operator_harness_armed: bool = False
+    # Separate default-off child attenuation; the legacy helper route is unchanged.
+    coo_domain_operator_armed: bool = False
     coo_tick_interval_seconds: float = 15.0
     coo_model_alias: str = "coo.sealed"
     coo_quota_class: str = "codex-coo"
@@ -1438,6 +1441,13 @@ class ServiceConfig:
             raise ValueError(
                 "the COO Operator Harness cannot be armed while COO autonomy is off"
             )
+        if type(self.coo_domain_operator_armed) is not bool:
+            raise ValueError("coo_domain_operator_armed must be boolean")
+        if self.coo_domain_operator_armed:
+            if not self.coo_autonomy_armed or not self.coo_operator_harness_armed:
+                raise ValueError("COO domain composition requires armed autonomy and Operator Harness")
+            if str(self.coo_operator_quota_class).strip().lower() == "codex-coo-operator":
+                raise ValueError("COO domain composition requires a distinct quota class")
         if not isinstance(self.terminal_return_armed, bool):
             raise ValueError("terminal-return arming must be boolean")
         terminal_fields_present = self.terminal_return_socket_path is not None
@@ -2315,6 +2325,13 @@ class ExecutiveControlService:
                 "configured COO operator alias must be read-only and use the "
                 "reviewed depth-one docs-MCP native-helper App Server profile"
             )
+        if self.config.coo_domain_operator_armed:
+            # Derive only the closed child profile from the same canonical registry.
+            # The source alias, model/economics, parent helper and registry stay intact.
+            try:
+                operator_profile = router.capability_registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+            except CapabilityPolicyError as exc:
+                raise ValueError("configured COO domain profile is production-disarmed or invalid") from exc
         binding = {
             "eligible_quota_classes": sorted(
                 {
@@ -2340,9 +2357,11 @@ class ExecutiveControlService:
             "operator_effort": operator_alias.effort,
             "operator_cost_class": operator_alias.cost_class,
             "operator_routing_policy_version": router.policy_version,
-            "operator_execution_profile_id": operator_alias.execution_profile_id,
+            "operator_execution_profile_id": (operator_profile.profile_id
+                if self.config.coo_domain_operator_armed else operator_alias.execution_profile_id),
             "operator_execution_profile_digest": (
-                operator_alias.execution_profile_digest
+                operator_profile.profile_digest if self.config.coo_domain_operator_armed
+                else operator_alias.execution_profile_digest
             ),
             "operator_capability_policy_version": (
                 operator_alias.capability_policy_version
@@ -4732,6 +4751,12 @@ class ExecutiveControlService:
             "harness_binary_digest": binding["operator_harness_binary_digest"],
             "harness_version": binding["operator_harness_version"],
         }
+        if self.config.coo_domain_operator_armed:
+            # model_alias selects its complete original profile at claim time.
+            # This child instead binds the exact attenuated profile in metadata.
+            operator_metadata.pop("model_alias")
+            operator_metadata["source_model_alias"] = self.config.coo_operator_model_alias
+            operator_metadata["purpose"] = "executive-coo-domain-orchestrator"
         proof_capabilities = ["code", "research", "tests"]
         existing = runtime.workers.get_worker(self.config.worker_id)
         if existing is not None:
