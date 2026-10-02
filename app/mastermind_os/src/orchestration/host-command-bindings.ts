@@ -285,3 +285,6 @@ export function subscribeCommandView(
     return () => {};
   }
 }
+
+export { createExecutiveLaunchBinding } from "./executive-launch-command-port";
+
