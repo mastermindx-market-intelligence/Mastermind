@@ -16,7 +16,10 @@ from datetime import datetime, timezone
 import re
 from typing import Iterable
 
-from .turn import DesktopSnapshot, DesktopTarget, EvidenceError, PreparedTurn
+from .turn import (
+    MAX_CLOCK_SKEW_SECONDS, MAX_SNAPSHOT_AGE_SECONDS,
+    DesktopSnapshot, DesktopTarget, EvidenceError, PreparedTurn, _clock,
+)
 
 MAX_PROVIDER_LOG_LINES = 20000
 MAX_PROVIDER_LOG_LINE_BYTES = 16384
@@ -28,25 +31,35 @@ _LOG_NAME_RE = re.compile(
     r"t[0-9]+-i[0-9]+-[0-9]+-[0-9]+\.log$"
 )
 _TIMESTAMP_RE = re.compile(r"^(?P<timestamp>\S+)")
-_ID_FIELD_RE = {
-    key: re.compile(rf"(?:^|\s){key}=(?P<value>{_UUID})(?:\s|$)")
-    for key in ("conversationId", "threadId", "latestTurnId")
-}
-_FIXED_FIELD_RE = {
-    "documentVisibilityState": re.compile(
-        r"(?:^|\s)documentVisibilityState=(?P<value>[A-Za-z_-]+)(?:\s|$)"
-    ),
-    "assignedStreamRole": re.compile(
-        r"(?:^|\s)assignedStreamRole=(?P<value>[A-Za-z_-]+)(?:\s|$)"
-    ),
-    "hasLatestThreadSettings": re.compile(
-        r"(?:^|\s)hasLatestThreadSettings=(?P<value>true|false)(?:\s|$)"
-    ),
-}
+_EVENT_RE = re.compile(
+    r"^(?P<timestamp>\S+) info \[(?P<logger>[A-Za-z-]+)\] "
+    r"(?P<event>[A-Za-z_]+)(?: (?P<fields>.*))?$"
+)
+_FIELD_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
-_RESUME_MARKER = "[electron-message-handler] maybe_resume_success"
-_THREAD_ITEMS_MARKER = "[AppServerConnection] response_routed"
-_THREAD_ITEMS_METHOD = "method=thread/items/list"
+
+def _identity_clock(value: object) -> float:
+    try:
+        return _clock(value)
+    except EvidenceError:
+        raise EvidenceError("provider_identity_time_invalid") from None
+
+
+def _event_fields(line: str, logger: str, event: str) -> dict[str, str] | None:
+    """Recognize an exact native envelope, never a marker inside other content."""
+    match = _EVENT_RE.fullmatch(line)
+    if match is None or (match.group("logger"), match.group("event")) != (logger, event):
+        return None
+    fields: dict[str, str] = {}
+    for token in (match.group("fields") or "").split():
+        key, separator, value = token.partition("=")
+        if (not separator or not _FIELD_NAME_RE.fullmatch(key) or not value
+                or any(c in value for c in ('"', "'", "="))):
+            raise EvidenceError("provider_log_fields_invalid")
+        if key in fields:
+            raise EvidenceError("provider_log_field_ambiguous")
+        fields[key] = value
+    return fields
 
 
 @dataclass(frozen=True)
@@ -98,8 +111,7 @@ class NativeThreadIdentity:
             raise EvidenceError("provider_thread_not_owned")
         if self.has_latest_thread_settings is not True:
             raise EvidenceError("provider_thread_settings_unqualified")
-        if type(self.observed_at) not in (int, float) or self.observed_at <= 0:
-            raise EvidenceError("provider_identity_time_invalid")
+        _identity_clock(self.observed_at)
 
 
 @dataclass(frozen=True)
@@ -111,10 +123,11 @@ class ThreadItemsObservation:
     conversation_id: str
 
     def __post_init__(self) -> None:
+        if not isinstance(self.binding, ProviderLogBinding):
+            raise EvidenceError("provider_log_binding_invalid")
         if _UUID_RE.fullmatch(str(self.conversation_id or "")) is None:
             raise EvidenceError("provider_native_identity_invalid")
-        if type(self.observed_at) not in (int, float) or self.observed_at <= 0:
-            raise EvidenceError("provider_identity_time_invalid")
+        _identity_clock(self.observed_at)
 
 
 def provider_log_binding(log_name: str, *, expected_pid: int) -> ProviderLogBinding:
@@ -142,11 +155,11 @@ def _timestamp(line: str) -> float:
     return parsed.astimezone(timezone.utc).timestamp()
 
 
-def _field(pattern: re.Pattern[str], line: str, code: str) -> str:
-    match = pattern.search(line)
-    if match is None:
+def _field(fields: dict[str, str], key: str, code: str, pattern: str) -> str:
+    value = fields.get(key)
+    if value is None or re.fullmatch(pattern, value) is None:
         raise EvidenceError(code)
-    return match.group("value")
+    return value
 
 
 def _bounded_lines(lines: Iterable[str]) -> tuple[str, ...]:
@@ -178,30 +191,15 @@ def parse_native_thread_identities(
         raise EvidenceError("provider_log_binding_invalid")
     observations: list[NativeThreadIdentity] = []
     for line in _bounded_lines(lines):
-        if _RESUME_MARKER not in line:
+        fields = _event_fields(line, "electron-message-handler", "maybe_resume_success")
+        if fields is None:
             continue
-        conversation = _field(
-            _ID_FIELD_RE["conversationId"], line, "provider_conversation_id_missing"
-        )
-        thread = _field(_ID_FIELD_RE["threadId"], line, "provider_thread_id_missing")
-        latest_turn = _field(
-            _ID_FIELD_RE["latestTurnId"], line, "provider_latest_turn_id_missing"
-        )
-        visibility = _field(
-            _FIXED_FIELD_RE["documentVisibilityState"],
-            line,
-            "provider_visibility_missing",
-        )
-        role = _field(
-            _FIXED_FIELD_RE["assignedStreamRole"],
-            line,
-            "provider_stream_role_missing",
-        )
-        latest_settings = _field(
-            _FIXED_FIELD_RE["hasLatestThreadSettings"],
-            line,
-            "provider_thread_settings_missing",
-        )
+        conversation = _field(fields, "conversationId", "provider_conversation_id_missing", _UUID)
+        thread = _field(fields, "threadId", "provider_thread_id_missing", _UUID)
+        latest_turn = _field(fields, "latestTurnId", "provider_latest_turn_id_missing", _UUID)
+        visibility = _field(fields, "documentVisibilityState", "provider_visibility_missing", r"[A-Za-z_-]+")
+        role = _field(fields, "assignedStreamRole", "provider_stream_role_missing", r"[A-Za-z_-]+")
+        latest_settings = _field(fields, "hasLatestThreadSettings", "provider_thread_settings_missing", r"true|false")
         observations.append(
             NativeThreadIdentity(
                 binding=binding,
@@ -227,11 +225,10 @@ def parse_thread_items_observations(
         raise EvidenceError("provider_log_binding_invalid")
     observations: list[ThreadItemsObservation] = []
     for line in _bounded_lines(lines):
-        if _THREAD_ITEMS_MARKER not in line or _THREAD_ITEMS_METHOD not in line:
+        fields = _event_fields(line, "AppServerConnection", "response_routed")
+        if fields is None or fields.get("method") != "thread/items/list":
             continue
-        conversation = _field(
-            _ID_FIELD_RE["conversationId"], line, "provider_conversation_id_missing"
-        )
+        conversation = _field(fields, "conversationId", "provider_conversation_id_missing", _UUID)
         observations.append(
             ThreadItemsObservation(
                 binding=binding,
@@ -258,12 +255,8 @@ def qualify_bound_thread(
     expected = target.intent_target.provider_session_id
     if _UUID_RE.fullmatch(str(expected or "")) is None:
         raise EvidenceError("provider_session_identity_unqualified")
-    if not_before is not None and (
-        type(not_before) not in (int, float)
-        or isinstance(not_before, bool)
-        or not_before <= 0
-    ):
-        raise EvidenceError("provider_identity_time_invalid")
+    if not_before is not None:
+        _identity_clock(not_before)
 
     candidates = [
         event
@@ -311,8 +304,9 @@ def bind_native_turn_evidence(
     """Join provider-native turn identity to one exact AX-observed operation turn.
 
     The operation marker and AX message graph select the user/assistant messages.
-    The provider log supplies only the native turn identity. Neither source may
-    substitute for the other, and existing conflicting native ids are refused.
+    The log corroborates an already native-bound user; latest-turn recency never
+    supplies missing causal identity. Only its exact ordered reply may inherit
+    that attested user identity. Missing or conflicting native ids fail closed.
     """
 
     if not isinstance(plan, PreparedTurn) or not isinstance(snapshot, DesktopSnapshot):
@@ -330,6 +324,10 @@ def bind_native_turn_evidence(
         raise EvidenceError("provider_turn_join_session_mismatch")
     if identity.observed_at < plan.prepared_at:
         raise EvidenceError("provider_turn_join_stale_identity")
+    age = snapshot.observed_at - identity.observed_at
+    if (age < -MAX_CLOCK_SKEW_SECONDS
+            or age > MAX_SNAPSHOT_AGE_SECONDS + MAX_CLOCK_SKEW_SECONDS):
+        raise EvidenceError("provider_turn_join_identity_time_out_of_window")
 
     marker = plan.wire_text.split("\n", 1)[0] + "\n"
     users = [
@@ -347,7 +345,9 @@ def bind_native_turn_evidence(
     user = users[0]
     if user.text != plan.wire_text or user.complete is not True:
         raise EvidenceError("provider_turn_join_user_unverified")
-    if user.native_turn_id not in (None, identity.latest_turn_id):
+    if user.native_turn_id is None:
+        raise EvidenceError("provider_turn_join_native_id_unproven")
+    if user.native_turn_id != identity.latest_turn_id:
         raise EvidenceError("provider_turn_join_native_id_conflict")
 
     replies = [
@@ -360,6 +360,8 @@ def bind_native_turn_evidence(
     if len(replies) > 1:
         raise EvidenceError("provider_turn_join_reply_ambiguous")
     reply = replies[0] if replies else None
+    if reply is not None and snapshot.messages.index(reply) < snapshot.messages.index(user):
+        raise EvidenceError("provider_turn_join_reply_order_invalid")
     if reply is not None and reply.native_turn_id not in (
         None,
         identity.latest_turn_id,
@@ -368,9 +370,7 @@ def bind_native_turn_evidence(
 
     rebound = []
     for message in snapshot.messages:
-        if message.message_id == user.message_id or (
-            reply is not None and message.message_id == reply.message_id
-        ):
+        if reply is not None and message.message_id == reply.message_id:
             rebound.append(
                 replace(message, native_turn_id=identity.latest_turn_id)
             )
