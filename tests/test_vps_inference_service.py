@@ -108,7 +108,7 @@ def test_request_closed(field):
         normalize_request(dict(operation_key='inference-test', objective='Research', **{field:'untrusted'}))
 
 
-@pytest.mark.parametrize('outcome', ['lost', 'raised', 'backend-error', 'malformed', 'not-sent'])
+@pytest.mark.parametrize('outcome', ['lost', 'raised', 'cancelled', 'backend-error', 'malformed', 'not-sent'])
 def test_submit_transport_uncertainty_never_replays(rsa_key, tmp_path, outcome):
     from integrations.mastermind_executive_app.gateway import CeoIngressResponse
     app, token, _ = setup_app(rsa_key, tmp_path)
@@ -118,6 +118,7 @@ def test_submit_transport_uncertainty_never_replays(rsa_key, tmp_path, outcome):
         if frame['schema'].endswith('grounding.v1'):
             return CeoIngressResponse('sent_ok', ok=True, result=GROUND)
         if outcome == 'raised': raise RuntimeError('PRIVATE_SECRET')
+        if outcome == 'cancelled': raise asyncio.CancelledError()
         if outcome == 'backend-error': return CeoIngressResponse('sent_ok', ok=False, error={'code':'backend_refused','message':'PRIVATE_SECRET'})
         if outcome == 'malformed': return CeoIngressResponse('sent_ok', ok=True, result={'accepted':True})
         return CeoIngressResponse('not_sent' if outcome == 'not-sent' else 'sent_effect_unknown')

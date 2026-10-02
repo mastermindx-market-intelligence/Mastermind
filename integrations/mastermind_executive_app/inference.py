@@ -3,6 +3,7 @@
 Host enrollment supplies the exact service subject/client binding. No credential
 acquisition, Runtime construction, provider selection or installation lives here.
 """
+import asyncio
 import dataclasses
 import json
 import re
@@ -144,6 +145,13 @@ class InferenceApp:
                 result = JSONResponse(dict(json.loads(result.body), terminal_result_ref=terminal_ref),
                                       status_code=result.status_code)
             return result
+        except asyncio.CancelledError:
+            # A submit cancellation can occur after the Unix ingress send crossed
+            # its effect boundary. Convert it to the existing effect-unknown
+            # response rather than allowing cancellation to imply safe replay.
+            if frame.get("schema") == ingress.SUBMIT_SCHEMA:
+                return unknown(operation)
+            raise
         except Exception:
             return unknown(operation)
 

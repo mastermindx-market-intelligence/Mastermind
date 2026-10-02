@@ -4,6 +4,7 @@ Inject the existing authenticated App/MCP tool-call interface. This module never
 acquires credentials, selects a host, starts work locally, polls, or retries.
 The caller retains its stable operation key in its existing operation record.
 """
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -44,6 +45,11 @@ class FabricInferenceClient:
             return validate_submission_receipt(self._receipt(response, operation_key), args)
         except FabricConflict:
             raise
+        except asyncio.CancelledError:
+            # Cancellation can arrive after the authenticated tool transport has
+            # crossed its send boundary. Preserve the logical operation and force
+            # status-only reconciliation instead of exposing a replayable cancel.
+            raise EffectUnknown(operation_key) from None
         except Exception:
             # Even a malformed response can follow a committed effect. No replay.
             raise EffectUnknown(operation_key) from None

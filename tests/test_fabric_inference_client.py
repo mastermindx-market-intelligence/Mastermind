@@ -26,6 +26,21 @@ def test_submit_loss_reconcile_reads_only():
     assert all(args['operation_key'] == 'stable-operation' for _, args in calls)
 
 
+def test_submit_cancellation_is_effect_unknown_not_replayable():
+    from brain.fabric_inference_client import FabricInferenceClient, EffectUnknown
+    calls = []
+    async def tool(name, arguments):
+        calls.append((name, arguments))
+        raise asyncio.CancelledError()
+    async def run():
+        with pytest.raises(EffectUnknown) as error:
+            await FabricInferenceClient(tool).submit(
+                'cancelled-operation', 'Read supplied data')
+        assert error.value.operation_key == 'cancelled-operation'
+    asyncio.run(run())
+    assert [name for name, _ in calls] == ['submit_service_intent']
+
+
 def result(selection):
     from control_plane.executive_orchestration_result import canonical_digest
     role_result = {'answer': 'observed'}
@@ -133,7 +148,7 @@ def test_no_direct_provider_import_or_fallback():
     tree = ast.parse(source)
     imports = [node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
     imports += [alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names]
-    assert set(imports) <= {'__future__', 'collections.abc', 'typing',
+    assert set(imports) <= {'__future__', 'asyncio', 'collections.abc', 'typing',
         'control_plane.executive_inference_contract'}
     for forbidden in ('cli_bridge', 'provider_waterfall', 'anthropic', 'subprocess', 'codex'):
         assert forbidden not in source.lower()
