@@ -212,7 +212,11 @@ def _admit_v2_plan(
     admit_claude_union: bool = True,
     plan_schema_version: str = "mastermind.execution_plan/v2",
 ):
-    assert plan_schema_version in {"mastermind.execution_plan/v2", "mastermind.execution_plan/v3"}
+    assert plan_schema_version in {
+        "mastermind.execution_plan/v2",
+        "mastermind.execution_plan/v3",
+        "mastermind.execution_plan/v4",
+    }
     receipt = submit_intent(
         runtime,
         _v2_intent(
@@ -300,7 +304,10 @@ def _admit_v2_plan(
             "attempt_limit": 1,
             "cost_class": "small",
         }
-        if plan_schema_version == "mastermind.execution_plan/v3":
+        if plan_schema_version in {
+            "mastermind.execution_plan/v3",
+            "mastermind.execution_plan/v4",
+        }:
             step["prerequisite_step_ids"] = []
         if placement is not None:
             step["placement"] = dict(placement)

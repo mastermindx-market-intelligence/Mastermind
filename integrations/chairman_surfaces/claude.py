@@ -45,6 +45,19 @@ DEFAULT_CLAUDE_PROJECTS_DIR = "~/.claude/projects"
 #: empirical evidence.
 _SLUG_FOLD_RE = re.compile(r"[^A-Za-z0-9-]")
 
+#: Native CLI handoff into Desktop was introduced in Claude Code 2.1.285.
+MINIMUM_DESKTOP_HANDOFF_VERSION = (2, 1, 285)
+_CLAUDE_VERSION_RE = re.compile(r"(?<![0-9])(\d+)\.(\d+)\.(\d+)(?![0-9])")
+
+
+def _parsed_claude_version(text: object) -> tuple[int, int, int] | None:
+    if not isinstance(text, str):
+        return None
+    match = _CLAUDE_VERSION_RE.search(text)
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups())
+
 
 def _slugify_project_dir(project_dir: str) -> str:
     """Map an absolute project directory to Claude Code's on-disk slug.
@@ -127,6 +140,88 @@ def open_claude_code(binding: dict, runner, *, claude_projects_dir: str | None =
     return contract.succeeded(
         "claude_code", binding_id, "launched",
         "launched a Terminal session for the bound session", verified=True,
+    )
+
+
+def open_claude_code_in_desktop(
+    binding: dict,
+    runner,
+    pty_runner,
+    *,
+    claude_projects_dir: str | None = None,
+    claude_cli_path: str | None = None,
+) -> dict:
+    """Move one exact local Claude Code session into Claude Desktop.
+
+    Anthropic's supported handoff is ``claude --desktop --resume <session-id>``.
+    The command requires a real TTY, so ``pty_runner`` is a distinct injected
+    subprocess boundary. The existing transcript remains the identity source;
+    this function creates no session registry and never sends a model prompt.
+    """
+    locator = binding.get("locator") if isinstance(binding, dict) else None
+    locator = locator if isinstance(locator, dict) else {}
+    binding_id = binding.get("binding_id") if isinstance(binding, dict) else None
+    binding_id = binding_id if isinstance(binding_id, str) else None
+    session_id = locator.get("session_id")
+    project_dir = locator.get("project_dir")
+
+    if not isinstance(session_id, str) or not SESSION_ID_RE.match(session_id):
+        return contract.refused(
+            "claude_code", binding_id, "unsafe_token",
+            "the bound session id failed the safety check",
+        )
+    if not contract.safe_abs_dir(project_dir):
+        return contract.refused(
+            "claude_code", binding_id, "unsafe_token",
+            "the bound project directory failed the safety check",
+        )
+    if not os.path.isdir(project_dir):
+        return contract.refused(
+            "claude_code", binding_id, "not_found",
+            "the bound project directory does not exist",
+        )
+    if not _claude_code_session_exists(claude_projects_dir, project_dir, session_id):
+        return contract.refused(
+            "claude_code", binding_id, "not_found",
+            "the bound session was not found in the local Claude Code session store",
+        )
+
+    if (not isinstance(claude_cli_path, str) or not os.path.isabs(claude_cli_path)
+            or not os.path.isfile(claude_cli_path) or not os.access(claude_cli_path, os.X_OK)):
+        return contract.refused(
+            "claude_code", binding_id, "not_installed",
+            "the Claude Desktop handoff runtime is not installed",
+        )
+
+    version_result = runner([claude_cli_path, "--version"], timeout=5.0)
+    version = _parsed_claude_version(
+        version_result.get("stdout") if isinstance(version_result, dict) else None
+    )
+    if (not isinstance(version_result, dict) or version_result.get("timed_out")
+            or version_result.get("code") != 0 or version is None
+            or version < MINIMUM_DESKTOP_HANDOFF_VERSION):
+        return contract.refused(
+            "claude_code", binding_id, "not_installed",
+            "the Claude Desktop handoff runtime does not meet the required version",
+        )
+
+    result = pty_runner(
+        [claude_cli_path, "--desktop", "--resume", session_id],
+        timeout=20.0,
+        cwd=project_dir,
+    )
+    expected_receipt = f"Opening session {session_id} in Claude Desktop"
+    if (not isinstance(result, dict) or result.get("timed_out")
+            or result.get("code") != 0
+            or expected_receipt not in result.get("stdout", "")):
+        return contract.refused(
+            "claude_code", binding_id, "runner_error",
+            "Claude did not confirm the Desktop session handoff",
+        )
+
+    return contract.succeeded(
+        "claude_code", binding_id, "opened_desktop",
+        "moved the bound Claude Code session into Claude Desktop", verified=True,
     )
 
 

@@ -702,7 +702,11 @@ def test_x1_autonomy_writes_only_through_the_audited_binding_open_never_ad_hoc()
     assert 'postJSON("/api/open", { binding_id: binding.binding_id, owed_context: context })' in helper
     assert "b5OwedContext(card, binding)" in helper
     assert "loadState()" in helper
-    assert 'postJSON("/api/open", { binding_id: binding.binding_id })' in _extract_fn("openBinding")
+    open_helper = _extract_fn("openBinding")
+    assert 'var request = { binding_id: binding.binding_id };' in open_helper
+    assert 'if (targetSurface) request.target_surface = targetSurface;' in open_helper
+    assert 'postJSON("/api/open", request)' in open_helper
+    assert "url:" not in open_helper and "argv:" not in open_helper and "path:" not in open_helper
 
 
 def test_x1_autonomy_absent_projection_is_source_qualified_not_an_error() -> None:

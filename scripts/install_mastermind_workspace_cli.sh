@@ -15,33 +15,70 @@ if [ "$(basename "$common_abs")" != ".git" ]; then
 fi
 source_repo="$(dirname "$common_abs")"
 
-# Select the workspace root once, while an authorized host installer owns the
-# decision. The installed launcher pins this value so a shell caller cannot
-# redirect the canonical route through MASTERMIND_AGENT_WORKSPACE_ROOT.
-workspace_root="$HOME/.mastermind/agent-workspaces"
-workspace_mount=""
-if [ -d /Volumes/Mastermind ]; then
-  observed_mount="$(/bin/df -P /Volumes/Mastermind 2>/dev/null | /usr/bin/awk 'END {print $6}')"
-  if [ "$observed_mount" = "/Volumes/Mastermind" ]; then
-    workspace_root="/Volumes/Mastermind/agent-workspaces"
-    workspace_mount="/Volumes/Mastermind"
-  fi
+# Select the workspace root once through the canonical workspace route.
+# This is installer policy only: it does not reserve storage or perform Runtime
+# admission. An enrolled host policy remains pinned even while its mount is
+# unavailable, so the installed launcher refuses fallback later.
+if [ -x /opt/homebrew/bin/python3 ]; then
+  profile_python=/opt/homebrew/bin/python3
+else
+  profile_python=python3
+fi
+profile_output="$("$profile_python" - "$repo/scripts/mastermind_workspace.py" "$HOME" <<'PY'
+import importlib.util
+import sys
+from pathlib import Path
+
+script = Path(sys.argv[1])
+home = Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("mastermind_workspace_install_profile", script)
+if spec is None or spec.loader is None:
+    raise SystemExit("cannot load workspace installation profile")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+profile = module.installation_storage_profile(home)
+for key in ("root", "mount_point", "policy_path"):
+    value = profile[key]
+    if "\n" in value or "\r" in value:
+        raise SystemExit("workspace installation profile contains a newline")
+    print(value)
+PY
+)"
+workspace_root="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '1p')"
+workspace_mount="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '2p')"
+storage_policy="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '3p')"
+if [ -z "$workspace_root" ]; then
+  echo "workspace installation profile did not return a root" >&2
+  exit 2
 fi
 
 target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
 payload_root="${MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT:-$HOME/.local/share/mastermind/workspace-cli/$release_sha}"
-mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane"
+mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane" "$payload_root/common"
 cp "$repo/scripts/mastermind_workspace.py" "$payload_root/scripts/mastermind_workspace.py"
 cp "$repo/control_plane/executive_workspace.py" "$payload_root/control_plane/executive_workspace.py"
 cp "$repo/control_plane/__init__.py" "$payload_root/control_plane/__init__.py"
+cp "$repo/common/"*.py "$payload_root/common/"
 chmod 0755 "$payload_root/scripts/mastermind_workspace.py"
-chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py"
+chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py" "$payload_root/common/"*.py
+
+# Emit path values as POSIX shell literals, including embedded apostrophes.
+shell_quote() {
+  printf "'"
+  printf '%s' "$1" | /usr/bin/sed "s/'/'\\\\''/g"
+  printf "'"
+}
+quoted_mount="$(shell_quote "$workspace_mount")"
+quoted_source="$(shell_quote "$source_repo")"
+quoted_root="$(shell_quote "$workspace_root")"
+quoted_policy="$(shell_quote "$storage_policy")"
+quoted_payload="$(shell_quote "$payload_root/scripts/mastermind_workspace.py")"
 
 wrapper_tmp="$target.tmp.$$"
 cat > "$wrapper_tmp" <<EOF
 #!/bin/sh
 set -eu
-workspace_mount='$workspace_mount'
+workspace_mount=$quoted_mount
 if [ -n "\$workspace_mount" ]; then
   observed_mount="\$(/bin/df -P "\$workspace_mount" 2>/dev/null | /usr/bin/awk 'END {print \$6}')"
   if [ "\$observed_mount" != "\$workspace_mount" ]; then
@@ -49,14 +86,15 @@ if [ -n "\$workspace_mount" ]; then
     exit 66
   fi
 fi
-export MASTERMIND_SOURCE_REPO='$source_repo'
-export MASTERMIND_AGENT_WORKSPACE_ROOT='$workspace_root'
+export MASTERMIND_SOURCE_REPO=$quoted_source
+export MASTERMIND_AGENT_WORKSPACE_ROOT=$quoted_root
+export MASTERMIND_WORKSPACE_STORAGE_POLICY=$quoted_policy
 if [ -n "\${MASTERMIND_PYTHON:-}" ]; then
-  exec "\$MASTERMIND_PYTHON" '$payload_root/scripts/mastermind_workspace.py' "\$@"
+  exec "\$MASTERMIND_PYTHON" $quoted_payload "\$@"
 elif [ -x /opt/homebrew/bin/python3 ]; then
-  exec /opt/homebrew/bin/python3 '$payload_root/scripts/mastermind_workspace.py' "\$@"
+  exec /opt/homebrew/bin/python3 $quoted_payload "\$@"
 else
-  exec python3 '$payload_root/scripts/mastermind_workspace.py' "\$@"
+  exec python3 $quoted_payload "\$@"
 fi
 EOF
 chmod 0755 "$wrapper_tmp"
