@@ -1,5 +1,5 @@
 /**
- * Deterministic launch operation keys and MCP intent ids.
+ * Deterministic launch operation keys and authenticated App intent ids.
  *
  * SHA-256 is a small pure-TS implementation because `prepare` is synchronous
  * (Web Crypto's `digest` is async) and this package's tsconfig has no Node types.
@@ -23,9 +23,11 @@ export interface LaunchKeyMaterial {
 
 const KEY_PREFIX = "mmos-launch-";
 const KEY_HASH_CHARS = 40;
-const INTENT_ID_PREFIX = "mcp-";
+const REQUEST_REF_PREFIX = "req-";
+const REQUEST_REF_DOMAIN = "mastermind.executive_app.operation_key.v1\0";
+const INTENT_ID_PREFIX = "auto-";
 const INTENT_ID_HASH_CHARS = 32;
-const INTENT_ID_DOMAIN = "mastermind.executive_mcp.operation_key.v1\0";
+const INTENT_ID_DOMAIN = "mastermind.executive_automated_request.v1\0";
 
 const encoder = new TextEncoder();
 
@@ -79,9 +81,15 @@ export function operationKeyForLaunch(input: LaunchKeyMaterial): string {
   return `${KEY_PREFIX}${sha256Hex(canonicalJson(body)).slice(0, KEY_HASH_CHARS)}`;
 }
 
+/** Mirrors ceo_request.app_request_ref for the authenticated web_ceo_v2 route. */
+export function requestRefForOperationKey(operationKey: string): string {
+  return `${REQUEST_REF_PREFIX}${sha256Hex(REQUEST_REF_DOMAIN + operationKey).slice(0, INTENT_ID_HASH_CHARS)}`;
+}
+
+/** Mirrors automated_intent_id(app_request_ref(key)); never the legacy MCP id. */
 export function intentIdForOperationKey(operationKey: string): string {
   const domain = encoder.encode(INTENT_ID_DOMAIN);
-  const key = encoder.encode(operationKey);
+  const key = encoder.encode(requestRefForOperationKey(operationKey));
   const bytes = new Uint8Array(domain.length + key.length);
   bytes.set(domain, 0);
   bytes.set(key, domain.length);

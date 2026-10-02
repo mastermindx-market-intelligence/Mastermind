@@ -15,6 +15,7 @@ import type {
 import {
   intentIdForOperationKey,
   operationKeyForLaunch,
+  requestRefForOperationKey,
 } from "./operation-key";
 
 /** Same string as host-command-bindings.COMMAND_ROUTE_UNAVAILABLE; value copied to keep this module free of a runtime import cycle. */
@@ -30,11 +31,26 @@ const RECEIPT_SCHEMAS = new Set([
   "mastermind.ceo_intent_receipt.v1",
   "mastermind.ceo_intent_receipt.v2",
 ]);
+// Closed web_ceo_v2 read/profile-error contract: server._is_e1_envelope.
+const E1_ENVELOPE_KEYS = [
+  "schema", "tool", "ok", "server_version", "mode", "generated_at",
+  "grounding", "data", "degraded", "bounded", "error",
+];
+const E1_ERROR_CODES = new Set([
+  "invalid_input", "grounding_unavailable", "grounding_changed",
+  "identity_unverified", "backend_unavailable", "backend_refused",
+  "authority_refused", "not_found", "output_too_large", "timeout",
+  "production_write_disabled", "internal_error",
+]);
 
 export interface ExecutiveToolEnvelope {
   readonly ok: boolean;
+  /** Authenticated App submit outcome; status reads retain the data envelope. */
+  readonly status?: unknown;
+  readonly request_ref?: unknown;
+  readonly receipt?: unknown;
   readonly data?: unknown;
-  readonly error?: { readonly code: string; readonly message?: string };
+  readonly error?: { readonly code: string; readonly message?: string } | null;
 }
 
 export interface ExecutiveToolClient {
@@ -222,10 +238,73 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     envelope: ExecutiveToolEnvelope,
     path: "submit" | "status",
   ): EffectReceipt {
-    if (envelope.ok !== true) {
-      return this._mapError(pointer, envelope.error?.code, path);
+    if (!isPlainObject(envelope) || typeof envelope.ok !== "boolean" || !isJsonValue(envelope)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
-    const data = envelope.data;
+    let data: unknown;
+    if (path === "submit") {
+      const appOutcome = "status" in envelope || "request_ref" in envelope || "receipt" in envelope;
+      if (!appOutcome) {
+        // Only the exact App preflight or E1 profile-error shapes can be
+        // classified as no effect. Accepted data or foreign fields contradict
+        // that proof, even when the error code itself names a refusal.
+        const barePreflight = hasExactKeys(envelope, ["ok", "error"]) &&
+          validError(envelope.error, false);
+        const profileError = validE1Envelope(envelope, "submit_ceo_intent");
+        if (envelope.ok !== false || (!barePreflight && !profileError) ||
+            !validError(envelope.error, profileError)) {
+          return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+        }
+        if (envelope.error.intent_id !== undefined &&
+            envelope.error.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
+          return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
+        }
+        return this._mapError(pointer, envelope.error.code, path);
+      }
+      if (typeof envelope.request_ref !== "string") {
+        return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+      }
+      if (envelope.request_ref !== requestRefForOperationKey(pointer.operationKey)) {
+        return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
+      }
+      if (Object.keys(envelope).some((key) =>
+        !["ok", "status", "request_ref", "receipt", "error"].includes(key)) ||
+          typeof envelope.status !== "string" ||
+          !["accepted", "refused", "operation_conflict", "ingress_unavailable", "effect_unknown"].includes(envelope.status) ||
+          envelope.ok !== (envelope.status === "accepted")) {
+        return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+      }
+      if (envelope.status !== "accepted") {
+        if (!validError(envelope.error, false) || "receipt" in envelope) {
+          return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+        }
+        if (envelope.status !== "refused") {
+          return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
+        }
+        return this._mapError(pointer, envelope.error.code, path);
+      }
+      if ("error" in envelope) {
+        return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+      }
+      data = envelope.receipt;
+    } else {
+      if (!validE1Envelope(envelope, "ceo_intent_status")) {
+        return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+      }
+      if (envelope.ok !== true) {
+        // validE1Envelope proves this closed error shape; foreign structured
+        // error identities still cannot authenticate this original operation.
+        if (!validError(envelope.error, true)) {
+          return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+        }
+        if (envelope.error.intent_id !== undefined &&
+            envelope.error.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
+          return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
+        }
+        return this._mapError(pointer, envelope.error.code, path);
+      }
+      data = envelope.data;
+    }
     if (!isPlainObject(data)) {
       return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
@@ -258,12 +337,15 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
   /**
    * Submit-path refused codes fire before the durable Job write:
    * invalid_input — executive_ceo_ingress.py _handle_submit :474-479;
-   * authority_refused / backend_refused — adapter.py :996-1040 and ingress
+   * authority_refused — adapter.py :996-1040 and ingress
    * _handle_normalized_submit admission_guard :673-685 (zero sink calls);
    * production_write_disabled — adapter.py :898-905;
    * identity_unverified — auth gate before write;
    * grounding_unavailable / grounding_changed — ingress :609 / :647-649
    * ("zero Job").
+   * backend_refused is ambiguous: ingress :717-727 invokes the sink before
+   * _finalize_receipt :368-374 can raise it. Retain the original pointer and
+   * reconcile via status; a refusal label does not establish no effect.
    * not_found is not a submit-path before-effect code (D1 / §7.2): the
    * installed ingress raises it only from _resolve_status_intent :775-777,
    * so on submit it is unknown/UNKNOWN_RECEIPT. On the status path every
@@ -297,13 +379,13 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
       case "invalid_input":
         return this._receipt(pointer, "refused", "INVALID_PAYLOAD");
       case "authority_refused":
-      case "backend_refused":
       case "production_write_disabled":
       case "identity_unverified":
       case "grounding_unavailable":
       case "grounding_changed":
         return this._receipt(pointer, "refused", "REFUSED");
       case "not_found":
+      case "backend_refused":
       case "backend_unavailable":
       case "internal_error":
       case "output_too_large":
@@ -452,7 +534,65 @@ function copyValidation(
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+  return typeof v === "object" && v !== null &&
+    (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function validError(value: unknown, allowIntent: boolean): value is {
+  code: string; message: string; intent_id?: string;
+} {
+  if (!isPlainObject(value) || typeof value.code !== "string" || typeof value.message !== "string") return false;
+  const hasIntent = Object.prototype.hasOwnProperty.call(value, "intent_id");
+  const keys = allowIntent && hasIntent ? ["code", "message", "intent_id"] : ["code", "message"];
+  return hasExactKeys(value, keys) && (!hasIntent || typeof value.intent_id === "string");
+}
+
+function validE1Envelope(value: Record<string, unknown>, tool: "submit_ceo_intent" | "ceo_intent_status"): boolean {
+  if (!hasExactKeys(value, E1_ENVELOPE_KEYS) ||
+      value.schema !== "mastermind.executive_mcp_result.v1" || value.tool !== tool ||
+      value.server_version !== "1.2.0" || value.mode !== "readonly" ||
+      typeof value.ok !== "boolean" || typeof value.generated_at !== "string" ||
+      !isPlainObject(value.grounding) || !Array.isArray(value.degraded) ||
+      !value.degraded.every((item) => typeof item === "string") ||
+      !Array.isArray(value.bounded) || !value.bounded.every(isPlainObject)) return false;
+  return value.ok ? value.error === null :
+    value.data === null && validError(value.error, true) && E1_ERROR_CODES.has(value.error.code);
+}
+
+/** The injected client returns parsed JSON; non-JSON values are malformed. */
+function isJsonValue(value: unknown): boolean {
+  const ancestors = new Set<object>();
+  const pending: Array<{ value: unknown; exit: boolean }> = [{ value, exit: false }];
+  try {
+    while (pending.length > 0) {
+      const entry = pending.pop()!;
+      const item = entry.value;
+      if (entry.exit) {
+        ancestors.delete(item as object);
+        continue;
+      }
+      if (item === null || typeof item === "string" || typeof item === "boolean") continue;
+      if (typeof item === "number") {
+        if (!Number.isFinite(item)) return false;
+        continue;
+      }
+      if ((!Array.isArray(item) && !isPlainObject(item)) || ancestors.has(item)) return false;
+      ancestors.add(item);
+      pending.push({ value: item, exit: true });
+      const children = Array.isArray(item) ? item : Object.values(item);
+      for (let i = children.length - 1; i >= 0; i -= 1) {
+        pending.push({ value: children[i], exit: false });
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sameJson(a: unknown, b: unknown): boolean {
