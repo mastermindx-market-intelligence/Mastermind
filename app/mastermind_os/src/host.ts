@@ -325,8 +325,9 @@ export async function createNativeClient(
     async signIn() {
       invalidateReads();
       const ticket = ++control;
+      const started = epoch;
       const result = await invoke("sign_in");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     async signOut() {
       const ticket = ++control;
@@ -336,8 +337,9 @@ export async function createNativeClient(
         acquisition: false,
         content: false,
       });
+      const started = epoch;
       const result = await invoke("sign_out");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
     readMission: ({ work_ref, root_job_id, signal }) => {

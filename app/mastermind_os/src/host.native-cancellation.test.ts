@@ -332,3 +332,47 @@ describe("native generation cancellation", () => {
     }
   });
 });
+
+describe("native auth event wins over delayed control reply", () => {
+  it.each(["sign-in", "sign-out"])(
+    "keeps the newer native auth state when %s returns late",
+    async (kind) => {
+      const hold = deferred();
+      const { client, notify } = await setup(() => hold.promise);
+      const signedOut = {
+        status: "signed_out",
+        reason: null,
+        acquisition: false,
+        content: false,
+      };
+      const pending = kind === "sign-in" ? client.signIn() : client.signOut();
+      const newer = kind === "sign-in" ? signedOut : signed;
+      notify(newer);
+      const observed = client.getState();
+      hold.resolve(kind === "sign-in" ? signed : signedOut);
+      await pending;
+      expect(client.getState()).toEqual(observed);
+      expect(client.getState()).toEqual(newer);
+    },
+  );
+
+  it.each(["sign-in", "sign-out"])(
+    "still consumes the current %s reply after a malformed native event",
+    async (kind) => {
+      const hold = deferred();
+      const { client, notify } = await setup(() => hold.promise);
+      const signedOut = {
+        status: "signed_out",
+        reason: null,
+        acquisition: false,
+        content: false,
+      };
+      const pending = kind === "sign-in" ? client.signIn() : client.signOut();
+      notify({ status: "invalid" });
+      const expected = kind === "sign-in" ? signed : signedOut;
+      hold.resolve(expected);
+      await pending;
+      expect(client.getState()).toEqual(expected);
+    },
+  );
+});
