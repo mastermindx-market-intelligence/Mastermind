@@ -65,6 +65,7 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
+    CHATGPT_GUI_RESOURCE_ID,
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
     CandidateResult,
@@ -2907,10 +2908,6 @@ class ExecutiveWorkerBroker:
                 if artifact_receipt is None:
                     # Only the explicitly requested and materialized GUI contract
                     # is artifact-free. A missing browser receipt is not success.
-                    from integrations.chatgpt_desktop.resource import (
-                        CHATGPT_GUI_RESOURCE_ID,
-                    )
-
                     capability = getattr(state.resource, "observed_capability", None)
                     required_resources = tuple(
                         item for item in state.requested.capabilities.required

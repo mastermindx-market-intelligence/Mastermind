@@ -42,3 +42,11 @@ Exact run receipts remain in the existing fabric state directory; this checkpoin
 No physical GUI-seat helper is implemented or installed by this repair, and no native send, mode change, runtime target enablement, merge, deployment, or original-parent return is proved. The existing Peekaboo `AGENT_EXECUTION_POLICY_REFUSAL` remains binding; generic shell typing, AX mutation, or another host/provider must not be used to route around it. The exact provider-native causal join remains required. #1112 held source/comparison and historical effect-unknown canary lanes remain frozen.
 
 Continue from the existing PRs and carriers under #1143; preserve the distinction between source validation, provider delivery, target consumption, and mission acceptance.
+
+## CI boundary repair — resumed 2026-10-02
+
+Hosted run `36985932149` failed two unchanged architecture checks because the broker's narrow artifact admission guard imported `CHATGPT_GUI_RESOURCE_ID` from an integration module. The original three source findings were independently reverified and closed (33 repaired-head adversarial checks), but the release hold correctly remained.
+
+The shared closed discriminator now lives once in the existing dependency-neutral `control_plane.operator_harness_contract` owner. Both broker and provider resource import it there. No artifact admission predicate, native-effect rule, test fence, or runtime setting was weakened. The two failed architecture tests plus the expanded nine-file GUI/identity/turn/broker/browser/RuntimeBinding/Wake/OHF/wire suite pass: **519 passed in 22.94s**. This corrects the earlier hosted-check failure; a new exact-head hosted run remains required.
+
+Resumed protected procedure pin: `263e6fa1e6cd11179f623d521c214d417b24a1ae`. Charter, strategic state, authority map, and required protected skill companions were byte-identical to the previously loaded `bce27c2` pin.

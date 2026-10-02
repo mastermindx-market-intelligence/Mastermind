@@ -14,6 +14,7 @@ import time
 from typing import Callable, Literal, Protocol, runtime_checkable
 
 from control_plane.operator_harness_contract import (
+    CHATGPT_GUI_RESOURCE_ID,
     ObservedCapabilityIdentity,
     OperationResolution,
     ProcessGenerationRef,
@@ -28,7 +29,6 @@ from integrations.chatgpt_desktop.turn import (
 )
 
 CHATGPT_APP_BUNDLE_ID = "com.openai.codex"
-CHATGPT_GUI_RESOURCE_ID = "chatgpt-desktop-gui-v1"
 CHATGPT_GUI_NETWORK_STATE = "loopback-gui-helper-only"
 CHATGPT_GUI_OPERATIONS = (
     "observe_target",
