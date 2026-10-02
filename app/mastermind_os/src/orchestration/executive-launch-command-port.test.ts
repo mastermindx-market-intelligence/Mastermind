@@ -707,8 +707,8 @@ describe("T10 status-read refusal retains the pointer", () => {
 });
 
 describe("T11 same-principal A→B reopen reconstructs workRef from the pointer", () => {
-  const WS_A = "WS:A";
-  const WS_B = "WS:B";
+  const WS_A = "WS:PROJECT-A";
+  const WS_B = "WS:PROJECT-B";
 
   it("T11 launch stores pointer.targetKey as the original workstream", async () => {
     const { client } = makeClient(() => ({

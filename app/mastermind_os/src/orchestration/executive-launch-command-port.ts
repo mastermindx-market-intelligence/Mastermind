@@ -402,7 +402,7 @@ function validPointerTargetKey(value: string | null): value is string {
     typeof value === "string" &&
     value.length > 0 &&
     value.length <= 72 &&
-    /^WS:[A-Z0-9][A-Za-z0-9._-]{0,63}$/.test(value)
+    WORKSTREAM_RE.test(value)
   );
 }
 
