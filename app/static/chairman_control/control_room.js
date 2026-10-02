@@ -772,11 +772,13 @@
     return { state: "VERIFIED", variant: "is-ok", openable: true, note: "Last verified " + (ageWords(binding.last_verified_at) || "at an unreadable time") + "." };
   }
 
-  function openBinding(binding, statusNode, trigger) {
+  function openBinding(binding, statusNode, trigger, targetSurface) {
     if (!binding || !binding.binding_id) return Promise.resolve();
     if (trigger) trigger.disabled = true;
-    if (statusNode) statusNode.textContent = "Opening…";
-    return postJSON("/api/open", { binding_id: binding.binding_id }).then(function (outcome) {
+    if (statusNode) statusNode.textContent = targetSurface === "desktop" ? "Opening in Desktop…" : "Opening…";
+    var request = { binding_id: binding.binding_id };
+    if (targetSurface) request.target_surface = targetSurface;
+    return postJSON("/api/open", request).then(function (outcome) {
       if (outcome && outcome.ok) {
         if (statusNode) statusNode.textContent = "Opened · " + safeText(outcome.action, "provider action");
       } else if (statusNode) {
@@ -795,11 +797,11 @@
     });
   }
 
-  function openBindingButton(binding, label) {
+  function openBindingButton(binding, label, targetSurface) {
     var confidence = bindingConfidence(binding);
     var btn = button(label || OPEN_LABEL[binding.role] || "Open", "ccr-open-button", function (event) {
       event.stopPropagation();
-      openBinding(binding, null, btn).then(function () { loadState(); });
+      openBinding(binding, null, btn, targetSurface).then(function () { loadState(); });
     });
     btn.disabled = !confidence.openable;
     return btn;
@@ -864,6 +866,9 @@
         copy.appendChild(el("div", { text: safeText(binding.work_ref) + " · " + bindingConfidence(binding).state, className: "ccr-destination-sub" }));
         row.appendChild(copy);
         row.appendChild(openBindingButton(binding, "Open"));
+        if (binding.provider === "claude_code") {
+          row.appendChild(openBindingButton(binding, "Desktop", "desktop"));
+        }
         list.appendChild(row);
       });
       details.appendChild(list);
@@ -1177,6 +1182,11 @@
       var open = openBindingButton(binding, "Open");
       open.classList.add("ccr-binding-open");
       controls.appendChild(open);
+      if (binding.provider === "claude_code") {
+        var desktop = openBindingButton(binding, "Desktop", "desktop");
+        desktop.classList.add("ccr-binding-open");
+        controls.appendChild(desktop);
+      }
       var unbind = button("Unbind", "ccr-open-button ccr-unbind-button", function (event) {
         event.stopPropagation();
         unbind.disabled = true;
