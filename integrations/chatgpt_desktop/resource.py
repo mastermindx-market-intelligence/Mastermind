@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
-from typing import Literal, Protocol, runtime_checkable
+import time
+from typing import Callable, Literal, Protocol, runtime_checkable
 
 from control_plane.operator_harness_contract import (
     ObservedCapabilityIdentity,
@@ -23,6 +24,7 @@ from integrations.chatgpt_desktop.turn import (
     DesktopSnapshot,
     EvidenceError,
     PreparedTurn,
+    verify_pre_dispatch,
 )
 
 CHATGPT_APP_BUNDLE_ID = "com.openai.codex"
@@ -69,7 +71,10 @@ def _positive(value: object, code: str) -> int:
 def _clock(value: object, code: str) -> float:
     if type(value) not in (int, float) or isinstance(value, bool):
         raise EvidenceError(code)
-    numeric = float(value)
+    try:
+        numeric = float(value)
+    except (OverflowError, ValueError):
+        raise EvidenceError(code) from None
     if not math.isfinite(numeric) or numeric <= 0:
         raise EvidenceError(code)
     return numeric
@@ -232,6 +237,9 @@ class ChatGPTGuiMutationReceipt:
     operation_id: str
     effect: OperationResolution
     before_snapshot_id: str
+    payload_digest: str
+    plan_before_snapshot_id: str
+    plan_before_digest: str
     after_snapshot_id: str | None = None
 
     def __post_init__(self) -> None:
@@ -249,13 +257,22 @@ class ChatGPTGuiMutationReceipt:
         if not isinstance(self.effect, OperationResolution):
             raise EvidenceError("chatgpt_gui_mutation_effect_invalid")
         _ref(self.before_snapshot_id, "chatgpt_gui_snapshot_id_invalid")
+        _digest(self.payload_digest, "chatgpt_gui_payload_digest_invalid")
+        _ref(self.plan_before_snapshot_id, "chatgpt_gui_snapshot_id_invalid")
+        _digest(self.plan_before_digest, "chatgpt_gui_plan_before_digest_invalid")
         if self.after_snapshot_id is not None:
             _ref(self.after_snapshot_id, "chatgpt_gui_snapshot_id_invalid")
 
 
 @runtime_checkable
 class ChatGPTGuiSeatClient(Protocol):
-    """Closed helper carrier.  There is intentionally no generic action method."""
+    """Closed helper carrier. There is no generic action method.
+
+    A concrete helper must recheck the exact target and semantic preimage at
+    its adjacent native mutation boundary using its own authoritative clock.
+    Resource preflight is an early refusal check, never a reusable permission
+    to overwrite a draft or submit after intervening state or identity drift.
+    """
 
     def open_generation(
         self, binding: ChatGPTGuiGenerationBinding
@@ -322,6 +339,7 @@ class ChatGPTGuiAttemptResource:
         resource_contract_digest: str,
         helper_binary_digest: str,
         helper_version: str,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         if client is None:
             raise EvidenceError("chatgpt_gui_client_missing")
@@ -335,6 +353,9 @@ class ChatGPTGuiAttemptResource:
         ):
             raise EvidenceError("chatgpt_gui_generation_identity_mismatch")
 
+        if not callable(clock):
+            raise EvidenceError("chatgpt_gui_clock_invalid")
+        self._clock = clock
         self.client = client
         self.attempt_id = epoch.attempt_id
         self.session_epoch_id = epoch.session_epoch_id
@@ -440,6 +461,19 @@ class ChatGPTGuiAttemptResource:
 
     def prepare_composer(self, plan: PreparedTurn) -> ChatGPTGuiMutationReceipt:
         self._validate_plan(plan)
+        fresh = self.observe_target(
+            provider_session_id=plan.target.intent_target.provider_session_id,
+        )
+        self._validate_plan(plan)
+        snapshot = fresh.snapshot
+        now = _clock(self._clock(), "chatgpt_gui_clock_invalid")
+        verify_pre_dispatch(plan, snapshot, now=now)
+        if snapshot.block_reason != "none" or snapshot.state != "idle":
+            raise EvidenceError("surface_not_ready")
+        if snapshot.composer_text:
+            raise EvidenceError("existing_composer_draft")
+        if snapshot.mode != plan.requested_mode:
+            raise EvidenceError("mode_not_verified")
         value = self.client.prepare_composer(self.binding, plan)
         return self._validate_mutation(value, plan, "prepare_composer")
 
@@ -449,6 +483,8 @@ class ChatGPTGuiAttemptResource:
         prepared: ChatGPTGuiMutationReceipt,
     ) -> ChatGPTGuiMutationReceipt:
         self._validate_plan(plan)
+        if not isinstance(prepared, ChatGPTGuiMutationReceipt):
+            raise EvidenceError("chatgpt_gui_prepare_receipt_invalid")
         self._check_helper(prepared)
 
         if (
@@ -457,6 +493,7 @@ class ChatGPTGuiAttemptResource:
             or prepared.effect is not OperationResolution.APPLIED
         ):
             raise EvidenceError("chatgpt_gui_prepare_receipt_invalid")
+        self._validate_mutation(prepared, plan, "prepare_composer")
         value = self.client.submit_prepared(self.binding, plan, prepared)
         return self._validate_mutation(value, plan, "submit_prepared")
 
@@ -501,6 +538,12 @@ class ChatGPTGuiAttemptResource:
         expected_operation = operation_id or plan.intent.command_id
         if value.action != action or value.operation_id != expected_operation:
             raise EvidenceError("chatgpt_gui_mutation_receipt_mismatch")
+        if (
+            value.payload_digest != plan.payload_digest
+            or value.plan_before_snapshot_id != plan.before_snapshot_id
+            or value.plan_before_digest != plan.before_digest
+        ):
+            raise EvidenceError("chatgpt_gui_mutation_receipt_binding_mismatch")
         return value
 
     def _validate_observation(

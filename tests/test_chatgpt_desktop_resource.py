@@ -157,6 +157,15 @@ def _snapshot(plan=None):
     )
 
 
+
+def _preflight_snapshot():
+    plan = _plan()
+    return DesktopSnapshot(
+        plan.target, "snapshot-fresh", NOW + 1, "semantic", True,
+        plan.requested_mode, "idle", "", (),
+    )
+
+
 def _observation(binding=None, helper_instance="helper-1", snapshot=None):
     binding = _binding() if binding is None else binding
     return ChatGPTGuiObservation(
@@ -195,7 +204,7 @@ def _close(binding=None, helper_instance="helper-1"):
     )
 
 
-def _mutation(binding, action, operation_id, effect=OperationResolution.APPLIED):
+def _mutation(binding, action, operation_id, plan, effect=OperationResolution.APPLIED):
     return ChatGPTGuiMutationReceipt(
         binding=binding,
         helper_instance_id="helper-1",
@@ -203,6 +212,9 @@ def _mutation(binding, action, operation_id, effect=OperationResolution.APPLIED)
         operation_id=operation_id,
         effect=effect,
         before_snapshot_id="snapshot-before",
+        payload_digest=plan.payload_digest,
+        plan_before_snapshot_id=plan.before_snapshot_id,
+        plan_before_digest=plan.before_digest,
         after_snapshot_id="snapshot-after",
     )
 
@@ -224,11 +236,11 @@ class FakeClient:
 
     def prepare_composer(self, binding, plan):
         self.calls.append(("prepare_composer", binding, plan.intent.command_id))
-        return _mutation(binding, "prepare_composer", plan.intent.command_id)
+        return _mutation(binding, "prepare_composer", plan.intent.command_id, plan)
 
     def submit_prepared(self, binding, plan, prepared):
         self.calls.append(("submit_prepared", binding, plan.intent.command_id))
-        return _mutation(binding, "submit_prepared", plan.intent.command_id)
+        return _mutation(binding, "submit_prepared", plan.intent.command_id, plan)
 
     def observe_turn(self, binding, plan):
         self.calls.append(("observe_turn", binding, plan.intent.command_id))
@@ -236,7 +248,7 @@ class FakeClient:
 
     def interrupt_turn(self, binding, plan, operation_id):
         self.calls.append(("interrupt_turn", binding, operation_id))
-        return _mutation(binding, "interrupt_turn", operation_id)
+        return _mutation(binding, "interrupt_turn", operation_id, plan)
 
     def reconcile(self, binding, plan):
         self.calls.append(("reconcile", binding, plan.intent.command_id))
@@ -247,11 +259,13 @@ class FakeClient:
         return self.close_receipt
 
 
-def _resource(client=None):
+def _resource(client=None, *, clock=lambda: NOW + 1):
     epoch, generation = _epoch_generation()
     if client is None:
         binding = _binding()
-        client = FakeClient(_open(binding), _observation(binding), _close(binding))
+        client = FakeClient(
+            _open(binding), _observation(binding, snapshot=_preflight_snapshot()), _close(binding)
+        )
     return ChatGPTGuiAttemptResource(
         client,
         epoch=epoch,
@@ -262,6 +276,7 @@ def _resource(client=None):
         resource_contract_digest=RESOURCE_DIGEST,
         helper_binary_digest=HELPER_DIGEST,
         helper_version="1.0.0",
+        clock=clock,
     )
 
 
@@ -433,6 +448,9 @@ def test_submit_requires_applied_prepare_from_same_helper_and_operation():
         operation_id=plan.intent.command_id,
         effect=OperationResolution.REFUSED,
         before_snapshot_id="snapshot-before",
+        payload_digest=plan.payload_digest,
+        plan_before_snapshot_id=plan.before_snapshot_id,
+        plan_before_digest=plan.before_digest,
         after_snapshot_id=None,
     )
     before = len(resource.client.calls)
@@ -524,3 +542,147 @@ def test_generation_constructor_rejects_epoch_worker_drift():
             helper_binary_digest=HELPER_DIGEST,
             helper_version="1.0.0",
         )
+
+
+def test_submit_refuses_changed_payload_for_same_operation():
+    resource = _resource()
+    resource.start()
+    resource.observe_target(provider_session_id=CONVERSATION)
+    plan = _plan()
+    prepared = resource.prepare_composer(plan)
+    changed = replace(
+        plan, wire_text=plan.wire_text + "\nDifferent unprepared payload"
+    )
+    assert changed.intent.command_id == plan.intent.command_id
+    assert changed.payload_digest != plan.payload_digest
+    before = len(resource.client.calls)
+    with pytest.raises(EvidenceError, match="receipt_binding_mismatch"):
+        resource.submit_prepared(changed, prepared)
+    assert len(resource.client.calls) == before
+    assert resource.submit_prepared(plan, prepared).action == "submit_prepared"
+
+
+def test_submit_refuses_altered_plan_before_snapshot_id():
+    resource = _resource()
+    resource.start()
+    resource.observe_target(provider_session_id=CONVERSATION)
+    plan = _plan()
+    prepared = resource.prepare_composer(plan)
+    altered = replace(plan, before_snapshot_id="snapshot-other")
+    assert altered.payload_digest == plan.payload_digest
+    before = len(resource.client.calls)
+    with pytest.raises(EvidenceError, match="receipt_binding_mismatch"):
+        resource.submit_prepared(altered, prepared)
+    assert len(resource.client.calls) == before
+
+
+def test_submit_refuses_altered_plan_before_digest():
+    resource = _resource()
+    resource.start()
+    resource.observe_target(provider_session_id=CONVERSATION)
+    plan = _plan()
+    prepared = resource.prepare_composer(plan)
+    altered = replace(plan, before_digest="c" * 64)
+    assert altered.payload_digest == plan.payload_digest
+    before = len(resource.client.calls)
+    with pytest.raises(EvidenceError, match="receipt_binding_mismatch"):
+        resource.submit_prepared(altered, prepared)
+    assert len(resource.client.calls) == before
+
+
+def test_mutation_receipt_requires_plan_binding_digests():
+    plan = _plan()
+    base = {
+        "binding": _binding(),
+        "helper_instance_id": "helper-1",
+        "action": "prepare_composer",
+        "operation_id": plan.intent.command_id,
+        "effect": OperationResolution.APPLIED,
+        "before_snapshot_id": plan.before_snapshot_id,
+        "payload_digest": plan.payload_digest,
+        "plan_before_snapshot_id": plan.before_snapshot_id,
+        "plan_before_digest": plan.before_digest,
+    }
+    with pytest.raises(EvidenceError, match="payload_digest_invalid"):
+        ChatGPTGuiMutationReceipt(**{**base, "payload_digest": "not-a-digest"})
+    with pytest.raises(EvidenceError, match="plan_before_digest_invalid"):
+        ChatGPTGuiMutationReceipt(**{**base, "plan_before_digest": "not-a-digest"})
+
+
+def test_submit_refuses_untyped_prepared_receipt():
+    resource = _resource()
+    resource.start()
+    resource.observe_target(provider_session_id=CONVERSATION)
+    plan = _plan()
+    resource.prepare_composer(plan)
+    before = len(resource.client.calls)
+    with pytest.raises(EvidenceError, match="prepare_receipt_invalid"):
+        resource.submit_prepared(plan, object())
+    assert len(resource.client.calls) == before
+
+
+@pytest.mark.parametrize("case, expected", [
+    ("draft", "pre_dispatch_state_changed"),
+    ("generating", "pre_dispatch_state_changed"),
+    ("permission", "pre_dispatch_state_changed"),
+    ("incomplete", "insufficient_semantic_evidence"),
+    ("missing", "snapshot_unavailable"),
+    ("old_snapshot", "fresh_pre_dispatch_observation_required"),
+    ("stale", "stale_or_future_snapshot"),
+    ("future", "stale_or_future_snapshot"),
+    ("expired_plan", "prepared_turn_expired"),
+    ("retargeted", "plan_target_mismatch"),
+])
+def test_prepare_rechecks_fresh_semantic_preimage_before_any_mutation(case, expected):
+    now = NOW + 7 if case == "expired_plan" else NOW + 1
+    resource = _resource(clock=lambda: now)
+    resource.start()
+    cached = resource.observe_target(provider_session_id=CONVERSATION)
+    snapshot = _preflight_snapshot()
+    changes = {
+        "draft": {"composer_text": "Do not overwrite this user's draft"},
+        "generating": {"state": "generating"},
+        "permission": {"block_reason": "permission"},
+        "incomplete": {"scope_complete": False},
+        "old_snapshot": {"snapshot_id": _plan().before_snapshot_id},
+        "stale": {"observed_at": NOW - 10},
+        "future": {"observed_at": NOW + 10},
+        "expired_plan": {"observed_at": now},
+    }
+    if case == "missing":
+        snapshot = None
+    elif case == "retargeted":
+        snapshot = replace(snapshot, target=replace(snapshot.target, pid=PID + 1))
+    else:
+        snapshot = replace(snapshot, **changes[case])
+    fresh = replace(cached, snapshot=snapshot) if case != "retargeted" else replace(
+        cached, pid=PID + 1, identity=_identity(PID + 1), snapshot=snapshot,
+    )
+    resource.client.observation = fresh
+    before = len(resource.client.calls)
+    with pytest.raises(EvidenceError, match=expected):
+        resource.prepare_composer(_plan())
+    assert [call[0] for call in resource.client.calls[before:]] == ["observe_target"]
+
+
+@pytest.mark.parametrize("bad_clock", [True, float("nan"), float("inf"), -(10**400), 10**400])
+def test_prepare_refuses_invalid_authoritative_clock_before_mutation(bad_clock):
+    resource = _resource(clock=lambda: bad_clock)
+    resource.start()
+    resource.observe_target(provider_session_id=CONVERSATION)
+    before = len(resource.client.calls)
+    with pytest.raises(EvidenceError, match="clock_invalid"):
+        resource.prepare_composer(_plan())
+    assert [call[0] for call in resource.client.calls[before:]] == ["observe_target"]
+
+
+def test_prepare_accepts_only_new_unchanged_semantic_snapshot():
+    resource = _resource()
+    resource.start()
+    resource.observe_target(provider_session_id=CONVERSATION)
+    before = len(resource.client.calls)
+    receipt = resource.prepare_composer(_plan())
+    assert receipt.effect is OperationResolution.APPLIED
+    assert [call[0] for call in resource.client.calls[before:]] == [
+        "observe_target", "prepare_composer",
+    ]

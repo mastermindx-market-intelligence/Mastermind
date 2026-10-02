@@ -40,10 +40,12 @@ from control_plane.executive_worker_broker import (
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
     CandidateResult,
+    CapabilityIdentity,
     CapabilityManifest,
     EventCursor,
     NativeHelperPolicy,
     NormalizedEvent,
+    ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
     ObservedTriState,
     OperationId,
@@ -370,7 +372,7 @@ def _materialization_payload(
     return payload
 
 
-def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
+def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None, capabilities=None):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "job-1"
     run_root = tmp_path / "runs"
@@ -391,7 +393,7 @@ def _fixture(tmp_path: Path, *, armed: bool = True, autonomy_guard=None):
         sandbox_policy="read-only",
         approval_policy="never",
         network_policy="disabled",
-        capabilities=CapabilityManifest(),
+        capabilities=capabilities or CapabilityManifest(),
         native_helper_policy=NativeHelperPolicy.DISABLED,
         authority_policy_hash="c" * 64,
     )
@@ -717,12 +719,40 @@ def test_browser_resource_is_generation_bound_and_sealed_only_after_uid_sweep(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("case", [
+    "admitted_gui", "undeclared", "untyped", "browser", "digest_drift",
+    "unattested", "additional_browser", "unknown_contract", "missing_capability",
+])
 def test_nonartifact_operator_resource_seals_after_uid_sweep(
-    tmp_path: Path,
+    tmp_path: Path, case: str,
 ) -> None:
     lifecycle: list[str] = []
+    gui = ObservedCapabilityIdentity(
+        kind="resource", name="chatgpt-desktop-gui-v1", resource_contract_digest="e" * 64,
+    )
+    requested_cap = CapabilityIdentity(
+        kind="resource", name=gui.name, harness_binary_digest="a" * 64,
+        resource_contract_digest=gui.resource_contract_digest,
+    )
+    resource_cap = gui
+    if case == "untyped":
+        resource_cap = to_wire(gui)
+    elif case == "browser":
+        resource_cap = dataclasses.replace(gui, name="browser-review-v1")
+    elif case == "digest_drift":
+        resource_cap = dataclasses.replace(gui, resource_contract_digest="f" * 64)
+    elif case == "unknown_contract":
+        resource_cap = dataclasses.replace(gui, name="unknown-resource")
+        requested_cap = dataclasses.replace(requested_cap, name=resource_cap.name)
+    elif case == "missing_capability":
+        resource_cap = None
+    required = () if case == "undeclared" else (requested_cap,)
+    if case == "additional_browser":
+        required += (dataclasses.replace(requested_cap, name="browser-review-v1"),)
 
     class Resource:
+        observed_capability = resource_cap
+
         def start(self) -> None:
             lifecycle.append("resource_start")
 
@@ -735,11 +765,20 @@ def test_nonartifact_operator_resource_seals_after_uid_sweep(
             return None
 
     async def scenario() -> None:
-        broker, peer, profile, sweeper, adapters = _fixture(tmp_path)
+        broker, peer, profile, sweeper, adapters = _fixture(
+            tmp_path, capabilities=CapabilityManifest(required=required),
+        )
 
         def resource_factory(_workspace, requested, _epoch, _generation):
             assert requested == profile
-            adapters[-1].lifecycle = lifecycle
+            adapter = adapters[-1]
+            adapter.lifecycle = lifecycle
+            attestation = adapter.observed_attestation
+            adapter.observed_attestation = lambda generation: dataclasses.replace(
+                attestation(generation),
+                capabilities=(resource_cap,) if isinstance(resource_cap, ObservedCapabilityIdentity)
+                and case != "unattested" else (),
+            )
             return Resource()
 
         broker.operator_resource_factory = resource_factory
@@ -761,17 +800,24 @@ def test_nonartifact_operator_resource_seals_after_uid_sweep(
             ),
             peer=peer,
         )
-        stopped = await broker.execute(
-            _request(
-                "ohf-stop",
-                {
-                    "operation_id": to_wire(OperationId("ohf-op:stop-gui")),
-                    "generation": to_wire(generation),
-                },
-                "stop-gui",
-            ),
-            peer=peer,
+        stop_request = _request(
+            "ohf-stop",
+            {
+                "operation_id": to_wire(OperationId("ohf-op:stop-gui")),
+                "generation": to_wire(generation),
+            },
+            "stop-gui",
         )
+        if case == "admitted_gui":
+            stopped = await broker.execute(stop_request, peer=peer)
+            assert stopped["result"]["artifact_receipt"] is None
+            assert broker._operator_run is None
+            assert broker._operator_terminal
+        else:
+            with pytest.raises(BrokerStateError, match="artifact-free admission"):
+                await broker.execute(stop_request, peer=peer)
+            assert broker._operator_run is not None
+            assert not broker._operator_terminal
         assert lifecycle == [
             "resource_start",
             "resource_bind",
@@ -781,7 +827,6 @@ def test_nonartifact_operator_resource_seals_after_uid_sweep(
             "uid_sweep:operator_terminal",
             "receipt_seal",
         ]
-        assert stopped["result"]["artifact_receipt"] is None
 
     asyncio.run(scenario())
 

@@ -72,6 +72,7 @@ from control_plane.operator_harness_contract import (
     LaunchComparison,
     LaunchDecision,
     NormalizedEvent,
+    ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
     OperationId,
     ProcessGenerationRef,
@@ -2903,7 +2904,52 @@ class ExecutiveWorkerBroker:
                     state.resource.seal_after_uid_sweep,
                     sweep,
                 )
-                if artifact_receipt is not None:
+                if artifact_receipt is None:
+                    # Only the explicitly requested and materialized GUI contract
+                    # is artifact-free. A missing browser receipt is not success.
+                    from integrations.chatgpt_desktop.resource import (
+                        CHATGPT_GUI_RESOURCE_ID,
+                    )
+
+                    capability = getattr(state.resource, "observed_capability", None)
+                    required_resources = tuple(
+                        item for item in state.requested.capabilities.required
+                        if item.kind == "resource"
+                    )
+                    receipt = state.materialization_receipt
+                    observed_resources = ()
+                    if receipt is not None:
+                        try:
+                            attestation = wire_observed_harness_attestation(
+                                receipt.observed_attestation
+                            )
+                        except OperatorHarnessWireError as exc:
+                            raise BrokerStateError(
+                                "operator resource lacks validated artifact-free admission"
+                            ) from exc
+                        observed_resources = tuple(
+                            item for item in attestation.capabilities
+                            if item.kind == "resource"
+                        )
+                    if (
+                        not isinstance(capability, ObservedCapabilityIdentity)
+                        or capability.kind != "resource"
+                        or capability.name != CHATGPT_GUI_RESOURCE_ID
+                        or not isinstance(capability.resource_contract_digest, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", capability.resource_contract_digest) is None
+                        or len(required_resources) != 1
+                        or required_resources[0].name != capability.name
+                        or required_resources[0].resource_contract_digest
+                        != capability.resource_contract_digest
+                        or observed_resources != (capability,)
+                        or receipt is None
+                        or receipt.requested_profile_digest
+                        != requested_profile_digest(operator_to_wire(state.requested))
+                    ):
+                        raise BrokerStateError(
+                            "operator resource lacks validated artifact-free admission"
+                        )
+                else:
                     if not isinstance(artifact_receipt, BrowserReviewReceipt):
                         raise BrokerStateError(
                             "operator resource returned an untyped artifact receipt"
