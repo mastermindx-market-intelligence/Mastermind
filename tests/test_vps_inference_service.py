@@ -52,6 +52,32 @@ def test_ingress_replay_conflict_and_status(tmp_path):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("frame", [
+    [],
+    {"schema": []},
+    {"schema": "mastermind.ceo_ingress.service_inference_submit.v1",
+     "request": {"operation_key": "x", "objective": "Research"},
+     "observed_grounding": {"mastermind_sha":"1"*40, "macro_sha":"2"*40,
+                            "boot_packet_schema":"mastermind.ceo_boot_packet.v1"}},
+    {"schema": "mastermind.ceo_ingress.service_inference_submit.v1",
+     "request": {"operation_key": "inference-test", "objective": "x" * 4001},
+     "observed_grounding": {"mastermind_sha":"1"*40, "macro_sha":"2"*40,
+                            "boot_packet_schema":"mastermind.ceo_boot_packet.v1"}},
+])
+def test_ingress_malformed_frames_use_typed_invalid_input(tmp_path, frame):
+    from control_plane import executive_inference_ingress as service
+    from control_plane.executive_ceo_ingress import CeoIngressError
+    rt = Runtime.at(tmp_path / "runtime")
+    class Ground:
+        def observe(self): return GROUND
+    with pytest.raises(CeoIngressError) as error:
+        asyncio.run(service.handle_frame(
+            frame, runtime=rt, grounding_provider=Ground(), workspace_root=tmp_path,
+            admission_guard=lambda _: None))
+    assert error.value.code == "invalid_input"
+    assert rt.jobs.list_jobs() == []
+
+
 def setup_app(rsa_key, tmp_path):
     from integrations.mastermind_executive_app.inference import InferenceSettings, create_inference_app, SERVICE_SCOPE
     from integrations.mastermind_executive_app.app import AppSettings
