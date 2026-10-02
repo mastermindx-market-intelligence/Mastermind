@@ -413,16 +413,16 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
 
     # The quoted sink predicates this law relies on are still where we cite them.
     assert "find_event_by_command_id(command_id)" in _source_window(
-        "control_plane/ceo_intent.py", 1257, 1263
+        "control_plane/ceo_intent.py", 1285, 1291
     )
     assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
-        "control_plane/ceo_intent.py", 1032, 1038
+        "control_plane/ceo_intent.py", 1055, 1061
     )
     assert 'return f"{COMMAND_ID_PREFIX}{intent_id}"' in _source_window(
-        "control_plane/ceo_intent.py", 870, 876
+        "control_plane/ceo_intent.py", 893, 899
     )
     pins = admission_status()["identity"]["conflict_predicates"]
-    assert {pin["line"] for pin in pins} == {"L1259", "L1034", "L872"}
+    assert {pin["line"] for pin in pins} == {"L1287", "L1057", "L895"}
     for pin in pins:
         assert pin["file"] == "control_plane/ceo_intent.py"
 
@@ -711,15 +711,15 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
     #     in added production source, and a source-line citation is not an
     #     identity.
     windows = {
-        "L723": _source_window("control_plane/ceo_intent.py", 721, 727),
-        "L593": _source_window("control_plane/ceo_intent.py", 591, 597),
-        "L979": _source_window("control_plane/ceo_intent.py", 977, 983),
-        "L1317": _source_window("control_plane/ceo_intent.py", 1315, 1321),
+        "L746": _source_window("control_plane/ceo_intent.py", 744, 750),
+        "L594": _source_window("control_plane/ceo_intent.py", 592, 598),
+        "L1002": _source_window("control_plane/ceo_intent.py", 1000, 1006),
+        "L1347": _source_window("control_plane/ceo_intent.py", 1345, 1351),
     }
-    assert "_SERVICE_REQUIRED_KEYS" in windows["L723"]
-    assert "def _require_service_ceiling" in windows["L593"]
-    assert 'value["principal_id"] = intent["principal_id"]' in windows["L979"]
-    assert 'owner_seat="coo"' in windows["L1317"]
+    assert "_SERVICE_REQUIRED_KEYS" in windows["L746"]
+    assert "def _require_service_ceiling" in windows["L594"]
+    assert 'value["principal_id"] = intent["principal_id"]' in windows["L1002"]
+    assert 'owner_seat="coo"' in windows["L1347"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"
@@ -835,7 +835,7 @@ def test_service_stamp_does_not_satisfy_the_ceo_seat_gate(tmp_path: Path):
 
 
 def test_registry_is_closed_and_look_alikes_confer_nothing():
-    assert list(REGISTRY) == ["svc-site-maintenance"]
+    assert list(REGISTRY) == ["svc-site-maintenance", "svc-vps-inference"]
     registered = _principal()
     assert service_principal("svc-site-maintenance") == registered
     assert REGISTRY["svc-site-maintenance"] == registered

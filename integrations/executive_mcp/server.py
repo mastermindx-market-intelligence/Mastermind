@@ -149,7 +149,7 @@ class _DuplicateAuthorizationGuard:
     """Reject raw duplicate credentials before SDK header coalescing."""
 
     def __init__(self, app: Any, *, fenced_app: Any | None = None, mcp_path: str = "/mcp") -> None:
-        if mcp_path not in {"/mcp", "/mcp/coo"}:
+        if mcp_path not in {"/mcp", "/mcp/coo", "/mcp/service-inference"}:
             raise ValueError("unknown static Executive transport")
         self._app = app
         self._fenced_app = fenced_app or app
@@ -1503,3 +1503,97 @@ def build_web_ceo_v2_with_coo_mcp_app(settings: Any, *, coo_settings: Any, audit
         workspace_app=workspace_app, content_app=content_app, os_app=os_app)
     coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink)
     return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata)
+
+
+def build_inference_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+    """Dormant three-tool service route; the existing App owns every operation."""
+    from integrations.executive_mcp.inference import MCP_PATH, TOOL_SPECS, validate_arguments
+    from integrations.mastermind_executive_app.inference import create_inference_app, unknown, refused
+
+    core = create_inference_app(settings, audit_sink=audit_sink)
+    oauth = MastermindTokenVerifier(authenticator=core.authenticator, policy=settings.policy,
+        now=settings.executive.clock, audit_sink=audit_sink)
+
+    class BoundVerifier:
+        async def verify_token(self, token):
+            access = await oauth.verify_token(token)
+            if access is None:
+                return None
+            try:
+                principal = await core.authorize_token(token)
+                if (access.client_id == principal.client_ref and access.subject == principal.subject_digest
+                        and access.resource == principal.resource and access.scopes == list(principal.scopes)):
+                    return access
+            except Exception:
+                pass
+            return None
+
+    server = Server("mastermind-executive-service-inference", version="1.0.0")
+    schemes = oauth_security_schemes(settings.policy.required_scopes)
+    tools = tuple(mcp_types.Tool(name=spec.name, description=spec.description, inputSchema=spec.input_schema,
+        annotations=mcp_types.ToolAnnotations(**spec.annotations), securitySchemes=schemes,
+        _meta={"securitySchemes": schemes}) for spec in TOOL_SPECS)
+
+    @server.list_tools()
+    async def list_tools():
+        return list(tools)
+
+    def reply(payload):
+        return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
+            text=canonical_json(payload).decode("utf-8"))], isError=payload.get("ok") is not True)
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(name, arguments):
+        try:
+            args = validate_arguments(name, arguments)
+        except Exception:
+            return reply(json.loads(refused("invalid_input", 400).body))
+        request = server.request_context.request
+        if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
+            return reply(json.loads(refused().body))
+        failure = unknown(args["operation_key"]) if name == "submit_service_intent" else refused("backend_unavailable", 503)
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=core), base_url="http://127.0.0.1",
+                    trust_env=False, follow_redirects=False) as client:
+                response = await client.post("/v1/tools/" + name,
+                    headers={"authorization": request.headers["authorization"]}, json={"arguments": args})
+            result = reply(response.json())
+            if len(result.model_dump_json(by_alias=True).encode("utf-8")) <= MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
+                return result
+        except Exception:
+            pass
+        return reply(json.loads(failure.body))
+
+    manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,
+        security_settings=TransportSecuritySettings(
+            allowed_hosts=["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "::1", "[::1]", "[::1]:*"],
+            allowed_origins=[]))
+    authenticated = PreAuthMcpBodyApp(AuthenticationMiddleware(
+        RequireAuthMiddleware(BoundedRequestApp(manager.handle_request), required_scopes=list(settings.policy.required_scopes),
+            resource_metadata_url=settings.policy.resource_metadata_url), backend=BearerAuthBackend(BoundVerifier())))
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        try:
+            async with manager.run():
+                yield
+        finally:
+            await core.aclose()
+
+    app = Starlette(routes=[Route(MCP_PATH, authenticated, methods=["POST"])], lifespan=lifespan)
+    app.router.redirect_slashes = False
+
+    class LiteralServiceRoute:
+        def __init__(self):
+            self._app = app
+            self._guard = _DuplicateAuthorizationGuard(app, mcp_path=MCP_PATH)
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") == "http" and (
+                    scope.get("path") != MCP_PATH or scope.get("raw_path") != MCP_PATH.encode("ascii")
+                    or scope.get("method") != "POST" or scope.get("query_string")):
+                await refused("invalid_input", 404)(scope, receive, send)
+                return
+            await self._guard(scope, receive, send)
+
+    return LiteralServiceRoute()

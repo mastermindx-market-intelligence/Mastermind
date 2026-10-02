@@ -1,0 +1,45 @@
+"""App-only service frames on CeoIngress, using its owner and sole intent sink."""
+from collections.abc import Mapping
+
+from control_plane import ceo_intent, executive_ceo_ingress as ingress
+from control_plane.executive_inference_contract import PRINCIPAL_ID, derive, intent_id, validate_receipt
+
+SUBMIT_SCHEMA = "mastermind.ceo_ingress.service_inference_submit.v1"
+STATUS_SCHEMA = "mastermind.ceo_ingress.service_inference_status.v1"
+SCHEMAS = frozenset({SUBMIT_SCHEMA, STATUS_SCHEMA})
+
+
+async def handle_frame(frame, *, runtime, grounding_provider, workspace_root, admission_guard):
+    is_submit = frame.get("schema") == SUBMIT_SCHEMA
+    if frame.get("schema") not in SCHEMAS:
+        raise ingress.CeoIngressError("invalid_input", "unknown service frame")
+    ingress._exact_top_keys(frame, "service frame", frozenset(
+        {"schema", "request", "observed_grounding"} if is_submit else {"schema", "operation_key"}))
+    try:
+        operation = frame["request"]["operation_key"] if is_submit else frame["operation_key"]
+        identity = intent_id(operation)
+        if is_submit:
+            candidate = derive(frame["request"], frame["observed_grounding"])["envelope"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ingress.CeoIngressError("invalid_input", "invalid bounded service request") from exc
+    existing = await ingress._backend_call(runtime.store.find_event_by_command_id, ceo_intent.command_id_for(identity))
+    if existing is not None:
+        payload = existing.get("payload")
+        provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
+        if (not isinstance(provenance, Mapping)
+                or provenance.get("schema") != ceo_intent.INTENT_SCHEMA_SERVICE
+                or provenance.get("principal_id") != PRINCIPAL_ID or provenance.get("actor") != PRINCIPAL_ID):
+            raise ingress.CeoIngressError("authority_refused", "operation belongs to another principal")
+    if not is_submit:
+        return {"receipt": validate_receipt(await ingress._resolve_status_intent(runtime, identity), operation),
+                "terminal_result_ref": None}
+    if existing is None:
+        trusted = await ingress._observe_trusted_grounding(grounding_provider)
+        if trusted != frame["observed_grounding"]:
+            raise ingress.CeoIngressError("grounding_mismatch", "service grounding mismatch")
+        candidate = derive(frame["request"], trusted)["envelope"]
+        if await ingress._observe_trusted_grounding(grounding_provider) != trusted:
+            raise ingress.CeoIngressError("grounding_changed", "service grounding changed")
+    # Canonical sink owns fingerprints, concurrent duplicate resolution and Job creation.
+    return validate_receipt(await ingress._submit(runtime, candidate, workspace_root,
+        service_admission_guard=admission_guard), operation)

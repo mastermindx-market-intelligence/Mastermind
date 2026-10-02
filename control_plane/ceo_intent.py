@@ -169,7 +169,8 @@ _SERVICE_ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH"})
 #: Future principals require a reviewed source change here; upstream emitters
 #: must prove their registry remains identical to this closed set.
 SERVICE_PRINCIPAL_BINDINGS = frozenset(
-    {("svc-site-maintenance", "svc-site-maintenance")}
+    {("svc-site-maintenance", "svc-site-maintenance"),
+     ("svc-vps-inference", "svc-vps-inference")}
 )
 #: The READ level of the A0-A7 effect ladder is its weakest rung, ``A0`` — the
 #: same default v1 already rides (``create_job(authority_level="A0")`` and
@@ -701,6 +702,28 @@ def _run_principal_guard(intent, guard) -> None:
         raise CeoIntentError("trusted principal admission refused") from None
 
 
+def _run_service_guard(intent, guard) -> None:
+    """Trusted synchronous host recheck at fresh creation; never on reconciliation.
+
+    This callback grants no authentication authority. The host owns enrollment,
+    arming and revocation, and must check them synchronously without retries.
+    Historical svc-site-maintenance admission does not require this input.
+    """
+    try:
+        if not callable(guard):
+            raise ValueError()
+        verdict = guard(copy.deepcopy(intent))
+        if verdict is not None:
+            # An async function is not a synchronous guard. Close its unawaited
+            # coroutine without running it; all other non-None values also refuse.
+            import inspect
+            if inspect.iscoroutine(verdict):
+                verdict.close()
+            raise ValueError()
+    except Exception:
+        raise CeoIntentError("trusted service admission refused") from None
+
+
 def validate_intent(payload: Any) -> dict[str, Any]:
     """Return the canonical form of one closed CEO intent envelope.
 
@@ -1209,6 +1232,7 @@ def submit_intent(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
+    service_admission_guard: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1227,6 +1251,10 @@ def submit_intent(
     intent fingerprint.  The runtime validates and persists the exact binding
     in Job constraints, making provider/profile selection host-owned while the
     original CEO operation identity remains the complete normalized envelope.
+
+    ``service_admission_guard`` is a trusted keyword-only synchronous host input.
+    Fresh svc-vps-inference creation requires it at the final sink boundary;
+    accepted duplicates reconcile before it, even when currently disarmed.
 
     Strict-v2 ``dialogue_source`` is trusted host admission input, never a
     public envelope field and never part of the caller-controlled fingerprint.
@@ -1295,6 +1323,8 @@ def submit_intent(
                 # above it.  No role, no host binding, no dialogue source.
                 if intent["schema"] == INTENT_SCHEMA_SERVICE:
                     _require_service_ceiling(contract)
+                    if intent["principal_id"] == "svc-vps-inference":
+                        _run_service_guard(intent, service_admission_guard)
                 else:
                     _require_principal_contract(intent)
                     _run_principal_guard(intent, principal_admission_guard)
