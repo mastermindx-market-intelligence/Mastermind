@@ -76,3 +76,59 @@ implement eligible Web event subscription/delivery in the existing Executive hos
 Only real original Web request -> exact native pickup -> useful reply -> same Web
 consumer proves the user outcome. Installed Executive remains readonly atc7407c6.
 Do not redo the accepted native proof unless its relevant bytes/dependencies change.
+
+## Authenticated reply-tool continuation — source increment after 1ff7e5a7
+
+Current user continued the same mission and original source custody. Protected
+procedure pin:bce27c289fc3802f34ca4a1ecad21d40f147b85c; required companions match
+cfd3b996 and remain compatible1.0.1/bootstrap1. SESSION_RELIABILITY is not enrolled.
+Initial source read confirmed original1ff7e5a7, clean, same branch and PR assignee.
+The attempted redundant workspace-acquire plus source-read call was platform-blocked
+before execution; it was not retried, moved, or used as a new custody receipt.
+Existing same-operation custody was never released/transferred. Work stayed on two
+new path-disjoint files and this checkpoint, not the held shared server or rejected
+reads. No alternate worktree, account, source carrier, permission or runtime route.
+
+Implemented `integrations/session_bridge/return_tools.py`: one read-only public
+`session_reply_read` definition/validator/handler composed through the incumbent
+Executive OAuth MCP host. Its compile-time extension retains existing tools,
+settings, dispatch and submit scopes; it creates no listener, authentication layer,
+subscription, session registry or consumption writer. Shared server.py and the
+previously reviewed native modules remain unchanged. Installation must explicitly
+select the extension after the source/host release is accepted; no selection occurred.
+The exact verified-principal/canonical-reader path remains the owner of authorization
+and reply provenance. Incoming read_ref is the only public argument; consume,
+actor, destination and permission fields are rejected. Unknown backend details are
+not forwarded. Cancellation propagates. Duplicate tool catalogs and promotion into
+release/submit scope are rejected before constructing an exposure configuration.
+
+Evidence: return-tools-red.log records the missing tool before implementation.
+An initial host-test run had seven fixture setup failures from nested asyncio.run;
+constructing the existing synchronous fixture before entering its event loop fixed
+those tests without changing production assertions. Four new release-scope/catalog
+regressions were observed RED before their targeted source repair.
+`return-tools-final.xml`:31PASS/0failures/errors/skips on final production bytes.
+This includes a complete local native reply -> event projection -> real JWT/MCP
+request -> actual Unix Relay read. Two repeated reads and duplicate native reply
+leave exactly one canonical post. Slack/native identity facts are fixtures; no live
+app, callback subscription, original Web consumption or native provider call is proven.
+
+Three further tests were appended for missing credentials, absent read scope, and
+duplicate Authorization headers. They are NOT_EXECUTED: the subsequent combined
+owning/full pytest call was blocked before execution and was not split/retried,
+rerouted, delegated or replaced by another verification lane. The31passed result
+is not a34-test result and not a full-suite qualification. Previous339owning and
+two full-repository collection errors remain historical, not refreshed for this increment.
+
+Current read-only Executive observation advanced fromc7407c6 to installedb3627c580dd37ac1c167f59ac4b7555a4330edef,
+Macro88804ed, at2026-10-02T07:30:12Z. Exposed tools remain the five legacy Executive
+operations; no session-send/read/event tool was available from this connection.
+Seven Jobs and zero RUNNING/QUEUED were observed. This is not fabric execution
+admission or evidence that this bridge has been installed.
+
+Remaining gates: independent reader/tool review, permitted recovery of the held
+source comparison/verification, reconciliation with remote6a238750, current-base CI,
+then explicit existing-host composition/native enrollment and original-Web consumer
+proof. Do not replay either denied operation or send verification to another actor.
+No push, deployment, live native message, subscription or automatic wake was attempted.
+MISSION_COMPLETE:false. Local source/proof persistence is not installed acceptance.
