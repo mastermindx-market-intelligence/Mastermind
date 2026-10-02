@@ -59,8 +59,9 @@ def test_exact_mode_is_data_not_hardcoded_model_routing(case, surface, effort):
     mode = ModeSelection(surface, 'Fixture Exact Model', effort)
     snapshot = replace(before, mode=mode)
     plan = prepare_turn(intent=intent, target=target, requested_mode=mode,
-                        prompt='canary', snapshot=snapshot, now=NOW)
-    verify_pre_dispatch(plan, snapshot, now=NOW)
+                        prompt='canary', snapshot=snapshot, now=NOW,
+                        allowed_surfaces=frozenset({surface}))
+    verify_pre_dispatch(plan, replace(snapshot, snapshot_id='fresh'), now=NOW)
     assert plan.requested_mode == mode
 
 
@@ -171,9 +172,9 @@ def test_second_observation_is_required_before_dispatch(case):
     before, plan = case[3:5]
     verify_pre_dispatch(plan, replace(before, snapshot_id='fresh', observed_at=NOW + 1), now=NOW + 1)
     with pytest.raises(EvidenceError, match='pre_dispatch_state_changed'):
-        verify_pre_dispatch(plan, replace(before, composer_text='new human draft'), now=NOW)
+        verify_pre_dispatch(plan, replace(before, snapshot_id='fresh', composer_text='new human draft'), now=NOW)
     with pytest.raises(EvidenceError, match='prepared_turn_expired'):
-        verify_pre_dispatch(plan, replace(before, observed_at=NOW + 6), now=NOW + 6)
+        verify_pre_dispatch(plan, replace(before, snapshot_id='fresh', observed_at=NOW + 6), now=NOW + 6)
 
 
 def test_missing_response_or_disconnection_never_proves_no_effect(case):
@@ -294,3 +295,79 @@ def test_import_and_reconcile_are_production_inert(case, monkeypatch):
     importlib.reload(integrations.chatgpt_desktop)
     *_, plan, _, _, after = case
     assert reconcile_turn(plan, after, now=NOW + 1).response_state == 'complete'
+
+
+@pytest.mark.parametrize('text', [
+    '```\nREQUEST_MODE: PRO', '~~~python\nREQUEST_MODE: EXTRA_HIGH',
+    '````\n```\nREQUEST_MODE: PRO',
+])
+def test_open_code_fence_never_becomes_mode_advice(case, text):
+    *_, plan, user, reply, after = case
+    result = reconcile_turn(plan, replace(after, messages=(user, replace(reply, text=text))), now=NOW + 1)
+    assert result.requested_next_mode is None
+
+
+def test_overflow_clock_is_a_static_validation_error(case):
+    with pytest.raises(EvidenceError, match='invalid_observation_time'):
+        replace(case[3], observed_at=10 ** 1000)
+
+
+def test_completed_answer_before_its_user_is_ambiguous(case):
+    *_, plan, user, reply, after = case
+    result = reconcile_turn(plan, replace(after, messages=(reply, user)), now=NOW + 1)
+    assert result.response_state == 'ambiguous'
+    assert result.response_text is None
+
+
+def test_aggregate_capture_size_is_bounded(case):
+    messages = tuple(MessageEvidence(f'm-{i}', 'user', 'x' * MAX_TEXT_BYTES, True) for i in range(5))
+    with pytest.raises(EvidenceError, match='snapshot_text_budget_exceeded'):
+        replace(case[3], messages=messages)
+
+
+@pytest.mark.parametrize('change', [
+    {'wire_text': 'not correlated'}, {'before_digest': 'not a digest'},
+    {'before_message_ids': ('same', 'same')}, {'prepared_at': True},
+])
+def test_malformed_prepared_turn_is_rejected(case, change):
+    with pytest.raises(EvidenceError):
+        replace(case[4], **change)
+
+
+def test_malformed_canonical_receipt_is_not_promoted_to_permission(case):
+    target, _, mode, before, *_ = case
+    receipt = OperationIntentReceipt('not-an-operation-id', target.intent_target)
+    with pytest.raises(EvidenceError, match='intent_target_mismatch'):
+        prepare_turn(intent=receipt, target=target, requested_mode=mode,
+                     prompt='canary', snapshot=before, now=NOW)
+
+
+def test_extra_high_does_not_silently_enter_work_credit_surface(case):
+    target, intent, _, before, *_ = case
+    mode = ModeSelection('work', 'Fixture Exact Model', 'EXTRA_HIGH')
+    with pytest.raises(EvidenceError, match='surface_not_in_admitted_envelope'):
+        prepare_turn(intent=intent, target=target, requested_mode=mode,
+                     prompt='canary', snapshot=replace(before, mode=mode), now=NOW)
+
+
+@pytest.mark.parametrize('surfaces', [True, {'chat'}, frozenset(), frozenset({'codex'})])
+def test_invalid_surface_envelope_is_rejected(case, surfaces):
+    target, intent, mode, before, *_ = case
+    with pytest.raises(EvidenceError, match='invalid_surface_envelope'):
+        prepare_turn(intent=intent, target=target, requested_mode=mode,
+                     prompt='canary', snapshot=before, now=NOW, allowed_surfaces=surfaces)
+
+
+def test_original_snapshot_cannot_be_reused_as_the_pre_dispatch_check(case):
+    before, plan = case[3:5]
+    with pytest.raises(EvidenceError, match='fresh_pre_dispatch_observation_required'):
+        verify_pre_dispatch(plan, before, now=NOW)
+    with pytest.raises(EvidenceError, match='fresh_pre_dispatch_observation_required'):
+        verify_pre_dispatch(plan, replace(before, snapshot_id='old', observed_at=NOW - 1), now=NOW)
+
+
+def test_whitespace_only_answer_is_not_a_completed_return(case):
+    *_, plan, user, reply, after = case
+    result = reconcile_turn(plan, replace(after, messages=(user, replace(reply, text=' \n\t'))), now=NOW + 1)
+    assert result.response_state == 'active'
+    assert result.response_text is None
