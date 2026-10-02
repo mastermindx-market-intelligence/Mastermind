@@ -6,7 +6,12 @@ from __future__ import annotations
 
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.executive_orchestration_result import canonical_digest
-from control_plane.executive_runtime import OrchestrationDispatchOutcome, Runtime
+from control_plane.executive_runtime import (
+    AttemptStatus,
+    JobStatus,
+    OrchestrationDispatchOutcome,
+    Runtime,
+)
 from test_executive_os_phase1fc import (
     _admit_v2_plan,
     _complete_ohf_role,
@@ -58,6 +63,8 @@ def test_failed_parallel_sibling_preserves_accepted_result_across_restart(tmp_pa
     assert outcome.action == "DISPATCHED"
     assert len(dispatched) == 1
     second = dispatched[0]
+    for dispatched_attempt in (first.attempt, second.attempt):
+        assert runtime.attempts.get_attempt(dispatched_attempt.attempt_id).status is AttemptStatus.CLAIMED
     assert runtime.jobs.get_job(accepted_job.job_id).current_attempt_id == first.attempt.attempt_id
 
     _complete_ohf_role(
@@ -76,6 +83,7 @@ def test_failed_parallel_sibling_preserves_accepted_result_across_restart(tmp_pa
         identity_seed=114401,
     )
     accepted_before = runtime.jobs.get_job(accepted_job.job_id)
+    assert accepted_before.status is JobStatus.COMPLETED
     attempts_before = runtime.attempts.list_attempts(accepted_job.job_id)
     events_before = runtime.events.list_events(job_id=accepted_job.job_id)
     assert second.lease_token is not None
@@ -86,6 +94,8 @@ def test_failed_parallel_sibling_preserves_accepted_result_across_restart(tmp_pa
         payload={"summary": "Injected sibling failure", "errors": ["failed"]},
     )
     failed_before = runtime.jobs.get_job(failed_job.job_id)
+    assert failed_before.status is JobStatus.FAILED
+    failed_attempts_before = runtime.attempts.list_attempts(failed_job.job_id)
 
     def no_dispatch(job_id, command_id):
         raise AssertionError(f"Unexpected replay of {job_id}: {command_id}")
@@ -103,6 +113,7 @@ def test_failed_parallel_sibling_preserves_accepted_result_across_restart(tmp_pa
         assert observed.attempts.list_attempts(accepted_job.job_id) == attempts_before
         assert observed.events.list_events(job_id=accepted_job.job_id) == events_before
         assert observed.jobs.get_job(failed_job.job_id) == failed_before
+        assert observed.attempts.list_attempts(failed_job.job_id) == failed_attempts_before
         assert not any(
             event.event_type == "JOB_REQUEUED"
             for event in observed.events.list_events(job_id=failed_job.job_id)
