@@ -44,7 +44,7 @@ try {
   assert.equal(discoveryPids.length, 2)
   const python = process.env.MMX_TEST_PYTHON
   assert.ok(python?.startsWith('/'), 'Exact test Python executable required')
-  const generated = spawnSync(python, ['-B', resolve(here, 'grant-projection-fixture.py')], {
+  const generated = spawnSync(python, ['-B', resolve(here, '../../../tests/fixtures/dsh_mcp_grant_projection.py')], {
     cwd: here, input: JSON.stringify({ fixture: 'synthetic-dsh-grant-canary', config, snapshot }),
     env: { PATH: process.env.PATH, HOME: home, TMPDIR: root }, encoding: 'utf8', timeout: 15000, maxBuffer: 300000,
   })

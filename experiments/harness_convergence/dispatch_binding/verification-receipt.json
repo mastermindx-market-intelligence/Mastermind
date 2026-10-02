@@ -1,6 +1,6 @@
 {
   "architecture": "arm64",
-  "generated_at": "2026-10-01T07:50:02.796652+00:00",
+  "generated_at": "2026-10-02T03:32:03.038472+00:00",
   "input_sha256": {
     "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
     "dispatch-binding.test.mjs": "62f7d741f2a9072343e2bea0bd299429e8fdd3a9f515aaaa137f15c5728e2299",
@@ -42,7 +42,7 @@
     },
     "exit_code": 0,
     "log": "loaded-preflight.log",
-    "log_sha256": "2795cece49407b4bbaef0ff601d38acc10277d388c5357608d795c601a1d41f9",
+    "log_sha256": "0fc2e2afb0eaa46ab94fda304b9d7d687dab62963319367f3e2f8afae3ba5f34",
     "passed": 17,
     "scope": "Actual ToolRuntime instance, in-memory probes, not installed ACP qualification",
     "stderr_empty": true,
@@ -57,7 +57,7 @@
       ],
       "killed": true,
       "log": "mutant-definition.log",
-      "log_sha256": "e2068bb5f59b9d28b2a94d655d3d76ba153ddc19f1b37be73f1340fc797bd842",
+      "log_sha256": "29ccfbfdc6ee4cf73f7b7471289f4b22a1f9b0a00aea0766e24d6f3556f3a71d",
       "mutant_sha256": "134933d11d4a79be3f4632fde2c449ae31d1350c6a076762609fda8926736d78",
       "observations": {
         "guard-throws-late": {
@@ -261,7 +261,7 @@
       ],
       "killed": true,
       "log": "mutant-guard.log",
-      "log_sha256": "7aec6ebd90fe0a91166bbb1ff67a36760fa057060f1021e224e2ae1d90b9491c",
+      "log_sha256": "6b164218fb8e553834a3558d21da2bd0719797bd8624c1285a12f34881370447",
       "mutant_sha256": "e98a08eb0b6f98f6ea58e77c91b709c24bd6bcc1732c58fe1ca3499ed78b6afd",
       "observations": {
         "guard-throws-late": {
@@ -455,7 +455,7 @@
       ],
       "killed": true,
       "log": "mutant-result.log",
-      "log_sha256": "5f582a972894cab1ad54ced527b4f608f8f2da139ab6c9b43254fe3482685cdc",
+      "log_sha256": "4fc709bd8c71cac9d08bff79366df303f31f56e6b2ee6cdeb0e4664a661a097f",
       "mutant_sha256": "dc5673694865c2f258e4f220a8d075368d5977dd96b64e09d2a6d104f97cd901",
       "observations": {
         "guard-throws-late": {
@@ -676,7 +676,7 @@
       "exit_code": 0,
       "failed_cases": [],
       "log": "patched-targeted.log",
-      "log_sha256": "a30020bc9877ebb903484f0c783ff8ed23b87cfe48965a323feae1f88cd6b498",
+      "log_sha256": "788ea712d2b34e8a6dbbf2f6c84bb0fceb1d8414f936f562248d4142875ced80",
       "observations": {
         "guard-throws-late": {
           "counts": {
@@ -885,7 +885,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-npm.log",
-      "log_sha256": "19197d23d06fa740ceaf848021b3c7828547f087792198bbe01b6d57e5aa4f3c",
+      "log_sha256": "fe9a035b2d76cec082ac96c658038f46b84b9cb52929220d7b792fa075ce8c04",
       "observations": {
         "guard-throws-late": {
           "counts": {
@@ -1087,7 +1087,7 @@
         "strict binding rejects own-scope shadowing during the wrapper"
       ],
       "log": "baseline-source.log",
-      "log_sha256": "7899a37f4fa27eec673ac8e0da11d845a91157ec4b6d598057398c21cd67cec7",
+      "log_sha256": "6f3d0e268e46e9f07b3ff258e4e7b5df4aa98f6f215cf253bf3ae38d2fb8f1b6",
       "observations": {
         "guard-throws-late": {
           "counts": {
@@ -1290,7 +1290,7 @@
       "log": "upstream-patched.log",
       "log_sha256": "84e61293e93d7fd493cac1ee05255ebb1cef3074c05b03918439748f3c70f544",
       "passed": 178,
-      "report_sha256": "fc09e049817b26983289ef96e0ba07e2e3b58e9987009de82833642e5aa72d85",
+      "report_sha256": "ae5b0b0cbaab42e47ac4553fdcc1545efe9aabbf8c80698230c7f87eaccacf2d",
       "stderr_empty": true,
       "tests": 178
     },
@@ -1300,7 +1300,7 @@
       "log": "upstream-pristine.log",
       "log_sha256": "95e53459c5199ef7accdd11a97691f6a1155a00e10ee5b736683360344acbcd4",
       "passed": 178,
-      "report_sha256": "769a23c8be7e3f7876808aa0ebf3e95e8c000c02361b902edb4217605e51c5f4",
+      "report_sha256": "f57639e370f09893910300a79da2047b5f9c18afeb901b05b80409b923a42f6d",
       "stderr_empty": true,
       "tests": 178
     }

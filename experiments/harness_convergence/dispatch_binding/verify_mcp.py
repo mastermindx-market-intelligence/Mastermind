@@ -441,7 +441,7 @@ def main() -> dict:
         '../../../control_plane/dsh_mcp_client_projection.py',
         '../../../control_plane/executive_agent_capabilities.py',
         '../../../tests/test_dsh_mcp_client_projection.py',
-        'grant-admission.test.mjs', 'grant-projection-fixture.py', 'native-grant-canary.mjs',
+        'grant-admission.test.mjs', '../../../tests/fixtures/dsh_mcp_grant_projection.py', 'native-grant-canary.mjs',
         'package.json', 'package-lock.json', 'donor-manifest.json', 'strict-dispatch-binding.patch']}
     report['success'] = True
     return report

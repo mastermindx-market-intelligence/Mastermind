@@ -9,7 +9,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from control_plane.executive_agent_capabilities import (  # noqa: E402
     ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest,

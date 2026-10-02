@@ -436,6 +436,11 @@ scenario; no admitted process or read/search call is created. The initial target
 check, positive execution, preflight, and original teardown all remain intact.
 This closes that observed startup window, not every possible host-isolation race.
 
+The cross-language producer lives in
+`tests/fixtures/dsh_mcp_grant_projection.py`, outside the production source tree.
+Its fixed fixture input and all production identity guards remain unchanged;
+the canary and verifier resolve that single test helper explicitly.
+
 The cross-language fixture deliberately constructs SYNTHETIC typed grants and
 a synthetic host-currentness witness. It uses the real registry types and
 canonical digest function but does not write a live policy, approve discovery,
