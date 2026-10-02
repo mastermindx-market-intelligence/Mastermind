@@ -132,24 +132,13 @@ GROUND = {'mastermind_sha':'1'*40, 'macro_sha':'2'*40, 'boot_packet_schema':'mas
 REQUEST = {'operation_key':'inference-test', 'objective':'Summarize the supplied research.'}
 
 
-def test_native_mcp_profile_is_closed(rsa_key, tmp_path):
-    from integrations.executive_mcp.server import build_inference_mcp_app
-    app, token, _ = setup_app(rsa_key, tmp_path)
-    native = build_inference_mcp_app(app.settings, audit_sink=app._audit_sink)
-    async def run():
-        async with native._app.router.lifespan_context(native._app):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=native), base_url='http://127.0.0.1') as client:
-                headers = {'authorization':'Bearer '+token, 'accept':'application/json, text/event-stream',
-                           'content-type':'application/json'}
-                response = await client.post('/mcp/service-inference', headers=headers,
-                    json={'jsonrpc':'2.0','id':1,'method':'tools/list','params':{}})
-                assert response.status_code == 200, response.text
-                assert [tool['name'] for tool in response.json()['result']['tools']] == [
-                    'submit_service_intent', 'service_intent_status', 'executive_fabric']
-                response = await client.post('/mcp/service-inference', headers=headers,
-                    json={'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'submit_ceo_intent','arguments':{}}})
-                assert response.json()['result']['isError'] is True
-    asyncio.run(run())
+def test_service_profile_contract_is_closed_without_shared_server_mount():
+    from integrations.executive_mcp.inference import MCP_PATH, TOOL_SPECS
+    assert MCP_PATH == "/mcp/service-inference"
+    assert [tool.name for tool in TOOL_SPECS] == [
+        "submit_service_intent", "service_intent_status", "executive_fabric"
+    ]
+    assert all(tool.name not in {"submit_ceo_intent", "submit_coo_ruling"} for tool in TOOL_SPECS)
 
 
 def test_status_refuses_foreign_service_under_same_intent_id(tmp_path):

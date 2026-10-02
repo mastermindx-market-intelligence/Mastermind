@@ -1,10 +1,10 @@
 # VPS inference service foundation — BUILT_NOT_PROVEN / SOURCE_ONLY / EXECUTION_NOT_YET_COMPOSED
 
 Retained source base: `8aa115c7e6d3ef9685d140256f5aa843cc0e4437`.
-Protected master re-pin before source freeze: `12ae50fa35254f99719bbeed82fde6e1f1423104`.
-Protected movement from the retained base is path-disjoint from this candidate; its later `remote_attempt_transport` movement is a dependency for the execution slice, not part of this foundation.
-The independent candidate remains uncommitted. No installation, authentication,
-provider call, call-site cutover, deployment, commit or push belongs to this slice.
+Current protected compatibility pin: `b3627c580dd37ac1c167f59ac4b7555a4330edef`.
+The candidate has been synthetically integrated on that exact protected head with its selected regression suite green. Protected movement from the retained base is path-disjoint from this foundation-owned surface after the shared-server collision was removed; the later `remote_attempt_transport` movement is an accepted dependency for the execution slice, not part of this foundation.
+The semantic slice is source-only. Source publication or a PR does not imply installation,
+authentication, provider execution, call-site cutover, deployment, selection or production proof.
 
 ## Capability and admission
 
@@ -15,8 +15,10 @@ provider call, call-site cutover, deployment, commit or push belongs to this sli
   `executive_fabric` restricted to `view=result`. Submit accepts only operation key
   and objective; department, priority, research profile and one attempt are fixed.
   No caller-controlled actor, provider, writes, commands or generic Job read exists.
-- The dormant App/MCP profile reuses existing JWT verification, audit, CeoIngress
-  transport and Fabric readers. Host configuration must supply the existing OAuth
+- The dormant service App/profile contract reuses existing JWT verification, audit,
+  CeoIngress transport and Fabric readers. Native MCP route mounting is deliberately
+  deferred because open PR #1112 currently owns integrations/executive_mcp/server.py;
+  this slice does not race that shared server file. Host configuration must supply the existing OAuth
   ResourcePolicy, shared JWKS, and reloadable exact policy/issuer/subject/client/
   resource/scope binding to `svc-vps-inference`. The scope is
   `mastermind.executive.service.inference`; service subjects are disjoint from CEO
@@ -122,8 +124,10 @@ The remaining gates are separate:
    and an operation-bound direct Job result. The current 4,000-character CEO
    objective ceiling must not silently truncate real prompts; a larger bounded
    service payload needs an owner-reviewed carrier before broad cutover.
-3. Installed Executive/App/listener/service binding qualification, including the
-   synchronous admission owner and exact service-only dispatch gate.
+3. Compose the native MCP route only after #1112 shared-server custody clears (or its
+   accepted successor provides a composition seam), then qualify the installed
+   Executive/App/listener/service binding, synchronous admission owner and exact
+   service-only dispatch gate.
 4. Service OAuth/client enrollment through existing authentication machinery.
 5. Provider/remote-worker-gateway arming and qualification through the existing
    shared Capacity and remote-worker owners; no direct-provider fallback.
@@ -147,7 +151,9 @@ These are source checks only, not runtime or provider qualification.
 
 Repair validation inside the Codex sandbox: 197 focused tests passed; 99 existing
 socket-dependent tests were blocked by the sandbox's Unix-socket bind denial and
-were not claimed there. Independent host-shell rerun on the authorized M2 Studio
-executed the complete eight-module selection, including those socket paths: **296
-passed**. The existing dependency-complete local Python environment was used without
-installation or provider/network calls. `git diff --check` passed.
+were not claimed there. Independent host-shell rerun on the authorized M2 Studio executed the complete
+selected regression set, including those socket paths, with **100% pass / rc=0**.
+A synthetic current-protected integration on b3627c580dd37ac1c167f59ac4b7555a4330edef
+also passed the same selected set at **100% / rc=0**. The existing dependency-complete
+local Python environment was used without installation or provider/network calls.
+`git diff --check` passed.
