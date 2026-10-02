@@ -308,3 +308,242 @@ __all__ = [
     "validate_hp0_binding",
     "validate_host_capacity_snapshot",
 ]
+
+
+# Additive Linux observation wire. The v1 admission owner above is unchanged.
+# COMPLETE here means complete for the named observation profile, NOT schedulable.
+NATIVE_SNAPSHOT_SCHEMA = "mastermind.host_capacity_snapshot/v2"
+NATIVE_OBSERVATION_PROFILE = "linux-native-observation/v1"
+NATIVE_MAX_WINDOW_MS = 5_000
+_NATIVE_BINDING_KEYS = frozenset({
+    "host_ref", "boot_ref", "capacity_pool_ref", "source_generation_sha256",
+    "execution_scope_sha256", "namespace_sha256", "ancestry_sha256",
+})
+_NATIVE_SCOPE_KEYS = frozenset({
+    "kind", "execution_scope_sha256", "namespace_sha256", "ancestry_sha256",
+})
+_NATIVE_FIELDS = frozenset({
+    "schema", "platform", "observation_profile", "host_ref", "boot_ref",
+    "capacity_pool_ref", "source_generation_sha256", "scope", "observed_at_ms",
+    "sample_window_ms", "total_observation_window_ms", "metrics",
+    "telemetry_status", "unknown_fields",
+})
+_NATIVE_NA = frozenset({
+    "darwin_vm_counters", "darwin_fseventsd", "host_cpu_full_pressure",
+})
+_NATIVE_REASONS = frozenset({
+    "MISSING", "PERMISSION_DENIED", "TIMEOUT", "MALFORMED", "OVERFLOW",
+    "SOURCE_MOVED", "BOOT_DRIFT", "STALE", "FUTURE", "WINDOW_INVALID",
+    "COUNTER_REGRESSION", "NO_COUNTER_DELTA", "NOT_SUPPORTED",
+    "SCOPE_UNQUALIFIED", "MOUNT_MISMATCH",
+})
+_NATIVE_UNITS = {
+    "host_usable_memory_bytes": "bytes_usable",
+    "host_available_memory_estimate_bytes": "bytes_estimate",
+    "host_swap_total_bytes": "bytes",
+    "host_swap_used_bytes": "bytes",
+    "host_cpu_busy_milli_pct": "milli_percent",
+    "host_logical_cpu_count": "logical_cpus",
+    "effective_cpu_capacity_millicores": "millicores_ceiling",
+    "effective_memory_headroom_estimate_bytes": "bytes_estimate",
+    "disk_usable_bytes": "bytes_unprivileged",
+    "pool_total_bytes": "bytes",
+    "darwin_vm_counters": "not_applicable",
+    "darwin_fseventsd": "not_applicable",
+    "host_cpu_full_pressure": "not_applicable",
+    "pswpin_pages_delta": "pages_delta",
+    "pswpout_pages_delta": "pages_delta",
+    **{
+        f"{resource}_{kind}_{metric}": (
+            "microseconds" if metric == "total" else "milli_percent"
+        )
+        for resource in ("cpu", "memory", "io")
+        for kind in (("some",) if resource == "cpu" else ("some", "full"))
+        for metric in ("avg10", "avg60", "avg300", "total")
+    },
+}
+
+
+def _native_object(value: Any, keys: frozenset[str]) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != keys:
+        _refuse("NATIVE_FIELDS_INVALID")
+    return value
+
+
+def _native_binding(value: Any) -> dict[str, str]:
+    source = _native_object(value, _NATIVE_BINDING_KEYS)
+    patterns = {
+        "host_ref": HOST_REF_RE,
+        "boot_ref": BOOT_REF_RE,
+        "capacity_pool_ref": CAPACITY_POOL_REF_RE,
+    }
+    return {
+        key: _reference(source[key], patterns.get(key, HP0_SHA256_RE))
+        for key in sorted(_NATIVE_BINDING_KEYS)
+    }
+
+
+def _native_metrics(value: Any) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    source = _native_object(value, frozenset(_NATIVE_UNITS))
+    normalized: dict[str, dict[str, Any]] = {}
+    unknown: list[str] = []
+    for name in sorted(_NATIVE_UNITS):
+        metric = _native_object(source[name], frozenset({"value", "null_reason"}))
+        number, reason = metric["value"], metric["null_reason"]
+        if name in _NATIVE_NA:
+            if number is not None or reason != "NOT_APPLICABLE":
+                _refuse("NATIVE_APPLICABILITY_INVALID")
+        elif number is None:
+            if type(reason) is not str or reason not in _NATIVE_REASONS:
+                _refuse("NATIVE_NULL_REASON_INVALID")
+            unknown.append(name)
+        else:
+            if reason is not None:
+                _refuse("NATIVE_NULL_REASON_INVALID")
+            minimum = 1 if name in {"host_usable_memory_bytes", "host_logical_cpu_count"} else 0
+            maximum = INT64_MAX
+            if name == "host_logical_cpu_count":
+                maximum = 4096
+            elif _NATIVE_UNITS[name] == "milli_percent":
+                maximum = 100_000
+            number = _integer(number, code="NATIVE_METRIC_INVALID", minimum=minimum, maximum=maximum)
+        normalized[name] = {"value": number, "null_reason": reason}
+
+    def bounded_pair(lower: str, upper: str, factor: int = 1) -> None:
+        a, b = normalized[lower]["value"], normalized[upper]["value"]
+        if a is not None and b is not None and a > b * factor:
+            _refuse("NATIVE_METRIC_PAIR_INVALID")
+
+    bounded_pair("host_available_memory_estimate_bytes", "host_usable_memory_bytes")
+    bounded_pair("effective_memory_headroom_estimate_bytes", "host_available_memory_estimate_bytes")
+    bounded_pair("effective_cpu_capacity_millicores", "host_logical_cpu_count", 1000)
+    bounded_pair("host_swap_used_bytes", "host_swap_total_bytes")
+    bounded_pair("disk_usable_bytes", "pool_total_bytes")
+    return normalized, unknown
+
+
+def validate_native_host_capacity_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a Linux observation; never normalize it into v1 admission evidence.
+
+    Owner references are syntactically validated, not authenticated by this pure
+    function. Capture, enrollment and the consuming reader retain that boundary.
+    """
+    source = _native_object(value, _NATIVE_FIELDS)
+    if (source["schema"] != NATIVE_SNAPSHOT_SCHEMA or source["platform"] != "linux"
+            or source["observation_profile"] != NATIVE_OBSERVATION_PROFILE):
+        _refuse("NATIVE_SCHEMA_INVALID")
+    scope = _native_object(source["scope"], _NATIVE_SCOPE_KEYS)
+    if scope["kind"] != "cgroup-v2":
+        _refuse("NATIVE_SCOPE_INVALID")
+    binding = _native_binding({
+        **{key: source[key] for key in ("host_ref", "boot_ref", "capacity_pool_ref", "source_generation_sha256")},
+        **{key: scope[key] for key in _NATIVE_SCOPE_KEYS if key != "kind"},
+    })
+    observed = _integer(source["observed_at_ms"], code="NATIVE_WINDOW_INVALID")
+    sample = _integer(source["sample_window_ms"], code="NATIVE_WINDOW_INVALID", minimum=1, maximum=NATIVE_MAX_WINDOW_MS)
+    span = _integer(source["total_observation_window_ms"], code="NATIVE_WINDOW_INVALID", minimum=sample, maximum=NATIVE_MAX_WINDOW_MS)
+    if observed < span:
+        _refuse("NATIVE_WINDOW_INVALID")
+    metrics, unknown = _native_metrics(source["metrics"])
+    supplied_unknown = source["unknown_fields"]
+    if type(supplied_unknown) is not list or supplied_unknown != unknown:
+        _refuse("NATIVE_UNKNOWN_FIELDS_INVALID")
+    expected_status = "PARTIAL" if unknown else "COMPLETE"
+    if source["telemetry_status"] != expected_status:
+        _refuse("NATIVE_TELEMETRY_STATUS_INVALID")
+    return {
+        "schema": NATIVE_SNAPSHOT_SCHEMA,
+        "platform": "linux",
+        "observation_profile": NATIVE_OBSERVATION_PROFILE,
+        **{key: binding[key] for key in ("host_ref", "boot_ref", "capacity_pool_ref", "source_generation_sha256")},
+        "scope": {"kind": "cgroup-v2", **{key: binding[key] for key in sorted(_NATIVE_SCOPE_KEYS - {"kind"})}},
+        "observed_at_ms": observed,
+        "sample_window_ms": sample,
+        "total_observation_window_ms": span,
+        "metrics": metrics,
+        "telemetry_status": expected_status,
+        "unknown_fields": list(unknown),
+    }
+
+
+def build_native_host_capacity_snapshot(
+    metrics: Mapping[str, Any], *, binding: Mapping[str, Any],
+    observed_at_ms: int, sample_window_ms: int, total_observation_window_ms: int,
+) -> dict[str, Any]:
+    """Seal the structural envelope over already-captured native metric pairs.
+
+    No host read, identity minting, signature, freshness clock, placement or
+    Runtime effect occurs. Caller is the trusted capture composition, not a model.
+    The unchanged Linux arithmetic producer may remain standard-library-only.
+    """
+    bound = _native_binding(binding)
+    values, unknown = _native_metrics(metrics)
+    return validate_native_host_capacity_snapshot({
+        "schema": NATIVE_SNAPSHOT_SCHEMA, "platform": "linux",
+        "observation_profile": NATIVE_OBSERVATION_PROFILE,
+        **{key: bound[key] for key in ("host_ref", "boot_ref", "capacity_pool_ref", "source_generation_sha256")},
+        "scope": {"kind": "cgroup-v2", **{key: bound[key] for key in _NATIVE_SCOPE_KEYS if key != "kind"}},
+        "observed_at_ms": observed_at_ms, "sample_window_ms": sample_window_ms,
+        "total_observation_window_ms": total_observation_window_ms,
+        "metrics": values, "unknown_fields": unknown,
+        "telemetry_status": "PARTIAL" if unknown else "COMPLETE",
+    })
+
+
+def canonical_native_host_capacity_json(value: Mapping[str, Any]) -> bytes:
+    normalized = validate_native_host_capacity_snapshot(value)
+    payload = (json.dumps(normalized, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=True, allow_nan=False) + "\n").encode("ascii")
+    if len(payload) > MAX_SNAPSHOT_BYTES:
+        _refuse("NATIVE_SNAPSHOT_TOO_LARGE")
+    return payload
+
+
+def project_native_host_capacity(
+    value: Mapping[str, Any], *, expected_binding: Mapping[str, Any],
+    now_ms: int, max_age_ms: int,
+) -> dict[str, Any]:
+    """Bounded reader composition with owner-supplied identity and clock policy.
+
+    The caller must authenticate capture and expected_binding independently;
+    digest equality is integrity evidence, never origin or execution authority.
+    COMPLETE observations still do not authorize placement or physical BEGIN.
+    """
+    snapshot = validate_native_host_capacity_snapshot(value)
+    expected = _native_binding(expected_binding)
+    actual = {
+        **{key: snapshot[key] for key in ("host_ref", "boot_ref", "capacity_pool_ref", "source_generation_sha256")},
+        **{key: snapshot["scope"][key] for key in _NATIVE_SCOPE_KEYS if key != "kind"},
+    }
+    if actual != expected:
+        _refuse("NATIVE_BINDING_MISMATCH")
+    now = _integer(now_ms, code="NATIVE_CLOCK_INVALID")
+    age = _integer(max_age_ms, code="NATIVE_CLOCK_INVALID", minimum=1)
+    if snapshot["observed_at_ms"] > now:
+        _refuse("NATIVE_FUTURE_DATED")
+    start = snapshot["observed_at_ms"] - snapshot["total_observation_window_ms"]
+    if now - start > age:
+        _refuse("NATIVE_STALE")
+    return {
+        "schema": "mastermind.native_host_capacity_read/v1",
+        **expected,
+        "platform": snapshot["platform"],
+        "observation_profile": snapshot["observation_profile"],
+        "observed_at_ms": snapshot["observed_at_ms"],
+        "sample_window_ms": snapshot["sample_window_ms"],
+        "total_observation_window_ms": snapshot["total_observation_window_ms"],
+        "snapshot_sha256": hashlib.sha256(canonical_native_host_capacity_json(snapshot)).hexdigest(),
+        "metrics": {key: {**metric, "unit": _NATIVE_UNITS[key]} for key, metric in snapshot["metrics"].items()},
+        "telemetry_status": snapshot["telemetry_status"],
+        "unknown_fields": list(snapshot["unknown_fields"]),
+        "capability": "OBSERVATION_ONLY",
+        "admission_state": "NOT_EVALUATED",
+        "can_place_work": False,
+    }
+
+
+__all__ += [
+    "NATIVE_SNAPSHOT_SCHEMA", "NATIVE_OBSERVATION_PROFILE",
+    "build_native_host_capacity_snapshot", "validate_native_host_capacity_snapshot",
+    "canonical_native_host_capacity_json", "project_native_host_capacity",
+]
