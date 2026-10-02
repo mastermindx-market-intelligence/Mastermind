@@ -65,6 +65,16 @@ elif command == 'ls':
 elif command == 'codesign':
     if fault == 'signature': sys.exit(1)
     if '--verify' not in args:
+        if target == 'stage' and os.environ.get('FINAL_REPLACE_RACE') == '1':
+            countfile = root / 'stage-signature-count'
+            count = int(countfile.read_text()) + 1 if countfile.exists() else 1
+            countfile.write_text(str(count))
+            if count == 2:
+                winner = path.parent / 'other-operator-helper'
+                winner.write_bytes(b'newer-unobserved-generation\n')
+                winner.chmod(0o555)
+                os.replace(winner, path.parent / 'codex-code-mode-host')
+                (root / 'final-race-observed').write_text('1')
         print('TeamIdentifier='+('WRONGTEAM' if fault == 'team' else '2DC432GLL2'))
         identifier = 'codex' if path.read_bytes() == b'main-0147\n' else 'codex-code-mode-host'
         print('Identifier='+('wrong-helper' if fault == 'identifier' else identifier))
@@ -127,12 +137,13 @@ def harness(tmp_path):
         "CODEX_CODE_MODE_HOST_SHA256": hashlib.sha256(HELPER).hexdigest(),
         "CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256": hashlib.sha256(PREDECESSOR).hexdigest(),
         "CODEX_CODE_MODE_HOST_TEMP": "",
+        "CODEX_CODE_MODE_HOST_BACKUP": "",
         "CODEX_CODE_MODE_HOST_ACTION": "",
         "PYTHON_BINARY": sys.executable,
     }
 
     def run(*, fault="", target="", tamper=False, race=False, replace_race=False,
-            version="0.159.2", real_acl=False):
+            final_replace_race=False, version="0.159.2", real_acl=False):
         setup["CODEX_VERSION"] = version
         script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in setup.items())
         observed_functions = functions if real_acl else functions.replace(
@@ -151,7 +162,8 @@ def harness(tmp_path):
         return subprocess.run(["/bin/bash", "-c", script], text=True, capture_output=True, timeout=15,
                               env={**os.environ, "FIXTURE_ROOT": str(tmp_path), "FAULT": fault,
                                    "FAULT_TARGET": target, "TAMPER_STAGE": str(int(tamper)),
-                                   "RACE_DESTINATION": race if isinstance(race, str) else str(int(race))})
+                                   "RACE_DESTINATION": race if isinstance(race, str) else str(int(race)),
+                                   "FINAL_REPLACE_RACE": str(int(final_replace_race))})
 
     def root_owned(path):
         with (tmp_path / "root-inodes").open("a") as f:
@@ -255,13 +267,23 @@ def test_installed_postimage_refused(harness, fault):
     assert dest.read_bytes() == HELPER
 
 
-@pytest.mark.parametrize("case", ["symlink", "dangling_symlink", "hardlink", "directory", "mode", "hash"])
+@pytest.mark.parametrize(
+    "case",
+    ["symlink", "dangling_symlink", "symlink_to_fifo", "fifo", "hardlink", "directory", "mode", "hash"],
+)
 def test_bad_existing_destination_is_never_replaced(harness, case):
     run, _, _, dest, _, root_owned = harness
-    if case == "directory": dest.mkdir()
-    elif case in ("symlink", "dangling_symlink"):
+    if case == "directory":
+        dest.mkdir()
+    elif case == "fifo":
+        os.mkfifo(dest)
+    elif case in ("symlink", "dangling_symlink", "symlink_to_fifo"):
         actual = dest.with_name("actual")
-        if case == "symlink": actual.write_bytes(HELPER); actual.chmod(0o555)
+        if case == "symlink":
+            actual.write_bytes(HELPER)
+            actual.chmod(0o555)
+        elif case == "symlink_to_fifo":
+            os.mkfifo(actual)
         dest.symlink_to(actual)
     else:
         dest.write_bytes(b"foreign" if case == "hash" else HELPER)
@@ -296,6 +318,20 @@ def test_prepared_replacement_refuses_changed_predecessor(harness):
     assert result.returncode == 65
     assert dest.lstat().st_ino == inode
     assert dest.read_bytes() == b"raced-helper\n"
+    assert not list(dest.parent.glob(".codex-code-mode-host.*"))
+
+
+def test_final_validation_preserves_later_privileged_winner(harness):
+    run, _, _, dest, root, root_owned = harness
+    dest.write_bytes(PREDECESSOR)
+    dest.chmod(0o555)
+    root_owned(dest)
+
+    result = run(final_replace_race=True)
+
+    assert (root / "final-race-observed").exists()
+    assert result.returncode == 65
+    assert dest.read_bytes() == b"newer-unobserved-generation\n"
     assert not list(dest.parent.glob(".codex-code-mode-host.*"))
 
 

@@ -43,6 +43,7 @@ CODEX_CODE_MODE_HOST_SHA256="ed79fbc9e1683feb29d73fb421f3e16932d178a459f63741754
 # helper pinned by the immediately preceding reviewed Executive generation.
 CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256="a059beb029cdbc989e72e23f8680be9f703cb6cf83d9598d91041f82178d018d"
 CODEX_CODE_MODE_HOST_TEMP=""
+CODEX_CODE_MODE_HOST_BACKUP=""
 CODEX_CODE_MODE_HOST_ACTION=""
 CODEX_VERSION="0.159.2"
 CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
@@ -453,6 +454,70 @@ cleanup_codex_code_mode_host_temp() {
   fi
 }
 
+rename_codex_path_exclusive() {
+  # Darwin production uses renameatx_np(RENAME_EXCL): one atomic namespace
+  # move that never replaces an entry at the destination. The non-Darwin
+  # branch exists only so hermetic source tests can exercise the same contract.
+  "$PYTHON_BINARY" -I -S -B - "$1" "$2" <<'PY' || return 65
+import ctypes
+import errno
+import os
+import sys
+
+source, destination = sys.argv[1:3]
+try:
+    if sys.platform == "darwin":
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename = getattr(libc, "renameatx_np", None)
+        if rename is None:
+            raise OSError(errno.ENOSYS, "renameatx_np unavailable")
+        rename.argtypes = [
+            ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename.restype = ctypes.c_int
+        # AT_FDCWD=-2 on Darwin; RENAME_EXCL=0x00000004.
+        if rename(-2, os.fsencode(source), -2, os.fsencode(destination), 0x4) != 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+    else:
+        if os.path.lexists(destination):
+            raise FileExistsError(destination)
+        os.rename(source, destination)
+except OSError:
+    sys.exit(65)
+PY
+}
+
+publish_codex_path_exclusive() {
+  # The staged helper is a regular single-link file on the same filesystem.
+  # Hard-link publication is exclusive: an existing file, directory or symlink
+  # wins and remains untouched.
+  "$PYTHON_BINARY" -I -S -B - "$1" "$2" <<'PY' || return 65
+import os
+import sys
+
+source, destination = sys.argv[1:3]
+try:
+    os.link(source, destination, follow_symlinks=False)
+    os.unlink(source)
+except OSError:
+    sys.exit(65)
+PY
+}
+
+restore_codex_code_mode_host_backup() {
+  local destination="$SYSTEM_ROOT/bin/codex-code-mode-host"
+  [ -n "$CODEX_CODE_MODE_HOST_BACKUP" ] || return 0
+  if rename_codex_path_exclusive "$CODEX_CODE_MODE_HOST_BACKUP" "$destination"; then
+    CODEX_CODE_MODE_HOST_BACKUP=""
+    return 0
+  fi
+  /bin/echo "preserved Codex helper backup requires reconciliation: $CODEX_CODE_MODE_HOST_BACKUP" >&2
+  return 65
+}
+
 prepare_codex_code_mode_host() {
   local destination="$SYSTEM_ROOT/bin/codex-code-mode-host"
   local observed_hash
@@ -461,6 +526,12 @@ prepare_codex_code_mode_host() {
   verify_codex_bin_directory || return 65
 
   if [ -e "$destination" ] || [ -L "$destination" ]; then
+    # Reject nonregular and symlink destinations before any byte reader can
+    # block on or follow a special file.
+    [ -f "$destination" ] && [ -x "$destination" ] && [ ! -L "$destination" ] || {
+      /bin/echo "installed Codex helper must be a direct regular executable" >&2
+      return 65
+    }
     # Preserve an already-current helper byte-for-byte/inode-for-inode. A
     # mismatched helper is replaceable only when it is the exact signed helper
     # pinned by the immediately preceding reviewed generation.
@@ -510,36 +581,35 @@ install_codex_code_mode_host() {
       verify_codex_component "$CODEX_CODE_MODE_HOST_TEMP" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
       # Publish exclusively. A concurrently created file, directory, or symlink
       # wins the race and makes this install refuse without overwriting it.
-      "$PYTHON_BINARY" -I -S -B - "$CODEX_CODE_MODE_HOST_TEMP" "$destination" <<'PY2' || return 65
-import os
-import sys
-
-try:
-    os.link(sys.argv[1], sys.argv[2], follow_symlinks=False)
-    os.unlink(sys.argv[1])
-except OSError:
-    sys.stderr.write("Codex helper exclusive publication failed\n")
-    sys.exit(65)
-PY2
+      publish_codex_path_exclusive "$CODEX_CODE_MODE_HOST_TEMP" "$destination" || return 65
       CODEX_CODE_MODE_HOST_TEMP=""
       ;;
     replace)
-      # Revalidate the predecessor immediately before the only replacement
-      # effect. If another operator/process changed it after preflight, refuse
-      # rather than overwriting an unobserved generation.
-      verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256" codex-code-mode-host 1 || return 65
+      # Revalidate the controlled staged participant before touching the live
+      # destination. Never re-hash the canonical destination at commit time:
+      # a privileged late writer could replace it with a FIFO/symlink and make
+      # a path-based byte reader block or follow the wrong inode.
       verify_codex_component "$CODEX_CODE_MODE_HOST_TEMP" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
-      "$PYTHON_BINARY" -I -S -B - "$CODEX_CODE_MODE_HOST_TEMP" "$destination" <<'PY2' || return 65
-import os
-import sys
 
-source, destination = sys.argv[1:]
-try:
-    os.replace(source, destination)
-except OSError:
-    sys.stderr.write("Codex helper atomic generation replacement failed\n")
-    sys.exit(65)
-PY2
+      # Atomically capture whatever entry is present *now* under a unique
+      # same-directory name without replacing anything. Only after that stable
+      # captured inode proves to be the reviewed predecessor may the candidate
+      # be published. A concurrent winner is therefore preserved, never lost.
+      CODEX_CODE_MODE_HOST_BACKUP="$CODEX_CODE_MODE_HOST_TEMP.predecessor"
+      rename_codex_path_exclusive "$destination" "$CODEX_CODE_MODE_HOST_BACKUP" || {
+        CODEX_CODE_MODE_HOST_BACKUP=""
+        return 65
+      }
+      if ! verify_codex_component "$CODEX_CODE_MODE_HOST_BACKUP" "$CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256" codex-code-mode-host 1; then
+        restore_codex_code_mode_host_backup || true
+        return 65
+      fi
+      if ! publish_codex_path_exclusive "$CODEX_CODE_MODE_HOST_TEMP" "$destination"; then
+        # If a concurrent writer filled the now-vacant destination, preserve it
+        # and also preserve the reviewed predecessor backup for reconciliation.
+        restore_codex_code_mode_host_backup || true
+        return 65
+      fi
       CODEX_CODE_MODE_HOST_TEMP=""
       ;;
     *)
@@ -550,7 +620,14 @@ PY2
   # The staged inode was fully attested before publication/replacement; verify
   # the final path again so completion proves exact bytes, signer, metadata and
   # single-link identity at the installed name.
-  verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1
+  verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
+  if [ -n "$CODEX_CODE_MODE_HOST_BACKUP" ]; then
+    # This backup was captured atomically and independently re-attested as the
+    # exact reviewed predecessor. It is deleted only after the new canonical
+    # path has passed its final attestation.
+    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_BACKUP" || return 65
+    CODEX_CODE_MODE_HOST_BACKUP=""
+  fi
 }
 # --- END Codex package component validation ---
 
