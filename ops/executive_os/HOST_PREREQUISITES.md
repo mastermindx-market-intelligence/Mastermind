@@ -663,7 +663,7 @@ proves from `config/read` with all layers included that no forced workspace or
 forced login policy was applied. Neither fallback is implicit. Personal,
 API-key, platform API-key, `CODEX_ACCESS_TOKEN` runtime injection, forced
 workspace IDs, operator credential copying, and manual `auth.json` edits are
-forbidden. Pinned Codex `0.147.0` has no reviewed workspace-selection flag; do
+forbidden. Pinned Codex `0.159.2` has no reviewed workspace-selection flag; do
 not invent one and never silently fall back to Personal.
 
 The live canary CLI does not accept `--probe-root`, `--operator-home`, or
@@ -674,7 +674,7 @@ drop. It is not group- or world-traversable. The root process removes that tree
 after the run. A local filesystem preflight failure is `isolation_violation`,
 not a provider `process_failed`.
 
-The inference canary uses the exact installed `codex-0.147.0` binary as
+The inference canary uses the exact installed `codex-0.159.2` binary as
 `_mastermind_worker`, the dedicated `CODEX_HOME`, production model
 `gpt-5.6-sol`, and an inert disposable workspace. It does not start services,
 open Executive SQLite, write production workspaces/runs, or print credentials.

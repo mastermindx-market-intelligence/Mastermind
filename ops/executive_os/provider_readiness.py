@@ -63,10 +63,10 @@ AUTH_PATH = Path(
     "/var/db/mastermind-executive/workers/codex-01/provider-home/auth.json"
 )
 CODEX_BINARY = Path(
-    "/Library/Application Support/MastermindExecutive/bin/codex-0.147.0"
+    "/Library/Application Support/MastermindExecutive/bin/codex-0.159.2"
 )
-CODEX_VERSION = "0.147.0"
-CODEX_SHA256 = "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+CODEX_VERSION = "0.159.2"
+CODEX_SHA256 = "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 CODEX_TEAM_ID = "2DC432GLL2"
 WORKER_UID = 451
 WORKER_GID = 451

@@ -421,6 +421,14 @@ _BASE_APP_SERVER_OVERRIDES = (
     "features.mcp_2026_07_28=false",
     "features.multi_agent=false",
     "features.multi_agent_v2=false",
+    "features.browser_use_external=false",
+    "features.browser_use_full_cdp_access=false",
+    "features.daemon_auto_start=false",
+    "features.shell_snapshot=false",
+    "features.shell_snapshot_v2=false",
+    "features.skill_mcp_dependency_install=false",
+    "features.skill_search=false",
+    "features.workspace_dependencies=false",
 )
 
 

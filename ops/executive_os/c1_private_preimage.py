@@ -92,9 +92,9 @@ RUNTIME_ROOT = "/var/db/mastermind-executive"
 CONTROL_CONFIG = f"{SYSTEM_ROOT}/config/control.json"
 WORKER_CONFIG = f"{SYSTEM_ROOT}/config/worker-codex.json"
 PYTHON_PROVENANCE = f"{SYSTEM_ROOT}/python-runtime.json"
-CODEX_ATTESTATION = f"{SYSTEM_ROOT}/codex-attestation-0.147.0.json"
+CODEX_ATTESTATION = f"{SYSTEM_ROOT}/codex-attestation-0.159.2.json"
 PYTHON_BINARY = "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
-CODEX_BINARY = f"{SYSTEM_ROOT}/bin/codex-0.147.0"
+CODEX_BINARY = f"{SYSTEM_ROOT}/bin/codex-0.159.2"
 CONTENT_PATHS = (*PLISTS, CONTROL_CONFIG, WORKER_CONFIG, PYTHON_PROVENANCE, CODEX_ATTESTATION)
 SOCKET_METADATA_PATHS = (
     "/var/run/mastermind-executive/ceo-ingress.sock",
@@ -836,9 +836,9 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
             "secret_canary_receipt_path": (
                 f"{RUNTIME_ROOT}/control/canaries/secret-canary.json"
             ),
-            "operator_harness_version": "0.147.0",
+            "operator_harness_version": "0.159.2",
             "operator_harness_binary_digest": (
-                "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+                "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
             ),
         },
         WORKER_CONFIG: {
@@ -853,7 +853,7 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
             "provider_home": f"{RUNTIME_ROOT}/workers/codex-01/provider-home",
             "codex_binary": CODEX_BINARY,
             "codex_attestation_receipt": CODEX_ATTESTATION,
-            "allowed_codex_versions": ["0.147.0"],
+            "allowed_codex_versions": ["0.159.2"],
             "required_team_identifier": "2DC432GLL2",
             "launchd_socket_name": "WorkerBroker",
         },
@@ -874,9 +874,9 @@ def expected_document_fixture(release_sha: str, tree_sha: str) -> dict[str, dict
         CODEX_ATTESTATION: {
             "schema_version": "mastermind.executive_codex_attestation/v1",
             "path": CODEX_BINARY,
-            "version": "0.147.0",
+            "version": "0.159.2",
             "team_identifier": "2DC432GLL2",
-            "sha256": "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+            "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704",
         },
     }
     for label, path in zip(LABELS, PLISTS, strict=True):
