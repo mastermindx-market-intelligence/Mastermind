@@ -3,6 +3,7 @@ import {
   canonicalJson,
   intentIdForOperationKey,
   operationKeyForLaunch,
+  requestRefForOperationKey,
   sha256Hex,
   type LaunchKeyMaterial,
 } from "./operation-key";
@@ -67,12 +68,14 @@ describe("T1 operation key", () => {
 });
 
 describe("T2 intent-id vector", () => {
-  it("pins mcp-bc363e20e05f2ba03efc9af32fe8f80d for the all-zero launch key", () => {
-    expect(
-      intentIdForOperationKey(
-        "mmos-launch-0000000000000000000000000000000000000000",
-      ),
-    ).toBe("mcp-bc363e20e05f2ba03efc9af32fe8f80d");
+  it("pins req-1fe9203648cf225b24e729dba8fa9ad7 and auto-ed35746b0a835165994569a8dc713270 for the all-zero launch key", () => {
+    const PINNED_KEY = "mmos-launch-" + "0".repeat(40);
+    expect(requestRefForOperationKey(PINNED_KEY)).toBe(
+      "req-1fe9203648cf225b24e729dba8fa9ad7",
+    );
+    expect(intentIdForOperationKey(PINNED_KEY)).toBe(
+      "auto-ed35746b0a835165994569a8dc713270",
+    );
   });
 
   it("matches echo -n test | shasum -a 256", () => {

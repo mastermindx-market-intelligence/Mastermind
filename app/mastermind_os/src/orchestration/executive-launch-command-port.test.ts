@@ -10,7 +10,11 @@ import {
   completeOrchestratorCommandBinding,
   sessionMatchesSelection,
 } from "./host-command-bindings";
-import { intentIdForOperationKey, operationKeyForLaunch } from "./operation-key";
+import {
+  intentIdForOperationKey,
+  operationKeyForLaunch,
+  requestRefForOperationKey,
+} from "./operation-key";
 import {
   createExecutiveLaunchBinding,
   type ExecutiveToolClient,
@@ -24,6 +28,8 @@ const PRINCIPAL = "scope-A";
 const GENERATION = "gen-1";
 const WORKSTREAM = "WS:ALPHA";
 const JOB_ID = "JOB-001";
+const PINNED_KEY = "mmos-launch-" + "0".repeat(40);
+const PINNED_INTENT_ID = "auto-ed35746b0a835165994569a8dc713270";
 
 const RESEARCH_FORM: LaunchForm = {
   goal: "Ship the launch binding",
@@ -68,6 +74,55 @@ interface CallLogEntry {
   args: Readonly<Record<string, unknown>>;
 }
 
+const SUBMIT_CODE_TABLE = [
+  ["invalid_input", "refused", "INVALID_PAYLOAD"],
+  ["authority_refused", "refused", "REFUSED"],
+  ["production_write_disabled", "refused", "REFUSED"],
+  ["identity_unverified", "refused", "REFUSED"],
+  ["grounding_unavailable", "refused", "REFUSED"],
+  ["grounding_changed", "refused", "REFUSED"],
+  ["backend_refused", "unknown", "UNKNOWN_RECEIPT"],
+  ["not_found", "unknown", "UNKNOWN_RECEIPT"],
+  ["backend_unavailable", "unknown", "UNKNOWN_RECEIPT"],
+  ["internal_error", "unknown", "UNKNOWN_RECEIPT"],
+  ["output_too_large", "unknown", "UNKNOWN_RECEIPT"],
+  ["timeout", "unknown", "TRANSPORT_ERROR"],
+] as const;
+
+const NON_TERMINAL_STATUSES = [
+  "operation_conflict",
+  "ingress_unavailable",
+  "effect_unknown",
+] as const;
+
+const STATUS_CODE_REASONS = [
+  ["invalid_input", "UNKNOWN_RECEIPT"],
+  ["authority_refused", "UNKNOWN_RECEIPT"],
+  ["identity_unverified", "UNKNOWN_RECEIPT"],
+  ["backend_refused", "UNKNOWN_RECEIPT"],
+  ["production_write_disabled", "UNKNOWN_RECEIPT"],
+  ["grounding_unavailable", "UNKNOWN_RECEIPT"],
+  ["grounding_changed", "UNKNOWN_RECEIPT"],
+  ["not_found", "UNKNOWN_RECEIPT"],
+  ["backend_unavailable", "UNKNOWN_RECEIPT"],
+  ["internal_error", "UNKNOWN_RECEIPT"],
+  ["output_too_large", "UNKNOWN_RECEIPT"],
+  ["timeout", "TRANSPORT_ERROR"],
+] as const;
+
+const STATUS_UNKNOWN_CODES = [
+  "invalid_input",
+  "authority_refused",
+  "identity_unverified",
+  "backend_refused",
+  "production_write_disabled",
+  "grounding_unavailable",
+  "grounding_changed",
+  "backend_unavailable",
+  "internal_error",
+  "output_too_large",
+] as const;
+
 function samePointer(a: OperationPointer, b: OperationPointer): boolean {
   return (
     a.operationKey === b.operationKey &&
@@ -106,18 +161,104 @@ function acceptedData(
     duplicate: false,
     dispatched: false,
     authority: {
-      requested: ["READ", "RESEARCH"],
+      requested: [],
       policy_sha256: "a".repeat(64),
       authority_level: "A0",
     },
-    grounding: {
-      mastermind_sha: "b".repeat(40),
-      macro_sha: "c".repeat(40),
-      boot_packet_schema: "mastermind.ceo_boot_packet.v1",
-    },
-    created_at_ms: 1,
+    grounding: {},
+    created_at_ms: 0,
     ...extra,
   };
+}
+
+function appAccepted(
+  operationKey: string,
+  extra: Record<string, unknown> = {},
+): ExecutiveToolEnvelope {
+  return {
+    ok: true,
+    status: "accepted",
+    request_ref: requestRefForOperationKey(operationKey),
+    receipt: acceptedData(operationKey, extra),
+  };
+}
+
+function appRefused(
+  operationKey: string,
+  code: string,
+  status:
+    | "refused"
+    | "operation_conflict"
+    | "ingress_unavailable"
+    | "effect_unknown" = "refused",
+): ExecutiveToolEnvelope {
+  return {
+    ok: false,
+    status,
+    request_ref: requestRefForOperationKey(operationKey),
+    error: { code, message: code },
+  };
+}
+
+function barePreflight(code: string): ExecutiveToolEnvelope {
+  return { ok: false, error: { code, message: code } };
+}
+
+function e1Envelope(
+  tool: "submit_ceo_intent" | "ceo_intent_status",
+  ok: boolean,
+  data: unknown,
+  error: { code: string; message: string; intent_id?: string } | null,
+): ExecutiveToolEnvelope {
+  return {
+    schema: "mastermind.executive_mcp_result.v1",
+    tool,
+    ok,
+    server_version: "1.2.0",
+    mode: "readonly",
+    generated_at: "2026-10-02T00:00:00Z",
+    grounding: {},
+    data,
+    degraded: [],
+    bounded: [],
+    error,
+  } as ExecutiveToolEnvelope;
+}
+
+function statusAccepted(
+  operationKey: string,
+  extra: Record<string, unknown> = {},
+): ExecutiveToolEnvelope {
+  return e1Envelope(
+    "ceo_intent_status",
+    true,
+    acceptedData(operationKey, extra),
+    null,
+  );
+}
+
+function statusError(
+  code: string,
+  extra?: { intent_id?: string },
+): ExecutiveToolEnvelope {
+  const error: { code: string; message: string; intent_id?: string } = {
+    code,
+    message: code,
+  };
+  if (extra?.intent_id !== undefined) error.intent_id = extra.intent_id;
+  return e1Envelope("ceo_intent_status", false, null, error);
+}
+
+function submitE1Error(
+  code: string,
+  extra?: { intent_id?: string },
+): ExecutiveToolEnvelope {
+  const error: { code: string; message: string; intent_id?: string } = {
+    code,
+    message: code,
+  };
+  if (extra?.intent_id !== undefined) error.intent_id = extra.intent_id;
+  return e1Envelope("submit_ceo_intent", false, null, error);
 }
 
 function makeClient(
@@ -170,7 +311,7 @@ function expectedResearchPayload(form: LaunchForm = RESEARCH_FORM) {
 }
 
 describe("T3 makeLaunchIntent", () => {
-  const idle = makeClient(() => ({ ok: false, error: { code: "not_found" } }));
+  const idle = makeClient(() => barePreflight("not_found"));
   const binding = makeBinding(idle.client);
 
   it("returns null for each §4 refusal", () => {
@@ -292,12 +433,12 @@ describe("T3 makeLaunchIntent", () => {
 
 describe("T4 submit matrix", () => {
   async function submitWith(
-    envelope: ExecutiveToolEnvelope | "throw",
+    envelope: ExecutiveToolEnvelope | Record<string, unknown> | "throw",
     extra?: { abort?: boolean },
   ) {
     const respond = async () => {
       if (envelope === "throw") throw new Error("client failed");
-      return envelope;
+      return envelope as ExecutiveToolEnvelope;
     };
     const { client } = makeClient(respond);
     const binding = makeBinding(client);
@@ -309,74 +450,124 @@ describe("T4 submit matrix", () => {
     return binding.port.submit(pointer, intent, abort.signal);
   }
 
-  const refusedInvalidPayload = ["invalid_input"] as const;
-  const refused = [
-    "authority_refused",
-    "backend_refused",
-    "production_write_disabled",
-    "identity_unverified",
-    "grounding_unavailable",
-    "grounding_changed",
-  ] as const;
-  const unknownReceipt = [
-    "not_found",
-    "backend_unavailable",
-    "internal_error",
-    "output_too_large",
-  ] as const;
-  const transport = ["timeout"] as const;
   const researchKey = expectedResearchPayload().operation_key;
 
-  it.each(refusedInvalidPayload)("%s → refused/INVALID_PAYLOAD", async (code) => {
-    const receipt = await submitWith({ ok: false, error: { code } });
+  it.each(SUBMIT_CODE_TABLE)(
+    "F3(b) %s → %s/%s",
+    async (code, disposition, reason) => {
+      const receipt = await submitWith(appRefused(researchKey, code));
+      expect(receipt).toMatchObject({
+        disposition,
+        reason,
+        kind: "launch",
+        targetKey: WORKSTREAM,
+      });
+      expect(receipt.missionSelection).toBeUndefined();
+    },
+  );
+
+  it("F3(b) unrecognised code → unknown/TRANSPORT_ERROR", async () => {
+    const receipt = await submitWith(
+      appRefused(researchKey, "not_a_gateway_code"),
+    );
     expect(receipt).toMatchObject({
-      disposition: "refused",
-      reason: "INVALID_PAYLOAD",
-      kind: "launch",
-      targetKey: WORKSTREAM,
+      disposition: "unknown",
+      reason: "TRANSPORT_ERROR",
     });
-    expect(receipt.missionSelection).toBeUndefined();
   });
 
-  it.each(refused)("%s → refused/REFUSED", async (code) => {
-    const receipt = await submitWith({ ok: false, error: { code } });
+  it.each(NON_TERMINAL_STATUSES)(
+    "F3(c) status %s → unknown/UNKNOWN_RECEIPT",
+    async (status) => {
+      const receipt = await submitWith(
+        appRefused(researchKey, "invalid_input", status),
+      );
+      expect(receipt).toMatchObject({
+        disposition: "unknown",
+        reason: "UNKNOWN_RECEIPT",
+      });
+    },
+  );
+
+  it.each(SUBMIT_CODE_TABLE)(
+    "F3(d) %s → %s/%s",
+    async (code, disposition, reason) => {
+      const receipt = await submitWith(barePreflight(code));
+      expect(receipt).toMatchObject({
+        disposition,
+        reason,
+        kind: "launch",
+        targetKey: WORKSTREAM,
+      });
+      expect(receipt.missionSelection).toBeUndefined();
+    },
+  );
+
+  it("F3(d) scope_refused → unknown/TRANSPORT_ERROR", async () => {
+    const receipt = await submitWith(barePreflight("scope_refused"));
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "TRANSPORT_ERROR",
+    });
+  });
+
+  it.each(SUBMIT_CODE_TABLE)(
+    "F3(e) %s → %s/%s",
+    async (code, disposition, reason) => {
+      const receipt = await submitWith(submitE1Error(code));
+      expect(receipt).toMatchObject({
+        disposition,
+        reason,
+        kind: "launch",
+        targetKey: WORKSTREAM,
+      });
+      expect(receipt.missionSelection).toBeUndefined();
+    },
+  );
+
+  it("F3(e) error.intent_id foreign → unknown/RECEIPT_MISMATCH", async () => {
+    const receipt = await submitWith(
+      submitE1Error("invalid_input", {
+        intent_id: intentIdForOperationKey(
+          "mmos-launch-ffffffffffffffffffffffffffffffffffffffff",
+        ),
+      }),
+    );
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "RECEIPT_MISMATCH",
+    });
+  });
+
+  it("F3(e) error.intent_id matching authority_refused → refused/REFUSED", async () => {
+    const receipt = await submitWith(
+      submitE1Error("authority_refused", {
+        intent_id: intentIdForOperationKey(researchKey),
+      }),
+    );
     expect(receipt).toMatchObject({
       disposition: "refused",
       reason: "REFUSED",
-      kind: "launch",
-      targetKey: WORKSTREAM,
     });
-    expect(receipt.missionSelection).toBeUndefined();
   });
 
-  it.each(unknownReceipt)("%s → unknown/UNKNOWN_RECEIPT", async (code) => {
-    const receipt = await submitWith({ ok: false, error: { code } });
+  it("F3(e) error.intent_id matching backend_refused → unknown/UNKNOWN_RECEIPT", async () => {
+    const receipt = await submitWith(
+      submitE1Error("backend_refused", {
+        intent_id: intentIdForOperationKey(researchKey),
+      }),
+    );
     expect(receipt).toMatchObject({
       disposition: "unknown",
       reason: "UNKNOWN_RECEIPT",
-      kind: "launch",
-      targetKey: WORKSTREAM,
     });
   });
 
-  it.each(transport)("%s → unknown/TRANSPORT_ERROR", async (code) => {
-    const receipt = await submitWith({ ok: false, error: { code } });
+  it("F3(e) unrecognised code → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith(submitE1Error("not_a_gateway_code"));
     expect(receipt).toMatchObject({
       disposition: "unknown",
-      reason: "TRANSPORT_ERROR",
-      kind: "launch",
-      targetKey: WORKSTREAM,
-    });
-  });
-
-  it("unrecognised code → unknown/TRANSPORT_ERROR", async () => {
-    const receipt = await submitWith({
-      ok: false,
-      error: { code: "not_a_gateway_code" },
-    });
-    expect(receipt).toMatchObject({
-      disposition: "unknown",
-      reason: "TRANSPORT_ERROR",
+      reason: "MALFORMED_RECEIPT",
     });
   });
 
@@ -389,10 +580,7 @@ describe("T4 submit matrix", () => {
   });
 
   it("aborted signal → unknown/TRANSPORT_ERROR", async () => {
-    const receipt = await submitWith(
-      { ok: true, data: acceptedData(researchKey) },
-      { abort: true },
-    );
+    const receipt = await submitWith(appAccepted(researchKey), { abort: true });
     expect(receipt).toMatchObject({
       disposition: "unknown",
       reason: "TRANSPORT_ERROR",
@@ -402,10 +590,9 @@ describe("T4 submit matrix", () => {
   it.each([false, true])(
     "accepted duplicate=%s → accepted/ACCEPTED with JOB-001",
     async (duplicate) => {
-      const receipt = await submitWith({
-        ok: true,
-        data: acceptedData(researchKey, { duplicate }),
-      });
+      const receipt = await submitWith(
+        appAccepted(researchKey, { duplicate }),
+      );
       expect(receipt).toEqual({
         operationKey: researchKey,
         kind: "launch",
@@ -418,12 +605,11 @@ describe("T4 submit matrix", () => {
   );
 
   it("accepted v2 schema is still accepted", async () => {
-    const receipt = await submitWith({
-      ok: true,
-      data: acceptedData(researchKey, {
+    const receipt = await submitWith(
+      appAccepted(researchKey, {
         schema: "mastermind.ceo_intent_receipt.v2",
       }),
-    });
+    );
     expect(receipt.disposition).toBe("accepted");
     expect(receipt.missionSelection).toEqual({
       workRef: WORKSTREAM,
@@ -431,13 +617,47 @@ describe("T4 submit matrix", () => {
     });
   });
 
+  it("receipt intent_id foreign → unknown/RECEIPT_MISMATCH", async () => {
+    const receipt = await submitWith(
+      appAccepted(researchKey, {
+        intent_id: intentIdForOperationKey(
+          "mmos-launch-ffffffffffffffffffffffffffffffffffffffff",
+        ),
+      }),
+    );
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "RECEIPT_MISMATCH",
+    });
+  });
+
+  it("receipt intent_id missing → unknown/MALFORMED_RECEIPT", async () => {
+    const doc = acceptedData(researchKey);
+    delete doc.intent_id;
+    const receipt = await submitWith({
+      ok: true,
+      status: "accepted",
+      request_ref: requestRefForOperationKey(researchKey),
+      receipt: doc,
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
   it("ok-but-malformed receipt → unknown/MALFORMED_RECEIPT", async () => {
     const malformed: ExecutiveToolEnvelope[] = [
-      { ok: true, data: null },
-      { ok: true, data: acceptedData(researchKey, { schema: "nope" }) },
-      { ok: true, data: acceptedData(researchKey, { accepted: false }) },
-      { ok: true, data: acceptedData(researchKey, { dispatched: true }) },
-      { ok: true, data: acceptedData(researchKey, { job_id: undefined }) },
+      {
+        ok: true,
+        status: "accepted",
+        request_ref: requestRefForOperationKey(researchKey),
+        receipt: null,
+      },
+      appAccepted(researchKey, { schema: "nope" }),
+      appAccepted(researchKey, { accepted: false }),
+      appAccepted(researchKey, { dispatched: true }),
+      appAccepted(researchKey, { job_id: undefined }),
     ];
     for (const envelope of malformed) {
       const receipt = await submitWith(envelope);
@@ -451,10 +671,9 @@ describe("T4 submit matrix", () => {
   });
 
   it("job_id that fails job() → unknown/UNKNOWN_RECEIPT", async () => {
-    const receipt = await submitWith({
-      ok: true,
-      data: acceptedData(researchKey, { job_id: "not-a-job" }),
-    });
+    const receipt = await submitWith(
+      appAccepted(researchKey, { job_id: "not-a-job" }),
+    );
     expect(receipt).toMatchObject({
       disposition: "unknown",
       reason: "UNKNOWN_RECEIPT",
@@ -463,8 +682,8 @@ describe("T4 submit matrix", () => {
 });
 
 describe("T5 readOperation", () => {
-  async function readWith(envelope: ExecutiveToolEnvelope) {
-    const { client, log } = makeClient(() => envelope);
+  async function readWith(envelope: ExecutiveToolEnvelope | Record<string, unknown>) {
+    const { client, log } = makeClient(() => envelope as ExecutiveToolEnvelope);
     const binding = makeBinding(client);
     const intent = binding.makeLaunchIntent(RESEARCH_FORM);
     if (!intent) throw new Error("expected launch intent");
@@ -478,10 +697,7 @@ describe("T5 readOperation", () => {
 
   it("accepted → missionSelection.workRef from pointer.targetKey", async () => {
     const key = expectedResearchPayload().operation_key;
-    const { receipt, log, pointer } = await readWith({
-      ok: true,
-      data: acceptedData(key),
-    });
+    const { receipt, log, pointer } = await readWith(statusAccepted(key));
     expect(pointer.targetKey).toBe(WORKSTREAM);
     expect(receipt).toEqual({
       operationKey: pointer.operationKey,
@@ -500,10 +716,7 @@ describe("T5 readOperation", () => {
   });
 
   it("not_found → unknown/UNKNOWN_RECEIPT", async () => {
-    const { receipt } = await readWith({
-      ok: false,
-      error: { code: "not_found" },
-    });
+    const { receipt } = await readWith(statusError("not_found"));
     expect(receipt).toMatchObject({
       disposition: "unknown",
       reason: "UNKNOWN_RECEIPT",
@@ -512,33 +725,62 @@ describe("T5 readOperation", () => {
   });
 
   it("unknown codes are retained as unknown", async () => {
-    for (const code of [
-      "invalid_input",
-      "authority_refused",
-      "identity_unverified",
-      "backend_refused",
-      "production_write_disabled",
-      "grounding_unavailable",
-      "grounding_changed",
-      "backend_unavailable",
-      "internal_error",
-      "output_too_large",
-    ] as const) {
-      const { receipt } = await readWith({ ok: false, error: { code } });
+    for (const code of STATUS_UNKNOWN_CODES) {
+      const { receipt } = await readWith(statusError(code));
       expect(receipt).toMatchObject({
         disposition: "unknown",
         reason: "UNKNOWN_RECEIPT",
       });
+      expect(receipt.disposition).not.toBe("refused");
     }
+  });
+
+  it("timeout → unknown/TRANSPORT_ERROR", async () => {
+    const { receipt } = await readWith(statusError("timeout"));
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "TRANSPORT_ERROR",
+    });
+    expect(receipt.disposition).not.toBe("refused");
+  });
+
+  it("unrecognised E1 code → unknown/MALFORMED_RECEIPT", async () => {
+    const { receipt } = await readWith(statusError("not_a_gateway_code"));
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("foreign error.intent_id → unknown/RECEIPT_MISMATCH", async () => {
+    const { receipt } = await readWith(
+      statusError("not_found", {
+        intent_id: intentIdForOperationKey(
+          "mmos-launch-ffffffffffffffffffffffffffffffffffffffff",
+        ),
+      }),
+    );
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "RECEIPT_MISMATCH",
+    });
+  });
+
+  it("matching error.intent_id still maps the code row", async () => {
+    const key = expectedResearchPayload().operation_key;
+    const { receipt } = await readWith(
+      statusError("not_found", { intent_id: intentIdForOperationKey(key) }),
+    );
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "UNKNOWN_RECEIPT",
+    });
   });
 });
 
 describe("T6 SEND/STOP", () => {
   it("returns null intents and presents COMMAND_ROUTE_UNAVAILABLE", () => {
-    const { client } = makeClient(() => ({
-      ok: false,
-      error: { code: "not_found" },
-    }));
+    const { client } = makeClient(() => barePreflight("not_found"));
     const binding = makeBinding(client);
     expect(binding.makeMessageIntent("sess-1", "hello")).toBeNull();
     expect(binding.makeStopIntent("sess-1")).toBeNull();
@@ -551,10 +793,7 @@ describe("T6 SEND/STOP", () => {
 
 describe("T7 completeOrchestratorCommandBinding", () => {
   it("returns non-null for createExecutiveLaunchBinding", () => {
-    const { client } = makeClient(() => ({
-      ok: false,
-      error: { code: "not_found" },
-    }));
+    const { client } = makeClient(() => barePreflight("not_found"));
     const binding = makeBinding(client);
     expect(completeOrchestratorCommandBinding(binding)).not.toBeNull();
   });
@@ -564,10 +803,9 @@ describe("T8 controller integration", () => {
   it("accepts a launch and recovers the same rootJobId without a second submit", async () => {
     const researchKey = expectedResearchPayload().operation_key;
     const { client, log } = makeClient((name) => {
-      if (name === "submit_ceo_intent" || name === "ceo_intent_status") {
-        return { ok: true, data: acceptedData(researchKey) };
-      }
-      return { ok: false, error: { code: "not_found" } };
+      if (name === "submit_ceo_intent") return appAccepted(researchKey);
+      if (name === "ceo_intent_status") return statusAccepted(researchKey);
+      return statusError("not_found");
     });
     const store = makeStore();
     const binding = makeBinding(client, RESEARCH_CONFIG, store);
@@ -603,31 +841,13 @@ describe("T8 controller integration", () => {
   });
 });
 
-const STATUS_CODE_REASONS = [
-  ["invalid_input", "UNKNOWN_RECEIPT"],
-  ["authority_refused", "UNKNOWN_RECEIPT"],
-  ["identity_unverified", "UNKNOWN_RECEIPT"],
-  ["backend_refused", "UNKNOWN_RECEIPT"],
-  ["production_write_disabled", "UNKNOWN_RECEIPT"],
-  ["grounding_unavailable", "UNKNOWN_RECEIPT"],
-  ["grounding_changed", "UNKNOWN_RECEIPT"],
-  ["not_found", "UNKNOWN_RECEIPT"],
-  ["backend_unavailable", "UNKNOWN_RECEIPT"],
-  ["internal_error", "UNKNOWN_RECEIPT"],
-  ["output_too_large", "UNKNOWN_RECEIPT"],
-  ["timeout", "TRANSPORT_ERROR"],
-] as const;
-
 describe("T9 late original completion retains the pointer", () => {
   it("T9 timeout then not_found keeps PENDING_POINTER; later JOB-001 is accepted", async () => {
     const researchKey = expectedResearchPayload().operation_key;
-    let statusEnvelope: ExecutiveToolEnvelope = {
-      ok: false,
-      error: { code: "not_found" },
-    };
+    let statusEnvelope: ExecutiveToolEnvelope = statusError("not_found");
     const { client, log } = makeClient((name) => {
       if (name === "submit_ceo_intent") {
-        return { ok: false, error: { code: "timeout" } };
+        return appRefused(researchKey, "timeout");
       }
       return statusEnvelope;
     });
@@ -654,7 +874,7 @@ describe("T9 late original completion retains the pointer", () => {
       1,
     );
 
-    statusEnvelope = { ok: true, data: acceptedData(researchKey) };
+    statusEnvelope = statusAccepted(researchKey);
     const rec2 = await ctrl.recover();
     expect(rec2.status).toBe("accepted");
     expect(rec2).toMatchObject({
@@ -673,9 +893,9 @@ describe("T10 status-read refusal retains the pointer", () => {
     async (code, reason) => {
       const { client, log } = makeClient((name) => {
         if (name === "ceo_intent_status") {
-          return { ok: false, error: { code } };
+          return statusError(code);
         }
-        return { ok: false, error: { code: "timeout" } };
+        return appRefused(expectedResearchPayload().operation_key, "timeout");
       });
       const store = makeStore();
       const binding = makeBinding(client, RESEARCH_CONFIG, store);
@@ -711,10 +931,9 @@ describe("T11 same-principal A→B reopen reconstructs workRef from the pointer"
   const WS_B = "WS:PROJECT-B";
 
   it("T11 launch stores pointer.targetKey as the original workstream", async () => {
-    const { client } = makeClient(() => ({
-      ok: false,
-      error: { code: "timeout" },
-    }));
+    const { client } = makeClient(() =>
+      appRefused(expectedResearchPayload().operation_key, "timeout"),
+    );
     const store = makeStore();
     const binding = makeBinding(client, RESEARCH_CONFIG, store);
     const intent = binding.makeLaunchIntent(RESEARCH_FORM);
@@ -748,9 +967,9 @@ describe("T11 same-principal A→B reopen reconstructs workRef from the pointer"
     };
     const { client } = makeClient((name) => {
       if (name === "ceo_intent_status") {
-        return { ok: true, data: acceptedData(keyA) };
+        return statusAccepted(keyA);
       }
-      return { ok: false, error: { code: "not_found" } };
+      return statusError("not_found");
     });
     const store = makeStore([[PRINCIPAL, pointerA]]);
     const configB: LaunchBindingConfig = { ...RESEARCH_CONFIG, workstream: WS_B };
@@ -777,10 +996,7 @@ describe("T11 same-principal A→B reopen reconstructs workRef from the pointer"
       kind: "launch",
       targetKey: null,
     };
-    const { client } = makeClient(() => ({
-      ok: true,
-      data: acceptedData(key),
-    }));
+    const { client } = makeClient(() => statusAccepted(key));
     const store = makeStore([[PRINCIPAL, pointer]]);
     const binding = makeBinding(client, RESEARCH_CONFIG, store);
     const portReceipt = await binding.port.readOperation(
@@ -798,10 +1014,7 @@ describe("T11 same-principal A→B reopen reconstructs workRef from the pointer"
   });
 
   it("T11 prepare of targetKey ≠ payload.workstream throws", () => {
-    const { client } = makeClient(() => ({
-      ok: false,
-      error: { code: "not_found" },
-    }));
+    const { client } = makeClient(() => barePreflight("not_found"));
     const binding = makeBinding(client);
     const intent = binding.makeLaunchIntent(RESEARCH_FORM);
     if (!intent) throw new Error("expected launch intent");
@@ -812,18 +1025,15 @@ describe("T11 same-principal A→B reopen reconstructs workRef from the pointer"
 });
 
 describe("T12 receipt intent_id authentication", () => {
-  const PINNED_KEY = "mmos-launch-0000000000000000000000000000000000000000";
-  const PINNED_INTENT_ID = "mcp-bc363e20e05f2ba03efc9af32fe8f80d";
   const FOREIGN_INTENT_ID = intentIdForOperationKey(
     "mmos-launch-ffffffffffffffffffffffffffffffffffffffff",
   );
 
   it("T12 submit foreign intent_id → unknown/RECEIPT_MISMATCH, never AcceptedState", async () => {
     const researchKey = expectedResearchPayload().operation_key;
-    const { client } = makeClient(() => ({
-      ok: true,
-      data: acceptedData(researchKey, { intent_id: FOREIGN_INTENT_ID }),
-    }));
+    const { client } = makeClient(() =>
+      appAccepted(researchKey, { intent_id: FOREIGN_INTENT_ID }),
+    );
     const store = makeStore();
     const binding = makeBinding(client, RESEARCH_CONFIG, store);
     const intent = binding.makeLaunchIntent(RESEARCH_FORM);
@@ -849,9 +1059,14 @@ describe("T12 receipt intent_id authentication", () => {
 
   it("T12 submit missing intent_id → unknown/MALFORMED_RECEIPT, never AcceptedState", async () => {
     const researchKey = expectedResearchPayload().operation_key;
-    const data = { ...acceptedData(researchKey) };
-    delete data.intent_id;
-    const { client } = makeClient(() => ({ ok: true, data }));
+    const doc = { ...acceptedData(researchKey) };
+    delete doc.intent_id;
+    const { client } = makeClient(() => ({
+      ok: true,
+      status: "accepted",
+      request_ref: requestRefForOperationKey(researchKey),
+      receipt: doc,
+    }));
     const store = makeStore();
     const binding = makeBinding(client, RESEARCH_CONFIG, store);
     const intent = binding.makeLaunchIntent(RESEARCH_FORM);
@@ -879,12 +1094,9 @@ describe("T12 receipt intent_id authentication", () => {
     const researchKey = expectedResearchPayload().operation_key;
     const { client } = makeClient((name) => {
       if (name === "ceo_intent_status") {
-        return {
-          ok: true,
-          data: acceptedData(researchKey, { intent_id: FOREIGN_INTENT_ID }),
-        };
+        return statusAccepted(researchKey, { intent_id: FOREIGN_INTENT_ID });
       }
-      return { ok: false, error: { code: "timeout" } };
+      return appRefused(researchKey, "timeout");
     });
     const binding = makeBinding(client);
     const intent = binding.makeLaunchIntent(RESEARCH_FORM);
@@ -915,9 +1127,9 @@ describe("T12 receipt intent_id authentication", () => {
     delete data.intent_id;
     const { client } = makeClient((name) => {
       if (name === "ceo_intent_status") {
-        return { ok: true, data };
+        return e1Envelope("ceo_intent_status", true, data, null);
       }
-      return { ok: false, error: { code: "timeout" } };
+      return appRefused(researchKey, "timeout");
     });
     const binding = makeBinding(client);
     const intent = binding.makeLaunchIntent(RESEARCH_FORM);
@@ -942,7 +1154,7 @@ describe("T12 receipt intent_id authentication", () => {
     expect(store.read(PRINCIPAL)).toEqual(pointer);
   });
 
-  it("T12 pinned vector key with mcp-bc363e20e05f2ba03efc9af32fe8f80d is accepted", async () => {
+  it("T12 pinned vector key with auto-ed35746b0a835165994569a8dc713270 is accepted", async () => {
     expect(intentIdForOperationKey(PINNED_KEY)).toBe(PINNED_INTENT_ID);
     const pointer: OperationPointer = {
       operationKey: PINNED_KEY,
@@ -954,10 +1166,12 @@ describe("T12 receipt intent_id authentication", () => {
       targetKey: WORKSTREAM,
       payload: { operation_key: PINNED_KEY, workstream: WORKSTREAM },
     };
-    const { client } = makeClient(() => ({
-      ok: true,
-      data: acceptedData(PINNED_KEY, { intent_id: PINNED_INTENT_ID }),
-    }));
+    const { client } = makeClient((name) => {
+      if (name === "submit_ceo_intent") {
+        return appAccepted(PINNED_KEY, { intent_id: PINNED_INTENT_ID });
+      }
+      return statusAccepted(PINNED_KEY, { intent_id: PINNED_INTENT_ID });
+    });
     const binding = makeBinding(client);
     const submitted = await binding.port.submit(
       pointer,
@@ -986,3 +1200,327 @@ describe("T12 receipt intent_id authentication", () => {
   });
 });
 
+describe("T13 sink-before-finalization regression + late authenticated recovery", () => {
+  it("T13 backend_refused → unknown/UNKNOWN_RECEIPT, pointer retained; later JOB-001 accepted without a second submit", async () => {
+    const researchKey = expectedResearchPayload().operation_key;
+    let statusEnvelope: ExecutiveToolEnvelope = statusError("not_found");
+    const { client, log } = makeClient((name) => {
+      if (name === "submit_ceo_intent") {
+        return appRefused(researchKey, "backend_refused");
+      }
+      return statusEnvelope;
+    });
+    const store = makeStore();
+    const binding = makeBinding(client, RESEARCH_CONFIG, store);
+    const intent = binding.makeLaunchIntent(RESEARCH_FORM);
+    if (!intent) throw new Error("expected launch intent");
+    const pointer = binding.port.prepare(intent);
+
+    const ctrl = new OperationController(binding.port, store);
+    const first = await ctrl.begin(intent);
+    expect(first.status).toBe("unknown");
+    expect(first.status).not.toBe("accepted");
+    expect(store.read(PRINCIPAL)).toEqual(pointer);
+
+    const retry = await ctrl.begin(intent);
+    expect(retry.status).toBe("checking");
+    expect(retry.reason).toBe("PENDING_POINTER");
+    expect(store.read(PRINCIPAL)).toEqual(pointer);
+    expect(log.filter((entry) => entry.name === "submit_ceo_intent")).toHaveLength(
+      1,
+    );
+
+    statusEnvelope = statusAccepted(researchKey);
+    const recovered = await ctrl.recover();
+    expect(recovered.status).toBe("accepted");
+    expect(recovered).toMatchObject({
+      reason: "ACCEPTED",
+      missionSelection: { workRef: WORKSTREAM, rootJobId: JOB_ID },
+    });
+    expect(log.filter((entry) => entry.name === "submit_ceo_intent")).toHaveLength(
+      1,
+    );
+  });
+
+  it("T13 authority_refused → refused/REFUSED (pointer-clearing); dispositions differ from backend_refused", async () => {
+    const researchKey = expectedResearchPayload().operation_key;
+    const { client: backendClient } = makeClient(() =>
+      appRefused(researchKey, "backend_refused"),
+    );
+    const backendBinding = makeBinding(backendClient);
+    const backendIntent = backendBinding.makeLaunchIntent(RESEARCH_FORM);
+    if (!backendIntent) throw new Error("expected launch intent");
+    const backendPointer = backendBinding.port.prepare(backendIntent);
+    const backendReceipt = await backendBinding.port.submit(
+      backendPointer,
+      backendIntent,
+      new AbortController().signal,
+    );
+
+    const store = makeStore();
+    const { client } = makeClient(() =>
+      appRefused(researchKey, "authority_refused"),
+    );
+    const binding = makeBinding(client, RESEARCH_CONFIG, store);
+    const intent = binding.makeLaunchIntent(RESEARCH_FORM);
+    if (!intent) throw new Error("expected launch intent");
+    const pointer = binding.port.prepare(intent);
+    const authorityReceipt = await binding.port.submit(
+      pointer,
+      intent,
+      new AbortController().signal,
+    );
+    expect(authorityReceipt).toMatchObject({
+      disposition: "refused",
+      reason: "REFUSED",
+    });
+    expect(backendReceipt.disposition).toBe("unknown");
+    expect(backendReceipt.reason).toBe("UNKNOWN_RECEIPT");
+    expect(authorityReceipt.disposition).not.toBe(backendReceipt.disposition);
+
+    const ctrl = new OperationController(binding.port, store);
+    const state = await ctrl.begin(intent);
+    expect(state.status).toBe("refused");
+    expect(state.status).not.toBe("accepted");
+    expect(store.read(PRINCIPAL)).toBeNull();
+  });
+});
+
+describe("T14 App-outcome shape matrix", () => {
+  async function submitWith(
+    envelope: ExecutiveToolEnvelope | Record<string, unknown>,
+  ) {
+    const { client } = makeClient(() => envelope as ExecutiveToolEnvelope);
+    const binding = makeBinding(client);
+    const intent = binding.makeLaunchIntent(RESEARCH_FORM);
+    if (!intent) throw new Error("expected launch intent");
+    const pointer = binding.port.prepare(intent);
+    return binding.port.submit(pointer, intent, new AbortController().signal);
+  }
+
+  async function readWith(
+    envelope: ExecutiveToolEnvelope | Record<string, unknown>,
+  ) {
+    const { client } = makeClient(() => envelope as ExecutiveToolEnvelope);
+    const binding = makeBinding(client);
+    const intent = binding.makeLaunchIntent(RESEARCH_FORM);
+    if (!intent) throw new Error("expected launch intent");
+    const pointer = binding.port.prepare(intent);
+    return binding.port.readOperation(pointer, new AbortController().signal);
+  }
+
+  const researchKey = expectedResearchPayload().operation_key;
+
+  it("T14 request_ref missing → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith({
+      ok: true,
+      status: "accepted",
+      receipt: acceptedData(researchKey),
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 request_ref ≠ requestRefForOperationKey → unknown/RECEIPT_MISMATCH", async () => {
+    const receipt = await submitWith({
+      ok: true,
+      status: "accepted",
+      request_ref: "req-deadbeefdeadbeefdeadbeefdeadbeef",
+      receipt: acceptedData(researchKey),
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "RECEIPT_MISMATCH",
+    });
+  });
+
+  it("T14 extra top-level key → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith({
+      ...appAccepted(researchKey),
+      extra: true,
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 ok inconsistent with status → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith({
+      ok: false,
+      status: "accepted",
+      request_ref: requestRefForOperationKey(researchKey),
+      error: { code: "invalid_input", message: "invalid_input" },
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 accepted + error key → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith({
+      ok: true,
+      status: "accepted",
+      request_ref: requestRefForOperationKey(researchKey),
+      receipt: acceptedData(researchKey),
+      error: { code: "invalid_input", message: "invalid_input" },
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 refused + receipt key → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith({
+      ok: false,
+      status: "refused",
+      request_ref: requestRefForOperationKey(researchKey),
+      error: { code: "authority_refused", message: "authority_refused" },
+      receipt: acceptedData(researchKey),
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 legacy { ok: true, data } on submit → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith({
+      ok: true,
+      data: acceptedData(researchKey),
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 legacy { ok: true, data } on status → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await readWith({
+      ok: true,
+      data: acceptedData(researchKey),
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 bare { ok: false, error } on status → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await readWith(barePreflight("not_found"));
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 ok not boolean → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith({
+      ok: "true",
+      status: "accepted",
+      request_ref: requestRefForOperationKey(researchKey),
+      receipt: acceptedData(researchKey),
+    });
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 receipt containing NaN → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await submitWith(
+      appAccepted(researchKey, { created_at_ms: Number.NaN }),
+    );
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 data containing Infinity → unknown/MALFORMED_RECEIPT", async () => {
+    const receipt = await readWith(
+      statusAccepted(researchKey, { created_at_ms: Number.POSITIVE_INFINITY }),
+    );
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 cyclic envelope → unknown/MALFORMED_RECEIPT without throwing", async () => {
+    const envelope: Record<string, unknown> = {
+      ok: true,
+      status: "accepted",
+      request_ref: requestRefForOperationKey(researchKey),
+      receipt: acceptedData(researchKey),
+    };
+    (envelope.receipt as Record<string, unknown>).cycle = envelope;
+    let thrown: unknown;
+    let receipt: Awaited<ReturnType<typeof submitWith>> | undefined;
+    try {
+      receipt = await submitWith(envelope);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeUndefined();
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 shared acyclic object referenced twice is classified by content", async () => {
+    const shared = { token: "shared" };
+    const receipt = await submitWith(
+      appAccepted(researchKey, {
+        grounding: { left: shared, right: shared },
+      }),
+    );
+    expect(receipt).toEqual({
+      operationKey: researchKey,
+      kind: "launch",
+      targetKey: WORKSTREAM,
+      disposition: "accepted",
+      reason: "ACCEPTED",
+      missionSelection: { workRef: WORKSTREAM, rootJobId: JOB_ID },
+    });
+  });
+
+  it("T14 array nested 100000 levels deep → unknown/MALFORMED_RECEIPT without stack overflow", async () => {
+    let deep: unknown = null;
+    for (let i = 0; i < 100000; i += 1) {
+      deep = [deep];
+    }
+    let thrown: unknown;
+    let receipt: Awaited<ReturnType<typeof submitWith>> | undefined;
+    try {
+      receipt = await submitWith({
+        ok: true,
+        status: "accepted",
+        request_ref: requestRefForOperationKey(researchKey),
+        receipt: deep,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeUndefined();
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+
+  it("T14 Object.create({polluted: true}) prototype → unknown/MALFORMED_RECEIPT", async () => {
+    const envelope = Object.create({ polluted: true }) as ExecutiveToolEnvelope;
+    Object.assign(envelope, appAccepted(researchKey));
+    const receipt = await submitWith(envelope);
+    expect(receipt).toMatchObject({
+      disposition: "unknown",
+      reason: "MALFORMED_RECEIPT",
+    });
+  });
+});
