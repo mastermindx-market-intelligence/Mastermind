@@ -136,6 +136,8 @@ class ExecutiveOperatorSupervisor:
         self._workspace_identity_source = workspace_identity_source
         self.prompt_source = prompt_source
         self.instance_id = instance_id
+        # Execution-local custody only. Never reconstructed by owner name or DB token.
+        self._domain_consumption_sessions: dict[str, tuple[Any, ...]] = {}
 
     def _adapter_for_attempt(
         self, lease: AttemptLease, requested: RequestedExecutionProfile,
@@ -1250,7 +1252,90 @@ class ExecutiveOperatorSupervisor:
             expected_consumption_projection_digest=digest,
             timeout_seconds=float(timeout_seconds),
         )
-        return orchestrator.seal_domain_consumption_result(session, receipt)
+        seal = orchestrator.seal_domain_consumption_result(session, receipt)
+        self._domain_consumption_sessions[current.attempt_id] = (
+            lease, session, adapter, receipt.turn, copy.deepcopy(seal),
+        )
+        return seal
+
+    def complete_domain_consumption(
+        self, lease: AttemptLease, *, consumption_seal: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Original-owner terminal transaction; full LIVE validation precedes stop.
+
+        Unknown/interrupted stops retain FINAL and all consumption evidence. There
+        is no recovery/takeover, token substitution, new actor, or provider turn.
+        Historical completion subsequently proves the exact existing stop events.
+        """
+        from control_plane.executive_orchestration_result import RawRoleResultObservation
+        if (type(lease) is not AttemptLease or type(lease.attempt) is not Attempt
+                or type(lease.lease_token) is not str or not lease.lease_token
+                or type(lease.attempt.fence_generation) is not int
+                or type(consumption_seal) is not dict):
+            raise ExecutiveOperatorSupervisorError("domain terminal requires typed original owner inputs")
+        retained = self._domain_consumption_sessions.get(lease.attempt.attempt_id)
+        if retained is None:
+            raise ExecutiveOperatorSupervisorError("domain terminal lacks the SAME original Supervisor custody")
+        original, session, adapter, turn, frozen_seal = retained
+        current = self.runtime.attempts.get_attempt(lease.attempt.attempt_id)
+        keys = ("attempt_id", "job_id", "worker_id", "quota_class", "fence_generation", "lease_owner",
+                "authority_policy_hash", "requested_execution_profile_digest", "effective_grant_digest",
+                "placement_snapshot_digest", "execution_principal_snapshot_digest", "execution_mode")
+        if (type(current) is not Attempt or current.status is not AttemptStatus.CHECKPOINTED
+                or lease.attempt.status is not AttemptStatus.CHECKPOINTED
+                or current.lease_owner != self.instance_id
+                or lease.lease_token != original.lease_token
+                or any(type(getattr(value, key)) is not type(getattr(original.attempt, key))
+                       or getattr(value, key) != getattr(original.attempt, key)
+                       for value in (current, lease.attempt) for key in keys)):
+            raise ExecutiveOperatorSupervisorError("domain terminal requires the SAME current original owner")
+        try:
+            same = (canonical_bytes(consumption_seal) == canonical_bytes(frozen_seal)
+                    and all(canonical_bytes(getattr(value, key)) == canonical_bytes(getattr(original.attempt, key))
+                            for value in (current, lease.attempt)
+                            for key in ("requested_execution_profile", "effective_grant", "placement_snapshot", "execution_principal_snapshot")))
+        except (TypeError, ValueError):
+            same = False
+        if not same:
+            raise ExecutiveOperatorSupervisorError("domain terminal full owner/consumption material changed")
+        seal = frozen_seal
+        body = canonical_bytes(seal["consumption_result"])
+        observation = RawRoleResultObservation(
+            attempt_id=turn.attempt_id, session_epoch_id=turn.session_epoch_id,
+            process_generation_id=turn.process_generation_id, turn_id=turn.turn_id,
+            provider_session_id=seal["provider_session_id"], provider_native_turn_id=seal["provider_native_turn_id"],
+            provider_turn_artifact_digest=seal["provider_turn_artifact_digest"], canonical_result_json=body.decode(),
+            canonical_result_digest=seal["consumed_body_digest"], canonical_result_byte_length=seal["raw_observation_byte_length"],
+            schema_version=seal["raw_observation_schema_version"],
+        )
+        validated = self.runtime.jobs.seal_cycle_domain_consumption(
+            seal["root_job_id"], domain_attempt_id=current.attempt_id,
+            observation=observation, command_id=seal["command_id"], turn=turn,
+            fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
+        )
+        if canonical_bytes(validated) != canonical_bytes(seal):
+            raise ExecutiveOperatorSupervisorError("domain terminal LIVE consumption revalidation drifted")
+        exact_lease = AttemptLease(current, lease.lease_token)
+        stopped = self._orchestrator(exact_lease, adapter).graceful_stop(
+            session, operation_id=OperationId(
+                f"ohf-op:coo-domain-terminal:{current.attempt_id}:{session.generation.process_generation_id}"),
+        )
+        if (stopped.process_liveness is not ProcessLiveness.PROVEN_DEAD
+                or stopped.provider_writer_state is not ProviderWriterState.RELEASED):
+            raise ExecutiveOperatorSupervisorError("domain terminal stop did not prove dead/released")
+        self.runtime.operator_harness.abandon_epoch(
+            epoch=session.epoch, fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
+        )
+        terminal = self.runtime.jobs.domain_terminal_payload(
+            seal["root_job_id"], domain_attempt_id=current.attempt_id,
+            fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
+        )
+        self.runtime.attempts.complete_attempt(
+            current.attempt_id, fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token, payload=terminal,
+        )
+        del self._domain_consumption_sessions[current.attempt_id]
+        return self.runtime.jobs.read_cycle_domain_terminal(seal["root_job_id"])
 
     def _recover_one(
         self, attempt_id: str
