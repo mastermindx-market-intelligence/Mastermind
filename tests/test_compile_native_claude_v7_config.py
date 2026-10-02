@@ -103,6 +103,7 @@ def test_compile_preserves_enrollment_and_only_adds_sealed_policy(tmp_path: Path
 @pytest.mark.parametrize(
     "mutation",
     [
+        lambda value: value.__setitem__("unexpected_secret_field", "must-not-copy"),
         lambda value: value.__setitem__("native_provider", "codex"),
         lambda value: value.__setitem__("operator_harness_armed", True),
         lambda value: value["native_realm_enrollment"].__setitem__(

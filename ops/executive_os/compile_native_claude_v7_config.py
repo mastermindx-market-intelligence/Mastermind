@@ -79,6 +79,11 @@ def _read_exact_json(path: Path, expected_sha256: str) -> tuple[dict[str, Any], 
 
 
 def _require_enrolled_native_claude(source: Mapping[str, Any]) -> None:
+    expected_fields = worker._NATIVE_CLAUDE_CONFIG_FIELDS | frozenset(
+        {"claude_sdk_python"}
+    )
+    if set(source) != expected_fields:
+        raise NativeClaudeV7CompileError("source native Claude v6 fields differ")
     if (
         source.get("schema_version") != worker.NATIVE_CONFIG_SCHEMA_VERSION
         or source.get("native_provider") != "claude"
@@ -102,6 +107,8 @@ def _require_enrolled_native_claude(source: Mapping[str, Any]) -> None:
 
 
 def _require_validation_config(validation: Mapping[str, Any]) -> None:
+    if set(validation) != worker._CONFIG_FIELDS:
+        raise NativeClaudeV7CompileError("validation Codex v4 fields differ")
     if (
         validation.get("schema_version") != worker.CONFIG_SCHEMA_VERSION
         or validation.get("required_team_identifier") != _OPENAI_TEAM
