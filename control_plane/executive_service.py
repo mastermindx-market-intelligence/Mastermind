@@ -48,6 +48,8 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import (
+    Attempt,
+    AttemptLease,
     AttemptStatus,
     EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
     Job,
@@ -204,7 +206,36 @@ class OperatorSupervisorProtocol(Protocol):
         self, job_id: str, *, command_id: str
     ) -> OrchestrationDispatchOutcome: ...
 
+    def continue_domain_consumption(self, lease: AttemptLease) -> dict[str, Any]: ...
+
     def reconcile_restart(self, *, requeue_lost: bool = False) -> list[Any]: ...
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class _CooDomainOwner:
+    supervisor: Any
+    runtime: Runtime
+    lease: AttemptLease
+    command_id: str
+    job_identity: str
+    attempt_identity: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _CooDomainConsumptionDispatch:
+    command_id: str
+    job_id: str
+    attempt: Attempt
+    consumption_seal: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "command_id": self.command_id,
+            "job_id": self.job_id,
+            "attempt": self.attempt.to_dict(),
+            "outcome": "ACTIVE",
+            "consumption_seal": self.consumption_seal,
+        }
 
 
 class BackupBackendProtocol(Protocol):
@@ -1964,6 +1995,8 @@ class ExecutiveControlService:
         self._coo_cycle_lock = asyncio.Lock()
         self._dispatch_tasks: dict[str, asyncio.Task[Any]] = {}
         self._dispatch_errors: dict[str, str] = {}
+        # Execution-local custody of actual initial returns, never a token registry.
+        self._coo_domain_owners: dict[str, _CooDomainOwner] = {}
         # Default-off composition.  Agent Dialogue owns the concrete Relay
         # projector and injects its factory at the host composition edge; the
         # Executive control plane never reaches back into an integration.
@@ -3009,6 +3042,10 @@ class ExecutiveControlService:
             health = self._database_health()
             if not health["ok"]:
                 raise ServiceError(f"Executive database health check failed: {health!r}")
+            if self.config.coo_domain_operator_armed:
+                # Cold startup has no right to recover/adopt an original domain.
+                # Refuse before factories, identity checks or either recovery path.
+                self._preflight_coo_domain_recovery()
             from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
             self._namespace_custody = ServiceRuntimeNamespaceCustody(
                 runtime=self.runtime, service_lock_fd=self._lock_fd,
@@ -3315,6 +3352,8 @@ class ExecutiveControlService:
         if hasattr(self, "_dialogue_observation_inode"):
             self._dialogue_observation_inode = None
         self._release_service_lock()
+        # Dropping process-local custody proves no provider death or writer release.
+        self._coo_domain_owners.clear()
         if deferred_terminal_cancel is not None:
             raise deferred_terminal_cancel
 
@@ -4871,7 +4910,7 @@ class ExecutiveControlService:
 
         runtime = self._require_runtime()
         async with self._workspace_lock:
-            if any(not task.done() for task in self._dispatch_tasks.values()):
+            if self._coo_domain_owners or any(not task.done() for task in self._dispatch_tasks.values()):
                 raise StateConflict(
                     "cannot create a sibling proof workspace while a worker dispatch is active"
                 )
@@ -5275,7 +5314,7 @@ class ExecutiveControlService:
     async def _requeue_proof_job(self, job_id: str) -> dict[str, Any]:
         runtime = self._require_runtime()
         async with self._workspace_lock:
-            if any(not task.done() for task in self._dispatch_tasks.values()):
+            if self._coo_domain_owners or any(not task.done() for task in self._dispatch_tasks.values()):
                 raise StateConflict(
                     "cannot rotate a proof workspace while a worker dispatch is active"
                 )
@@ -5586,7 +5625,122 @@ class ExecutiveControlService:
                     "reviewed COO operator quota identity is unavailable or drifted"
                 )
 
+    @staticmethod
+    def _coo_domain_job_identity(job: Job) -> str:
+        return json.dumps({key: getattr(job, key) for key in (
+            "job_id", "root_job_id", "parent_job_id", "depth", "orchestration_role",
+            "worktree", "branch", "constraints", "orchestration_provenance",
+        )}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    @staticmethod
+    def _coo_domain_attempt_identity(attempt: Attempt) -> str:
+        keys = (
+            "attempt_id", "job_id", "worker_id", "quota_class", "fence_generation",
+            "lease_owner", "authority_policy_hash", "requested_execution_profile_digest",
+            "effective_grant_digest", "placement_snapshot_digest",
+            "execution_principal_snapshot_digest", "execution_mode",
+            "requested_execution_profile", "effective_grant", "placement_snapshot",
+            "execution_principal_snapshot",
+        )
+        return json.dumps({key: [type(getattr(attempt, key)).__name__, getattr(attempt, key)]
+            for key in keys}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    def _is_service_coo_domain(self, job: Job) -> bool:
+        return (self.config.coo_domain_operator_armed and job.depth == 1
+            and job.orchestration_role == "plan"
+            and job.constraints.get("execution_profile_id") == COO_DOMAIN_EXECUTION_PROFILE)
+
+    def _require_owned_coo_domain(self, job: Job) -> AttemptLease:
+        runtime = self._require_runtime()
+        if type(job) is not Job:
+            self._service_state = "QUARANTINED"
+            raise StateConflict("retained COO domain Job is not current typed Runtime data")
+        owner = self._coo_domain_owners.get(job.job_id)
+        current = runtime.attempts.get_attempt(job.current_attempt_id) if job.current_attempt_id else None
+        if (owner is None or self._closing or not self._is_service_coo_domain(job)
+                or owner.runtime is not runtime or owner.supervisor is not self.operator_supervisor
+                or getattr(owner.supervisor, "runtime", None) is not runtime
+                or type(current) is not Attempt or current.status is not AttemptStatus.CHECKPOINTED
+                or job.status is not JobStatus.CHECKPOINTED
+                or type(owner.lease) is not AttemptLease or type(owner.lease.lease_token) is not str
+                or not owner.lease.lease_token
+                or current.lease_owner != getattr(owner.supervisor, "instance_id", None)
+                or current.worker_id != self.config.worker_id
+                or current.quota_class != str(self.config.coo_operator_quota_class).strip().lower()
+                or job.assigned_worker_id != current.worker_id
+                or job.assigned_quota_class != current.quota_class
+                or self._coo_domain_job_identity(job) != owner.job_identity
+                or self._coo_domain_attempt_identity(current) != owner.attempt_identity
+                or self._coo_domain_attempt_identity(owner.lease.attempt) != owner.attempt_identity):
+            self._service_state = "QUARANTINED"
+            raise StateConflict("COO domain has no exact same-Service original owner")
+        try:
+            self._require_bound_coo_job(job)
+            with runtime.store.read() as connection:
+                # Validate the captured caller token; ignore the private guard's row.
+                # No stored token is extracted, substituted, rotated or serialized.
+                runtime.attempts._leased_row(connection,
+                    attempt_id=current.attempt_id, fence_generation=current.fence_generation,
+                    lease_token=owner.lease.lease_token, timestamp=runtime.store.now_ms(),
+                    statuses={AttemptStatus.CHECKPOINTED})
+        except (RuntimeProofError, ServiceError):
+            self._service_state = "QUARANTINED"
+            raise
+        return AttemptLease(current, owner.lease.lease_token)
+
+    def _owned_coo_domain_jobs(self) -> set[str]:
+        jobs = set()
+        for job_id in self._coo_domain_owners:
+            job = self._require_runtime().jobs.get_job(job_id)
+            if job is None:
+                self._service_state = "QUARANTINED"
+                raise StateConflict("retained COO domain Job disappeared")
+            self._require_owned_coo_domain(job)
+            jobs.add(job_id)
+        return jobs
+
+    def _retain_coo_domain_return(self, job: Job, supervisor: Any,
+        started: OrchestrationDispatchOutcome, command_id: str) -> None:
+        from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+        if (job.status is not JobStatus.QUEUED or job.job_id in self._coo_domain_owners
+                or not isinstance(supervisor, ExecutiveOperatorSupervisor)
+                or type(started) is not OrchestrationDispatchOutcome
+                or started.command_id != command_id or started.job_id != job.job_id
+                or started.outcome != "ACTIVE" or type(started.attempt) is not Attempt
+                or started.attempt.status is not AttemptStatus.CHECKPOINTED
+                or type(started.lease_token) is not str or not started.lease_token):
+            self._service_state = "QUARANTINED"
+            raise StateConflict("COO domain return is not the original checkpointed lease")
+        self._coo_domain_owners[job.job_id] = _CooDomainOwner(
+            supervisor, self._require_runtime(), AttemptLease(started.attempt, started.lease_token),
+            command_id, self._coo_domain_job_identity(job),
+            self._coo_domain_attempt_identity(started.attempt),
+        )
+        current = self._require_runtime().jobs.get_job(job.job_id)
+        assert current is not None
+        self._require_owned_coo_domain(current)
+
+    def _preflight_coo_domain_recovery(self) -> tuple[set[str], list[Attempt]]:
+        owned = self._owned_coo_domain_jobs()
+        active = [attempt for attempt in self._require_runtime().attempts.list_attempts()
+            if attempt.status in _COO_ACTIVE_ATTEMPT_STATUSES]
+        for attempt in active:
+            job = self._require_runtime().jobs.get_job(attempt.job_id)
+            if job is not None and self._is_service_coo_domain(job) and job.job_id not in owned:
+                self._service_state = "QUARANTINED"
+                raise StateConflict("unowned COO domain requires original-owner adjudication")
+        return owned, active
+
     async def _reconcile_unowned_cycle_attempts(self) -> None:
+        if self.config.coo_domain_operator_armed:
+            owned, active = self._preflight_coo_domain_recovery()
+            if owned:
+                finishing = {job_id for job_id, task in self._dispatch_tasks.items() if not task.done()}
+                if all(attempt.job_id in owned or attempt.job_id in finishing for attempt in active):
+                    return
+                # Never sweep a healthy original owner through generic restart recovery.
+                self._service_state = "QUARANTINED"
+                raise StateConflict("unowned active Attempt coexists with retained COO domain")
         if any(not task.done() for task in self._dispatch_tasks.values()):
             return
         runtime = self._require_runtime()
@@ -5628,7 +5782,7 @@ class ExecutiveControlService:
 
     async def _dispatch_cycle_job_exact(
         self, job_id: str, command_id: str
-    ) -> OrchestrationDispatchOutcome:
+    ) -> OrchestrationDispatchOutcome | _CooDomainConsumptionDispatch:
         runtime = self._require_runtime()
         async with self._dispatch_lock:
             async with self._workspace_lock:
@@ -5637,6 +5791,7 @@ class ExecutiveControlService:
                     for value, task in self._dispatch_tasks.items()
                     if not task.done()
                 }
+                live |= self._owned_coo_domain_jobs()
                 job = runtime.jobs.get_job(job_id)
                 if job is None:
                     raise StateConflict(f"job {job_id!r} does not exist")
@@ -5691,6 +5846,23 @@ class ExecutiveControlService:
                     )
                     else self._require_supervisor()
                 )
+                is_domain = self._is_service_coo_domain(job)
+                if is_domain and job.status is not JobStatus.QUEUED:
+                    lease = self._require_owned_coo_domain(job)
+                    owner = self._coo_domain_owners[job_id]
+                    if command_id != owner.command_id:
+                        raise StateConflict("domain continuation command differs from its original dispatch")
+                    try:
+                        seal = await self._run_physical(supervisor.continue_domain_consumption, lease)
+                        if (type(seal) is not dict or len(json.dumps(seal).encode("utf-8"))
+                                > self.config.max_response_bytes):
+                            raise ServiceError("domain consumption return exceeds its bounded receipt")
+                        current_lease = self._require_owned_coo_domain(runtime.jobs.get_job(job_id))
+                        return _CooDomainConsumptionDispatch(command_id, job_id, current_lease.attempt, seal)
+                    except Exception as exc:
+                        self._dispatch_errors[job_id] = f"{type(exc).__name__}: domain consumption requires reconciliation"
+                        self._service_state = "QUARANTINED"
+                        raise
                 try:
                     started = await self._run_owned_coroutine(
                         supervisor.start_cycle_job(job_id, command_id=command_id)
@@ -5709,6 +5881,8 @@ class ExecutiveControlService:
                         self._service_state = "QUARANTINED"
                     raise
                 if isinstance(started, OrchestrationDispatchOutcome):
+                    if is_domain:
+                        self._retain_coo_domain_return(job, supervisor, started, command_id)
                     if started.outcome == "TERMINAL":
                         await self._project_terminal_return(
                             started.job_id,
@@ -5743,6 +5917,8 @@ class ExecutiveControlService:
             raise StateConflict(f"Executive control service is {self._service_state}")
         root_id = self._id(root_job_id, "root_job_id")
         async with self._coo_cycle_lock:
+            # Original custody must quarantine binding drift before other host guards.
+            retained = self._owned_coo_domain_jobs()
             self._require_coo_worker_composed()
             root = self._require_runtime().jobs.get_job(root_id)
             if root is None or not self._is_bound_coo_root(root):
@@ -5759,6 +5935,7 @@ class ExecutiveControlService:
                 for value, task in self._dispatch_tasks.items()
                 if not task.done()
             }
+            live |= retained
             live_jobs = [self._require_runtime().jobs.get_job(value) for value in live]
             if live and (
                 any(value is None for value in live_jobs)
@@ -5854,13 +6031,14 @@ class ExecutiveControlService:
         return None
 
     def _live_bound_coo_root_id(self) -> str | None:
-        """Return the one bound COO root owning every live service finisher."""
+        """Return the bound root owning every live finisher and retained domain."""
 
-        live = [
+        live = {
             job_id
             for job_id, task in self._dispatch_tasks.items()
             if not task.done()
-        ]
+        }
+        live |= self._owned_coo_domain_jobs()
         if not live:
             return None
         runtime = self._require_runtime()
@@ -5936,16 +6114,6 @@ class ExecutiveControlService:
                 return
             if self._service_state != "READY":
                 continue
-            has_live_dispatch = any(
-                not task.done() for task in self._dispatch_tasks.values()
-            )
-            live_root_id = (
-                self._live_bound_coo_root_id()
-                if has_live_dispatch
-                else None
-            )
-            if has_live_dispatch and live_root_id is None:
-                continue
             root_id: str | None = None
             try:
                 if not self.config.coo_autonomy_armed:
@@ -5953,6 +6121,14 @@ class ExecutiveControlService:
                 # Validate before writing even a diagnostic refusal. The existing
                 # per-action guard revalidates immediately before useful work.
                 self._require_current_autonomy()
+                has_live_dispatch = any(
+                    not task.done() for task in self._dispatch_tasks.values()
+                ) or bool(self._coo_domain_owners)
+                live_root_id = (
+                    self._live_bound_coo_root_id() if has_live_dispatch else None
+                )
+                if has_live_dispatch and live_root_id is None:
+                    continue
                 prestart_refusals: dict[str, Exception] = {}
                 selected_root_id = live_root_id
                 if selected_root_id is None:
@@ -6809,7 +6985,7 @@ class ExecutiveControlService:
             # the lock so a concurrent creator cannot enter the snapshot/start
             # gap or slip through an unrecorded-active window.
             async with self._workspace_lock:
-                if any(not task.done() for task in self._dispatch_tasks.values()):
+                if self._coo_domain_owners or any(not task.done() for task in self._dispatch_tasks.values()):
                     raise StateConflict("the serialized worker already has an active dispatch")
                 job = runtime.jobs.get_job(job_id)
                 if job is None:
@@ -6992,7 +7168,7 @@ class ExecutiveControlService:
             return _jsonable(runtime.jobs.cancel_job(self._id(args["job_id"], "job_id")))
         if command == "reconcile":
             self._exact_args(args, set())
-            if any(not task.done() for task in self._dispatch_tasks.values()):
+            if self._coo_domain_owners or any(not task.done() for task in self._dispatch_tasks.values()):
                 raise StateConflict("cannot reconcile while this service owns an active dispatch")
             return _jsonable(
                 await self._run_physical(

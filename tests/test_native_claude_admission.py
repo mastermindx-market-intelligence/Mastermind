@@ -22,6 +22,7 @@ def _service_with_alias(alias_name: str) -> ExecutiveControlService:
         operator_harness_binary_digest="b" * 64,
         operator_harness_version="fixture-v1",
         coo_operator_harness_armed=False,
+        coo_domain_operator_armed=False,
     )
     return service
 
