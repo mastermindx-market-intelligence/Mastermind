@@ -776,7 +776,7 @@
     if (!binding || !binding.binding_id) return Promise.resolve();
     if (trigger) trigger.disabled = true;
     if (statusNode) {
-      statusNode.className = "ccr-binding-meta";
+      statusNode.className = "ccr-binding-meta ccr-navigation-status";
       statusNode.textContent = targetSurface === "desktop" ? "Opening in Desktop…" : "Opening…";
     }
     var request = { binding_id: binding.binding_id };
@@ -790,13 +790,13 @@
         statusNode.textContent = outcome && outcome.failure_kind === "effect_unknown"
           ? "Handoff uncertain. Inspect the bound session before retrying."
           : "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
-        statusNode.className = "ccr-binding-meta ccr-problem";
+        statusNode.className = "ccr-binding-meta ccr-navigation-status ccr-problem";
       }
       return outcome;
     }).catch(function () {
       if (statusNode) {
         statusNode.textContent = "Open outcome unknown: response unavailable. Inspect the bound session before retrying.";
-        statusNode.className = "ccr-binding-meta ccr-problem";
+        statusNode.className = "ccr-binding-meta ccr-navigation-status ccr-problem";
       }
       return null;
     }).finally(function () {
@@ -807,12 +807,12 @@
   function openBindingButton(binding, label, targetSurface) {
     var confidence = bindingConfidence(binding);
     var status = document.createElement("span");
-    status.className = "ccr-binding-meta";
+    status.className = "ccr-binding-meta ccr-navigation-status";
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
     var btn = button(label || OPEN_LABEL[binding.role] || "Open", "ccr-open-button", function (event) {
       event.stopPropagation();
-      if (!status.parentNode && btn.parentNode) btn.parentNode.insertBefore(status, btn.nextSibling);
+      if (!status.parentNode && btn.parentNode) btn.parentNode.appendChild(status);
       return openBinding(binding, status, btn, targetSurface).then(function (outcome) {
         // Keep failure/uncertainty visible. A refresh used to discard it.
         if (outcome && outcome.ok) loadState();
@@ -881,10 +881,12 @@
         copy.appendChild(el("div", { text: workTitle(binding.work_ref), className: "ccr-destination-title" }));
         copy.appendChild(el("div", { text: safeText(binding.work_ref) + " · " + bindingConfidence(binding).state, className: "ccr-destination-sub" }));
         row.appendChild(copy);
-        row.appendChild(openBindingButton(binding, "Open"));
+        var actions = el("div", { className: "ccr-navigation-actions" });
+        actions.appendChild(openBindingButton(binding, "Open"));
         if (binding.provider === "claude_code") {
-          row.appendChild(openBindingButton(binding, "Desktop", "desktop"));
+          actions.appendChild(openBindingButton(binding, "Desktop", "desktop"));
         }
+        row.appendChild(actions);
         list.appendChild(row);
       });
       details.appendChild(list);

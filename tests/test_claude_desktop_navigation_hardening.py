@@ -259,7 +259,7 @@ const loadState = () => {refreshes++;};
 const OPEN_LABEL = {};
 const bindingConfidence = () => ({openable:true});
 const document = {createElement: () => ({parentNode:null, setAttribute(){}})};
-const parent = {insertBefore(node){node.parentNode=this; this.status=node;}};
+const parent = {appendChild(node){node.parentNode=this; this.status=node;}};
 const button = (label, cls, handler) => ({label, className:cls, handler, parentNode:parent, nextSibling:null});
 ''' + '\n'.join(functions) + r'''
 const b={binding_id:'opaque-binding',role:'chairman'};
