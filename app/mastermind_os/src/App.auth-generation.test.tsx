@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 // Native events and source documents are injected fixtures, not live account reads.
-import { webcrypto } from "node:crypto";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,10 +63,11 @@ async function nativeFixture() {
     },
   };
 }
-beforeEach(() => {
+beforeEach(async () => {
   history.replaceState(null, "", "/os/?work_ref=WS%3AFABRIC&root_job_id=JOB-001");
   delete (window as any).__TAURI_INTERNALS__;
   delete window.MastermindMissionHost;
+  const { webcrypto } = await vi.importActual<{ webcrypto: Crypto }>("node:crypto");
   vi.stubGlobal("crypto", webcrypto);
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); delete window.MastermindMissionHost; });
@@ -99,7 +99,7 @@ describe("native auth generation reaches the actual workspace", () => {
     const e = await nativeFixture();
     window.MastermindMissionHost = e.host;
     render(<App />);
-    await userEvent.setup().click(screen.getByRole("button", { name: route, exact: true }));
+    await userEvent.setup().click(screen.getByRole("button", { name: route }));
     await waitFor(() => expect(document.body.textContent).toContain(privateText));
     const reads = e.invoke.mock.calls.filter(([name]) => name === "read_programs").length;
     e.hold();
