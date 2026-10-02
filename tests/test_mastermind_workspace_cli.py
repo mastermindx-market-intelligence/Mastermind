@@ -445,12 +445,31 @@ def test_wrong_or_missing_volume_identity_blocks_admission(storage_cli, monkeypa
     assert "STORAGE_VOLUME_IDENTITY_MISMATCH" in result["error"]
 
 
-def test_unmounted_path_is_not_a_storage_volume(storage_cli, monkeypatch, capsys):
-    cli, _, _, _ = storage_cli
+def test_non_mount_path_without_exact_native_mount_identity_is_refused(storage_cli, monkeypatch, capsys):
+    cli, _, _, data = storage_cli
     monkeypatch.setattr(Path, "is_mount", lambda p: False)
+    monkeypatch.setattr(cli, "_volume_identity", lambda p: {
+        "MountPoint": "/different-volume",
+        "VolumeUUID": data["volume_uuid"],
+        "Writable": True,
+    })
     code, result = _call_storage_cli(cli, capsys, "storage")
     assert code == 2
-    assert "STORAGE_MOUNT_UNAVAILABLE" in result["error"]
+    assert "STORAGE_VOLUME_IDENTITY_MISMATCH" in result["error"]
+
+
+def test_apfs_data_mountpoint_is_accepted_from_exact_native_identity(storage_cli, monkeypatch, capsys):
+    cli, _, _, data = storage_cli
+    monkeypatch.setattr(Path, "is_mount", lambda p: False)
+    monkeypatch.setattr(cli, "_volume_identity", lambda p: {
+        "MountPoint": data["mount_point"],
+        "VolumeUUID": data["volume_uuid"],
+        "Writable": True,
+    })
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 0
+    assert result["receipt"]["state"] == "READY"
+    assert result["receipt"]["mount_point"] == data["mount_point"]
 
 
 def test_storage_observation_failure_does_not_become_free_capacity(storage_cli, monkeypatch, capsys):
