@@ -775,20 +775,27 @@
   function openBinding(binding, statusNode, trigger, targetSurface) {
     if (!binding || !binding.binding_id) return Promise.resolve();
     if (trigger) trigger.disabled = true;
-    if (statusNode) statusNode.textContent = targetSurface === "desktop" ? "Opening in Desktop…" : "Opening…";
+    if (statusNode) {
+      statusNode.className = "ccr-binding-meta";
+      statusNode.textContent = targetSurface === "desktop" ? "Opening in Desktop…" : "Opening…";
+    }
     var request = { binding_id: binding.binding_id };
     if (targetSurface) request.target_surface = targetSurface;
     return postJSON("/api/open", request).then(function (outcome) {
       if (outcome && outcome.ok) {
-        if (statusNode) statusNode.textContent = "Opened · " + safeText(outcome.action, "provider action");
+        if (statusNode) statusNode.textContent = outcome.action === "opened_desktop"
+          ? "Desktop handoff accepted; visible app state not checked."
+          : "Opened · " + safeText(outcome.action, "provider action");
       } else if (statusNode) {
-        statusNode.textContent = "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
+        statusNode.textContent = outcome && outcome.failure_kind === "effect_unknown"
+          ? "Handoff uncertain. Inspect the bound session before retrying."
+          : "Did not open · " + safeText(outcome && outcome.failure_kind, "unknown reason");
         statusNode.className = "ccr-binding-meta ccr-problem";
       }
       return outcome;
     }).catch(function () {
       if (statusNode) {
-        statusNode.textContent = "Did not open · local server unavailable";
+        statusNode.textContent = "Open outcome unknown: response unavailable. Inspect the bound session before retrying.";
         statusNode.className = "ccr-binding-meta ccr-problem";
       }
       return null;
@@ -799,9 +806,18 @@
 
   function openBindingButton(binding, label, targetSurface) {
     var confidence = bindingConfidence(binding);
+    var status = document.createElement("span");
+    status.className = "ccr-binding-meta";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
     var btn = button(label || OPEN_LABEL[binding.role] || "Open", "ccr-open-button", function (event) {
       event.stopPropagation();
-      openBinding(binding, null, btn, targetSurface).then(function () { loadState(); });
+      if (!status.parentNode && btn.parentNode) btn.parentNode.insertBefore(status, btn.nextSibling);
+      return openBinding(binding, status, btn, targetSurface).then(function (outcome) {
+        // Keep failure/uncertainty visible. A refresh used to discard it.
+        if (outcome && outcome.ok) loadState();
+        return outcome;
+      });
     });
     btn.disabled = !confidence.openable;
     return btn;
