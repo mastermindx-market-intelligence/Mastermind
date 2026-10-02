@@ -63,8 +63,9 @@ repair, 2026-08-22)
   map — a request path is only ever used as a dict LOOKUP key, never
   concatenated into a filesystem path, so path traversal has no code path to
   reach;
-* ``POST /api/open`` accepts only a ``binding_id`` — never a URL, argv, path,
-  or profile from the browser; the actual navigation argv is built entirely
+* ``POST /api/open`` accepts a ``binding_id`` plus an optional closed
+  ``target_surface`` discriminator — never a URL, argv, path, session id, or
+  profile from the browser; the actual navigation argv is built entirely
   server-side by :mod:`integrations.chairman_surfaces`.
 
 Usage
@@ -111,6 +112,11 @@ DEFAULT_STATIC_DIR = _REPO_ROOT / "app" / "static" / "chairman_control"
 
 #: Default ephemeral loopback port.
 DEFAULT_PORT = 8787
+
+#: Isolated Claude Code runtime used only for CLI -> Desktop session handoff.
+#: Keeping it outside ~/.local/bin preserves the independently attested
+#: Executive Claude worker runtime.
+DEFAULT_CLAUDE_DESKTOP_CLI = "~/.local/share/mastermind/claude-desktop-bridge-install/.local/bin/claude"
 
 #: Host is hard-coded, never a flag — see module docstring / architecture §8.2.
 HOST = "127.0.0.1"
@@ -384,8 +390,8 @@ _DEFAULT_CWD_RUNNER_MAX_BYTES = 65536
 #: organizational data (measured 112,569 bytes in Wave D live proof — see
 #: the fix commission) and must never be silently truncated before
 #: ``json.loads`` sees it. 4 MiB is a generous multiple of that measured
-#: size, not a guess; ``integrations/chairman_surfaces/runner.py`` itself is
-#: NOT touched — its 64 KiB cap stays exactly as-is for every adapter call,
+#: size, not a guess; ``integrations/chairman_surfaces/runner.py`` keeps its
+#: 64 KiB cap exactly as-is for every non-PTY adapter call,
 #: whose outputs are tiny (osascript/open exit codes and short strings) by
 #: design.
 _REFRESH_BUILDS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
@@ -421,10 +427,10 @@ def default_runner(
     ever needs to widen it on this branch too.
 
     Only ``/api/refresh-builds`` (invoking Macro's active-build compiler
-    script) needs a working directory, and ``run_argv`` has no ``cwd``
-    parameter — that module is outside this packet's edit scope (see the
-    build commission's OWNED FILES). This branch reuses ``run_argv``'s own
-    argv-validation gate (:func:`integrations.chairman_surfaces.runner.
+    script) needs a captured-output working directory, and ``run_argv`` has
+    no ``cwd`` parameter. (The separate Desktop handoff uses
+    ``surfaces_runner.run_argv_pty`` directly.) This branch reuses
+    ``run_argv``'s own argv-validation gate (:func:`integrations.chairman_surfaces.runner.
     _validate_argv`) and reproduces its exact safety properties (``shell=
     False``, never raising on subprocess failure), but takes an explicit
     ``max_bytes`` output cap (default matches ``run_argv``'s own 64 KiB;
@@ -509,6 +515,7 @@ class ServerConfig:
     port: int
     static_dir: Path = DEFAULT_STATIC_DIR
     runner: Callable[..., dict] = default_runner
+    claude_desktop_handoff_runner: Callable[..., dict] = surfaces_runner.run_argv_pty
     now_fn: Callable[[], str] = _utc_now_z
     open_binding_fn: Callable[..., dict] = contract.open_binding
     #: Server-only elapsed source validity; no fallback and no browser authority.
@@ -519,6 +526,9 @@ class ServerConfig:
     #: (``~/.claude/projects`` / ``~/.codex/sessions``). Tests inject a
     #: ``tmp_path`` here instead.
     claude_projects_dir: str | None = None
+    #: Separate interactive Claude CLI path for exact CLI -> Desktop handoff.
+    #: This is intentionally distinct from Executive's provider-worker binary.
+    claude_desktop_cli: str | None = None
     codex_sessions_dir: str | None = None
     #: CAP-C1: optional path to a placement-selection facts document,
     #: passed straight through to ``ccr.build_control_room``'s own
@@ -574,6 +584,10 @@ class ServerConfig:
     #: gate early. The envelope's ``refresh_in_flight`` key stays a bool,
     #: derived as ``count > 0`` in :func:`_cached_state_snapshot`.
     state_refreshes_in_flight: int = 0
+    # Hosted lifecycle drains actual refresh handles before retiring owners.
+    state_refresh_threads: set = field(default_factory=set)
+    state_stopping: bool = False
+    workspace_refresh_on_read: bool = True
     #: Cache max-age (seconds, monotonic clock) before a GET kicks a
     #: background recompose. CLI flag ``--state-ttl``.
     state_ttl: float = 120.0
@@ -591,6 +605,16 @@ class ServerConfig:
     #: ``None``. Cleared on the next successful recompose. Never raised into
     #: a serving thread — surfaced only in the ``/api/state`` envelope.
     state_refresh_error: str | None = None
+    #: Trusted installed source join (parent-injected before start): given the
+    #: composition's ``generated_at``, returns the canonical
+    #: ``mastermind.chairman_control_room.v1`` document built from
+    #: pre-acquired bounded inputs. Called ONLY from ``_compose_state_doc``
+    #: within the existing off-demand refresh/publication bracket. A
+    #: configured callback that fails is never answered with the legacy
+    #: gather — the failure propagates to the existing refresh-error path and
+    #: the last good composition (or explicit unavailability) stands. The
+    #: default ``None`` keeps the exact standalone legacy behavior.
+    compose_inputs: Callable[[str], dict[str, Any]] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -616,8 +640,23 @@ def _compose_state_doc(
     cost now runs off the request path, so it can afford to wait out the
     real host's measured 94-206s brief cost rather than the 60s bound that
     always timed out on the request path (F1/F2).
+
+    A trusted ``ServerConfig.compose_inputs`` callback (installed source
+    join, injected by the parent before start) is honored here FIRST: it
+    receives this composition's ``generated_at`` and returns the canonical
+    document from pre-acquired bounded inputs, so the legacy gather below is
+    never entered while it is configured.  Its failure is this composition's
+    failure — there is no fallback to the legacy source-root gather, the
+    exception reaches the existing refresh-error path, and an empty/default
+    document is never substituted for a configured source.
     """
     generated_at = config.now_fn()
+    if config.compose_inputs is not None:
+        doc = config.compose_inputs(generated_at)
+        if (not isinstance(doc, dict)
+                or doc.get("schema") != ccr.SCHEMA):
+            raise ValueError("configured compose_inputs returned a non-canonical document")
+        return doc
     build_kwargs: dict[str, Any] = {
         "repo_root": config.repo_root,
         "macro_root_flag": config.macro_root,
@@ -661,6 +700,8 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
     error) below.
     """
     with config.state_lock:
+        if config.state_stopping:
+            raise RuntimeError("control room owner is stopping")
         config.state_compose_seq += 1
         gen = config.state_compose_seq
         if explicit:
@@ -670,6 +711,24 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
 
 
 def _refresh_state_cache(
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
+) -> None:
+    thread = threading.current_thread()
+    with config.state_lock:
+        config.state_refresh_threads.add(thread)
+        stopping = config.state_stopping
+        if stopping:
+            config.state_refreshes_in_flight -= 1
+    try:
+        if not stopping:
+            _refresh_state_cache_impl(config, timeout=timeout, generation=generation,
+                                      include_capabilities=include_capabilities)
+    finally:
+        with config.state_lock:
+            config.state_refresh_threads.discard(thread)
+
+
+def _refresh_state_cache_impl(
     config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
 ) -> None:
     """Compose a fresh doc (+ capability census, when requested) for
@@ -786,7 +845,7 @@ def _maybe_start_background_refresh(config: ServerConfig) -> None:
         composed_monotonic = config.state_cache.get("composed_monotonic")
         age = None if composed_monotonic is None else time.monotonic() - composed_monotonic
         is_stale = age is None or age > config.state_ttl
-        if not is_stale or config.state_refreshes_in_flight:
+        if config.state_stopping or not is_stale or config.state_refreshes_in_flight:
             return
         config.state_compose_seq += 1
         gen = config.state_compose_seq
@@ -799,7 +858,18 @@ def _maybe_start_background_refresh(config: ServerConfig) -> None:
         },
         daemon=True,
     )
-    thread.start()
+    with config.state_lock:
+        if config.state_stopping:
+            config.state_refreshes_in_flight -= 1
+            return
+        config.state_refresh_threads.add(thread)
+        # Start under the same lock so shutdown never misses a reserved handle.
+        try:
+            thread.start()
+        except BaseException:
+            config.state_refresh_threads.discard(thread)
+            config.state_refreshes_in_flight -= 1
+            raise
 
 
 def _ensure_capabilities_cached(config: ServerConfig) -> None:
@@ -1155,8 +1225,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         cheap dict lookup, not part of the composition cache).
         """
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        _ensure_capabilities_cached(config)
-        _maybe_start_background_refresh(config)
+        if config.workspace_refresh_on_read:
+            _ensure_capabilities_cached(config)
+            _maybe_start_background_refresh(config)
         snapshot = _cached_state_snapshot(config)
         body = {
             "control_room": snapshot["doc"],
@@ -1195,12 +1266,17 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         data, err = self._read_json_body()
         if err:
             return self._bad_request(err)
-        unknown = _unknown_key(data, {"binding_id", "owed_context"})
+        unknown = _unknown_key(data, {"binding_id", "owed_context", "target_surface"})
         if unknown is not None:
             return self._bad_request(f"unknown key: {unknown!r}")
         binding_id = data.get("binding_id")
         if not isinstance(binding_id, str) or not binding_id:
             return self._bad_request("binding_id: required (non-empty string)")
+        target_surface = data.get("target_surface")
+        if target_surface is not None and (
+            type(target_surface) is not str or target_surface not in {"default", "desktop"}
+        ):
+            return self._bad_request("target_surface: must be 'default' or 'desktop'")
         owed_route = "owed_context" in data
         if owed_route and not _owed_context_shape(data["owed_context"]):
             return self._owed_open_refused()
@@ -1209,6 +1285,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         open_fn = config.open_binding_fn
         provider_runner = config.runner
         provider_options = dict(claude_projects_dir=config.claude_projects_dir,
+                                claude_desktop_cli=config.claude_desktop_cli,
+                                claude_desktop_handoff_runner=config.claude_desktop_handoff_runner,
+                                target_surface=target_surface,
                                 codex_sessions_dir=config.codex_sessions_dir,
                                 mlx_profiles_root=config.mlx_profiles_root,
                                 gologin_profiles_root=config.gologin_profiles_root)
@@ -1508,6 +1587,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--macro-root", default=None, help="Macro checkout root (default: auto-resolved)")
     parser.add_argument("--bindings-path", default=None, help="surface_bindings.json path (default: platform default)")
     parser.add_argument(
+        "--claude-desktop-cli", default=DEFAULT_CLAUDE_DESKTOP_CLI,
+        help="isolated Claude Code CLI used for exact session handoff into Claude Desktop",
+    )
+    parser.add_argument(
         "--placement-selection", default=None,
         help="CAP-C1: path to a placement-selection facts document (default: no placement_selection "
              "section composed)",
@@ -1539,6 +1622,7 @@ def _build_config(args: argparse.Namespace) -> ServerConfig:
         repo_root=repo_root,
         macro_root=macro_root,
         bindings_path=bindings_path,
+        claude_desktop_cli=(str(Path(args.claude_desktop_cli).expanduser()) if args.claude_desktop_cli else None),
         placement_selection_path=placement_selection_path,
         token=token,
         origin=f"http://{HOST}:{args.port}",

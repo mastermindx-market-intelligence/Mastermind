@@ -40,7 +40,11 @@ from common.redaction import sanitize_external_text
 from control_plane import ceo_intent
 from control_plane import executive_dialogue_observation as dialogue_observation
 from control_plane import executive_ceo_ingress as ceo_ingress
-from control_plane.executive_agent_capabilities import CapabilityPolicyError
+from control_plane.executive_agent_capabilities import (
+    CapabilityPolicyError,
+    adapter_supports_execution_surface,
+    is_sealed_worker_execution_surface,
+)
 from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import (
     AttemptStatus,
@@ -54,7 +58,13 @@ from control_plane.executive_runtime import (
     SCHEMA_VERSION,
     StateConflict,
     ValidatedRoleCompletion,
-    V2_HOST_EXECUTION_BINDING_KEYS,
+    V3_HOST_EXECUTION_BINDING_KEYS,
+    _normalise_constraints,
+    _normalise_work_placement_union,
+    _validated_plan_admission,
+    _project_work_placement,
+    HOST_EXECUTION_BINDING_VERSION_KEY,
+    HOST_EXECUTION_BINDING_V3,
     _attempt_from_row,
     _dialogue_source_from_root_creation,
     _job_from_row,
@@ -1367,6 +1377,21 @@ class ServiceConfig:
     max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     shutdown_grace_seconds: float = 10.0
+    # Optional root-owned subscription-canary realm.  When present the primary
+    # ``quota_class`` is locked READ-only and carries
+    # ``metadata.subscription_canary_realm == <exact object>``.  Ordinary
+    # configs leave every field ``None`` and the realm is not advertised.
+    subscription_canary_realm_binding_id: str | None = None
+    subscription_canary_realm_generation: int | None = None
+    subscription_canary_realm_config_sha256: str | None = None
+    # Closed default-off Job-bound login-check composition.  The root-installed
+    # control config is the only arm.  ``privileged_broker_socket_path`` is
+    # present only when ``privileged_readiness_armed`` is True and must then be
+    # exactly the canonical privileged socket path reviewed for the protected
+    # broker.  See §6 / Task 5.
+    privileged_readiness_armed: bool = False
+    privileged_broker_socket_path: Path | None = None
+    release_control_armed: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -1405,6 +1430,8 @@ class ServiceConfig:
             raise ValueError("coo_autonomy_armed must be boolean")
         if not isinstance(self.ceo_submit_armed, bool):
             raise ValueError("ceo_submit_armed must be boolean")
+        if type(self.release_control_armed) is not bool:
+            raise ValueError("release_control_armed must be boolean")
         if not isinstance(self.coo_operator_harness_armed, bool):
             raise ValueError("coo_operator_harness_armed must be boolean")
         if self.coo_operator_harness_armed and not self.coo_autonomy_armed:
@@ -1461,6 +1488,117 @@ class ServiceConfig:
             raise ValueError("max_response_bytes must be between 4 KiB and 16 MiB")
         if not 0.1 <= float(self.shutdown_grace_seconds) <= 60:
             raise ValueError("shutdown_grace_seconds must be between 0.1 and 60 seconds")
+        if not isinstance(self.privileged_readiness_armed, bool):
+            raise ValueError("privileged_readiness_armed must be boolean")
+        if self.privileged_readiness_armed:
+            if self.privileged_broker_socket_path is None:
+                raise ValueError(
+                    "privileged_readiness_armed requires privileged_broker_socket_path"
+                )
+            broker_socket = Path(self.privileged_broker_socket_path)
+            if not broker_socket.is_absolute():
+                raise ValueError("privileged_broker_socket_path must be absolute")
+            canonical = Path("/var/run/mastermind-executive/privileged.sock")
+            if broker_socket != canonical:
+                raise ValueError(
+                    "privileged_broker_socket_path must equal the canonical "
+                    f"{canonical} privileged broker socket"
+                )
+            object.__setattr__(self, "privileged_broker_socket_path", broker_socket)
+            if broker_socket == self.socket_path:
+                raise ValueError(
+                    "privileged_broker_socket_path must differ from the control socket"
+                )
+        elif self.privileged_broker_socket_path is not None:
+            raise ValueError(
+                "privileged_broker_socket_path is forbidden while privileged_readiness_armed is False"
+            )
+        self._validate_subscription_canary_realm()
+
+    # -- subscription_canary_realm validation ---------------------------------
+
+    def _validate_subscription_canary_realm(self) -> None:
+        binding_id = self.subscription_canary_realm_binding_id
+        generation = self.subscription_canary_realm_generation
+        config_sha = self.subscription_canary_realm_config_sha256
+        if binding_id is None and generation is None and config_sha is None:
+            return
+        if (
+            not isinstance(binding_id, str)
+            or not binding_id
+            or binding_id != binding_id.strip()
+        ):
+            raise ValueError("subscription_canary_realm binding_id is invalid")
+        if (
+            type(generation) is not int
+            or isinstance(generation, bool)
+            or generation < 1
+            or generation >= 2 ** 63
+        ):
+            raise ValueError("subscription_canary_realm generation is invalid")
+        if (
+            not isinstance(config_sha, str)
+            or config_sha != config_sha.lower()
+            or re.fullmatch(r"[0-9a-f]{64}", config_sha) is None
+        ):
+            raise ValueError("subscription_canary_realm config_sha256 is invalid")
+        try:
+            from control_plane.subscription_harness_bindings import (
+                HarnessBindingError,
+                get_binding,
+            )
+            binding = get_binding(binding_id)
+        except (HarnessBindingError, ValueError) as exc:
+            raise ValueError(
+                "subscription_canary_realm binding is not reviewed"
+            ) from exc
+        if (
+            binding.adapter_id != "codex-cli"
+            or binding.implementation_state == "SPEC_ONLY"
+            or binding.autonomous_allowed is not False
+        ):
+            raise ValueError(
+                "subscription_canary_realm binding is not a reviewed codex-cli "
+                "attended-only implementation"
+            )
+        if (
+            self.provider != binding.provider
+            or self.worker_type != binding.adapter_id
+        ):
+            raise ValueError(
+                "subscription_canary_realm worker provider/worker_type disagrees "
+                "with the reviewed binding"
+            )
+        from control_plane.subscription_provider_profiles import get_profile
+
+        profile = get_profile(binding.profile_id)
+        expected_model = binding.model_for(profile)
+        if (
+            not isinstance(self.model, str)
+            or self.model.casefold() != expected_model.casefold()
+        ):
+            raise ValueError(
+                "subscription_canary_realm worker model disagrees with the "
+                "reviewed binding"
+            )
+
+    def subscription_canary_realm(self) -> Mapping[str, Any] | None:
+        """Return the frozen exact subscription-canary realm object or ``None``.
+
+        The dict is built from the validated scalar fields only; no other
+        source may widen the advertised realm.  The returned mapping is the
+        same object the supervisor carries on the enriched ``WorkerLaunchSpec``
+        and the same object the worker side re-validates against its disk
+        config SHA.  Callers must treat the result as read-only.
+        """
+
+        if self.subscription_canary_realm_binding_id is None:
+            return None
+        return _FROZEN_REALM(
+            binding_id=str(self.subscription_canary_realm_binding_id),
+            generation=int(self.subscription_canary_realm_generation),
+            config_sha256=str(self.subscription_canary_realm_config_sha256),
+        )
 
 
 def _jsonable(value: Any) -> Any:
@@ -1477,6 +1615,56 @@ def _jsonable(value: Any) -> Any:
     if hasattr(value, "value") and isinstance(getattr(value, "value"), str):
         return value.value
     return value
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubscriptionCanaryRealm(Mapping[str, Any]):
+    """Immutable, secret-free subscription-canary realm record.
+
+    The exact field set is enforced by ``__post_init__`` so any caller that
+    bypasses the dataclass validation (e.g. ``dataclasses.replace``) cannot
+    widen or rename the advertised object.  This is the single shape that
+    crosses the Control-to-Worker boundary and the metadata boundary.
+    """
+
+    binding_id: str
+    generation: int
+    config_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding_id, str) or not self.binding_id.strip():
+            raise ValueError("subscription_canary_realm binding_id is invalid")
+        if (
+            type(self.generation) is not int
+            or isinstance(self.generation, bool)
+            or self.generation < 1
+            or self.generation >= 2 ** 63
+        ):
+            raise ValueError("subscription_canary_realm generation is invalid")
+        if (
+            not isinstance(self.config_sha256, str)
+            or self.config_sha256 != self.config_sha256.lower()
+            or re.fullmatch(r"[0-9a-f]{64}", self.config_sha256) is None
+        ):
+            raise ValueError("subscription_canary_realm config_sha256 is invalid")
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "binding_id":
+            return self.binding_id
+        if key == "generation":
+            return self.generation
+        if key == "config_sha256":
+            return self.config_sha256
+        raise KeyError(key)
+
+    def __iter__(self):
+        return iter(("binding_id", "generation", "config_sha256"))
+
+    def __len__(self) -> int:
+        return 3
+
+
+_FROZEN_REALM = _SubscriptionCanaryRealm
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -1604,20 +1792,60 @@ class _ModuleBackupBackend:
 
 
 CEO_APP_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
+CEO_WEB_CEO_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V2
+CEO_WEB_CEO_V2_READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V3
+CEO_APP_READ_TOOLS_BY_SCHEMA = {
+    CEO_APP_READ_SCHEMA: frozenset(
+        {
+            "executive_state",
+            "executive_inbox",
+            "executive_job",
+            "ceo_intent_status",
+        }
+    ),
+    CEO_WEB_CEO_READ_SCHEMA: frozenset(
+        {
+            "executive_state",
+            "executive_inbox",
+            "executive_job",
+            "executive_fabric",
+            "ceo_intent_status",
+        }
+    ),
+    CEO_WEB_CEO_V2_READ_SCHEMA: frozenset(
+        {
+            "executive_state",
+            "executive_inbox",
+            "executive_job",
+            "executive_fabric",
+            "ceo_intent_status",
+        }
+    ),
+}
 
 
 @dataclasses.dataclass(frozen=True)
 class CeoIngressAppBinding:
     """Host-owned capability for one App peer on the existing ingress.
 
-    It neither changes C1's peer nor arms C1. The App can send v2 frames
-    only; the existing admission owner still validates every request.
+    It neither changes C1's peer nor arms C1. Existing App v2 behavior stays
+    unchanged; optional principal frames require a separate dormant-by-default
+    guard/arming capability. The existing admission owner validates every request.
     """
 
     peer_uid: int
     armed: bool
     grounding_provider: ceo_ingress.GroundingProvider
     read_provider: Any | None = None
+    content_provider_factory: Callable[[Runtime], Any] | None = None
+    steward_provider_factory: Callable[[Runtime], Any] | None = None
+    workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
+    read_schema: str = CEO_APP_READ_SCHEMA
+    # Separate principal capability; the incumbent CEO armed bit grants none.
+    # Existing launchers omit these fields, so this route is dormant by default.
+    principal_facts_factory: Callable[[Runtime], Any] | None = None
+    principal_admission_armed: bool = False
+    principal_admission_guard: Callable[[Mapping[str, Any]], None] | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -1626,6 +1854,16 @@ class CeoIngressAppBinding:
             raise ValueError("App admission arming must be boolean")
         if not callable(getattr(self.grounding_provider, "observe", None)):
             raise ValueError("App binding requires a grounding provider")
+        if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
+            raise ValueError("App binding read schema is not an admitted profile")
+        if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
+            raise ValueError("principal facts require a host provider")
+        if type(self.principal_admission_armed) is not bool:
+            raise ValueError("principal admission arming must be boolean")
+        if self.principal_admission_guard is not None and not callable(self.principal_admission_guard):
+            raise ValueError("principal admission requires a host guard")
+        if self.principal_admission_armed and self.principal_admission_guard is None:
+            raise ValueError("armed principal admission requires a host guard")
 
 
 class ExecutiveControlService:
@@ -1655,6 +1893,7 @@ class ExecutiveControlService:
         ) = None,
         ceo_ingress_armed: bool = False,
         ceo_ingress_app_binding: CeoIngressAppBinding | None = None,
+        workspace_control_room: Any | None = None,
         ceo_ingress_activated_socket: socket.socket | None = None,
         terminal_return_projector: TerminalReturnProjector | None = None,
         terminal_return_projector_factory: (
@@ -1669,9 +1908,16 @@ class ExecutiveControlService:
         ) = None,
         dialogue_wake_handler: DialogueWakeHandler | None = None,
         dialogue_observation_activated_socket: socket.socket | None = None,
+        privileged_readiness_controller_factory: (
+            Callable[[Any], Any] | None
+        ) = None,
+        release_control_consumer_factory: (
+            Callable[[Runtime], "ReleaseControlConsumer"] | None
+        ) = None,
     ) -> None:
         self.config = config
         self._runtime_factory = runtime_factory
+        self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
         self._operator_identity_verifier = operator_identity_verifier
@@ -1764,6 +2010,12 @@ class ExecutiveControlService:
         self._coo_last_error: str | None = None
         self._coo_last_tick_at: str | None = None
         self._closing = False
+        self._namespace_custody = None
+        self._operator_handlers: set[asyncio.Task[Any]] = set()
+        self._operator_writers: set[asyncio.StreamWriter] = set()
+        self._physical_workers: set[asyncio.Task[Any]] = set()
+        self._listener_drains: set[asyncio.Task[Any]] = set()
+        self._read_provider_drain: asyncio.Task[Any] | None = None
         self._startup_reconciliation: list[Any] = []
         self._started_at: str | None = None
         if service_state not in {"READY", "AWAITING_CANARY"}:
@@ -1771,6 +2023,37 @@ class ExecutiveControlService:
         self._service_state = service_state
         self._canary_loader = canary_loader
         self.instance_id = f"executive-service-{uuid4().hex}"
+
+        # --- Task 5: closed default-off Job-bound login-check composition ----
+        # The factory is the existing composition seam: it receives the same
+        # Runtime the supervisor factory receives, after the single Runtime
+        # has opened.  No second Runtime is created; no privileged socket is
+        # reachable without an injected factory on an armed ServiceConfig.
+        if self.config.privileged_readiness_armed:
+            if not callable(privileged_readiness_controller_factory):
+                raise ValueError(
+                    "armed privileged_readiness composition requires "
+                    "privileged_readiness_controller_factory"
+                )
+        elif privileged_readiness_controller_factory is not None:
+            raise ValueError(
+                "privileged_readiness_controller_factory requires "
+                "privileged_readiness_armed=True"
+            )
+        self._privileged_readiness_controller_factory = (
+            privileged_readiness_controller_factory
+        )
+        self._privileged_readiness_controller: Any | None = None
+
+        # Host composition must arm the existing consumer and its startup
+        # closure together. No request or factory presence alone grants an arm.
+        if self.config.release_control_armed:
+            if not callable(release_control_consumer_factory):
+                raise ValueError("armed release control requires its consumer factory")
+        elif release_control_consumer_factory is not None:
+            raise ValueError("release consumer factory requires release_control_armed")
+        self._release_control_consumer_factory = release_control_consumer_factory
+        self._release_control_consumer = None
 
         # --- MAS-75 PR-A: optional dedicated CeoIngress composition --------
         #
@@ -1994,8 +2277,10 @@ class ExecutiveControlService:
             raise ValueError(f"configured COO execution alias is invalid: {exc}") from exc
         if (
             not alias.worker_eligible
-            or alias.adapter_id != "codex-cli"
-            or profile.execution_surface != "codex-exec"
+            or not is_sealed_worker_execution_surface(profile.execution_surface)
+            or not adapter_supports_execution_surface(
+                alias.adapter_id, profile.execution_surface
+            )
             or not profile.write_capable
             or profile.auth_realm != "dedicated-worker-account"
             or profile.approval_policy != "never"
@@ -2006,7 +2291,7 @@ class ExecutiveControlService:
             or profile.plugins
         ):
             raise ValueError(
-                "configured COO alias must be a sealed, extension-free, write-capable Codex worker"
+                "configured COO alias must be a sealed, extension-free, write-capable worker"
             )
         if (
             not operator_alias.worker_eligible
@@ -2071,8 +2356,13 @@ class ExecutiveControlService:
             "operator_harness_version": self.config.operator_harness_version,
             "operator_harness_armed": self.config.coo_operator_harness_armed,
         }
-        if set(binding) != set(V2_HOST_EXECUTION_BINDING_KEYS):
+        binding["work_placement_union"] = [
+            {"provider_realm": binding["provider"], "quota_class": quota}
+            for quota in binding["eligible_quota_classes"]
+        ]
+        if set(binding) != set(V3_HOST_EXECUTION_BINDING_KEYS):
             raise ValueError("configured COO host binding fields drifted")
+        binding[HOST_EXECUTION_BINDING_VERSION_KEY] = HOST_EXECUTION_BINDING_V3
         return binding
 
     def _require_current_coo_binding(self) -> dict[str, Any]:
@@ -2143,6 +2433,46 @@ class ExecutiveControlService:
             raise ServiceError("Executive control service is not started")
         return self.runtime
 
+    def _primary_quota_descriptor(
+        self, *, default_capabilities: Sequence[str],
+    ) -> tuple[dict[str, Any], tuple[str, ...]]:
+        """Return the primary quota-class descriptor used for the worker.
+
+        When the configured Control advertises a reviewed subscription-canary
+        realm, the primary quota class becomes strictly READ-only, carries the
+        realm object in its metadata, and the provider/model/effort/cost_class
+        are derived from the reviewed binding/profile rather than trusted
+        booleans on the Control config.  An ordinary (no realm) configuration
+        preserves the exact historical descriptor.
+        """
+
+        realm = self.config.subscription_canary_realm()
+        if realm is None:
+            capabilities = tuple(default_capabilities)
+            descriptor: dict[str, Any] = {
+                "provider": self.config.provider,
+                "model": self.config.model,
+                "effort": self.config.effort,
+                "cost_class": self.config.cost_class,
+                "capabilities": list(capabilities),
+            }
+            return descriptor, capabilities
+        from control_plane.subscription_harness_bindings import get_binding
+        from control_plane.subscription_provider_profiles import get_profile
+
+        binding = get_binding(self.config.subscription_canary_realm_binding_id)
+        profile = get_profile(binding.profile_id)
+        realm_model = binding.model_for(profile, None)
+        descriptor = {
+            "provider": str(binding.provider),
+            "model": str(realm_model),
+            "effort": self.config.effort,
+            "cost_class": self.config.cost_class,
+            "capabilities": ["read"],
+            "metadata": {"subscription_canary_realm": dict(realm)},
+        }
+        return descriptor, ("read",)
+
     def _require_supervisor(self) -> SupervisorProtocol:
         if self.supervisor is None:
             raise ServiceError("Executive supervisor is not configured")
@@ -2166,25 +2496,86 @@ class ExecutiveControlService:
             supervisor, "require_complete_launch_attestation"
         ):
             raise ServiceError("Executive supervisor cannot activate a complete canary")
-        supervisor.secret_canary_verdict = validated
-        supervisor.require_complete_launch_attestation = True
-        self._startup_reconciliation = await asyncio.to_thread(
-            supervisor.reconcile_restart,
-            requeue_lost=False,
-        )
+        if self.config.release_control_armed:
+            # Claim this activation before the first suspension. A sibling
+            # must not re-enter closure or overwrite a later quarantine.
+            self._service_state = "ACTIVATING_CANARY"
+        try:
+            supervisor.secret_canary_verdict = validated
+            supervisor.require_complete_launch_attestation = True
+            self._startup_reconciliation = await self._run_physical(
+                supervisor.reconcile_restart,
+                requeue_lost=False,
+            )
+            await self._schedule_recovered_runs()
+        except (Exception, asyncio.CancelledError):
+            if self.config.release_control_armed:
+                self._service_state = "QUARANTINED"
+            raise
+        if self._reconciliation_requires_quarantine(
+            self._startup_reconciliation
+        ):
+            self._service_state = "QUARANTINED"
+            raise StateConflict(
+                "Executive restart reconciliation was quarantined"
+            )
         # Activation is the first moment this bootstrap-quarantined instance
         # may resume durable terminal obligations.  Replay while admission is
         # still closed; exposing READY first would create a race and omitting
         # replay would strand every completion committed before the canary.
         self._service_state = "ACTIVATING_CANARY"
         try:
+            await self._finalize_release_admission_on_startup()
             await self._replay_terminal_returns_on_startup()
+        except asyncio.CancelledError:
+            if self.config.release_control_armed:
+                self._service_state = "QUARANTINED"
+            raise
         except Exception:
             self._service_state = "QUARANTINED"
             raise
         if self._service_state == "QUARANTINED":
             raise StateConflict("Executive terminal-return replay was quarantined")
         self._service_state = "READY"
+
+    def _require_release_control_consumer(self):
+        from control_plane.executive_release_consumer import ReleaseControlConsumer
+
+        runtime = self._require_runtime()
+        if not self.config.release_control_armed:
+            return ReleaseControlConsumer(runtime)
+        consumer = self._release_control_consumer
+        if (
+            type(consumer) is not ReleaseControlConsumer
+            or consumer.runtime is not runtime
+            or not callable(getattr(consumer, "finalize_unresolved_admission", None))
+        ):
+            raise ServiceError("qualified release consumer composition is unavailable")
+        return consumer
+
+    async def _finalize_release_admission_on_startup(self) -> None:
+        """One bounded closure through the existing consumer, never a poller.
+
+        The coupled consumer owns canonical admission/root-history validation
+        and the one Runtime closure transaction. Missing or uncertain evidence
+        raises; only an explicitly successful return may let startup continue.
+        Ordinary public reconciliation remains a read-only consumer operation.
+        """
+        if not self.config.release_control_armed:
+            return
+        try:
+            consumer = self._require_release_control_consumer()
+            result = await self._run_physical(consumer.finalize_unresolved_admission)
+            if result is not None:
+                raise ServiceError("release closure returned an unknown outcome")
+        except asyncio.CancelledError:
+            # The shielded physical task still owns its work and is drained by
+            # close(). Cancellation cannot reopen admission or trigger retry.
+            self._service_state = "QUARANTINED"
+            raise
+        except Exception as exc:
+            self._service_state = "QUARANTINED"
+            raise StateConflict("Executive release closure was quarantined") from exc
 
     def _acquire_service_lock(self) -> None:
         self.runtime_state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -2430,13 +2821,14 @@ class ExecutiveControlService:
     async def _bind_ceo_ingress_server(self, *, start_serving: bool) -> None:
         """Construct (bind) the dedicated CeoIngress listener; see ``_bind_operator_server``."""
 
+        from control_plane import executive_release_ingress as release_ingress
         assert self._ceo_ingress_socket_path is not None
         if self._ceo_ingress_activated_socket is None:
             self._prepare_ceo_ingress_socket_path()
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 path=str(self._ceo_ingress_socket_path),
-                limit=ceo_ingress.MAX_REQUEST_BYTES + 1,
+                limit=release_ingress.MAX_FRAME_BYTES + 1,
                 start_serving=start_serving,
             )
             self._ceo_ingress_socket_path.chmod(0o600)
@@ -2451,7 +2843,7 @@ class ExecutiveControlService:
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 sock=activated,
-                limit=ceo_ingress.MAX_REQUEST_BYTES + 1,
+                limit=release_ingress.MAX_FRAME_BYTES + 1,
                 start_serving=start_serving,
                 **activated_options,
             )
@@ -2588,6 +2980,8 @@ class ExecutiveControlService:
     async def start(self) -> None:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
+        if self._namespace_custody is not None and not self._namespace_custody._closed:
+            raise ServiceError("previous Runtime namespace custody is still retained")
         self._closing = False
         self._require_current_autonomy()
         self._prepare_socket()
@@ -2596,9 +2990,28 @@ class ExecutiveControlService:
             health = self._database_health()
             if not health["ok"]:
                 raise ServiceError(f"Executive database health check failed: {health!r}")
+            from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+            self._namespace_custody = ServiceRuntimeNamespaceCustody(
+                runtime=self.runtime, service_lock_fd=self._lock_fd,
+                lock_path=self.service_lock_path, marker_path=self.running_marker_path,
+                instance_id=self.instance_id,
+            )
+            self._namespace_custody.start()
             if self._supervisor_factory is None:
                 raise ServiceError("supervisor_factory is required for startup reconciliation")
             self.supervisor = self._supervisor_factory(self.runtime)
+            if self._release_control_consumer_factory is not None:
+                self._release_control_consumer = self._release_control_consumer_factory(
+                    self.runtime
+                )
+                self._require_release_control_consumer()
+            # Task 5: instantiate the default-off Job-bound login-check
+            # controller after the single Runtime has opened; the factory is
+            # the existing composition pattern, never an open socket.
+            if self._privileged_readiness_controller_factory is not None:
+                self._privileged_readiness_controller = (
+                    self._privileged_readiness_controller_factory(self.runtime)
+                )
             if self.config.coo_operator_harness_armed:
                 if self._operator_supervisor_factory is None:
                     raise ServiceError(
@@ -2615,17 +3028,26 @@ class ExecutiveControlService:
             # Startup reconciliation must never auto-requeue.  LOST work returns
             # to QUEUED only through the explicit requeue command.
             if self._service_state == "READY":
-                self._startup_reconciliation = await asyncio.to_thread(
+                self._startup_reconciliation = await self._run_physical(
                     self.supervisor.reconcile_restart, requeue_lost=False
                 )
                 if self.operator_supervisor is not None:
                     self._startup_reconciliation.extend(
-                        await asyncio.to_thread(
+                        await self._run_physical(
                             self.operator_supervisor.reconcile_restart,
                             requeue_lost=False,
                         )
                     )
+                await self._schedule_recovered_runs()
+                if self._reconciliation_requires_quarantine(
+                    self._startup_reconciliation
+                ):
+                    self._service_state = "QUARANTINED"
+                if self._service_state != "QUARANTINED":
+                    await self._finalize_release_admission_on_startup()
                 await self._replay_terminal_returns_on_startup()
+            if self._workspace_control_room is not None:
+                await self._workspace_control_room.start()
             if (
                 self._ceo_ingress_socket_path is not None
                 or self._dialogue_observation_socket_path is not None
@@ -2659,7 +3081,10 @@ class ExecutiveControlService:
             # (Operator starts second, so this line already runs after both),
             # unchanged single-listener timing otherwise.
             self._started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            if self.config.coo_autonomy_armed:
+            if (
+                self.config.coo_autonomy_armed
+                and self._service_state == "READY"
+            ):
                 self._coo_shutdown_event = asyncio.Event()
                 self._coo_tick_task = asyncio.create_task(
                     self._coo_tick_loop(),
@@ -2700,19 +3125,26 @@ class ExecutiveControlService:
             observation_server.close()
         if ceo_ingress_server is not None:
             ceo_ingress_server.close()
-        if server is not None:
-            await server.wait_closed()
-        if observation_server is not None:
-            await observation_server.wait_closed()
-        if ceo_ingress_server is not None:
-            await ceo_ingress_server.wait_closed()
+        # Python 3.12 Server.wait_closed also waits for accepted transports.
+        # Close/drain those transports before awaiting listener completion.
+        for listener in (server, observation_server, ceo_ingress_server):
+            if listener is not None:
+                self._listener_drains.add(asyncio.create_task(listener.wait_closed()))
 
-        coo_tick, self._coo_tick_task = self._coo_tick_task, None
+        for writer in tuple(self._operator_writers):
+            writer.close()
+        await self._drain_service_tasks(self._operator_handlers)
+        if self._privileged_readiness_controller is not None:
+            await self._privileged_readiness_controller.aclose()
+        await self._drain_service_tasks(self._physical_workers)
+
+        coo_tick = self._coo_tick_task
         if coo_tick is not None:
             # A CooCycle action can cross a durable mutation/claim boundary in
             # its worker thread.  Cancellation would not stop that thread, so
             # shutdown drains the one bounded action to a real return point.
-            await asyncio.gather(coo_tick, return_exceptions=True)
+            await self._drain_service_tasks([coo_tick])
+        self._coo_tick_task = None
         self._coo_shutdown_event = None
         current_task = asyncio.current_task()
         coo_actions = [
@@ -2721,7 +3153,7 @@ class ExecutiveControlService:
             if task is not current_task and not task.done()
         ]
         if coo_actions:
-            await asyncio.gather(*coo_actions, return_exceptions=True)
+            await self._drain_service_tasks(coo_actions)
         self._coo_action_tasks.clear()
 
         # Dispatch finishers are terminal-return producers.  Stop/drain them
@@ -2733,6 +3165,13 @@ class ExecutiveControlService:
         if runtime is not None:
             for job_id, task in list(self._dispatch_tasks.items()):
                 if task.done():
+                    continue
+                if task.get_name().startswith(
+                    "executive-recovered-finish-"
+                ):
+                    # A service restart relinquishes only the in-memory
+                    # collector. The exact worker remains owned by its durable
+                    # Attempt and will be reattached by the replacement.
                     continue
                 try:
                     job = runtime.jobs.get_job(job_id)
@@ -2753,7 +3192,7 @@ class ExecutiveControlService:
             for task in pending:
                 task.cancel()
             if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+                await self._drain_service_tasks(pending)
         self._dispatch_tasks.clear()
 
         # A terminal-return flight may already have crossed the durable
@@ -2767,42 +3206,39 @@ class ExecutiveControlService:
             if task is not current_task and not task.done()
         ]
         if terminal_flights:
-            terminal_drain = asyncio.gather(
-                *terminal_flights,
-                return_exceptions=True,
-            )
-            try:
-                await asyncio.shield(terminal_drain)
-            except asyncio.CancelledError as exc:
-                # ``close()`` is itself caller-owned and may be cancelled,
-                # but the already-ATTEMPTED Relay flight is service-owned.
-                # Defer the caller cancellation until the flight reaches a
-                # durable terminal phase and all service cleanup below has
-                # completed.  Shield every subsequent wait so a repeated
-                # cancellation request still cannot reach the owned flight.
-                deferred_terminal_cancel = exc
-                while not terminal_drain.done():
-                    try:
-                        await asyncio.shield(terminal_drain)
-                    except asyncio.CancelledError:
-                        continue
+            # Preserve deferred caller cancellation for an already-attempted
+            # Relay flight, while bounding the drain by one monotonic deadline.
+            deadline = asyncio.get_running_loop().time() + self.config.shutdown_grace_seconds
+            pending = set(terminal_flights)
+            while pending:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise ServiceError("terminal service work has not drained; custody retained")
+                try:
+                    _, pending = await asyncio.wait(pending, timeout=remaining)
+                except asyncio.CancelledError as exc:
+                    deferred_terminal_cancel = exc
         self._terminal_return_flights.clear()
 
         # §14.2 — CeoIngress handler tasks are NEVER cancelled here, unlike the
         # dispatch tasks above.  A handler whose sync ``submit_intent`` thread
         # has already started cannot be safely cancelled (cancelling the
         # awaiting coroutine does not cancel the underlying thread/
-        # transaction), so ``close()`` waits every already-started handler to
-        # a REAL terminal outcome with no grace-period timeout.  The service
-        # lock/marker below is not released until this drains.
+        # transaction), so timeout retains the service lock and Runtime until
+        # each already-started handler and its physical worker have drained.
         ceo_ingress_tasks = [task for task in self._ceo_ingress_tasks if not task.done()]
         if ceo_ingress_tasks:
-            await asyncio.gather(*ceo_ingress_tasks, return_exceptions=True)
+            await self._drain_service_tasks(ceo_ingress_tasks)
         self._ceo_ingress_tasks.clear()
+        if self._workspace_control_room is not None:
+            await self._workspace_control_room.close()
         if self._ceo_ingress_app_binding is not None:
             read_provider = self._ceo_ingress_app_binding.read_provider
             if read_provider is not None:
-                await read_provider.aclose()
+                if self._read_provider_drain is None:
+                    self._read_provider_drain = asyncio.create_task(read_provider.aclose())
+                await self._drain_service_tasks([self._read_provider_drain])
+                self._read_provider_drain.result()
         observation_task_set = getattr(self, "_dialogue_observation_tasks", None)
         observation_tasks = [
             task
@@ -2810,9 +3246,19 @@ class ExecutiveControlService:
             if task is not current_task and not task.done()
         ]
         if observation_tasks:
-            await asyncio.gather(*observation_tasks, return_exceptions=True)
+            await self._drain_service_tasks(observation_tasks)
         if observation_task_set is not None:
             observation_task_set.clear()
+
+        await self._drain_service_tasks(self._physical_workers)
+        await self._drain_service_tasks(self._listener_drains)
+        for listener_drain in self._listener_drains:
+            listener_drain.result()
+        self._listener_drains.clear()
+        if self._namespace_custody is not None:
+            self._namespace_custody.close(
+                timeout_seconds=min(30.0, self.config.shutdown_grace_seconds)
+            )
 
         if not self._launchd_activated:
             try:
@@ -2881,10 +3327,42 @@ class ExecutiveControlService:
             == _PRODUCTION_CONTROL_SOCKET.resolve(strict=False)
         )
 
+    async def _run_physical(self, function, /, *args, **kwargs):
+        return await self._run_owned_coroutine(asyncio.to_thread(function, *args, **kwargs))
+
+    async def _run_owned_coroutine(self, coroutine):
+        # Includes the Operator supervisor's internal physical thread. The task
+        # belongs to the service even if its request is cancelled twice.
+        task = asyncio.create_task(coroutine)
+        self._physical_workers.add(task)
+
+        def finished(completed):
+            self._physical_workers.discard(completed)
+            if not completed.cancelled():
+                completed.exception()
+
+        task.add_done_callback(finished)
+        return await asyncio.shield(task)
+
+    async def _drain_service_tasks(self, tasks) -> None:
+        pending = {task for task in tasks
+                   if task is not asyncio.current_task() and not task.done()}
+        if pending:
+            _, pending = await asyncio.wait(
+                pending, timeout=self.config.shutdown_grace_seconds
+            )
+        if pending:
+            raise ServiceError("physical service work has not drained; custody retained")
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        task = asyncio.current_task()
+        self._operator_handlers.add(task)
+        self._operator_writers.add(writer)
         try:
+            if self._closing:
+                return
             connection = writer.get_extra_info("socket")
             if connection is None:
                 raise ServiceError("control connection has no local socket identity")
@@ -2904,7 +3382,8 @@ class ExecutiveControlService:
                     "platform exposes no trusted local peer uid",
                 )
                 return
-            if peer not in self._allowed_peer_uids():
+            control_peer = peer == os.geteuid()
+            if peer not in self._allowed_peer_uids() and not control_peer:
                 await self._send_error(writer, "peer_denied", "peer uid is not authorized")
                 return
             try:
@@ -2921,6 +3400,41 @@ class ExecutiveControlService:
                 request = json.loads(raw.decode("utf-8", errors="strict"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 await self._send_error(writer, "invalid_json", "request is not valid UTF-8 JSON")
+                return
+            lifecycle_commands = {"content-observer-enroll": "enroll", "content-observer-status": "status", "content-observer-revoke": "revoke"}
+            if isinstance(request, dict) and isinstance(request.get("command"), str) and request["command"] in lifecycle_commands:
+                if not control_peer:
+                    await self._send_error(writer, "peer_denied", "content enrollment requires control uid")
+                    return
+                try:
+                    command, args = self._request(request)
+                    # profile_key is optional; None means legacy single-profile
+                    profile_key = None
+                    if "profile_key" in args:
+                        from common.executive_content_contract import ContentProfileKey
+                        pk = args["profile_key"]
+                        if isinstance(pk, str) and pk in (ContentProfileKey.web, ContentProfileKey.mac):
+                            profile_key = ContentProfileKey(pk)
+                        else:
+                            raise ValueError("INVALID_REQUEST")
+                        self._exact_args(args, {"profile_key"})
+                    else:
+                        self._exact_args(args, set())
+                    binding = self._ceo_ingress_app_binding
+                    if (binding is None or binding.content_provider_factory is None
+                            or self._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise ValueError("CONTENT_UNAVAILABLE")
+                    provider = binding.content_provider_factory(self._require_runtime())
+                    result = await getattr(provider, lifecycle_commands[command])(profile_key)
+                    from common.executive_content_contract import digest
+                    public = {"status": result["status"], "binding_digest": digest({
+                        "turn_key": result.get("turn_key"), "grant_generation": result.get("grant_generation")})}
+                    await self._send(writer, {"ok": True, "result": public})
+                except Exception:
+                    await self._send_error(writer, "content_observer_refused", "content observer action refused")
+                return
+            if peer not in self._allowed_peer_uids():
+                await self._send_error(writer, "peer_denied", "peer uid is not authorized")
                 return
             try:
                 result = await self._dispatch_request(request)
@@ -2960,6 +3474,8 @@ class ExecutiveControlService:
                 return
             await self._send(writer, {"ok": True, "result": result})
         finally:
+            self._operator_handlers.discard(task)
+            self._operator_writers.discard(writer)
             writer.close()
             try:
                 await writer.wait_closed()
@@ -3502,7 +4018,7 @@ class ExecutiveControlService:
                     type(wake_handler) is ExecutiveDialogueWakeBridge
                     and wake_handler.canary_profile is not None
                 ):
-                    source_result = await asyncio.to_thread(
+                    source_result = await self._run_physical(
                         wake_handler.reconcile_dialogue_sources,
                         runtime,
                         source_request,
@@ -3540,7 +4056,7 @@ class ExecutiveControlService:
                 )
                 if callable(provider):
                     try:
-                        facts = await asyncio.to_thread(
+                        facts = await self._run_physical(
                             provider, runtime, wake_request.parent
                         )
                         source_response = reduce_dialogue_observation(
@@ -3604,7 +4120,7 @@ class ExecutiveControlService:
                     }
                 else:
                     try:
-                        facts = await asyncio.to_thread(
+                        facts = await self._run_physical(
                             provider, runtime, request.parent
                         )
                         response = reduce_dialogue_observation(
@@ -3648,15 +4164,18 @@ class ExecutiveControlService:
         )
 
     async def _send_ceo_ingress_response(
-        self, writer: asyncio.StreamWriter, payload: Mapping[str, Any]
+        self, writer: asyncio.StreamWriter, payload: Mapping[str, Any],
+        *, response_ceiling: int = ceo_ingress.MAX_RESPONSE_BYTES,
     ) -> None:
         """Dedicated bounded sender (§7.4) — the 32 KiB ingress ceiling, never
         the generic ``_send()``'s ``ServiceConfig.max_response_bytes``.  A
         successful canonical receipt above the ingress bound is a protocol/
-        backend defect and refuses; it is never truncated."""
+        backend defect and refuses; it is never truncated.  ``response_ceiling``
+        widens that bound only for the installed App's framed content pages,
+        whose own contract ceiling is ``MAX_PAGE_BYTES``."""
 
         raw = _canonical_json(payload)
-        if len(raw) > ceo_ingress.MAX_RESPONSE_BYTES:
+        if len(raw) > response_ceiling:
             raw = _canonical_json(
                 {
                     "ok": False,
@@ -3765,7 +4284,8 @@ class ExecutiveControlService:
             # at least the separator byte.  ``not raw`` is therefore
             # unreachable here and is intentionally omitted (verified by
             # grepping both except clauses above: neither falls through).
-            if len(raw) > ceo_ingress.MAX_REQUEST_BYTES:
+            from control_plane import executive_release_ingress as release_ingress
+            if len(raw) > release_ingress.MAX_FRAME_BYTES:
                 await self._send_ceo_ingress_error(
                     writer, "request_too_large", "request exceeds byte limit"
                 )
@@ -3774,18 +4294,118 @@ class ExecutiveControlService:
                 text = raw.decode("utf-8", errors="strict")
             except UnicodeDecodeError:
                 await self._send_ceo_ingress_error(
-                    writer, "invalid_json", "request is not valid UTF-8"
+                    writer,
+                    "request_too_large" if len(raw) > ceo_ingress.MAX_REQUEST_BYTES else "invalid_json",
+                    "request frame refused",
                 )
                 return
             try:
                 parsed = json.loads(text)
-            except json.JSONDecodeError:
+            except (ValueError, RecursionError):
                 await self._send_ceo_ingress_error(
-                    writer, "invalid_json", "request is not valid JSON"
+                    writer,
+                    "request_too_large" if len(raw) > ceo_ingress.MAX_REQUEST_BYTES else "invalid_json",
+                    "request frame refused",
                 )
                 return
+            is_release = isinstance(parsed, dict) and parsed.get("schema") == release_ingress.FRAME_SCHEMA
+            if not is_release and len(raw) > ceo_ingress.MAX_REQUEST_BYTES:
+                await self._send_ceo_ingress_error(writer, "request_too_large", "request exceeds byte limit")
+                return
+            if is_release:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "release frame requires the installed gateway")
+                    return
+                if (
+                    self._closing
+                    or self._service_state not in {"READY", "AWAITING_CANARY"}
+                    or (self.config.release_control_armed and self._service_state != "READY")
+                ):
+                    await self._send_ceo_ingress_error(writer, "RELEASE_UNAVAILABLE", "release controls are unavailable")
+                    return
+                from control_plane.executive_release_consumer import ReleaseConsumerError
+                try:
+                    # Run in the serving process, retaining this accepted
+                    # socket. No helper serializes or fabricates its capture.
+                    consumer = self._require_release_control_consumer()
+                    release_socket = connection.dup()
+                    def consume_release():
+                        # asyncio exposes a TransportSocket wrapper. Its
+                        # in-process duplicate is a real socket with the same
+                        # connected kernel peer, owned until this call settles.
+                        with release_socket:
+                            return consumer.handle(raw, release_socket)
+                    result = await self._run_physical(consume_release)
+                    await self._send_ceo_ingress_response(
+                        writer, {"ok": True, "result": result},
+                        response_ceiling=release_ingress.MAX_RESPONSE_BYTES)
+                except (release_ingress.ReleaseIngressError, ReleaseConsumerError) as exc:
+                    refusal = {"schema": release_ingress.RESPONSE_SCHEMA,
+                        "operation": parsed.get("operation"), "ok": False,
+                        "error": {"code": exc.code}}
+                    if exc.code == "RELEASE_APPROVAL_READBACK_UNKNOWN":
+                        # Persistence already succeeded; this is not proof of
+                        # zero effect. Reconcile the original operation only.
+                        refusal["effect"] = "EFFECT_UNKNOWN"
+                    await self._send_ceo_ingress_response(writer, {"ok": True, "result": refusal})
+                except Exception:
+                    # If an approval transaction may have committed, the
+                    # caller must reconcile the same operation, never retry.
+                    await self._send_ceo_ingress_response(writer, {
+                        "ok": True, "result": {"schema": release_ingress.RESPONSE_SCHEMA,
+                        "operation": parsed.get("operation"), "ok": False,
+                        "effect": "EFFECT_UNKNOWN", "error": {"code": "RELEASE_RESPONSE_UNKNOWN"}}})
+                return
+            from common.executive_workspace_contract import (
+                FRAME_SCHEMA, FRAME_SCHEMA_V2,
+                MAX_RESPONSE_BYTES as WORKSPACE_MAX_RESPONSE_BYTES,
+                MAX_RESULT_RESPONSE_BYTES,
+                response_ceiling_for,
+                error as workspace_error,
+                bounded_canonical as workspace_encode,
+            )
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2}:
+                factory = app_binding.workspace_read_provider_factory
+                # Pick the operation-specific ceiling BEFORE any work so an
+                # unknown or malformed frame never widens to a larger ceiling.
+                operation = parsed.get("operation") if isinstance(parsed, dict) else None
+                if parsed.get("schema") == FRAME_SCHEMA_V2:
+                    ceiling = response_ceiling_for(operation)
+                else:
+                    ceiling = WORKSPACE_MAX_RESPONSE_BYTES
+                if factory is None or self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = workspace_error("source_unavailable", 503)
+                else:
+                    try:
+                        result = await factory(self._require_runtime()).handle_frame(parsed)
+                    except Exception:
+                        result = workspace_error("source_unavailable", 503)
+                    if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        result = workspace_error("source_unavailable", 503)
+                try:
+                    workspace_encode(result, limit=ceiling - 1)
+                except (TypeError, ValueError):
+                    result = workspace_error("source_unavailable", 503)
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=ceiling)
+                return
+            from common.executive_content_contract import ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA, MAX_PAGE_BYTES
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {ACCESS_SCHEMA, PAGE_SCHEMA, STEWARD_SCHEMA}:
+                factory = (app_binding.steward_provider_factory if parsed["schema"] == STEWARD_SCHEMA
+                           else app_binding.content_provider_factory)
+                if factory is None or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                else:
+                    try:
+                        result = await factory(self._require_runtime()).handle_frame(parsed)
+                    except Exception:
+                        result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                    if self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
+                await self._send_ceo_ingress_response(writer, result, response_ceiling=(
+                    MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
+                return
             if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
-                ceo_ingress.APP_READ_SCHEMA, ceo_ingress.APP_GROUNDING_SCHEMA,
+                app_binding.read_schema, ceo_ingress.APP_GROUNDING_SCHEMA,
             }:
                 try:
                     if parsed["schema"] == ceo_ingress.APP_GROUNDING_SCHEMA:
@@ -3797,10 +4417,13 @@ class ExecutiveControlService:
                     else:
                         if set(parsed) != {"schema", "tool", "arguments"}:
                             raise ValueError("invalid read frame")
-                        if parsed["tool"] not in {
-                            "executive_state", "executive_inbox",
-                            "executive_job", "ceo_intent_status",
-                        } or not isinstance(parsed["arguments"], dict):
+                        admitted_read_tools = CEO_APP_READ_TOOLS_BY_SCHEMA[
+                            app_binding.read_schema
+                        ]
+                        if (
+                            parsed["tool"] not in admitted_read_tools
+                            or not isinstance(parsed["arguments"], dict)
+                        ):
                             raise ValueError("invalid read operation")
                         if app_binding.read_provider is None:
                             await self._send_ceo_ingress_error(
@@ -3818,17 +4441,53 @@ class ExecutiveControlService:
                         writer, "invalid_input", "installed read was refused"
                     )
                 return
+            from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            if isinstance(parsed, dict) and parsed.get("schema") == FACT_SCHEMA:
+                if not app_peer or not callable(app_binding.principal_facts_factory):
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "COO facts require the installed App peer")
+                    return
+                try:
+                    if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                        raise ValueError("source_unavailable")
+                    if parsed.get("operation") == "mission" and not app_binding.principal_admission_armed:
+                        raise ValueError("source_unavailable")
+                    provider = app_binding.principal_facts_factory(self._require_runtime())
+                    if type(provider) is not CooHostProvider:
+                        raise ValueError("source_unavailable")
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(provider.facts, parsed)))
+                    if (self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}
+                            or self._ceo_ingress_app_binding is not app_binding):
+                        raise ValueError("source_unavailable")
+                    response = {"ok": True, "result": result}
+                    workspace_encode(response, limit=WORKSPACE_MAX_RESPONSE_BYTES - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=WORKSPACE_MAX_RESPONSE_BYTES)
+                except Exception:
+                    await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503))
+                return
+            principal_frame = (
+                isinstance(parsed, Mapping) and isinstance(parsed.get("schema"), str)
+                and parsed["schema"] in ceo_ingress.PRINCIPAL_SCHEMAS
+            )
+            if principal_frame and (
+                not app_peer or not callable(app_binding.principal_admission_guard)
+            ):
+                await self._send_ceo_ingress_error(
+                    writer, "peer_denied", "principal frame is not authorized for this peer"
+                )
+                return
             if app_peer and (
                 not isinstance(parsed, Mapping)
                 or parsed.get("schema") not in {
                     ceo_ingress.SUBMIT_SCHEMA_V2, ceo_ingress.STATUS_SCHEMA_V2,
+                    *ceo_ingress.PRINCIPAL_SCHEMAS,
                 }
             ):
                 await self._send_ceo_ingress_error(
                     writer, "peer_denied", "frame is not authorized for this peer"
                 )
                 return
-            if app_peer and (
+            if app_peer and not principal_frame and (
                 not app_binding.armed
                 or self._service_state not in {"READY", "AWAITING_CANARY"}
             ):
@@ -3849,6 +4508,21 @@ class ExecutiveControlService:
                     "Executive CEO ingress is not currently admitting requests",
                 )
                 return
+            def principal_guard(envelope):
+                # Executed by the sink only on a fresh effect, off the event
+                # loop. Recheck binding/arming/state around the host fact read.
+                # Neither the frame nor the model supplies this function.
+                def require_current():
+                    if (not app_peer or app_binding is not self._ceo_ingress_app_binding
+                            or not app_binding.principal_admission_armed
+                            or self._closing or not self._ceo_ingress_ready
+                            or self._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise ValueError("principal admission unavailable")
+                require_current()
+                result = app_binding.principal_admission_guard(envelope)
+                require_current()
+                return result
+
             try:
                 result = await ceo_ingress.handle_frame(
                     parsed,
@@ -3859,6 +4533,8 @@ class ExecutiveControlService:
                     service_state=self._service_state,
                     ceo_ingress_armed=(app_binding.armed if app_peer
                                        else self._ceo_ingress_armed),
+                    principal_peer_authorized=app_peer and principal_frame,
+                    principal_admission_guard=principal_guard if principal_frame else None,
                     # Strict-v2 selection is trusted host composition.  The
                     # source-free public frame cannot opt itself into (or out
                     # of) the terminal-return admission path.
@@ -3921,6 +4597,9 @@ class ExecutiveControlService:
         return value
 
     def _proof_contract(self, *, workspace: Path, branch: str) -> dict[str, Any]:
+        authorities = ["READ", "RESEARCH", "RUN_TESTS", "WRITE_BRANCH"]
+        if self.config.privileged_readiness_armed:
+            authorities.append("REQUEST_WORKER_LOGIN_CHECK")
         return {
             "objective": _PROOF_OBJECTIVE,
             "department": "executive-infrastructure",
@@ -3938,7 +4617,7 @@ class ExecutiveControlService:
                 "eligible_quota_classes": [self.config.quota_class],
             },
             "attempt_limit": 3,
-            "requested_authorities": ["READ", "RESEARCH", "RUN_TESTS", "WRITE_BRANCH"],
+            "requested_authorities": sorted(authorities),
             "allowed_write_paths": [_PROOF_ARTIFACT],
             "validation_commands": [list(_PROOF_VALIDATION)],
         }
@@ -3972,6 +4651,46 @@ class ExecutiveControlService:
 
     def _register_worker(self) -> Any:
         runtime = self._require_runtime()
+        realm = self.config.subscription_canary_realm()
+        if realm is not None:
+            descriptor, capabilities = self._primary_quota_descriptor(
+                default_capabilities=("read",),
+            )
+            expected_capabilities = list(capabilities)
+            expected_metadata = dict(descriptor.get("metadata", {}))
+            existing = runtime.workers.get_worker(self.config.worker_id)
+            if existing is not None:
+                quota = runtime.workers.get_quota_class(
+                    self.config.worker_id, self.config.quota_class
+                )
+                if (
+                    existing.provider != self.config.provider
+                    or existing.account_label != self.config.worker_account_label
+                    or existing.worker_type != self.config.worker_type
+                    or existing.capabilities != expected_capabilities
+                    or quota is None
+                    or quota.provider != descriptor["provider"]
+                    or quota.model != descriptor["model"]
+                    or quota.effort != descriptor["effort"]
+                    or quota.cost_class != descriptor["cost_class"]
+                    or quota.capabilities != expected_capabilities
+                    or quota.metadata != expected_metadata
+                ):
+                    raise StateConflict(
+                        "configured subscription-canary worker identity already "
+                        "exists with different policy"
+                    )
+                return existing
+            return runtime.workers.register_worker(
+                self.config.worker_id,
+                provider=self.config.provider,
+                account_label=self.config.worker_account_label,
+                worker_type=self.config.worker_type,
+                capabilities=expected_capabilities,
+                quota_classes={self.config.quota_class: descriptor},
+                metadata={"service_managed": True},
+            )
+
         binding = self._require_current_coo_binding()
         router = ModelRouter.load()
         alias = router.model_aliases[self.config.coo_model_alias]
@@ -4031,37 +4750,38 @@ class ExecutiveControlService:
                 or quota.capabilities != proof_capabilities
             ):
                 raise StateConflict("configured worker identity already exists with different policy")
-            runtime.workers.register_quota_class(
-                self.config.worker_id,
-                self.config.coo_quota_class,
-                provider=str(binding["provider"]),
-                model=str(binding["model"]),
-                effort=str(binding["effort"]),
-                cost_class=str(binding["cost_class"]),
-                capabilities=coo_capabilities,
-                metadata=coo_metadata,
-            )
-            runtime.workers.register_quota_class(
-                self.config.worker_id,
-                self.config.coo_default_quota_class,
-                provider=str(binding["provider"]),
-                model=str(binding["model"]),
-                effort=str(binding["effort"]),
-                cost_class="default",
-                capabilities=coo_capabilities,
-                metadata=coo_default_metadata,
-            )
-            if self.config.coo_operator_harness_armed:
+            if self.config.coo_autonomy_armed:
                 runtime.workers.register_quota_class(
                     self.config.worker_id,
-                    self.config.coo_operator_quota_class,
-                    provider=str(binding["operator_provider"]),
-                    model=str(binding["operator_model"]),
-                    effort=str(binding["operator_effort"]),
-                    cost_class=str(binding["operator_cost_class"]),
-                    capabilities=operator_capabilities,
-                    metadata=operator_metadata,
+                    self.config.coo_quota_class,
+                    provider=str(binding["provider"]),
+                    model=str(binding["model"]),
+                    effort=str(binding["effort"]),
+                    cost_class=str(binding["cost_class"]),
+                    capabilities=coo_capabilities,
+                    metadata=coo_metadata,
                 )
+                runtime.workers.register_quota_class(
+                    self.config.worker_id,
+                    self.config.coo_default_quota_class,
+                    provider=str(binding["provider"]),
+                    model=str(binding["model"]),
+                    effort=str(binding["effort"]),
+                    cost_class="default",
+                    capabilities=coo_capabilities,
+                    metadata=coo_default_metadata,
+                )
+                if self.config.coo_operator_harness_armed:
+                    runtime.workers.register_quota_class(
+                        self.config.worker_id,
+                        self.config.coo_operator_quota_class,
+                        provider=str(binding["operator_provider"]),
+                        model=str(binding["operator_model"]),
+                        effort=str(binding["operator_effort"]),
+                        cost_class=str(binding["operator_cost_class"]),
+                        capabilities=operator_capabilities,
+                        metadata=operator_metadata,
+                    )
             refreshed = runtime.workers.get_worker(self.config.worker_id)
             assert refreshed is not None
             return refreshed
@@ -4137,7 +4857,7 @@ class ExecutiveControlService:
             nonce = uuid4().hex
             workspace_name = f"proof-{nonce}"
             branch = f"{self.config.proof_branch}-{nonce}"
-            receipt = await asyncio.to_thread(
+            receipt = await self._run_physical(
                 prepare_credentialless_clone,
                 self.config.proof_source_repository,
                 self.config.proof_workspace_root,
@@ -4537,8 +5257,8 @@ class ExecutiveControlService:
             job = runtime.jobs.get_job(job_id)
             if job is None or not self._is_fixed_proof_job(job):
                 raise StateConflict("service requeue accepts only its fixed harmless proof job")
-            rotation = await asyncio.to_thread(self._rotate_proof_workspace, job)
-            requeued = await asyncio.to_thread(runtime.jobs.requeue_job, job_id)
+            rotation = await self._run_physical(self._rotate_proof_workspace, job)
+            requeued = await self._run_physical(runtime.jobs.requeue_job, job_id)
             result = requeued.to_dict()
             result["workspace_rotation"] = rotation
             return result
@@ -4621,7 +5341,9 @@ class ExecutiveControlService:
         return receipt
 
     def _is_bound_coo_root(self, root: Job) -> bool:
-        binding = self._require_current_coo_binding()
+        raw_binding = self._require_current_coo_binding()
+        binding = _normalise_constraints(raw_binding)
+        binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
         provenance = root.orchestration_provenance
         return bool(
             root.parent_job_id is None
@@ -4705,6 +5427,21 @@ class ExecutiveControlService:
             if job.constraints.get("cost_class") not in {"small", "default"}:
                 raise StateConflict(
                     "COO Job cost class has no reviewed serialized capacity"
+                )
+        if job.orchestration_role == "work":
+            with runtime.store.read() as connection:
+                row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root.job_id,)).fetchone()
+                if row is None:
+                    raise StateConflict("COO root disappeared before placement validation")
+                _admission, plan = _validated_plan_admission(connection, row)
+            step = next((item for item in plan["steps"] if item["step_id"] == job.plan_step_id), None)
+            if step is None or job.plan_attempt_id != plan["plan_attempt_id"]:
+                raise StateConflict("COO work placement is not in its admitted plan")
+            if "placement" in step:
+                expected = _project_work_placement(
+                    expected, root.constraints, step["placement"],
+                    raw_root_constraints=root.constraints,
+                    plan_schema_version=str(plan["schema_version"]),
                 )
         for key, value in expected.items():
             if job.constraints.get(key) != value:
@@ -4835,13 +5572,13 @@ class ExecutiveControlService:
         ]
         if not active:
             return
-        receipts = await asyncio.to_thread(
+        receipts = await self._run_physical(
             self._require_supervisor().reconcile_restart,
             requeue_lost=False,
         )
         if self.operator_supervisor is not None:
             receipts.extend(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self.operator_supervisor.reconcile_restart,
                     requeue_lost=False,
                 )
@@ -4875,12 +5612,34 @@ class ExecutiveControlService:
                     for value, task in self._dispatch_tasks.items()
                     if not task.done()
                 }
-                if live and live != {job_id}:
-                    raise StateConflict("the serialized worker already has another active dispatch")
                 job = runtime.jobs.get_job(job_id)
                 if job is None:
                     raise StateConflict(f"job {job_id!r} does not exist")
                 self._require_bound_coo_job(job)
+                if live and live != {job_id}:
+                    live_jobs = [runtime.jobs.get_job(value) for value in live]
+                    if (
+                        any(value is None for value in live_jobs)
+                        or any(
+                            value.root_job_id != job.root_job_id
+                            for value in live_jobs
+                            if value is not None
+                        )
+                        or any(
+                            value.status not in {
+                                JobStatus.RUNNING,
+                                JobStatus.CHECKPOINTED,
+                            }
+                            for value in live_jobs
+                            if value is not None
+                        )
+                    ):
+                        raise StateConflict(
+                            "the serialized worker already has another active dispatch"
+                        )
+                    for value in live_jobs:
+                        assert value is not None
+                        self._require_bound_coo_job(value)
                 if job.status not in {
                     JobStatus.QUEUED,
                     JobStatus.RUNNING,
@@ -4891,6 +5650,14 @@ class ExecutiveControlService:
                     )
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
+                if (
+                    job.orchestration_role == "plan"
+                    and job.constraints.get("execution_profile_id")
+                    == "operator.appserver.interactive.v1"
+                ):
+                    raise StateConflict(
+                        "interactive plan Jobs are not routed to the planner supervisor"
+                    )
                 supervisor: Any = (
                     self._require_operator_supervisor()
                     if (
@@ -4900,8 +5667,8 @@ class ExecutiveControlService:
                     else self._require_supervisor()
                 )
                 try:
-                    started = await supervisor.start_cycle_job(
-                        job_id, command_id=command_id
+                    started = await self._run_owned_coroutine(
+                        supervisor.start_cycle_job(job_id, command_id=command_id)
                     )
                 except Exception as exc:
                     current = runtime.jobs.get_job(job_id)
@@ -4982,7 +5749,7 @@ class ExecutiveControlService:
                 )
                 return future.result()
 
-            outcome = await asyncio.to_thread(
+            outcome = await self._run_physical(
                 CooCycle(self._require_runtime(), dispatcher=dispatch).run_once,
                 root_id,
             )
@@ -5061,6 +5828,42 @@ class ExecutiveControlService:
             return root.job_id
         return None
 
+    def _live_bound_coo_root_id(self) -> str | None:
+        """Return the one bound COO root owning every live service finisher."""
+
+        live = [
+            job_id
+            for job_id, task in self._dispatch_tasks.items()
+            if not task.done()
+        ]
+        if not live:
+            return None
+        runtime = self._require_runtime()
+        jobs = [runtime.jobs.get_job(job_id) for job_id in live]
+        if any(job is None for job in jobs):
+            return None
+        concrete = [job for job in jobs if job is not None]
+        root_ids = {job.root_job_id for job in concrete}
+        if len(root_ids) != 1:
+            return None
+        root_id = next(iter(root_ids))
+        if not isinstance(root_id, str):
+            return None
+        if any(
+            job.status not in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}
+            for job in concrete
+        ):
+            return None
+        root = runtime.jobs.get_job(root_id)
+        try:
+            if root is None or not self._is_bound_coo_root(root):
+                return None
+            for job in concrete:
+                self._require_bound_coo_job(job)
+        except (StateConflict, ServiceError):
+            return None
+        return root_id
+
     def _record_coo_tick_refusal(self, root_job_id: str, exc: Exception) -> None:
         """Persist one idempotent, secret-free autonomous refusal receipt."""
 
@@ -5106,9 +5909,17 @@ class ExecutiveControlService:
                 pass
             if self._coo_shutdown_event.is_set():
                 return
-            if self._service_state != "READY" or any(
+            if self._service_state != "READY":
+                continue
+            has_live_dispatch = any(
                 not task.done() for task in self._dispatch_tasks.values()
-            ):
+            )
+            live_root_id = (
+                self._live_bound_coo_root_id()
+                if has_live_dispatch
+                else None
+            )
+            if has_live_dispatch and live_root_id is None:
                 continue
             root_id: str | None = None
             try:
@@ -5118,11 +5929,13 @@ class ExecutiveControlService:
                 # per-action guard revalidates immediately before useful work.
                 self._require_current_autonomy()
                 prestart_refusals: dict[str, Exception] = {}
-                selected_root_id = self._next_bound_coo_root(
-                    prestart_refusals=prestart_refusals
-                )
-                for refused_root_id, refusal in prestart_refusals.items():
-                    self._record_coo_tick_refusal(refused_root_id, refusal)
+                selected_root_id = live_root_id
+                if selected_root_id is None:
+                    selected_root_id = self._next_bound_coo_root(
+                        prestart_refusals=prestart_refusals
+                    )
+                    for refused_root_id, refusal in prestart_refusals.items():
+                        self._record_coo_tick_refusal(refused_root_id, refusal)
                 # A diagnostic-write failure must not be attributed to a healthy
                 # root that has not yet been selected for any action.
                 root_id = selected_root_id
@@ -5172,6 +5985,50 @@ class ExecutiveControlService:
             current = asyncio.current_task()
             if self._dispatch_tasks.get(job_id) is current:
                 self._dispatch_tasks.pop(job_id, None)
+
+    @staticmethod
+    def _reconciliation_requires_quarantine(values: list[Any]) -> bool:
+        blocked = {
+            "IDENTITY_AMBIGUOUS",
+            "LIVE_QUARANTINED",
+            "LEASE_EXPIRED_QUARANTINED",
+            "STALE_FENCE_QUARANTINED",
+        }
+        for value in values:
+            status = getattr(value, "status", None)
+            rendered = getattr(status, "value", status)
+            if rendered in blocked:
+                return True
+        return False
+
+    async def _schedule_recovered_runs(self) -> None:
+        supervisor = self._require_supervisor()
+        take = getattr(supervisor, "take_recovered_runs", None)
+        if not callable(take):
+            return
+        for active in take():
+            lease = getattr(active, "lease", None)
+            attempt = getattr(lease, "attempt", None)
+            job_id = getattr(attempt, "job_id", None)
+            attempt_id = getattr(attempt, "attempt_id", None)
+            if not isinstance(job_id, str) or not isinstance(
+                attempt_id, str
+            ):
+                self._service_state = "QUARANTINED"
+                raise ServiceError(
+                    "recovered worker has no exact Job/Attempt identity"
+                )
+            existing = self._dispatch_tasks.get(job_id)
+            if existing is not None and not existing.done():
+                self._service_state = "QUARANTINED"
+                raise ServiceError(
+                    "recovered worker conflicts with an existing finisher"
+                )
+            task = asyncio.create_task(
+                self._finish_dispatched(job_id, active),
+                name=f"executive-recovered-finish-{job_id}",
+            )
+            self._dispatch_tasks[job_id] = task
 
     async def _replay_terminal_returns_on_startup(self) -> None:
         """Re-offer durable terminal facts in canonical JobRegistry order."""
@@ -5978,6 +6835,8 @@ class ExecutiveControlService:
         return path
 
     async def _dispatch_request(self, raw_request: Any) -> Any:
+        if self._closing:
+            raise ServiceError("Executive service is closing")
         command, args = self._request(raw_request)
         runtime = self._require_runtime()
 
@@ -6008,6 +6867,19 @@ class ExecutiveControlService:
                     "last_error": self._coo_last_error,
                 },
             }
+        if command == "offline-delivery-observation":
+            self._exact_args(args, {"runtime_root", "root_job_id", "expected_release_sha", "observed_at"})
+            if not isinstance(args["runtime_root"], str) or Path(args["runtime_root"]).absolute() != self.config.runtime_root.absolute():
+                raise ValueError("observation requires this installed Runtime root")
+            if self._namespace_custody is None:
+                raise ServiceError("Runtime namespace custody unavailable")
+            from scripts.web_ceo_offline_delivery_canary import build_receipt
+            bound = self._namespace_custody.bound_runtime(runtime)
+            return await self._run_physical(
+                build_receipt, bound, root_job_id=args["root_job_id"],
+                expected_release_sha=args["expected_release_sha"],
+                observed_at=args["observed_at"],
+            )
         if command == "health":
             self._exact_args(args, set())
             return self._database_health()
@@ -6017,7 +6889,7 @@ class ExecutiveControlService:
                 raise StateConflict("Executive control service is not awaiting a canary")
             if self._canary_loader is None:
                 raise ServiceError("Executive control service has no canary loader")
-            verdict = await asyncio.to_thread(self._canary_loader)
+            verdict = await self._run_physical(self._canary_loader)
             await self.activate_canary(verdict)
             return {"service_state": self._service_state}
         if self._service_state != "READY":
@@ -6076,7 +6948,7 @@ class ExecutiveControlService:
             # opaque `internal_error` path.
             self._exact_args(args, {"intent"})
             return _jsonable(
-                await asyncio.to_thread(self._submit_service_intent, args["intent"])
+                await self._run_physical(self._submit_service_intent, args["intent"])
             )
         if command == "ceo-intent-status":
             # Read-back only.  The durable JOB_CREATED event plus the Job row are
@@ -6084,7 +6956,7 @@ class ExecutiveControlService:
             self._exact_args(args, {"intent_id"})
             intent_id = self._id(args["intent_id"], "intent_id")
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     ceo_intent.resolve_intent,
                     runtime,
                     intent_id,
@@ -6098,7 +6970,7 @@ class ExecutiveControlService:
             if any(not task.done() for task in self._dispatch_tasks.values()):
                 raise StateConflict("cannot reconcile while this service owns an active dispatch")
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self._require_supervisor().reconcile_restart,
                     requeue_lost=False,
                 )
@@ -6114,7 +6986,7 @@ class ExecutiveControlService:
             self.config.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
             self.config.backup_root.chmod(0o700)
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self._backup_backend.create_online_backup,
                     runtime.store,
                     self.config.backup_root,
@@ -6127,10 +6999,45 @@ class ExecutiveControlService:
             if not manifest_path.is_file() or manifest_path.is_symlink():
                 raise ServiceError("backup has no canonical manifest and is not restorable")
             return _jsonable(
-                await asyncio.to_thread(
+                await self._run_physical(
                     self._backup_backend.verify_backup,
                     database_path,
                     manifest_path,
+                )
+            )
+        if command == "check-current-worker-login":
+            # Closed READY-only Job-bound login-check dispatch (Task 5).
+            # Exactly three caller fields; no caller can supply an action,
+            # worker, slot, executable, path, host, release, request id,
+            # credential kind, expiry, retry instruction or force flag.
+            self._exact_args(args, {"job_id", "attempt_id", "fence_generation"})
+            if not self.config.privileged_readiness_armed:
+                raise ServiceError(
+                    "check-current-worker-login is not armed in this ServiceConfig"
+                )
+            controller = self._privileged_readiness_controller
+            if controller is None:
+                raise ServiceError(
+                    "check-current-worker-login has no privileged readiness controller"
+                )
+            job_id = self._id(args["job_id"], "job_id")
+            attempt_id = self._id(args["attempt_id"], "attempt_id")
+            fence = args["fence_generation"]
+            if (
+                type(fence) is not int
+                or isinstance(fence, bool)
+                or fence <= 0
+            ):
+                raise ServiceError(
+                    "fence_generation must be a positive integer"
+                )
+            return _jsonable(
+                await controller.check(
+                    {
+                        "job_id": job_id,
+                        "attempt_id": attempt_id,
+                        "fence_generation": fence,
+                    }
                 )
             )
         raise ValueError(f"unknown control command {command!r}")

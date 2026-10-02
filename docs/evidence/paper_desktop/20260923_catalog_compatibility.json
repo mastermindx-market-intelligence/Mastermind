@@ -1,0 +1,58 @@
+{
+  "observed_on": "2026-09-23",
+  "capability_state": "BUILT_NOT_PROVEN",
+  "production_accepted": false,
+  "procedure_commit": "c917a75b0168a524a51b2ba0603a99118e93ef1f",
+  "server": [
+    "paper-desktop",
+    "0.5.11"
+  ],
+  "prior_catalog_sha256": "e295e78106615d4058f47f18b661c97b1832231ae77164c534ee42df62a11519",
+  "observed_catalog_sha256": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570",
+  "observed_hosts": [
+    {
+      "device": "Mac-Studio.local",
+      "catalog_sha256": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570"
+    },
+    {
+      "device": "admins-Mini-652.ts.net lan",
+      "catalog_sha256": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570"
+    }
+  ],
+  "compatibility_review": {
+    "allowlisted_read_tool_count": 17,
+    "allowlisted_edit_tool_count": 12,
+    "edit_tools": [
+      "create_artboard",
+      "create_page",
+      "create_tokens",
+      "duplicate_nodes",
+      "finish_working_on_nodes",
+      "move_nodes",
+      "rename_nodes",
+      "set_comment_thread_status",
+      "set_text_content",
+      "set_tokens",
+      "update_styles",
+      "write_html"
+    ],
+    "every_edit_requires_fileId": true,
+    "edit_schemas_additionalProperties_false": true,
+    "bridge_token_delete_refusal_preserved": true,
+    "blocked_tools": [
+      "create_file",
+      "delete_nodes",
+      "export",
+      "export_combined_pdf",
+      "open_file"
+    ],
+    "conclusion": "bounded catalog-pin compatibility repair; no new Paper authority, gateway, lifecycle, auth, retry, or transport plane"
+  },
+  "candidate": {
+    "branch": "sol/paper-catalog-compat-20260923",
+    "bridge_sha256": "26e3b5e8435d9a44f9476d29ae8d2f55819b9d7c05a0c008fb021da58d96e081",
+    "runtime_generation": "v3",
+    "deployed": false,
+    "live_write_proven": false
+  }
+}

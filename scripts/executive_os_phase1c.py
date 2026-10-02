@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import hashlib
 import json
 import os
@@ -29,7 +30,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
-from control_plane.executive_runtime import RuntimeProofError, RuntimeStore
+from control_plane.executive_runtime import RuntimeProofError
 from control_plane.executive_autonomy import (
     AutonomyRefusal,
     validate_runtime_guard_file,
@@ -38,6 +39,8 @@ from control_plane.executive_service import (
     ExecutiveDialogueWakeBridge,
     ExecutiveControlService,
     CeoIngressAppBinding,
+    CEO_APP_READ_SCHEMA,
+    CEO_WEB_CEO_V2_READ_SCHEMA,
     ServiceConfig,
     ServiceError,
     activate_launchd_socket,
@@ -92,6 +95,77 @@ def _build_executive_dialogue_wake_carrier(
 
 
 CONTROL_CONFIG_SCHEMA_VERSION = "mastermind.executive_control_config/v1"
+
+
+def _validate_subscription_canary_realm_config(config: dict[str, Any]) -> None:
+    """Validate the optional root-owned ``subscription_canary_realm`` block.
+
+    The shape is fixed: exactly ``{binding_id, generation, config_sha256}``
+    and each field passes the same fail-closed check the supervisor and the
+    worker re-apply on disk.  Validation does not rewrite the loaded mapping:
+    fixed-target source identity and hashes continue to cover the exact
+    root-owned bytes.  An ordinary (no realm) configuration remains unchanged.
+    """
+
+    realm = config.get("subscription_canary_realm")
+    if realm is None:
+        return
+    if not isinstance(realm, dict) or set(realm) != {
+        "binding_id", "generation", "config_sha256",
+    }:
+        raise ServiceError(
+            "control config subscription_canary_realm must have exactly "
+            "binding_id, generation, config_sha256"
+        )
+    binding_id = realm["binding_id"]
+    generation = realm["generation"]
+    config_sha = realm["config_sha256"]
+    if (
+        not isinstance(binding_id, str)
+        or not binding_id
+        or binding_id != binding_id.strip()
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.binding_id is invalid"
+        )
+    if (
+        type(generation) is not int
+        or isinstance(generation, bool)
+        or generation < 1
+        or generation >= 2 ** 63
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.generation is invalid"
+        )
+    if (
+        not isinstance(config_sha, str)
+        or config_sha != config_sha.lower()
+        or re.fullmatch(r"[0-9a-f]{64}", config_sha) is None
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm.config_sha256 is invalid"
+        )
+    # Final fail-closed review of the binding against the catalog so a typo
+    # in the realm cannot survive even if the three scalar fields look sane.
+    from control_plane.subscription_harness_bindings import (
+        HarnessBindingError,
+        get_binding,
+    )
+    try:
+        binding = get_binding(binding_id)
+    except (HarnessBindingError, ValueError) as exc:
+        raise ServiceError(
+            "control config subscription_canary_realm binding is not reviewed"
+        ) from exc
+    if (
+        binding.adapter_id != "codex-cli"
+        or binding.implementation_state == "SPEC_ONLY"
+        or binding.autonomous_allowed is not False
+    ):
+        raise ServiceError(
+            "control config subscription_canary_realm binding is not a "
+            "reviewed codex-cli attended-only implementation"
+        )
 AUTONOMY_RECEIPT = Path(
     "/Library/Application Support/MastermindExecutive/config/autonomy-state-v1.json"
 )
@@ -108,6 +182,7 @@ _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
+_CONTENT_PROFILE_MAX_BYTES = 65536
 _CONFIG_REQUIRED = frozenset(
     {
         "schema_version",
@@ -134,7 +209,14 @@ _CONFIG_REQUIRED = frozenset(
 )
 _CONFIG_OPTIONAL = frozenset(
     {
+        "content_observer",
+        "content_observer_profile_path",
+        "workspace_acquisition",
+        "workspace_resource_policy",
+        "workspace_control_room",
+        "coo_principal_armed",
         "proof_branch",
+        "exact_worker_claim_target",
         "worker_id",
         "worker_account_label",
         "quota_class",
@@ -161,6 +243,7 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_app_armed",
         "ceo_ingress_app_macro_root",
         "ceo_ingress_app_boot_python",
+        "executive_mcp_profile",
         "terminal_return_armed",
         "terminal_return_socket_path",
         "dialogue_observation_socket_path",
@@ -168,6 +251,10 @@ _CONFIG_OPTIONAL = frozenset(
         "dialogue_observation_peer_uid",
         "dialogue_bridge_armed",
         "dialogue_wake_retry_policy",
+        "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
+        "python_runtime_provenance_digest",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -220,6 +307,9 @@ def _parser() -> argparse.ArgumentParser:
     serve.add_argument("--config", type=_absolute_path, required=True)
 
     for name, help_text in (
+        ("content-observer-enroll", "Explicitly enroll the installed content profile as control uid."),
+        ("content-observer-status", "Reconcile the installed content profile without enrollment."),
+        ("content-observer-revoke", "Revoke the installed content profile as control uid."),
         ("status", "Show service and startup-reconciliation status."),
         ("health", "Check SQLite migration and integrity health."),
         ("activate-canary", "Validate and activate the current PID-bound canary."),
@@ -230,7 +320,18 @@ def _parser() -> argparse.ArgumentParser:
         ("reconcile", "Reconcile durable attempts without automatic requeue."),
         ("backup", "Create an online DB backup in the configured backup root."),
     ):
-        sub.add_parser(name, help=help_text)
+        cmd_parser = sub.add_parser(name, help=help_text)
+        if name.startswith("content-observer-"):
+            cmd_parser.add_argument(
+                "--profile-key",
+                choices=["web", "mac"],
+                help="Content profile key (web or mac). Omit for legacy single-profile.",
+            )
+
+    readiness = sub.add_parser("check-current-worker-login", help="Read assigned worker login status for one current Attempt.")
+    readiness.add_argument("job_id")
+    readiness.add_argument("attempt_id")
+    readiness.add_argument("fence_generation", type=int)
 
     job = sub.add_parser("job", help="Inspect one Job.")
     job.add_argument("job_id")
@@ -288,6 +389,153 @@ def _private_json(path: Path, *, label: str, root_owned: bool) -> dict[str, Any]
     return value
 
 
+def _content_profile_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_gid,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _sealed_content_profile_ancestors(path: Path) -> tuple[tuple[str, tuple[int, ...]], ...]:
+    """Return stable identities for root-owned, non-symlink path ancestors."""
+
+    identities = []
+    for node in path.parents:
+        try:
+            info = node.lstat()
+        except OSError as exc:
+            raise ServiceError("content observer profile path is unavailable") from exc
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022
+        ):
+            raise ServiceError(
+                "content observer profile path ancestors must be root-owned and sealed"
+            )
+        identities.append((os.fspath(node), _content_profile_identity(info)))
+    return tuple(identities)
+
+
+def _content_profile_path(value: Any) -> Path:
+    """Accept one exact, normalized path without resolving aliases silently."""
+
+    if type(value) is not str or not value or not Path(value).is_absolute():
+        raise ServiceError("content observer profile path must be absolute")
+    path = Path(value)
+    if os.path.normpath(value) != value or os.fspath(path) != value:
+        raise ServiceError("content observer profile path must be normalized")
+    _sealed_content_profile_ancestors(path)
+    try:
+        if path.resolve(strict=True) != path:
+            raise ServiceError("content observer profile path must not traverse symlinks")
+    except ServiceError:
+        raise
+    except OSError as exc:
+        raise ServiceError("content observer profile path is unavailable") from exc
+    return path
+
+
+def _read_content_profile_document(path: Path, *, expected_gid: int) -> dict[str, Any]:
+    """Read one current root-published profile snapshot without cached fallback."""
+
+    if type(expected_gid) is not int or expected_gid < 0:
+        raise ServiceError("content observer profile Control GID is invalid")
+    before_ancestors = _sealed_content_profile_ancestors(path)
+    fd = -1
+    try:
+        fd = os.open(
+            path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+        )
+        before = os.fstat(fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != 0
+            or before.st_gid != expected_gid
+            or stat.S_IMODE(before.st_mode) != 0o440
+            or before.st_size > _CONTENT_PROFILE_MAX_BYTES
+        ):
+            raise ServiceError("content observer profile source identity is invalid")
+        parts: list[bytes] = []
+        size = 0
+        while True:
+            part = os.read(
+                fd,
+                min(65536, _CONTENT_PROFILE_MAX_BYTES + 1 - size),
+            )
+            if not part:
+                break
+            parts.append(part)
+            size += len(part)
+            if size > _CONTENT_PROFILE_MAX_BYTES:
+                raise ServiceError("content observer profile exceeds byte bound")
+        raw = b"".join(parts)
+        after = os.fstat(fd)
+        path_info = path.lstat()
+        after_ancestors = _sealed_content_profile_ancestors(path)
+        if (
+            _content_profile_identity(before) != _content_profile_identity(after)
+            or _content_profile_identity(after) != _content_profile_identity(path_info)
+            or before_ancestors != after_ancestors
+            or len(raw) != after.st_size
+        ):
+            raise ServiceError("content observer profile changed during read")
+
+        def unique_pairs(items):
+            result = {}
+            for key, item in items:
+                if key in result:
+                    raise ServiceError("content observer profile contains duplicate keys")
+                result[key] = item
+            return result
+
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs)
+        if type(value) is not dict:
+            raise ServiceError("content observer profile must contain a JSON object")
+        return value
+    except ServiceError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ServiceError("content observer profile is unavailable or malformed") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _validate_content_profiles(value: Any, *, expected_release_sha: str) -> Any:
+    from common.executive_content_contract import (
+        ContentObserverProfile,
+        load_content_profiles,
+    )
+
+    try:
+        configured = load_content_profiles(value)
+    except (TypeError, ValueError) as exc:
+        raise ServiceError("content observer profile is invalid") from exc
+    profiles = (
+        (configured,)
+        if type(configured) is ContentObserverProfile
+        else tuple(
+            slot.profile
+            for slot in (configured.web, configured.mac)
+            if slot.profile is not None
+        )
+    )
+    if any(profile.release_sha != expected_release_sha for profile in profiles):
+        raise ServiceError("content observer release differs from control source")
+    return configured
+
+
 def _path(value: Any, name: str) -> Path:
     if not isinstance(value, str) or not Path(value).is_absolute():
         raise ServiceError(f"control config {name} must be an absolute path")
@@ -325,16 +573,187 @@ def _sealed_root_executable(value: Any, name: str) -> Path:
     return path
 
 
+def _attest_app_boot_runtime(path: Path) -> Path:
+    """Bind the optional App boot interpreter to the accepted CF2 capacity runtime."""
+    from control_plane.ceo_boot_packet import attest_capacity_boot_runtime
+
+    try:
+        attest_capacity_boot_runtime(path)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise ServiceError("App boot runtime attestation failed") from exc
+    return path
+
+
 def _integer(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ServiceError(f"control config {name} must be a non-negative integer")
     return value
 
 
-def load_control_config(path: str | Path) -> dict[str, Any]:
-    """Load the exact secret-free, root-owned production composition contract."""
+_CONTROL_TARGET_COMPOSITION = object()
 
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class _TargetConfigSnapshot:
+    path: Path
+    raw: bytes
+    identity: tuple[int, ...]
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.raw).hexdigest()
+
+
+class _LoadedTargetConfig(dict):
+    """A startup-only snapshot; never accepted as serialized authority."""
+    def __init__(self, value, snapshot: _TargetConfigSnapshot):
+        super().__init__(value)
+        self._target_snapshot = snapshot
+        self._normalized_sha256 = ""
+
+
+def _target_file_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _read_target_config_snapshot(path: Path) -> tuple[dict[str, Any], _TargetConfigSnapshot]:
+    """Read one bounded owner-controlled file and hash the very bytes parsed."""
+    if not path.is_absolute():
+        raise ServiceError("exact worker target config path must be absolute")
+    fd = -1
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+            or before.st_uid not in {0, os.geteuid()} or stat.S_IMODE(before.st_mode) & 0o022
+            or before.st_size <= 0 or before.st_size > 256 * 1024):
+            raise ServiceError("exact worker target source identity is invalid")
+        parts, size = [], 0
+        while True:
+            part = os.read(fd, min(65536, 256 * 1024 + 1 - size))
+            if not part:
+                break
+            size += len(part)
+            if size > 256 * 1024:
+                raise ServiceError("exact worker target config exceeds byte bound")
+            parts.append(part)
+        raw = b"".join(parts)
+        after = os.fstat(fd)
+        if (_target_file_identity(before) != _target_file_identity(after)
+            or _target_file_identity(after) != _target_file_identity(path.lstat())
+            or len(raw) != after.st_size):
+            raise ServiceError("exact worker target source changed during read")
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ServiceError("exact worker target config contains duplicate keys")
+                result[key] = value
+            return result
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+        if not isinstance(value, dict):
+            raise ServiceError("exact worker target config is not an object")
+        return value, _TargetConfigSnapshot(path, raw, _target_file_identity(after))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ServiceError("exact worker target source is unavailable or malformed") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _target_config_mode(config: Mapping[str, Any]) -> str:
+    value = config.get("exact_worker_claim_target", {"mode": "disabled"})
+    if value == {"mode": "disabled"}:
+        return "disabled"
+    if (not isinstance(value, dict) or set(value) != {"mode", "definition", "max_age_ms"}
+        or value.get("mode") != "fixed"):
+        raise ServiceError("exact worker target configuration is not closed")
+    from control_plane.executive_runtime import _normalise_exact_worker_target_documents
+    try:
+        definition, _ = _normalise_exact_worker_target_documents(value["definition"], {
+            "schema_version": "mastermind.exact_worker_target_observation/v1",
+            "source_sha256": "0" * 64, "control_attestation_sha256": "0" * 64,
+            "observed_at_ms": 1, "max_age_ms": value["max_age_ms"],
+        })
+    except (ValueError, RuntimeProofError) as exc:
+        raise ServiceError("exact worker target definition is invalid") from exc
+    if (definition["worker_id"] != config.get("worker_id", "codex-01")
+        or definition["expected_account_label"] != config.get("worker_account_label", "dedicated-codex-home")):
+        raise ServiceError("exact worker target does not match the fixed broker identity")
+    return "fixed"
+
+
+class _ExactWorkerTargetSource:
+    """Private adapter of the existing attested config into the claim owner."""
+    def __init__(self, raw, attestation, attestation_loader, *, capability):
+        if capability is not _CONTROL_TARGET_COMPOSITION or type(raw) is not _LoadedTargetConfig:
+            raise ServiceError("exact worker target lacks attested source composition")
+        self._raw = raw
+        self._snapshot = raw._target_snapshot
+        self._attestation = dict(attestation)
+        self._attestation_loader = attestation_loader
+        self._target = json.loads(self._snapshot.raw)["exact_worker_claim_target"]
+        self.require_current()
+
+    def require_current(self) -> None:
+        if _canonical_sha256(_jsonable(self._raw)) != self._raw._normalized_sha256:
+            raise ServiceError("exact worker target loaded composition was modified")
+        _, current = _read_target_config_snapshot(self._snapshot.path)
+        if current != self._snapshot:
+            raise ServiceError("exact worker target consumed source snapshot changed")
+        attestation = self._attestation_loader()
+        if (not isinstance(attestation, Mapping)
+            or attestation.get("config_sha256") != self._snapshot.sha256
+            or self._attestation.get("config_sha256") != self._snapshot.sha256
+            or _canonical_sha256(attestation) != _canonical_sha256(self._attestation)):
+            raise ServiceError("exact worker target source/attestation binding differs")
+
+    def for_job(self, job_id: str, *, now_ms: int):
+        from control_plane.executive_runtime import (
+            _issue_exact_worker_claim_target, _EXACT_WORKER_TARGET_PRODUCER,
+        )
+        if job_id != self._target["definition"]["job_id"]:
+            raise ServiceError("exact worker target does not select this Job")
+        self.require_current()
+        return _issue_exact_worker_claim_target(
+            self._target["definition"], {
+                "schema_version": "mastermind.exact_worker_target_observation/v1",
+                "source_sha256": self._snapshot.sha256,
+                "control_attestation_sha256": _canonical_sha256(self._attestation),
+                "observed_at_ms": now_ms, "max_age_ms": self._target["max_age_ms"],
+            }, _producer_capability=_EXACT_WORKER_TARGET_PRODUCER,
+            revalidate=self.require_current,
+        )
+
+
+def _bind_exact_worker_target_source(raw, attestation, *, _producer_capability, attestation_loader):
+    if _target_config_mode(raw) == "disabled":
+        return None
+    return _ExactWorkerTargetSource(raw, attestation, attestation_loader,
+                                   capability=_producer_capability)
+
+
+def load_control_config(
+    path: str | Path, *, enforce_current_uid: bool = True
+) -> dict[str, Any]:
+    """Load the exact secret-free, root-owned production composition contract.
+
+    The service path keeps the default live-UID check.  A root-only credential
+    interlock may request static validation so it can prove the configured
+    control UID without impersonating that UID or weakening service startup.
+    """
+
+    if type(enforce_current_uid) is not bool:
+        raise ServiceError("control config UID enforcement selector must be boolean")
+    if not enforce_current_uid and os.geteuid() != 0:
+        raise ServiceError("static control config validation requires root")
     config = _private_json(Path(path), label="Executive control config", root_owned=True)
+    if _target_config_mode(config) == "fixed":
+        parsed, snapshot = _read_target_config_snapshot(Path(path))
+        if parsed != config:
+            raise ServiceError("exact worker target config moved between observations")
+        config = _LoadedTargetConfig(parsed, snapshot)
     if config.get("schema_version") != CONTROL_CONFIG_SCHEMA_VERSION:
         raise ServiceError("unsupported Executive control config schema")
     keys = set(config)
@@ -349,10 +768,24 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    arm = config.get("privileged_readiness_armed", False)
+    broker_socket = config.get("privileged_broker_socket_path")
+    if type(arm) is not bool:
+        raise ServiceError("privileged_readiness_armed must be boolean")
+    if (arm and broker_socket != "/var/run/mastermind-executive/privileged.sock") or (not arm and broker_socket is not None):
+        raise ServiceError("privileged readiness requires the armed canonical broker socket")
+    from ops.executive_os.coo_principal_host import validate_control_coo
+    try:
+        validate_control_coo(config)
+    except ValueError:
+        raise ServiceError("COO principal requires explicit Workspace and v2 App composition") from None
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
     app_present = keys & _CEO_INGRESS_APP_CONFIG_KEYS
+    content_sources = keys & {"content_observer", "content_observer_profile_path"}
+    if len(content_sources) > 1:
+        raise ServiceError("content observer sources are mutually exclusive")
     if app_present and (
         app_present != _CEO_INGRESS_APP_CONFIG_KEYS
         or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
@@ -360,6 +793,16 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     if "ceo_ingress_app_boot_python" in keys and app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
         raise ServiceError("App boot interpreter requires the complete App binding")
+    from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
+    try:
+        validate_installed_mcp_profile_current(config.get("executive_mcp_profile", "legacy"))
+    except ValueError:
+        raise ServiceError("installed Executive MCP profile is invalid") from None
+    if "executive_mcp_profile" in keys and (
+        app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
     terminal_return_present = keys & _TERMINAL_RETURN_CONFIG_KEYS
     if terminal_return_present and terminal_return_present != _TERMINAL_RETURN_CONFIG_KEYS:
         raise ServiceError("terminal-return control config fields must be supplied together")
@@ -382,6 +825,10 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         "control_environment_attestation_path",
     ):
         config[name] = _path(config[name], name)
+    if "content_observer_profile_path" in config:
+        config["content_observer_profile_path"] = _content_profile_path(
+            config["content_observer_profile_path"]
+        )
     if ceo_ingress_present:
         config["ceo_ingress_socket_path"] = _path(
             config["ceo_ingress_socket_path"], "ceo_ingress_socket_path"
@@ -429,9 +876,42 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             config["ceo_ingress_app_macro_root"], "ceo_ingress_app_macro_root"
         )
         if "ceo_ingress_app_boot_python" in config:
-            config["ceo_ingress_app_boot_python"] = _sealed_root_executable(
+            sealed_boot_python = _sealed_root_executable(
                 config["ceo_ingress_app_boot_python"], "ceo_ingress_app_boot_python"
             )
+            config["ceo_ingress_app_boot_python"] = _attest_app_boot_runtime(
+                sealed_boot_python
+            )
+    workspace_keys = {"workspace_acquisition", "workspace_resource_policy", "workspace_control_room"}
+    if keys & workspace_keys:
+        if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
+            raise ServiceError("workspace acquisition requires its policy and installed App peer")
+        topology = config["workspace_control_room"]
+        if (type(topology) is not dict or set(topology) != {"port"}
+                or type(topology["port"]) is not int or not 1 <= topology["port"] <= 65535):
+            raise ServiceError("workspace Control Room topology refused")
+        from integrations.business_mcp_auth.contracts import load_resource_policy
+        from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
+        try:
+            workspace_policy = load_resource_policy(config["workspace_resource_policy"])
+            config["workspace_acquisition"] = validate_workspace_bindings(config["workspace_acquisition"], workspace_policy)
+        except Exception:
+            raise ServiceError("workspace acquisition policy or binding refused") from None
+    if content_sources:
+        if not app_present:
+            raise ServiceError("content observer requires installed App peer")
+        value = (
+            config["content_observer"]
+            if "content_observer" in config
+            else _read_content_profile_document(
+                config["content_observer_profile_path"],
+                expected_gid=os.getegid(),
+            )
+        )
+        _validate_content_profiles(
+            value,
+            expected_release_sha=str(config["proof_base_sha"]),
+        )
     if observation_present:
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
@@ -488,7 +968,8 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError(
                 "control config dialogue_wake_retry_policy is invalid"
             ) from exc
-    if config["control_uid"] != os.geteuid():
+    _validate_subscription_canary_realm_config(config)
+    if enforce_current_uid and config["control_uid"] != os.geteuid():
         raise ServiceError("control service effective uid does not match control config")
     if config["worker_uid"] == config["control_uid"]:
         raise ServiceError("worker_uid must differ from control_uid")
@@ -579,6 +1060,13 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
             raise ServiceError(
                 "control config operator_harness_binary_digest must be SHA-256"
             )
+    if "python_runtime_provenance_digest" in config:
+        digest = config["python_runtime_provenance_digest"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ServiceError(
+                "control config python_runtime_provenance_digest must be lowercase "
+                "64-hex SHA-256"
+            )
     if "operator_harness_version" in config:
         version = config["operator_harness_version"]
         if not isinstance(version, str) or not version.strip() or len(version) > 64:
@@ -592,6 +1080,8 @@ def load_control_config(path: str | Path) -> dict[str, Any]:
         raise ServiceError(
             "control config coo_tick_interval_seconds must be numeric"
         )
+    if type(config) is _LoadedTargetConfig:
+        config._normalized_sha256 = _canonical_sha256(_jsonable(config))
     return config
 
 
@@ -615,6 +1105,96 @@ def _canonical_sha256(value: Any) -> str:
     except (TypeError, ValueError) as exc:
         raise ServiceError("canary receipt contains non-canonical JSON data") from exc
     return hashlib.sha256(payload).hexdigest()
+
+
+class _HotContentProfileSource:
+    """A fixed-path mutable profile source bound to one startup identity."""
+
+    def __init__(
+        self,
+        *,
+        profile_path: Path,
+        expected_gid: int,
+        expected_release_sha: str,
+        config_path: Path,
+        startup_attestation: Mapping[str, Any],
+        attestation_loader: Callable[[], Mapping[str, Any]],
+    ):
+        if not isinstance(startup_attestation, Mapping):
+            raise ServiceError("content observer startup attestation is invalid")
+        config_sha256 = startup_attestation.get("config_sha256")
+        process_identity = startup_attestation.get("process_identity")
+        if (
+            not isinstance(config_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", config_sha256) is None
+            or not isinstance(process_identity, Mapping)
+        ):
+            raise ServiceError("content observer startup identity is incomplete")
+        self._profile_path = profile_path
+        self._expected_gid = expected_gid
+        self._expected_release_sha = expected_release_sha
+        self._config_path = config_path
+        self._config_sha256 = config_sha256
+        self._startup_attestation = json.loads(
+            json.dumps(startup_attestation, ensure_ascii=False)
+        )
+        self._startup_attestation_sha256 = _canonical_sha256(
+            self._startup_attestation
+        )
+        self._startup_process_identity_sha256 = _canonical_sha256(
+            self._startup_attestation["process_identity"]
+        )
+        self._attestation_loader = attestation_loader
+        self.load()
+
+    def _require_startup_identity(self) -> None:
+        try:
+            current_config_sha256 = _sha256_file(self._config_path)
+        except OSError as exc:
+            raise ServiceError("content observer control config is unavailable") from exc
+        current = self._attestation_loader()
+        if (
+            not isinstance(current, Mapping)
+            or current_config_sha256 != self._config_sha256
+            or current.get("config_sha256") != self._config_sha256
+            or current.get("release_commit_sha") != self._expected_release_sha
+            or _canonical_sha256(current) != self._startup_attestation_sha256
+            or _canonical_sha256(current.get("process_identity"))
+            != self._startup_process_identity_sha256
+        ):
+            raise ServiceError("content observer startup config or attestation changed")
+
+    def load(self) -> dict[str, Any]:
+        self._require_startup_identity()
+        value = _read_content_profile_document(
+            self._profile_path,
+            expected_gid=self._expected_gid,
+        )
+        _validate_content_profiles(
+            value,
+            expected_release_sha=self._expected_release_sha,
+        )
+        self._require_startup_identity()
+        return value
+
+
+def _bind_hot_content_profile_source(
+    raw: Mapping[str, Any],
+    startup_attestation: Mapping[str, Any],
+    *,
+    config_path: Path,
+    attestation_loader: Callable[[], Mapping[str, Any]],
+) -> _HotContentProfileSource | None:
+    if "content_observer_profile_path" not in raw:
+        return None
+    return _HotContentProfileSource(
+        profile_path=Path(raw["content_observer_profile_path"]),
+        expected_gid=os.getegid(),
+        expected_release_sha=str(raw["proof_base_sha"]),
+        config_path=config_path,
+        startup_attestation=startup_attestation,
+        attestation_loader=attestation_loader,
+    )
 
 
 def _load_control_environment_attestation(
@@ -932,7 +1512,22 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
+    content_profile_loader: Callable[[], Any] | None = None,
+    workspace_acquisition_loader: Callable[[], Any] | None = None,
+    exact_target_source: _ExactWorkerTargetSource | None = None,
+    workspace_bindings_path: Path | None = None,
+    coo_source: Any | None = None,
+    claimed_operator_adapter_factory: Callable[..., Any] | None = None,
+    remote_operator_binding_source: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
+    # This is trusted host composition, never a JSON/model-selected factory.
+    if (claimed_operator_adapter_factory is not None
+            and not callable(claimed_operator_adapter_factory)):
+        raise ServiceError("claimed operator factory must be callable")
+    if (remote_operator_binding_source is not None
+            and (not callable(remote_operator_binding_source)
+                 or claimed_operator_adapter_factory is not None)):
+        raise ServiceError("remote operator binding source conflicts with factory")
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
         ExecutiveOperatorSupervisor,
@@ -945,6 +1540,13 @@ def _service_from_config(
         RemoteWorkerProcessController,
         WorkerBrokerClient,
     )
+
+    if _target_config_mode(raw) == "fixed":
+        if type(exact_target_source) is not _ExactWorkerTargetSource or exact_target_source._raw is not raw:
+            raise ServiceError("exact worker target has no attested composition")
+        exact_target_source.require_current()
+    elif exact_target_source is not None:
+        raise ServiceError("exact worker target source conflicts with disabled config")
 
     client = WorkerBrokerClient(
         raw["worker_broker_socket_path"],
@@ -964,6 +1566,32 @@ def _service_from_config(
             "armed COO Operator Harness requires an exact installed binary identity"
         )
 
+    realm_raw = raw.get("subscription_canary_realm")
+    realm_binding_id: str | None = None
+    realm_generation: int | None = None
+    realm_config_sha256: str | None = None
+    worker_provider = "codex"
+    worker_type = "codex-cli"
+    worker_model = str(raw.get("model") or "gpt-5.6-sol")
+    if realm_raw is not None:
+        _validate_subscription_canary_realm_config(
+            {"subscription_canary_realm": realm_raw}
+        )
+        # load_control_config has already validated this exact closed object.
+        # Derive worker identity from the reviewed catalog instead of trusting
+        # parallel provider/model fields in root configuration.
+        from control_plane.subscription_harness_bindings import get_binding
+        from control_plane.subscription_provider_profiles import get_profile
+
+        realm_binding_id = str(realm_raw["binding_id"])
+        realm_generation = int(realm_raw["generation"])
+        realm_config_sha256 = str(realm_raw["config_sha256"])
+        reviewed_binding = get_binding(realm_binding_id)
+        reviewed_profile = get_profile(reviewed_binding.profile_id)
+        worker_provider = reviewed_binding.provider
+        worker_type = reviewed_binding.adapter_id
+        worker_model = reviewed_binding.model_for(reviewed_profile)
+
     config = ServiceConfig(
         runtime_root=raw["runtime_root"],
         socket_path=raw["control_socket_path"],
@@ -977,10 +1605,14 @@ def _service_from_config(
         worker_account_label=str(
             raw.get("worker_account_label") or "dedicated-codex-home"
         ),
+        worker_type=worker_type,
+        provider=worker_provider,
         quota_class=str(raw.get("quota_class") or "codex-native"),
-        model=str(raw.get("model") or "gpt-5.6-sol"),
+        model=worker_model,
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
+        privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
+        privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
@@ -1006,6 +1638,9 @@ def _service_from_config(
         operator_harness_version=binary_version,
         allowed_peer_uids=tuple(raw["allowed_peer_uids"]),
         shutdown_grace_seconds=float(raw.get("shutdown_grace_seconds") or 10.0),
+        subscription_canary_realm_binding_id=realm_binding_id,
+        subscription_canary_realm_generation=realm_generation,
+        subscription_canary_realm_config_sha256=realm_config_sha256,
     )
     # A persisted receipt from another service instance is never startup
     # authority. Every new PID starts quarantined and can activate only after a
@@ -1024,6 +1659,29 @@ def _service_from_config(
             client,
             validation_commands_for_spec=validations,
         )
+        # Only the attended subscription-canary lane gets a claim provider;
+        # ordinary composition passes ``None`` so the supervisor never calls
+        # the observation owner and never enriches the LaunchSpec.
+        claim_provider: Callable[[str, str], Mapping[str, Any]] | None = None
+        claim_binding_id: str | None = None
+        if config.subscription_canary_realm() is not None:
+            from control_plane.model_router import observe_subscription_canary_claim
+
+            realm = config.subscription_canary_realm()
+            assert realm is not None
+
+            def claim_provider(
+                attempt_id: str,
+                binding_id: str,
+                _runtime=runtime,
+            ) -> Mapping[str, Any]:
+                return observe_subscription_canary_claim(
+                    _runtime,
+                    attempt_id=attempt_id,
+                    binding_id=binding_id,
+                )
+
+            claim_binding_id = str(realm["binding_id"])
         return ExecutiveSupervisor(
             runtime,
             adapter,
@@ -1040,18 +1698,43 @@ def _service_from_config(
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
             process_controller=RemoteWorkerProcessController(client),
+            exact_target_provider=(
+                (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
+                if exact_target_source is not None else None
+            ),
+            subscription_canary_claim_provider=claim_provider,
+            subscription_canary_binding_id=claim_binding_id,
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
-        def adapter_factory(turn_input_loader):
+        def primary_factory(attempt, requested, turn_input_loader, *, recovery):
+            # A fixed primary client must never carry another claimed worker.
+            # Multi-worker composition supplies its current owner-bound factory.
+            if (attempt.worker_id != config.worker_id
+                    or requested.worker_id != config.worker_id
+                    or requested.provider != "openai-codex"
+                    or requested.harness_kind != "codex-app-server"):
+                raise ServiceError("claim differs from the configured operator worker")
             return RemoteCodexOperatorAdapter(
                 client,
                 turn_input_loader=turn_input_loader,
             )
 
+        factory = claimed_operator_adapter_factory
+        workspace_source = None
+        if remote_operator_binding_source is not None:
+            from control_plane.remote_attempt_transport import (
+                build_claimed_remote_operator_factory,
+                build_claimed_remote_workspace_identity_source,
+            )
+            factory = build_claimed_remote_operator_factory(runtime, remote_operator_binding_source)
+            workspace_source = build_claimed_remote_workspace_identity_source(
+                runtime, remote_operator_binding_source
+            )
         return ExecutiveOperatorSupervisor(
             runtime,
-            adapter_factory=adapter_factory,
+            claimed_adapter_factory=(factory if factory is not None else primary_factory),
+            workspace_identity_source=workspace_source,
             prompt_source=sealed_supervisor,
         )
 
@@ -1078,11 +1761,30 @@ def _service_from_config(
             return ExecutiveTerminalReturnProjector(
                 RuntimeTerminalReturnBindingResolver(runtime_provider),
                 socket_path=socket_path,
+                result_synopsis_version="v2",
             )
 
         terminal_return_kwargs["terminal_return_projector_factory"] = (
             terminal_return_projector_factory
         )
+
+    from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_v3 import (
+        WEB_CEO_V3_PROFILE,
+        validate_installed_mcp_profile_current,
+    )
+
+    try:
+        installed_profile = validate_installed_mcp_profile_current(
+            raw.get("executive_mcp_profile", "legacy")
+        )
+    except ValueError:
+        raise ServiceError("installed Executive MCP profile is invalid") from None
+    if "executive_mcp_profile" in raw and not (
+        _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw)
+        and _CEO_INGRESS_CONFIG_KEYS <= set(raw)
+    ):
+        raise ServiceError("App binding requires all App and CeoIngress configuration fields")
 
     listener = activate_launchd_socket(str(raw["launchd_socket_name"]))
     activated_listeners = [listener]
@@ -1099,21 +1801,141 @@ def _service_from_config(
             "ceo_ingress_armed": False,
             "ceo_ingress_activated_socket": ceo_listener,
         }
+    workspace_control_room = None
     if _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw):
         # SDK-free canonical projection runs under the existing control uid.
         # The network App has no Runtime database or source-checkout access.
-        from integrations.executive_mcp.installed import InstalledExecutiveReaders
-        readers = InstalledExecutiveReaders(
+        # Commission lookup is likewise host-owned. Provider construction is
+        # network-inert; observations occur only during trusted admission.
+        from integrations.mastermind_executive_app.web_commission_source import (
+            GitHubWebCommissionSourceProvider,
+        )
+
+        reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
             runtime_root=Path(raw["runtime_root"]),
             boot_python=(Path(raw["ceo_ingress_app_boot_python"])
                          if "ceo_ingress_app_boot_python" in raw else None),
+            code_root=Path(__file__).resolve().parents[1],
+            expected_source_sha=str(raw["proof_base_sha"]),
         )
+        if installed_profile in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}:
+            from integrations.executive_mcp.web_ceo import (
+                WebCeoV2InstalledExecutiveReaders,
+            )
+            readers = WebCeoV2InstalledExecutiveReaders(**reader_kwargs)
+            from control_plane.fabric_job_view import ARM_KEYS
+            readers.bind_fabric_source(
+                bounded_runtime=lambda: service._namespace_custody.bound_runtime(
+                    service._require_runtime()
+                ),
+                armed={
+                    **{
+                        key: raw.get(key) if type(raw.get(key)) is bool else None
+                        for key in ARM_KEYS
+                    },
+                    "source": "control.json",
+                },
+                runtime_identity={"root": None, "db_present": True, "identity": None},
+            )
+            app_read_schema = CEO_WEB_CEO_V2_READ_SCHEMA
+        else:
+            from integrations.executive_mcp.installed import InstalledExecutiveReaders
+            readers = InstalledExecutiveReaders(**reader_kwargs)
+            app_read_schema = CEO_APP_READ_SCHEMA
+        content_factories = {}
+        if {"content_observer", "content_observer_profile_path"} & set(raw):
+            from control_plane.executive_content_observer import ExecutiveContentObserver
+            from integrations.mastermind_steward_app.installed_reads import InstalledStewardReadProvider
+            from datetime import datetime, timezone
+            import time
+            if content_profile_loader is None:
+                raise ServiceError("sealed current content profile loader is required")
+            content_factories = {
+                "content_provider_factory": lambda runtime: ExecutiveContentObserver(
+                    runtime=runtime, broker_client=client, profile_loader=content_profile_loader,
+                    now=lambda: int(time.time())),
+                "steward_provider_factory": lambda runtime: InstalledStewardReadProvider(
+                    readers=readers, runtime=runtime, bindings_path=None,
+                    now=lambda: datetime.now(timezone.utc)),
+            }
+        workspace_factories = {}
+        if "workspace_acquisition" in raw:
+            from integrations.business_mcp_auth.contracts import load_resource_policy
+            from integrations.mastermind_workspace_app.contract import workspace_authorizers
+            from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+            from control_plane.workspace_read_service import workspace_provider_factory
+            from scripts.chairman_control_room import ServerConfig
+            from control_plane.fabric_job_view import ARM_KEYS
+            import secrets
+            if workspace_acquisition_loader is None:
+                raise ServiceError("sealed current workspace acquisition loader is required")
+            policy = load_resource_policy(raw["workspace_resource_policy"])
+            _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            # Installed source join: the trusted parent builds the composer from
+            # the same sealed roots the readers use, never from the public App.
+            # The collector is the existing installed one, constructed directly
+            # with the attested boot interpreter and sealed source SHA.  The
+            # custody callback stays late-bound: it closes over the local
+            # ``service`` built below and is only ever invoked by the off-demand
+            # refresh, after that service has started.  A ``None`` bindings path
+            # stays an explicit unavailable binding — no HOME expansion.
+            if "ceo_ingress_app_boot_python" not in raw:
+                raise ServiceError("workspace acquisition requires the sealed boot interpreter")
+            from control_plane.workspace_source_join import build_workspace_composer
+            from integrations.executive_mcp.installed import InstalledBootPacketCollector
+            packet_collector = InstalledBootPacketCollector(
+                source_root=Path(raw["proof_source_repository"]),
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+                code_root=Path(__file__).resolve().parents[1],
+                python_executable=_attest_app_boot_runtime(
+                    Path(raw["ceo_ingress_app_boot_python"])),
+                expected_source_sha=str(raw["proof_base_sha"]),
+            )
+            compose_inputs = build_workspace_composer(
+                packet_collector=packet_collector,
+                repo_root=Path(raw["proof_source_repository"]),
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]),
+                bounded_runtime=lambda: service._namespace_custody.bound_runtime(
+                    service._require_runtime()),
+                bindings_path=workspace_bindings_path,
+            )
+            # Existing source paths and existing controller permissions only.
+            # Bind the installation-selected incumbent topology before publishing.
+            port = raw["workspace_control_room"]["port"]
+            workspace_control_room = HostedControlRoom(ServerConfig(
+                repo_root=Path(raw["proof_source_repository"]),
+                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
+                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
+                compose_inputs=compose_inputs))
+            workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
+                control_room=workspace_control_room, authorize=authorize,
+                armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
+                runtime_identity={"root": None, "db_present": True, "identity": None},
+                # The factory is inert until the actual service has started.
+                # Namespace custody belongs to that service and validates the
+                # exact Runtime supplied by its App request handler.
+                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
+        coo_factories = {}
+        from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+        from control_plane.coo_principal_host import CooHostProvider
+        if validate_control_coo(raw):
+            if type(coo_source) is not CooInstalledSource or "workspace_read_provider_factory" not in workspace_factories:
+                raise ServiceError("COO principal requires the sealed source and existing Workspace owner")
+            def coo_factory(runtime):
+                return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
+            coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
+                principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
+            read_schema=app_read_schema,
+            **content_factories, **workspace_factories, **coo_factories,
+        )
+        ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
+            GitHubWebCommissionSourceProvider()
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
@@ -1167,9 +1989,15 @@ def _service_from_config(
                     "terminal-return Relay socket must be distinct from every "
                     "activated listener"
                 )
-    return ExecutiveControlService(
+    readiness_factory = None
+    if config.privileged_readiness_armed:
+        from control_plane.executive_privileged_authority import PrivilegedReadinessController
+        def readiness_factory(runtime):
+            return PrivilegedReadinessController(runtime, release_sha=config.proof_base_sha)
+    service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        privileged_readiness_controller_factory=readiness_factory,
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
@@ -1178,10 +2006,12 @@ def _service_from_config(
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
+        workspace_control_room=workspace_control_room,
         **ceo_ingress_kwargs,
         **dialogue_observation_kwargs,
         **terminal_return_kwargs,
     )
+    return service
 
 
 async def _request_boot_autonomy_canary(
@@ -1225,6 +2055,24 @@ async def _serve_from_config(config_path: Path) -> None:
         config_path=config_path,
         expected_release_sha=str(raw["proof_base_sha"]),
     )
+    exact_target_source = _bind_exact_worker_target_source(
+        raw, control_attestation, _producer_capability=_CONTROL_TARGET_COMPOSITION,
+        attestation_loader=lambda: _load_control_environment_attestation(
+            Path(raw["control_environment_attestation_path"]), config_path=config_path,
+            expected_release_sha=str(raw["proof_base_sha"]),
+        ),
+    )
+    content_attestation_loader = lambda: _load_control_environment_attestation(
+        Path(raw["control_environment_attestation_path"]),
+        config_path=config_path,
+        expected_release_sha=str(raw["proof_base_sha"]),
+    )
+    hot_content_profile_source = _bind_hot_content_profile_source(
+        raw,
+        control_attestation,
+        config_path=config_path,
+        attestation_loader=content_attestation_loader,
+    )
     canary_path = Path(raw["secret_canary_receipt_path"])
 
     def load_canary() -> Mapping[str, Any]:
@@ -1264,17 +2112,35 @@ async def _serve_from_config(config_path: Path) -> None:
             persist_path=canary_path,
         )
 
+    content_profile_loader: Callable[[], Any] | None = None
+    if hot_content_profile_source is not None:
+        content_profile_loader = hot_content_profile_source.load
+    elif "content_observer" in raw:
+        content_profile_loader = lambda: load_control_config(config_path)[
+            "content_observer"
+        ]
+
+    coo_source = None
+    from ops.executive_os.coo_principal_host import CooInstalledSource, DEFAULT_INSTALL_PATH, validate_control_coo
+    if validate_control_coo(raw):
+        coo_source = CooInstalledSource.from_path(DEFAULT_INSTALL_PATH,
+            Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
     service = _service_from_config(
         raw,
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,
+        content_profile_loader=content_profile_loader,
+        workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
+        **({"coo_source": coo_source} if coo_source is not None else {}),
+        **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
 
 
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
     if args.command in {
+        "content-observer-enroll", "content-observer-status", "content-observer-revoke",
         "status",
         "health",
         "activate-canary",
@@ -1285,9 +2151,14 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         "reconcile",
         "backup",
     }:
+        if args.command.startswith("content-observer-") and hasattr(args, 'profile_key') and args.profile_key:
+            return args.command, {"profile_key": args.profile_key}
         return args.command, {}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
+    if args.command == "check-current-worker-login":
+        return args.command, {"job_id": args.job_id, "attempt_id": args.attempt_id,
+                              "fence_generation": args.fence_generation}
     if args.command == "run-coo-cycle":
         return args.command, {"root_job_id": args.root_job_id}
     if args.command == "attempt":
@@ -1317,13 +2188,8 @@ def _offline_restore(args: argparse.Namespace) -> Any:
     database, manifest = _backup_paths(config, args.name)
     if args.command == "restore-verify":
         return verify_restore_drill(database, manifest)
-    store = RuntimeStore(config["runtime_root"])
     return restore_backup_offline(
-        store,
-        database,
-        manifest,
-        service_marker_path=store.path.parent / "executive-service.running",
-        service_lock_path=store.path.parent / "executive-service.lock",
+        Path(config["runtime_root"]), database, manifest,
     )
 
 

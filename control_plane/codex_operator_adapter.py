@@ -2119,7 +2119,7 @@ class CodexOperatorAdapter:
             self.visible_turn_projection = projection
         return projection
 
-    def mint_observer_grant(self, turn: TurnRef) -> str:
+    def mint_observer_grant(self, turn: TurnRef, *, binding=None):
         state = self._generations.get(turn.process_generation_id)
         if state is None:
             raise CodexAdapterError(
@@ -2131,8 +2131,7 @@ class CodexOperatorAdapter:
             raise CodexAdapterError(
                 AdapterFailureClass.SESSION_MISSING, "native turn is missing"
             )
-        return self._visible_projection().mint_grant(
-            TurnKey(
+        key = TurnKey(
                 turn.attempt_id,
                 turn.session_epoch_id,
                 turn.process_generation_id,
@@ -2140,16 +2139,38 @@ class CodexOperatorAdapter:
                 state.generation.worker_id,
                 turn.turn_id,
                 native_turn,
-            )
         )
+        projection = self._visible_projection()
+        if binding is not None:
+            return projection.enroll_observer(key, **binding)
+        return projection.mint_grant(key)
+
+    @staticmethod
+    def _completed_turn_event_end(state: _GenerationState, turn_id: str) -> int | None:
+        """Locate the existing exact completion; do not create a snapshot store."""
+        native_turn = state.turns.get(turn_id)
+        if native_turn is None:
+            return None
+        for index, event in enumerate(state.events):
+            if (
+                event.turn_id == turn_id
+                and event.kind == "turn/completed"
+                and event.provider_event_id == native_turn
+                and event.native_subordinate_id is None
+            ):
+                return index + 1
+        return None
 
     def _ingest_turn_notifications(
         self,
         state: _GenerationState,
         turn: TurnRef,
         notifications: Sequence[Mapping[str, Any]],
+        *,
+        generation_only: bool = False,
     ) -> None:
         subordinate_ids = state.turn_subordinates.setdefault(turn.turn_id, set())
+        completed = generation_only or self._completed_turn_event_end(state, turn.turn_id) is not None
 
         def register_subordinate(value: Any) -> str:
             native_id = str(value or "").strip()
@@ -2176,7 +2197,48 @@ class CodexOperatorAdapter:
 
         for item in notifications:
             method = str(item.get("method") or "unknown")
-            if turn.turn_id in state.visible_turns:
+            if method == "turn/completed":
+                completed_params = item.get("params")
+                completed_turn = (
+                    completed_params.get("turn")
+                    if isinstance(completed_params, Mapping) else None
+                )
+                if not isinstance(completed_turn, Mapping):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "completion has no exact native turn identity",
+                        effect_unknown=True,
+                    )
+                outer_thread = completed_params.get("threadId")
+                inner_thread = completed_turn.get("threadId")
+                if any(
+                    value is not None and (
+                        type(value) is not str or not value
+                        or value != value.strip()
+                    )
+                    for value in (outer_thread, inner_thread)
+                ) or (
+                    outer_thread is not None and inner_thread is not None
+                    and outer_thread != inner_thread
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "completion thread identity is malformed or conflicting",
+                        effect_unknown=True,
+                    )
+                completed_thread = outer_thread if outer_thread is not None else inner_thread
+                # Child-thread events retain the existing helper admission
+                # below. They cannot satisfy the parent's terminal check.
+                if completed_thread in {None, "", state.provider_session_id} and (
+                    type(completed_turn.get("id")) is not str
+                    or completed_turn.get("id") != state.turns.get(turn.turn_id)
+                ):
+                    raise CodexAdapterError(
+                        AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                        "completion does not match the selected native turn",
+                        effect_unknown=True,
+                    )
+            if not completed and turn.turn_id in state.visible_turns:
                 self._visible_projection().publish(
                     TurnKey(
                         turn.attempt_id,
@@ -2333,13 +2395,21 @@ class CodexOperatorAdapter:
                     attempt_id=turn.attempt_id,
                     session_epoch_id=turn.session_epoch_id,
                     process_generation_id=turn.process_generation_id,
-                    turn_id=turn.turn_id,
+                    # Notifications after exact completion remain generation
+                    # evidence, not fresh evidence of the closed logical turn.
+                    turn_id=None if completed else turn.turn_id,
                     kind=method,
                     provider_event_id=provider_event_id or None,
                     native_subordinate_id=native_subordinate_id,
                     payload_redacted=safe_payload,
                 )
             )
+            if (
+                method == "turn/completed"
+                and provider_event_id == state.turns.get(turn.turn_id)
+                and native_subordinate_id is None
+            ):
+                completed = True
 
     def _audit_native_helper_tree(
         self, state: _GenerationState, turn: TurnRef
@@ -2525,15 +2595,28 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "turn input loader returned an unsupported input type",
             )
+        def prepare_send(request_id: int, queued: list[dict[str, Any]]) -> None:
+            # Runs inside the client's existing notification/send critical
+            # section. Never re-enter client I/O from this closed callback.
+            if queued:
+                previous_id = next(reversed(state.turns), None)
+                context_turn = (
+                    TurnRef(previous_id, turn.session_epoch_id,
+                            turn.process_generation_id, turn.attempt_id)
+                    if previous_id is not None else turn
+                )
+                self._ingest_turn_notifications(
+                    state, context_turn, queued, generation_only=True
+                )
+            if self.skill_canary_binding is not None and state.skills_changed:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CONFIG_DRIFT,
+                    "skills_changed_during_canary",
+                    effect_unknown=True,
+                )
+            state.pending_prebind_request_id = request_id
+
         try:
-            next_request_id = getattr(state.client, "next_request_id", None)
-            if callable(next_request_id):
-                state.pending_prebind_request_id = next_request_id()
-                prebind_armer = getattr(state.client, "arm_prebind", None)
-                if callable(prebind_armer):
-                    prebind_armer(state.pending_prebind_request_id)
-            else:
-                state.pending_prebind_request_id = None
             result = state.client.request(
                 "turn/start",
                 {
@@ -2543,11 +2626,17 @@ class CodexOperatorAdapter:
                     "approvalPolicy": state.requested.approval_policy,
                 },
                 timeout=60.0,
+                before_send=prepare_send,
             )
             turn_obj = (
                 result.get("turn") if isinstance(result.get("turn"), Mapping) else {}
             )
             native_turn_id = str(turn_obj.get("id") or "")
+        except CodexAdapterError:
+            # The host-owned send guard reports configuration/authority facts,
+            # not an RPC transport error. Preserve its exact failure taxonomy.
+            self._visible_projection().drop_prebind("turn_start_error")
+            raise
         except Exception as exc:
             self._visible_projection().drop_prebind("turn_start_error")
             raise _rpc_failure(exc, effect_unknown=True) from exc
@@ -2899,6 +2988,7 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "event cursor is outside its generation scope",
             )
+        endpoint = len(state.events)
         if cursor.turn_id:
             turn = TurnRef(
                 cursor.turn_id,
@@ -2910,30 +3000,47 @@ class CodexOperatorAdapter:
                 raise CodexAdapterError(
                     AdapterFailureClass.SESSION_MISSING, "event cursor turn is missing"
                 )
-            notifications = state.client.drain_notifications()
-            if notifications:
-                self._ingest_turn_notifications(state, turn, notifications)
-            if not any(
-                event.turn_id == cursor.turn_id and event.kind == "turn/completed"
-                for event in state.events
-            ):
-                try:
-                    completed = state.client.wait_notification(
-                        "turn/completed", timeout=max(0.001, float(timeout_seconds))
-                    )
-                except Exception as exc:
-                    raise _rpc_failure(exc, effect_unknown=True) from exc
-                completed_after = state.client.drain_notifications()
-                self._ingest_turn_notifications(
-                    state, turn, [*completed_after, completed]
+            completed_end = self._completed_turn_event_end(state, cursor.turn_id)
+            # A completed read replays the existing event prefix. It must not
+            # drain new provider events under the identity of a closed turn.
+            if completed_end is None:
+                notifications = state.client.drain_notifications()
+                if notifications:
+                    self._ingest_turn_notifications(state, turn, notifications)
+                completed_end = self._completed_turn_event_end(state, cursor.turn_id)
+                if completed_end is None:
+                    try:
+                        prefix = state.client.wait_notifications_through(
+                            "turn/completed", timeout=max(0.001, float(timeout_seconds))
+                        )
+                    except Exception as exc:
+                        raise _rpc_failure(exc, effect_unknown=True) from exc
+                    self._ingest_turn_notifications(state, turn, prefix)
+                    completed_end = self._completed_turn_event_end(state, cursor.turn_id)
+            if completed_end is None:
+                raise CodexAdapterError(
+                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                    "selected native turn completion is unavailable",
+                    effect_unknown=True,
+                )
+            if cursor.local_sequence > completed_end:
+                raise CodexAdapterError(
+                    AdapterFailureClass.VALIDATION_FAILURE,
+                    "event cursor is beyond the selected turn completion",
                 )
             self._audit_native_helper_tree(state, turn)
-        events = tuple(state.events[cursor.local_sequence :])
+            endpoint = completed_end
+        # Offsets remain generation-global, but a closed turn has an immutable
+        # endpoint even if later generation evidence has already been appended.
+        events = tuple(
+            event for event in state.events[cursor.local_sequence : endpoint]
+            if cursor.turn_id is None or event.turn_id == cursor.turn_id
+        )
         return events, EventCursor(
             attempt_id=cursor.attempt_id,
             session_epoch_id=cursor.session_epoch_id,
             process_generation_id=cursor.process_generation_id,
-            local_sequence=len(state.events),
+            local_sequence=endpoint,
             turn_id=cursor.turn_id,
             provider_replay_cursor=None,
         )
@@ -2958,6 +3065,78 @@ class CodexOperatorAdapter:
         except Exception as exc:
             raise _rpc_failure(exc, effect_unknown=True) from exc
 
+    def _read_native_turn_result(
+        self, state: _GenerationState, native_turn: str, *, effect_unknown: bool
+    ) -> list[Mapping[str, Any]]:
+        """Use the existing private page owner for one bounded, unique result.
+
+        Both candidate and canonical-result readers consume the same complete
+        page traversal. No result is accepted merely because the first page
+        contains a match, and no provider bytes leave this private seam.
+        """
+        def refused(message: str) -> CodexAdapterError:
+            return CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                message, effect_unknown=effect_unknown,
+            )
+
+        provider_session_id = state.provider_session_id
+        deadline = time.monotonic() + RAW_TURN_TOTAL_TIMEOUT_SECONDS
+        cursor: str | None = None
+        cumulative = 0
+        matches: list[Mapping[str, Any]] = []
+        seen_cursors: set[str] = set()
+        reached_end = False
+        for _page in range(MAX_RAW_TURN_PAGES):
+            if state.provider_session_id != provider_session_id:
+                raise refused("native turn result session changed during collection")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise refused("raw turn pagination did not terminate within the deadline")
+            try:
+                page = state.client.request_raw_turn_page(
+                    thread_id=provider_session_id,
+                    native_turn_id=native_turn,
+                    cursor=cursor,
+                    timeout=remaining,
+                )
+                if type(page.frame_byte_length) is not int or page.frame_byte_length <= 0:
+                    raise ValueError("raw turn frame accounting is malformed")
+                cumulative += page.frame_byte_length
+                if cumulative > MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES:
+                    raise ValueError("raw turn cumulative frame bound exceeded")
+                raw = page.consume()
+            except Exception as exc:
+                raise _rpc_failure(exc, effect_unknown=effect_unknown) from exc
+            if state.provider_session_id != provider_session_id:
+                raise refused("native turn result session changed during collection")
+            if time.monotonic() >= deadline:
+                raise refused("raw turn pagination did not terminate within the deadline")
+            data = raw.get("data") if isinstance(raw, Mapping) else None
+            if not isinstance(data, list) or any(not isinstance(row, Mapping) for row in data):
+                raise refused("raw turn page data is malformed")
+            matches.extend(row for row in data if row.get("id") == native_turn)
+            if len(matches) > 1:
+                raise refused("raw native turn result is missing or ambiguous")
+            next_cursor = raw.get("nextCursor")
+            if next_cursor is None:
+                reached_end = True
+                break
+            if (
+                not isinstance(next_cursor, str)
+                or not next_cursor
+                or next_cursor != next_cursor.strip()
+                or next_cursor in seen_cursors
+            ):
+                raise refused("raw turn pagination cursor is malformed or repeated")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+        if not reached_end:
+            raise refused("raw turn pagination exceeded the closed page bound")
+        if len(matches) != 1:
+            raise refused("raw native turn result is missing or ambiguous")
+        return matches
+
     def collect_candidate_result(self, turn: TurnRef) -> CandidateResult:
         state = self._generations.get(turn.process_generation_id)
         if state is None:
@@ -2979,23 +3158,26 @@ class CodexOperatorAdapter:
                 "native helper tree was not reconciled before candidate collection",
                 effect_unknown=True,
             )
-        try:
-            result = state.client.request(
-                "thread/turns/list", {"threadId": state.provider_session_id}
-            )
-        except Exception as exc:
-            raise _rpc_failure(exc, effect_unknown=True) from exc
-        rows = [row for row in result.get("data", []) if isinstance(row, Mapping)]
-        matching = [row for row in rows if str(row.get("id") or "") == native_turn]
-        if not matching:
+        matching = self._read_native_turn_result(
+            state, native_turn, effect_unknown=True
+        )
+        result_status = matching[0].get("status")
+        if result_status is not None and result_status != "completed":
             raise CodexAdapterError(
                 AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                "native turn result is missing",
+                "native turn result contradicts completed-turn evidence",
                 effect_unknown=True,
             )
         texts = turn_texts(matching)
         summary = redact_evidence_text(texts[-1][:4000]) if texts else None
         artifact_digest = _canonical_digest(matching)
+        previous_digest = state.candidate_artifact_digests.get(turn.turn_id)
+        if previous_digest is not None and artifact_digest != previous_digest:
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                "native turn result changed after candidate collection",
+                effect_unknown=True,
+            )
         if self.skill_canary_binding is not None:
             self._verify_skill_state_after_turn(state, self.skill_canary_binding)
         state.candidate_artifact_digests[turn.turn_id] = artifact_digest
@@ -3022,69 +3204,9 @@ class CodexOperatorAdapter:
             raise CodexAdapterError(
                 AdapterFailureClass.SESSION_MISSING, "native turn is missing"
             )
-        deadline = time.monotonic() + RAW_TURN_TOTAL_TIMEOUT_SECONDS
-        cursor: str | None = None
-        cumulative = 0
-        matches: list[Mapping[str, Any]] = []
-        seen_cursors: set[str] = set()
-        reached_end = False
-        for _page in range(MAX_RAW_TURN_PAGES):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise CodexAdapterError(
-                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                    "raw turn pagination did not terminate within the deadline",
-                )
-            try:
-                page = state.client.request_raw_turn_page(
-                    thread_id=state.provider_session_id,
-                    native_turn_id=native_turn,
-                    cursor=cursor,
-                    timeout=remaining,
-                )
-                cumulative += page.frame_byte_length
-                if cumulative > MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES:
-                    raise ValueError("raw turn cumulative frame bound exceeded")
-                raw = page.consume()
-            except Exception as exc:
-                raise _rpc_failure(exc, effect_unknown=False) from exc
-            data = raw.get("data")
-            if not isinstance(data, list):
-                raise CodexAdapterError(
-                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                    "raw turn page data is malformed",
-                )
-            matches.extend(
-                row
-                for row in data
-                if isinstance(row, Mapping) and str(row.get("id") or "") == native_turn
-            )
-            next_cursor = raw.get("nextCursor")
-            if next_cursor is None:
-                reached_end = True
-                break
-            if (
-                not isinstance(next_cursor, str)
-                or not next_cursor
-                or next_cursor != next_cursor.strip()
-                or next_cursor in seen_cursors
-            ):
-                raise CodexAdapterError(
-                    AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                    "raw turn pagination cursor is malformed or repeated",
-                )
-            seen_cursors.add(next_cursor)
-            cursor = next_cursor
-        if not reached_end:
-            raise CodexAdapterError(
-                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                "raw turn pagination exceeded the closed page bound",
-            )
-        if len(matches) != 1:
-            raise CodexAdapterError(
-                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
-                "raw native turn result is missing or ambiguous",
-            )
+        matches = self._read_native_turn_result(
+            state, native_turn, effect_unknown=False
+        )
         selected = matches[0]
         messages = [
             item

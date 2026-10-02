@@ -2541,6 +2541,8 @@ def _repair_host_fixture(
         path = system_root / relative
         path.mkdir(parents=True, mode=mode, exist_ok=True)
         path.chmod(mode)
+    # Mirror the real producer's umask-077 intermediate source boundary.
+    (system_root / "capacity-sources").chmod(0o700)
     lock = system_root / "locks" / "cf2-h0.lock"
     lock.write_bytes(b"")
     lock.chmod(0o600)
@@ -2776,7 +2778,7 @@ def test_source_repair_parent_graph_refuses_untrusted_intermediate_metadata(
         capacity_sources.rename(moved)
         capacity_sources.symlink_to(moved, target_is_directory=True)
     elif drift == "parent-mode":
-        capacity_sources.chmod(0o777)
+        capacity_sources.chmod(0o755)
     elif drift == "parent-xattr":
         name = b"com.mastermind.test" if sys.platform == "darwin" else b"user.mastermind-test"
         try:
@@ -7606,3 +7608,136 @@ def test_rollback_staged_every_durability_boundary_replays_exactly(
         position.failure_layout
         is artifacts.SourceRepairFailureLayout.STAGED_SOURCE
     )
+
+
+@pytest.fixture
+def canonical_native_tmp_leaf():
+    """Real owned bytes; never alter the global native temp root."""
+    if sys.platform != "darwin":
+        pytest.skip("Darwin canonical temporary-root contract")
+    with tempfile.TemporaryDirectory(prefix="mmx-canonical-tmp-", dir="/tmp") as raw:
+        root = Path(raw)
+        # Native temp children can inherit wheel; qualify only our own fixture.
+        os.chown(root, os.getuid(), os.getgid())
+        root.chmod(0o700)
+        leaf = root / "evidence.json"
+        leaf.write_bytes(b"same retained source bytes\n")
+        leaf.chmod(0o444)
+        yield root, leaf
+
+
+@pytest.mark.parametrize("kind", ("file", "directory"))
+def test_canonical_native_tmp_and_alias_retain_the_same_source(
+    canonical_native_tmp_leaf, kind: str,
+) -> None:
+    root, leaf = canonical_native_tmp_leaf
+    alias = leaf if kind == "file" else root
+    canonical = alias.resolve()
+    assert canonical.parts[:3] == ("/", "private", "tmp")
+    identity = alias.stat()
+    assert (identity.st_dev, identity.st_ino) == (
+        canonical.stat().st_dev, canonical.stat().st_ino
+    )
+    snapshots = []
+    for target in (alias, canonical):
+        view = artifacts._RepositoryView(target)
+        try:
+            retained = os.fstat(view.root_descriptor)
+            snapshots.append((retained.st_dev, retained.st_ino))
+            assert view.read_bytes("." if kind == "file" else leaf.name,
+                                   maximum_bytes=1024) == b"same retained source bytes\n"
+            view.revalidate()
+        finally:
+            view.close()
+    assert snapshots == [(identity.st_dev, identity.st_ino)] * 2
+
+
+def test_canonical_native_tmp_preserves_complete_materialized_repository(
+    canonical_native_tmp_leaf, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _leaf = canonical_native_tmp_leaf
+    # Exercise the established real Git/pack/archive/materialization contract,
+    # then read the very same closed repository through its canonical name.
+    test_complete_transport_v2_binds_nonmaterial_closure_and_exact_archive(root, monkeypatch)
+    with zipfile.ZipFile(root / "complete-v2.zip") as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+    checkout = root / "complete-installed"
+    assert checkout.stat().st_ino == checkout.resolve().stat().st_ino
+    alias = artifacts.verify_complete_repository(checkout, manifest)
+    canonical = artifacts.verify_complete_repository(checkout.resolve(), manifest)
+    assert canonical == alias
+
+
+def test_canonical_native_tmp_does_not_trust_nested_tmp_names(
+    canonical_native_tmp_leaf,
+) -> None:
+    root, _leaf = canonical_native_tmp_leaf
+    misleading = root / "private" / "tmp"
+    misleading.mkdir(parents=True)
+    misleading.chmod(0o1777)
+    leaf = misleading / "evidence.json"
+    leaf.write_bytes(b"not a native traversal root\n")
+    leaf.chmod(0o444)
+    with pytest.raises(artifacts.CapacityHostArtifactError,
+                       match="SOURCE_METADATA_INVALID"):
+        view = artifacts._RepositoryView(leaf.resolve())
+        view.close()
+
+
+@pytest.mark.parametrize("phase", ("open", "revalidate"))
+@pytest.mark.parametrize("violation", (
+    "type", "owner", "group", "mode", "device", "link", "flags", "acl", "xattr",
+))
+def test_canonical_native_tmp_keeps_exact_security_checks(
+    canonical_native_tmp_leaf, monkeypatch: pytest.MonkeyPatch,
+    phase: str, violation: str,
+) -> None:
+    _root, leaf = canonical_native_tmp_leaf
+    target = leaf.resolve()
+    native = Path("/private/tmp").stat()
+    native_identity = (native.st_dev, native.st_ino)
+    original_fstat, original_stat = os.fstat, os.stat
+    original_acl = artifacts._descriptor_has_extended_acl
+    original_xattrs = artifacts._descriptor_extended_attribute_names
+    changes = {
+        "type": {"st_mode": stat.S_IFREG | 0o1777},
+        "owner": {"st_uid": 10000},
+        "group": {"st_gid": 10000},
+        "mode": {"st_mode": stat.S_IFDIR | 0o0777},
+        "device": {"st_dev": native.st_dev + 1},
+        "link": {"st_nlink": 0},
+        "flags": {"st_flags": 1},
+    }.get(violation, {})
+
+    def matches(info):
+        return (info.st_dev, info.st_ino) == native_identity
+
+    def overlay(info):
+        return _StatOverlay(info, **changes) if matches(info) else info
+
+    # A successful baseline prevents an earlier unrelated refusal from
+    # masquerading as coverage of the selected security predicate.
+    view = artifacts._RepositoryView(target)
+    try:
+        assert view.read_bytes(".", maximum_bytes=1024) == b"same retained source bytes\n"
+        if phase == "open":
+            view.close()
+            view = None
+        monkeypatch.setattr(os, "fstat", lambda fd: overlay(original_fstat(fd)))
+        monkeypatch.setattr(os, "stat", lambda *a, **k: overlay(original_stat(*a, **k)))
+        monkeypatch.setattr(artifacts, "_descriptor_has_extended_acl",
+            lambda fd: (True if violation == "acl" and matches(original_fstat(fd))
+                        else original_acl(fd)))
+        monkeypatch.setattr(artifacts, "_descriptor_extended_attribute_names",
+            lambda fd: (original_xattrs(fd) | frozenset({b"user.mmx-forbidden"})
+                        if violation == "xattr" and matches(original_fstat(fd))
+                        else original_xattrs(fd)))
+        code = "SOURCE_METADATA_INVALID" if phase == "open" else "SOURCE_VIEW_DRIFT"
+        with pytest.raises(artifacts.CapacityHostArtifactError, match=code):
+            if phase == "open":
+                view = artifacts._RepositoryView(target)
+            else:
+                view.revalidate()
+    finally:
+        if view is not None:
+            view.close()

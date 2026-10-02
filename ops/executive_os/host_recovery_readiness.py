@@ -7,7 +7,7 @@ read is an existence check on a fixed, absolute path derived from the reviewed
 label set — never a caller-supplied path and never a directory scan.
 
 The mandatory ``--profile`` argument selects which closed requirement table
-classifies the result.  It is deliberately not command authority: both profiles
+classifies the result.  It is deliberately not command authority: all profiles
 collect the same fixed superset of observations with the same fixed argv, so
 naming a profile can never widen what this module runs or reads.
 
