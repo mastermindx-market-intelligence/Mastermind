@@ -931,6 +931,9 @@ export function App() {
     previousAuth = useRef<string | null>(
       authState ? JSON.stringify(authState) : null,
     ),
+    previousHostGeneration = useRef(
+      window.MastermindMissionHost?.invalidationGeneration?.() ?? 0,
+    ),
     bumpInvalidation = () => {
       invalidation.current += 1;
       pairAbort.current?.abort();
@@ -985,17 +988,30 @@ export function App() {
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
         const serialized = JSON.stringify(state);
-        if (serialized === previousAuth.current) return;
+        const generation =
+          window.MastermindMissionHost?.invalidationGeneration?.() ?? 0;
+        if (
+          serialized === previousAuth.current &&
+          generation === previousHostGeneration.current
+        ) return;
         previousAuth.current = serialized;
+        previousHostGeneration.current = generation;
         bumpInvalidation();
+        // Invalidate rendered and in-flight source data at the notification,
+        // not after replacement reads resolve or a passive effect runs.
+        programRequest.current++;
+        missionRequest.current++;
+        resultRequest.current++;
+        resultController.current?.abort();
+        setIndex({ programs: [], state: "PENDING", reason: "SOURCE_READ_PENDING" });
+        setMission(unavailableMission(null,
+          state.acquisition ? "SOURCE_READ_PENDING" : "AUTHENTICATION_REQUIRED"));
         setAuthState(state);
         setAuthRevision((n) => n + 1);
         setWindowDocument(null);
         setAssociation(null);
         setMissionV3(null);
         setResultState({ kind: "IDLE" });
-        if (!state.acquisition)
-          setMission(unavailableMission(null, "AUTHENTICATION_REQUIRED"));
       }),
     [],
   );
