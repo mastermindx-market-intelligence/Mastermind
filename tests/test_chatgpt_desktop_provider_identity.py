@@ -443,6 +443,9 @@ def test_provider_native_identity_joins_ax_turn_without_weakening_reconciler():
     before_join = reconcile_turn(plan, after, now=T1)
     assert before_join.input_effect == OperationResolution.EFFECT_UNKNOWN
 
+    # The native producer must already correlate the user with this provider turn.
+    user = replace(user, native_turn_id=identity.latest_turn_id)
+    after = replace(after, messages=(user, reply))
     joined = bind_native_turn_evidence(plan, after, identity)
     bound_user, bound_reply = joined.messages
     assert bound_user.message_id == user.message_id
@@ -459,6 +462,7 @@ def test_provider_native_identity_joins_ax_turn_without_weakening_reconciler():
 
 def test_provider_join_can_confirm_input_before_assistant_exists():
     plan, after, identity, user, _ = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
     user_only = replace(after, messages=(user,))
     joined = bind_native_turn_evidence(plan, user_only, identity)
     result = reconcile_turn(plan, joined, now=T1)
@@ -509,6 +513,7 @@ def test_provider_join_refuses_duplicate_marker_users():
 
 def test_provider_join_refuses_multiple_reply_branches():
     plan, after, identity, user, reply = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
     duplicate = replace(
         reply,
         message_id="assistant-provider-identity-2",
@@ -523,6 +528,7 @@ def test_provider_join_refuses_multiple_reply_branches():
 
 def test_provider_join_does_not_stamp_unrelated_messages():
     plan, after, identity, user, reply = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
     old = MessageEvidence(
         "old-message",
         "assistant",
@@ -552,3 +558,131 @@ def test_provider_join_requires_exact_ax_payload_completion():
                 replace(after, messages=(changed, reply)),
                 identity,
             )
+
+
+# Exact-head review regressions: native recency is not causal turn identity.
+def test_later_unrelated_turn_cannot_stamp_marker_correlated_exchange():
+    plan, after, identity, user, reply = _unbound_turn_case()
+    later_user = MessageEvidence("later-user", "user", "Unrelated", True)
+    later_reply = MessageEvidence(
+        "later-reply", "assistant", "Unrelated answer", True,
+        reply_to_user_id=later_user.message_id,
+    )
+    after = replace(after, messages=(user, reply, later_user, later_reply))
+    with pytest.raises(EvidenceError, match="provider_turn_join_native_id_unproven"):
+        bind_native_turn_evidence(plan, after, identity)
+    assert reconcile_turn(plan, after, now=T1).input_effect == OperationResolution.EFFECT_UNKNOWN
+
+
+def test_recency_without_other_visible_turn_still_cannot_attest_marker_user():
+    plan, after, identity, *_ = _unbound_turn_case()
+    with pytest.raises(EvidenceError, match="provider_turn_join_native_id_unproven"):
+        bind_native_turn_evidence(plan, after, identity)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf"), True, 10**400])
+def test_identity_clocks_refuse_nonfinite_or_unrepresentable_values(value):
+    from integrations.chatgpt_desktop.provider_identity import ThreadItemsObservation
+    _, _, identity, *_ = _unbound_turn_case()
+    with pytest.raises(EvidenceError, match="provider_identity_time_invalid"):
+        replace(identity, observed_at=value)
+    with pytest.raises(EvidenceError, match="provider_identity_time_invalid"):
+        ThreadItemsObservation(identity.binding, value, CONVERSATION)
+    with pytest.raises(EvidenceError, match="provider_identity_time_invalid"):
+        qualify_bound_thread(_target(), identity.binding, [_resume()], not_before=value)
+
+
+@pytest.mark.parametrize("offset", [1.001, 3600])
+def test_identity_after_snapshot_clock_window_refuses(offset):
+    plan, after, identity, user, reply = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
+    after = replace(after, messages=(user, reply))
+    with pytest.raises(EvidenceError, match="provider_turn_join_identity_time_out_of_window"):
+        bind_native_turn_evidence(plan, after, replace(identity, observed_at=T1 + offset))
+
+
+def test_identity_too_old_for_snapshot_refuses():
+    plan, after, identity, user, reply = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
+    after = replace(after, observed_at=T1 + 7, messages=(user, reply))
+    with pytest.raises(EvidenceError, match="provider_turn_join_identity_time_out_of_window"):
+        bind_native_turn_evidence(plan, after, identity)
+
+
+@pytest.mark.parametrize("marker", [
+    "[electron-message-handler] maybe_resume_success_suffix",
+    "[another] note [electron-message-handler] maybe_resume_success",
+    '[another] note text="[electron-message-handler] maybe_resume_success',
+    "[electron-message-handler-extra] maybe_resume_success",
+])
+def test_lookalike_resume_event_cannot_create_identity(marker):
+    binding = provider_log_binding(LOG_NAME, expected_pid=PID)
+    line = _resume().replace(_RESUME_TEST_MARKER, marker)
+    assert parse_native_thread_identities(binding, [line]) == ()
+
+
+_RESUME_TEST_MARKER = "[electron-message-handler] maybe_resume_success"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("conversationId", CONVERSATION), ("conversationId", OTHER_CONVERSATION),
+    ("threadId", CONVERSATION), ("latestTurnId", TURN_1),
+    ("documentVisibilityState", "visible"), ("assignedStreamRole", "owner"),
+    ("hasLatestThreadSettings", "true"),
+])
+def test_duplicate_identity_fields_refuse_even_when_values_match(field, value):
+    binding = provider_log_binding(LOG_NAME, expected_pid=PID)
+    with pytest.raises(EvidenceError, match="provider_log_field_ambiguous"):
+        parse_native_thread_identities(binding, [_resume() + f" {field}={value}"])
+
+
+def test_items_method_suffix_cannot_create_observation():
+    binding = provider_log_binding(LOG_NAME, expected_pid=PID)
+    assert parse_thread_items_observations(
+        binding, [_items().replace("method=thread/items/list", "method=thread/items/list_extra")]
+    ) == ()
+
+
+@pytest.mark.parametrize("extra", [
+    "method=thread/items/list", "method=thread/delete",
+    f"conversationId={CONVERSATION}", f"conversationId={OTHER_CONVERSATION}",
+])
+def test_items_duplicate_routing_fields_refuse(extra):
+    binding = provider_log_binding(LOG_NAME, expected_pid=PID)
+    with pytest.raises(EvidenceError, match="provider_log_field_ambiguous"):
+        parse_thread_items_observations(binding, [_items() + " " + extra])
+
+
+def test_assistant_before_native_bound_user_cannot_inherit_identity():
+    plan, after, identity, user, reply = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
+    with pytest.raises(EvidenceError, match="provider_turn_join_reply_order_invalid"):
+        bind_native_turn_evidence(plan, replace(after, messages=(reply, user)), identity)
+
+
+def test_native_bound_user_does_not_override_conflicting_reply_turn():
+    plan, after, identity, user, reply = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
+    reply = replace(reply, native_turn_id=OTHER_TURN)
+    with pytest.raises(EvidenceError, match="provider_turn_join_native_id_conflict"):
+        bind_native_turn_evidence(plan, replace(after, messages=(user, reply)), identity)
+
+
+@pytest.mark.parametrize("snapshot_offset,identity_offset", [(0, 1), (6, 0)])
+def test_identity_snapshot_clock_boundaries_remain_usable(snapshot_offset, identity_offset):
+    plan, after, identity, user, reply = _unbound_turn_case()
+    user = replace(user, native_turn_id=identity.latest_turn_id)
+    after = replace(after, observed_at=T1 + snapshot_offset, messages=(user, reply))
+    joined = bind_native_turn_evidence(
+        plan, after, replace(identity, observed_at=T1 + identity_offset),
+    )
+    assert joined.messages[0] is user
+    assert joined.messages[1].native_turn_id == identity.latest_turn_id
+
+
+def test_quoted_payload_cannot_supply_missing_identity_fields():
+    binding = provider_log_binding(LOG_NAME, expected_pid=PID)
+    payload = _resume().split("maybe_resume_success ", 1)[1]
+    quoted = f'{_resume().split("maybe_resume_success", 1)[0]}maybe_resume_success payload="{payload}"'
+    with pytest.raises(EvidenceError, match="provider_log_fields_invalid"):
+        parse_native_thread_identities(binding, [quoted])
