@@ -82,12 +82,11 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (!ctx) return null;
     const payload = this._payloadFromForm(form, ctx.principalScope);
     if (!payload) return null;
-    return { kind: "launch", targetKey: null, payload };
+    return { kind: "launch", targetKey: this.config.workstream, payload };
   }
 
   prepare(intent: CommandIntent): OperationPointer {
     if (intent.kind !== "launch") throw new Error("INVALID_KIND");
-    if (intent.targetKey !== null) throw new Error("INVALID_PAYLOAD");
     const ctx = this.owner();
     if (!ctx) throw new Error("INVALID_PAYLOAD");
     const form = formFromPayload(intent.payload);
@@ -96,11 +95,18 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (!expected || !sameJson(expected, intent.payload)) {
       throw new Error("INVALID_PAYLOAD");
     }
+    const workstream = expected.workstream;
+    if (typeof workstream !== "string" || !validWorkstream(workstream)) {
+      throw new Error("INVALID_PAYLOAD");
+    }
+    if (intent.targetKey !== workstream) {
+      throw new Error("INVALID_PAYLOAD");
+    }
     const operationKey = expected.operation_key;
     if (typeof operationKey !== "string" || !KEY_RE.test(operationKey)) {
       throw new Error("INVALID_PAYLOAD");
     }
-    return { operationKey, kind: "launch", targetKey: null };
+    return { operationKey, kind: "launch", targetKey: workstream };
   }
 
   async submit(
@@ -110,6 +116,9 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
   ): Promise<EffectReceipt> {
     if (pointer.operationKey !== intent.payload.operation_key) {
       return this._receipt(pointer, "refused", "MALFORMED_POINTER");
+    }
+    if (!validPointerTargetKey(pointer.targetKey)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_POINTER");
     }
     if (signal.aborted) {
       return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
@@ -127,17 +136,16 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (signal.aborted) {
       return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
     }
-    const workRef =
-      typeof intent.payload.workstream === "string"
-        ? intent.payload.workstream
-        : this.config.workstream;
-    return this._mapEnvelope(pointer, envelope, workRef);
+    return this._mapEnvelope(pointer, envelope, "submit");
   }
 
   async readOperation(
     pointer: OperationPointer,
     signal: AbortSignal,
   ): Promise<EffectReceipt> {
+    if (!validPointerTargetKey(pointer.targetKey)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_POINTER");
+    }
     if (signal.aborted) {
       return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
     }
@@ -155,7 +163,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (signal.aborted) {
       return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
     }
-    return this._mapEnvelope(pointer, envelope, this.config.workstream);
+    return this._mapEnvelope(pointer, envelope, "status");
   }
 
   private _payloadFromForm(
@@ -212,14 +220,23 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
   private _mapEnvelope(
     pointer: OperationPointer,
     envelope: ExecutiveToolEnvelope,
-    workRef: string,
+    path: "submit" | "status",
   ): EffectReceipt {
     if (envelope.ok !== true) {
-      return this._mapError(pointer, envelope.error?.code);
+      return this._mapError(pointer, envelope.error?.code, path);
     }
     const data = envelope.data;
     if (!isPlainObject(data)) {
       return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (typeof data.intent_id !== "string") {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (data.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
+    }
+    if (!validPointerTargetKey(pointer.targetKey)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_POINTER");
     }
     const schemaOk =
       typeof data.schema === "string" && RECEIPT_SCHEMAS.has(data.schema);
@@ -233,22 +250,49 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
       return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
     }
     return this._receipt(pointer, "accepted", "ACCEPTED", {
-      workRef,
+      workRef: pointer.targetKey,
       rootJobId: data.job_id,
     });
   }
 
   /**
-   * Refused codes fire before the durable Job write on the installed ingress:
+   * Submit-path refused codes fire before the durable Job write:
    * invalid_input — executive_ceo_ingress.py _handle_submit :474-479;
    * authority_refused / backend_refused — adapter.py :996-1040 and ingress
    * _handle_normalized_submit admission_guard :673-685 (zero sink calls);
    * production_write_disabled — adapter.py :898-905;
    * identity_unverified — auth gate before write;
    * grounding_unavailable / grounding_changed — ingress :609 / :647-649
-   * ("zero Job"); not_found — no Job minted for the key.
+   * ("zero Job").
+   * not_found is not a submit-path before-effect code (D1 / §7.2): the
+   * installed ingress raises it only from _resolve_status_intent :775-777,
+   * so on submit it is unknown/UNKNOWN_RECEIPT. On the status path every
+   * non-accepted result is unknown and retains the pointer (§8.3).
    */
-  private _mapError(pointer: OperationPointer, code: string | undefined): EffectReceipt {
+  private _mapError(
+    pointer: OperationPointer,
+    code: string | undefined,
+    path: "submit" | "status",
+  ): EffectReceipt {
+    if (path === "status") {
+      switch (code) {
+        case "invalid_input":
+        case "authority_refused":
+        case "identity_unverified":
+        case "backend_refused":
+        case "production_write_disabled":
+        case "grounding_unavailable":
+        case "grounding_changed":
+        case "not_found":
+        case "backend_unavailable":
+        case "internal_error":
+        case "output_too_large":
+          return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
+        case "timeout":
+        default:
+          return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
+      }
+    }
     switch (code) {
       case "invalid_input":
         return this._receipt(pointer, "refused", "INVALID_PAYLOAD");
@@ -258,8 +302,8 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
       case "identity_unverified":
       case "grounding_unavailable":
       case "grounding_changed":
-      case "not_found":
         return this._receipt(pointer, "refused", "REFUSED");
+      case "not_found":
       case "backend_unavailable":
       case "internal_error":
       case "output_too_large":
@@ -279,7 +323,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     return {
       operationKey: pointer.operationKey,
       kind: "launch",
-      targetKey: null,
+      targetKey: pointer.targetKey,
       disposition,
       reason,
       ...(missionSelection ? { missionSelection } : {}),
@@ -351,6 +395,15 @@ function validGoal(goal: unknown): goal is string {
 
 function validWorkstream(value: string): boolean {
   return value.length <= 72 && WORKSTREAM_RE.test(value);
+}
+
+function validPointerTargetKey(value: string | null): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 72 &&
+    /^WS:[A-Z0-9][A-Za-z0-9._-]{0,63}$/.test(value)
+  );
 }
 
 function validPriority(value: number): boolean {
