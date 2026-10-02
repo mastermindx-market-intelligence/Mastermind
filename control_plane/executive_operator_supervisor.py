@@ -502,21 +502,34 @@ class ExecutiveOperatorSupervisor:
     @staticmethod
     def _turn_operation_id(
         attempt_id: str,
-        prompt: str,
         commission: VerifiedCommission | None,
     ) -> OperationId:
-        """Bind commission-bearing TX-5 to the exact model-visible input.
+        """Bind commission-bearing TX-5 to stable immutable input identity.
 
-        Source-free jobs retain their historical operation identity. A strict
-        immutable commission changes the operation identity to the exact prompt
-        digest, so a pre-feature turn cannot later inherit newly available
-        commission bytes during recovery.
+        The model-visible prompt may include observational routing capacity that
+        legitimately changes between the original turn and restart. Recovery
+        identity therefore binds the durable Attempt to the exact immutable
+        commission reference/content digest rather than re-hashing ambient
+        routing observations. Source-free jobs retain their historical identity.
         """
 
         if commission is None:
             return OperationId(f"ohf-op:turn:{attempt_id}")
-        prompt_digest = hashlib.sha256(prompt.encode("utf-8", errors="strict")).hexdigest()
-        return OperationId(f"ohf-op:turn-input:{prompt_digest}")
+        binding = {
+            "schema_version": "mastermind.operator_turn_commission_binding/v1",
+            "attempt_id": attempt_id,
+            "commission_ref": commission.ref_dict(),
+        }
+        binding_digest = hashlib.sha256(
+            json.dumps(
+                binding,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8", errors="strict")
+        ).hexdigest()
+        return OperationId(f"ohf-op:turn-commission:{binding_digest}")
 
     @staticmethod
     def _terminal_payload(
@@ -970,7 +983,6 @@ class ExecutiveOperatorSupervisor:
         start_operation = OperationId(f"ohf-op:start:{attempt_id}")
         turn_operation = self._turn_operation_id(
             attempt_id,
-            prompt_by_turn["pending"],
             verified_commission,
         )
         stop_operation = OperationId(f"ohf-op:stop:{attempt_id}")
@@ -1195,7 +1207,7 @@ class ExecutiveOperatorSupervisor:
             # only a loader placeholder for reconcile/cancel mechanics.
             prompt = self._prompt(job, lease, verified_commission)
             expected_turn_operation = (
-                self._turn_operation_id(attempt_id, prompt, verified_commission)
+                self._turn_operation_id(attempt_id, verified_commission)
                 if verified_commission is not None
                 else None
             )

@@ -32,7 +32,12 @@ from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
 )
-from control_plane.executive_supervisor import ReconcileStatus, VerifiedCommission
+from control_plane.executive_supervisor import (
+    ExecutiveSupervisor,
+    ReconcileStatus,
+    VerifiedCommission,
+    verify_commission_for_job,
+)
 from control_plane.model_router import ModelRouter
 from control_plane.operator_harness_contract import (
     AuthRealmFact,
@@ -530,6 +535,7 @@ def _seed_dispatchable_operator_planner(
     commission_repository: str = "mastermindx-market-intelligence/Mastermind",
     commission_ref_commit: str | None = None,
     clock: _Clock | None = None,
+    routing_capacity: bool = False,
 ):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
@@ -599,6 +605,11 @@ def _seed_dispatchable_operator_planner(
         "operator_harness_version": "0.147.0",
         "operator_harness_armed": True,
     }
+    if routing_capacity:
+        binding["host_execution_binding_version"] = "mastermind.host_execution_binding/v3"
+        binding["work_placement_union"] = [
+            {"provider_realm": sealed.provider_alias, "quota_class": "codex-coo"}
+        ]
     runtime.workers.register_worker(
         "worker-a",
         provider=operator.provider_alias,
@@ -624,6 +635,30 @@ def _seed_dispatchable_operator_planner(
             }
         },
     )
+    if routing_capacity:
+        runtime.workers.register_worker(
+            "routing-worker",
+            provider=sealed.provider_alias,
+            account_label="routing-worker@company",
+            worker_type="fixture",
+            capabilities=list(sealed.capabilities),
+            quota_classes={
+                "codex-coo": {
+                    "provider": sealed.provider_alias,
+                    "model": sealed.model,
+                    "effort": sealed.effort,
+                    "cost_class": sealed.cost_class,
+                    "capabilities": list(sealed.capabilities),
+                    "metadata": {
+                        "routing_policy_version": router.policy_version,
+                        "execution_profile_id": sealed.execution_profile_id,
+                        "execution_profile_digest": sealed.execution_profile_digest,
+                        "capability_policy_version": sealed.capability_policy_version,
+                        "capability_policy_digest": sealed.capability_policy_digest,
+                    },
+                }
+            },
+        )
     intent = _intent()
     intent["grounding"] = {"mastermind_sha": base_sha, "macro_sha": "b" * 40}
     intent["execution_contract"] = {
@@ -666,7 +701,13 @@ def _seed_dispatchable_operator_planner(
 
 
 
-def _seed_commission_bound_legacy_turn(tmp_path: Path):
+def _seed_commission_bound_legacy_turn(
+    tmp_path: Path,
+    *,
+    legacy_operation: bool = True,
+    routing_capacity: bool = False,
+    production_prompt_source: bool = False,
+):
     """Create the exact pre-feature hazard: valid commission, legacy TX-5 id."""
 
     clock = _Clock()
@@ -675,6 +716,7 @@ def _seed_commission_bound_legacy_turn(tmp_path: Path):
         tmp_path,
         commission_content=commission,
         clock=clock,
+        routing_capacity=routing_capacity,
     )
     dispatch = runtime.attempts.dispatch_cycle_job(
         planner.job_id,
@@ -689,10 +731,20 @@ def _seed_commission_bound_legacy_turn(tmp_path: Path):
     class _LeaseView:
         attempt = dispatch.attempt
 
+    prompt_source = (
+        ExecutiveSupervisor(
+            runtime,
+            object(),  # type: ignore[arg-type]
+            inspector=object(),  # type: ignore[arg-type]
+            process_controller=object(),  # type: ignore[arg-type]
+        )
+        if production_prompt_source
+        else _CommissionPromptSource()
+    )
     seed_supervisor = ExecutiveOperatorSupervisor(
         runtime,
         adapter_factory=lambda _loader: None,  # type: ignore[arg-type]
-        prompt_source=_CommissionPromptSource(),  # type: ignore[arg-type]
+        prompt_source=prompt_source,  # type: ignore[arg-type]
     )
     profile = seed_supervisor._requested_profile(planner, _LeaseView())  # type: ignore[arg-type]
     harness = runtime.operator_harness
@@ -751,25 +803,121 @@ def _seed_commission_bound_legacy_turn(tmp_path: Path):
         principal_observation=principal,
     )
 
-    # This is exactly the pre-fix operation identity. It proves only that a turn
-    # happened; it carries no evidence of which immutable commission was sent.
-    legacy_turn_op = OperationId(f"ohf-op:turn:{dispatch.attempt.attempt_id}")
+    if legacy_operation:
+        # This is exactly the pre-fix operation identity. It proves only that a
+        # turn happened; it carries no evidence of which commission was sent.
+        turn_operation = OperationId(f"ohf-op:turn:{dispatch.attempt.attempt_id}")
+    else:
+        lease = AttemptLease(dispatch.attempt, dispatch.lease_token)
+        verified = verify_commission_for_job(
+            runtime, planner, Path(planner.worktree).resolve(strict=True)
+        )
+        assert verified is not None
+        prompt = seed_supervisor._prompt(planner, lease, verified)
+        turn_operation = seed_supervisor._turn_operation_id(
+            dispatch.attempt.attempt_id, verified
+        )
     turn = harness.reserve_turn(
         epoch=epoch,
         generation=g1,
-        operation_id=legacy_turn_op,
+        operation_id=turn_operation,
         fence_generation=sealed.fence_generation,
         lease_token=dispatch.lease_token,
     )
     harness.acknowledge_turn(
         turn=turn,
-        operation_id=legacy_turn_op,
+        operation_id=turn_operation,
         fence_generation=sealed.fence_generation,
         lease_token=dispatch.lease_token,
         observation=TurnStartObservation("NATIVE-G1", True),
     )
     return clock, runtime, planner, dispatch, profile, commission, turn
 
+
+def test_commission_bound_recovery_survives_unrelated_routing_capacity_change(
+    tmp_path: Path,
+) -> None:
+    clock, runtime, planner, dispatch, profile, _commission, _turn = (
+        _seed_commission_bound_legacy_turn(
+            tmp_path,
+            legacy_operation=False,
+            routing_capacity=True,
+            production_prompt_source=True,
+        )
+    )
+    lease = AttemptLease(dispatch.attempt, dispatch.lease_token)
+    verified = verify_commission_for_job(
+        runtime, planner, Path(planner.worktree).resolve(strict=True)
+    )
+    assert verified is not None
+    production_prompt = ExecutiveSupervisor(
+        runtime,
+        object(),  # type: ignore[arg-type]
+        inspector=object(),  # type: ignore[arg-type]
+        process_controller=object(),  # type: ignore[arg-type]
+    )
+    operator = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=lambda _loader: None,  # type: ignore[arg-type]
+        prompt_source=production_prompt,
+    )
+    prompt_before = operator._prompt(planner, lease, verified)
+    operation_before = operator._turn_operation_id(
+        dispatch.attempt.attempt_id, verified
+    )
+
+    runtime.workers.set_worker_status("routing-worker", "OFFLINE")
+
+    prompt_after = operator._prompt(planner, lease, verified)
+    operation_after = operator._turn_operation_id(
+        dispatch.attempt.attempt_id, verified
+    )
+    assert hashlib.sha256(prompt_before.encode()).hexdigest() != hashlib.sha256(
+        prompt_after.encode()
+    ).hexdigest()
+    assert operation_after == operation_before
+
+    clock.advance(3)
+    class _RoutingRecoveryAdapter(_RecoveryAdapter):
+        def __init__(self, runtime, profile, loader, *, live_existing):
+            super().__init__(
+                runtime, profile, loader, live_existing=live_existing
+            )
+            self.process = ProcessIdentityObservation(
+                4101, 4101, "start-4101", "boot-test"
+            )
+
+        def reconcile(self, _generation):
+            return ReconcileObservation(
+                ProcessLiveness.ALIVE,
+                self.process,
+                True,
+                ProviderWriterState.HELD,
+                self.provider_session_id,
+                profile.expected_config_digest,
+            )
+
+    adapters: list[_RecoveryAdapter] = []
+
+    def factory(loader):
+        adapter = _RoutingRecoveryAdapter(
+            runtime, profile, loader, live_existing=True
+        )
+        adapters.append(adapter)
+        return adapter
+
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        adapter_factory=factory,  # type: ignore[arg-type]
+        prompt_source=production_prompt,
+    )
+
+    recovered = supervisor.reconcile_restart()
+
+    assert [item.status for item in recovered] == [ReconcileStatus.OPERATOR_RECOVERED]
+    assert len(adapters) == 1
+    attempt = runtime.attempts.get_attempt(dispatch.attempt.attempt_id)
+    assert attempt is not None and attempt.status is AttemptStatus.COMPLETED
 
 def test_recovery_quarantines_legacy_commission_turn_without_original_input_binding(
     tmp_path: Path,
@@ -1005,9 +1153,26 @@ def test_fresh_operator_consumes_persisted_verified_commission_before_provider_t
     prompt = adapters[0].prompts[0]
     assert commission.decode("utf-8") in prompt
     assert '"path": "research/operator-commission.md"' in prompt
+    verified = verify_commission_for_job(
+        runtime, planner, Path(planner.worktree).resolve(strict=True)
+    )
+    assert verified is not None
+    binding = {
+        "schema_version": "mastermind.operator_turn_commission_binding/v1",
+        "attempt_id": outcome.attempt.attempt_id,
+        "commission_ref": verified.ref_dict(),
+    }
     expected_turn_operation = (
-        "ohf-op:turn-input:"
-        + hashlib.sha256(prompt.encode("utf-8", errors="strict")).hexdigest()
+        "ohf-op:turn-commission:"
+        + hashlib.sha256(
+            json.dumps(
+                binding,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
     )
     with runtime.store.read() as connection:
         rows = connection.execute(
