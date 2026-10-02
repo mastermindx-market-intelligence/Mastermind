@@ -353,7 +353,7 @@ def test_claude_code_desktop_handoff_requires_exact_native_receipt(tmp_path):
     )
 
     assert outcome["ok"] is False
-    assert outcome["failure_kind"] == "runner_error"
+    assert outcome["failure_kind"] == "effect_unknown"
     assert outcome["verified"] is False
 
 

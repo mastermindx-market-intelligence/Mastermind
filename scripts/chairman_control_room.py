@@ -1273,7 +1273,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         if not isinstance(binding_id, str) or not binding_id:
             return self._bad_request("binding_id: required (non-empty string)")
         target_surface = data.get("target_surface")
-        if target_surface is not None and target_surface not in {"default", "desktop"}:
+        if target_surface is not None and (
+            type(target_surface) is not str or target_surface not in {"default", "desktop"}
+        ):
             return self._bad_request("target_surface: must be 'default' or 'desktop'")
         owed_route = "owed_context" in data
         if owed_route and not _owed_context_shape(data["owed_context"]):

@@ -193,11 +193,18 @@ def open_claude_code_in_desktop(
             "the Claude Desktop handoff runtime is not installed",
         )
 
-    version_result = runner([claude_cli_path, "--version"], timeout=5.0)
+    try:
+        version_result = runner([claude_cli_path, "--version"], timeout=5.0)
+    except Exception:
+        return contract.refused(
+            "claude_code", binding_id, "not_installed",
+            "the Claude Desktop handoff runtime could not be qualified",
+        )
     version = _parsed_claude_version(
         version_result.get("stdout") if isinstance(version_result, dict) else None
     )
-    if (not isinstance(version_result, dict) or version_result.get("timed_out")
+    if (not isinstance(version_result, dict) or version_result.get("timed_out") is not False
+            or type(version_result.get("code")) is not int
             or version_result.get("code") != 0 or version is None
             or version < MINIMUM_DESKTOP_HANDOFF_VERSION):
         return contract.refused(
@@ -205,23 +212,40 @@ def open_claude_code_in_desktop(
             "the Claude Desktop handoff runtime does not meet the required version",
         )
 
-    result = pty_runner(
-        [claude_cli_path, "--desktop", "--resume", session_id],
-        timeout=20.0,
-        cwd=project_dir,
-    )
-    expected_receipt = f"Opening session {session_id} in Claude Desktop"
-    if (not isinstance(result, dict) or result.get("timed_out")
-            or result.get("code") != 0
-            or expected_receipt not in result.get("stdout", "")):
+    # Once the runner is invoked, an exception or missing acknowledgement is
+    # not proof of non-delivery. Never replay the handoff from this adapter.
+    try:
+        result = pty_runner(
+            [claude_cli_path, "--desktop", "--resume", session_id],
+            timeout=20.0,
+            cwd=project_dir,
+        )
+    except Exception:
+        result = None
+    if (isinstance(result, dict) and result.get("started") is False
+            and result.get("code") is None
+            and result.get("timed_out") is False and result.get("stdout") == ""):
         return contract.refused(
             "claude_code", binding_id, "runner_error",
-            "Claude did not confirm the Desktop session handoff",
+            "the Desktop handoff process did not start",
+        )
+    expected_receipt = f"Opening session {session_id} in Claude Desktop"
+    if (not isinstance(result, dict) or result.get("timed_out") is not False
+            or type(result.get("code")) is not int or result.get("code") != 0
+            or result.get("started") is False
+            or result.get("process_reaped") is False
+            or result.get("output_truncated") is True
+            or not isinstance(result.get("stdout"), str)
+            or expected_receipt not in result["stdout"]):
+        return contract.refused(
+            "claude_code", binding_id, "effect_unknown",
+            "the Desktop handoff may have occurred; inspect the bound session before retrying",
         )
 
     return contract.succeeded(
         "claude_code", binding_id, "opened_desktop",
-        "moved the bound Claude Code session into Claude Desktop", verified=True,
+        "the bound session exists and Desktop handoff was accepted; visible app state was not checked",
+        verified=True,
     )
 
 
