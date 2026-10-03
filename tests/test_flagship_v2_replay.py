@@ -175,7 +175,7 @@ def test_conviction_buy_still_lands_through_the_triad(monkeypatch):
         return {**m, "synthesis": lenses.synthesize(m)}
 
     monkeypatch.setenv("MASTERMIND_ENTRY_GATE", "1")
-    monkeypatch.setattr(conviction, "candidates", lambda: ["GOODCO"])
+    monkeypatch.setattr(conviction, "candidates", lambda asof=None: ["GOODCO"])
     monkeypatch.setattr(lenses, "full", _fake_full)
     monkeypatch.setattr(eem, "assess", lambda t, **k: {
         "ticker": t, "verdict": "pullback_in_trend", "buyable": True, "entry_score": 75.0,
@@ -211,7 +211,7 @@ def test_nw_entry_shrink_applies_subtract_only(monkeypatch):
         return {**m, "synthesis": lenses.synthesize(m)}
 
     monkeypatch.setenv("MASTERMIND_ENTRY_GATE", "1")
-    monkeypatch.setattr(conviction, "candidates", lambda: ["SHRUNKCO"])
+    monkeypatch.setattr(conviction, "candidates", lambda asof=None: ["SHRUNKCO"])
     monkeypatch.setattr(lenses, "full", _fake_full)
     monkeypatch.setattr(eem, "assess", lambda t, **k: {
         "ticker": t, "verdict": "clean", "buyable": True, "entry_score": 60.0,

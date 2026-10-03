@@ -157,10 +157,13 @@ def _default_bottom_state(ticker: str):
         return None
 
 
-def _default_prophet_plan(ticker: str):
+def _default_prophet_plan(ticker: str, pit_asof: str | None = None):
+    """The name's Prophet geometry, bounded at ``pit_asof`` when the caller declared a binding
+    point-in-time boundary. ``None`` keeps the unbounded read — the pre-existing behaviour."""
     try:
         from portfolio import prophet_feed
-        return prophet_feed.plan_for(ticker)
+        return (prophet_feed.plan_for(ticker, pit_asof) if pit_asof is not None
+                else prophet_feed.plan_for(ticker))
     except Exception:  # noqa: BLE001
         return None
 
@@ -287,13 +290,19 @@ def assess(ticker: str, *, series=None, stockdata: dict | None = None,
            signal_gate_row: dict | None = None, stage_row: dict | None = None,
            bottom_state: str | None = None, pulse: dict | None = None,
            theme_id: str | None = None, prophet_plan: dict | None = None,
-           as_of: str | None = None, _use_defaults: bool = True) -> dict:
+           as_of: str | None = None, pit_asof: str | None = None,
+           _use_defaults: bool = True) -> dict:
     """The binding entry read for a would-be NEW buy. Returns
     ``{ticker, verdict, buyable, entry_score, metrics, notes, park_triggers, sources, as_of}``.
 
     FAIL-OPEN: absent inputs degrade toward 'unknown', which withholds NOTHING (the caller treats
     only explicit adverse verdicts as park-worthy). Never raises. ``_use_defaults=False`` keeps the
-    call fully offline (tests) even where an injected input is None."""
+    call fully offline (tests) even where an injected input is None.
+
+    ``as_of`` is a LABEL stamped into the report. ``pit_asof`` is a BINDING point-in-time boundary:
+    when given, the default Prophet plan is read bounded at it, so a historical assessment cannot
+    pick up a plan state computed after the decision. They are separate because the live run stamps
+    an ``as_of`` without wanting a bound (see ``portfolio.conviction.build``)."""
     t = (ticker or "").upper().strip()
     notes: list[str] = []
     sources: list[str] = []
@@ -309,7 +318,7 @@ def assess(ticker: str, *, series=None, stockdata: dict | None = None,
     if bottom_state is None and _use_defaults:
         bottom_state = _default_bottom_state(t)
     if prophet_plan is None and _use_defaults:
-        prophet_plan = _default_prophet_plan(t)
+        prophet_plan = _default_prophet_plan(t, pit_asof)
 
     fm = _fast_metrics(series)
     lm = _leg_metrics(series)
