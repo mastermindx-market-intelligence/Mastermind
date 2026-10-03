@@ -40,6 +40,16 @@ from integrations.mastermind_steward_app.server import (
     REQUIRED_SCOPE,
     build_contract_server,
 )
+from integrations.mastermind_steward_app.research import (
+    CITATION_URL_SURFACE_MISSING,
+    FETCH_TOOL,
+    RESEARCH_SERVER_VERSION,
+    SEARCH_TOOL,
+)
+from integrations.mastermind_steward_app.research_server import (
+    build_authenticated_research_app,
+    build_research_tools,
+)
 
 
 MCP_PATH = "/mcp/steward/v1"
@@ -1052,3 +1062,290 @@ def test_steward_stack_is_pinned_and_live_window_is_opt_in_and_disabled_by_defau
     parameter = inspect.signature(build_authenticated_app).parameters["live_window"]
     assert parameter.default is None
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+
+def test_research_generation_adds_only_search_and_fetch_to_protected_six_tools():
+    tools = build_research_tools()
+    names = [tool.name for tool in tools]
+    assert names == [
+        "list_responsibilities",
+        "get_responsibility",
+        "get_attention",
+        "get_current_runtime",
+        "explain_blocker",
+        "resolve_surface",
+        SEARCH_TOOL,
+        FETCH_TOOL,
+    ]
+    for tool in tools[-2:]:
+        assert tool.annotations is not None
+        assert tool.annotations.readOnlyHint is True
+        assert tool.annotations.destructiveHint is False
+        assert tool.annotations.idempotentHint is True
+        assert tool.annotations.openWorldHint is False
+        assert tool.outputSchema is not None
+        rendered = tool.model_dump(by_alias=True, exclude_none=True)
+        schemes = rendered["securitySchemes"]
+        assert schemes == [{"type": "oauth2", "scopes": [REQUIRED_SCOPE]}]
+        assert rendered["_meta"]["securitySchemes"] == schemes
+
+
+def test_research_auth_failure_occurs_before_company_state_access():
+    policy = _policy()
+    verifier, verifier_calls = _stub_verifier(policy, None)
+    port = _Port()
+    app = build_authenticated_research_app(
+        build_contract_server(port),
+        policy=policy,
+        token_verifier=verifier,
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 31,
+        "method": "tools/call",
+        "params": {
+            "name": SEARCH_TOOL,
+            "arguments": {"query": "Mastermind"},
+        },
+    }
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        missing = client.post(MCP_PATH, headers=MCP_HEADERS, json=body)
+        refused = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": "Bearer rejected"},
+            json=body,
+        )
+
+    assert missing.status_code == 401
+    assert refused.status_code == 401
+    assert port.calls == []
+    assert verifier_calls == ["rejected"]
+
+
+def test_research_search_returns_matching_structured_and_text_output(
+    rsa_key: rsa.RSAPrivateKey,
+):
+    policy = _policy()
+    verifier, fetcher, sink = _real_verifier(policy, rsa_key)
+    bearer = _token(rsa_key, policy)
+    snapshot_calls: list[int] = []
+
+    def provider():
+        snapshot_calls.append(1)
+        return _projection_snapshot()
+
+    port = ControlRoomStewardReadPort(
+        provider,
+        clock=lambda: datetime(
+            2026,
+            9,
+            1,
+            12,
+            5,
+            0,
+            tzinfo=timezone.utc,
+        ),
+        stale_after_seconds=900,
+    )
+    app = build_authenticated_research_app(
+        build_contract_server(port),
+        policy=policy,
+        token_verifier=verifier,
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 32,
+        "method": "tools/call",
+        "params": {
+            "name": SEARCH_TOOL,
+            "arguments": {"query": "Alpha program runtime capability"},
+        },
+    }
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        response = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": f"Bearer {bearer}"},
+            json=body,
+        )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is False
+    structured = result["structuredContent"]
+    assert json.loads(result["content"][0]["text"]) == structured
+    assert structured["results"]
+    alpha = next(
+        row for row in structured["results"] if row["title"] == "Alpha program"
+    )
+    assert alpha["id"].startswith("steward:research:v1:")
+    assert alpha["url"] == ""
+    assert snapshot_calls == [1]
+    assert fetcher.calls == [JWKS_URI]
+    assert sink.events == [
+        AuthAuditEvent(
+            schema=AUTH_AUDIT_SCHEMA,
+            policy_id=policy.policy_id,
+            code="accepted",
+            accepted=True,
+        )
+    ]
+
+
+def test_research_fetch_preserves_truth_gaps_and_leaks_no_private_source_values(
+    rsa_key: rsa.RSAPrivateKey,
+):
+    policy = _policy()
+    verifier, _, _ = _real_verifier(policy, rsa_key)
+    bearer = _token(rsa_key, policy)
+    snapshot_calls: list[int] = []
+
+    def provider():
+        snapshot_calls.append(1)
+        return _projection_snapshot()
+
+    port = ControlRoomStewardReadPort(
+        provider,
+        clock=lambda: datetime(
+            2026,
+            9,
+            1,
+            12,
+            5,
+            0,
+            tzinfo=timezone.utc,
+        ),
+        stale_after_seconds=900,
+    )
+    app = build_authenticated_research_app(
+        build_contract_server(port),
+        policy=policy,
+        token_verifier=verifier,
+    )
+    search_body = {
+        "jsonrpc": "2.0",
+        "id": 33,
+        "method": "tools/call",
+        "params": {
+            "name": SEARCH_TOOL,
+            "arguments": {"query": "Alpha program"},
+        },
+    }
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        search_response = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": f"Bearer {bearer}"},
+            json=search_body,
+        )
+        document_id = next(
+            row["id"]
+            for row in search_response.json()["result"]["structuredContent"]["results"]
+            if row["title"] == "Alpha program"
+        )
+        snapshot_calls.clear()
+        fetch_body = {
+            "jsonrpc": "2.0",
+            "id": 34,
+            "method": "tools/call",
+            "params": {
+                "name": FETCH_TOOL,
+                "arguments": {"id": document_id},
+            },
+        }
+        fetch_response = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": f"Bearer {bearer}"},
+            json=fetch_body,
+        )
+
+    assert fetch_response.status_code == 200
+    result = fetch_response.json()["result"]
+    assert result["isError"] is False
+    structured = result["structuredContent"]
+    assert json.loads(result["content"][0]["text"]) == structured
+    assert structured["id"] == document_id
+    assert structured["title"] == "Alpha program"
+    assert structured["url"] == ""
+    assert structured["metadata"]["citation_status"] == CITATION_URL_SURFACE_MISSING
+    assert structured["metadata"]["secretary_server_version"] == "2.0.0"
+    assert "NO_SOURCE" in structured["text"]
+    assert "RUNTIME_UNKNOWN" in structured["text"]
+    assert "SURFACE_UNKNOWN" in structured["text"]
+    assert "responsibility.objective" not in structured["text"]
+    assert "attention.requested_action" not in structured["text"]
+    assert snapshot_calls == [1, 1, 1, 1, 1, 1]
+
+    wire = fetch_response.text
+    for private in (
+        bearer,
+        "JOB-RAW-001",
+        "ATTENTION-RAW-001",
+        "11111111-1111-4111-8111-111111111111",
+        "SEAT-RAW-001",
+        "provider=chatgpt",
+        "\"provider\":\"chatgpt\"",
+    ):
+        assert private not in wire
+
+
+def test_research_malformed_query_is_rejected_after_auth_before_steward_read(
+    rsa_key: rsa.RSAPrivateKey,
+):
+    policy = _policy()
+    verifier, _, _ = _real_verifier(policy, rsa_key)
+    bearer = _token(rsa_key, policy)
+    port = _Port()
+    app = build_authenticated_research_app(
+        build_contract_server(port),
+        policy=policy,
+        token_verifier=verifier,
+    )
+    body = {
+        "jsonrpc": "2.0",
+        "id": 35,
+        "method": "tools/call",
+        "params": {
+            "name": SEARCH_TOOL,
+            "arguments": {"query": "x" * 513},
+        },
+    }
+
+    with TestClient(app, base_url=BASE_URL) as client:
+        response = client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": f"Bearer {bearer}"},
+            json=body,
+        )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert result["content"] == [{"type": "text", "text": "INVALID_REQUEST"}]
+    assert "structuredContent" not in result
+    assert port.calls == []
+
+
+def test_research_server_reports_explicit_new_app_generation_version():
+    tools = build_research_tools()
+    assert [tool.name for tool in tools][-2:] == [SEARCH_TOOL, FETCH_TOOL]
+    assert RESEARCH_SERVER_VERSION == "3.0.0"
+
+
+
+def test_authenticated_app_generation_selector_is_closed_before_source_access():
+    policy = _policy()
+    verifier, _ = _stub_verifier(policy, None)
+    port = _Port()
+
+    with pytest.raises(ValueError, match="unsupported Steward app generation"):
+        build_authenticated_app(
+            build_contract_server(port),
+            policy=policy,
+            token_verifier=verifier,
+            app_generation="arbitrary-server",
+        )
+
+    assert port.calls == []
