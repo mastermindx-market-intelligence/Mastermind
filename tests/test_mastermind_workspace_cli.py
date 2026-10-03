@@ -108,6 +108,29 @@ def test_cli_census_reports_source_and_managed_workspace(tmp_path: Path):
     assert states[str((root / "web" / "cli-op-003").resolve())] == "MANAGED_ACTIVE"
 
 
+def test_cli_census_uses_observed_origin_default_branch_not_master(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    _git(source, "branch", "-m", "main")
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "main")
+    _git(source, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+    unmanaged = tmp_path / "clean-unmanaged"
+    _git(source, "worktree", "add", "--detach", str(unmanaged), base_sha)
+    root = tmp_path / "managed-root"
+    code, census = _run_cli(source, root, "census")
+    assert code == 0
+    rows = {entry["path"]: entry for entry in census["receipt"]["worktrees"]}
+    row = rows[str(unmanaged.resolve())]
+    assert row["state"] == "CLEAN_RECOVERABLE"
+    assert row["recoverability"] == "HEAD_REACHABLE_FROM_ORIGIN_DEFAULT"
+
+
 @pytest.mark.parametrize("enrolled", [False, True])
 @pytest.mark.parametrize("path_component", [
     "plain",
@@ -278,6 +301,112 @@ def test_installer_pins_host_root_and_refuses_missing_mount(
     )
     assert refused.returncode == 66
     assert f"not mounted at {tmp_path}; refusing fallback" in refused.stderr
+
+
+def _workspace_installer_fixture(repo_root: Path, tmp_path: Path) -> Path:
+    fixture = tmp_path / "installer-repo"
+    (fixture / "scripts").mkdir(parents=True)
+    (fixture / "control_plane").mkdir()
+    (fixture / "common").mkdir()
+    for relative in (
+        "scripts/install_mastermind_workspace_cli.sh",
+        "scripts/mastermind_workspace.py",
+        "control_plane/executive_workspace.py",
+        "control_plane/__init__.py",
+        "common/commission_ref.py",
+        "common/__init__.py",
+    ):
+        source = repo_root / relative
+        target = fixture / relative
+        target.write_bytes(source.read_bytes())
+        target.chmod(source.stat().st_mode & 0o777)
+    _git(fixture, "init", "-q")
+    _git(fixture, "config", "user.name", "Workspace Installer Test")
+    _git(fixture, "config", "user.email", "workspace-installer@example.invalid")
+    _git(fixture, "add", ".")
+    _git(fixture, "commit", "-qm", "fixture")
+    return fixture
+
+
+def test_installer_can_pin_an_alternate_source_at_install_time(tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[1]
+    fixture = _workspace_installer_fixture(repo_root, tmp_path)
+    alternate_parent = tmp_path / "alternate O'Brien $literal"
+    alternate_parent.mkdir()
+    alternate, _ = _repository(alternate_parent)
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    launcher = tmp_path / "bin" / "mmx-workspace-macro"
+    payload = tmp_path / "payload"
+    env = dict(os.environ)
+    env.update({
+        "HOME": str(fake_home),
+        "MASTERMIND_WORKSPACE_CLI_INSTALL": str(launcher),
+        "MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT": str(payload),
+        "MASTERMIND_WORKSPACE_CLI_SOURCE_REPO": str(alternate),
+    })
+    completed = subprocess.run(
+        ["/bin/sh", str(fixture / "scripts" / "install_mastermind_workspace_cli.sh")],
+        cwd=fixture, env=env, check=False, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert subprocess.run(
+        ["/bin/sh", "-n", str(launcher)], capture_output=True, text=True,
+    ).returncode == 0
+
+    # Replace only the copied test payload so the generated wrapper discloses
+    # which source it pinned without creating a workspace.
+    payload_script = payload / "scripts" / "mastermind_workspace.py"
+    payload_script.write_text(
+        "import json, os\n"
+        "print(json.dumps({'source': os.environ.get('MASTERMIND_SOURCE_REPO')}))\n",
+        encoding="utf-8",
+    )
+    hostile_env = dict(env)
+    hostile_env["MASTERMIND_PYTHON"] = sys.executable
+    hostile_env["MASTERMIND_SOURCE_REPO"] = str(tmp_path / "hostile-runtime-source")
+    invoked = subprocess.run(
+        [str(launcher), "census"], cwd=tmp_path, env=hostile_env, check=True,
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert json.loads(invoked.stdout) == {"source": str(alternate.resolve())}
+
+
+@pytest.mark.parametrize("source_kind", ["missing", "subdirectory"])
+def test_installer_refuses_unqualified_alternate_source_before_publish(
+    tmp_path: Path, source_kind: str,
+):
+    repo_root = Path(__file__).resolve().parents[1]
+    fixture = _workspace_installer_fixture(repo_root, tmp_path)
+    if source_kind == "missing":
+        alternate = tmp_path / "missing-source"
+    else:
+        parent = tmp_path / "alternate"
+        parent.mkdir()
+        source, _ = _repository(parent)
+        alternate = source / "nested"
+        alternate.mkdir()
+
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    launcher = tmp_path / "bin" / "mmx-workspace-macro"
+    env = dict(os.environ)
+    env.update({
+        "HOME": str(fake_home),
+        "MASTERMIND_WORKSPACE_CLI_INSTALL": str(launcher),
+        "MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT": str(tmp_path / "payload"),
+        "MASTERMIND_WORKSPACE_CLI_SOURCE_REPO": str(alternate),
+    })
+    completed = subprocess.run(
+        ["/bin/sh", str(fixture / "scripts" / "install_mastermind_workspace_cli.sh")],
+        cwd=fixture, env=env, check=False, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode != 0
+    assert "workspace source repository" in completed.stderr.lower()
+    assert not launcher.exists()
 
 
 # Storage admission is part of the existing attended workspace route, not a
@@ -637,3 +766,108 @@ def test_installation_profile_keeps_required_mount_without_fallback(storage_cli,
     selected = cli.installation_storage_profile(home)
     assert selected["root"] == str(root.resolve())
     assert selected["mount_point"] == data["mount_point"]
+
+
+def _published_feature_branch(source: Path, tmp_path: Path) -> tuple[str, str]:
+    _git(source, "branch", "-m", "main")
+    remote = tmp_path / "adopt-remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "main")
+    _git(source, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _git(source, "checkout", "-qb", "sol/incumbent-repair")
+    (source / "README.md").write_text("published repair\n", encoding="utf-8")
+    _git(source, "add", "README.md")
+    _git(source, "commit", "-qm", "published repair")
+    head = _git(source, "rev-parse", "HEAD")
+    _git(source, "push", "-u", "origin", "sol/incumbent-repair")
+    _git(source, "checkout", "-q", "main")
+    return "sol/incumbent-repair", head
+
+
+def test_cli_adopts_exact_published_nondefault_branch_and_reuses_it(tmp_path: Path):
+    source, _base_sha = _repository(tmp_path)
+    branch, head = _published_feature_branch(source, tmp_path)
+    root = tmp_path / "workspaces"
+
+    code, adopted = _run_cli(
+        source, root, "adopt", "--operation-id", "recover-incumbent-001",
+        "--branch", branch, "--expected-head", head,
+    )
+    assert code == 0
+    assert adopted["effect"] == "APPLIED"
+    receipt = adopted["receipt"]
+    assert receipt["branch"] == branch
+    assert receipt["head_sha"] == head
+    assert receipt["base_sha"] == head
+    workspace = Path(receipt["workspace_path"])
+    assert (workspace / "README.md").read_text(encoding="utf-8") == "published repair\n"
+
+    code, reused = _run_cli(
+        source, root, "adopt", "--operation-id", "recover-incumbent-001",
+        "--branch", branch, "--expected-head", head,
+    )
+    assert code == 0
+    assert reused["effect"] == "NOT_APPLIED"
+    assert reused["receipt"]["reused"] is True
+
+    code, released = _run_cli(
+        source, root, "release", "--operation-id", "recover-incumbent-001",
+    )
+    assert code == 0
+    assert released["receipt"]["state"] == "REMOVED"
+    assert _git(source, "rev-parse", f"refs/heads/{branch}") == head
+
+
+def test_cli_adopt_rejects_default_branch_expected_head_mismatch_and_unpublished(tmp_path: Path):
+    source, _base_sha = _repository(tmp_path)
+    branch, head = _published_feature_branch(source, tmp_path)
+    root = tmp_path / "workspaces"
+
+    code, default = _run_cli(
+        source, root, "adopt", "--operation-id", "reject-default",
+        "--branch", "main", "--expected-head", _git(source, "rev-parse", "refs/remotes/origin/main"),
+    )
+    assert code == 2
+    assert default["effect"] == "NOT_APPLIED"
+    assert "default" in default["error"].lower()
+
+    code, mismatch = _run_cli(
+        source, root, "adopt", "--operation-id", "reject-mismatch",
+        "--branch", branch, "--expected-head", "0" * 40,
+    )
+    assert code == 2
+    assert mismatch["effect"] == "NOT_APPLIED"
+    assert "expected head" in mismatch["error"].lower() or "published" in mismatch["error"].lower()
+
+    _git(source, "checkout", "-qb", "sol/local-only")
+    (source / "README.md").write_text("local only\n", encoding="utf-8")
+    _git(source, "add", "README.md")
+    _git(source, "commit", "-qm", "local only")
+    local_head = _git(source, "rev-parse", "HEAD")
+    _git(source, "checkout", "-q", "main")
+    code, unpublished = _run_cli(
+        source, root, "adopt", "--operation-id", "reject-unpublished",
+        "--branch", "sol/local-only", "--expected-head", local_head,
+    )
+    assert code == 2
+    assert unpublished["effect"] == "NOT_APPLIED"
+    assert "published" in unpublished["error"].lower() or "remote" in unpublished["error"].lower()
+
+
+def test_cli_adopt_refuses_branch_checked_out_in_another_source_worktree(tmp_path: Path):
+    source, _base_sha = _repository(tmp_path)
+    branch, head = _published_feature_branch(source, tmp_path)
+    legacy = tmp_path / "legacy-worktree"
+    _git(source, "worktree", "add", str(legacy), branch)
+    root = tmp_path / "workspaces"
+    code, body = _run_cli(
+        source, root, "adopt", "--operation-id", "reject-live-writer",
+        "--branch", branch, "--expected-head", head,
+    )
+    assert code == 2
+    assert body["effect"] == "NOT_APPLIED"
+    assert "worktree" in body["error"].lower() or "checked out" in body["error"].lower()

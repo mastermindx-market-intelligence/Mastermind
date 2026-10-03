@@ -2,8 +2,10 @@
 """Canonical attended-session workspace route for Mastermind hosts.
 
 This CLI is a thin adapter over ``control_plane.executive_workspace``.  It does
-not own lifecycle state.  The host owns the source repo and workspace root; the
-caller supplies only an operation identity, exact base SHA, and a closed lane.
+not own lifecycle state.  The host owns the source repo and workspace root.
+New work receives an operation identity, exact base SHA, and closed lane;
+recovery may instead adopt one exact already-published non-default branch at an
+expected remote-tracking head. Neither path fetches or rewrites source history.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from control_plane.executive_workspace import (  # noqa: E402
     WorkspaceError,
+    adopt_published_linked_worktree,
     inspect_linked_worktree,
     prepare_linked_worktree,
     release_linked_worktree,
@@ -257,10 +260,18 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
 
-    acquire = sub.add_parser("acquire", help="acquire or reuse one linked workspace")
+    acquire = sub.add_parser("acquire", help="acquire or reuse one new linked workspace")
     acquire.add_argument("--operation-id", required=True)
     acquire.add_argument("--base-sha", required=True)
     acquire.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
+
+    adopt = sub.add_parser(
+        "adopt", help="adopt one exact already-published non-default branch"
+    )
+    adopt.add_argument("--operation-id", required=True)
+    adopt.add_argument("--branch", required=True)
+    adopt.add_argument("--expected-head", required=True)
+    adopt.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
 
     sub.add_parser("census", help="read-only census of registered source worktrees")
     sub.add_parser("storage", help="read-only enrolled volume and free-space admission check")
@@ -287,6 +298,19 @@ def _git_text(source: Path, *args: str) -> tuple[int, str, str]:
         stderr=subprocess.PIPE,
     )
     return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
+
+
+def _origin_default_remote_ref(source: Path) -> str | None:
+    code, value, _ = _git_text(
+        source, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"
+    )
+    if code != 0:
+        return None
+    ref = value.strip()
+    prefix = "refs/remotes/origin/"
+    if not ref.startswith(prefix) or ref == f"{prefix}HEAD":
+        return None
+    return ref
 
 
 def _porcelain_records(source: Path) -> list[dict[str, str]]:
@@ -340,9 +364,13 @@ def _census(source: Path, root: Path) -> dict[str, object]:
             elif managed and locked_reason:
                 state = "MANAGED_ACTIVE"
             else:
-                ancestor_code, _, _ = _git_text(
-                    source, "merge-base", "--is-ancestor", head, "refs/remotes/origin/master"
-                )
+                origin_default_ref = _origin_default_remote_ref(source)
+                if origin_default_ref is None:
+                    ancestor_code = 1
+                else:
+                    ancestor_code, _, _ = _git_text(
+                        source, "merge-base", "--is-ancestor", head, origin_default_ref
+                    )
                 remote_head = ""
                 if branch:
                     remote_code, remote_value, _ = _git_text(
@@ -352,7 +380,7 @@ def _census(source: Path, root: Path) -> dict[str, object]:
                         remote_head = remote_value
                 if ancestor_code == 0:
                     state = "CLEAN_RECOVERABLE"
-                    recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
+                    recoverability = "HEAD_REACHABLE_FROM_ORIGIN_DEFAULT"
                 elif remote_head == head and head:
                     state = "CLEAN_RECOVERABLE"
                     recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
@@ -425,6 +453,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             return _emit(
                 "acquire",
+                receipt,
+                effect="NOT_APPLIED" if receipt.reused else "APPLIED",
+            )
+        if args.action == "adopt":
+            if not _storage_status(root)["admission_allowed"]:
+                raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
+            receipt = adopt_published_linked_worktree(
+                source,
+                root,
+                operation_id=args.operation_id,
+                lane=args.lane,
+                branch=args.branch,
+                expected_head_sha=args.expected_head,
+            )
+            return _emit(
+                "adopt",
                 receipt,
                 effect="NOT_APPLIED" if receipt.reused else "APPLIED",
             )
