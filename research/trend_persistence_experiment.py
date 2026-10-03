@@ -205,31 +205,15 @@ def evaluate(panel, *, horizons=DEFAULT_HORIZONS):
     return result
 
 
-def run_audited_panel(*, horizons=DEFAULT_HORIZONS, formation_step=5):
-    """Run against Mastermind's audited deep+delisted, sanitized, PIT S&P1500 substrate."""
+def run_audited_panel():
+    """Development-sample run on the audited deep+delisted, sanitized, PIT S&P1500 substrate.
+
+    Delegates to ``research.trend_persistence_panel``, which owns the global formation
+    calendar, the delisting-aware labels and the holdout fence. The design is frozen by
+    ``research/TREND_PERSISTENCE_PREREG_V1.md``; this entry point cannot score the holdout.
+    """
     try:
-        from loop import factor_experiment as fx
-        closes, mem, _idx, hygiene = fx.load_panel()
-        if closes is None or closes.empty or "SPY" not in closes.columns:
-            return {"status": "unavailable", "reason": "audited_price_panel_missing"}
-        benchmark = closes["SPY"]
-        prices = {c: closes[c] for c in closes.columns if c != "SPY"}
-        cache = {}
-        def eligible(ticker, asof):
-            key = str(asof)[:10]
-            if key not in cache:
-                cache[key] = fx.members_asof(mem, asof)
-            return str(ticker) in cache[key]
-        rows = build_panel(
-            prices, benchmark, horizons=horizons, formation_step=formation_step,
-            eligible_asof=eligible,
-        )
-        out = evaluate(rows, horizons=horizons)
-        out.update({
-            "panel_rows": len(rows), "universe_names": len(prices),
-            "universe": "sp1500_pit", "panel": "deep_plus_delisted_sanitized",
-            "hygiene": hygiene,
-        })
-        return out
+        from research import trend_persistence_panel as panel
+        return panel.run(sample="dev")
     except Exception as exc:
         return {"status": "unavailable", "error": str(exc)}

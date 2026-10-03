@@ -57,8 +57,24 @@ def _log_returns(w):
         return None
 
 
-def _path_efficiency(s, sessions: int) -> float | None:
-    """Absolute net log move / absolute log path length; bounded in [0, 1]."""
+def _net_log_move(w) -> float | None:
+    """Exact endpoint log move of a window (not a sum of rounded daily differences)."""
+    try:
+        import math
+        first, last = float(w.iloc[0]), float(w.iloc[-1])
+        if first <= 0 or last <= 0:
+            return None
+        return math.log(last) - math.log(first)
+    except Exception:
+        return None
+
+
+def _signed_efficiency(s, sessions: int) -> float | None:
+    """Net log move / absolute log path length; bounded in [-1, 1].
+
+    The sign carries direction: a clean decline scores near -1 and a clean advance near +1.
+    The unsigned form cannot separate the two, so pooled tests of it mix opposite effects.
+    """
     try:
         if s is None or len(s) <= sessions:
             return None
@@ -67,13 +83,19 @@ def _path_efficiency(s, sessions: int) -> float | None:
         if r is None or not len(r):
             return None
         gross = float(r.abs().sum())
-        if gross <= 0:
+        net = _net_log_move(w)
+        if gross <= 0 or net is None:
             return None
-        net = abs(float(r.sum()))
         value = _finite_float(net / gross)
-        return min(1.0, max(0.0, value)) if value is not None else None
+        return min(1.0, max(-1.0, value)) if value is not None else None
     except Exception:
         return None
+
+
+def _path_efficiency(s, sessions: int) -> float | None:
+    """Absolute net log move / absolute log path length; bounded in [0, 1]."""
+    value = _signed_efficiency(s, sessions)
+    return abs(value) if value is not None else None
 
 
 def _positive_day_fraction(s, sessions: int) -> float | None:
@@ -91,10 +113,11 @@ def _directional_consistency(s, sessions: int) -> float | None:
     try:
         if s is None or len(s) <= sessions:
             return None
-        r = _log_returns(s.iloc[-1 - sessions :])
-        if r is None or not len(r):
+        w = s.iloc[-1 - sessions :]
+        r = _log_returns(w)
+        net = _net_log_move(w)
+        if r is None or not len(r) or net is None:
             return None
-        net = float(r.sum())
         if net == 0:
             return _finite_float((r == 0).mean())
         return _finite_float((r * (1.0 if net > 0 else -1.0) > 0).mean())
@@ -166,6 +189,7 @@ def extract(prices, *, benchmark=None, asof=None) -> dict[str, Any]:
         out["relative_strength"][f"excess_{w}d"] = _relative_strength(s, b, w) if b is not None else None
     for w in (20, 60, 120):
         out["path_quality"][f"efficiency_{w}d"] = _path_efficiency(s, w)
+        out["path_quality"][f"signed_efficiency_{w}d"] = _signed_efficiency(s, w)
         out["path_quality"][f"positive_day_fraction_{w}d"] = _positive_day_fraction(s, w)
         out["path_quality"][f"directional_consistency_{w}d"] = _directional_consistency(s, w)
         out["gain_retention"][f"retained_{w}d"] = _gain_retention(s, w)
