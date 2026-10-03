@@ -169,7 +169,7 @@ def test_authorized_key_renderer_forces_stable_relay_and_restrictions(tmp_path: 
     line = renderer.render(public_key, "mini4")
 
     assert line.startswith(
-        'restrict,command="/Library/Application Support/MastermindExecutive/bin/mmx-vps-release-relay mini4" '
+        'restrict,command="\'/Library/Application Support/MastermindExecutive/bin/mmx-vps-release-relay\' mini4" '
     )
     assert f"ssh-ed25519 {payload}" in line
     assert line.endswith("mastermind-release-mini4")

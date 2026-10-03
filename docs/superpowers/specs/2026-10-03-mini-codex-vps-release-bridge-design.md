@@ -38,15 +38,18 @@ Git remote or branch. The privileged broker maps the request to the installed re
 The wrapper:
 
 1. requires root broker identity and one exact commit argument;
-2. fixes the public Mastermind Git remote and `master` branch;
-3. requires the request SHA to equal current remote `master`, then fetches and rechecks it;
-4. materializes a clean archive in a private temporary directory;
-5. requires the target archive's `scripts/deploy_code_to_vps.sh` to be byte-identical to the
+2. fixes the Mastermind GitHub remote, `master` branch and M2 source-repository path;
+3. performs GitHub authentication only under the attended M2 owner's existing Git credential context,
+   with prompting disabled and hooks suppressed; no Git credential is exposed to the mini or caller;
+4. requires the request SHA to equal current remote `master`, then refetches and rechecks it
+   immediately before the production-effect boundary;
+5. materializes a clean archive from that exact fetched commit in a private temporary directory;
+6. requires the target archive's `scripts/deploy_code_to_vps.sh` to be byte-identical to the
    installed trusted Executive release copy before production effect;
-6. uses the M2-local VPS key plus strict known-host verification;
-7. invokes the existing deploy transaction with fixed production coordinates;
-8. independently verifies the final production marker and health;
-9. maps an unprovable final state to exit 75 so the privileged broker preserves `EFFECT_UNKNOWN`.
+7. uses the M2-local VPS key plus strict known-host verification;
+8. invokes the existing deploy transaction with fixed production coordinates;
+9. independently verifies the final production marker and health;
+10. maps an unprovable final state to exit 75 so the privileged broker preserves `EFFECT_UNKNOWN`.
 
 A changed deployment implementation therefore cannot bootstrap itself merely because it landed on
 GitHub. The trusted Executive release must first be updated through its own existing release gates.
@@ -55,7 +58,7 @@ GitHub. The trusted Executive release must first be updated through its own exis
 Each mini receives a dedicated Ed25519 key named `~/.ssh/m2_release`. That key is not the existing
 recovery identity and is not a VPS credential. On M2 its public key is installed with:
 
-`restrict,command="/Library/Application Support/MastermindExecutive/bin/mmx-vps-release-relay miniN"`
+`restrict,command="'/Library/Application Support/MastermindExecutive/bin/mmx-vps-release-relay' miniN"`
 
 The forced label is part of the server-side key grant. The relay accepts only:
 
@@ -87,7 +90,7 @@ merge. For each mini:
 4. inspect `scripts/render_mini_vps_release_authorized_key.py --public-key-file ... --label miniN`;
 5. on attended M2, run
    `scripts/install_mini_vps_release_authorized_key.py --public-key-file ... --label miniN`;
-   it appends only the exact rendered `restrict,command="... miniN"` entry and refuses label rebinding;
+   it appends only the exact rendered `restrict,command="'...' miniN"` entry and refuses label rebinding;
 6. install the mini client with `scripts/install_mini_vps_release_client.py --require-key`;
 7. run `mmx-vps-release preflight` and record the exact host/key/install identities.
 No private key is copied between machines. Reusing `m2_recovery` as the release credential is

@@ -32,6 +32,7 @@ def test_privileged_vps_release_scripts_parse() -> None:
 def test_privileged_vps_release_has_closed_target_and_credential_coordinates() -> None:
     source = _broker_source()
     assert 'REMOTE="https://github.com/mastermindx-market-intelligence/Mastermind.git"' in source
+    assert 'SOURCE_REPO="/Users/chriswong/Documents/GitHub/Mastermind"' in source
     assert 'BOXHOST="root@146.190.142.17"' in source
     assert 'DPATH="/opt/mastermind"' in source
     assert 'KEY="/Users/chriswong/.ssh/macro_dashboard_deploy_v2"' in source
@@ -43,9 +44,12 @@ def test_privileged_vps_release_has_closed_target_and_credential_coordinates() -
 
 def test_privileged_vps_release_binds_current_master_and_installed_executor() -> None:
     source = _broker_source()
-    assert 'git ls-remote "$REMOTE" "refs/heads/$BASE_BRANCH"' in source
+    assert '/usr/bin/sudo -H -u chriswong' in source
+    assert 'GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false' in source
+    assert '-c core.hooksPath=/dev/null' in source
+    assert source.count('refs/heads/$BASE_BRANCH:refs/remotes/mmx-release/$BASE_BRANCH') == 2
     assert '[ "$REMOTE_SHA" = "$TARGET_SHA" ]' in source
-    assert '[ "$FETCHED_SHA" = "$TARGET_SHA" ]' in source
+    assert '"${GIT_OWNER[@]}" archive "$TARGET_SHA"' in source
     assert 'INSTALLED_DEPLOY="$RELEASE_ROOT/scripts/deploy_code_to_vps.sh"' in source
     assert '/usr/bin/cmp -s "$INSTALLED_DEPLOY" "$TARGET_DEPLOY"' in source
     assert 'MASTERMIND_DEPLOY_SOURCE="$TMP_ROOT/stage/"' in source

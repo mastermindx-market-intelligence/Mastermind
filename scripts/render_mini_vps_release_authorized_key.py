@@ -56,7 +56,7 @@ def render(public_key: Path, label: str) -> str:
     if _LABEL.fullmatch(label) is None:
         raise RenderError("label must be a mini fleet identity such as mini4")
     payload = _read_public_key(public_key)
-    forced = f'restrict,command="{_RELAY} {label}"'
+    forced = f'restrict,command="\'{_RELAY}\' {label}"'
     return f"{forced} {_KEY_TYPE} {payload} mastermind-release-{label}"
 
 

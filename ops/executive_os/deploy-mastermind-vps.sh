@@ -22,12 +22,13 @@ esac
 
 REMOTE="https://github.com/mastermindx-market-intelligence/Mastermind.git"
 BASE_BRANCH="master"
+SOURCE_REPO="/Users/chriswong/Documents/GitHub/Mastermind"
 BOXHOST="root@146.190.142.17"
 DPATH="/opt/mastermind"
 KEY="/Users/chriswong/.ssh/macro_dashboard_deploy_v2"
 KNOWN_HOSTS="/Users/chriswong/.ssh/known_hosts"
 HEALTH="http://127.0.0.1:8001/health"
-for tool in /usr/bin/git /usr/bin/tar /usr/bin/ssh /usr/bin/cmp /usr/bin/mktemp /usr/bin/awk /usr/bin/stat /bin/bash; do
+for tool in /usr/bin/git /usr/bin/tar /usr/bin/ssh /usr/bin/cmp /usr/bin/mktemp /usr/bin/awk /usr/bin/stat /usr/bin/sudo /usr/bin/env /bin/bash; do
   [ -x "$tool" ] || { echo "required release tool unavailable: $tool" >&2; exit 65; }
 done
 [ -f "$KEY" ] && [ ! -L "$KEY" ] || { echo "fixed VPS key unavailable" >&2; exit 65; }
@@ -45,6 +46,19 @@ case "$KNOWN_META" in
   *) echo "fixed known_hosts metadata invalid" >&2; exit 65 ;;
 esac
 
+[ -d "$SOURCE_REPO/.git" ] && [ ! -L "$SOURCE_REPO" ] && [ ! -L "$SOURCE_REPO/.git" ] || {
+  echo "fixed M2 source repository unavailable" >&2
+  exit 65
+}
+[ "$(/usr/bin/stat -f '%Su' "$SOURCE_REPO")" = "chriswong" ] || {
+  echo "fixed M2 source repository owner invalid" >&2
+  exit 65
+}
+GIT_OWNER=(
+  /usr/bin/sudo -H -u chriswong
+  /usr/bin/env GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false
+  /usr/bin/git -C "$SOURCE_REPO" -c core.hooksPath=/dev/null
+)
 SSH=(/usr/bin/ssh -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes
   -o ConnectTimeout=20 -o "UserKnownHostsFile=$KNOWN_HOSTS" -o StrictHostKeyChecking=yes)
 remote_marker() {
@@ -57,10 +71,6 @@ remote_health_for() {
     printf '%s' \"\$body\" | grep -Eq '\"scheduled_runtime_ok\"[[:space:]]*:[[:space:]]*true' &&
     printf '%s' \"\$body\" | grep -Eq '\"commit\"[[:space:]]*:[[:space:]]*\"$sha\"'" >/dev/null 2>&1
 }
-export GIT_CONFIG_GLOBAL=/dev/null
-export GIT_CONFIG_NOSYSTEM=1
-export GIT_TERMINAL_PROMPT=0
-export GIT_ASKPASS=/usr/bin/false
 TMP_ROOT="$(/usr/bin/mktemp -d /private/tmp/mmx-vps-release.XXXXXX)"
 cleanup() {
   case "$TMP_ROOT" in
@@ -69,23 +79,17 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-REMOTE_SHA="$(/usr/bin/git ls-remote "$REMOTE" "refs/heads/$BASE_BRANCH" | /usr/bin/awk 'NR==1 {print $1}')"
+"${GIT_OWNER[@]}" fetch -q --no-tags --force "$REMOTE" \
+  "refs/heads/$BASE_BRANCH:refs/remotes/mmx-release/$BASE_BRANCH"
+REMOTE_SHA="$("${GIT_OWNER[@]}" rev-parse "refs/remotes/mmx-release/$BASE_BRANCH^{commit}")"
 [[ "$REMOTE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "remote master identity unavailable" >&2; exit 65; }
 [ "$REMOTE_SHA" = "$TARGET_SHA" ] || {
   echo "refusing deploy: requested commit is not current origin/master" >&2
   exit 65
 }
 
-/usr/bin/git init -q "$TMP_ROOT/repo"
-/usr/bin/git -C "$TMP_ROOT/repo" remote add origin "$REMOTE"
-/usr/bin/git -C "$TMP_ROOT/repo" fetch -q --depth=1 origin "$BASE_BRANCH"
-FETCHED_SHA="$(/usr/bin/git -C "$TMP_ROOT/repo" rev-parse FETCH_HEAD^{commit})"
-[ "$FETCHED_SHA" = "$TARGET_SHA" ] || {
-  echo "origin/master moved during release qualification" >&2
-  exit 65
-}
 /bin/mkdir "$TMP_ROOT/stage"
-/usr/bin/git -C "$TMP_ROOT/repo" archive "$TARGET_SHA" | /usr/bin/tar -xf - -C "$TMP_ROOT/stage"
+"${GIT_OWNER[@]}" archive "$TARGET_SHA" | /usr/bin/tar -xf - -C "$TMP_ROOT/stage"
 INSTALLED_DEPLOY="$RELEASE_ROOT/scripts/deploy_code_to_vps.sh"
 TARGET_DEPLOY="$TMP_ROOT/stage/scripts/deploy_code_to_vps.sh"
 [ -x "$INSTALLED_DEPLOY" ] && [ -f "$TARGET_DEPLOY" ] || {
@@ -97,7 +101,9 @@ TARGET_DEPLOY="$TMP_ROOT/stage/scripts/deploy_code_to_vps.sh"
   exit 65
 }
 
-REMOTE_SHA_BEFORE_EFFECT="$(/usr/bin/git ls-remote "$REMOTE" "refs/heads/$BASE_BRANCH" | /usr/bin/awk 'NR==1 {print $1}')"
+"${GIT_OWNER[@]}" fetch -q --no-tags --force "$REMOTE" \
+  "refs/heads/$BASE_BRANCH:refs/remotes/mmx-release/$BASE_BRANCH"
+REMOTE_SHA_BEFORE_EFFECT="$("${GIT_OWNER[@]}" rev-parse "refs/remotes/mmx-release/$BASE_BRANCH^{commit}")"
 [ "$REMOTE_SHA_BEFORE_EFFECT" = "$TARGET_SHA" ] || {
   echo "origin/master moved before the production effect boundary" >&2
   exit 65
