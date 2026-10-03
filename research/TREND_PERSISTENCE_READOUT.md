@@ -3,13 +3,23 @@
 Wave B, stock level. Development sample (formation dates 2003–2021) and one holdout run
 (formation dates 2022-07-06 to 2026-06-02).
 
-**Where this stands.** The one holdout run is done (§10). All 29 development survivors were
-confirmed: 21 drawdown-shape tests and 8 path-quality tests. By the rule fixed before the run,
-those two families are `RESEARCH_PREDICTIVE` for describing downside risk, on the confirmed
-members only. Gain retention had no survivor and stays `DESCRIPTIVE`. Nothing is promoted for
-forward return (§2). The effect is small: between the top and bottom fifth of stocks on a
-confirmed feature, average forward maximum drawdown differs by 0.03 to 1.2 percentage points.
-No advisory field, score or gate follows from this.
+**Where this stands.** The one holdout run is done (§10). All 29 development survivors passed
+the four pre-registered holdout gates: 21 drawdown-shape tests and 8 path-quality tests. By
+the rule fixed before the run, those two families are labelled `RESEARCH_PREDICTIVE` for
+describing downside risk, on the confirmed members only.
+
+**The label does not mean these features say something volatility does not.** A review after
+the run (§4) found, and a committed benchmark confirms (§10), that simulated prices with no
+trend persistence of any kind — no drift, no return autocorrelation, only volatility that
+differs across stocks, clusters in time and rises after falls — pass the same holdout gates on
+14 to 29 of the 29 tests. What the run establishes is narrower: these features are associated
+with forward drawdown after eleven rank-linear controls, and that association is not
+distinguished from one more estimate of volatility.
+
+Gain retention had no survivor and stays `DESCRIPTIVE`. Nothing is promoted for forward return
+(§2). The effect is small: between the top and bottom fifth of stocks on a confirmed feature,
+average forward maximum drawdown differs by 0.03 to 1.2 percentage points. No advisory field,
+score or gate follows from this, and nothing advances until the comparison in §8 has been run.
 
 ## 1. Results in one view
 
@@ -18,11 +28,13 @@ No advisory field, score or gate follows from this.
 | Do these features say anything about forward return vs SPY beyond momentum, volatility and beta? | V1 | 72 | **0** | Null. Closed for these constructions, this universe, these horizons. |
 | Do they say anything about forward maximum drawdown beyond momentum, one volatility window and beta? | V1 | 72 | 34 | Not usable as evidence: volatility was under-controlled (§4). |
 | Same, with volatility at four spans, downside volatility, the quoted-price mask and price floors on printed closes? | V2 | 72 | **29** | A filter, not evidence. These 29 go to the holdout. |
-| Do the 29 hold on formation dates from 2022-07-06, on the repaired universe? | V2 holdout | 29 | **29 confirmed** | Confirmed and small (§10). Earns a walk-forward comparison, nothing more. |
+| Do the 29 hold on formation dates from 2022-07-06, on the repaired universe? | V2 holdout | 29 | **29 pass** | Passed the pre-registered gates. Small (§10). Not distinguished from volatility: next row. |
+| Does a simulated market with volatility and no persistence pass the same gates? | V2 on simulated prices | 72 / 29 | **24–41 of 72** pass development, **14–29 of the 29** pass the holdout gates | Yes. The gates do not separate these features from volatility estimates (§10). |
 
 A development survivor has passed pre-registered gates on a sample that was inspected before
 V2 was written and that is tilted toward survivors (§5). Development alone confirms nothing.
-The holdout run is the confirmation (§10).
+The holdout run is the pre-registered confirmation (§10). The benchmark beside it says what
+that confirmation can and cannot mean.
 
 ## 2. V1 — forward return relative to SPY: null
 
@@ -110,13 +122,34 @@ instrument that was reviewed, unchanged; the code fixes follow the run.
 
 | # | Finding | Severity | Disposition |
 | --- | --- | --- | --- |
-| N1 | A holdout run is bound to the development result the caller supplies, not to a digest pinned in code. Development could be scored on other inputs and the holdout then run on those. | minor | Deviation from V2 §0 (Binding). The run uses the committed development result; panel digest `48cb5e76…` is printed on both results. A code pin follows the run. |
-| N2 | On holdout dates the instrument still computes the share of positive dates, the non-overlapping t and the era means, then deletes them. V2 §7 says they are not computed. | minor | Deviation from V2 §7. They are never printed or read. Fixed after the run. |
-| N3 | No test covers the printed-$1 leg of the quoted-price mask or the loader that applies it. | minor | Test added after the run. |
+| N1 | A holdout run is bound to the development result the caller supplies, not to a digest pinned in code. Development could be scored on other inputs and the holdout then run on those. | minor | Deviation from V2 §0 (Binding). The run uses the committed development result; panel digest `48cb5e76…` is printed on both results. Fixed after the run: `HOLDOUT_PANEL_SHA256` pins the one panel a design's holdout may be scored on, and a test proves a self-consistent development result on another panel is refused. |
+| N2 | On holdout dates the instrument still computes the share of positive dates, the non-overlapping t and the era means, then deletes them. V2 §7 says they are not computed. | minor | Deviation from V2 §7. They are never printed or read. Fixed after the run: on holdout dates they are no longer formed. The development result reproduces byte for byte on the fixed code. |
+| N3 | No test covers the printed-$1 leg of the quoted-price mask or the loader that applies it. | minor | Test added after the run (`test_a_printed_close_under_a_dollar_is_not_a_quote`). |
 | N4 | A wrong print in the store on an audited name now moves its quote test. PLMR prints $0.01–0.03 for 14 sessions from 2023-03-16 against a real price near $55, which takes it out of the cross-section until its windows clear. 81 member cells since the store began are unquoted by a print under $1 while the adjusted price is $1 or more; most are real sub-$1 prints. | minor | Disclosed here. V2 §10 says store prints are taken as they are. |
-| N4 | The audited panel keys prices by today's ticker. Where a symbol changed hands (DOC, HR, SAFE, CNR among them), the audited column holds the successor company's prices for the earlier member. | minor | Disclosed here. It predates this work and affects development and holdout alike. For those names the floor test reads the right company's printed close while features, controls and labels read the audited column. |
+| N4b | The audited panel keys prices by today's ticker. Where a symbol changed hands (DOC, HR, SAFE, CNR among them), the audited column holds the successor company's prices for the earlier member. | minor | Disclosed here. It predates this work and affects development and holdout alike. For those names the floor test reads the right company's printed close while features, controls and labels read the audited column. |
 | N5 | V2 §3 says about 50 names are on the fallback. The count is 34, and they are not only class shares and renamed symbols (MPT, DCH and GAP are among them). | note | An error in the frozen text. It changes no rule, so the document is not re-frozen. |
 | N6 | `score` trusts the digest stored in the panel it is handed. | note | The edge V2 §0 already declares. |
+
+### Fourth review: the conclusion
+
+A fourth read-only review, by a different reviewer, attacked the holdout conclusion in §10
+after the run. It recomputed every number in §10 from the committed result, re-derived the
+four holdout gates and the false-discovery step for all 29 tests, and checked that no feature
+window overlaps its label window. All of that holds. Its verdict on the reading was **fail**:
+§10 presented the confirmed tests as saying something beyond volatility, and the instrument
+cannot show that.
+
+| # | Finding | Severity | Disposition |
+| --- | --- | --- | --- |
+| R1 | Simulated prices with no drift, no return autocorrelation and nothing but volatility differences give positive ICs of the same order as the confirmed ones, pass all seven development gates on a third of the 72 tests, and pass the holdout gates on most of the 29. | blocker, on the reading | Accepted. Reproduced independently and committed as a benchmark (`research/trend_persistence_null.py`; §10, "Against a market with only volatility"). The reading in §10 is rewritten. |
+| R2 | The limit "a dependence on volatility that is not rank-linear can pass through" was stated as a possibility. It is measured, and it is the size of the effect. | major | Accepted. §10 limits rewritten. |
+| R3 | "Holdout ICs did not shrink" was offered as support. An artefact of volatility does not shrink either, and development and holdout are different universes. | major | Accepted. Paragraph rewritten. |
+| R4 | The `distance_to_high` confirmations lean on store-sourced names far more than the two tests §10 named. | major | Accepted. §10 brackets now print all nine. |
+| R5 | The fifths for `distance_to_high` form an inverted U, and the simulated market reproduces that shape. | minor | Accepted. Shape paragraph rewritten. |
+| R6 | Two rows of the third review's table were both numbered N4. | minor | The second is now N4b. |
+| R7 | The holdout result stores no false-discovery q. The largest, recomputed, is 0.0415. | note | Recorded here. The result file is not regenerated. |
+
+No number in §10 changed. What is claimed from them did.
 
 ## 5. Substrate: what the universe actually is
 
@@ -306,11 +339,14 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
   git history at commit `28c445e0`.
 - **V1's development result was re-emitted** on the revised instrument so that it carries a
   panel digest. Every statistic and the survivor set are identical.
-- **A holdout run is bound to the supplied development result, not to a pin in code** (N1,
-  §4). V2 §0 reads as if the committed result were enforced. The run below uses the committed
-  result.
-- **Unlisted statistics are computed and discarded on holdout dates** (N2, §4). V2 §7 says
-  they are not computed. They are never printed.
+- **The holdout run was bound to the supplied development result, not to a pin in code** (N1,
+  §4). V2 §0 reads as if the committed result were enforced. The run used the committed
+  result. The pin was added after the run.
+- **Unlisted statistics were computed and discarded on holdout dates** (N2, §4). V2 §7 says
+  they are not computed. They were never printed. The instrument no longer forms them.
+- **The volatility-only benchmark in §10 is post hoc.** It was designed after the holdout
+  result was seen, in answer to the fourth review (§4). It scores simulated prices only: no
+  real label is read, and the holdout was not run again.
 - **V2 §3 misstates the fallback names** (N5, §4): 34 names, not about 50.
 - **More price-only work on 2022 onward** was done for revision 2, by the author and by the
   second and third reviews: printed-against-adjusted price comparisons, floor counts under each rule,
@@ -321,12 +357,20 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
 
 1. Re-review of the changes revision 2 made — done (§4).
 2. One holdout run — done (§10).
-3. Code fixes N1–N3 from the re-review (§4).
-4. Walk-forward comparison (Wave B2), under its own pre-registration: does adding the
-   confirmed features to a momentum-and-volatility model improve its out-of-sample
-   description of forward drawdown, and by how much? The holdout years have now been seen, so
-   B2 measures size and calibration. It cannot serve as a second confirmation.
-5. Sector and size controls, and group persistence (Wave C), need point-in-time sector
+3. Code fixes N1–N3 from the re-review — done (§4).
+4. Review of the conclusion and the volatility-only benchmark — done (§4, §10).
+5. Walk-forward comparison (Wave B2), under its own pre-registration and its own review. Two
+   questions. Value: does adding the confirmed features to a volatility-aware model —
+   volatility at short half-lives, largest daily moves, curvature, and the dependence of
+   volatility on recent direction — improve its out-of-sample ranking of forward drawdown by
+   a material amount? Kind: once the realised volatility of the label's own window is known,
+   is anything left beyond what the simulated market leaves? The holdout years have been
+   seen, so B2 measures. It cannot serve as a second confirmation.
+   - If the value question fails, nothing is built and the family stops at Wave B for these
+     constructions. The features stay available as descriptive fields.
+   - If it passes and the kind question does not, anything built is named a volatility-type
+     risk estimate. It is not persistence evidence.
+6. Sector and size controls, and group persistence (Wave C), need point-in-time sector
    history for former members first.
 
 Nothing above creates an advisory field, a score or a gate.
@@ -361,8 +405,21 @@ python3 -m research.trend_persistence_panel --design v2 --sample holdout \
     --out research/data/trend_persistence_v2_holdout.json
 ```
 
-It refuses a panel whose digest differs from the development result's, so it has to be run
-on the same inputs.
+It refuses a panel whose digest differs from the development result's or from the digest
+pinned in `HOLDOUT_PANEL_SHA256`, so it can only reproduce the committed result on the same
+inputs. It is not to be run for any other purpose.
+
+The volatility-only benchmark (§10). Simulated prices; about 20 minutes:
+
+```
+python3 -m research.trend_persistence_null \
+    --holdout-result research/data/trend_persistence_v2_holdout.json \
+    --real-closes <breadth>/_closes_deep.parquet \
+    --out research/data/trend_persistence_v2_null.json
+```
+
+`--real-closes` is optional. It reads prices before 2022 only, to print the real volatility
+facts next to the simulated ones.
 
 ## 10. V2 — holdout result
 
@@ -380,8 +437,10 @@ mean IC ≥ 0.005.
 | path quality | 36 | 8 | 8 | `RESEARCH_PREDICTIVE`, downside-risk description, the 8 members |
 | gain retention | 9 | 0 | — | `DESCRIPTIVE`; null printed in §6 |
 
-The tier is the one V2 §8 fixed before the run. It earns a walk-forward comparison against a
-momentum-and-volatility model. It earns no advisory use.
+The tier is the one V2 §8 fixed before the run, and it is applied as written. It records that
+the pre-registered gates were passed. Those gates do not separate these features from
+volatility (below), so the tier is not a claim that they do. It earns a walk-forward
+comparison against a volatility-aware model (§8). It earns no advisory use.
 
 | Horizon | Formation dates | First | Last | Median names | Store-sourced | Floor on printed close | Label carried through a delisting |
 | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
@@ -398,7 +457,8 @@ Small. Three ways to see it.
 - **What the controls absorb.** `max_drawdown_120d` at 60 sessions is the strongest test. Its
   raw rank IC with forward drawdown is 0.42. With the four momentum controls it is 0.39. With
   V1's six controls it is 0.10. With V2's eleven it is 0.05. Most of what these features say
-  about forward drawdown is volatility said another way.
+  about forward drawdown is volatility said another way, and the benchmark below shows the
+  remainder is not clearly anything else.
 - **In drawdown terms.** Sort stocks each date into fifths by the feature, after removing the
   controls. For the strongest test the bottom fifth's forward maximum drawdown averages
   −16.4% and the top fifth's −15.2%: 1.2 points over 60 sessions. Across the 29 tests the gap
@@ -406,26 +466,133 @@ Small. Three ways to see it.
 
 The shape differs by feature. For `max_drawdown` over 60 and 120 sessions the five group
 means are ordered (one pair, at the 5-session horizon, is 0.02 points out of order). For
-`distance_to_high` and `max_drawdown_20d` the difference is the bottom fifth: stocks furthest
-below their high, given the controls, draw down more, and the other four fifths are not
-ordered. For `efficiency_20d` the lower two fifths are deeper than the upper two by 0.1 to
-0.3 points. For `positive_day_fraction` and `sessions_since_high` the end fifths differ by
-0.2 points or less and the middle fifths are the deepest; the rank correlation is confirmed
-but the groups do not line up.
+`distance_to_high` the five means are not ordered in any of the nine tests: the bottom fifth
+is the deepest, the second or third is the shallowest, and the top fifth — the stocks nearest
+their high — is deeper than the second (60-day feature at 60 sessions: −16.7%, −15.2%,
+−15.3%, −15.9%, −15.8%). The rank correlation is positive because of the bottom fifth. For
+`max_drawdown_20d` the difference is also the bottom fifth. For `efficiency_20d` the lower two
+fifths are deeper than the upper two by 0.1 to 0.3 points. For `positive_day_fraction` and
+`sessions_since_high` the end fifths differ by 0.2 points or less and the middle fifths are
+the deepest; the rank correlation passes the gates but the groups do not line up. The
+simulated market below gives the same shapes: for `distance_to_high` both end fifths deeper
+than the middle, and for `positive_day_fraction` the second and third fifths the deepest.
 
-Holdout ICs did not shrink from development: the median ratio is 0.98. A set chosen for
-passing gates usually shrinks. Drawdown shape held level; the path-quality ICs rose
-(`efficiency_20d` at 20 sessions, +0.017 to +0.031).
+Holdout ICs are about the size of development's: the median ratio is 0.98 (drawdown shape
+0.94, path quality 1.61; `efficiency_20d` at 20 sessions went from +0.017 to +0.031). That is
+not support for the features. An association that comes from volatility would hold its size
+as well, and the two samples are different universes: development's median date has 560
+names and is tilted toward survivors (§5); the holdout's has 1,482 with former members
+restored.
+
+### Against a market with only volatility
+
+The fourth review (§4) asked what the same instrument reports on prices that have no trend
+persistence at all. `research/trend_persistence_null.py` simulates them: daily log returns
+with zero mean and no autocorrelation, 500 stocks and a market factor, five specifications,
+five seeds each. Each simulated panel is scored by the V2 instrument unchanged: a long panel
+through development's seven gates, and an independent shorter one through the four holdout
+gates, asked of the 29 real tests with their real development signs. No real label is read.
+Result: `research/data/trend_persistence_v2_null.json`.
+
+| Market | Volatility clustering, lag 1 / 20 / 60 | Leverage | Daily sd, 10th / 50th / 90th pct | Pass development, of 72 | Of the 29, pass the holdout gates |
+| --- | --- | ---: | --- | ---: | ---: |
+| Real prices, 2003–2021, 400 names | 0.25 / 0.16 / 0.10 | -0.049 | 1.6% / 2.3% / 3.3% | 29 | 29 |
+| A. One volatility for every stock | -0.00 / 0.00 / -0.00 | -0.001 | 1.9% / 2.1% / 2.3% | 0 | 0–2 |
+| B. Volatility differs by stock, constant in time | -0.00 / 0.00 / -0.00 | -0.002 | 1.4% / 2.1% / 3.2% | 2–6 | 8–13 |
+| C. B, and volatility clusters in time | 0.15 / 0.10 / 0.07 | +0.005 | 1.8% / 2.6% / 3.8% | 9–12 | 8–11 |
+| D. C, and falls raise volatility | 0.25 / 0.19 / 0.13 | -0.061 | 1.5% / 2.2% / 3.1% | 24–34 | 14–25 |
+| E. D, and an occasional large move | 0.21 / 0.16 / 0.11 | -0.050 | 1.6% / 2.3% / 3.4% | 31–41 | 25–29 |
+
+Ranges are over the five seeds. *Volatility clustering* is the median autocorrelation of
+absolute daily returns. *Leverage* is the median correlation of a return with the next day's
+absolute return. Market E is the closest to real prices on all three measures.
+
+- **With one volatility for every stock the instrument finds nothing** (A). It is not biased
+  when stocks do not differ.
+- **Unequal volatility alone is enough to pass.** With volatility constant in time and
+  independent returns (B), 8–13 of the 29 pass the holdout gates. Feature, controls and
+  label are all noisy measures of the same volatility, and removing the controls rank-linearly
+  leaves some of it behind.
+- **The more the simulated volatility behaves like real volatility, the more pass.** In the
+  market closest to real prices (E), 25–29 of the 29 pass, and 31–41 of the 72 pass
+  development. Real prices gave 29.
+
+Mean IC by feature group on the shorter simulated panels, against the holdout. The share of
+the holdout IC is in brackets.
+
+| Feature group | Tests | Mean holdout IC | B | C | D | E |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `distance_to_high` | 9 | +0.0213 | -0.0049 (-23%) | -0.0085 (-40%) | +0.0084 (40%) | +0.0113 (53%) |
+| `max_drawdown` | 9 | +0.0336 | +0.0113 (34%) | +0.0173 (52%) | +0.0184 (55%) | +0.0336 (100%) |
+| `sessions_since_high` | 3 | -0.0160 | +0.0001 (-1%) | +0.0075 (-47%) | -0.0014 (9%) | -0.0133 (83%) |
+| `efficiency` | 2 | +0.0275 | +0.0132 (48%) | +0.0102 (37%) | +0.0084 (30%) | +0.0393 (143%) |
+| `positive_day_fraction` | 6 | +0.0207 | +0.0009 (4%) | +0.0026 (13%) | +0.0162 (78%) | +0.0341 (165%) |
+
+Seven tests have a holdout IC more than two standard deviations, across seeds, above the mean
+of every simulated market: `distance_to_high_120d` at all three horizons,
+`distance_to_high_60d` at 20 and 60 sessions, and `max_drawdown_120d` at 20 and 60 sessions.
+They are 1.5 to 3.1 times market E's. The other 22 are inside what at least one simulated
+market produces.
+
+What follows:
+
+- The pre-registered gates ask whether the IC is zero after rank-linear controls. A market
+  with only volatility fails that test of zero as readily as real prices do. Passing the gates
+  does not show information beyond volatility.
+- For `efficiency_20d`, `positive_day_fraction`, `sessions_since_high`, `max_drawdown_20d` and
+  `max_drawdown_60d`, market E reproduces most or all of the holdout IC.
+- The seven tests above the simulated markets are not thereby shown to be something else.
+  The simulation is one calibration, and real volatility has structure it lacks: sectors,
+  earnings dates, regimes. They are the tests the next comparison looks at first (§8).
+
+Per test, mean simulated IC on the shorter panels, and how many of the five runs pass the
+holdout gates:
+
+| Feature | Sessions | Holdout IC | B | C | D | E | Runs passing, D | Runs passing, E | Above every market |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `distance_to_high_20d` | 5 | +0.0073 | -0.0046 | -0.0101 | +0.0053 | +0.0092 | 2 of 5 | 4 of 5 | no |
+| `distance_to_high_20d` | 20 | +0.0118 | -0.0062 | -0.0123 | +0.0086 | +0.0120 | 3 of 5 | 5 of 5 | no |
+| `distance_to_high_20d` | 60 | +0.0135 | -0.0089 | -0.0135 | +0.0070 | +0.0074 | 4 of 5 | 4 of 5 | no |
+| `distance_to_high_60d` | 5 | +0.0132 | -0.0026 | -0.0075 | +0.0057 | +0.0108 | 2 of 5 | 5 of 5 | no |
+| `distance_to_high_60d` | 20 | +0.0260 | -0.0050 | -0.0099 | +0.0085 | +0.0135 | 3 of 5 | 5 of 5 | yes |
+| `distance_to_high_60d` | 60 | +0.0259 | -0.0065 | -0.0088 | +0.0098 | +0.0124 | 3 of 5 | 4 of 5 | yes |
+| `distance_to_high_120d` | 5 | +0.0211 | -0.0028 | -0.0041 | +0.0075 | +0.0111 | 4 of 5 | 5 of 5 | yes |
+| `distance_to_high_120d` | 20 | +0.0366 | -0.0048 | -0.0057 | +0.0112 | +0.0136 | 3 of 5 | 5 of 5 | yes |
+| `distance_to_high_120d` | 60 | +0.0360 | -0.0032 | -0.0048 | +0.0122 | +0.0117 | 3 of 5 | 4 of 5 | yes |
+| `max_drawdown_20d` | 5 | +0.0220 | +0.0026 | +0.0111 | +0.0169 | +0.0394 | 5 of 5 | 5 of 5 | no |
+| `max_drawdown_20d` | 20 | +0.0295 | +0.0047 | +0.0124 | +0.0203 | +0.0464 | 5 of 5 | 5 of 5 | no |
+| `max_drawdown_20d` | 60 | +0.0289 | +0.0047 | +0.0099 | +0.0186 | +0.0346 | 5 of 5 | 5 of 5 | no |
+| `max_drawdown_60d` | 5 | +0.0239 | +0.0125 | +0.0188 | +0.0189 | +0.0332 | 5 of 5 | 5 of 5 | no |
+| `max_drawdown_60d` | 20 | +0.0380 | +0.0162 | +0.0239 | +0.0252 | +0.0422 | 5 of 5 | 5 of 5 | no |
+| `max_drawdown_60d` | 60 | +0.0425 | +0.0156 | +0.0236 | +0.0229 | +0.0369 | 4 of 5 | 5 of 5 | no |
+| `max_drawdown_120d` | 5 | +0.0253 | +0.0117 | +0.0144 | +0.0115 | +0.0215 | 4 of 5 | 5 of 5 | no |
+| `max_drawdown_120d` | 20 | +0.0409 | +0.0167 | +0.0199 | +0.0155 | +0.0264 | 4 of 5 | 5 of 5 | yes |
+| `max_drawdown_120d` | 60 | +0.0511 | +0.0172 | +0.0219 | +0.0158 | +0.0223 | 3 of 5 | 4 of 5 | yes |
+| `sessions_since_high_60d` | 20 | -0.0181 | -0.0003 | +0.0105 | +0.0002 | -0.0178 | 0 of 5 | 5 of 5 | no |
+| `sessions_since_high_120d` | 20 | -0.0155 | +0.0010 | +0.0068 | -0.0006 | -0.0130 | 0 of 5 | 5 of 5 | no |
+| `sessions_since_high_120d` | 60 | -0.0143 | -0.0004 | +0.0052 | -0.0039 | -0.0091 | 0 of 5 | 3 of 5 | no |
+| `efficiency_20d` | 5 | +0.0243 | +0.0109 | +0.0080 | +0.0063 | +0.0340 | 3 of 5 | 5 of 5 | no |
+| `efficiency_20d` | 20 | +0.0308 | +0.0154 | +0.0123 | +0.0105 | +0.0445 | 4 of 5 | 5 of 5 | no |
+| `positive_day_fraction_20d` | 5 | +0.0132 | -0.0001 | +0.0028 | +0.0115 | +0.0241 | 5 of 5 | 5 of 5 | no |
+| `positive_day_fraction_60d` | 5 | +0.0224 | +0.0009 | +0.0027 | +0.0145 | +0.0337 | 5 of 5 | 5 of 5 | no |
+| `positive_day_fraction_60d` | 20 | +0.0246 | +0.0013 | +0.0042 | +0.0198 | +0.0416 | 5 of 5 | 5 of 5 | no |
+| `positive_day_fraction_60d` | 60 | +0.0188 | -0.0002 | +0.0046 | +0.0214 | +0.0358 | 5 of 5 | 5 of 5 | no |
+| `positive_day_fraction_120d` | 5 | +0.0208 | +0.0014 | +0.0009 | +0.0127 | +0.0309 | 5 of 5 | 5 of 5 | no |
+| `positive_day_fraction_120d` | 20 | +0.0244 | +0.0020 | +0.0005 | +0.0172 | +0.0385 | 5 of 5 | 5 of 5 | no |
 
 ### Brackets
 
 - **Leavers' carried labels removed.** All 29 keep their sign and stay at 0.005 or above.
 - **Audited names only** (store-sourced names removed). 27 of 29 keep their sign and stay at
   0.005 or above. The two that do not are `distance_to_high_20d` at 5 sessions (−0.0002) and
-  at 20 sessions (+0.0038). Those two confirmations rest on the repaired names, which are
-  adjusted for splits only (V2 §10). `distance_to_high_20d` at 5 sessions is also the test
-  that cleared development's IC floor by 0.00002, and its holdout p (0.042) is the weakest.
-  It is confirmed by the rule and is the marginal member.
+  at 20 sessions (+0.0038). The other `distance_to_high` tests shrink as well. Share of the
+  holdout IC kept: the 20-day feature at 60 sessions, 41%; the 60-day feature, 42%, 66% and
+  70% at 5, 20 and 60 sessions; the 120-day feature, 71%, 84% and 91%. `max_drawdown_20d`
+  keeps 67% to 78%. Every other test keeps 86% or more. The `distance_to_high` confirmations
+  lean on the repaired names, which are adjusted for splits only (V2 §10).
+  `distance_to_high_20d` at 5 sessions is also the test that cleared development's IC floor
+  by 0.00002, and its holdout p (0.042) is the weakest. It passes by the rule and is the
+  marginal member.
 
 ### Every confirmed test
 
@@ -479,8 +646,16 @@ drawdown or a price nearer its high.
   high, how long since the high, and how steady the advance was.
 - **No sector or size control.** Point-in-time sector history does not exist for former
   members (the current map covers 3 of 1,083). Part of the effect may be sector membership.
-- **Controls enter as ranks.** Volatility at four spans and downside volatility at two are
-  removed rank-linearly. A dependence on volatility that is not rank-linear can pass through.
+- **Not separated from volatility.** Volatility at four spans and downside volatility at two
+  are removed rank-linearly. What that leaves behind in a market with only volatility is the
+  size of the effect (above). The run does not show that any confirmed feature says something
+  a better volatility estimate would not.
+- **Two universes.** Development's median date has 560 names, tilted toward survivors. The
+  holdout's has 1,482. Agreement between them is not a like-for-like replication.
+- **The benchmark is one calibration.** 500 simulated names against about 1,480 real ones,
+  five seeds, specifications written after the result was seen. It gives a range for what
+  volatility alone produces, not an estimate. With more names, more simulated tests would
+  pass, not fewer.
 - **Not a strategy and not a forecast of return.** V1 found nothing for forward return (§2).
   An IC ignores costs and turnover.
 - **Deviations N1, N2 and N5** (§4, §7) were recorded before the run and do not change what

@@ -131,6 +131,14 @@ def design_of(design: "str | Design") -> Design:
     return DESIGNS[str(design)]
 
 
+# The one panel a design's holdout may be scored on. It is a fact about the inputs, not a design
+# constant, so it lives outside ``frozen_design``. V2's holdout was scored once, on 2026-10-03,
+# on this panel; a later run can only reproduce the committed result.
+HOLDOUT_PANEL_SHA256: Mapping[str, str] = MappingProxyType({
+    "v2": "48cb5e76269b3a503d2973aecdd04733a2d8b88434db06de8367a224ba4ef178",
+})
+
+
 class HoldoutLocked(RuntimeError):
     """Raised when the holdout is requested without everything the pre-registration demands."""
 
@@ -495,16 +503,27 @@ def _judges():
     return V
 
 
-def _series_stats(V, dates, series, horizon: int, step: int, lag: int) -> dict[str, Any]:
+def _series_stats(V, dates, series, horizon: int, step: int, lag: int,
+                  gating: bool = True) -> dict[str, Any]:
+    """Mean and HAC t of a per-date series; with ``gating`` also what the development gates read.
+
+    Hit rate, the thinned series and the era means are development-gate inputs. They are not
+    formed at all when ``gating`` is off, which is how the holdout is scored.
+    """
     s = np.asarray(series, float)
     keep = np.isfinite(s)
     s, d = s[keep], np.asarray(dates)[keep]
     out: dict[str, Any] = {"n_dates": int(len(s)), "mean": None, "t_hac": None, "p_hac": None,
-                           "hac_lags": None, "hit": None,
-                           "thinned": {"n": 0, "mean": None, "t": None}, "era_means": []}
+                           "hac_lags": None}
+    if gating:
+        out.update({"hit": None, "thinned": {"n": 0, "mean": None, "t": None}, "era_means": []})
     if len(s) < MIN_DATES_FOR_MEAN:
         return out
     nw = V.newey_west_tstat(pd.Series(s), lags=max(4, 2 * math.ceil(horizon / step)))
+    out.update({"mean": float(s.mean()), "t_hac": nw["t"], "p_hac": nw["p"],
+                "hac_lags": nw["lags"]})
+    if not gating:
+        return out
     every = max(1, math.ceil((horizon + lag) / step))
     thin = s[::every]
     nwt = V.newey_west_tstat(pd.Series(thin), lags=2)
@@ -513,7 +532,6 @@ def _series_stats(V, dates, series, horizon: int, step: int, lag: int) -> dict[s
         sel = (d >= np.datetime64(a)) & (d <= np.datetime64(b))
         eras.append(float(s[sel].mean()) if int(sel.sum()) >= MIN_DATES_PER_ERA else None)
     out.update({
-        "mean": float(s.mean()), "t_hac": nw["t"], "p_hac": nw["p"], "hac_lags": nw["lags"],
         "hit": float((s > 0).mean()),
         "thinned": {"n": int(len(thin)), "mean": float(thin.mean()) if len(thin) else None,
                     "t": nwt["t"]},
@@ -557,7 +575,8 @@ def score(panel: dict, *, design: "str | Design" = "v1", sample: str = "dev",
 
     Nothing is scored unless the design's pre-registration still hashes to its pin. A holdout
     run additionally needs that hash from the caller and the committed development result. The
-    panel must be, byte for byte, the one that result was scored on; the development survivors
+    panel must be, byte for byte, the one that result was scored on and the one pinned in
+    ``HOLDOUT_PANEL_SHA256``; the development survivors
     are then re-derived on it, the run refuses if they differ from the committed ones, and it
     scores those tests and no others. With no survivor it does not
     run, and the holdout stays unspent.
@@ -573,6 +592,9 @@ def score(panel: dict, *, design: "str | Design" = "v1", sample: str = "dev",
                                 or dev_result.get("panel_sha256") != panel["digest"]):
         raise HoldoutLocked("the panel is not the one the committed development result was "
                             "scored on (inputs differ); the holdout was not scored")
+    if sample == "holdout" and HOLDOUT_PANEL_SHA256.get(d.id) != panel["digest"]:
+        raise HoldoutLocked("the panel is not the one pinned for this design's holdout; "
+                            "the holdout was not scored")
     try:
         V = _judges()
     except Exception as exc:                                  # engine not importable
@@ -728,7 +750,7 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
                 key = f"{feature}|{h}|{endpoint}"
                 if only is not None and key not in only:
                     continue
-                st = _series_stats(V, dates_a, ext_a[:, j, e], h, step, lag)
+                st = _series_stats(V, dates_a, ext_a[:, j, e], h, step, lag, gating=gating)
                 with np.errstate(invalid="ignore"):
                     bin_means = [float(np.nanmean(bins_a[:, q, j, e])) for q in range(N_BINS)]
                 st.update({
@@ -742,9 +764,6 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
                 if gating:
                     st["bucket_means"] = [series_mean(bucket_a[:, q, j, e])
                                           for q in range(N_BUCKETS)]
-                else:
-                    for unlisted in ("hit", "thinned", "era_means"):
-                        del st[unlisted]
                 if v1c:
                     st["v1_controls_mean"] = float(np.nanmean(np.asarray(v1c)[:, j, e]))
                 if rbuckets:

@@ -263,9 +263,10 @@ def test_v1_holdout_is_closed_for_good():
         panel.run(sample="holdout", prereg_hash=pin, dev_result=fake_dev)
 
 
-def test_v2_holdout_needs_the_hash_and_the_committed_development_result():
+def test_v2_holdout_needs_the_hash_and_the_committed_development_result(monkeypatch):
     pytest.importorskip("engine.validation")
     built = _synthetic_panel(masked=True)
+    monkeypatch.setattr(panel, "HOLDOUT_PANEL_SHA256", {"v2": built["digest"]})
     pin = panel.pinned_prereg("v2")
     dev = panel.score(built, design="v2", sample="dev")
     assert dev["status"] == "scored" and dev["design_id"] == "v2"
@@ -287,9 +288,10 @@ def test_v2_holdout_needs_the_hash_and_the_committed_development_result():
         panel.score(built, design="v2", sample="holdout", prereg_hash=pin, dev_result=forged)
 
 
-def test_holdout_is_bound_to_the_panel_the_development_result_was_scored_on():
+def test_holdout_is_bound_to_the_panel_the_development_result_was_scored_on(monkeypatch):
     pytest.importorskip("engine.validation")
     built = _synthetic_panel(masked=True)
+    monkeypatch.setattr(panel, "HOLDOUT_PANEL_SHA256", {"v2": built["digest"]})
     pin = panel.pinned_prereg("v2")
     dev = panel.score(built, design="v2", sample="dev")
     assert dev["panel_sha256"] == built["digest"] and len(built["digest"]) == 64
@@ -304,6 +306,35 @@ def test_holdout_is_bound_to_the_panel_the_development_result_was_scored_on():
         panel.score(built, design="v2", sample="holdout", prereg_hash=pin, dev_result=legacy)
 
 
+def test_holdout_is_pinned_in_code_to_the_panel_v2_was_scored_on():
+    """A self-consistent development result on some other panel still cannot open the holdout."""
+    pytest.importorskip("engine.validation")
+    assert panel.HOLDOUT_PANEL_SHA256 == {
+        "v2": "48cb5e76269b3a503d2973aecdd04733a2d8b88434db06de8367a224ba4ef178"}
+    assert "HOLDOUT_PANEL_SHA256" not in json.dumps(panel.frozen_design("v2"))
+    with open("research/data/trend_persistence_v2_dev.json") as fh:
+        committed = json.load(fh)
+    assert committed["panel_sha256"] == panel.HOLDOUT_PANEL_SHA256["v2"]
+    built = _synthetic_panel(masked=True)
+    pin = panel.pinned_prereg("v2")
+    dev = panel.score(built, design="v2", sample="dev")       # binds to the synthetic panel
+    with pytest.raises(panel.HoldoutLocked, match="pinned for this design"):
+        panel.score(built, design="v2", sample="holdout", prereg_hash=pin, dev_result=dev)
+
+
+def test_statistics_the_holdout_does_not_list_are_never_formed():
+    pytest.importorskip("engine.validation")
+    V = panel._judges()
+    dates = pd.bdate_range("2023-01-02", periods=60).to_numpy()
+    series = np.linspace(-0.01, 0.03, 60)
+    full = panel._series_stats(V, dates, series, 20, 5, 1)
+    lean = panel._series_stats(V, dates, series, 20, 5, 1, gating=False)
+    assert set(full) - set(lean) == {"hit", "thinned", "era_means"}
+    assert {k: full[k] for k in lean} == lean
+    short = panel._series_stats(V, dates[:3], series[:3], 20, 5, 1, gating=False)
+    assert set(short) == set(lean) and short["mean"] is None
+
+
 def test_a_panel_off_the_preregistered_calendar_is_refused():
     closes, spy = _prices(400, 20, seed=5)
     closes.insert(0, "SPY", spy)
@@ -316,6 +347,7 @@ def test_a_panel_off_the_preregistered_calendar_is_refused():
 def test_holdout_stays_unspent_without_a_development_survivor(monkeypatch):
     pytest.importorskip("engine.validation")
     built = _synthetic_panel(masked=True)
+    monkeypatch.setattr(panel, "HOLDOUT_PANEL_SHA256", {"v2": built["digest"]})
     pin = panel.pinned_prereg("v2")
     real = panel._apply_dev_gates
 
@@ -332,6 +364,7 @@ def test_holdout_stays_unspent_without_a_development_survivor(monkeypatch):
 def test_holdout_scores_the_development_survivors_and_nothing_else(monkeypatch):
     pytest.importorskip("engine.validation")
     built = _synthetic_panel(masked=True, stored=("N000", "N001", "N002"))
+    monkeypatch.setattr(panel, "HOLDOUT_PANEL_SHA256", {"v2": built["digest"]})
     pin = panel.pinned_prereg("v2")
     keys = {"max_drawdown_120d|20|forward_max_drawdown": 1,
             "retained_60d|20|forward_max_drawdown": -1}
@@ -367,6 +400,7 @@ def test_holdout_scores_the_development_survivors_and_nothing_else(monkeypatch):
 def test_a_survivor_without_holdout_dates_is_printed_as_unconfirmed(monkeypatch):
     pytest.importorskip("engine.validation")
     built = _synthetic_panel(masked=True)
+    monkeypatch.setattr(panel, "HOLDOUT_PANEL_SHA256", {"v2": built["digest"]})
     pin = panel.pinned_prereg("v2")
     keys = {"max_drawdown_120d|20|forward_max_drawdown": 1,
             "max_drawdown_120d|60|forward_max_drawdown": 1}
@@ -589,6 +623,41 @@ def test_store_block_is_adjusted_trimmed_and_reported(tmp_path):
     assert (printed["AAA"].iloc[:100] == 60.0).all() and (printed["AAA"].iloc[100:] == 20.0).all()
     assert (printed["BBB"].iloc[:50] == 5.0).all() and printed["BBB"].iloc[50:150].isna().all()
     assert substrate.store_window_members(mem) == ["AAA", "BBB", "CCC", "DD/E"]
+
+
+def test_a_printed_close_under_a_dollar_is_not_a_quote(tmp_path, monkeypatch):
+    """The quoted-price mask reads the price as printed, not the split-adjusted one."""
+    pytest.importorskip("pyarrow")
+    from loop import factor_experiment as fx
+    index = pd.bdate_range("2021-07-06", periods=40)
+    closes = pd.DataFrame({"SPY": 400.0, "AAA": 30.0, "BBB": 12.0, "CCC": 50.0}, index=index)
+    mem = pd.DataFrame({"ticker": ["AAA", "BBB", "CCC", "DDD"], "start_date": index[0],
+                        "end_date": pd.NaT})
+    monkeypatch.setattr(panel, "load_audited_panel", lambda breadth_dir=None: (
+        closes.copy(), mem.copy(), {"source": "test"}))
+    monkeypatch.setattr(substrate, "_raw_audited",
+                        lambda breadth, floor: closes.drop(columns="SPY").copy())
+    monkeypatch.setattr(substrate, "load_split_reference", lambda: pd.DataFrame(
+        {"ticker": pd.Series(dtype=str), "execution_date": pd.Series(dtype="datetime64[ns]"),
+         "split_from": pd.Series(dtype=float), "split_to": pd.Series(dtype=float)}))
+    # AAA printed under $1 for ten sessions although its adjusted close is $30 (a later
+    # reverse split); BBB printed above $1 throughout; CCC has no file; DDD is store-sourced.
+    pd.DataFrame({"close": np.r_[np.full(10, 0.60), np.full(30, 30.0)]},
+                 index=index).to_parquet(tmp_path / "AAA.parquet")
+    pd.DataFrame({"close": np.full(40, 12.0)}, index=index).to_parquet(tmp_path / "BBB.parquet")
+    pd.DataFrame({"close": np.r_[np.full(5, 0.80), np.full(35, 9.0)]},
+                 index=index).to_parquet(tmp_path / "DDD.parquet")
+    out_closes, observed, printed, _, prov = substrate.load_repaired_panel(None, str(tmp_path))
+    assert list(out_closes.columns) == ["SPY", "AAA", "BBB", "CCC", "DDD"]
+    assert prov["store"]["names"] == ["DDD"]
+    assert not observed["AAA"].iloc[:10].any() and observed["AAA"].iloc[10:].all()
+    assert (printed["AAA"].iloc[:10] == 0.60).all()           # printed, not adjusted
+    assert observed["BBB"].all()
+    assert printed["CCC"].isna().all() and observed["CCC"].all()   # no print known: audited mask
+    assert not observed["DDD"].iloc[:5].any() and observed["DDD"].iloc[5:].all()
+    assert observed["SPY"].all()
+    assert fx.MIN_PRICE == 1.0
+    assert prov["printed"]["n_names"] == 3
 
 
 def test_committed_split_reference_loads_clean():
