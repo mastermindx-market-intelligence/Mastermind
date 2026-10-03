@@ -513,6 +513,7 @@ class ServerConfig:
     token: str
     origin: str
     port: int
+    runtime_root: Path | None = None
     static_dir: Path = DEFAULT_STATIC_DIR
     runner: Callable[..., dict] = default_runner
     claude_desktop_handoff_runner: Callable[..., dict] = surfaces_runner.run_argv_pty
@@ -659,6 +660,7 @@ def _compose_state_doc(
         return doc
     build_kwargs: dict[str, Any] = {
         "repo_root": config.repo_root,
+        "runtime_root": config.runtime_root,
         "macro_root_flag": config.macro_root,
         "environ": os.environ,
         "now": generated_at,
@@ -1584,6 +1586,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"default {DEFAULT_PORT}")
     parser.add_argument("--repo-root", default=None, help="Mastermind checkout root (default: this repo)")
+    parser.add_argument(
+        "--runtime-root", default=None,
+        help="Executive Runtime root (default: repository root for compatibility)",
+    )
     parser.add_argument("--macro-root", default=None, help="Macro checkout root (default: auto-resolved)")
     parser.add_argument("--bindings-path", default=None, help="surface_bindings.json path (default: platform default)")
     parser.add_argument(
@@ -1612,6 +1618,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _build_config(args: argparse.Namespace) -> ServerConfig:
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _REPO_ROOT
+    runtime_root = Path(args.runtime_root).resolve() if args.runtime_root else None
     macro_root = _resolve_macro_root_simple(args.macro_root, os.environ, repo_root)
     bindings_path = Path(args.bindings_path).expanduser() if args.bindings_path else None
     placement_selection_path = (
@@ -1627,6 +1634,7 @@ def _build_config(args: argparse.Namespace) -> ServerConfig:
         token=token,
         origin=f"http://{HOST}:{args.port}",
         port=args.port,
+        runtime_root=runtime_root,
         static_dir=DEFAULT_STATIC_DIR,
         compose_timeout=args.compose_timeout,
         state_ttl=args.state_ttl,
