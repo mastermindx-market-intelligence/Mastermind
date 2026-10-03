@@ -232,3 +232,26 @@ def test_paper_concurrency_is_target_scoped_not_file_leased():
     ):
         assert forbidden.lower() not in combined.lower()
 
+
+
+def test_publication_drift_uses_current_same_app_refresh_lifecycle():
+    skill = norm(SKILL)
+    connection = norm(CONNECTION)
+    integration = norm(INTEGRATION)
+    runbook = norm(ROOT / "docs/PAPER_DIRECT_CHATGPT.md")
+
+    for text in (skill, connection, runbook):
+        assert "developer-mode MCP connection" in text
+        assert "Refresh" in text
+        assert "start a new conversation" in text
+
+    for text in (skill, connection, runbook, integration):
+        assert "Plugin Directory" in text
+        assert "custom workspace MCP app" in text
+        assert "recreate + republish" in text
+    assert "Enterprise/Edu Action control" in connection
+    assert "Enterprise/Edu Action control" in runbook
+    assert "reusing the existing tunnel/backend" in connection
+    assert "reusing the existing tunnel/backend" in runbook
+    assert "parallel duplicate" in connection
+    assert "parallel duplicate" in runbook

@@ -165,9 +165,16 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    private **Mastermind Paper**, choosing Connection **Tunnel** and the existing tunnel ID.
    A plugin name or successful registration is not proof of any Paper operation. When an accepted
    source/runtime revision changes tool descriptions or collaboration metadata, review and refresh
-   the **same app's** approved action snapshot. If ChatGPT still shows older file-exclusive wording
-   after the runtime is current, record `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not
-   create a duplicate app/tunnel or treat stale transport metadata as a document lease.
+   the **same app's** approved action snapshot. For a developer-mode MCP connection, deploy/restart
+   the reviewed server, open that existing connection in ChatGPT Plugins, select **Refresh**, confirm
+   the advertised tool metadata changed, and then start a new conversation. A published Plugin
+   Directory plugin uses continuous review/rescan. A published custom workspace MCP app follows its
+   current workspace flow: OpenAI help can require recreate + republish for tool/metadata changes,
+   while Enterprise/Edu Action control can Refresh changed actions after publication. If that exact
+   flow requires recreation, replace the old logical Mastermind Paper app in the attended ceremony
+   while reusing the existing tunnel/backend; do not leave a parallel duplicate app/tunnel. If
+   ChatGPT still shows older file-exclusive wording after the runtime is current, record
+   `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not treat stale transport metadata as a document lease.
 6. Discover exactly the accepted tools in a fresh ChatGPT session. Use the assigned direct app
    for the approved scratch-file inspect/catalog/read -> one bounded edit -> post-read ->
    screenshot inspection -> JSX journey. Preserve file ID, snapshot and stable operation ID.
