@@ -184,6 +184,8 @@ class ReconcileNotAppliedRequest:
     expected_credential_kind: str
     workspace_binding_class: str
     credential_expires_at: str
+    # Derived from the target digest, never a new wire claim.
+    requalify_terminal_adverse_sha256: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -197,6 +199,42 @@ class ReconcileNotAppliedRequest:
             "workspace_binding_class": self.workspace_binding_class,
             "credential_expires_at": self.credential_expires_at,
         }
+
+
+def _reconciliation_target(raw: Mapping[str, Any]):
+    """Recover the unique exact target from the existing evidence fields.
+
+    Requalification's fourth argument is the old receipt digest already bound
+    by this wire schema. No inferred mode is accepted without the target hash.
+    """
+    args = {
+        "expected_credential_kind": raw.get("expected_credential_kind"),
+        "workspace_binding_class": raw.get("workspace_binding_class"),
+        "credential_expires_at": raw.get("credential_expires_at"),
+    }
+    variants = [args]
+    if args["expected_credential_kind"] == "device-auth":
+        variants.append({
+            **args, "requalify_terminal_adverse_sha256": raw.get("readiness_receipt_sha256"),
+        })
+    matches = []
+    for candidate in variants:
+        try:
+            target = validate_request({
+                "schema": REQUEST_SCHEMA, "request_id": raw.get("target_request_id"),
+                "action": "executive.worker_auth.verify_ready", "args": candidate,
+            })
+        except ValueError as exc:
+            raise PrivilegedBrokerError(
+                "reconciliation target verify_ready arguments are invalid"
+            ) from exc
+        if hashlib.sha256(canonical_request_bytes(target)).hexdigest() == raw.get("target_request_sha256"):
+            matches.append(target)
+    if len(matches) != 1:
+        raise RequestIdConflictError(
+            "reconciliation target request digest does not match supplied arguments"
+        )
+    return matches[0]
 
 
 def validate_reconcile_not_applied_request(
@@ -223,27 +261,7 @@ def validate_reconcile_not_applied_request(
     if not isinstance(release_sha, str) or _SHA40_RE.fullmatch(release_sha) is None:
         raise PrivilegedBrokerError("reconciliation target release is invalid")
 
-    target_raw = {
-        "schema": REQUEST_SCHEMA,
-        "request_id": request_id,
-        "action": "executive.worker_auth.verify_ready",
-        "args": {
-            "expected_credential_kind": raw.get("expected_credential_kind"),
-            "workspace_binding_class": raw.get("workspace_binding_class"),
-            "credential_expires_at": raw.get("credential_expires_at"),
-        },
-    }
-    try:
-        target = validate_request(target_raw)
-    except ValueError as exc:
-        raise PrivilegedBrokerError(
-            "reconciliation target verify_ready arguments are invalid"
-        ) from exc
-    canonical_digest = hashlib.sha256(canonical_request_bytes(target)).hexdigest()
-    if canonical_digest != request_sha:
-        raise RequestIdConflictError(
-            "reconciliation target request digest does not match supplied arguments"
-        )
+    target = _reconciliation_target(raw)
     args = target.args_dict()
     return ReconcileNotAppliedRequest(
         target_request_id=request_id,
@@ -254,6 +272,7 @@ def validate_reconcile_not_applied_request(
         expected_credential_kind=args["expected_credential_kind"],
         workspace_binding_class=args["workspace_binding_class"],
         credential_expires_at=args["credential_expires_at"],
+        requalify_terminal_adverse_sha256=args.get("requalify_terminal_adverse_sha256"),
     )
 
 
@@ -588,29 +607,12 @@ def validate_reconciliation_record(
         "executive.worker_auth.verify_ready"
     ]:
         raise BrokerTrustError("reconciliation target effect class is invalid")
-    target_raw = {
-        "schema": REQUEST_SCHEMA,
-        "request_id": request_id,
-        "action": "executive.worker_auth.verify_ready",
-        "args": {
-            "expected_credential_kind": record.get("expected_credential_kind"),
-            "workspace_binding_class": record.get("workspace_binding_class"),
-            "credential_expires_at": record.get("credential_expires_at"),
-        },
-    }
     try:
-        target = validate_request(target_raw)
-    except ValueError as exc:
-        raise BrokerTrustError(
-            "reconciliation target verify_ready arguments are invalid"
-        ) from exc
-    if (
-        hashlib.sha256(canonical_request_bytes(target)).hexdigest()
-        != record["target_request_sha256"]
-    ):
+        _reconciliation_target(record)
+    except (ValueError, PrivilegedBrokerError) as exc:
         raise BrokerTrustError(
             "reconciliation target digest does not match recorded arguments"
-        )
+        ) from exc
     target_started = _validate_receipt_time(
         record.get("target_started_at"), "target_started_at"
     )
@@ -1292,52 +1294,72 @@ class PrivilegedActionBroker:
         if evidence["readiness_receipt_sha256"] != request.readiness_receipt_sha256:
             raise BrokerTrustError("provider readiness receipt changed after target request")
         document = evidence["readiness_document"]
-        if (
-            not isinstance(document, Mapping)
-            or document.get("schema_version")
-            != "mastermind.executive_provider_readiness/v2"
-            or document.get("passed") is not True
-            or document.get("refusal") is not None
-            or document.get("expected_credential_kind")
-            != request.expected_credential_kind
-            or document.get("workspace_binding_class")
-            != request.workspace_binding_class
-        ):
-            raise BrokerTrustError(
-                "current provider readiness receipt is not the prior passing receipt"
+        if request.requalify_terminal_adverse_sha256 is not None:
+            from ops.executive_os.provider_readiness import (
+                ReadinessError, validate_terminal_predecessor_document,
             )
-        prior_credential_expires_at = document.get("credential_expires_at")
-        if (
-            not isinstance(prior_credential_expires_at, str)
-            or _UTC_RE.fullmatch(prior_credential_expires_at) is None
-        ):
-            raise BrokerTrustError(
-                "current provider readiness receipt has an invalid credential expiry"
-            )
-        if prior_credential_expires_at == request.credential_expires_at:
-            raise BrokerTrustError(
-                "current provider readiness receipt already carries the target deadline"
-            )
+            if (not isinstance(document, Mapping)
+                    or not isinstance(evidence["current_auth_identity"], Mapping)
+                    or not isinstance(evidence["current_binary_identity"], Mapping)):
+                raise BrokerTrustError("terminal predecessor evidence is incomplete")
+            try:
+                validate_terminal_predecessor_document(
+                    document, auth_identity=evidence["current_auth_identity"],
+                    binary_identity=evidence["current_binary_identity"],
+                    expected_kind=request.expected_credential_kind,
+                    workspace_binding_class=request.workspace_binding_class,
+                )
+            except (ReadinessError, OSError) as exc:
+                raise BrokerTrustError("terminal predecessor identity continuity is unproven") from exc
+            # Exact unchanged pre-marker adverse bytes prove this request never
+            # installed its reservation, even if deadlines happen to coincide.
+        else:
+            if (
+                not isinstance(document, Mapping)
+                or document.get("schema_version")
+                != "mastermind.executive_provider_readiness/v2"
+                or document.get("passed") is not True
+                or document.get("refusal") is not None
+                or document.get("expected_credential_kind")
+                != request.expected_credential_kind
+                or document.get("workspace_binding_class")
+                != request.workspace_binding_class
+            ):
+                raise BrokerTrustError(
+                    "current provider readiness receipt is not the prior passing receipt"
+                )
+            prior_credential_expires_at = document.get("credential_expires_at")
+            if (
+                not isinstance(prior_credential_expires_at, str)
+                or _UTC_RE.fullmatch(prior_credential_expires_at) is None
+            ):
+                raise BrokerTrustError(
+                    "current provider readiness receipt has an invalid credential expiry"
+                )
+            if prior_credential_expires_at == request.credential_expires_at:
+                raise BrokerTrustError(
+                    "current provider readiness receipt already carries the target deadline"
+                )
 
-        current_auth_identity = evidence["current_auth_identity"]
-        current_binary_identity = evidence["current_binary_identity"]
-        receipt_auth_identity = document.get("credential_lstat")
-        receipt_binary_identity = document.get("codex_binary")
-        provider_identity = document.get("provider_identity")
-        if (
-            not isinstance(current_auth_identity, Mapping)
-            or not isinstance(current_binary_identity, Mapping)
-            or not isinstance(receipt_auth_identity, Mapping)
-            or not isinstance(receipt_binary_identity, Mapping)
-            or not isinstance(provider_identity, Mapping)
-            or receipt_auth_identity != dict(current_auth_identity)
-            or receipt_binary_identity != dict(current_binary_identity)
-            or provider_identity.get("credential_lstat") != dict(current_auth_identity)
-            or provider_identity.get("codex_binary") != dict(current_binary_identity)
-        ):
-            raise BrokerTrustError(
-                "current provider auth or installed binary identity differs from the pre-effect readiness receipt"
-            )
+            current_auth_identity = evidence["current_auth_identity"]
+            current_binary_identity = evidence["current_binary_identity"]
+            receipt_auth_identity = document.get("credential_lstat")
+            receipt_binary_identity = document.get("codex_binary")
+            provider_identity = document.get("provider_identity")
+            if (
+                not isinstance(current_auth_identity, Mapping)
+                or not isinstance(current_binary_identity, Mapping)
+                or not isinstance(receipt_auth_identity, Mapping)
+                or not isinstance(receipt_binary_identity, Mapping)
+                or not isinstance(provider_identity, Mapping)
+                or receipt_auth_identity != dict(current_auth_identity)
+                or receipt_binary_identity != dict(current_binary_identity)
+                or provider_identity.get("credential_lstat") != dict(current_auth_identity)
+                or provider_identity.get("codex_binary") != dict(current_binary_identity)
+            ):
+                raise BrokerTrustError(
+                    "current provider auth or installed binary identity differs from the pre-effect readiness receipt"
+                )
 
         observed_at = document.get("observed_at")
         observed_time = _validate_receipt_time(
