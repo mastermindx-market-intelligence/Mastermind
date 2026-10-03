@@ -31,7 +31,7 @@ class ExactTargetRouter:
         claude_reply: Callable[[str, str, str, str], Any],
     ) -> None:
         self._replies = {
-            "fabric": fabric_reply,
+            "fabric_attempt": fabric_reply,
             "codex": codex_reply,
             "claude": claude_reply,
         }

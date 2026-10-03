@@ -314,3 +314,27 @@ def test_duplicate_carrier_reconciles_attention_without_rewaking_native_target()
     assert events == ["carrier", ("reconcile", "claude:target-001", expected)]
     assert result["carrier"]["action"] == "DUPLICATE"
     assert result["attention"] == {"state": "ATTENTION_ACCEPTED", "reconciled": True}
+
+
+def test_exact_target_router_accepts_public_fabric_attempt_prefix():
+    calls = []
+    router = ExactTargetRouter(
+        fabric_reply=lambda *args: calls.append(("fabric", args)),
+        codex_reply=lambda *_: None,
+        claude_reply=lambda *_: None,
+    )
+    router(
+        "fabric_attempt:exact-1",
+        "Continue.",
+        "Stop after result.",
+        "fabric-route-001",
+    )
+    assert calls == [(
+        "fabric",
+        (
+            "fabric_attempt:exact-1",
+            "Continue.",
+            "Stop after result.",
+            "fabric-route-001",
+        ),
+    )]

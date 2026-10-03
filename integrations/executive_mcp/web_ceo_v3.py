@@ -169,6 +169,8 @@ WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "07be259eaf9df920bd68b542b0e38793c606d14f897
 
 def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:
     """Current installed selector; older v2 validator remains frozen."""
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
+
     if type(value) is str and value in {
         v2.INSTALLED_MCP_PROFILE_LEGACY,
         v2.WEB_CEO_V2_PROFILE,
@@ -176,6 +178,7 @@ def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:
         PERSONAL_READ_PROFILE,
         RELEASE_CONTROL_PROFILE,
         WEB_CEO_RELEASE_PROFILE,
+        WEB_CEO_SESSIONS_PROFILE,
     }:
         return value
     raise ValueError("installed Executive MCP profile is invalid")

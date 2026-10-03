@@ -496,3 +496,44 @@ Fresh exact working-tree proof:
 No runtime/native/provider effect, install, subscription, credential change,
 retry owner or alternative source carrier was used. This repair changes only
 the original dialogue binding freshness contract and its regression test.
+
+## Installed fabric continuation repair — 2026-10-03
+
+Current root session recovered the same operation and workspace after verifying
+that the long-lived workspace file holders were readers and no active source
+modifier was observed. Canonical acquire reused the original lane; pickup and
+START are recorded on #1112 (comments5968431589 and5968433480). The exact prior
+eleven-file dirty delta is preserved outside source at
+/Volumes/Mastermind/evidence/exact-session-interconnect-20261002/1112-preserved-delta-20261003.json
+(SHA256129aea81a9aa40b48fe1afded0fa116c7f628334972753e1028e0bffe8d93ce6).
+No alternate checkout or replacement branch was created.
+
+The installed sessions profile now constructs the fabric projection and reply
+resolver from the existing Runtime, immutable admission source and Wake records.
+Discovery returns the host-derived continuation_operation_key. CONTINUE compares
+that key before any carrier read, checks the exact current writer, and compares
+a deep binding snapshot after the read. Target, generation, provider-session,
+thread, worker or predecessor changes cannot reuse another carrier's key.
+Malformed bindings are typed pre-send refusals, including noncanonical nested
+mappings. No operation registry or new session store was introduced.
+
+The App ingress refuses disarmed requests before factory/owner entry. After owner
+entry, a changed binding or service state preserves effect uncertainty. Response
+write failure performs no second response, owner call or fallback. The existing
+fabric_attempt spelling is used by the router.
+
+Evidence includes the real _service_from_config composition over a temporary
+Runtime with two active synthetic workers, persisted harness generations,
+immutable root source and Wake events. It discovers both exact targets and
+rejects one target's key on the other without touching the production Dialogue
+socket. The broad bridge/profile/composition test campaign passed; independent
+read-only review passed after fixing its pre-send classification finding.
+Log: /Volumes/Mastermind/evidence/exact-session-interconnect-20261002/1112-full-bridge-tests-20261003.log.
+
+Still owed: current-base integration and CI; actual native attention and reverse
+parent consumption; installed Codex/Claude owners; CONSULT A-to-B-to-A; SUMMON.
+Codex/Claude discovery remains empty and native attention explicitly UNAVAILABLE.
+The source-free summon wrapper lacks a production operation-scope resolver;
+reuse of the existing Executive requested-scope admission contract is under
+architectural review. No new authority binding is inferred from commission prose.
+This checkpoint is source progress, not native live acceptance or mission completion.

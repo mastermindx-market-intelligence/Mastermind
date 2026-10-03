@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
@@ -41,6 +42,8 @@ class ExecutiveReplyBinding:
     """Trusted exact-current binding; every field comes from incumbent owners."""
 
     target_ref: str
+    target_generation: str
+    current_writer: Mapping[str, Any]
     work_ref: str
     commission_ref: Mapping[str, Any]
     session_ref: str
@@ -49,6 +52,21 @@ class ExecutiveReplyBinding:
     applies_to: Mapping[str, Any]
     thread_ts: str
     reply_to_message_key: str
+
+    @property
+    def continuation_operation_key(self) -> str:
+        """Host-derived identity for exactly one carrier/writer/generation.
+
+        Payload is excluded so conflicting retries reconcile under one key.
+        This pure projection is not a second operation registry.
+        """
+        witness = dataclasses.asdict(self)
+        digest = hashlib.sha256(json.dumps(
+            {"schema": "mastermind.session_bridge.continuation_binding.v1", **witness},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")).hexdigest()
+        return "session-continue-" + digest
 
 
 class ExecutiveReplyBindingResolver(Protocol):
@@ -80,6 +98,16 @@ class AgentDialogueContinueWriter:
     def _context(binding: ExecutiveReplyBinding) -> dict[str, Any]:
         if not isinstance(binding, ExecutiveReplyBinding):
             raise BridgeError("binding_unavailable", "reply binding is unavailable")
+        if (
+            not isinstance(binding.target_generation, str) or not binding.target_generation
+            or dict(binding.current_writer) != {
+                "kind": "worker_attempt",
+                "job_id": binding.applies_to.get("job_id"),
+                "attempt_id": binding.applies_to.get("attempt_id"),
+                "worker_id": binding.applies_to.get("worker_id"),
+            }
+        ):
+            raise BridgeError("binding_unavailable", "current writer binding is invalid")
         try:
             return DialogueContextV2(
                 work_ref=binding.work_ref,
@@ -155,6 +183,7 @@ class AgentDialogueContinueWriter:
         message = current["message"]
         if (
             message.get("message_type") not in _ELIGIBLE_REQUEST_TYPES
+            or message.get("actor_ref") != dict(binding.current_writer)
             or message.get("applies_to") != dict(binding.applies_to)
             or not isinstance(message.get("created_at"), str)
         ):
@@ -230,13 +259,19 @@ class AgentDialogueContinueWriter:
     ) -> dict[str, Any]:
         try:
             binding = self._resolver.resolve(target_ref)
+            context = self._context(binding)
+            if binding.target_ref != target_ref:
+                raise ValueError("target binding drifted")
+            bound_key = binding.continuation_operation_key
+            # Deep snapshot includes nested owner facts; a frozen dataclass
+            # alone cannot detect mapping mutation across the awaited read.
+            bound_witness = dataclasses.asdict(binding)
         except Exception:
             raise BridgeError("binding_unavailable", "exact target binding unavailable") from None
-        if binding.target_ref != target_ref:
-            raise BridgeError("binding_unavailable", "target binding drifted")
-        context = self._context(binding)
-        bound_thread_ts = binding.thread_ts
-        bound_reply_to_message_key = binding.reply_to_message_key
+        if operation_key != bound_key:
+            raise BridgeError(
+                "operation_carrier_conflict", "continuation operation belongs to another carrier"
+            )
         request_message, existing_reply = await self._read(
             binding=binding,
             context=context,
@@ -244,6 +279,8 @@ class AgentDialogueContinueWriter:
         try:
             current_binding = self._resolver.resolve(target_ref)
             current_context = self._context(current_binding)
+            current_witness = dataclasses.asdict(current_binding)
+            current_key = current_binding.continuation_operation_key
         except Exception:
             raise BridgeError(
                 "binding_unavailable",
@@ -252,8 +289,8 @@ class AgentDialogueContinueWriter:
         if (
             current_binding.target_ref != target_ref
             or current_context != context
-            or current_binding.thread_ts != bound_thread_ts
-            or current_binding.reply_to_message_key != bound_reply_to_message_key
+            or current_witness != bound_witness
+            or current_key != operation_key
         ):
             raise BridgeError(
                 "binding_unavailable",

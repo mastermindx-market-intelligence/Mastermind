@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -59,6 +60,9 @@ def _worker_result():
 def _binding():
     return ExecutiveReplyBinding(
         target_ref="codex:bind-001:g1",
+        target_generation="g1",
+        current_writer={"kind": "worker_attempt", "job_id": "JOB-001",
+                        "attempt_id": "ATT-001", "worker_id": "W-001"},
         work_ref="WS:DOT-BRIDGE",
         commission_ref=COMMISSION,
         session_ref="asd-session-dotbridge01",
@@ -140,7 +144,7 @@ def _run(service):
             "codex:bind-001:g1",
             "Inspect the next bounded failure.",
             "Stop after the next validated RESULT.",
-            "dot-reply-001",
+            _binding().continuation_operation_key,
         )
     )
 
@@ -249,7 +253,7 @@ def test_continue_writer_re_resolves_complete_binding_after_awaited_read():
                 original.target_ref,
                 "Inspect the next bounded failure.",
                 "Stop after the next validated RESULT.",
-                "dot-reply-reresolve-001",
+                _binding().continuation_operation_key,
             )
         )
 
@@ -263,6 +267,9 @@ def test_continue_writer_re_resolve_detects_in_place_nested_binding_mutation():
     applies = dict(APPLIES)
     binding = ExecutiveReplyBinding(
         target_ref="codex:bind-001:g1",
+        target_generation="g1",
+        current_writer={"kind": "worker_attempt", "job_id": "JOB-001",
+                        "attempt_id": "ATT-001", "worker_id": "W-001"},
         work_ref="WS:DOT-BRIDGE",
         commission_ref=commission,
         session_ref="asd-session-dotbridge01",
@@ -302,10 +309,93 @@ def test_continue_writer_re_resolve_detects_in_place_nested_binding_mutation():
                 binding.target_ref,
                 "Inspect the next bounded failure.",
                 "Stop after the next validated RESULT.",
-                "dot-reply-alias-001",
+                _binding().continuation_operation_key,
             )
         )
 
     assert error.value.code == "binding_unavailable"
     assert resolver.calls == [binding.target_ref, binding.target_ref]
     assert [call[1]["operation"] for call in service.calls] == ["read_thread"]
+
+
+@pytest.mark.parametrize("change", [
+    {"target_ref": "codex:bind-002:g1"},
+    {"target_generation": "g2"},
+    {"thread_ts": "1787896128.999999"},
+    {"reply_to_message_key": "asd-worker-result-0002"},
+    {"current_writer": {"kind": "worker_attempt", "job_id": "JOB-001",
+                        "attempt_id": "ATT-002", "worker_id": "W-001"},
+     "applies_to": {**APPLIES, "attempt_id": "ATT-002"}},
+])
+def test_other_carrier_cannot_reuse_continuation_key_before_any_read(change):
+    original = _binding()
+    second = dataclasses.replace(original, **change)
+    assert second.continuation_operation_key != original.continuation_operation_key
+    service = Service()
+    writer = AgentDialogueContinueWriter(
+        Resolver(second), socket_path=Path("/private/tmp/dialogue.sock"), service_call=service)
+    with pytest.raises(BridgeError) as exc:
+        asyncio.run(writer(second.target_ref, "Continue.", "Return.", original.continuation_operation_key))
+    assert exc.value.code == "operation_carrier_conflict"
+    assert service.calls == []
+
+
+@pytest.mark.parametrize("change", [
+    {"target_generation": "g2"},
+    {"thread_ts": "1787896128.999999"},
+    {"reply_to_message_key": "asd-worker-result-0002"},
+    {"current_writer": {"kind": "worker_attempt", "job_id": "JOB-001",
+                        "attempt_id": "ATT-002", "worker_id": "W-001"},
+     "applies_to": {**APPLIES, "attempt_id": "ATT-002"}},
+])
+def test_continuation_binding_rotation_across_read_never_sends(change):
+    first = _binding()
+    class Rotating:
+        calls = 0
+        def resolve(self, target_ref):
+            self.calls += 1
+            return first if self.calls == 1 else dataclasses.replace(first, **change)
+    service = Service()
+    writer = AgentDialogueContinueWriter(
+        Rotating(), socket_path=Path("/private/tmp/dialogue.sock"), service_call=service)
+    with pytest.raises(BridgeError) as exc:
+        asyncio.run(writer(first.target_ref, "Continue.", "Return.", first.continuation_operation_key))
+    assert exc.value.code == "binding_unavailable"
+    assert [call[1]["operation"] for call in service.calls] == ["read_thread"]
+
+
+def test_carrier_message_must_be_from_bound_current_writer():
+    class WrongWriter(Service):
+        async def __call__(self, socket_path, request):
+            response = await super().__call__(socket_path, request)
+            if request["operation"] == "read_thread":
+                response["result"]["messages"][0]["message"]["actor_ref"]["worker_id"] = "W-OTHER"
+            return response
+    service = WrongWriter()
+    with pytest.raises(BridgeError) as exc:
+        _run(service)
+    assert exc.value.code == "carrier_stale"
+    assert [call[1]["operation"] for call in service.calls] == ["read_thread"]
+
+
+@pytest.mark.parametrize("bad", [
+    object(),
+    dataclasses.replace(_binding(), target_generation=object()),
+    dataclasses.replace(_binding(), current_writer=None),
+    dataclasses.replace(_binding(), current_writer=MappingProxyType(dict(_binding().current_writer))),
+])
+@pytest.mark.parametrize("after_read", [False, True])
+def test_malformed_binding_is_pre_send_refusal(bad, after_read):
+    first = _binding()
+    class Malformed:
+        calls = 0
+        def resolve(self, target_ref):
+            self.calls += 1
+            return first if after_read and self.calls == 1 else bad
+    service = Service()
+    writer = AgentDialogueContinueWriter(
+        Malformed(), socket_path=Path("/private/tmp/dialogue.sock"), service_call=service)
+    with pytest.raises(BridgeError) as exc:
+        asyncio.run(writer(first.target_ref, "Continue.", "Return.", first.continuation_operation_key))
+    assert exc.value.code == "binding_unavailable"
+    assert [call[1]["operation"] for call in service.calls] == (["read_thread"] if after_read else [])

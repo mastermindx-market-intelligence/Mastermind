@@ -1769,6 +1769,7 @@ def _service_from_config(
         )
 
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import (
         WEB_CEO_V3_PROFILE,
         validate_installed_mcp_profile_current,
@@ -1820,7 +1821,11 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
-        if installed_profile in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}:
+        if installed_profile in {
+            WEB_CEO_V2_PROFILE,
+            WEB_CEO_V3_PROFILE,
+            WEB_CEO_SESSIONS_PROFILE,
+        }:
             from integrations.executive_mcp.web_ceo import (
                 WebCeoV2InstalledExecutiveReaders,
             )
@@ -1927,12 +1932,22 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+        session_factories = {}
+        if installed_profile == WEB_CEO_SESSIONS_PROFILE:
+            from integrations.session_bridge.installed import build_runtime_session_bridge
+            def session_bridge_factory(runtime):
+                # Validate the supplied live Runtime through the incumbent
+                # namespace owner before constructing any projection or writer.
+                service._namespace_custody.bound_runtime(runtime)
+                return build_runtime_session_bridge(
+                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET)
+            session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
             read_schema=app_read_schema,
-            **content_factories, **workspace_factories, **coo_factories,
+            **content_factories, **workspace_factories, **coo_factories, **session_factories,
         )
         ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
             GitHubWebCommissionSourceProvider()

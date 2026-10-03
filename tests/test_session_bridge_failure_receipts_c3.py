@@ -213,6 +213,7 @@ def test_real_unix_dialogue_commit_reopen_preserves_one_reply(lose_commit_reply)
 
     async def scenario(socket_path):
         binding = dataclasses.replace(fx._binding(), thread_ts=ef.THREAD_TS)
+        send = {**SEND, "operation_key": binding.continuation_operation_key}
         client = ef.InMemorySlackClient(relay_bot_user_id=ef.BOT)
         client.add_parent(ef.parent_message(author=ef.BOT, work_ref=binding.work_ref,
             commission_ref=dict(binding.commission_ref), session_ref=binding.session_ref,
@@ -232,7 +233,7 @@ def test_real_unix_dialogue_commit_reopen_preserves_one_reply(lose_commit_reply)
             return _gateway(sender=CanonicalReplyCoordinator(reply_writer=writer, attention_waker=wake))
         await service.start()
         try:
-            first = await new_gateway().call("session_send", SEND)
+            first = await new_gateway().call("session_send", send)
             assert first.get("data") is not None or first["error"]["code"] == "carrier_effect_unknown", first
             if lose_commit_reply:
                 assert first["ok"] is False
@@ -243,13 +244,13 @@ def test_real_unix_dialogue_commit_reopen_preserves_one_reply(lose_commit_reply)
                 assert first["data"]["carrier"]["action"] == "POSTED"
                 assert first["data"]["attention"]["state"] == "EFFECT_UNKNOWN"
             assert client.post_call_count == 1
-            reopened = await new_gateway().call("session_send", SEND)
+            reopened = await new_gateway().call("session_send", send)
             assert reopened["data"]["reply_committed"] is True
             assert reopened["data"]["carrier"]["action"] == "DUPLICATE"
             assert reopened["data"]["attention"]["state"] == "EFFECT_UNKNOWN"
             assert client.post_call_count == 1
             assert service.lost is lose_commit_reply
-            changed = await new_gateway().call("session_send", {**SEND, "instruction": "Changed operation payload."})
+            changed = await new_gateway().call("session_send", {**send, "instruction": "Changed operation payload."})
             assert changed["ok"] is False
             assert client.post_call_count == 1
             assert "untrusted-wake-error" not in json.dumps([first, reopened, changed])
