@@ -238,10 +238,16 @@ def test_open_apply_still_queues_then_scheduler_sells_etfs_and_preserves_stock(
     assert _fills(migration_book) == fills
 
 
-def test_missing_open_exit_price_retains_queued_intent_and_mutates_no_account_or_fills(
+def test_unpriceable_legacy_etf_is_not_queued_for_exit_off_a_cost_basis(
     migration_book, monkeypatch
 ):
-    from bot import settle
+    """A legacy ETF with no current mark must not be queued for liquidation.
+
+    The normalization boundary previously valued an unpriceable held line at ``avg_cost``,
+    which let this migration queue a real exit for XLV against a fabricated current NAV.
+    Marking is now fail-closed, so the migration blocks ahead of any queue or write and the
+    unpriceable holding is preserved — never sold, zero-weighted, or turned into cash.
+    """
     from portfolio import autonomous_migration, paper_account
 
     monkeypatch.setattr(
@@ -249,12 +255,41 @@ def test_missing_open_exit_price_retains_queued_intent_and_mutates_no_account_or
         "_current_price",
         lambda ticker: PRICES.get(ticker) if ticker != "XLV" else None,
     )
+    before = _tree_bytes(migration_book)
+    incomplete = {ticker: price for ticker, price in PRICES.items() if ticker != "XLV"}
+
+    blocked = autonomous_migration.migrate(
+        "2026-08-11", apply=True, market_open=True, prices=incomplete
+    )
+
+    assert blocked["ok"] is False
+    assert blocked["status"] == "blocked_normalization_freeze"
+    assert blocked["error"] == "unpriceable_held_position:XLV"
+    # nothing queued, nothing filled, nothing written
+    assert _tree_bytes(migration_book) == before
+    assert _fills(migration_book) == []
+    assert paper_account.load_pending_target("autonomous") in (None, {}, [])
+    # the unpriceable holding is still held, at its original size
+    assert paper_account._load_account("autonomous")["positions"]["XLV"]["shares"] == 85.0
+
+
+def test_missing_open_exit_price_retains_queued_intent_and_mutates_no_account_or_fills(
+    migration_book, monkeypatch
+):
+    """The settlement fence, exercised on its own.
+
+    The exit is queued while XLV still carries a real mark; the quote then goes dark before
+    the open. Settlement must retain the pending intent rather than fill at a guessed price.
+    """
+    from bot import settle
+    from portfolio import autonomous_migration, paper_account
+
     account_path = migration_book / "account.json"
     account_before = account_path.read_bytes()
     incomplete = {ticker: price for ticker, price in PRICES.items() if ticker != "XLV"}
 
     queued = autonomous_migration.migrate(
-        "2026-08-11", apply=True, market_open=True, prices=incomplete
+        "2026-08-11", apply=True, market_open=True, prices=PRICES
     )
 
     assert queued["status"] == "queued"
