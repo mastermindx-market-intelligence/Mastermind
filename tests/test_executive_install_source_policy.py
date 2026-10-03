@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -245,3 +246,65 @@ def test_git_refuses_wildcard_safe_directory_value_before_spawn(
     )
     with pytest.raises(InstallSourcePolicyError, match="path is unsafe"):
         source_policy._git(repo, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("operation", ["tree", "archive", "clone"])
+def test_installer_source_reads_work_without_persistent_ownership_trust(
+    tmp_path: Path, operation: str, linked: bool
+) -> None:
+    repo, _accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    if linked:
+        worktree = tmp_path / "linked-source"
+        _git(repo, "worktree", "add", "--detach", str(worktree), protected)
+        repo = worktree
+    source_config = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "config"
+    config_before = source_config.read_bytes()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    checkout = tmp_path / "admin"
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "SOURCE_REPO": str(repo.resolve()),
+        "EXPECTED_SHA": protected,
+        "STAGING": str(staging),
+        "ADMIN_CHECKOUT": str(checkout),
+    }
+    baseline = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "rev-parse", "HEAD"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert baseline.returncode != 0
+    assert "dubious ownership" in baseline.stderr
+
+    selectors = {
+        "tree": 'TREE_SHA="$(',
+        "archive": 'archive --format=tar "$EXPECTED_SHA"',
+        "clone": 'clone --no-hardlinks --no-checkout',
+    }
+    statements = [
+        line.strip() for line in INSTALL.read_text(encoding="utf-8").splitlines()
+        if selectors[operation] in line
+    ]
+    assert len(statements) == 1
+    script = "set -euo pipefail\n" + statements[0] + "\n"
+    if operation == "tree":
+        script += 'printf "%s\\n" "$TREE_SHA"\n'
+    completed = subprocess.run(
+        ["/bin/bash", "-c", script],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    if operation == "tree":
+        assert completed.stdout.strip() == _git(repo, "rev-parse", f"{protected}^{{tree}}")
+    elif operation == "archive":
+        assert (staging / "state.txt").read_text(encoding="utf-8") == "protected\n"
+    else:
+        assert _git(checkout, "rev-parse", "HEAD") == protected
+        assert not (checkout / "state.txt").exists()
+        assert "safe.directory" not in (checkout / ".git" / "config").read_text(encoding="utf-8")
+    assert source_config.read_bytes() == config_before
