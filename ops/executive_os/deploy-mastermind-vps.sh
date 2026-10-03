@@ -22,13 +22,12 @@ esac
 
 REMOTE="https://github.com/mastermindx-market-intelligence/Mastermind.git"
 BASE_BRANCH="master"
-SOURCE_REPO="/Users/chriswong/Documents/GitHub/Mastermind"
 BOXHOST="root@146.190.142.17"
 DPATH="/opt/mastermind"
 KEY="/Users/chriswong/.ssh/macro_dashboard_deploy_v2"
 KNOWN_HOSTS="/Users/chriswong/.ssh/known_hosts"
 HEALTH="http://127.0.0.1:8001/health"
-for tool in /usr/bin/git /usr/bin/tar /usr/bin/ssh /usr/bin/cmp /usr/bin/mktemp /usr/bin/awk /usr/bin/stat /usr/bin/sudo /usr/bin/env /bin/bash; do
+for tool in /usr/bin/git /usr/bin/tar /usr/bin/ssh /usr/bin/cmp /usr/bin/mktemp /usr/bin/awk /usr/bin/stat /usr/bin/sudo /usr/bin/env /usr/sbin/chown /bin/chmod /bin/bash; do
   [ -x "$tool" ] || { echo "required release tool unavailable: $tool" >&2; exit 65; }
 done
 [ -f "$KEY" ] && [ ! -L "$KEY" ] || { echo "fixed VPS key unavailable" >&2; exit 65; }
@@ -46,19 +45,23 @@ case "$KNOWN_META" in
   *) echo "fixed known_hosts metadata invalid" >&2; exit 65 ;;
 esac
 
-[ -d "$SOURCE_REPO/.git" ] && [ ! -L "$SOURCE_REPO" ] && [ ! -L "$SOURCE_REPO/.git" ] || {
-  echo "fixed M2 source repository unavailable" >&2
-  exit 65
+TMP_ROOT="$(/usr/bin/mktemp -d /private/tmp/mmx-vps-release.XXXXXX)"
+/bin/chmod 0711 "$TMP_ROOT"
+cleanup() {
+  case "$TMP_ROOT" in
+    /private/tmp/mmx-vps-release.*) /bin/rm -rf -- "$TMP_ROOT" ;;
+  esac
 }
-[ "$(/usr/bin/stat -f '%Su' "$SOURCE_REPO")" = "chriswong" ] || {
-  echo "fixed M2 source repository owner invalid" >&2
-  exit 65
-}
+trap cleanup EXIT INT TERM HUP
+/bin/mkdir "$TMP_ROOT/repo"
+/usr/sbin/chown chriswong:staff "$TMP_ROOT/repo"
+/bin/chmod 0700 "$TMP_ROOT/repo"
 GIT_OWNER=(
   /usr/bin/sudo -H -u chriswong
-  /usr/bin/env GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false
-  /usr/bin/git -C "$SOURCE_REPO" -c core.hooksPath=/dev/null
+  /usr/bin/env GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false
+  /usr/bin/git -C "$TMP_ROOT/repo" -c credential.helper=osxkeychain -c core.hooksPath=/dev/null
 )
+"${GIT_OWNER[@]}" init -q
 SSH=(/usr/bin/ssh -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes
   -o ConnectTimeout=20 -o "UserKnownHostsFile=$KNOWN_HOSTS" -o StrictHostKeyChecking=yes)
 remote_marker() {
@@ -71,13 +74,6 @@ remote_health_for() {
     printf '%s' \"\$body\" | grep -Eq '\"scheduled_runtime_ok\"[[:space:]]*:[[:space:]]*true' &&
     printf '%s' \"\$body\" | grep -Eq '\"commit\"[[:space:]]*:[[:space:]]*\"$sha\"'" >/dev/null 2>&1
 }
-TMP_ROOT="$(/usr/bin/mktemp -d /private/tmp/mmx-vps-release.XXXXXX)"
-cleanup() {
-  case "$TMP_ROOT" in
-    /private/tmp/mmx-vps-release.*) /bin/rm -rf -- "$TMP_ROOT" ;;
-  esac
-}
-trap cleanup EXIT INT TERM HUP
 
 "${GIT_OWNER[@]}" fetch -q --no-tags --force "$REMOTE" \
   "refs/heads/$BASE_BRANCH:refs/remotes/mmx-release/$BASE_BRANCH"

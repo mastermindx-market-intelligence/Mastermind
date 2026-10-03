@@ -38,12 +38,14 @@ Git remote or branch. The privileged broker maps the request to the installed re
 The wrapper:
 
 1. requires root broker identity and one exact commit argument;
-2. fixes the Mastermind GitHub remote, `master` branch and M2 source-repository path;
-3. performs GitHub authentication only under the attended M2 owner's existing Git credential context,
-   with prompting disabled and hooks suppressed; no Git credential is exposed to the mini or caller;
+2. fixes the Mastermind GitHub remote and `master` branch, then creates a random root-owned
+   temporary root whose parent is traverse-only and whose Git child is owner-only for `chriswong`;
+3. performs GitHub authentication only inside that isolated Git child through the M2 owner's existing
+   macOS keychain helper while system/global Git configuration, prompting and hooks are disabled;
+   no Git credential is exposed to the mini or caller;
 4. requires the request SHA to equal current remote `master`, then refetches and rechecks it
    immediately before the production-effect boundary;
-5. materializes a clean archive from that exact fetched commit in a private temporary directory;
+5. materializes a clean archive from that exact fetched commit in the same private temporary root;
 6. requires the target archive's `scripts/deploy_code_to_vps.sh` to be byte-identical to the
    installed trusted Executive release copy before production effect;
 7. uses the M2-local VPS key plus strict known-host verification;
@@ -95,10 +97,10 @@ merge. For each mini:
 7. run `mmx-vps-release preflight` and record the exact host/key/install identities.
 No private key is copied between machines. Reusing `m2_recovery` as the release credential is
 prohibited because an already-broad authorized-key entry would defeat the forced-command boundary.
-The current mini fleet already has a broader historical M2 recovery identity for other workflows;
-this bridge does not claim to revoke or sandbox that separate credential. Migrating/removing that
-legacy authority is a separate operation and is required before claiming that mini-hosted Codex has
-no arbitrary M2 shell path at all.
+The current fleet census found that mini4 has a broader historical M2 recovery identity while
+mini1–mini3 do not. This bridge does not claim to revoke or sandbox mini4's separate credential.
+Migrating/removing that legacy authority is a separate operation and is required before claiming
+that mini4-hosted Codex has no arbitrary M2 shell path at all.
 
 ## Acceptance
 
