@@ -254,3 +254,105 @@ Claude Desktop inbox write under the existing effect owner, Claude consumption,
 canonical native reply, reply event/read reference, and SAME originating Web
 consumer. No production native message, installation, subscription, callback,
 or deployment has occurred in this slice.
+
+## 2026-10-03 reviewer repairs: effect uncertainty + Claude management owner
+
+Fresh #1112 reviews changed two release conclusions and are consumed here.
+
+### Authenticated modifying-effect boundary
+
+Independent exact-head review 5966360785 found one blocking defect: the
+authenticated direct-tool host could invoke session_send/session_summon,
+then translate an untyped exception, malformed result, or oversized post-effect
+result into backend_unavailable / output_too_large. Those codes can be
+misread as safe retry even though the owner may already have committed an
+effect.
+
+TDD discriminators were observed RED for all three modifying cases before the
+repair. The host now classifies those post-entry failures as effect_unknown
+with an original-operation reconciliation instruction. Read-only failures retain
+backend_unavailable / output_too_large; owner-typed pre-effect refusal such
+as binding_unavailable remains preserved. The handler is still invoked exactly
+once; no retry/store/failover was added.
+
+This repair was committed and published separately as
+71ce38d3758ee39b29eef289d8276947835691a8
+(fix(session-bridge): preserve modifying effect uncertainty).
+The broader bridge/dialogue campaign at that boundary was 427 PASS.
+
+### Claude live-session transport supersession
+
+Review 5966399134 correctly rejected the previously published direct
+/private/tmp/cc-socks/<pid>.sock sender as bypassing Claude's incumbent native
+session-management owner. The useful exact-target discovery evidence is retained
+only as historical investigation; direct raw socket delivery is superseded
+and removed from the current source.
+
+integrations/session_bridge/claude_native.py is now a provider-neutral adapter
+over an injected ClaudeSessionManagementPort with four owner calls:
+list_sessions, get_session, send_message, and same-owner reconcile_message.
+The bridge does not discover/open provider sockets, read messaging tokens,
+inspect session titles, store transcripts, choose newest sessions, or own
+retries/lifecycle.
+
+The normalized owner facts are exact provider session UUID, exact host reference,
+opaque owner generation, and current addressable boolean. Public target projection
+contains only the derived target_ref, kind, host, generation, and addressability.
+It omits provider session UUID, title, socket, path, credential and token material.
+Target resolution re-reads the exact session through the same owner and refuses
+generation/addressability drift.
+
+ClaudeNativeAttentionClient calls the management owner's send_message exactly
+once. A normalized definitive refusal is native_refused. A lost, raised,
+malformed, or otherwise ambiguous modifying result invokes only the same owner's
+reconcile_message; it never resends. Reconciliation can recover only a proven
+accepted result. Every other ambiguous reconciliation remains native_effect_unknown.
+target_consumed and parent_consumed stay false.
+
+A discriminator monkeypatches socket.socket after the asyncio event loop is
+created and the management-owner send still succeeds, proving this adapter does
+not open the raw Claude inbox itself. The earlier version of that test failed for
+a harness reason because patching global socket creation also prevented asyncio's
+self-pipe; that fixture issue was corrected without changing the product assertion.
+
+### Canonical message identity into attention
+
+CanonicalReplyCoordinator no longer passes only an operation key to native
+attention. After the Agent Dialogue owner proves reply_committed=true, the
+coordinator requires the exact committed message_key and constructs the typed
+AttentionReference(operation_key, message_key). The native waker receives only
+(target_ref, AttentionReference). A committed carrier missing a usable message
+key is effect_unknown and does not wake, because the carrier effect already
+exists but native identity is not safely reconstructable.
+
+This preserves the required sequence:
+canonical Dialogue commit -> exact operation/message reference -> incumbent
+native attention owner.
+
+No native transport may invent/rederive the message key.
+
+### Verification
+
+Fresh current bytes:
+- claude_native.py SHA256 8abf1fbebb96108fa04e4274ea3075f6aa38b3fa0aeb2bc68ae4a2fd3414699b
+- native_backends.py SHA256 5cb0b4b473f3c13a36e813a3e4c829242e18597b8983e07e4c5403874876e155
+- Claude management tests SHA256 5af477970ffdddee5c5b71065806a1dec565068fce6175e4b0ad298006dd0a02
+- native coordinator tests SHA256 2a5f5cf0d8c5108dcb0ad7f27b3b09becd347d0536fee13ed3b69c0fd9c4001d
+
+Executed:
+- Claude management slice: 15 PASS, XML 898d1b6abee8b5da5427acd0f05a7dd907558cad9f22fa078be10d0d80e12c69;
+- coordinator/effect/Claude integration: 49 PASS, XML dbe9a60a2cba1bf73b8ec857c473c62f50416565459c0d07416afc21180f9f73;
+- broader bridge/dialogue/auth reviewer-repair campaign: 427 PASS / 0 failures / 0 errors / 0 skips, XML a24834260e1ac962b75582300f8488ab842cc0e6eb0235911751b1ee0a2118e8;
+- full repository pytest attempted and remains unqualified only by the same two unrelated collection imports (engine.signal_archive, lib): 2 errors, 5 skips; XML 4f19649eb84a810caf6c3ee3844337618d5cb0041d616c14227f5f20ce78bbb6.
+
+The installed Claude management owner remains an injected port because
+ccd_session_mgmt is internal to Claude Desktop/CCD rather than a configured
+external MCP service. The CLI's configured MCP list does not expose it as a
+standalone endpoint, and the Desktop processes expose no separate TCP listener.
+This source therefore does not invent a private protocol. Installed composition
+must bind this port through the incumbent Claude owner or stay unarmed.
+
+Codex remains owned by the path-disjoint PR #1156 queue/Wake lane. Do not
+duplicate it here. MISSION_COMPLETE remains false: installed Session Bridge
+profile composition, real Claude owner binding, production send/consume/reply,
+MCP Events return, and SAME originating Web consumer proof remain owed.

@@ -10,6 +10,7 @@ import inspect
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
+from .native_wire import AttentionReference
 from .schemas import BridgeError
 
 
@@ -99,10 +100,21 @@ class CanonicalReplyCoordinator:
                 "carrier_not_committed",
                 "canonical dialogue reply was not proven committed",
             )
+        try:
+            reference = AttentionReference(
+                operation_key=operation_key,
+                message_key=carrier.get("message_key"),
+            )
+        except (TypeError, ValueError):
+            raise BridgeError(
+                "effect_unknown",
+                "canonical dialogue reply committed without a usable attention reference; "
+                "reconcile the original operation",
+            ) from None
 
         try:
             attention = await _maybe_await(
-                self._attention_waker(target_ref, operation_key)
+                self._attention_waker(target_ref, reference)
             )
         except Exception:
             # The reply is already committed. Retain its exact receipt even

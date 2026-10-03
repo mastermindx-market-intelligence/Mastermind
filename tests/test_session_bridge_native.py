@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from integrations.session_bridge.native_backends import (
     CanonicalReplyCoordinator,
     CanonicalTargetReader,
@@ -67,9 +69,14 @@ def test_reply_coordinator_commits_carrier_before_wake():
             "op-001",
         )
     )
+    from integrations.session_bridge.native_wire import AttentionReference
     assert events == [
         ("carrier", "codex:binding-7", "op-001"),
-        ("wake", "codex:binding-7", "op-001"),
+        (
+            "wake",
+            "codex:binding-7",
+            AttentionReference(operation_key="op-001", message_key="asd-dot-001"),
+        ),
     ]
     assert result["reply_committed"] is True
     assert result["attention"] == {"state": "DELIVERED"}
@@ -111,7 +118,11 @@ def test_attention_failure_does_not_resend_committed_carrier():
 
     def writer(*_args):
         events.append("carrier")
-        return {"reply_committed": True, "action": "POSTED"}
+        return {
+            "reply_committed": True,
+            "action": "POSTED",
+            "message_key": "asd-claude-attention-001",
+        }
 
     def wake(*_args):
         events.append("wake")
@@ -203,3 +214,59 @@ def test_research_summon_refuses_host_write_scope():
         assert exc.code == "binding_unavailable"
     else:
         raise AssertionError("research summon must refuse trusted write scope")
+
+
+def test_reply_coordinator_wake_uses_exact_committed_message_reference():
+    from integrations.session_bridge.native_wire import AttentionReference
+
+    seen = []
+
+    def writer(*_args):
+        return {
+            "reply_committed": True,
+            "action": "POSTED",
+            "message_key": "asd-canonical-message-001",
+        }
+
+    async def wake(target_ref, reference):
+        seen.append((target_ref, reference))
+        return {"state": "ATTENTION_ACCEPTED"}
+
+    sender = CanonicalReplyCoordinator(reply_writer=writer, attention_waker=wake)
+    result = asyncio.run(sender(
+        "claude:target-001",
+        "Continue.",
+        "Stop after result.",
+        "canonical-ref-op-001",
+    ))
+    assert seen == [(
+        "claude:target-001",
+        AttentionReference(
+            operation_key="canonical-ref-op-001",
+            message_key="asd-canonical-message-001",
+        ),
+    )]
+    assert result["reply_committed"] is True
+
+
+def test_reply_coordinator_missing_committed_message_key_is_effect_unknown_without_wake():
+    calls = []
+
+    def writer(*_args):
+        calls.append("write")
+        return {"reply_committed": True, "action": "POSTED"}
+
+    def wake(*_args):
+        calls.append("wake")
+        return {"state": "ATTENTION_ACCEPTED"}
+
+    sender = CanonicalReplyCoordinator(reply_writer=writer, attention_waker=wake)
+    with pytest.raises(BridgeError) as caught:
+        asyncio.run(sender(
+            "claude:target-001",
+            "Continue.",
+            "Stop after result.",
+            "missing-reference-op-001",
+        ))
+    assert caught.value.code == "effect_unknown"
+    assert calls == ["write"]
