@@ -27,13 +27,30 @@ MASTERMIND_WORKSPACE_CLI_INSTALL="$HOME/.local/bin/mmx-workspace-macro" \
   ./scripts/install_mastermind_workspace_cli.sh
 ```
 
-The installer requires the override to be the exact absolute Git worktree root, resolves it physically, and embeds that path in the generated wrapper. The wrapper overwrites any runtime `MASTERMIND_SOURCE_REPO` value, preserving the same source-pinning boundary as the default launcher. Use the repository-specific installed launcher (`mmx-workspace-macro` in this example) for acquire/status/release on that repository; do not overwrite the default launcher merely to switch repositories.
+The installer requires the override to be the exact absolute Git worktree root, resolves it physically, and embeds that path in the generated wrapper. The wrapper overwrites any runtime `MASTERMIND_SOURCE_REPO` value, preserving the same source-pinning boundary as the default launcher. Use the repository-specific installed launcher (`mmx-workspace-macro` in this example) for acquire/adopt/status/release on that repository; do not overwrite the default launcher merely to switch repositories.
 
-The JSON receipt supplies the exact `workspace_path`, derived branch, base SHA, and shared Git common directory. Repeating `acquire` for the same operation reuses that workspace. Never point two independent operations at one workspace or mint proof/review worktrees outside this owner. Before editing, `cd` to the receipt path and confirm:
+The JSON receipt supplies the exact `workspace_path`, branch, base SHA, and shared Git common directory. Repeating `acquire` for the same new operation reuses that workspace.
+
+When recovery must continue an **already-published incumbent PR branch**, do not cherry-pick it into a replacement branch merely to obtain custody. Fetch the canonical source checkout normally, resolve the exact observed remote head, and use the same installed repository-specific launcher:
+
+```bash
+git fetch origin --prune
+head_sha="$(git rev-parse refs/remotes/origin/<incumbent-branch>)"
+mmx-workspace-macro adopt \
+  --operation-id <stable-existing-operation-id> \
+  --branch <incumbent-branch> \
+  --expected-head "$head_sha" \
+  --lane web
+```
+
+`adopt` is fail-closed: the branch must already exist on `origin`, its observed remote-tracking SHA must equal `--expected-head`, it may not be the repository's `origin/HEAD` default branch, and it may not already be checked out in another worktree of that canonical source checkout. Adoption never fetches, resets, rebases, force-updates, or creates a replacement PR branch. A pre-existing local branch is reused only when it already equals the published expected head.
+
+Never point two independent operations at one workspace or mint proof/review worktrees outside this owner. Before editing, `cd` to the receipt path and confirm:
 
 ```bash
 git status --short --branch
-git merge-base --is-ancestor origin/master HEAD
+origin_default="$(git symbolic-ref --quiet refs/remotes/origin/HEAD)"
+git merge-base --is-ancestor "$origin_default" HEAD
 ```
 
 If a session opens in the legacy shared checkout and it is dirty, do not clean,

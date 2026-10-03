@@ -2,8 +2,10 @@
 """Canonical attended-session workspace route for Mastermind hosts.
 
 This CLI is a thin adapter over ``control_plane.executive_workspace``.  It does
-not own lifecycle state.  The host owns the source repo and workspace root; the
-caller supplies only an operation identity, exact base SHA, and a closed lane.
+not own lifecycle state.  The host owns the source repo and workspace root.
+New work receives an operation identity, exact base SHA, and closed lane;
+recovery may instead adopt one exact already-published non-default branch at an
+expected remote-tracking head. Neither path fetches or rewrites source history.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from control_plane.executive_workspace import (  # noqa: E402
     WorkspaceError,
+    adopt_published_linked_worktree,
     inspect_linked_worktree,
     prepare_linked_worktree,
     release_linked_worktree,
@@ -257,10 +260,18 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
 
-    acquire = sub.add_parser("acquire", help="acquire or reuse one linked workspace")
+    acquire = sub.add_parser("acquire", help="acquire or reuse one new linked workspace")
     acquire.add_argument("--operation-id", required=True)
     acquire.add_argument("--base-sha", required=True)
     acquire.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
+
+    adopt = sub.add_parser(
+        "adopt", help="adopt one exact already-published non-default branch"
+    )
+    adopt.add_argument("--operation-id", required=True)
+    adopt.add_argument("--branch", required=True)
+    adopt.add_argument("--expected-head", required=True)
+    adopt.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
 
     sub.add_parser("census", help="read-only census of registered source worktrees")
     sub.add_parser("storage", help="read-only enrolled volume and free-space admission check")
@@ -442,6 +453,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             return _emit(
                 "acquire",
+                receipt,
+                effect="NOT_APPLIED" if receipt.reused else "APPLIED",
+            )
+        if args.action == "adopt":
+            if not _storage_status(root)["admission_allowed"]:
+                raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
+            receipt = adopt_published_linked_worktree(
+                source,
+                root,
+                operation_id=args.operation_id,
+                lane=args.lane,
+                branch=args.branch,
+                expected_head_sha=args.expected_head,
+            )
+            return _emit(
+                "adopt",
                 receipt,
                 effect="NOT_APPLIED" if receipt.reused else "APPLIED",
             )

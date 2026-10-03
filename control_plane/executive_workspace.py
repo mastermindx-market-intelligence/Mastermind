@@ -2018,6 +2018,7 @@ def prepare_linked_worktree(
     base_sha: str,
     branch: str,
     workspace_name: str | None = None,
+    adopt_existing_branch: bool = False,
 ) -> LinkedWorkspaceReceipt:
     """Acquire one low-storage linked worktree for a trusted attended session.
 
@@ -2040,6 +2041,8 @@ def prepare_linked_worktree(
         raise WorkspaceError("workspace_name is unsafe for linked workspace custody")
     if not _EXACT_SHA_RE.fullmatch(selected_base):
         raise WorkspaceError("base_sha must be an exact 40-character lowercase commit SHA")
+    if not isinstance(adopt_existing_branch, bool):
+        raise WorkspaceError("adopt_existing_branch must be boolean")
 
     source = Path(source_repository).expanduser().resolve()
     root = Path(workspace_root).expanduser().resolve()
@@ -2093,10 +2096,18 @@ def prepare_linked_worktree(
         cwd=None,
         env=env,
     )
-    if branch_code == 0 and existing_branch:
+    branch_preexisting = branch_code == 0 and bool(existing_branch)
+    if branch_preexisting and not adopt_existing_branch:
         raise WorkspaceError("linked workspace branch already exists without its bound workspace")
     if branch_code not in {0, 1}:
         raise WorkspaceError("could not determine whether the linked workspace branch exists")
+    if branch_preexisting and existing_branch.lower() != resolved_base:
+        raise WorkspaceError("existing linked workspace branch head does not match the expected head")
+    if adopt_existing_branch:
+        branch_ref = f"refs/heads/{selected_branch}"
+        for record in _worktree_records(source, env=env):
+            if record.get("branch") == branch_ref:
+                raise WorkspaceError("published branch is already checked out in another worktree")
 
     sparse_directories = _pinned_sparse_directories(source, resolved_base, env=env)
     if sparse_directories is not None:
@@ -2108,27 +2119,19 @@ def prepare_linked_worktree(
             raise WorkspaceError("source worktreeConfig enrollment is required for sparse creation")
 
     created = False
+    branch_created = False
     try:
-        _run(
-            [
-                "git",
-                "-C",
-                str(source),
-                "worktree",
-                "add",
-                "--no-checkout",
-                "--lock",
-                "--reason",
-                expected_lock,
-                "-b",
-                selected_branch,
-                str(destination),
-                resolved_base,
-            ],
-            cwd=None,
-            env=env,
-        )
+        command = [
+            "git", "-C", str(source), "worktree", "add",
+            "--no-checkout", "--lock", "--reason", expected_lock,
+        ]
+        if branch_preexisting:
+            command.extend([str(destination), selected_branch])
+        else:
+            command.extend(["-b", selected_branch, str(destination), resolved_base])
+        _run(command, cwd=None, env=env)
         created = True
+        branch_created = not branch_preexisting
         _configure_new_sparse_workspace(destination, sparse_directories, env=env)
         # Hydrate the admitted HEAD without detaching its operation-bound branch.
         # The destination is new and locked; existing workspaces returned above.
@@ -2159,17 +2162,18 @@ def prepare_linked_worktree(
                 cwd=None,
                 env=env,
             )
-            branch_code, branch_head, _ = _run_status(
-                ["git", "-C", str(source), "rev-parse", f"refs/heads/{selected_branch}"],
-                cwd=None,
-                env=env,
-            )
-            if branch_code == 0 and branch_head.lower() == resolved_base:
-                _run_status(
-                    ["git", "-C", str(source), "branch", "-D", selected_branch],
+            if branch_created:
+                branch_code, branch_head, _ = _run_status(
+                    ["git", "-C", str(source), "rev-parse", f"refs/heads/{selected_branch}"],
                     cwd=None,
                     env=env,
                 )
+                if branch_code == 0 and branch_head.lower() == resolved_base:
+                    _run_status(
+                        ["git", "-C", str(source), "branch", "-D", selected_branch],
+                        cwd=None,
+                        env=env,
+                    )
         raise
 
     return LinkedWorkspaceReceipt(
@@ -2184,6 +2188,60 @@ def prepare_linked_worktree(
         common_git_dir=str(common),
         lock_reason=expected_lock,
         reused=False,
+    )
+
+
+def adopt_published_linked_worktree(
+    source_repository: str | Path,
+    workspace_root: str | Path,
+    *,
+    operation_id: str,
+    lane: str,
+    branch: str,
+    expected_head_sha: str,
+) -> LinkedWorkspaceReceipt:
+    """Adopt one exact already-published non-default branch into canonical custody.
+
+    The remote-tracking ref and expected SHA are evidence; this function never
+    fetches, rewrites, rebases, resets, or force-updates the incumbent branch.
+    """
+    source = Path(source_repository).expanduser().resolve()
+    root = Path(workspace_root).expanduser().resolve()
+    selected_branch = str(branch).strip()
+    expected = str(expected_head_sha).strip().lower()
+    if not source.is_dir():
+        raise WorkspaceError(f"source repository is not a directory: {source}")
+    if not _EXACT_SHA_RE.fullmatch(expected):
+        raise WorkspaceError("expected_head_sha must be an exact 40-character lowercase commit SHA")
+    env = _git_env(root / ".control-home")
+    _run(["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"], cwd=None, env=env)
+    _run(["git", "check-ref-format", "--branch", selected_branch], cwd=source, env=env)
+
+    default_ref = _origin_default_remote_ref(source, env=env)
+    if default_ref is None:
+        raise WorkspaceError("origin default branch is unavailable; refusing published-branch adoption")
+    remote_ref = f"refs/remotes/origin/{selected_branch}"
+    if remote_ref == default_ref:
+        raise WorkspaceError("origin default branch cannot be adopted as an incumbent repair branch")
+
+    code, published_head, _ = _run_status(
+        ["git", "-C", str(source), "rev-parse", "--verify", "--quiet", remote_ref],
+        cwd=None,
+        env=env,
+    )
+    if code != 0 or not published_head:
+        raise WorkspaceError("published branch is not observed on the origin remote-tracking refs")
+    if published_head.lower() != expected:
+        raise WorkspaceError("published branch does not match the expected head")
+
+    return prepare_linked_worktree(
+        source,
+        root,
+        operation_id=operation_id,
+        lane=lane,
+        base_sha=expected,
+        branch=selected_branch,
+        adopt_existing_branch=True,
     )
 
 

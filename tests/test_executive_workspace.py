@@ -1269,3 +1269,85 @@ def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_pa
     assert released.removed is True
     assert not workspace.exists()
     assert _git(source, "rev-parse", "refs/heads/sol/web-op-006") == head
+
+
+def test_adopt_published_linked_worktree_binds_exact_remote_head_without_rewriting(tmp_path: Path):
+    source, _base_sha = _repository(tmp_path)
+    _git(source, "branch", "-m", "main")
+    remote = tmp_path / "adopt-owner.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "main")
+    _git(source, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    branch = "sol/incumbent-owner"
+    _git(source, "checkout", "-qb", branch)
+    (source / "README.md").write_text("accepted branch\n", encoding="utf-8")
+    _git(source, "add", "README.md")
+    _git(source, "commit", "-qm", "accepted branch")
+    head = _git(source, "rev-parse", "HEAD")
+    _git(source, "push", "-u", "origin", branch)
+    _git(source, "checkout", "-q", "main")
+
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.adopt_published_linked_worktree(
+        source, root, operation_id="recover-incumbent-owner", lane="web",
+        branch=branch, expected_head_sha=head,
+    )
+    workspace = Path(receipt.workspace_path)
+    assert receipt.head_sha == head
+    assert receipt.base_sha == head
+    assert receipt.branch == branch
+    assert receipt.reused is False
+    assert _git(workspace, "rev-parse", "HEAD") == head
+    assert _git(workspace, "branch", "--show-current") == branch
+    assert (workspace / "README.md").read_text(encoding="utf-8") == "accepted branch\n"
+
+    reused = executive_workspace.adopt_published_linked_worktree(
+        source, root, operation_id="recover-incumbent-owner", lane="web",
+        branch=branch, expected_head_sha=head,
+    )
+    assert reused.reused is True
+    assert reused.workspace_path == receipt.workspace_path
+
+
+def test_adopt_published_linked_worktree_rejects_default_mismatch_and_live_branch(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    _git(source, "branch", "-m", "main")
+    remote = tmp_path / "adopt-owner-negative.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "main")
+    _git(source, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+    root = tmp_path / "agent-workspaces"
+    with pytest.raises(WorkspaceError, match="default"):
+        executive_workspace.adopt_published_linked_worktree(
+            source, root, operation_id="reject-default-owner", lane="web",
+            branch="main", expected_head_sha=base_sha,
+        )
+
+    branch = "sol/incumbent-live"
+    _git(source, "checkout", "-qb", branch)
+    (source / "README.md").write_text("feature\n", encoding="utf-8")
+    _git(source, "add", "README.md")
+    _git(source, "commit", "-qm", "feature")
+    head = _git(source, "rev-parse", "HEAD")
+    _git(source, "push", "-u", "origin", branch)
+    with pytest.raises(WorkspaceError, match="worktree|checked out"):
+        executive_workspace.adopt_published_linked_worktree(
+            source, root, operation_id="reject-live-owner", lane="web",
+            branch=branch, expected_head_sha=head,
+        )
+
+    _git(source, "checkout", "-q", "main")
+    with pytest.raises(WorkspaceError, match="expected head|published"):
+        executive_workspace.adopt_published_linked_worktree(
+            source, root, operation_id="reject-mismatch-owner", lane="web",
+            branch=branch, expected_head_sha="0" * 40,
+        )
