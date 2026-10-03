@@ -32,6 +32,7 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from ops.executive_os.acceptance_maintenance import Maintenance, MaintenanceError
 from ops.executive_os.install_source_policy import (
     InstallSourcePolicyError,
     validate_acceptance_source,
@@ -1072,6 +1073,7 @@ class Acceptance:
         self.worker_config: dict[str, Any] = {}
         self.receipt_root = RUNTIME_ROOT / "control" / "acceptance" / self.expected_sha
         self.services_started = False
+        self.maintenance: Maintenance | None = None
         self.helper: subprocess.Popen[bytes] | None = None
         self.helper_pid: int | None = None
         self.nonexecutive_disabled_before: str | None = None
@@ -1957,17 +1959,21 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             raise AcceptanceError("control environment canary file is not root/control 0440")
 
         database = Path(self.config["runtime_root"]) / "data" / "control_plane" / "executive.sqlite3"
-        if database.exists() or database.is_symlink():
-            raise AcceptanceError("Executive runtime is not clean; archive it before acceptance")
-        for field, label in (
-            ("proof_workspace_root", "proof workspace root"),
-            ("worker_runs_root", "worker runs root"),
-            ("receipts_root", "launch receipts root"),
-            ("backup_root", "backup root"),
-        ):
-            _empty_directory(Path(self.config[field]), label=label)
-        if Path(self.config["secret_canary_receipt_path"]).exists():
-            raise AcceptanceError("a prior secret-canary receipt exists")
+        maintenance_digest = getattr(self.args, "maintenance_descriptor_sha256", None)
+        if maintenance_digest is not None:
+            self.maintenance = Maintenance(self.expected_sha, maintenance_digest, self.config)
+        else:
+            if database.exists() or database.is_symlink():
+                raise AcceptanceError("Executive runtime is not clean; archive it before acceptance")
+            for field, label in (
+                ("proof_workspace_root", "proof workspace root"),
+                ("worker_runs_root", "worker runs root"),
+                ("receipts_root", "launch receipts root"),
+                ("backup_root", "backup root"),
+            ):
+                _empty_directory(Path(self.config[field]), label=label)
+            if Path(self.config["secret_canary_receipt_path"]).exists():
+                raise AcceptanceError("a prior secret-canary receipt exists")
         _prepare_acceptance_receipt_root(
             self.receipt_root,
             control_uid=self.control_identity.pw_uid,
@@ -2037,7 +2043,16 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         production_sentinel = paths["forbidden_production_sentinel"]
         protected = [admin_sentinel, other_sentinel, production_sentinel]
         for path in protected:
-            self._create_sentinel(path)
+            if getattr(self, "maintenance", None) is not None and path != admin_sentinel:
+                info = path.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or info.st_uid != self.control_identity.pw_uid
+                        or info.st_gid != self.control_group.gr_gid
+                        or stat.S_IMODE(info.st_mode) != 0o600
+                        or info.st_size != 65 or has_macos_acl(path)):
+                    raise AcceptanceError("preserved canary sentinel identity drifted")
+            else:
+                self._create_sentinel(path)
 
     def install_secret_canary_receipt(
         self,
@@ -2920,12 +2935,22 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         self.validate_install()
         self.initialize_runtime_and_fixtures()
         control_pid, worker_pid = self.start_and_attest_services()
+        if self.maintenance is not None:
+            descriptor = self.maintenance.descriptor
+            self._control_request(
+                "recover-proof-capacity", descriptor["recovery_job_id"],
+                descriptor["recovery_attempt_id"], persist="predecessor-capacity-recovered.json",
+            )
         success_job_id = self.successful_job()
         control_pid = self.restart_after_completion(success_job_id, control_pid)
         interrupted_job_id, control_pid, worker_pid = self.interrupted_job(
             control_pid, worker_pid
         )
+        if self.maintenance is not None:
+            self.maintenance.verify([success_job_id, interrupted_job_id])
         self.backup_restore((success_job_id, interrupted_job_id))
+        if self.maintenance is not None:
+            self.maintenance.verify([success_job_id, interrupted_job_id])
         control_pid = self._wait_control()
         self._wait_pid(WORKER_LABEL)
         if self._control_request("status")["result"].get("service_state") != "READY":
@@ -2969,6 +2994,10 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             },
         )
 
+        if self.maintenance is not None:
+            self.maintenance.finish(
+                [success_job_id, interrupted_job_id], self.receipt_root / "acceptance-summary.json")
+
     def cleanup_after_failure(self) -> None:
         if self.services_started:
             self._capture_failure_observability()
@@ -2992,6 +3021,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-repo", type=Path, required=True)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--operator-user", required=True)
+    parser.add_argument("--maintenance-descriptor-sha256",
+                        help="Exact root-sealed maintenance descriptor; default remains clean-only.")
     parser.add_argument("--success-timeout", type=float, default=2400.0)
     parser.add_argument("--active-timeout", type=float, default=120.0)
     return parser
@@ -3009,7 +3040,7 @@ def main() -> int:
     try:
         acceptance = Acceptance(args)
         acceptance.run()
-    except (AcceptanceError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
+    except (AcceptanceError, MaintenanceError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
         if acceptance is not None:
             acceptance.cleanup_after_failure()
         print(f"acceptance error: {type(exc).__name__}: {exc}", file=sys.stderr)
