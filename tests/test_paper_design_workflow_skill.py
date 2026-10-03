@@ -245,8 +245,13 @@ def test_publication_drift_uses_current_same_app_refresh_lifecycle():
         assert "Refresh" in text
         assert "start a new conversation" in text
 
-    assert "current OpenAI behavior requires recreate + republish" not in skill
-    assert "Current OpenAI Business behavior also does not support updating a published app in place" not in connection
-    assert "Business published apps currently require recreate + republish" not in integration
-    assert "do not create a duplicate app/tunnel" in connection.lower()
-    assert "do not create a duplicate app/tunnel" in runbook.lower()
+    for text in (skill, connection, runbook, integration):
+        assert "Plugin Directory" in text
+        assert "custom workspace MCP app" in text
+        assert "recreate + republish" in text
+    assert "Enterprise/Edu Action control" in connection
+    assert "Enterprise/Edu Action control" in runbook
+    assert "reusing the existing tunnel/backend" in connection
+    assert "reusing the existing tunnel/backend" in runbook
+    assert "parallel duplicate" in connection
+    assert "parallel duplicate" in runbook
