@@ -65,6 +65,7 @@ from control_plane.executive_orchestration_principal import (
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
+    CHATGPT_GUI_RESOURCE_ID,
     ATTENTION_TURN_INSTRUCTION,
     AttentionTurnObservation,
     CandidateResult,
@@ -72,6 +73,7 @@ from control_plane.operator_harness_contract import (
     LaunchComparison,
     LaunchDecision,
     NormalizedEvent,
+    ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
     OperationId,
     ProcessGenerationRef,
@@ -467,7 +469,9 @@ class OperatorAttemptResource(Protocol):
 
     def stop(self) -> None: ...
 
-    def seal_after_uid_sweep(self, sweep: UIDSweepReceipt) -> BrowserReviewReceipt: ...
+    def seal_after_uid_sweep(
+        self, sweep: UIDSweepReceipt
+    ) -> BrowserReviewReceipt | None: ...
 
 
 OperatorAdapterFactory = Callable[
@@ -2901,28 +2905,70 @@ class ExecutiveWorkerBroker:
                     state.resource.seal_after_uid_sweep,
                     sweep,
                 )
-                if not isinstance(artifact_receipt, BrowserReviewReceipt):
-                    raise BrokerStateError(
-                        "browser resource returned an untyped artifact receipt"
+                if artifact_receipt is None:
+                    # Only the explicitly requested and materialized GUI contract
+                    # is artifact-free. A missing browser receipt is not success.
+                    capability = getattr(state.resource, "observed_capability", None)
+                    required_resources = tuple(
+                        item for item in state.requested.capabilities.required
+                        if item.kind == "resource"
                     )
-                try:
-                    artifact_receipt = browser_review_receipt(
-                        artifact_receipt.to_wire()
-                    )
-                except BrowserReviewError as exc:
-                    raise BrokerStateError(
-                        "browser resource returned an invalid closed artifact receipt"
-                    ) from exc
-                if (
-                    artifact_receipt.attempt_id != state.epoch.attempt_id
-                    or artifact_receipt.session_epoch_id
-                    != state.epoch.session_epoch_id
-                    or artifact_receipt.process_generation_id
-                    != state.generation.process_generation_id
-                ):
-                    raise BrokerStateError(
-                        "browser receipt generation identity drifted"
-                    )
+                    receipt = state.materialization_receipt
+                    observed_resources = ()
+                    if receipt is not None:
+                        try:
+                            attestation = wire_observed_harness_attestation(
+                                receipt.observed_attestation
+                            )
+                        except OperatorHarnessWireError as exc:
+                            raise BrokerStateError(
+                                "operator resource lacks validated artifact-free admission"
+                            ) from exc
+                        observed_resources = tuple(
+                            item for item in attestation.capabilities
+                            if item.kind == "resource"
+                        )
+                    if (
+                        not isinstance(capability, ObservedCapabilityIdentity)
+                        or capability.kind != "resource"
+                        or capability.name != CHATGPT_GUI_RESOURCE_ID
+                        or not isinstance(capability.resource_contract_digest, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", capability.resource_contract_digest) is None
+                        or len(required_resources) != 1
+                        or required_resources[0].name != capability.name
+                        or required_resources[0].resource_contract_digest
+                        != capability.resource_contract_digest
+                        or observed_resources != (capability,)
+                        or receipt is None
+                        or receipt.requested_profile_digest
+                        != requested_profile_digest(operator_to_wire(state.requested))
+                    ):
+                        raise BrokerStateError(
+                            "operator resource lacks validated artifact-free admission"
+                        )
+                else:
+                    if not isinstance(artifact_receipt, BrowserReviewReceipt):
+                        raise BrokerStateError(
+                            "operator resource returned an untyped artifact receipt"
+                        )
+                    try:
+                        artifact_receipt = browser_review_receipt(
+                            artifact_receipt.to_wire()
+                        )
+                    except BrowserReviewError as exc:
+                        raise BrokerStateError(
+                            "browser resource returned an invalid closed artifact receipt"
+                        ) from exc
+                    if (
+                        artifact_receipt.attempt_id != state.epoch.attempt_id
+                        or artifact_receipt.session_epoch_id
+                        != state.epoch.session_epoch_id
+                        or artifact_receipt.process_generation_id
+                        != state.generation.process_generation_id
+                    ):
+                        raise BrokerStateError(
+                            "browser receipt generation identity drifted"
+                        )
             await self._remember_operator_terminal(
                 state, observation, artifact_receipt
             )

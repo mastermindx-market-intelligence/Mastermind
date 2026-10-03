@@ -573,6 +573,24 @@ def test_projection_refuses_grok_bot_provider_with_no_surface_mapping(tmp_path):
         project_runtime_binding(runtime, sealed.attempt_id, _target(surface="grok-bot"))
 
 
+def test_projection_accepts_chatgpt_provider_only_for_chatgpt_sol_target(tmp_path):
+    assert _PROVIDER_TO_REASONING_SURFACE["chatgpt"] == "chatgpt-sol"
+    runtime, _dispatch, sealed, _epoch, _generation, _process, _profile_value = (
+        _admitted_runtime(tmp_path, provider="chatgpt")
+    )
+
+    binding = project_runtime_binding(
+        runtime,
+        sealed.attempt_id,
+        _target(surface="chatgpt-sol"),
+    )
+    assert binding.reasoning_surface == "chatgpt-sol"
+    assert binding.native_handle == "PROVIDER-SESSION-1"
+
+    with pytest.raises(StateConflict):
+        project_runtime_binding(runtime, sealed.attempt_id, _target(surface="codex"))
+
+
 def test_projection_refuses_non_ohf_attempt_and_wrong_source_admission(tmp_path):
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
