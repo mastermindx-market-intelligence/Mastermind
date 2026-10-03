@@ -4,7 +4,8 @@ Wave B, stock level. Development sample only (formation dates 2003–2021).
 
 **Where this stands.** Nothing is promoted. Every feature in this family is still
 `DESCRIPTIVE`. The holdout (2022 onward) has not been scored. One claim — downside risk — is
-queued for a single confirmatory holdout run under `TREND_PERSISTENCE_PREREG_V2.md`.
+queued for a single confirmatory holdout run under `TREND_PERSISTENCE_PREREG_V2.md`
+(revision 2, re-frozen after the second review in §4).
 
 ## 1. Results in one view
 
@@ -12,7 +13,7 @@ queued for a single confirmatory holdout run under `TREND_PERSISTENCE_PREREG_V2.
 | --- | --- | --- | --- | --- |
 | Do these features say anything about forward return vs SPY beyond momentum, volatility and beta? | V1 | 72 | **0** | Null. Closed for these constructions, this universe, these horizons. |
 | Do they say anything about forward maximum drawdown beyond momentum, one volatility window and beta? | V1 | 72 | 34 | Not usable as evidence: volatility was under-controlled (§4). |
-| Same, with volatility at four spans, downside volatility and the quoted-price mask? | V2 | 72 | **29** | A filter, not evidence. These 29 go to the holdout. |
+| Same, with volatility at four spans, downside volatility, the quoted-price mask and price floors on printed closes? | V2 | 72 | **29** | A filter, not evidence. These 29 go to the holdout. |
 
 A survivor here has passed pre-registered development gates. It has not been confirmed
 out of sample, and development alone cannot confirm it: the development universe is tilted
@@ -68,46 +69,102 @@ judge parity, inference, gate logic and feature arithmetic passed. It found:
 **V1's holdout is closed.** With F1 and the volatility finding, a V1 holdout run would test
 a design already known to be wrong. The instrument now refuses it.
 
+### Second review — the V2 instrument, fence and substrate
+
+V2 §7 makes an independent review a precondition of the holdout run. A second read-only
+review attacked revision 1 of V2. It reproduced the development result exactly (29
+survivors, every number), confirmed the statistics, the judge parity with eleven controls and
+the survivor-only holdout path, and related no feature to any label on 2022 onward. Its
+verdict: pass with fixes, and the holdout must not run until they land.
+
+| # | Finding | Severity | What was done |
+| --- | --- | --- | --- |
+| B1 | The $1 and $5 floors were tested on back-adjusted prices, so a later split could decide eligibility on a holdout date. About 274 of 294,780 eligible stock-dates. | blocker, small | Floors are tested on the close as printed, read from the whole-market store, wherever it prints one. |
+| B2 | For audited names the $5 floor was tested on the cleaner's rebuilt level, which can sit far from the printed price. 1,091 holdout stock-dates failed $5 on the rebuilt level while printing $5 or more; 181 the other way. | major | Same fix. |
+| A1 | A holdout run was not tied to the inputs the development result used, and the survivor re-check could not see the store-sourced block. | major | Every result carries a digest of its panel. A holdout run refuses unless its panel matches the development result's. The inputs are snapshotted. |
+| A2 | The holdout run would have printed statistics V2 did not list: quintile-group, era and non-overlapping statistics and a hit rate. | minor | The holdout forms and prints only what V2 §7 and §9 list. |
+| A3 | A deliberate caller could get around the fence: alter a panel, edit the design registry, call private functions, or use the older generic harness. | minor | The registry is read-only and a panel off the pre-registered calendar is refused. What the fence cannot bind is declared in V2 §0 and §10. |
+| C1 | Large single-day moves remain in store-sourced names after cleaning, and some raw jumps look like splits the reference does not list. | minor | Counted in §5. The audited-only bracket printed beside each holdout number shows the effect. |
+| D2 | A survivor with no usable holdout date would have vanished from the output. | minor | It is printed as unconfirmed. |
+
+The repairs change eligibility, so V2 was re-frozen as revision 2 and development was scored
+again (§6, §7).
+
 ## 5. Substrate: what the universe actually is
 
 Members by the membership file, and how many have a price, on the first session of the
-year:
+year. *Eligible price* means a quoted price that also clears the $5 floor.
 
-| Year | Members | Audited panel | Repaired, quoted |
-| --- | --- | --- | --- |
-| 2004 | 494 | 270 | 268 |
-| 2008 | 497 | 317 | 314 |
-| 2012 | 497 | 346 | 346 |
-| 2013 | 920 | 593 | 593 |
-| 2016 | 920 | 647 | 647 |
-| 2019 | 913 | 726 | 726 |
-| 2020 | 1,521 | 1,085 | 1,085 |
-| 2021 | 1,521 | 1,125 | 1,125 |
-| 2022 | 1,516 | 1,167 | 1,501 |
-| 2023 | 1,514 | 1,222 | 1,507 |
-| 2024 | 1,510 | 1,314 | 1,506 |
-| 2025 | 1,507 | 1,385 | 1,504 |
-| 2026 | 1,506 | 1,458 | 1,505 |
+| Year | Members | Audited panel, quoted | Repaired, quoted | Repaired, eligible price |
+| --- | --- | --- | --- | --- |
+| 2004 | 494 | 268 | 268 | 256 |
+| 2008 | 497 | 314 | 314 | 306 |
+| 2012 | 497 | 346 | 346 | 331 |
+| 2013 | 920 | 593 | 593 | 577 |
+| 2016 | 920 | 647 | 647 | 642 |
+| 2019 | 913 | 726 | 726 | 721 |
+| 2020 | 1,521 | 1,085 | 1,085 | 1,074 |
+| 2021 | 1,521 | 1,125 | 1,125 | 1,113 |
+| 2022 | 1,516 | 1,167 | 1,501 | 1,492 |
+| 2023 | 1,514 | 1,222 | 1,507 | 1,489 |
+| 2024 | 1,510 | 1,314 | 1,506 | 1,498 |
+| 2025 | 1,507 | 1,385 | 1,504 | 1,498 |
+| 2026 | 1,506 | 1,458 | 1,505 | 1,496 |
 
-Two things follow.
+Three things follow.
 
 - **The membership file is not a constant S&P 1500.** It lists about 500 names until 2012,
   about 920 from 2013 and about 1,520 from 2020.
-- **The audited panel is survivor-tilted.** It prices 55–80% of members in development,
+- **The audited panel is survivor-tilted.** It prices 54–80% of members in development,
   mostly names that are still listed. `loop/factor_experiment.py` calls the panel
   "survivorship-safe"; for this universe that overstates it. Every development number in
   this readout carries that tilt.
+- **The holdout universe is close to whole.** For 2022 onward the gap is repaired from the
+  whole-market daily store (410 names, split adjustment from a committed vendor reference,
+  validated against the audited panel on names both sources hold: 91 of 91 real splits
+  matched, no false adjustment). The repaired panel prices 99% or more of members, and
+  98–99% are eligible. Names that left before mid-2021 cannot be repaired.
 
-For 2022 onward the gap is repaired from the whole-market daily store (410 names, split
-adjustment from a committed vendor reference, validated against the audited panel on names
-both sources hold: 91 of 91 real splits matched, no false adjustment). The repaired panel
-prices more than 99% of members. Names that left before mid-2021 cannot be repaired.
+**Price floors on printed closes.** From 2021-07-06 the $1 and $5 floors are tested on the
+close as it printed. On the 197 holdout formation dates that have a 5-session label
+(2022-07-06 to 2026-06-02; prices and membership only):
+
+| | Stock-dates |
+| --- | --- |
+| Members | 297,167 |
+| Print $5 or more | 290,276 |
+| — of those, eligible | 290,240 |
+| Print under $5 (18 under $1) — not eligible | 2,314 |
+| No printed close | 4,577 |
+| — of those, eligible on the adjusted, cleaned price | 3,818 |
+| Eligible in all | 294,058 |
+
+98.7% of eligible stock-dates were tested on a printed close. The 1.3% on the fallback are
+about 50 names: four class-share symbols the store files differently (BF-B, BRK-B, CWEN-A,
+MOG-A) and symbols the store starts carrying only after a ticker change. Per formation date
+roughly 1,480 to 1,500 names are eligible and roughly 1,460 to 1,495 have every feature and
+control.
+
+**What is still wrong in the store-sourced prices.** Counted by the second review, on prices
+only, in the holdout window: 160 cleaned single-day moves beyond ±40% across 82 store-sourced
+names (68 beyond ±55%). 3 of 29 applied split events do not match the raw price jump within
+30% (BNED 2024-06-12, CARA 2024-12-31, and FI 2021-10-04, which falls in a listing the
+segment rule drops). 16 split-like raw jumps are not in the reference; the review could not
+verify those in RGS, KAMN, ORGO, APPS, MODV, WOLF and QURE, and identified those in FRC and
+PACW as real crashes. A wrong price in a store-sourced name moves that name's features,
+controls and labels. The audited-only bracket shows how much a holdout number leans on these
+names.
 
 ## 6. V2 — development result
 
 Controls: four trailing returns, volatility at 20/60/120/252 sessions, downside volatility at
-60/252, beta. Quoted-price mask. Seven gates, the seventh requiring the same sign in at least
-four of five volatility quintiles. 72 tests.
+60/252, beta. Quoted-price mask. Price floors on printed closes from 2021-07-06. Seven gates,
+the seventh requiring the same sign in at least four of five volatility quintiles. 72 tests.
+
+This is the result under revision 2. Revision 2 changes eligibility only in the last
+half-year of the development sample (3–5% of development stock-dates have a printed close).
+The survivors are the same 29 tests as under revision 1, no gate changed for any test, and
+the largest change in any mean IC is 0.00002.
 
 | Family | Tests | Survive |
 | --- | --- | --- |
@@ -124,80 +181,81 @@ four of five volatility quintiles. 72 tests.
   do not survive.
 - **Gain retention.** Null under V2's controls. The single V1 survivor does not survive them.
 
-These are small effects. The largest mean IC is 0.056.
+These are small effects. The largest mean IC is 0.056. One survivor is there by a hair:
+`distance_to_high_20d` at 5 sessions clears the 0.010 floor by 0.00002, in both revisions.
 
 | Feature | h | Mean IC | HAC t | BH q | V1 controls | Momentum only | Raw | Gates failed | Survives |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `directional_consistency_20d` | 5 | -0.0036 | -2.10 | 0.0498 | -0.0030 | +0.0192 | +0.0076 | G2, G4, G5, G6 | no |
-| `directional_consistency_20d` | 20 | -0.0057 | -2.93 | 0.0057 | -0.0076 | +0.0225 | +0.0070 | G2, G5, G6 | no |
+| `directional_consistency_20d` | 5 | -0.0036 | -2.10 | 0.0497 | -0.0030 | +0.0192 | +0.0076 | G2, G4, G5, G6 | no |
+| `directional_consistency_20d` | 20 | -0.0057 | -2.94 | 0.0057 | -0.0076 | +0.0225 | +0.0070 | G2, G5, G6 | no |
 | `directional_consistency_20d` | 60 | -0.0085 | -3.86 | 0.0002 | -0.0094 | +0.0239 | +0.0044 | G2, G3, G5, G6 | no |
 | `directional_consistency_60d` | 5 | -0.0043 | -2.30 | 0.0308 | -0.0094 | +0.0174 | +0.0103 | G2, G5, G6 | no |
-| `directional_consistency_60d` | 20 | -0.0103 | -3.58 | 0.0005 | -0.0164 | +0.0203 | +0.0087 | G3, G5 | no |
-| `directional_consistency_60d` | 60 | -0.0187 | -4.91 | 0.0000 | -0.0247 | +0.0152 | -0.0024 | G5 | no |
+| `directional_consistency_60d` | 20 | -0.0103 | -3.57 | 0.0007 | -0.0164 | +0.0203 | +0.0087 | G3, G5 | no |
+| `directional_consistency_60d` | 60 | -0.0187 | -4.90 | 0.0000 | -0.0247 | +0.0152 | -0.0024 | G5 | no |
 | `directional_consistency_120d` | 5 | -0.0089 | -4.16 | 0.0000 | -0.0086 | +0.0138 | +0.0082 | G2, G5, G6 | no |
 | `directional_consistency_120d` | 20 | -0.0190 | -5.57 | 0.0000 | -0.0177 | +0.0124 | +0.0021 | G5 | no |
 | `directional_consistency_120d` | 60 | -0.0272 | -5.83 | 0.0000 | -0.0245 | +0.0097 | -0.0042 | G5 | no |
 | `efficiency_20d` | 5 | +0.0172 | +8.55 | 0.0000 | +0.0188 | +0.0516 | +0.0054 | — | yes |
 | `efficiency_20d` | 20 | +0.0173 | +6.25 | 0.0000 | +0.0163 | +0.0590 | -0.0008 | — | yes |
 | `efficiency_20d` | 60 | +0.0071 | +2.36 | 0.0273 | +0.0059 | +0.0507 | -0.0150 | G2, G3, G5, G6, G7 | no |
-| `efficiency_60d` | 5 | +0.0093 | +3.66 | 0.0005 | +0.0128 | +0.0461 | -0.0045 | G2, G6, G7 | no |
+| `efficiency_60d` | 5 | +0.0093 | +3.66 | 0.0004 | +0.0128 | +0.0461 | -0.0045 | G2, G6, G7 | no |
 | `efficiency_60d` | 20 | +0.0072 | +1.75 | 0.1069 | +0.0101 | +0.0548 | -0.0150 | G1, G2, G6, G7 | no |
 | `efficiency_60d` | 60 | -0.0072 | -1.57 | 0.1419 | -0.0057 | +0.0413 | -0.0368 | G1, G2, G5, G6 | no |
-| `efficiency_120d` | 5 | +0.0025 | +0.85 | 0.4283 | +0.0061 | +0.0430 | -0.0185 | G1, G2, G3, G6, G7 | no |
-| `efficiency_120d` | 20 | -0.0068 | -1.42 | 0.1880 | -0.0014 | +0.0482 | -0.0382 | G1, G2, G3, G5, G6 | no |
+| `efficiency_120d` | 5 | +0.0025 | +0.85 | 0.4282 | +0.0061 | +0.0430 | -0.0185 | G1, G2, G3, G6, G7 | no |
+| `efficiency_120d` | 20 | -0.0068 | -1.42 | 0.1883 | -0.0014 | +0.0482 | -0.0382 | G1, G2, G3, G5, G6 | no |
 | `efficiency_120d` | 60 | -0.0177 | -2.72 | 0.0102 | -0.0139 | +0.0402 | -0.0535 | G5 | no |
 | `positive_day_fraction_20d` | 5 | +0.0107 | +5.62 | 0.0000 | +0.0111 | +0.0311 | +0.0526 | — | yes |
-| `positive_day_fraction_20d` | 20 | +0.0093 | +3.66 | 0.0005 | +0.0090 | +0.0356 | +0.0607 | G2, G6 | no |
+| `positive_day_fraction_20d` | 20 | +0.0093 | +3.65 | 0.0005 | +0.0090 | +0.0356 | +0.0607 | G2, G6 | no |
 | `positive_day_fraction_20d` | 60 | +0.0092 | +3.58 | 0.0005 | +0.0113 | +0.0401 | +0.0570 | G2, G6 | no |
-| `positive_day_fraction_60d` | 5 | +0.0139 | +7.27 | 0.0000 | +0.0136 | +0.0436 | +0.0703 | — | yes |
-| `positive_day_fraction_60d` | 20 | +0.0150 | +5.07 | 0.0000 | +0.0145 | +0.0552 | +0.0875 | — | yes |
+| `positive_day_fraction_60d` | 5 | +0.0139 | +7.28 | 0.0000 | +0.0137 | +0.0436 | +0.0703 | — | yes |
+| `positive_day_fraction_60d` | 20 | +0.0150 | +5.06 | 0.0000 | +0.0144 | +0.0552 | +0.0875 | — | yes |
 | `positive_day_fraction_60d` | 60 | +0.0117 | +2.93 | 0.0057 | +0.0142 | +0.0590 | +0.0845 | — | yes |
 | `positive_day_fraction_120d` | 5 | +0.0136 | +7.71 | 0.0000 | +0.0166 | +0.0518 | +0.0804 | — | yes |
 | `positive_day_fraction_120d` | 20 | +0.0149 | +4.99 | 0.0000 | +0.0188 | +0.0672 | +0.1009 | — | yes |
-| `positive_day_fraction_120d` | 60 | +0.0108 | +2.41 | 0.0242 | +0.0183 | +0.0719 | +0.1007 | G7 | no |
+| `positive_day_fraction_120d` | 60 | +0.0107 | +2.41 | 0.0244 | +0.0183 | +0.0719 | +0.1007 | G7 | no |
 | `signed_efficiency_20d` | 5 | +0.0072 | +3.83 | 0.0002 | +0.0106 | +0.0516 | +0.0581 | G2, G6 | no |
 | `signed_efficiency_20d` | 20 | +0.0057 | +2.35 | 0.0273 | +0.0063 | +0.0635 | +0.0687 | G2, G3, G6 | no |
-| `signed_efficiency_20d` | 60 | +0.0023 | +0.71 | 0.5079 | +0.0050 | +0.0677 | +0.0592 | G1, G2, G3, G4, G6 | no |
-| `signed_efficiency_60d` | 5 | -0.0006 | -0.30 | 0.7664 | +0.0056 | +0.0762 | +0.0756 | G1, G2, G3, G4, G5, G6, G7 | no |
-| `signed_efficiency_60d` | 20 | -0.0017 | -0.50 | 0.6317 | +0.0049 | +0.1023 | +0.0962 | G1, G2, G3, G4, G5, G6, G7 | no |
-| `signed_efficiency_60d` | 60 | -0.0082 | -1.60 | 0.1354 | -0.0045 | +0.1095 | +0.0881 | G1, G2, G3, G4, G5, G6, G7 | no |
-| `signed_efficiency_120d` | 5 | -0.0020 | -0.92 | 0.3983 | +0.0088 | +0.0951 | +0.0879 | G1, G2, G3, G4, G5, G6, G7 | no |
-| `signed_efficiency_120d` | 20 | -0.0064 | -1.74 | 0.1079 | +0.0090 | +0.1305 | +0.1111 | G1, G2, G3, G5, G6, G7 | no |
-| `signed_efficiency_120d` | 60 | -0.0093 | -2.00 | 0.0611 | +0.0066 | +0.1452 | +0.1102 | G2, G3, G5, G6, G7 | no |
-| `retained_20d` | 5 | +0.0083 | +4.35 | 0.0000 | +0.0115 | +0.0524 | +0.0595 | G2, G6 | no |
+| `signed_efficiency_20d` | 60 | +0.0023 | +0.71 | 0.5083 | +0.0050 | +0.0677 | +0.0592 | G1, G2, G3, G4, G6 | no |
+| `signed_efficiency_60d` | 5 | -0.0006 | -0.29 | 0.7680 | +0.0056 | +0.0762 | +0.0756 | G1, G2, G3, G4, G5, G6, G7 | no |
+| `signed_efficiency_60d` | 20 | -0.0017 | -0.51 | 0.6302 | +0.0049 | +0.1023 | +0.0962 | G1, G2, G3, G4, G5, G6, G7 | no |
+| `signed_efficiency_60d` | 60 | -0.0082 | -1.60 | 0.1349 | -0.0045 | +0.1095 | +0.0881 | G1, G2, G3, G4, G5, G6, G7 | no |
+| `signed_efficiency_120d` | 5 | -0.0020 | -0.92 | 0.3981 | +0.0088 | +0.0951 | +0.0879 | G1, G2, G3, G4, G5, G6, G7 | no |
+| `signed_efficiency_120d` | 20 | -0.0064 | -1.74 | 0.1075 | +0.0090 | +0.1304 | +0.1111 | G1, G2, G3, G5, G6, G7 | no |
+| `signed_efficiency_120d` | 60 | -0.0093 | -2.01 | 0.0609 | +0.0066 | +0.1452 | +0.1102 | G2, G3, G5, G6, G7 | no |
+| `retained_20d` | 5 | +0.0083 | +4.35 | 0.0000 | +0.0115 | +0.0524 | +0.0594 | G2, G6 | no |
 | `retained_20d` | 20 | +0.0068 | +2.75 | 0.0098 | +0.0072 | +0.0643 | +0.0703 | G2, G3, G6 | no |
-| `retained_20d` | 60 | +0.0034 | +1.08 | 0.3271 | +0.0060 | +0.0685 | +0.0608 | G1, G2, G3, G4, G6 | no |
-| `retained_60d` | 5 | +0.0034 | +1.61 | 0.1354 | +0.0096 | +0.0790 | +0.0804 | G1, G2, G3, G4, G6 | no |
-| `retained_60d` | 20 | +0.0036 | +1.05 | 0.3305 | +0.0100 | +0.1058 | +0.1023 | G1, G2, G4, G6 | no |
-| `retained_60d` | 60 | -0.0024 | -0.46 | 0.6578 | +0.0011 | +0.1131 | +0.0954 | G1, G2, G3, G4, G5, G6, G7 | no |
-| `retained_120d` | 5 | +0.0057 | +2.21 | 0.0384 | +0.0167 | +0.0998 | +0.0988 | G2, G3, G5, G6 | no |
-| `retained_120d` | 20 | +0.0045 | +1.09 | 0.3260 | +0.0199 | +0.1370 | +0.1279 | G1, G2, G3, G4, G5, G6 | no |
-| `retained_120d` | 60 | +0.0039 | +0.71 | 0.5079 | +0.0195 | +0.1529 | +0.1307 | G1, G2, G3, G4, G5, G6 | no |
+| `retained_20d` | 60 | +0.0034 | +1.08 | 0.3276 | +0.0060 | +0.0685 | +0.0608 | G1, G2, G3, G4, G6 | no |
+| `retained_60d` | 5 | +0.0034 | +1.61 | 0.1349 | +0.0096 | +0.0791 | +0.0804 | G1, G2, G3, G4, G6 | no |
+| `retained_60d` | 20 | +0.0036 | +1.05 | 0.3321 | +0.0100 | +0.1058 | +0.1023 | G1, G2, G4, G6 | no |
+| `retained_60d` | 60 | -0.0025 | -0.46 | 0.6567 | +0.0011 | +0.1131 | +0.0954 | G1, G2, G3, G4, G5, G6, G7 | no |
+| `retained_120d` | 5 | +0.0056 | +2.21 | 0.0384 | +0.0167 | +0.0998 | +0.0988 | G2, G3, G5, G6 | no |
+| `retained_120d` | 20 | +0.0045 | +1.09 | 0.3265 | +0.0199 | +0.1370 | +0.1279 | G1, G2, G3, G4, G5, G6 | no |
+| `retained_120d` | 60 | +0.0039 | +0.71 | 0.5083 | +0.0194 | +0.1529 | +0.1307 | G1, G2, G3, G4, G5, G6 | no |
 | `distance_to_high_20d` | 5 | +0.0100 | +4.75 | 0.0000 | +0.0235 | +0.1360 | +0.1528 | — | yes |
 | `distance_to_high_20d` | 20 | +0.0167 | +7.08 | 0.0000 | +0.0291 | +0.1817 | +0.2005 | — | yes |
-| `distance_to_high_20d` | 60 | +0.0145 | +6.10 | 0.0000 | +0.0315 | +0.1959 | +0.2026 | — | yes |
-| `distance_to_high_60d` | 5 | +0.0164 | +7.59 | 0.0000 | +0.0246 | +0.1734 | +0.1793 | — | yes |
-| `distance_to_high_60d` | 20 | +0.0255 | +9.48 | 0.0000 | +0.0354 | +0.2359 | +0.2363 | — | yes |
-| `distance_to_high_60d` | 60 | +0.0273 | +9.40 | 0.0000 | +0.0397 | +0.2576 | +0.2423 | — | yes |
-| `distance_to_high_120d` | 5 | +0.0216 | +10.49 | 0.0000 | +0.0384 | +0.1932 | +0.1962 | — | yes |
-| `distance_to_high_120d` | 20 | +0.0355 | +12.10 | 0.0000 | +0.0587 | +0.2665 | +0.2605 | — | yes |
+| `distance_to_high_20d` | 60 | +0.0145 | +6.09 | 0.0000 | +0.0315 | +0.1959 | +0.2026 | — | yes |
+| `distance_to_high_60d` | 5 | +0.0165 | +7.60 | 0.0000 | +0.0246 | +0.1734 | +0.1793 | — | yes |
+| `distance_to_high_60d` | 20 | +0.0255 | +9.47 | 0.0000 | +0.0354 | +0.2359 | +0.2364 | — | yes |
+| `distance_to_high_60d` | 60 | +0.0273 | +9.40 | 0.0000 | +0.0397 | +0.2576 | +0.2424 | — | yes |
+| `distance_to_high_120d` | 5 | +0.0216 | +10.49 | 0.0000 | +0.0384 | +0.1933 | +0.1962 | — | yes |
+| `distance_to_high_120d` | 20 | +0.0355 | +12.10 | 0.0000 | +0.0587 | +0.2665 | +0.2606 | — | yes |
 | `distance_to_high_120d` | 60 | +0.0406 | +10.60 | 0.0000 | +0.0677 | +0.2925 | +0.2693 | — | yes |
 | `max_drawdown_20d` | 5 | +0.0185 | +9.72 | 0.0000 | +0.0437 | +0.2174 | +0.2538 | — | yes |
-| `max_drawdown_20d` | 20 | +0.0280 | +11.04 | 0.0000 | +0.0503 | +0.2843 | +0.3288 | — | yes |
+| `max_drawdown_20d` | 20 | +0.0280 | +11.04 | 0.0000 | +0.0503 | +0.2844 | +0.3288 | — | yes |
 | `max_drawdown_20d` | 60 | +0.0275 | +9.95 | 0.0000 | +0.0573 | +0.3090 | +0.3440 | — | yes |
-| `max_drawdown_60d` | 5 | +0.0246 | +10.78 | 0.0000 | +0.0284 | +0.2321 | +0.2722 | — | yes |
-| `max_drawdown_60d` | 20 | +0.0412 | +13.09 | 0.0000 | +0.0465 | +0.3186 | +0.3648 | — | yes |
-| `max_drawdown_60d` | 60 | +0.0472 | +13.31 | 0.0000 | +0.0506 | +0.3444 | +0.3856 | — | yes |
-| `max_drawdown_120d` | 5 | +0.0268 | +13.03 | 0.0000 | +0.0505 | +0.2397 | +0.2833 | — | yes |
+| `max_drawdown_60d` | 5 | +0.0246 | +10.79 | 0.0000 | +0.0284 | +0.2321 | +0.2722 | — | yes |
+| `max_drawdown_60d` | 20 | +0.0412 | +13.09 | 0.0000 | +0.0465 | +0.3186 | +0.3649 | — | yes |
+| `max_drawdown_60d` | 60 | +0.0472 | +13.31 | 0.0000 | +0.0506 | +0.3445 | +0.3856 | — | yes |
+| `max_drawdown_120d` | 5 | +0.0269 | +13.03 | 0.0000 | +0.0505 | +0.2397 | +0.2834 | — | yes |
 | `max_drawdown_120d` | 20 | +0.0442 | +14.01 | 0.0000 | +0.0803 | +0.3319 | +0.3831 | — | yes |
 | `max_drawdown_120d` | 60 | +0.0557 | +12.17 | 0.0000 | +0.0964 | +0.3648 | +0.4133 | — | yes |
-| `sessions_since_high_20d` | 5 | -0.0018 | -1.06 | 0.3305 | -0.0037 | -0.0198 | -0.0409 | G1, G2, G3, G4, G5, G6, G7 | no |
-| `sessions_since_high_20d` | 20 | -0.0035 | -1.64 | 0.1309 | -0.0048 | -0.0277 | -0.0512 | G1, G2, G3, G4, G6, G7 | no |
-| `sessions_since_high_20d` | 60 | -0.0013 | -0.57 | 0.5897 | -0.0033 | -0.0274 | -0.0436 | G1, G2, G3, G4, G5, G6, G7 | no |
+| `sessions_since_high_20d` | 5 | -0.0019 | -1.06 | 0.3294 | -0.0037 | -0.0198 | -0.0409 | G1, G2, G3, G4, G5, G6, G7 | no |
+| `sessions_since_high_20d` | 20 | -0.0035 | -1.64 | 0.1310 | -0.0048 | -0.0277 | -0.0512 | G1, G2, G3, G4, G6, G7 | no |
+| `sessions_since_high_20d` | 60 | -0.0013 | -0.57 | 0.5905 | -0.0033 | -0.0274 | -0.0436 | G1, G2, G3, G4, G5, G6, G7 | no |
 | `sessions_since_high_60d` | 5 | -0.0091 | -5.05 | 0.0000 | -0.0077 | -0.0358 | -0.0575 | G2, G6 | no |
-| `sessions_since_high_60d` | 20 | -0.0124 | -4.59 | 0.0000 | -0.0121 | -0.0513 | -0.0741 | — | yes |
-| `sessions_since_high_60d` | 60 | -0.0086 | -2.74 | 0.0098 | -0.0079 | -0.0518 | -0.0682 | G2, G6 | no |
-| `sessions_since_high_120d` | 5 | -0.0075 | -3.96 | 0.0002 | -0.0131 | -0.0428 | -0.0717 | G2, G4, G6 | no |
+| `sessions_since_high_60d` | 20 | -0.0124 | -4.58 | 0.0000 | -0.0121 | -0.0513 | -0.0742 | — | yes |
+| `sessions_since_high_60d` | 60 | -0.0086 | -2.74 | 0.0099 | -0.0079 | -0.0518 | -0.0682 | G2, G6 | no |
+| `sessions_since_high_120d` | 5 | -0.0075 | -3.97 | 0.0002 | -0.0131 | -0.0428 | -0.0717 | G2, G4, G6 | no |
 | `sessions_since_high_120d` | 20 | -0.0164 | -5.89 | 0.0000 | -0.0256 | -0.0673 | -0.0961 | — | yes |
 | `sessions_since_high_120d` | 60 | -0.0154 | -4.77 | 0.0000 | -0.0253 | -0.0720 | -0.0950 | — | yes |
 
@@ -213,10 +271,21 @@ These are small effects. The largest mean IC is 0.056.
   V2 treats development as a filter.
 - **Price-only work on 2022 onward** was done to build and validate the repair: split
   validation, gap counts, member coverage. No feature was related to any label there.
+- **V2 was re-frozen before any holdout run.** Revision 1 (sha256 `e63d49eb…d24c`) is
+  superseded by revision 2 (sha256 `2882865d…2d17`), which makes the repairs the second
+  review required (§4). Development was scored again under revision 2: the same 29
+  survivors, largest change in any mean IC 0.00002. Revision 1's development result is in
+  git history at commit `28c445e0`.
+- **V1's development result was re-emitted** on the revised instrument so that it carries a
+  panel digest. Every statistic and the survivor set are identical.
+- **More price-only work on 2022 onward** was done for revision 2, by the author and by the
+  second review: printed-against-adjusted price comparisons, floor counts under each rule,
+  eligible and complete-case counts per formation date, large-move and split checks. No
+  feature was related to any label there.
 
 ## 8. What happens next
 
-1. Independent review of the V2 instrument, fence and substrate.
+1. Re-review of the changes revision 2 made.
 2. One holdout run: the 29 survivors, formation dates from 2022-07-06, repaired universe.
 3. Per family: confirmed members move to `RESEARCH_PREDICTIVE` for downside-risk
    description and earn a walk-forward comparison; otherwise the family stays `DESCRIPTIVE`
@@ -236,7 +305,24 @@ python3 -m research.trend_persistence_panel --design v2 --sample dev \
 
 `<breadth>` holds `_closes_deep.parquet`, `_closes_delisted.parquet` and
 `sp1500_pit_membership.parquet`. Input digests are stamped in each result under
-`provenance`.
+`provenance`, and the panel digest under `panel_sha256`.
+
+The committed results were scored on these inputs (sha256, first 16 hex digits):
+`_closes_deep.parquet` `88e3261ca077543a`, `_closes_delisted.parquet` `1e668fe0c181a59f`,
+`sp1500_pit_membership.parquet` `7b34316c0561619b`, store-sourced block `4c86f65bb07784fe`, printed
+closes `fae48d0d4fb90e19`. V2 panel digest: `48cb5e76269b3a50…`.
+
+The holdout run, once, after the re-review:
+
+```
+python3 -m research.trend_persistence_panel --design v2 --sample holdout \
+    --prereg-hash <sha256 of TREND_PERSISTENCE_PREREG_V2.md> \
+    --dev-result research/data/trend_persistence_v2_dev.json \
+    --breadth-dir <breadth> --store-dir <massive_stock_day> --out <file>
+```
+
+It refuses a panel whose digest differs from the development result's, so it has to be run
+on the same inputs.
 
 ## Appendix A — gate legend
 

@@ -3,6 +3,12 @@
 Advisory-only: no live ranking, sizing, gates, buys or sells. Historical research reuses
 Mastermind's audited survivorship/PIT panel when available and asks whether path-quality
 features add information conditional on vanilla momentum.
+
+This module holds no data and no holdout fence: ``build_panel`` and ``evaluate`` score
+whatever prices they are handed. The pre-registered tests live in
+``research.trend_persistence_panel``, which owns the fence. Do not feed this harness real
+prices for formation dates on or after 2022-01-01 — that would read the locked holdout
+outside the pre-registration.
 """
 from __future__ import annotations
 

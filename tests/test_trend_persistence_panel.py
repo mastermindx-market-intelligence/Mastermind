@@ -204,8 +204,11 @@ def _synthetic_panel(masked: bool = False, stored=()):
     closes, spy = _prices(900, 130, seed=9, start="2020-01-01")
     closes.insert(0, "SPY", spy)
     mem = _membership(closes.drop(columns="SPY"))
-    observed = closes.notna() if masked else None
-    return panel.build_panel(closes, mem, observed=observed, store_sourced=stored)
+    if not masked:
+        return panel.build_panel(closes, mem, store_sourced=stored)
+    printed = closes[closes.index >= pd.Timestamp(substrate.STORE_START)].reindex(closes.index)
+    return panel.build_panel(closes, mem, observed=closes.notna(), printed=printed,
+                             store_sourced=stored)
 
 
 def test_sample_boundaries_are_fixed_and_development_never_touches_a_locked_price():
@@ -241,8 +244,10 @@ def test_no_caller_can_move_the_holdout_boundary():
         panel.score(built, design=panel.Design(
             id="v2", prereg_file="x.md", prereg_sha256="0" * 64, controls=panel.CONTROLS,
             endpoints=panel.ENDPOINTS, holdout_formation_start="2030-01-01",
-            observed_mask=False, risk_bucket_gate=False, substrate="audited",
-            holdout_open=True))
+            observed_mask=False, printed_floor=False, risk_bucket_gate=False,
+            substrate="audited", holdout_open=True))
+    with pytest.raises(TypeError):                            # the registry itself is read-only
+        panel.DESIGNS["v1"] = panel.DESIGNS["v2"]
 
 
 def test_v1_holdout_is_closed_for_good():
@@ -282,6 +287,32 @@ def test_v2_holdout_needs_the_hash_and_the_committed_development_result():
         panel.score(built, design="v2", sample="holdout", prereg_hash=pin, dev_result=forged)
 
 
+def test_holdout_is_bound_to_the_panel_the_development_result_was_scored_on():
+    pytest.importorskip("engine.validation")
+    built = _synthetic_panel(masked=True)
+    pin = panel.pinned_prereg("v2")
+    dev = panel.score(built, design="v2", sample="dev")
+    assert dev["panel_sha256"] == built["digest"] and len(built["digest"]) == 64
+    assert _synthetic_panel(masked=True)["digest"] == built["digest"]      # deterministic
+    # same design, same survivors claimed, different inputs: one more stored name
+    other = _synthetic_panel(masked=True, stored=("N000",))
+    assert other["digest"] != built["digest"]
+    with pytest.raises(panel.HoldoutLocked, match="not the one"):
+        panel.score(other, design="v2", sample="holdout", prereg_hash=pin, dev_result=dev)
+    legacy = {k: v for k, v in dev.items() if k != "panel_sha256"}         # an unbound result
+    with pytest.raises(panel.HoldoutLocked, match="not the one"):
+        panel.score(built, design="v2", sample="holdout", prereg_hash=pin, dev_result=legacy)
+
+
+def test_a_panel_off_the_preregistered_calendar_is_refused():
+    closes, spy = _prices(400, 20, seed=5)
+    closes.insert(0, "SPY", spy)
+    mem = _membership(closes.drop(columns="SPY"))
+    for kwargs in ({"step": 10}, {"lag": 2}, {"horizons": (5, 20)}):
+        with pytest.raises(ValueError, match="pre-registered calendar"):
+            panel.score(panel.build_panel(closes, mem, **kwargs), sample="dev")
+
+
 def test_holdout_stays_unspent_without_a_development_survivor(monkeypatch):
     pytest.importorskip("engine.validation")
     built = _synthetic_panel(masked=True)
@@ -315,6 +346,8 @@ def test_holdout_scores_the_development_survivors_and_nothing_else(monkeypatch):
     out = panel.score(built, design="v2", sample="holdout", prereg_hash=pin, dev_result=dev)
     assert out["status"] == "scored" and out["sample"] == "holdout"
     assert set(out["tests"]) == set(keys) and out["n_confirm_requested"] == 2
+    assert out["panel_sha256"] == built["digest"]
+    assert out["coverage"]["20"]["printed_floor_fraction"] == 1.0
     assert list(out["coverage"]) == ["20"]                   # horizons without a survivor: untouched
     first = pd.Timestamp(out["coverage"]["20"]["first_date"])
     assert first >= pd.Timestamp(panel.HOLDOUT_FORMATION_START_V2)
@@ -325,7 +358,38 @@ def test_holdout_scores_the_development_survivors_and_nothing_else(monkeypatch):
         assert set(st["holdout_gates"]) == {"h1_same_sign", "h2_one_sided_p", "h3_bh_fdr",
                                             "h4_ic_floor"}
         assert "drop_mean" in st and "audited_only_mean" in st and "v1_controls_mean" in st
+        # nothing the pre-registration does not list is formed on the holdout
+        assert not set(st) & {"hit", "thinned", "era_means", "bucket_means",
+                              "risk_bucket_means", "gates", "advance_dev"}
     json.dumps(out, default=str)
+
+
+def test_a_survivor_without_holdout_dates_is_printed_as_unconfirmed(monkeypatch):
+    pytest.importorskip("engine.validation")
+    built = _synthetic_panel(masked=True)
+    pin = panel.pinned_prereg("v2")
+    keys = {"max_drawdown_120d|20|forward_max_drawdown": 1,
+            "max_drawdown_120d|60|forward_max_drawdown": 1}
+    real_gates, real_rows = panel._apply_dev_gates, panel.sample_rows
+
+    def two_survivors(V, result, d):
+        real_gates(V, result, d)
+        result["survivors"] = dict(keys)
+
+    def no_long_horizon(built_, horizon, sample, design="v1"):
+        rows = real_rows(built_, horizon, sample, design)
+        return rows[:0] if (sample == "holdout" and int(horizon) == 60) else rows
+
+    monkeypatch.setattr(panel, "_apply_dev_gates", two_survivors)
+    monkeypatch.setattr(panel, "sample_rows", no_long_horizon)
+    dev = panel.score(built, design="v2", sample="dev")
+    out = panel.score(built, design="v2", sample="holdout", prereg_hash=pin, dev_result=dev)
+    assert set(out["tests"]) == set(keys) and out["n_confirm_requested"] == 2
+    lost = out["tests"]["max_drawdown_120d|60|forward_max_drawdown"]
+    assert lost["not_scored"] == "no_usable_holdout_dates" and lost["n_dates"] == 0
+    assert lost["p_one_sided"] == 1.0 and lost["confirmed_holdout"] is False
+    assert not any(lost["holdout_gates"].values())
+    assert "max_drawdown_120d|60|forward_max_drawdown" not in out["confirmed"]
 
 
 def test_development_scoring_runs_every_preregistered_test():
@@ -370,6 +434,35 @@ def test_a_design_refuses_a_panel_built_for_the_other_mask():
         panel.score(_synthetic_panel(masked=True), design="v1", sample="dev")
     with pytest.raises(ValueError, match="quoted-price mask"):
         panel.score(_synthetic_panel(), design="v2", sample="dev")
+    closes, spy = _prices(330, 4, seed=13)
+    closes.insert(0, "SPY", spy)
+    mem = _membership(closes.drop(columns="SPY"))
+    with pytest.raises(ValueError, match="printed prices"):       # v2 without printed closes
+        panel.score(panel.build_panel(closes, mem, observed=closes.notna()),
+                    design="v2", sample="dev")
+
+
+def test_the_selection_floor_is_tested_on_the_printed_close_where_one_is_known():
+    closes, spy = _prices(330, 4, seed=13)
+    closes.insert(0, "SPY", spy)
+    mem = _membership(closes.drop(columns="SPY"))
+    names = [c for c in closes.columns if c != "SPY"]
+    plain = panel.build_panel(closes, mem, observed=closes.notna())
+    at = {int(r): i for i, r in enumerate(plain["rows"])}
+    assert plain["eligible"][at[262]].all() and not plain["printed_floor"]
+    printed = pd.DataFrame(np.nan, index=closes.index, columns=closes.columns)
+    printed.iloc[262, 1] = 4.99       # N000 printed under the floor: a later reverse split
+    printed.iloc[267, 2] = 250.0      # N001 printed far above its adjusted level: a later split
+    lowered = closes.copy()
+    lowered.iloc[:, 2] = closes.iloc[:, 2] * (2.0 / closes.iloc[267, 2])   # adjusted level: $2
+    built = panel.build_panel(lowered, mem, observed=closes.notna(), printed=printed)
+    assert built["printed_floor"] and built["digest"] != plain["digest"]
+    assert not built["eligible"][at[262], 0]                     # the printed close decides
+    assert built["eligible"][at[262], 2] and built["eligible"][at[267], 0]   # no print: fallback
+    assert built["eligible"][at[267], 1]                         # printed above, adjusted below
+    assert not built["eligible"][at[262], 1]                     # no print there: adjusted $2
+    assert built["floor_printed"][at[262], 0] and not built["floor_printed"][at[262], 2]
+    assert names[0] == "N000"
 
 
 def test_only_quoted_prices_decide_eligibility_and_features():
@@ -435,6 +528,7 @@ def test_only_the_confirmatory_design_can_ever_open_a_holdout():
     assert [d.id for d in panel.DESIGNS.values() if d.holdout_open] == ["v2"]
     v2 = panel.DESIGNS["v2"]
     assert v2.endpoints == ("forward_max_drawdown",) and v2.observed_mask and v2.risk_bucket_gate
+    assert v2.printed_floor and not panel.DESIGNS["v1"].printed_floor
     assert pd.Timestamp(v2.holdout_formation_start) > pd.Timestamp(panel.HOLDOUT_START)
 
 
@@ -489,6 +583,12 @@ def test_store_block_is_adjusted_trimmed_and_reported(tmp_path):
     assert np.allclose(block["AAA"].to_numpy(), 20.0)       # the 3-for-1 split is removed
     assert block["BBB"].iloc[:150].isna().all() and (block["BBB"].iloc[150:] == 80.0).all()
     assert report["listings_trimmed"] == ["BBB"] and report["splits_applied"] == 1
+    # printed closes are read by symbol and day, unadjusted and untrimmed
+    printed, absent = substrate.load_printed(["AAA", "BBB", "CCC"], index, str(tmp_path))
+    assert absent == ["CCC"] and list(printed.columns) == ["AAA", "BBB"]
+    assert (printed["AAA"].iloc[:100] == 60.0).all() and (printed["AAA"].iloc[100:] == 20.0).all()
+    assert (printed["BBB"].iloc[:50] == 5.0).all() and printed["BBB"].iloc[50:150].isna().all()
+    assert substrate.store_window_members(mem) == ["AAA", "BBB", "CCC", "DD/E"]
 
 
 def test_committed_split_reference_loads_clean():

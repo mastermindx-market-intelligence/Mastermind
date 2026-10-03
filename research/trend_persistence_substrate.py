@@ -11,10 +11,15 @@ session 2021-07-06), back-adjusts them for splits from a committed vendor refere
 one contiguous listing that matches the membership, and cleans the block with the audited
 sanitizer. Audited columns are loaded by the audited loader and are not touched.
 
-It also returns the quoted-price mask for every column: True where a real close of at least
-$1 was printed that day. The sanitizer fills the gaps inside a name's life, and whether a day
-is "inside" depends on whether the name trades again later, so the cleaned panel alone cannot
-say what was knowable on the day. The mask can.
+It also returns the quoted-price mask for every column: True where the cleaned panel holds a
+real close and not a filled one. The sanitizer fills the gaps inside a name's life, and
+whether a day is "inside" depends on whether the name trades again later, so the cleaned panel
+alone cannot say what was knowable on the day. The mask can.
+
+And it returns the close exactly as it printed, unadjusted, for every member the store has a
+file for. A back-adjusted price is divided by splits that had not happened yet, so a $1 or $5
+threshold tested on it lets the future decide who is eligible. From the store's first session
+the thresholds are tested on the printed close.
 
 What this does not repair, and the pre-registration says so: members that left before the
 store begins; dividends and spin-offs in store-sourced names (only splits are adjusted, so a
@@ -80,11 +85,44 @@ def member_segment(close: pd.Series, spans, gap_days: int = SEGMENT_GAP_DAYS) ->
     return close[run == best]
 
 
-def store_candidates(mem: pd.DataFrame, have) -> list[str]:
-    """Members with a span reaching into the store window and no audited price column."""
+def store_window_members(mem: pd.DataFrame) -> list[str]:
+    """Members with a membership span reaching into the store window."""
     ends = pd.to_datetime(mem["end_date"])
     live = mem[ends.isna() | (ends > pd.Timestamp(STORE_START))]
-    return sorted(set(live["ticker"].astype(str)) - set(map(str, have)))
+    return sorted(set(live["ticker"].astype(str)))
+
+
+def store_candidates(mem: pd.DataFrame, have) -> list[str]:
+    """Members with a span reaching into the store window and no audited price column."""
+    return sorted(set(store_window_members(mem)) - set(map(str, have)))
+
+
+def _read_store_close(store_dir: str, ticker: str) -> pd.Series | None:
+    """One symbol's raw closes from the store, by day; None when the store has no file."""
+    path = os.path.join(store_dir, f"{ticker}.parquet")
+    if "/" in ticker or not os.path.exists(path):
+        return None
+    raw = pd.read_parquet(path, columns=["close"])["close"]
+    raw.index = pd.to_datetime(raw.index)
+    raw = raw[~raw.index.duplicated()].sort_index().astype(float)
+    return raw[np.isfinite(raw) & (raw > 0)]
+
+
+def load_printed(tickers, index: pd.DatetimeIndex, store_dir: str):
+    """Closes as printed (unadjusted) for ``tickers`` on ``index``; NaN where the store has none.
+
+    Read by symbol and day: the membership names a symbol on a day, and the store prints that
+    symbol on that day, so no listing has to be chosen and nothing later is consulted.
+    """
+    cols: dict[str, pd.Series] = {}
+    absent: list[str] = []
+    for t in tickers:
+        raw = _read_store_close(store_dir, t)
+        if raw is None:
+            absent.append(t)
+            continue
+        cols[t] = raw.reindex(index)
+    return pd.DataFrame(cols, index=index, dtype=float), absent
 
 
 def default_store_dir() -> str:
@@ -102,14 +140,10 @@ def build_store_block(tickers, mem: pd.DataFrame, index: pd.DatetimeIndex,
     report: dict[str, Any] = {"no_file": [], "not_the_member": [], "listings_trimmed": [],
                               "splits_applied": 0}
     for t in tickers:
-        path = os.path.join(store_dir, f"{t}.parquet")
-        if "/" in t or not os.path.exists(path):
+        raw = _read_store_close(store_dir, t)
+        if raw is None:
             report["no_file"].append(t)
             continue
-        raw = pd.read_parquet(path, columns=["close"])["close"]
-        raw.index = pd.to_datetime(raw.index)
-        raw = raw[~raw.index.duplicated()].sort_index().astype(float)
-        raw = raw[np.isfinite(raw) & (raw > 0)]
         mine = splits[splits["ticker"] == t]
         adj = split_adjust(raw, mine)
         which = (names == t).to_numpy()
@@ -138,10 +172,13 @@ def _raw_audited(breadth: str, floor: pd.Timestamp) -> pd.DataFrame:
 
 
 def load_repaired_panel(breadth_dir: str | None = None, store_dir: str | None = None):
-    """Audited panel + store-sourced members, with the quoted-price mask.
+    """Audited panel + store-sourced members, with the quoted-price mask and printed closes.
 
-    Returns (closes, observed, mem, provenance). ``closes`` has SPY first, then the audited
-    columns exactly as the audited loader returns them, then the store-sourced columns.
+    Returns (closes, observed, printed, mem, provenance). ``closes`` has SPY first, then the
+    audited columns exactly as the audited loader returns them, then the store-sourced columns.
+    ``printed`` has the same columns: the unadjusted close where the store prints one, else NaN.
+    ``observed`` is True where the cleaned panel holds a real close and, where a printed close
+    is known, that printed close is at least $1.
     """
     from loop import factor_experiment as fx
     from research import trend_persistence_panel as panel
@@ -175,5 +212,20 @@ def load_repaired_panel(breadth_dir: str | None = None, store_dir: str | None = 
     }
     closes = pd.concat([closes, clean], axis=1)
     observed = pd.concat([observed, block >= fx.MIN_PRICE], axis=1)
+
+    window = set(store_window_members(mem))
+    printed, absent = load_printed([c for c in closes.columns if c in window], index, store_dir)
+    printed = printed.reindex(columns=closes.columns)
+    known = printed.notna()
+    observed = observed & (~known | (printed >= fx.MIN_PRICE))
+    digest = hashlib.sha256()
+    digest.update("|".join(map(str, printed.columns)).encode())
+    digest.update(np.ascontiguousarray(printed.to_numpy(float)).tobytes())
+    first = known.any(axis=1)
+    provenance["printed"] = {
+        "n_names": int(known.any(axis=0).sum()), "no_file": absent,
+        "first_session": str(index[first.to_numpy().argmax()])[:10] if bool(first.any()) else None,
+        "sha256_16": digest.hexdigest()[:16],
+    }
     provenance["n_columns"] = int(closes.shape[1])
-    return closes, observed, mem, provenance
+    return closes, observed, printed, mem, provenance

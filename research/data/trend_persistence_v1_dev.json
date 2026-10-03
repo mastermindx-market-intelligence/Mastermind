@@ -194,23 +194,24 @@
  "n_tests": 144,
  "n_tests_with_p": 144,
  "panel": "deep_plus_delisted_sanitized",
+ "panel_sha256": "705313753e4eb910f0d4ed91bb2c63b1cad4dbb047ed1cb9338eee1703ffad4a",
  "prereg_sha256": "5edc15d6482668cde5bfd13485811d20e3ef22d125658e4f89bc11d6ed64aa05",
  "provenance": {
-  "breadth_dir": "/private/tmp/claude-501/-Users-chriswong-Documents-Cluade-macro-main--claude-worktrees-trend-persistence-orchestration-430aef/44653691-f558-4e43-a34e-9c1d80aebad6/scratchpad/breadth",
+  "breadth_dir": "/Volumes/Mastermind/agent-workspaces/claude/44ff44e73b840f81/trend-persistence-inputs/breadth",
   "files": {
    "_closes_deep.parquet": {
     "bytes": 61779282,
-    "mtime": "2026-06-19",
+    "mtime": "2026-10-03",
     "sha256_16": "88e3261ca077543a"
    },
    "_closes_delisted.parquet": {
     "bytes": 3323570,
-    "mtime": "2026-06-19",
+    "mtime": "2026-10-03",
     "sha256_16": "1e668fe0c181a59f"
    },
    "sp1500_pit_membership.parquet": {
     "bytes": 42778,
-    "mtime": "2026-09-20",
+    "mtime": "2026-10-03",
     "sha256_16": "7b34316c0561619b"
    }
   },
@@ -7611,138 +7612,161 @@
  "universe": "sp1500_pit",
  "universe_coverage": {
   "2004": {
+   "above_floor": 257,
    "date": "2004-01-02",
    "members": 494,
    "priced": 270,
    "with_price_column": 350
   },
   "2005": {
+   "above_floor": 261,
    "date": "2005-01-03",
    "members": 495,
    "priced": 275,
    "with_price_column": 349
   },
   "2006": {
+   "above_floor": 274,
    "date": "2006-01-03",
    "members": 497,
    "priced": 288,
    "with_price_column": 353
   },
   "2007": {
+   "above_floor": 285,
    "date": "2007-01-03",
    "members": 496,
    "priced": 296,
    "with_price_column": 355
   },
   "2008": {
+   "above_floor": 308,
    "date": "2008-01-02",
    "members": 497,
    "priced": 317,
    "with_price_column": 366
   },
   "2009": {
+   "above_floor": 293,
    "date": "2009-01-02",
    "members": 498,
    "priced": 323,
    "with_price_column": 366
   },
   "2010": {
+   "above_floor": 315,
    "date": "2010-01-04",
    "members": 499,
    "priced": 333,
    "with_price_column": 370
   },
   "2011": {
+   "above_floor": 325,
    "date": "2011-01-03",
    "members": 497,
    "priced": 338,
    "with_price_column": 373
   },
   "2012": {
+   "above_floor": 331,
    "date": "2012-01-03",
    "members": 497,
    "priced": 346,
    "with_price_column": 380
   },
   "2013": {
+   "above_floor": 577,
    "date": "2013-01-02",
    "members": 920,
    "priced": 593,
    "with_price_column": 641
   },
   "2014": {
+   "above_floor": 594,
    "date": "2014-01-02",
    "members": 919,
    "priced": 602,
    "with_price_column": 648
   },
   "2015": {
+   "above_floor": 608,
    "date": "2015-01-02",
    "members": 912,
    "priced": 614,
    "with_price_column": 654
   },
   "2016": {
+   "above_floor": 642,
    "date": "2016-01-04",
    "members": 920,
    "priced": 647,
    "with_price_column": 679
   },
   "2017": {
+   "above_floor": 674,
    "date": "2017-01-03",
    "members": 920,
    "priced": 677,
    "with_price_column": 698
   },
   "2018": {
+   "above_floor": 702,
    "date": "2018-01-02",
    "members": 918,
    "priced": 705,
    "with_price_column": 721
   },
   "2019": {
+   "above_floor": 721,
    "date": "2019-01-02",
    "members": 913,
    "priced": 726,
    "with_price_column": 737
   },
   "2020": {
+   "above_floor": 1074,
    "date": "2020-01-02",
    "members": 1521,
    "priced": 1085,
    "with_price_column": 1096
   },
   "2021": {
+   "above_floor": 1113,
    "date": "2021-01-04",
    "members": 1521,
    "priced": 1125,
    "with_price_column": 1132
   },
   "2022": {
+   "above_floor": 1162,
    "date": "2022-01-03",
    "members": 1516,
    "priced": 1167,
    "with_price_column": 1171
   },
   "2023": {
+   "above_floor": 1212,
    "date": "2023-01-03",
    "members": 1514,
    "priced": 1222,
    "with_price_column": 1223
   },
   "2024": {
+   "above_floor": 1306,
    "date": "2024-01-02",
    "members": 1510,
    "priced": 1314,
    "with_price_column": 1314
   },
   "2025": {
+   "above_floor": 1377,
    "date": "2025-01-02",
    "members": 1507,
    "priced": 1385,
    "with_price_column": 1385
   },
   "2026": {
+   "above_floor": 1443,
    "date": "2026-01-02",
    "members": 1506,
    "priced": 1458,

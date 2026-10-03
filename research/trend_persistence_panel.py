@@ -33,7 +33,8 @@ import json
 import math
 import os
 from dataclasses import dataclass
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
@@ -99,24 +100,27 @@ class Design:
     endpoints: tuple
     holdout_formation_start: str         # first formation date of the holdout sample
     observed_mask: bool                  # only quoted prices decide eligibility and features
+    printed_floor: bool                  # price thresholds are tested on the close as printed
     risk_bucket_gate: bool               # G7: same sign across volatility quintiles
     substrate: str                       # "audited" | "repaired"
     holdout_open: bool                   # False: this design's holdout is never scored
 
 
-DESIGNS = {
+DESIGNS: Mapping[str, Design] = MappingProxyType({
     "v1": Design(
         id="v1", prereg_file="TREND_PERSISTENCE_PREREG_V1.md",
         prereg_sha256="5edc15d6482668cde5bfd13485811d20e3ef22d125658e4f89bc11d6ed64aa05",
         controls=CONTROLS, endpoints=ENDPOINTS, holdout_formation_start=HOLDOUT_START,
-        observed_mask=False, risk_bucket_gate=False, substrate="audited", holdout_open=False),
+        observed_mask=False, printed_floor=False, risk_bucket_gate=False, substrate="audited",
+        holdout_open=False),
     "v2": Design(
         id="v2", prereg_file="TREND_PERSISTENCE_PREREG_V2.md",
-        prereg_sha256="e63d49eb49ef82daa65f14cf6b6eb871ce32a3665d5fb11dc604160ec147d24c",
+        prereg_sha256="2882865d02ad75a6db78a292daae1a8391bf7f876f615234d063cb455b782d17",
         controls=CONTROLS_V2, endpoints=("forward_max_drawdown",),
         holdout_formation_start=HOLDOUT_FORMATION_START_V2,
-        observed_mask=True, risk_bucket_gate=True, substrate="repaired", holdout_open=True),
-}
+        observed_mask=True, printed_floor=True, risk_bucket_gate=True, substrate="repaired",
+        holdout_open=True),
+})
 
 
 def design_of(design: "str | Design") -> Design:
@@ -157,7 +161,8 @@ def frozen_design(design: "str | Design" = "v1") -> dict[str, Any]:
             "design": d.id, "risk_windows": list(RISK_WINDOWS),
             "downside_windows": list(DOWNSIDE_WINDOWS), "risk_controls": list(RISK_CONTROLS),
             "holdout_formation_start": d.holdout_formation_start,
-            "observed_mask": d.observed_mask, "risk_bucket_gate": d.risk_bucket_gate,
+            "observed_mask": d.observed_mask, "printed_floor": d.printed_floor,
+            "risk_bucket_gate": d.risk_bucket_gate,
             "substrate": d.substrate, "n_bins": N_BINS,
             "min_dates_for_mean": MIN_DATES_FOR_MEAN, "thinning_phase": 0,
         })
@@ -371,14 +376,17 @@ def membership_mask(index: pd.DatetimeIndex, names: list, mem: pd.DataFrame) -> 
 
 
 def build_panel(closes: pd.DataFrame, mem: pd.DataFrame, *, observed: pd.DataFrame | None = None,
-                store_sourced=(), horizons=HORIZONS, step: int = FORMATION_STEP,
-                lag: int = ENTRY_LAG) -> dict[str, Any]:
+                printed: pd.DataFrame | None = None, store_sourced=(), horizons=HORIZONS,
+                step: int = FORMATION_STEP, lag: int = ENTRY_LAG) -> dict[str, Any]:
     """Assemble the PIT feature/label panel on one global formation calendar.
 
     ``observed`` (same shape as ``closes``) marks cells whose close was actually quoted. When it
     is given, a name is eligible only on a quoted price and a feature window holding any
     unquoted cell yields no value; labels still follow the cleaned series, so a name that stops
     trading keeps its last price. Without it the cleaned panel is taken as is (design v1).
+    ``printed`` (same shape) holds the close exactly as it printed that day, unadjusted, where
+    one is known. Where it is, the selection floor is tested on it and not on the adjusted,
+    cleaned level — an adjusted price depends on splits that had not happened yet.
     The sample boundaries are not a property of the panel: ``sample_rows`` reads them from the
     design, so no caller can move them.
     """
@@ -398,17 +406,30 @@ def build_panel(closes: pd.DataFrame, mem: pd.DataFrame, *, observed: pd.DataFra
         quoted = quoted & np.isfinite(P)
     feats, ctrl = compute_features(P if quoted is None else np.where(quoted, P, np.nan), spy, rows)
     labels = compute_labels(P, spy, rows, horizons, lag)
+    floor_px, floor_printed = P, np.zeros(P.shape, bool)
+    if printed is not None:
+        asprinted = printed.reindex(index=closes.index, columns=names).to_numpy(float)
+        floor_printed = np.isfinite(asprinted)
+        floor_px = np.where(floor_printed, asprinted, P)
     with np.errstate(invalid="ignore"):
-        eligible = member[rows] & np.isfinite(P[rows]) & (P[rows] >= SELECT_FLOOR)
+        eligible = member[rows] & np.isfinite(P[rows]) & (floor_px[rows] >= SELECT_FLOOR)
     if quoted is not None:
         eligible &= quoted[rows]
     stored = set(store_sourced)
+    digest = hashlib.sha256()
+    for part in (index.asi8, np.ascontiguousarray(P), np.ascontiguousarray(spy), member,
+                 quoted, np.ascontiguousarray(floor_px), floor_printed):
+        digest.update(b"-" if part is None else np.ascontiguousarray(part).tobytes())
+    digest.update(repr(("|".join(map(str, names)), sorted(map(str, stored)), int(step), int(lag),
+                        tuple(int(h) for h in horizons), MIN_HISTORY, SELECT_FLOOR)).encode())
     return {
         "index": index, "names": names, "rows": rows, "features": feats, "controls": ctrl,
         "labels": labels, "eligible": eligible, "step": int(step), "lag": int(lag),
         "horizons": tuple(int(h) for h in horizons),
-        "observed_mask": quoted is not None,
+        "observed_mask": quoted is not None, "printed_floor": printed is not None,
+        "floor_printed": floor_printed[rows],
         "store_sourced": np.array([n in stored for n in names], bool),
+        "digest": digest.hexdigest(),
     }
 
 
@@ -505,6 +526,19 @@ def _same_sign(value, sign) -> bool:
     return value is not None and sign != 0 and float(np.sign(value)) == float(sign)
 
 
+def _check_panel(panel: dict, d: Design) -> None:
+    if bool(panel.get("observed_mask")) != d.observed_mask:
+        raise ValueError(f"design {d.id} needs a panel built "
+                         f"{'with' if d.observed_mask else 'without'} the quoted-price mask")
+    if bool(panel.get("printed_floor")) != d.printed_floor:
+        raise ValueError(f"design {d.id} needs a panel built "
+                         f"{'with' if d.printed_floor else 'without'} printed prices")
+    if (panel.get("step"), panel.get("lag"), tuple(panel.get("horizons", ()))) != (
+            FORMATION_STEP, ENTRY_LAG, HORIZONS):
+        raise ValueError("the panel was not built on the pre-registered calendar "
+                         "(formation step, entry lag, horizons)")
+
+
 def _check_holdout_request(d: Design, pin: str, prereg_hash, dev_result) -> None:
     if not d.holdout_open:
         raise HoldoutLocked(f"design {d.id}: this holdout is closed and is never scored")
@@ -522,9 +556,10 @@ def score(panel: dict, *, design: "str | Design" = "v1", sample: str = "dev",
     """Score one design's pre-registered tests on one sample.
 
     Nothing is scored unless the design's pre-registration still hashes to its pin. A holdout
-    run additionally needs that hash from the caller and the committed development result; it
-    then re-derives the development survivors on this very panel, refuses if they differ from
-    the committed ones, and scores those tests and no others. With no survivor it does not
+    run additionally needs that hash from the caller and the committed development result. The
+    panel must be, byte for byte, the one that result was scored on; the development survivors
+    are then re-derived on it, the run refuses if they differ from the committed ones, and it
+    scores those tests and no others. With no survivor it does not
     run, and the holdout stays unspent.
     """
     d = design_of(design)
@@ -533,9 +568,11 @@ def score(panel: dict, *, design: "str | Design" = "v1", sample: str = "dev",
     pin = pinned_prereg(d)
     if sample == "holdout":
         _check_holdout_request(d, pin, prereg_hash, dev_result)
-    if bool(panel.get("observed_mask")) != d.observed_mask:
-        raise ValueError(f"design {d.id} needs a panel built "
-                         f"{'with' if d.observed_mask else 'without'} the quoted-price mask")
+    _check_panel(panel, d)
+    if sample == "holdout" and (not panel.get("digest")
+                                or dev_result.get("panel_sha256") != panel["digest"]):
+        raise HoldoutLocked("the panel is not the one the committed development result was "
+                            "scored on (inputs differ); the holdout was not scored")
     try:
         V = _judges()
     except Exception as exc:                                  # engine not importable
@@ -580,8 +617,11 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
     E = len(endpoints)
     result: dict[str, Any] = {
         "schema": SCHEMA, "status": "scored", "sample": sample, "design_id": d.id,
-        "prereg_sha256": pin, "design": frozen_design(d), "coverage": {}, "tests": {},
+        "prereg_sha256": pin, "panel_sha256": panel.get("digest"), "design": frozen_design(d),
+        "coverage": {}, "tests": {},
     }
+    gating = sample == "dev"            # bucket, era and thinned statistics gate development only
+    floor_printed = panel.get("floor_printed")
 
     for h in panel["horizons"]:
         cols = list(range(len(FEATURES)))
@@ -593,7 +633,7 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
         K = len(cols)
         lab = panel["labels"][h]
         sel = sample_rows(panel, h, sample, d)
-        dates, n_names, n_deli, n_incomplete, n_stored = [], [], [], [], []
+        dates, n_names, n_deli, n_incomplete, n_stored, n_printed = [], [], [], [], [], []
         ext, mom, v1c, raw, drop, aud = [], [], [], [], [], []
         buckets, rbuckets, bins = [], [], []
 
@@ -631,9 +671,10 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
                     ic_aud, _ = semi_partial_rank_ic(X[keep], Z[keep], Y[keep])
                 aud.append(ic_aud)
             # momentum buckets: equal-count groups of the mean rank of the momentum controls
-            buckets.append(quintile_ics(_rank(Z[:, :n_mom]).mean(axis=1), X, Z, Y, n))
-            if risk_cols is not None:
-                rbuckets.append(quintile_ics(_rank(Z[:, risk_cols]).mean(axis=1), X, Z, Y, n))
+            if gating:
+                buckets.append(quintile_ics(_rank(Z[:, :n_mom]).mean(axis=1), X, Z, Y, n))
+                if risk_cols is not None:
+                    rbuckets.append(quintile_ics(_rank(Z[:, risk_cols]).mean(axis=1), X, Z, Y, n))
             # label means by quintile of the control-neutral feature rank (descriptive)
             which = np.minimum(((Rr - 1.0) * N_BINS // n).astype(int), N_BINS - 1)
             bm = np.full((N_BINS, K, E), np.nan)
@@ -646,6 +687,8 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
             n_names.append(n)
             n_deli.append(int(deli.sum()))
             n_incomplete.append(int(base.sum()) - n)
+            if floor_printed is not None:
+                n_printed.append(int(floor_printed[f][ok].sum()))
             ext.append(ic_ext)
             mom.append(ic_mom)
             raw.append(_corr(_rank(X), _rank(Y)))
@@ -665,12 +708,14 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
         }
         if stored is not None and n_names:
             cov["store_sourced_fraction"] = float(sum(n_stored) / max(1, sum(n_names)))
+        if d.printed_floor and n_names:
+            cov["printed_floor_fraction"] = float(sum(n_printed) / max(1, sum(n_names)))
         result["coverage"][str(h)] = cov
         if not dates:
             continue
         dates_a = np.asarray(dates)
         ext_a, mom_a, raw_a, drop_a = (np.asarray(a) for a in (ext, mom, raw, drop))
-        bucket_a, bins_a = np.asarray(buckets), np.asarray(bins)
+        bucket_a, bins_a = (np.asarray(buckets) if gating else None), np.asarray(bins)
 
         def series_mean(a):
             with np.errstate(invalid="ignore"):
@@ -691,10 +736,15 @@ def _score_sample(V, panel: dict, d: Design, pin: str, sample: str,
                     "endpoint": endpoint,
                     "raw_mean": float(np.nanmean(raw_a[:, j, e])),
                     "momentum_only_mean": float(np.nanmean(mom_a[:, j, e])),
-                    "bucket_means": [series_mean(bucket_a[:, q, j, e]) for q in range(N_BUCKETS)],
                     "drop_mean": series_mean(drop_a[:, j, e]),
                     "bin_means": bin_means,
                 })
+                if gating:
+                    st["bucket_means"] = [series_mean(bucket_a[:, q, j, e])
+                                          for q in range(N_BUCKETS)]
+                else:
+                    for unlisted in ("hit", "thinned", "era_means"):
+                        del st[unlisted]
                 if v1c:
                     st["v1_controls_mean"] = float(np.nanmean(np.asarray(v1c)[:, j, e]))
                 if rbuckets:
@@ -753,6 +803,13 @@ def _apply_holdout_confirmation(V, result: dict, confirm: dict[str, int]) -> Non
         p = float(st["p_hac"])
         one_sided[key] = p / 2.0 if _same_sign(st["mean"], sign) else 1.0 - p / 2.0
     bh = V.benjamini_hochberg(one_sided, alpha=BH_ALPHA)
+    for key in confirm:
+        if key not in result["tests"]:                 # no usable holdout date at this horizon
+            feature, horizon, endpoint = key.split("|")
+            result["tests"][key] = {
+                "feature": feature, "family": family_of(feature), "horizon_d": int(horizon),
+                "endpoint": endpoint, "n_dates": 0, "mean": None, "t_hac": None, "p_hac": None,
+                "hac_lags": None, "not_scored": "no_usable_holdout_dates"}
     confirmed = {}
     for key, st in result["tests"].items():
         p1 = one_sided.get(key)
@@ -821,11 +878,13 @@ def load_audited_panel(breadth_dir: str | None = None):
 
 
 def universe_coverage(closes: pd.DataFrame, mem: pd.DataFrame,
-                      observed: pd.DataFrame | None = None) -> dict[str, Any]:
+                      observed: pd.DataFrame | None = None,
+                      printed: pd.DataFrame | None = None) -> dict[str, Any]:
     """How much of the point-in-time universe the panel can actually price, year by year.
 
     On the first session of each year: members by the membership file, members with a price
-    column at all, and members with a usable price that day. Prices and membership only — no
+    column at all, members with a usable price that day, and members that also clear the
+    selection floor (on the printed close where one is known). Prices and membership only — no
     label enters, so this is safe to print for any year.
     """
     index = pd.DatetimeIndex(closes.index)
@@ -844,8 +903,15 @@ def universe_coverage(closes: pd.DataFrame, mem: pd.DataFrame,
         usable = np.isfinite(px)
         if observed is not None:
             usable &= observed.loc[t, have].to_numpy(bool)
+        floor_px = px
+        if printed is not None:
+            asprinted = printed.loc[t].reindex(have).to_numpy(float)
+            floor_px = np.where(np.isfinite(asprinted), asprinted, px)
+        with np.errstate(invalid="ignore"):
+            above = usable & (floor_px >= SELECT_FLOOR)
         out[str(year)] = {"date": str(t)[:10], "members": len(members),
-                          "with_price_column": len(have), "priced": int(usable.sum())}
+                          "with_price_column": len(have), "priced": int(usable.sum()),
+                          "above_floor": int(above.sum())}
     return out
 
 
@@ -857,10 +923,11 @@ def run(*, design: "str | Design" = "v1", sample: str = "dev", breadth_dir: str 
     pin = pinned_prereg(d)
     if sample == "holdout":
         _check_holdout_request(d, pin, prereg_hash, dev_result)   # fail before loading anything
-    observed, stored = None, ()
+    observed, printed, stored = None, None, ()
     if d.substrate == "repaired":
         from research import trend_persistence_substrate as substrate
-        closes, observed, mem, provenance = substrate.load_repaired_panel(breadth_dir, store_dir)
+        closes, observed, printed, mem, provenance = substrate.load_repaired_panel(
+            breadth_dir, store_dir)
         stored = provenance["store"]["names"]
     else:
         closes, mem, provenance = load_audited_panel(breadth_dir)
@@ -868,14 +935,16 @@ def run(*, design: "str | Design" = "v1", sample: str = "dev", breadth_dir: str 
         return {"schema": SCHEMA, "status": "unavailable",
                 "reason": "audited_price_panel_missing"}
     panel = build_panel(closes, mem, observed=observed if d.observed_mask else None,
-                        store_sourced=stored)
+                        printed=printed if d.printed_floor else None, store_sourced=stored)
     out = score(panel, design=d, sample=sample, prereg_hash=prereg_hash, dev_result=dev_result)
     out.update({
         "universe": "sp1500_pit",
         "panel": ("deep_plus_delisted_sanitized" if d.substrate == "audited"
                   else "deep_plus_delisted_plus_store_sanitized_quoted"),
         "universe_names": len(panel["names"]), "provenance": provenance,
-        "universe_coverage": universe_coverage(closes, mem, observed if d.observed_mask else None),
+        "universe_coverage": universe_coverage(closes, mem,
+                                               observed if d.observed_mask else None,
+                                               printed if d.printed_floor else None),
     })
     return out
 

@@ -1,5 +1,8 @@
 # Trend Persistence — Pre-registration V2
 
+**Revision 2**, frozen 2026-10-03 before any holdout run. Revision 1 (sha256 `e63d49eb…d24c`)
+is superseded; §0 says what changed and why.
+
 Wave B, stock level, one claim: do path quality, gain retention and drawdown shape describe a
 stock's **downside risk** over the next 5–60 sessions beyond what trailing momentum, realized
 volatility at four spans, downside volatility and beta already describe?
@@ -34,8 +37,28 @@ produce is the holdout.
 
 **The holdout is unspent.** No statistic relating any feature to any label has been computed
 for any formation date on or after 2022-01-01. Price-only work has been done on that window
-and is declared: validating the split reference against the audited panel, counting gaps, and
-counting how many index members have a price.
+and is declared: validating the split reference against the audited panel, counting gaps,
+comparing printed with adjusted prices, and counting how many index members have a price,
+clear the price floors and have every feature and control on each formation date.
+
+**Revision 2.** §7 requires an independent review of the instrument before the holdout is
+run. The review of revision 1 reproduced the development result, found the statistics and the
+survivor-only path correct, and required three repairs before any holdout run. This revision
+makes them.
+
+- *The price floors looked ahead.* Revision 1 tested the $1 and $5 floors on adjusted prices.
+  An adjusted price is divided by every later split, and the audited cleaner's rebuilt level
+  can drift far from the price that printed, so something after a holdout date could decide
+  who was eligible on it. The floors are now tested on the close as it printed, wherever the
+  store prints one (§2, §3). On holdout formation dates that makes about 1,100 stock-dates
+  eligible that were not and removes about 300 that were, of about 294,000.
+- *A holdout run was not tied to its inputs.* It now is (Binding, below).
+- *The holdout run printed statistics this document did not list.* It now forms and prints
+  only what §7 and §9 list.
+
+Eligibility changed, so development is scored again under this revision and its survivors
+derived again. Revision 1's development result (29 of 72 survive) is superseded; the readout
+keeps it as a record. Nothing about the holdout was learned between the two freezes.
 
 **Binding.**
 
@@ -46,6 +69,18 @@ counting how many index members have a price.
   instrument then re-derives the development survivors itself on the same panel, refuses if
   they differ from the committed ones, and scores those tests and nothing else. Horizons with
   no survivor are not touched.
+- A holdout run is bound to its inputs. Every result carries a digest of the panel it was
+  scored on: the sessions, the cleaned prices, the benchmark, the membership, the quoted-price
+  mask, the prices the floor was tested on, the names and the calendar constants. A holdout
+  run refuses unless its panel has exactly the digest stamped on the committed development
+  result. A panel built on another formation step, entry lag or horizon set is refused for
+  either sample.
+- The fence binds the instrument's entry points. It cannot bind code written to go around it:
+  calling the instrument's private functions, altering a panel between building and scoring,
+  or feeding real prices to the older generic harness
+  (`research/trend_persistence_experiment.py`, which holds no data and no fence) can compute
+  what this document forbids. That would be a breach of this pre-registration, not a result
+  under it.
 - This file is never edited after the holdout is scored. A change before that is a new freeze
   with a new pin, recorded in the readout with its reason.
 - Anything done differently from this document is recorded as a deviation in the readout,
@@ -87,47 +122,68 @@ session 2021-07-06):
 Audited columns are not touched; the repaired panel's audited columns equal the audited
 loader's output exactly. Today the repair adds 410 names; 2 members have no store file.
 
-**Quoted-price mask.** A cell is *quoted* when a real close of at least $1 was printed that
-day — in the raw audited files for audited columns, in the split-adjusted store closes for
-store columns. Cleaned prices that are gap fills are not quoted.
+**Printed closes.** For every member whose membership reaches past 2021-07-06 and that has a
+store file — audited or store-sourced, 1,918 names — the unadjusted close is read from the
+store by symbol and day. Printed closes are used for the two price floors and for nothing
+else: features, controls and labels come from the cleaned, adjusted prices. Four audited
+names have no store file under their symbol (BF-B, BRK-B, CWEN-A, MOG-A).
+
+**Quoted-price mask.** A cell is *quoted* when the inputs hold a real close of at least $1
+for that day — in the raw audited files for audited columns, in the split-adjusted store
+closes for store columns — and, where the store prints a close for that symbol that day, the
+printed close is at least $1 too. Cleaned prices that are gap fills are not quoted.
 
 **Universe.** Point-in-time membership from the membership file, same predicate as
 `loop.factor_experiment.members_asof`. The file is not a constant S&P 1500: it lists about 500
 names until 2012, about 920 from 2013 and about 1,520 from 2020.
 
 **How much of that universe has a price** (first session of the year; prices and membership
-only):
+only). *Eligible price* means quoted and at or above the $5 floor of §3.
 
-| Year | Members | Audited panel | Repaired, quoted |
-| --- | --- | --- | --- |
-| 2004 | 494 | 270 | 268 |
-| 2008 | 497 | 317 | 314 |
-| 2012 | 497 | 346 | 346 |
-| 2013 | 920 | 593 | 593 |
-| 2016 | 920 | 647 | 647 |
-| 2019 | 913 | 726 | 726 |
-| 2020 | 1,521 | 1,085 | 1,085 |
-| 2021 | 1,521 | 1,125 | 1,125 |
-| 2022 | 1,516 | 1,167 | 1,501 |
-| 2023 | 1,514 | 1,222 | 1,507 |
-| 2024 | 1,510 | 1,314 | 1,506 |
-| 2025 | 1,507 | 1,385 | 1,504 |
-| 2026 | 1,506 | 1,458 | 1,505 |
+| Year | Members | Audited panel, quoted | Repaired, quoted | Repaired, eligible price |
+| --- | --- | --- | --- | --- |
+| 2004 | 494 | 268 | 268 | 256 |
+| 2008 | 497 | 314 | 314 | 306 |
+| 2012 | 497 | 346 | 346 | 331 |
+| 2013 | 920 | 593 | 593 | 577 |
+| 2016 | 920 | 647 | 647 | 642 |
+| 2019 | 913 | 726 | 726 | 721 |
+| 2020 | 1,521 | 1,085 | 1,085 | 1,074 |
+| 2021 | 1,521 | 1,125 | 1,125 | 1,113 |
+| 2022 | 1,516 | 1,167 | 1,501 | 1,492 |
+| 2023 | 1,514 | 1,222 | 1,507 | 1,489 |
+| 2024 | 1,510 | 1,314 | 1,506 | 1,498 |
+| 2025 | 1,507 | 1,385 | 1,504 | 1,498 |
+| 2026 | 1,506 | 1,458 | 1,505 | 1,496 |
 
-The development sample therefore sees 55–80% of the members, tilted toward names that
-survived. The holdout sees more than 99%. That asymmetry is the reason development is only a
-filter here.
+In development 52–79% of the members are eligible, tilted toward names that survived. In the
+holdout 99% or more of the members have a quoted price and 98–99% are eligible; the gap
+between the two is names that print under $5. That asymmetry is the reason development is
+only a filter here.
 
-Input digests (audited files, store block, split reference), the panel's date range, the
-hygiene counters and this coverage table are stamped on every result.
+Input digests (audited files, store block, printed closes, split reference), the panel
+digest, the panel's date range, the hygiene counters and this coverage table are stamped on
+every result.
 
 ## 3. Design
 
 **Formation calendar.** One global calendar: every 5th session of the panel starting at
 session index 252.
 
-**Eligibility at *t*.** Point-in-time member, a quoted price on *t*, and a cleaned price of at
-least $5. Nothing after *t* enters.
+**Eligibility at *t*.** Point-in-time member, a quoted price on *t*, and a close of at least
+$5 on *t*. The $5 test, like the $1 test inside the quoted-price mask, reads the close as it
+printed that day wherever the store prints one. Where it prints none — every date before
+2021-07-06, and after it a symbol the store does not carry that day — both tests fall back on
+the adjusted, cleaned price.
+
+A printed close holds nothing from after *t*. The fallback does: an adjusted price is divided
+by later splits and, for audited names, sits on the level the cleaner rebuilt. On the 197
+holdout formation dates that have a 5-session label (2022-07-06 to 2026-06-02), 294,058
+stock-dates are eligible; 290,240 of them (98.7%) were tested on a printed close and 3,818
+(1.3%, about 50 names: the four class-share symbols and symbols the store starts carrying
+only after a ticker change) on the fallback. Of the 290,276 member stock-dates that print $5
+or more, 36 are not eligible, all for want of an audited price that day (SBNY 35, KNF 1).
+Development dates before 2021-07-06 are on the fallback entirely (§10).
 
 **Features (24).** As V1: eight definitions at 20, 60 and 120 sessions, from the closes in the
 window ending at *t*. A window holding any unquoted cell yields no value.
@@ -216,8 +272,9 @@ stocks whose label was not carried; a date needs 100 of them and the mean needs 
 ## 7. Holdout confirmation
 
 Run once, after this document, the instrument and the development result are committed and an
-independent review of the V2 instrument and fence has passed. Only development survivors are
-scored. If there are none the holdout is not run and stays unspent.
+independent review of the V2 instrument and fence has passed. For this revision that means
+the review of revision 1 plus a re-review of the changes it required. Only development
+survivors are scored. If there are none the holdout is not run and stays unspent.
 
 A survivor is confirmed only if all four hold, on the full repaired universe.
 
@@ -227,6 +284,12 @@ A survivor is confirmed only if all four hold, on the full repaired universe.
 | H2 | one-sided HAC p ≤ 0.05 in that direction (p ÷ 2 when the sign matches, 1 − p ÷ 2 when it does not) |
 | H3 | Benjamini–Hochberg q ≤ 0.10 across the survivors, on the one-sided p-values (a survivor without a p-value enters as 1) |
 | H4 | absolute mean IC ≥ 0.005 |
+
+For each survivor the holdout run forms and prints the per-date series' length, mean, HAC t,
+p and lag count; the one-sided p; the four gates; and the non-gating numbers of §9. It forms
+nothing else. The quintile-group, era and non-overlapping statistics of §6 and the share of
+positive dates gate or describe development only and are not computed on holdout dates. A
+survivor with no usable holdout date is printed as unconfirmed, with no statistic.
 
 ## 8. Decision rule
 
@@ -245,8 +308,9 @@ A kill closes these constructions on this universe and these horizons, not the i
 
 Raw rank IC; semi-partial rank IC with the four momentum controls only and with V1's six
 controls (to show what the added volatility controls absorb); label means by quintile of the
-control-neutral feature rank; coverage (dates, median names, share of labels carried through a
-delisting, share of eligible stocks lost to incomplete cases, share of store-sourced stocks).
+control-neutral feature rank; coverage (dates, first and last date, median names, share of
+labels carried through a delisting, share of eligible stocks lost to incomplete cases, share
+of store-sourced stocks, share of stocks whose floor was tested on a printed close).
 
 For each holdout survivor two brackets are printed beside the gated number: the mean IC with
 carried labels removed, and the mean IC on audited-panel names only. They show how much a
@@ -265,8 +329,21 @@ confirmation leans on carried prices or on the repaired names; they do not gate.
   missing, so a collapse exits at its last price of $1 or more.
 - **Clamped prices.** Daily moves beyond ±60% are clamped by the audited sanitizer, so price
   levels after a clamp are reconstructed, not quoted.
-- **Thresholds apply to adjusted prices.** The $1 and $5 floors are tested on split-adjusted
-  (store) or fully adjusted (audited) prices, not on the price printed that day.
+- **Floors before the store begins.** Before 2021-07-06 no printed close exists, so the $1 and
+  $5 floors are tested on adjusted, cleaned prices and a later split or the cleaner's rebuilt
+  level can decide eligibility. That covers development up to its last half-year. It is one
+  more reason development is a filter and not evidence.
+- **Floors on the fallback in the holdout.** 1.3% of eligible holdout stock-dates have no
+  printed close and are tested on the adjusted, cleaned price (§3).
+- **The quote test keeps one adjusted leg.** A cleaned price must exist, and the audited
+  cleaner drops adjusted prints under $1. From 2021-07-06 that leg removed no member cell
+  that printed $1 or more.
+- **Store prints are taken as they are.** A wrong print in the store moves a floor test, and
+  a wrong or missing split in the reference moves a store-sourced price. Large single-day
+  moves that remain in store-sourced names after cleaning are counted in the readout beside
+  the audited-only bracket.
+- **The fence has an edge.** It binds the instrument's entry points, not code written to go
+  around it (§0).
 - **Members that left before mid-2021 stay unpriced.** The store cannot reach them.
 - **Short holdout.** About four years: one rate cycle, one regional-bank failure wave. At 60
   sessions there are roughly fifteen non-overlapping windows.
@@ -330,6 +407,7 @@ The instrument's `frozen_design("v2")` must equal this block; a test enforces it
   "risk_controls": ["vol_20d", "vol_60d", "vol_120d", "vol_252d", "downvol_60d", "downvol_252d"],
   "holdout_formation_start": "2022-07-06",
   "observed_mask": true,
+  "printed_floor": true,
   "risk_bucket_gate": true,
   "substrate": "repaired",
   "n_bins": 5,
