@@ -29,9 +29,12 @@ The ChatGPT app's approved action snapshot may lag an accepted runtime/source re
 source/runtime now declares `MULTI_WRITER_PER_FILE_TARGET_SCOPED` but the current app tool
 description still says one designer/exclusive ownership or describes prepare as active-file focus,
 classify **DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Keep the same app/tunnel identity and
-refresh/recreate that app's approved action snapshot through its normal attended admin ceremony
-after the accepted runtime is deployed. Do not create a second Paper plane, infer a file lease from
-stale metadata, or use publication drift to bypass a denial or unresolved effect.
+bring that app's approved action snapshot current through the platform's supported existing-app
+lifecycle after the accepted runtime is deployed. For a developer-mode MCP connection, use
+**Refresh** and verify the new metadata in a new conversation; for a published/plugin-managed state,
+use its supported review/rescan/action-control path and recreate only when the platform specifically
+requires recreation for that exact app state. Do not create a second Paper plane, infer a file lease
+from stale metadata, or use publication drift to bypass a denial or unresolved effect.
 
 For multi-seat Business rollout, each ChatGPT seat may have its own exact tunnel-client transport,
 seat-specific launchd label and transport singleton. All such transports reuse the same stdio server
