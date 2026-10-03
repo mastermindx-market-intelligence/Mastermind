@@ -150,3 +150,31 @@ def test_seal_lookup_uses_canonical_config_root_and_exact_returned_path(assignme
             a.job, a.attempt, receipt_name="test.json",
             seal_path=str(a.alias / "receipts" / "attempt-1" / seal.name),
         )
+
+
+@pytest.mark.parametrize("drift", [None, "archive-alias", "receipt-alias", "other-private-receipt", "receipt-symlink"])
+def test_rotation_uses_exact_canonical_producer_paths(assignment, drift):
+    a = assignment
+    archive = a.real / "workspaces" / ".lost-attempts" / "job-1" / "attempt-1"
+    archive.mkdir(parents=True)
+    receipt = archive.with_name("attempt-1.rotation.json")
+    receipt.write_text("{}"); receipt.chmod(0o600)
+    archive_raw, receipt_raw = str(archive), str(receipt)
+    if drift == "archive-alias":
+        archive_raw = archive_raw.replace(str(a.real), str(a.alias), 1)
+    elif drift == "receipt-alias":
+        receipt_raw = receipt_raw.replace(str(a.real), str(a.alias), 1)
+    elif drift in {"other-private-receipt", "receipt-symlink"}:
+        other = a.real / "other-private.json"
+        other.write_text("{}"); other.chmod(0o600)
+        if drift == "receipt-symlink":
+            receipt.unlink(); receipt.symlink_to(other)
+        else:
+            receipt_raw = str(other)
+    kwargs = dict(workspace_root=a.alias / "workspaces", job_id="job-1", attempt_id="attempt-1",
+                  archive_path=archive_raw, receipt_path=receipt_raw)
+    if drift is None:
+        assert subject._durable_rotation_paths(**kwargs) == (archive, receipt)
+    else:
+        with pytest.raises(subject.AcceptanceError):
+            subject._durable_rotation_paths(**kwargs)

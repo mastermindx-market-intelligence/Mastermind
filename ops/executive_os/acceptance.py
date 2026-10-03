@@ -400,6 +400,19 @@ def _durable_assignment_paths(
     return workspace, run_dir
 
 
+
+def _durable_rotation_paths(
+    *, workspace_root: Path, job_id: str, attempt_id: str,
+    archive_path: str, receipt_path: str,
+) -> tuple[Path, Path]:
+    root = _configured_assignment_root(workspace_root)
+    expected_archive = root / ".lost-attempts" / job_id / attempt_id
+    expected_receipt = expected_archive.with_name(f"{attempt_id}.rotation.json")
+    if archive_path != os.fspath(expected_archive) or receipt_path != os.fspath(expected_receipt):
+        raise AcceptanceError("workspace rotation proof path drifted")
+    return _canonical_durable_path(archive_path), _canonical_durable_path(receipt_path)
+
+
 def _validate_assignment_seal_payload(
     payload: Mapping[str, Any],
     *,
@@ -2468,16 +2481,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             or not isinstance(rotation.get("receipt_path"), str)
         ):
             raise AcceptanceError("workspace rotation evidence is incomplete")
-        archive_path = _canonical_durable_path(rotation["archive_path"])
-        expected_archive = (
-            _configured_assignment_root(Path(self.config["proof_workspace_root"]))
-            / ".lost-attempts"
-            / job_id
-            / interrupted_attempt_id
+        archive_path, rotation_receipt_path = _durable_rotation_paths(
+            workspace_root=Path(self.config["proof_workspace_root"]),
+            job_id=job_id,
+            attempt_id=interrupted_attempt_id,
+            archive_path=rotation["archive_path"],
+            receipt_path=rotation["receipt_path"],
         )
-        if archive_path != expected_archive:
-            raise AcceptanceError("archived prior workspace path drifted")
-        rotation_receipt_path = Path(rotation["receipt_path"])
         rotation_info = rotation_receipt_path.lstat()
         archive_info = archive_path.lstat()
         fresh_info = prior_workspace.lstat()
