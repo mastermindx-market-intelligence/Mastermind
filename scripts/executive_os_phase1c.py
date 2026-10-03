@@ -1812,6 +1812,8 @@ def _service_from_config(
             GitHubWebCommissionSourceProvider,
         )
 
+        commission_source_provider = GitHubWebCommissionSourceProvider()
+
         reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
@@ -1935,12 +1937,63 @@ def _service_from_config(
         session_factories = {}
         if installed_profile == WEB_CEO_SESSIONS_PROFILE:
             from integrations.session_bridge.installed import build_runtime_session_bridge
+            from integrations.session_bridge.native_backends import ExecutiveSummonAdapter
+            from integrations.session_bridge.schemas import BridgeError
+            from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
+            from control_plane import executive_ceo_ingress as session_ingress, ceo_request
+
             def session_bridge_factory(runtime):
                 # Validate the supplied live Runtime through the incumbent
                 # namespace owner before constructing any projection or writer.
                 service._namespace_custody.bound_runtime(runtime)
+                binding = service._ceo_ingress_app_binding
+
+                def require_session_admission(_envelope=None):
+                    if (binding is not service._ceo_ingress_app_binding
+                            or not binding.armed or service._closing
+                            or service._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise BridgeError("ingress_unavailable", "Executive admission is unavailable")
+
+                async def submit_summon(payload):
+                    require_session_admission()
+                    request = dict(payload)
+                    request_ref = ceo_request.app_request_ref(request.pop("operation_key"))
+                    try:
+                        observed = await session_ingress._observe_trusted_grounding(readers)
+                        require_session_admission()
+                        receipt = await session_ingress.handle_frame(
+                            {"schema": session_ingress.SUBMIT_SCHEMA_V2,
+                             "request_ref": request_ref, "observed_grounding": observed,
+                             "request": request},
+                            runtime=runtime, grounding_provider=readers,
+                            workspace_root=config.proof_workspace_root,
+                            service_state=service._service_state,
+                            ceo_ingress_armed=binding.armed,
+                            strict_v2_admission=True,
+                            execution_binding_provider=service._require_current_coo_binding,
+                            dialogue_source_provider=commission_source_provider,
+                            admission_guard=require_session_admission,
+                        )
+                    except session_ingress.CeoIngressError as exc:
+                        # Canonical owner classifies its durable effect/refusal.
+                        raise BridgeError(exc.code, exc.message) from None
+                    # After the mutation owner returns, drift cannot be described
+                    # as a zero-effect refusal. The private transport preserves it.
+                    try:
+                        require_session_admission()
+                    except BridgeError:
+                        raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                    return receipt
+
+                adapter = ExecutiveSummonAdapter(submit_summon)
+                async def summon(principal, arguments):
+                    if not {READ_SCOPE, SUBMIT_SCOPE} <= set(principal.scopes):
+                        raise BridgeError("authority_refused", "Executive submit scopes are required")
+                    return await adapter(arguments)
+
                 return build_runtime_session_bridge(
-                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET)
+                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    summon_handler=summon)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
@@ -1950,7 +2003,7 @@ def _service_from_config(
             **content_factories, **workspace_factories, **coo_factories, **session_factories,
         )
         ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
-            GitHubWebCommissionSourceProvider()
+            commission_source_provider
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (

@@ -5,10 +5,9 @@ process, or session state. They compose incumbent canonical owners only.
 """
 from __future__ import annotations
 
-import dataclasses
 import inspect
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from typing import Any
 
 from .native_wire import AttentionReference
 from .schemas import BridgeError
@@ -191,93 +190,21 @@ class CanonicalTargetReader:
         return values
 
 
-@dataclasses.dataclass(frozen=True)
-class ExecutiveSummonBinding:
-    """Trusted host-owned fields required by canonical Executive admission."""
-
-    department: str
-    priority: int = 0
-    workstream: str | None = None
-    allowed_write_paths: tuple[str, ...] = ()
-    validation: Mapping[str, Any] | None = None
-    attempt_limit: int = 2
-
-
-class ExecutiveSummonBindingResolver(Protocol):
-    def resolve(
-        self, *, operation_key: str, execution_profile: str
-    ) -> ExecutiveSummonBinding: ...
-
-
 class ExecutiveSummonAdapter:
-    """Build one canonical intent using trusted host scope, then submit it.
+    """Pass requested scope to the existing Executive admission authority.
 
-    The Dot supplies only objective/profile/operation identity. Department,
-    priority, workstream, write scope, validation and attempt ceiling come from
-    the authenticated host's binding resolver. Provider/host placement remains
-    entirely with Executive/Capacity.
+    This adapter never grants authority or chooses provider/account/host. The
+    canonical normalizer and Runtime policy retain those decisions.
     """
 
-    def __init__(
-        self,
-        submit_intent: Callable[[Mapping[str, Any]], Any],
-        *,
-        binding_resolver: ExecutiveSummonBindingResolver,
-    ) -> None:
+    def __init__(self, submit_intent: Callable[[Mapping[str, Any]], Any]) -> None:
         if not callable(submit_intent):
             raise TypeError("submit_intent must be callable")
-        if not hasattr(binding_resolver, "resolve") or not callable(binding_resolver.resolve):
-            raise TypeError("binding_resolver must expose resolve()")
         self._submit_intent = submit_intent
-        self._binding_resolver = binding_resolver
 
     def __call__(self, arguments: Mapping[str, Any]) -> Any:
-        operation_key = arguments["operation_key"]
-        execution_profile = arguments["execution_profile"]
-        try:
-            binding = self._binding_resolver.resolve(
-                operation_key=operation_key,
-                execution_profile=execution_profile,
-            )
-        except Exception:
-            raise BridgeError(
-                "binding_unavailable", "trusted Executive summon binding unavailable"
-            ) from None
-        if not isinstance(binding, ExecutiveSummonBinding):
-            raise BridgeError("binding_unavailable", "trusted Executive summon binding invalid")
-        if not isinstance(binding.department, str) or not binding.department:
-            raise BridgeError("binding_unavailable", "trusted Executive department unavailable")
-        if isinstance(binding.priority, bool) or not isinstance(binding.priority, int):
-            raise BridgeError("binding_unavailable", "trusted Executive priority invalid")
-        if not 1 <= binding.attempt_limit <= 3:
-            raise BridgeError("binding_unavailable", "trusted Executive attempt limit invalid")
-
-        payload: dict[str, Any] = {
-            "operation_key": operation_key,
-            "objective": arguments["objective"],
-            "department": binding.department,
-            "priority": binding.priority,
-            "execution_profile": execution_profile,
-            "attempt_limit": binding.attempt_limit,
-        }
-        if binding.workstream is not None:
-            payload["workstream"] = binding.workstream
-
-        if execution_profile == "bounded_code_change":
-            if not binding.allowed_write_paths or not isinstance(binding.validation, Mapping):
-                raise BridgeError(
-                    "binding_unavailable",
-                    "bounded code summon requires trusted write scope and validation",
-                )
-            payload["allowed_write_paths"] = list(binding.allowed_write_paths)
-            payload["validation"] = dict(binding.validation)
-        elif binding.allowed_write_paths or binding.validation is not None:
-            raise BridgeError(
-                "binding_unavailable",
-                "research summon binding must not carry write scope",
-            )
-
-        return self._submit_intent(payload)
+        from .schemas import validate_tool_arguments
+        return self._submit_intent(validate_tool_arguments("session_summon", arguments))
 
 
 __all__ = [
@@ -285,6 +212,4 @@ __all__ = [
     "CanonicalTargetReader",
     "ExactTargetRouter",
     "ExecutiveSummonAdapter",
-    "ExecutiveSummonBinding",
-    "ExecutiveSummonBindingResolver",
 ]

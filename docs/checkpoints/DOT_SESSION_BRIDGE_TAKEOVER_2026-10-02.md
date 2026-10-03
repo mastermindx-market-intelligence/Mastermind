@@ -537,3 +537,41 @@ The source-free summon wrapper lacks a production operation-scope resolver;
 reuse of the existing Executive requested-scope admission contract is under
 architectural review. No new authority binding is inferred from commission prose.
 This checkpoint is source progress, not native live acceptance or mission completion.
+
+## Canonical SUMMON integration — 2026-10-03
+
+The continuation repair was published asd372a357a564182a9dbb0c277ae1112158626765.
+Protected origin/master0c781eb94ed1c402da2878869054edac4d35b662 was then merged
+normally as377682c26fa6892527701d248d6b0074bdbdc51d, preserving the current
+flat Web-CEO transport and verified-TLS commission fetch. No shared history rewrite.
+
+Architecture review found that ExecutiveSummonBindingResolver was an unnecessary
+local design constraint, not a governing contract. Both #1141 and #1143 require
+reuse of Executive admission and Capacity; the existing submit_ceo_intent already
+accepts semantic requested scope and lets Runtime policy adjudicate authority.
+The wrapper now reuses that exact schema and normalizer, additionally requiring
+workstream for strict-v2 admission. It adds no provider/host/account/credential,
+commission selector, raw authority, raw argv or new operation registry.
+
+The installed factory composes ExecutiveSummonAdapter with in-process CeoIngress
+strict-v2 handling. It derives request_ref from operation_key, uses canonical
+grounding observations, the current COO binding and the same commission provider
+as ordinary Web-CEO submit. Read+submit scopes and current App binding/armed/state
+are checked; the existing late admission guard checks again before the sink.
+Post-owner drift remains effect_unknown. No direct provider or worker spawn.
+
+Real temporary Runtime/service tests prove one durable QUEUED Job, exact immutable
+commission provenance, dispatched=false, duplicate reconciliation to the same Job,
+changed-payload conflict, zero Jobs on source absence/source movement/grounding
+movement and missing scope, and one Job with effect_unknown on post-owner binding
+drift. Schema parity and forbidden-field tests use the canonical contract.
+Current-base campaign:403 passed,0 failed,0 errors,0 skipped (27.592s).
+Independent architecture review passed. Evidence:
+ /Volumes/Mastermind/evidence/exact-session-interconnect-20261002/1112-currentbase-summon-20261003.xml
+ /Volumes/Mastermind/evidence/exact-session-interconnect-20261002/1112-currentbase-summon-tests-20261003.log
+The initial combined run exposed macOS temporary-file group inheritance in an
+unmodified Mosyle fixture; an operator-owned test temp parent with the expected
+group resolved it without changing production metadata checks.
+
+Production attention and parent consumption, Codex/Claude owner composition,
+CONSULT and native acceptance remain open. A queued admission is not execution.

@@ -65,7 +65,14 @@ def test_handlers_delegate_only_to_existing_gateway():
             "objective": "Inspect one bounded issue.",
             "execution_profile": "research_only",
             "operation_key": "session-helper-summon-001",
-        })
+
+                                                        "department": "executive-infrastructure",
+                                                        "priority": 0,
+                                                        "workstream": "WS:DOT-SESSION-BRIDGE",
+                                                        "attempt_limit": 2,
+                                                        "allowed_write_paths": [],
+                                                        "validation": {}
+                                                    })
         return targets, sent, summoned
 
     targets, sent, summoned = asyncio.run(exercise())

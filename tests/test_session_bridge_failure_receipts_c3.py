@@ -111,7 +111,14 @@ def test_uncaught_backend_failure_has_a_bounded_unknown_result(tool):
         calls.append(1)
         raise ConnectionResetError("untrusted-secret-shaped-error")
     args = SEND if tool == "session_send" else {"objective": "One useful task.",
-        "execution_profile": "research_only", "operation_key": SEND["operation_key"]}
+        "execution_profile": "research_only", "operation_key": SEND["operation_key"],
+                                                   "department": "executive-infrastructure",
+                                                   "priority": 0,
+                                                   "workstream": "WS:DOT-SESSION-BRIDGE",
+                                                   "attempt_limit": 2,
+                                                   "allowed_write_paths": [],
+                                                   "validation": {}
+                                               }
     result = asyncio.run(_gateway(sender=fail, summoner=fail).call(tool, args))
     assert calls == [1]
     assert result["ok"] is False

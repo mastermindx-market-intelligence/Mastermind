@@ -114,20 +114,23 @@ def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
         }
 
     if tool_name == "session_summon":
-        obj = _object(
-            arguments,
-            required={"objective", "execution_profile", "operation_key"},
-        )
-        objective = _text(obj["objective"], "objective", max_chars=4000)
-        execution_profile = _text(
-            obj["execution_profile"], "execution_profile", max_chars=64
-        )
-        if execution_profile not in ("bounded_code_change", "research_only"):
-            raise BridgeError("invalid_input", "execution_profile is unsupported")
-        return {
-            "objective": objective,
-            "execution_profile": execution_profile,
-            "operation_key": _operation_key(obj["operation_key"]),
-        }
+        from integrations.executive_mcp import schemas as executive
+        try:
+            normalized = executive.validate_tool_arguments(executive.MODIFYING_TOOL, arguments)
+        except executive.GatewayError as exc:
+            raise BridgeError(exc.code, exc.message) from None
+        if "workstream" not in normalized:
+            raise BridgeError("invalid_input", "strict Executive admission requires workstream")
+        return normalized
 
     raise BridgeError("not_found", "unknown tool")
+
+
+def summon_input_schema() -> dict[str, Any]:
+    """Reuse Executive requested-scope syntax; strict-v2 additionally needs source identity."""
+    import copy
+    from integrations.executive_mcp import schemas as executive
+    schema = copy.deepcopy(executive.tool_spec(executive.MODIFYING_TOOL).input_schema)
+    if "workstream" not in schema["required"]:
+        schema["required"].append("workstream")
+    return schema

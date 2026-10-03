@@ -184,7 +184,8 @@ class InstalledSessionBridgeProvider:
             )
 
 
-def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path):
+def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
+                                 summon_handler: Callable | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
@@ -223,7 +224,7 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path):
             arguments["stop_condition"], arguments["operation_key"]))
 
     return InstalledSessionBridgeProvider(
-        target_projector=targets, reply_handler=send, summon_handler=unavailable)
+        target_projector=targets, reply_handler=send, summon_handler=(summon_handler if summon_handler is not None else unavailable))
 
 
 class InstalledSessionBridgeClient:

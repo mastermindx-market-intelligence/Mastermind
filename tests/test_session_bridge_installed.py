@@ -24,7 +24,7 @@ PRINCIPAL = VerifiedPrincipal(
     resource="https://exec.example.test/mcp",
     subject_digest="1" * 64,
     client_ref="2" * 64,
-    scopes=("mastermind.executive.read", "mastermind.executive.submit"),
+    scopes=("mastermind.executive.read", "mastermind.executive.intent.submit"),
     issued_at=1791000000,
     expires_at=1791003600,
     jti_digest="3" * 64,
@@ -97,7 +97,14 @@ def test_sent_unknown_modifying_frame_is_effect_unknown_without_retry(tool):
         "objective": "Inspect one bounded issue.",
         "execution_profile": "research_only",
         "operation_key": "installed-effect-002",
-    })
+
+                                         "department": "executive-infrastructure",
+                                         "priority": 0,
+                                         "workstream": "WS:DOT-SESSION-BRIDGE",
+                                         "attempt_limit": 2,
+                                         "allowed_write_paths": [],
+                                         "validation": {}
+                                     })
     call = c.send if tool == "session_send" else c.summon
     with pytest.raises(BridgeError) as error:
         asyncio.run(call(PRINCIPAL, args))
@@ -289,7 +296,14 @@ def test_existing_control_service_refuses_session_frame_without_owner(tmp_path, 
     ("session_send", {"target_ref": "fabric_attempt:exact", "instruction": "Continue.",
                       "stop_condition": "Return evidence.", "operation_key": "continue-001"}),
     ("session_summon", {"objective": "Read existing source.", "execution_profile": "research_only",
-                        "operation_key": "summon-001"}),
+                        "operation_key": "summon-001",
+                           "department": "executive-infrastructure",
+                           "priority": 0,
+                           "workstream": "WS:DOT-SESSION-BRIDGE",
+                           "attempt_limit": 2,
+                           "allowed_write_paths": [],
+                           "validation": {}
+                       }),
 ])
 def test_disarmed_session_route_enters_no_factory_or_owner(tmp_path, short_socket_root, monkeypatch, tool, arguments):
     import dataclasses
@@ -421,7 +435,14 @@ def test_real_installed_factory_projects_runtime_wake_and_binds_continuation(tmp
             assert result["result"]["error"]["code"] == "operation_carrier_conflict"
             result = await call("session_summon", {
                 "objective": "Inspect current source.", "execution_profile": "research_only",
-                "operation_key": "not-a-host-commission"})
-            assert result["result"]["error"]["code"] == "backend_unavailable"
+                "operation_key": "not-a-host-commission",
+                                                      "department": "executive-infrastructure",
+                                                      "priority": 0,
+                                                      "workstream": "WS:DOT-SESSION-BRIDGE",
+                                                      "attempt_limit": 2,
+                                                      "allowed_write_paths": [],
+                                                      "validation": {}
+                                                  })
+            assert result["result"]["error"]["code"] == "grounding_unavailable"
 
     asyncio.run(run())

@@ -33,11 +33,7 @@ SESSION_SEND_SPEC = _spec("session_send",
     read_only=False)
 SESSION_SUMMON_SPEC = _spec("session_summon",
     "Request existing Executive admission and Capacity placement. Provider, account and host selection are never accepted from the caller.",
-    {"type":"object","properties":{
-        "objective":{"type":"string","minLength":1,"maxLength":4000},
-        "execution_profile":{"type":"string","enum":["bounded_code_change","research_only"]},
-        "operation_key":{"type":"string","minLength":1,"maxLength":bridge.MAX_OPERATION_KEY_CHARS}},
-     "required":["objective","execution_profile","operation_key"],"additionalProperties":False},
+    bridge.summon_input_schema(),
     read_only=False)
 
 if v2.WEB_CEO_V2_TOOL_SPECS[-1].name != legacy.MODIFYING_TOOL:

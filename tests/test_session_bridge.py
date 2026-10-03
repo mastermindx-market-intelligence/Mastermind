@@ -35,7 +35,7 @@ def test_send_refuses_extra_routing_fields():
             },
         )
     except Exception as exc:
-        assert "unexpected fields" in str(exc)
+        assert "unexpected" in str(exc)
     else:
         raise AssertionError("fallback routing field must be refused")
 
@@ -75,6 +75,13 @@ def test_summon_is_delegated_not_provider_spawned():
                 "objective": "inspect the failing integration",
                 "execution_profile": "bounded_code_change",
                 "operation_key": "dot-summon-001",
+
+                "department": "executive-infrastructure",
+                "priority": 0,
+                "workstream": "WS:DOT-SESSION-BRIDGE",
+                "attempt_limit": 2,
+                "allowed_write_paths": ["integrations/session_bridge"],
+                "validation": {"pytest_targets": ["tests/test_session_bridge.py"]}
             },
         )
     )
@@ -85,6 +92,13 @@ def test_summon_is_delegated_not_provider_spawned():
             "objective": "inspect the failing integration",
             "execution_profile": "bounded_code_change",
             "operation_key": "dot-summon-001",
+
+            "department": "executive-infrastructure",
+            "priority": 0,
+            "workstream": "WS:DOT-SESSION-BRIDGE",
+            "attempt_limit": 2,
+            "allowed_write_paths": ["integrations/session_bridge"],
+            "validation": {"pytest_targets": ["tests/test_session_bridge.py"]}
         }
     ]
 
@@ -98,10 +112,17 @@ def test_summon_refuses_model_visible_provider_selection():
                 "execution_profile": "bounded_code_change",
                 "operation_key": "dot-summon-001",
                 "preferred_surface": "codex",
+
+                "department": "executive-infrastructure",
+                "priority": 0,
+                "workstream": "WS:DOT-SESSION-BRIDGE",
+                "attempt_limit": 2,
+                "allowed_write_paths": ["integrations/session_bridge"],
+                "validation": {"pytest_targets": ["tests/test_session_bridge.py"]}
             },
         )
     except Exception as exc:
-        assert "unexpected fields" in str(exc)
+        assert "unexpected" in str(exc)
     else:
         raise AssertionError("Dot must not bypass Capacity provider selection")
 
@@ -148,9 +169,16 @@ def test_summon_refuses_non_executive_profile():
                 "objective": "repair the failing integration",
                 "execution_profile": "direct_provider_spawn",
                 "operation_key": "dot-summon-invalid-001",
+
+                "department": "executive-infrastructure",
+                "priority": 0,
+                "workstream": "WS:DOT-SESSION-BRIDGE",
+                "attempt_limit": 2,
+                "allowed_write_paths": [],
+                "validation": {}
             },
         )
     except Exception as exc:
-        assert "execution_profile is unsupported" in str(exc)
+        assert "execution_profile" in str(exc)
     else:
         raise AssertionError("invented summon profiles must be refused")

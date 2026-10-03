@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .schemas import summon_input_schema
 from .gateway import SessionBridgeGateway
 
 
@@ -51,16 +52,7 @@ def build_tools() -> list[Any]:
         mcp_types.Tool(
             name="session_summon",
             description="Request one admitted worker/session through canonical Executive admission and Capacity placement.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "objective": {"type": "string", "minLength": 1, "maxLength": 4000},
-                    "execution_profile": {"type": "string", "enum": ["bounded_code_change", "research_only"]},
-                    "operation_key": {"type": "string", "minLength": 1, "maxLength": 96},
-                },
-                "required": ["objective", "execution_profile", "operation_key"],
-                "additionalProperties": False,
-            },
+            inputSchema=summon_input_schema(),
             annotations=common,
         ),
     ]
