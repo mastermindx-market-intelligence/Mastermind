@@ -259,3 +259,173 @@ def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
     assert "Do not mix procedure revisions" in text
     assert "does not transfer an incumbent writer, authorize a retry, or relax admission" in text
     assert "explanatory notes, not a second closed routing taxonomy" in text
+
+
+# Adaptive attended-mode and recovery source contracts. These are procedural tests, not provider proof.
+def test_attended_mode_recommendation_is_task_and_capability_adaptive():
+    text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
+    for phrase in (
+        "Sol owns the **mode recommendation**",
+        "Prefer **Pro**",
+        "Prefer **Extra High**",
+        "reversible task-fit defaults, not capability guarantees",
+        "Pro may expose a needed write action",
+        "Extra High is a recovery candidate, not a guarantee",
+        "One successful READ or WRITE",
+        "Do not alternate modes ceremonially",
+    ):
+        assert phrase in text
+
+
+def test_attended_mode_switch_never_grants_authority_or_bypasses_denial():
+    text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
+    for phrase in (
+        "grants **no** authority, permission, admission, source custody, carrier transfer, retry",
+        "never bypasses a safety/permission denial",
+        "never clears `EFFECT_UNKNOWN`",
+        "separate from automated Executive/ModelRouter admission",
+        "`PRO_MODE_TASK_CLASS`",
+        "Text cannot self-switch",
+        "re-verify the exact capability needed",
+    ):
+        assert phrase in text
+
+
+def test_context_rotation_is_procedural_and_effect_fenced():
+    text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
+    for phrase in (
+        "exact surface is `ROTATION_REQUIRED`",
+        "all modifying effects are reconciled",
+        "compact durable continuation exists",
+        "`CONTEXT_ROTATION` is a procedural transition, not a finalization classification",
+        "`EFFECT_UNKNOWN` blocks receiver change and context rotation",
+    ):
+        assert phrase in text
+
+
+def test_final_gate_projects_platform_and_ui_recovery_without_new_lifecycle_states():
+    text = " ".join(_section("Step 8 — Final-response gate").split())
+    assert "`PLATFORM_FAILURE` is a blocker reason, not a finalization classification" in text
+    assert "`MODE_SWITCH` and `FRESH_CHAT`" in text
+    assert "are human-control/recovery reasons, not lifecycle states" in text
+    assert "`CHECKPOINTED_CONTINUATION`" in text
+    assert "`NOT_CANONICALLY_PERSISTED`" in text
+    assert "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write" in text
+    assert "`EXACT_HUMAN_GATE` only for a real human/admin ceremony" in text
+    assert "`ALL_SCOPED_LANES_BLOCKED`" in text
+    assert "`MORE_WORK_EXISTS`" in text
+
+
+def test_long_run_phase_contract_fences_breadth_without_shortening_productive_turns():
+    text = " ".join(_section("Step 1 — Freeze the active-turn frame").split())
+    for phrase in (
+        "ACTIVE_PHASE",
+        "PHASE_DONE_WHEN",
+        "ALLOWED_SURFACES",
+        "DEFERRED_NONBLOCKING_FINDINGS",
+        "Depth is allowed; breadth is fenced",
+        "one bounded blocking subphase",
+        "phase-boundary re-evaluation",
+    ):
+        assert phrase in text
+
+
+def test_attended_mode_policy_is_session_sticky_after_substantial_work_begins():
+    text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
+    for phrase in (
+        "mode choice is session-level by default",
+        "mode stickiness is the default",
+        "do not bounce a mature Sol Pro conversation",
+        "tool-heavy",
+        "fresh-chat boundary",
+    ):
+        assert phrase in text
+
+
+def test_phase_barrier_separates_mission_incomplete_from_current_turn_lifetime():
+    text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
+    for phrase in (
+        "recovery gap",
+        "PHASE BARRIER",
+        "MORE_WORK_EXISTS",
+        "start it in the same healthy turn",
+        "same healthy chat",
+        "A checkpoint may occur mid-turn",
+    ):
+        assert phrase in text
+
+
+def test_phase_barrier_pins_healthy_same_turn_continuation_decision():
+    text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
+    assert "**start that next phase in the same turn**" in text
+    assert "not itself a turn boundary" in text
+    assert "Healthy output pressure alone does not require" in text
+
+
+def test_support_only_cycles_are_not_capability_delta_or_stop_reason():
+    text = " ".join(_section("Step 3 — Require a capability delta, not activity").split())
+    for phrase in (
+        "review requests",
+        "notifications",
+        "status reads",
+        "projection lookups",
+        "checkpoint/comments",
+        "CI observations",
+        "actually closes a gate or changes what can safely happen next",
+        "NO_DELTA_LOOP",
+        "execute the highest-value ready capability step",
+    ):
+        assert phrase in text
+
+
+def test_waiting_external_is_lane_local_and_not_durable_execution():
+    blocker = " ".join(_section("Step 4 — Treat a blocker as lane-local first").split())
+    offload = " ".join(_section("Step 7 — Offload work that should outlive the reasoning turn").split())
+    for phrase in (
+        "`WAITING_EXTERNAL` is lane-local",
+        "review request",
+        "owner message",
+        "pending CI/check",
+        "move to it in the same turn",
+    ):
+        assert phrase in blocker
+    assert "is not `DURABLE_EXECUTION_RUNNING`" in offload
+    assert "accepted/started execution identity and lawful return/wake path" in offload
+
+
+def test_checkpointed_continuation_rejects_clean_phase_or_wait_as_exit_coupon():
+    text = " ".join(_section("Step 8 — Final-response gate").split())
+    for phrase in (
+        "observed continuity risk",
+        "materially heavy/context-expanding next phase",
+        "ordinary clean task/phase/chunk/checkpoint boundary",
+        "review request",
+        "owner message",
+        "pending CI",
+        "insufficient while healthy useful authorized work remains",
+        "clean phase boundary is a save-and-reassess point",
+    ):
+        assert phrase in text
+    assert "A specific chunk boundary or observed continuity risk" not in text
+
+
+def test_more_work_exists_continues_across_task_and_phase_boundaries():
+    text = " ".join(_section("Step 8 — Final-response gate").split())
+    assert "If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**" in text
+    assert "including across task and phase boundaries" in text
+    assert "support-only cycle cannot manufacture that gate" in text
+
+
+def test_persistence_failure_does_not_invent_human_or_effect_state():
+    text = " ".join(_section("Step 8 — Final-response gate").split())
+    required = (
+        "ambiguous checkpoint write",
+        "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write",
+        "`EXACT_HUMAN_GATE` only for a real human/admin ceremony",
+        "proven persistence/platform outage",
+        "`ALL_SCOPED_LANES_BLOCKED`",
+        "safe independent work remains",
+        "`MORE_WORK_EXISTS`",
+    )
+    for phrase in required:
+        assert phrase in text
