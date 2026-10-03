@@ -87,11 +87,47 @@ def provider_rungs(role: str | None = None) -> list[dict[str, Any]]:
     return sorted(rungs, key=lambda rung: bool(rung["cooling"]))
 
 
-def available() -> bool:
+def _shared_availability_modules():
+    from engine.neuralweb import capability_broker, key_pool
+
+    return capability_broker, key_pool
+
+
+def _oauth_available(role: str | None = None) -> bool:
+    """Whether any PRESENT OAuth capability is authorized for this lane.
+
+    This deliberately does not call ``llm_auth._oauth_pool_candidates`` or
+    ``provider_rungs``.  Those functions rank candidates using cooling, window
+    load and weekly budget state; that work affects ORDER, not whether the pool
+    has a rung at all.  Health/readiness callers only need existence.
+    """
     try:
-        return bool(provider_rungs())
+        capability_broker, key_pool = _shared_availability_modules()
+        lane = _lane(role)
+        for capability_id in key_pool.discover_present_keys():
+            resolved = capability_broker.resolve(capability_id, lane=lane)
+            if resolved.get("allowed") and resolved.get("ref_name"):
+                return True
     except Exception:
         return False
+    return False
+
+
+def available() -> bool:
+    """True when at least one authorized subscription provider is configured.
+
+    Provider ranking remains the responsibility of ``provider_rungs`` at actual
+    reasoning time.  Keeping this existence check independent is load-bearing:
+    ``/health`` calls it and must not rescan cooling/usage ledgers per probe.
+    """
+    try:
+        from brain import codex_bridge
+
+        if codex_bridge.available():
+            return True
+    except Exception:
+        pass
+    return _oauth_available()
 
 
 def _failure_kind(error: object) -> str | None:
