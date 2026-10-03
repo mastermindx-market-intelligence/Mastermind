@@ -234,6 +234,36 @@ The reviewer could not check the pull-request comment or its time, since it had 
 GitHub. The comment is `5969307706`, created 2026-10-03 12:47:13Z; the attempt file records
 the run starting at 12:47:29Z.
 
+### Eighth review: the reference file rewritten after the run
+
+An eighth read-only review, by a reviewer who had not seen the earlier ones, attacked the
+commit that rewrote the simulated reference (`84ee9590`, §7). It read no real price and ran
+nothing of B2. Its verdict: **pass, with one fix**.
+
+It confirmed each of these:
+
+- The old and new files hold the same value. All 72,217 numbers compare exactly.
+- The new file, written on one line again, reproduces the old bytes.
+- The code hash is the same at the commit that ran, at `703a9363` and at `84ee9590`.
+- The result, the attempt record and both pre-registrations are byte-identical across the
+  change.
+- Altering any value in the reference, even one number in its last place, makes the test
+  fail.
+- The run's refusals are unchanged, and a second run is no easier than before.
+
+It judged the failing check a false positive and the rewrite a legitimate answer to it. The
+file is still scanned in full, and the only numbers from 400 to 999 in it are the two counts
+of 800 simulated cells.
+
+| # | Finding | Severity | Disposition |
+| --- | --- | --- | --- |
+| F1 | The recipe in §9 wrote a rebuilt reference over the committed file. A rebuild is on one line, so it would not match the pin and would fail the check again. | minor | Fixed. The recipe writes to a scratch path and says how to compare a rebuild. |
+| F2 | The check that failed judges data files one line at a time. That flags ordinary numbers in a one-line file. It also misses a real identity number when a file is written one member per line. | minor, outside this study | Both reported to the check's owner (issue 1188). The check was not changed here. |
+| — | The §7 entry did not name the clause it departs from. | nit | Named: B2 §11. |
+
+The reviewer could not show from the repository alone that no run was made outside it. None
+was: the result and attempt files are the ones the single run wrote.
+
 ## 5. Substrate: what the universe actually is
 
 Members by the membership file, and how many have a price, on the first session of the
@@ -459,7 +489,9 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
   hash of that file (`6225eabb…8d81`). A test writes the committed file on one line again, as
   the instrument does, and checks that it hashes to the value the run recorded. The code hash
   leaves out the two pin lines and is unchanged (`5c976ce8…fca6`). Nothing was run again, and
-  the check itself was not changed.
+  the check itself was not changed. B2 §11 says the reference's sha256 is pinned as
+  `REFERENCE_SHA256`; that is now the hash of the rewritten file, not of the file as the run
+  read it (§4, eighth review).
 
 ## 8. What happens next
 
@@ -531,10 +563,13 @@ The B2 simulated reference. Simulated prices; about 15 minutes on 20 cores:
 ```
 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
 python3 -m research.trend_persistence_walkforward --reference --jobs 20 \
-    --out research/data/trend_persistence_b2_reference.json
+    --out <scratch>/b2_reference.json
 ```
 
-Two builds on the same machine gave identical runs.
+Two builds on the same machine gave identical runs. The instrument writes the file on one
+line; the committed copy holds the same value with one member per line (§7). Compare a rebuild
+by its sha256, which should be `e2caf7e8…20f3`, the hash the run recorded, and not by
+`REFERENCE_SHA256`. Do not write a rebuild over the committed file.
 
 The B2 run. It takes no output path and writes
 `research/data/trend_persistence_b2_result.json`. It refuses to run while that file exists.
@@ -788,12 +823,13 @@ drawdown or a price nearer its high.
 
 ## 11. Wave B2 — walk-forward result
 
-One run, on 2026-10-03 at 12:47 UTC, from commit `aadb15d2` with a clean tree:
-pre-registration `79764bf5…80aa`, simulated reference `e2caf7e8…20f3` (the one-line file as
-it stood at the run; §7), code hash `5c976ce8…fca6`. The attempt was recorded on pull request 1155 before the run read a real
-price (§4, sixth review). It was the first attempt and needed no retry. The two files it wrote
-are committed unedited (commit `d671d3c2`): `research/data/trend_persistence_b2_result.json`
-and `research/data/trend_persistence_b2_attempt.json`. The panel is the one V2 was scored on
+One run, on 2026-10-03 at 12:47 UTC, from commit `aadb15d2` with a clean tree: pre-registration
+`79764bf5…80aa`, simulated reference `e2caf7e8…20f3` (the one-line file as it stood at the run;
+§7), code hash `5c976ce8…fca6`. The attempt was recorded on pull request 1155 before the run
+read a real price (§4, sixth review). It was the first attempt and needed no retry. The two
+files it wrote are committed unedited (commit `d671d3c2`):
+`research/data/trend_persistence_b2_result.json` and
+`research/data/trend_persistence_b2_attempt.json`. The panel is the one V2 was scored on
 (digest `48cb5e76…f178`). Before fitting anything the instrument reproduced V2's 29 holdout
 means from the committed result to 1e-9.
 
