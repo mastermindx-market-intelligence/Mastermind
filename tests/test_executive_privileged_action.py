@@ -251,7 +251,42 @@ def test_secondary_host_power_policy_rejects_all_arguments() -> None:
         )
 
 
-def test_exactly_nine_actions_are_accepted() -> None:
+def test_vps_deploy_has_fixed_argv_and_effect_class(tmp_path: Path) -> None:
+    sha = "a" * 40
+    request = validate_request(
+        _request("executive.vps.deploy_mastermind", {"commit_sha": sha})
+    )
+    assert request.effect_class == "PRODUCTION_DEPLOY"
+    assert build_argv(request, tmp_path) == (
+        "/bin/bash",
+        str(tmp_path / "ops/executive_os/deploy-mastermind-vps.sh"),
+        "--commit-sha",
+        sha,
+    )
+
+
+@pytest.mark.parametrize(
+    "sha",
+    ["a" * 39, "A" * 40, "g" * 40, "../" + "a" * 37, "a" * 41],
+)
+def test_vps_deploy_requires_exact_lowercase_commit_sha(sha: str) -> None:
+    with pytest.raises(PrivilegedActionError, match="commit_sha"):
+        validate_request(
+            _request("executive.vps.deploy_mastermind", {"commit_sha": sha})
+        )
+
+
+def test_vps_deploy_rejects_extra_arguments() -> None:
+    with pytest.raises(PrivilegedActionError, match="deploy arguments"):
+        validate_request(
+            _request(
+                "executive.vps.deploy_mastermind",
+                {"commit_sha": "a" * 40, "host": "other"},
+            )
+        )
+
+
+def test_exactly_ten_actions_are_accepted() -> None:
     cases = {
         "executive.services.start": {},
         "executive.services.stop": {},
@@ -259,6 +294,7 @@ def test_exactly_nine_actions_are_accepted() -> None:
         "executive.services.start_readside": {},
         "executive.services.stop_readside": {},
         "executive.host.prepare_secondary_power_policy": {},
+        "executive.vps.deploy_mastermind": {"commit_sha": "a" * 40},
         "executive.worker_auth.verify_only": {},
         "executive.worker_auth.verify_ready": {
             "slot_id": "codex-pro-01",

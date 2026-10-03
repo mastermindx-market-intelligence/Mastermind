@@ -122,6 +122,8 @@ _TRUSTED_EFFECT_PATHS = (
     "ops/executive_os/service-control.sh",
     "ops/executive_os/provision-worker-auth.sh",
     "ops/executive_os/secondary_host_power_policy.py",
+    "ops/executive_os/deploy-mastermind-vps.sh",
+    "scripts/deploy_code_to_vps.sh",
 )
 _TERMINAL_RECEIPT_KEYS = frozenset(
     {
