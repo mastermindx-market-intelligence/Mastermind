@@ -534,9 +534,10 @@ only when every useful lane is blocked, and `MORE_WORK_EXISTS` when safe indepen
   all of the following hold:
   1. An observed continuity risk, materially heavy/context-expanding next phase that would consume the
      safe landing reserve, or a genuinely required surface/context transition justifies ending this turn.
-     An ordinary clean task/phase/chunk/checkpoint boundary, review request, owner message, pending CI,
-     completed plan, or arbitrary time target is insufficient while healthy useful authorized work remains;
-     elapsed time alone never satisfies this gate.
+     The older shorthand `specific chunk boundary or observed continuity risk` is preserved here only as
+     a compatibility phrase: a specific chunk boundary alone is no longer sufficient. An ordinary clean
+     task/phase/chunk/checkpoint boundary, review request, owner message, pending CI, completed plan or arbitrary time target
+     is insufficient while healthy useful authorized work remains; elapsed time alone never satisfies this gate.
   2. The current cumulative checkpoint has a verified persistence receipt/readback from its existing
      owner, with an exact immutable revision or digest. It covers all material effects through this
      boundary, not merely an older snapshot.
