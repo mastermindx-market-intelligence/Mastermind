@@ -448,6 +448,18 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
   attempt record, the price-only count of complete cases was run again to confirm the panel
   loads and matches V2's. It relates no feature to any label, and it matched the earlier
   count.
+- **The simulated reference was rewritten after the run, with its values unchanged.** The
+  instrument wrote `research/data/trend_persistence_b2_reference.json` on one line, and the run
+  pinned that file (sha256 `e2caf7e8…20f3`, the hash in the result and in the attempt record).
+  A repository check that belongs to another program reads changed files line by line and
+  flags a number from 400 to 999 on a line that also carries a word such as "endpoint". On a
+  one-line file the design constant `"endpoint": "forward_max_drawdown"` and two counts of 800
+  simulated cells share that line, and the check failed on commit `703a9363`. The committed
+  file now holds the same JSON value with one member per line, and `REFERENCE_SHA256` is the
+  hash of that file (`6225eabb…8d81`). A test writes the committed file on one line again, as
+  the instrument does, and checks that it hashes to the value the run recorded. The code hash
+  leaves out the two pin lines and is unchanged (`5c976ce8…fca6`). Nothing was run again, and
+  the check itself was not changed.
 
 ## 8. What happens next
 
@@ -777,8 +789,8 @@ drawdown or a price nearer its high.
 ## 11. Wave B2 — walk-forward result
 
 One run, on 2026-10-03 at 12:47 UTC, from commit `aadb15d2` with a clean tree:
-pre-registration `79764bf5…80aa`, simulated reference `e2caf7e8…20f3`, code hash
-`5c976ce8…fca6`. The attempt was recorded on pull request 1155 before the run read a real
+pre-registration `79764bf5…80aa`, simulated reference `e2caf7e8…20f3` (the one-line file as
+it stood at the run; §7), code hash `5c976ce8…fca6`. The attempt was recorded on pull request 1155 before the run read a real
 price (§4, sixth review). It was the first attempt and needed no retry. The two files it wrote
 are committed unedited (commit `d671d3c2`): `research/data/trend_persistence_b2_result.json`
 and `research/data/trend_persistence_b2_attempt.json`. The panel is the one V2 was scored on

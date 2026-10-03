@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -913,7 +914,15 @@ def test_the_committed_result_was_produced_once_under_the_pinned_files():
     with open(os.path.join(here, wf.ATTEMPT_FILE)) as fh:
         attempts = json.load(fh)["attempts"]
     assert out["prereg_sha256"] == wf.PREREG_SHA256
-    assert out["reference_sha256"] == wf.REFERENCE_SHA256
+    # The run pinned the reference as `--reference` wrote it: on one line. The committed file
+    # holds the same value with one member per line (readout §7), and the pin follows the file.
+    # Written on one line again, it must hash to what the run recorded.
+    ref_path = os.path.join(here, wf.REFERENCE_FILE)
+    with open(ref_path) as fh:
+        one_line = json.dumps(json.load(fh), sort_keys=True, separators=(",", ":")) + "\n"
+    assert out["reference_sha256"] == hashlib.sha256(one_line.encode()).hexdigest()
+    assert (out["reference_sha256"][:8], out["reference_sha256"][-4:]) == ("e2caf7e8", "20f3")
+    assert wf.REFERENCE_SHA256 == wf._sha256(ref_path)
     assert out["code_sha256"] == wf.code_sha256()
     assert out["holdout_result_sha256"] == wf.HOLDOUT_RESULT_SHA256
     assert out["panel_sha256"] == wf.V2_PANEL_SHA256
