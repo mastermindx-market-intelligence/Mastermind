@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 
 import pytest
-import acp
+
+acp = pytest.importorskip("acp", reason="optional ACP SDK absent; tool observations NOT qualified")
 
 from test_acp_native_startup import launch
 from integrations.acp_worker.native import AcpNativeProcessOwner
