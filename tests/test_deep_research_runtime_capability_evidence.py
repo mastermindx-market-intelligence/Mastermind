@@ -85,8 +85,8 @@ def test_producer_projects_live_gateway_file_and_terminal_probe_through_cap1():
         assert row.read_serviceable is True
         assert row.write_serviceable is False
         assert row.last_proven_at == "2026-10-03T07:07:22.197000Z"
-        assert row.canonical_owner == "capacity"
-        assert row.source_refs == ("capacity:studio-direct-read-evidence",)
+        assert row.canonical_owner == "studio-direct"
+        assert row.source_refs == ("studio-direct:read-evidence",)
 
 
 def test_exposed_but_unproven_read_stays_distinct_from_proven_live():
@@ -192,8 +192,8 @@ def test_synthetic_producer_control_room_steward_journey_is_fresh_and_source_att
 
     records = {record.capability_id: record for record in projection.records}
     file_record = records["studio_direct_file_read"]
-    assert file_record.canonical_owner == "capacity"
-    assert file_record.source_refs == ("capacity:studio-direct-read-evidence",)
+    assert file_record.canonical_owner == "studio-direct"
+    assert file_record.source_refs == ("studio-direct:read-evidence",)
     assert file_record.app_generation == GENERATION
     assert file_record.proof_state == "PROVEN_LIVE"
     assert file_record.availability == "AVAILABLE"

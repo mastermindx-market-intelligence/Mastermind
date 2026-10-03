@@ -4,9 +4,9 @@ This module is deliberately not a Studio Direct client. An already-authorized
 runtime/operator path performs any live probe and supplies only the reviewed,
 versioned observation fields below. The producer converts that receipt into the
 existing mastermind.sol_capability_status.v1 projection, attributed to the
-existing Capacity owner while Studio Direct remains the observed app/surface;
-it opens no shell, file, browser, provider, RuntimeBinding, fleet, or
-persistence path itself.
+existing Studio Direct owner; the broader Fleet/Capacity lineage remains the
+placement owner. It opens no shell, file, browser, provider, RuntimeBinding,
+fleet, or persistence path itself.
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from control_plane.sol_capability_status import (
 )
 
 OBSERVATION_SCHEMA = "mastermind.studio_direct_read_evidence.v1"
-SOURCE_REF = "capacity:studio-direct-read-evidence"
-CANONICAL_OWNER = "capacity"
+SOURCE_REF = "studio-direct:read-evidence"
+CANONICAL_OWNER = "studio-direct"
 APP_ID = "studio-direct"
 
 _RELEVANT_KEYS = frozenset(
