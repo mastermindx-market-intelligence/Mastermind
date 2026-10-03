@@ -25,6 +25,29 @@ WORKER_RECOVERY_BINDING_VERSION = "mastermind.worker_recovery_binding/v1"
 DURABLE_COLLECTION_CONTRACT_VERSION = "mastermind.worker_durable_collection/v1"
 _MAX_RECOVERY_PROMPT_BYTES = 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SUBSCRIPTION_CANARY_CLAIM_FIELDS = frozenset({
+    "schema", "execution_mode", "run_id", "job_id", "worker_id", "quota_class",
+    "fence_generation", "capacity_generation", "capacity_state", "held_attempt_id",
+    "current_attempt_id", "binding_id", "profile_id", "adapter_id", "model",
+    "realm_config_sha256", "realm_generation", "catalog_digest", "issued_at_ms",
+    "expires_at_ms", "observation_digest",
+})
+_SUBSCRIPTION_CANARY_TOKEN_FIELDS = frozenset({
+    "run_id", "job_id", "worker_id", "quota_class", "held_attempt_id",
+    "current_attempt_id", "binding_id", "profile_id", "adapter_id", "model",
+})
+_SUBSCRIPTION_CANARY_DIGEST_FIELDS = frozenset({
+    "realm_config_sha256", "catalog_digest", "observation_digest",
+})
+_SUBSCRIPTION_CANARY_INTEGER_FIELDS = frozenset({
+    "fence_generation", "capacity_generation", "realm_generation",
+    "issued_at_ms", "expires_at_ms",
+})
+_SUBSCRIPTION_CANARY_SECRET_NAME_RE = re.compile(
+    r"(?:^|_)(?:api[-_]?key|authorization|credential|secret|token)(?:$|_)",
+    re.IGNORECASE,
+)
+_SUBSCRIPTION_CANARY_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 MAX_ARTIFACTS = 32
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
@@ -86,6 +109,58 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def validate_subscription_canary_claim(value: Any) -> Mapping[str, Any]:
+    """Validate and freeze the exact public owner observation.
+
+    The durable launch field is evidence only; the process-local admission
+    travels through a separate adapter seam and is never persisted.
+    """
+
+    if value is None or (isinstance(value, Mapping) and not value):
+        return _FrozenMapping(())
+    if not isinstance(value, Mapping) or set(value) != _SUBSCRIPTION_CANARY_CLAIM_FIELDS:
+        raise WorkerRecoveryContractError("subscription canary claim fields are invalid")
+    for field_name in _SUBSCRIPTION_CANARY_TOKEN_FIELDS:
+        token = value[field_name]
+        if not isinstance(token, str) or _SUBSCRIPTION_CANARY_TOKEN_RE.fullmatch(token) is None:
+            raise WorkerRecoveryContractError(
+                f"subscription canary claim {field_name} is invalid"
+            )
+    for field_name in _SUBSCRIPTION_CANARY_DIGEST_FIELDS:
+        digest = value[field_name]
+        if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
+            raise WorkerRecoveryContractError(
+                f"subscription canary claim {field_name} is invalid"
+            )
+    for field_name in _SUBSCRIPTION_CANARY_INTEGER_FIELDS:
+        number = value[field_name]
+        if type(number) is not int or not 0 < number < 2**63:
+            raise WorkerRecoveryContractError(
+                f"subscription canary claim {field_name} is invalid"
+            )
+    if (
+        value["schema"] != "mastermind.subscription_canary_claim/v1"
+        or value["execution_mode"] != "interactive_canary"
+        or value["capacity_state"] != "BUSY"
+        or value["capacity_generation"] != value["fence_generation"]
+        or value["held_attempt_id"] != value["run_id"]
+        or value["current_attempt_id"] != value["run_id"]
+        or not value["issued_at_ms"] <= value["expires_at_ms"]
+    ):
+        raise WorkerRecoveryContractError("subscription canary claim is malformed")
+    frozen = _freeze(dict(value))
+    for key, item in frozen.items():
+        if isinstance(key, str) and _SUBSCRIPTION_CANARY_SECRET_NAME_RE.search(key):
+            raise WorkerRecoveryContractError(
+                "subscription canary claim contains a secret-like field"
+            )
+        if isinstance(item, str) and _SUBSCRIPTION_CANARY_SECRET_NAME_RE.fullmatch(item):
+            raise WorkerRecoveryContractError(
+                "subscription canary claim contains a raw secret label"
+            )
+    return frozen
+
+
 class WorkerRunStatus(str, Enum):
     STARTING = "STARTING"
     RUNNING = "RUNNING"
@@ -133,6 +208,10 @@ class LaunchAttestation:
     secret_canary_verdict: Mapping[str, Any]
     launch_nonce: str
     process_identity: Mapping[str, Any]
+    subscription_canary_observation_digest: str | None = None
+    subscription_canary_binding_id: str | None = None
+    subscription_canary_model: str | None = None
+    isolation_manifest_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +231,22 @@ class LaunchAttestation:
             "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
             "launch_nonce": self.launch_nonce,
             "process_identity": dict(self.process_identity),
+            **(
+                {"isolation_manifest_sha256": self.isolation_manifest_sha256}
+                if self.isolation_manifest_sha256 is not None
+                else {}
+            ),
+            **(
+                {
+                    "subscription_canary_observation_digest": (
+                        self.subscription_canary_observation_digest
+                    ),
+                    "subscription_canary_binding_id": self.subscription_canary_binding_id,
+                    "subscription_canary_model": self.subscription_canary_model,
+                }
+                if self.subscription_canary_observation_digest is not None
+                else {}
+            ),
         }
 
 
@@ -190,6 +285,7 @@ class WorkerLaunchSpec:
     shared_run_gid: int | None = None
     secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     require_secret_canary: bool = False
+    subscription_canary_claim: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -205,6 +301,11 @@ class WorkerLaunchSpec:
             self,
             "secret_canary_verdict",
             _freeze(self.secret_canary_verdict),
+        )
+        object.__setattr__(
+            self,
+            "subscription_canary_claim",
+            validate_subscription_canary_claim(self.subscription_canary_claim),
         )
 
 
@@ -611,6 +712,7 @@ __all__ = [
     "LAUNCH_ATTESTATION_SCHEMA_VERSION",
     "WORKER_RECOVERY_BINDING_VERSION",
     "DURABLE_COLLECTION_CONTRACT_VERSION",
+    "validate_subscription_canary_claim",
     "MAX_ARTIFACTS",
     "MAX_ARTIFACT_BYTES",
     "MAX_ARTIFACT_TOTAL_BYTES",

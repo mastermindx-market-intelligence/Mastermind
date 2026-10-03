@@ -38,8 +38,15 @@ PINNED_PYTHON_RUNTIME_ROOT="/Library/Frameworks/Python.framework/Versions/3.12"
 PINNED_PYTHON_BINARY="$PINNED_PYTHON_RUNTIME_ROOT/bin/python3.12"
 PYTHON_RUNTIME_RECEIPT="/Library/Application Support/MastermindExecutive/python-runtime.json"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-CODEX_VERSION="0.147.0"
-CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+CODEX_CODE_MODE_HOST_SHA256="ed79fbc9e1683feb29d73fb421f3e16932d178a459f63741754014c6c7ea6107"
+# One-step migration fence. A generation upgrade may replace only the exact
+# helper pinned by the immediately preceding reviewed Executive generation.
+CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256="a059beb029cdbc989e72e23f8680be9f703cb6cf83d9598d91041f82178d018d"
+CODEX_CODE_MODE_HOST_TEMP=""
+CODEX_CODE_MODE_HOST_BACKUP=""
+CODEX_CODE_MODE_HOST_ACTION=""
+CODEX_VERSION="0.159.2"
+CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 
 usage() {
   /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
@@ -171,9 +178,33 @@ if [ -n "$(/usr/bin/find "$PYTHON_RUNTIME_ROOT" -exec /usr/bin/stat -f '%Sp' {} 
   exit 65
 fi
 /usr/bin/codesign --verify --deep --strict "$PYTHON_RUNTIME_ROOT" >/dev/null 2>&1 || {
-  /bin/echo "Python runtime signature/sealed resources are invalid" >&2
+  /bin/echo "Python runtime root signature/sealed resources are invalid" >&2
   exit 65
 }
+for python_signature_resource in \
+  "$PYTHON_RUNTIME_ROOT/_CodeSignature/CodeResources" \
+  "$PYTHON_RUNTIME_ROOT/Resources/Python.app/Contents/_CodeSignature/CodeResources"; do
+  [ -f "$python_signature_resource" ] && [ ! -L "$python_signature_resource" ] || {
+    /bin/echo "Python signature resource is not a direct regular file: $python_signature_resource" >&2
+    exit 65
+  }
+  [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$python_signature_resource")" = "0:0:644:1" ] || {
+    /bin/echo "Python signature resource is not root:wheel single-link mode 0644: $python_signature_resource" >&2
+    exit 65
+  }
+  case "$(/usr/bin/stat -f '%Sp' "$python_signature_resource")" in
+    *+) /bin/echo "Python signature resource has a filesystem ACL: $python_signature_resource" >&2; exit 65 ;;
+  esac
+done
+[ "$(/usr/bin/id -u "$CONTROL_USER")" = "$CONTROL_UID" ] || {
+  /bin/echo "$CONTROL_USER must resolve to UID $CONTROL_UID" >&2
+  exit 65
+}
+/usr/bin/sudo -n -u "$CONTROL_USER" \
+  /usr/bin/codesign --verify --deep --strict "$PYTHON_RUNTIME_ROOT" >/dev/null 2>&1 || {
+    /bin/echo "UID $CONTROL_UID cannot verify the Python runtime root" >&2
+    exit 65
+  }
 OBSERVED_PYTHON_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PYTHON_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
 [ "$OBSERVED_PYTHON_TEAM" = "$PYTHON_TEAM_ID" ] || {
   /bin/echo "Python runtime signer team is not the explicit allowlist" >&2
@@ -315,8 +346,301 @@ PY
   /bin/echo "Python runtime provenance receipt validation failed" >&2
   exit 65
 }
-[ -x "$CODEX_BINARY" ] && [ ! -L "$CODEX_BINARY" ] || {
-  /bin/echo "Codex binary must be a direct executable file" >&2
+PYTHON_RUNTIME_PROVENANCE_DIGEST="$("$PYTHON_BINARY" -I -S -B - \
+  "$PYTHON_RUNTIME_ROOT" "$PYTHON_BINARY" "$PYTHON_VERSION" "$PYTHON_TEAM_ID" \
+  "$PYTHON_PACKAGE_SHA256" "$PYTHON_BINARY_SHA256" "$PYTHON_FRAMEWORK_SHA256" <<'PY'
+import hashlib
+import json
+import sys
+
+(
+    runtime_root, python_binary, version, team, package_sha,
+    binary_sha, framework_sha,
+) = sys.argv[1:]
+identity = {
+    "schema_version": "mastermind.executive_python_runtime/v1",
+    "python_version": version,
+    "runtime_root": runtime_root,
+    "python_binary": python_binary,
+    "team_identifier": team,
+    "package_sha256": package_sha,
+    "python_binary_sha256": binary_sha,
+    "python_framework_sha256": framework_sha,
+}
+print(hashlib.sha256(
+    b"mastermind.executive_python_runtime_provenance/v1\x00"
+    + json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+).hexdigest())
+PY
+)" || {
+  /bin/echo "Python runtime provenance digest projection failed" >&2
+  exit 65
+}
+# --- BEGIN Codex package component validation ---
+# Codex resolves this native helper beside its executable. Both hashes come
+# from the same signed @openai/codex@0.159.2-darwin-arm64 package.
+verify_codex_no_acl() {
+  local acl_listing
+  # Darwin stat reports POSIX mode bits only. ls -e emits ACL entries on
+  # additional lines, even when extended attributes mask its '+' with '@'.
+  acl_listing="$(LC_ALL=C /bin/ls -lde "$1")" || return 65
+  [ -n "$acl_listing" ] || return 65
+  case "$acl_listing" in
+    *$'\n'*) /bin/echo "Codex path has a filesystem ACL or ambiguous listing: $1" >&2; return 65 ;;
+  esac
+}
+
+verify_codex_component() {
+  local path="$1" expected_hash="$2" expected_identifier="$3" installed="$4"
+  local signature observed_hash
+  [ -f "$path" ] && [ -x "$path" ] && [ ! -L "$path" ] || {
+    /bin/echo "Codex component must be a direct regular executable: $path" >&2
+    return 65
+  }
+  [ "$(/usr/bin/stat -f '%l' "$path")" = "1" ] || {
+    /bin/echo "Codex component must have exactly one hard link: $path" >&2
+    return 65
+  }
+  verify_codex_no_acl "$path" || return 65
+  if [ "$installed" = "1" ]; then
+    [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "0:0:555" ] || {
+      /bin/echo "installed Codex component is not root:wheel mode 0555: $path" >&2
+      return 65
+    }
+  fi
+  observed_hash="$(/usr/bin/shasum -a 256 "$path" | /usr/bin/awk '{print $1}')" || return 65
+  [ "$observed_hash" = "$expected_hash" ] || {
+    /bin/echo "Codex component bytes differ from the reviewed package: $path" >&2
+    return 65
+  }
+  /usr/bin/codesign --verify --strict "$path" >/dev/null 2>&1 || {
+    /bin/echo "Codex component signature is invalid: $path" >&2
+    return 65
+  }
+  signature="$(/usr/bin/codesign -dv --verbose=4 "$path" 2>&1)" || return 65
+  [ "$(/bin/echo "$signature" | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')" = "2DC432GLL2" ] \
+    && [ "$(/bin/echo "$signature" | /usr/bin/awk -F= '$1 == "Identifier" {print $2}')" = "$expected_identifier" ] || {
+      /bin/echo "Codex component signer or identifier is not the reviewed OpenAI component: $path" >&2
+      return 65
+    }
+}
+
+verify_codex_bin_directory() {
+  local ancestor metadata
+  for ancestor in /Library "/Library/Application Support" "$SYSTEM_ROOT" "$SYSTEM_ROOT/bin"; do
+    [ -d "$ancestor" ] && [ ! -L "$ancestor" ] || return 65
+    metadata="$(/usr/bin/stat -f '%u:%g:%Lp' "$ancestor")" || return 65
+    # macOS may provision the shared Application Support directory root:admin;
+    # 0755 grants that group no write access. Our private bin domain is wheel.
+    if [ "$metadata" != "0:0:755" ]; then
+      [ "$ancestor" = "/Library/Application Support" ] && [ "$metadata" = "0:80:755" ] || {
+        /bin/echo "Codex bin ancestor ownership or mode is unsafe: $ancestor" >&2
+        return 65
+      }
+    fi
+    verify_codex_no_acl "$ancestor" || return 65
+  done
+}
+
+cleanup_codex_code_mode_host_temp() {
+  if [ -n "$CODEX_CODE_MODE_HOST_TEMP" ]; then
+    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_TEMP"
+    CODEX_CODE_MODE_HOST_TEMP=""
+  fi
+}
+
+rename_codex_path_exclusive() {
+  # Darwin production uses renameatx_np(RENAME_EXCL): one atomic namespace
+  # move that never replaces an entry at the destination. The non-Darwin
+  # branch exists only so hermetic source tests can exercise the same contract.
+  "$PYTHON_BINARY" -I -S -B - "$1" "$2" <<'PY' || return 65
+import ctypes
+import errno
+import os
+import sys
+
+source, destination = sys.argv[1:3]
+try:
+    if sys.platform == "darwin":
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename = getattr(libc, "renameatx_np", None)
+        if rename is None:
+            raise OSError(errno.ENOSYS, "renameatx_np unavailable")
+        rename.argtypes = [
+            ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_int, ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename.restype = ctypes.c_int
+        # AT_FDCWD=-2 on Darwin; RENAME_EXCL=0x00000004.
+        if rename(-2, os.fsencode(source), -2, os.fsencode(destination), 0x4) != 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+    else:
+        if os.path.lexists(destination):
+            raise FileExistsError(destination)
+        os.rename(source, destination)
+except OSError:
+    sys.exit(65)
+PY
+}
+
+publish_codex_path_exclusive() {
+  # The staged helper is a regular single-link file on the same filesystem.
+  # Hard-link publication is exclusive: an existing file, directory or symlink
+  # wins and remains untouched.
+  "$PYTHON_BINARY" -I -S -B - "$1" "$2" <<'PY' || return 65
+import os
+import sys
+
+source, destination = sys.argv[1:3]
+try:
+    os.link(source, destination, follow_symlinks=False)
+    os.unlink(source)
+except OSError:
+    sys.exit(65)
+PY
+}
+
+restore_codex_code_mode_host_backup() {
+  local destination="$SYSTEM_ROOT/bin/codex-code-mode-host"
+  [ -n "$CODEX_CODE_MODE_HOST_BACKUP" ] || return 0
+  if rename_codex_path_exclusive "$CODEX_CODE_MODE_HOST_BACKUP" "$destination"; then
+    CODEX_CODE_MODE_HOST_BACKUP=""
+    return 0
+  fi
+  /bin/echo "preserved Codex helper backup requires reconciliation: $CODEX_CODE_MODE_HOST_BACKUP" >&2
+  return 65
+}
+
+prepare_codex_code_mode_host() {
+  local destination="$SYSTEM_ROOT/bin/codex-code-mode-host"
+  local observed_hash
+  CODEX_CODE_MODE_HOST_ACTION=""
+  CODEX_CODE_MODE_HOST_TEMP=""
+  verify_codex_bin_directory || return 65
+
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    # Reject nonregular and symlink destinations before any byte reader can
+    # block on or follow a special file.
+    [ -f "$destination" ] && [ -x "$destination" ] && [ ! -L "$destination" ] || {
+      /bin/echo "installed Codex helper must be a direct regular executable" >&2
+      return 65
+    }
+    # Preserve an already-current helper byte-for-byte/inode-for-inode. A
+    # mismatched helper is replaceable only when it is the exact signed helper
+    # pinned by the immediately preceding reviewed generation.
+    observed_hash="$(/usr/bin/shasum -a 256 "$destination" 2>/dev/null | /usr/bin/awk '{print $1}')" || return 65
+    if [ "$observed_hash" = "$CODEX_CODE_MODE_HOST_SHA256" ]; then
+      verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
+      CODEX_CODE_MODE_HOST_ACTION="preserve"
+      return 0
+    fi
+    verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256" codex-code-mode-host 1 || return 65
+    CODEX_CODE_MODE_HOST_ACTION="replace"
+  else
+    CODEX_CODE_MODE_HOST_ACTION="publish"
+  fi
+
+  # Stage and attest the next helper while all installed services are still
+  # untouched. A generation mismatch can therefore never be discovered only
+  # after teardown.
+  CODEX_CODE_MODE_HOST_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-code-mode-host.XXXXXX")" || return 65
+  /usr/bin/ditto --noqtn "$CODEX_CODE_MODE_HOST_BINARY" "$CODEX_CODE_MODE_HOST_TEMP" || {
+    cleanup_codex_code_mode_host_temp
+    return 65
+  }
+  /usr/sbin/chown root:wheel "$CODEX_CODE_MODE_HOST_TEMP" || {
+    cleanup_codex_code_mode_host_temp
+    return 65
+  }
+  /bin/chmod 0555 "$CODEX_CODE_MODE_HOST_TEMP" || {
+    cleanup_codex_code_mode_host_temp
+    return 65
+  }
+  verify_codex_component "$CODEX_CODE_MODE_HOST_TEMP" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || {
+    cleanup_codex_code_mode_host_temp
+    return 65
+  }
+}
+
+install_codex_code_mode_host() {
+  local destination="$SYSTEM_ROOT/bin/codex-code-mode-host"
+  verify_codex_bin_directory || return 65
+  case "$CODEX_CODE_MODE_HOST_ACTION" in
+    preserve)
+      verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1
+      return $?
+      ;;
+    publish)
+      verify_codex_component "$CODEX_CODE_MODE_HOST_TEMP" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
+      # Publish exclusively. A concurrently created file, directory, or symlink
+      # wins the race and makes this install refuse without overwriting it.
+      publish_codex_path_exclusive "$CODEX_CODE_MODE_HOST_TEMP" "$destination" || return 65
+      CODEX_CODE_MODE_HOST_TEMP=""
+      ;;
+    replace)
+      # Revalidate the controlled staged participant before touching the live
+      # destination. Never re-hash the canonical destination at commit time:
+      # a privileged late writer could replace it with a FIFO/symlink and make
+      # a path-based byte reader block or follow the wrong inode.
+      verify_codex_component "$CODEX_CODE_MODE_HOST_TEMP" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
+
+      # Atomically capture whatever entry is present *now* under a unique
+      # same-directory name without replacing anything. Only after that stable
+      # captured inode proves to be the reviewed predecessor may the candidate
+      # be published. A concurrent winner is therefore preserved, never lost.
+      CODEX_CODE_MODE_HOST_BACKUP="$CODEX_CODE_MODE_HOST_TEMP.predecessor"
+      rename_codex_path_exclusive "$destination" "$CODEX_CODE_MODE_HOST_BACKUP" || {
+        CODEX_CODE_MODE_HOST_BACKUP=""
+        return 65
+      }
+      if ! verify_codex_component "$CODEX_CODE_MODE_HOST_BACKUP" "$CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256" codex-code-mode-host 1; then
+        restore_codex_code_mode_host_backup || true
+        return 65
+      fi
+      if ! publish_codex_path_exclusive "$CODEX_CODE_MODE_HOST_TEMP" "$destination"; then
+        # If a concurrent writer filled the now-vacant destination, preserve it
+        # and also preserve the reviewed predecessor backup for reconciliation.
+        restore_codex_code_mode_host_backup || true
+        return 65
+      fi
+      CODEX_CODE_MODE_HOST_TEMP=""
+      ;;
+    *)
+      /bin/echo "Codex helper was not prepared before installation" >&2
+      return 65
+      ;;
+  esac
+  # The staged inode was fully attested before publication/replacement; verify
+  # the final path again so completion proves exact bytes, signer, metadata and
+  # single-link identity at the installed name.
+  verify_codex_component "$destination" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 1 || return 65
+  if [ -n "$CODEX_CODE_MODE_HOST_BACKUP" ]; then
+    # This backup was captured atomically and independently re-attested as the
+    # exact reviewed predecessor. It is deleted only after the new canonical
+    # path has passed its final attestation.
+    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_BACKUP" || return 65
+    CODEX_CODE_MODE_HOST_BACKUP=""
+  fi
+}
+# --- END Codex package component validation ---
+
+# Check the complete package before stopping any service, even on reinstall.
+[ "$CODEX_VERSION" = "0.159.2" ] || {
+  /bin/echo "Codex package version differs from the reviewed 0.159.2 allowlist" >&2
+  exit 65
+}
+CODEX_CODE_MODE_HOST_BINARY="$(/usr/bin/dirname "$CODEX_BINARY")/codex-code-mode-host"
+verify_codex_component "$CODEX_BINARY" "$CODEX_SHA256" codex 0 || exit 65
+verify_codex_component "$CODEX_CODE_MODE_HOST_BINARY" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 0 || exit 65
+[ "$CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256" != "$CODEX_CODE_MODE_HOST_SHA256" ] || {
+  /bin/echo "Codex helper predecessor and current generation hashes must differ" >&2
   exit 65
 }
 if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
@@ -555,7 +879,7 @@ fi
     /bin/echo "source checkout failed the reviewed Executive install policy" >&2
     exit 65
   }
-TREE_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
+TREE_SHA="$(/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 RUNTIME_ROOT="/var/db/mastermind-executive"
@@ -660,7 +984,26 @@ esac
 # install-owned daemons, including a separately prepared C1 Relay, disabled
 # and booted out across generation mutation and rollback.
 STAGING=""
+CODEX_CODE_MODE_HOST_TEMP=""
+wait_for_launchd_absent() {
+  local label="$1"
+  local description="$2"
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if ! /bin/launchctl print "system/$label" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [ "$attempt" -lt 5 ]; then
+      /bin/sleep 1
+    fi
+  done
+  /bin/echo "$description LaunchDaemon remained loaded after bootout" >&2
+  return 1
+}
 leave_installed_services_stopped() {
+  if [ -n "${CODEX_CODE_MODE_HOST_TEMP:-}" ]; then
+    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_TEMP"
+  fi
   /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
   /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
@@ -685,6 +1028,7 @@ leave_installed_services_stopped() {
     /bin/rm -rf -- "$STAGING"
   fi
 }
+prepare_codex_code_mode_host || exit 65
 trap leave_installed_services_stopped EXIT
 /bin/launchctl disable "system/$RELAY_LABEL"
 /bin/launchctl disable "system/$CONTROL_LABEL"
@@ -696,30 +1040,15 @@ trap leave_installed_services_stopped EXIT
 /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
 /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-if /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1; then
-  /bin/echo "relay LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$CONTROL_LABEL" >/dev/null 2>&1; then
-  /bin/echo "control LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$WORKER_LABEL" >/dev/null 2>&1; then
-  /bin/echo "worker LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$BACKUP_LABEL" >/dev/null 2>&1; then
-  /bin/echo "backup LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
-if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
-  /bin/echo "privileged LaunchDaemon remained loaded after bootout" >&2
-  exit 65
-fi
+wait_for_launchd_absent "$RELAY_LABEL" relay || exit 65
+wait_for_launchd_absent "$CONTROL_LABEL" control || exit 65
+wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
+wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
+wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   # mktemp creates the staging root as 0700. Both non-root service UIDs need
@@ -773,7 +1102,7 @@ INSTALLED_VERSION="$("$INSTALLED_CODEX" --version 2>/dev/null | /usr/bin/awk '$1
 }
 INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{print $1}')"
 [ "$INSTALLED_HASH" = "$CODEX_SHA256" ] || {
-  /bin/echo "installed Codex bytes do not match the exact reviewed 0.147.0 allowlist" >&2
+  /bin/echo "installed Codex bytes do not match the exact reviewed 0.159.2 allowlist" >&2
   exit 65
 }
 [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$INSTALLED_CODEX")" = "0:0:555" ] || {
@@ -790,7 +1119,10 @@ esac
 
 ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
 if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
-  /usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  # Root reads the operator-owned source through Git transport; the local-copy
+  # optimization has a distinct ownership boundary. Trust only the validated
+  # source path for this command, never persist a host-wide exception.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi
@@ -873,7 +1205,8 @@ fi
     "$CONTROL_RUNTIME_ROOT" "$ADMIN_CHECKOUT" "$WORKSPACE_ROOT" "$EXPECTED_SHA" \
     "$BACKUP_ROOT" "$RECEIPTS_ROOT" "$PROVIDER_HOME" "$RUN_ROOT" \
     "$CANARY_RECEIPT" "$CONTROL_ENV_ATTESTATION" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
-    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" <<'PY'
+    "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" "$ARM_PRIVILEGED_BROKER" \
+    "$PYTHON_RUNTIME_PROVENANCE_DIGEST" <<'PY'
 import json, os, pathlib, re, sys
 release_root = sys.argv.pop(1)
 sys.path.insert(0, release_root)
@@ -902,6 +1235,8 @@ from scripts.executive_os_phase1c import (
     operator_uid,
     operator_harness_binary_digest,
     operator_harness_version,
+    arm_privileged_broker,
+    python_runtime_provenance_digest,
 ) = sys.argv[1:]
 
 ceo_ingress_expected = {
@@ -924,6 +1259,18 @@ dialogue_bridge_expected = {
     },
 }
 schema_keys = _CONFIG_REQUIRED | _CONFIG_OPTIONAL
+readiness_fields = {"privileged_readiness_armed", "privileged_broker_socket_path"}
+readiness_schema_keys = readiness_fields & schema_keys
+if arm_privileged_broker not in {"0", "1"}:
+    raise SystemExit("invalid privileged broker installation arm")
+if readiness_schema_keys and readiness_schema_keys != readiness_fields:
+    raise SystemExit("partial privileged readiness control-config schema")
+if arm_privileged_broker == "1" and readiness_schema_keys != readiness_fields:
+    raise SystemExit("armed release lacks privileged readiness composition")
+readiness_expected = ({
+    "privileged_readiness_armed": arm_privileged_broker == "1",
+    "privileged_broker_socket_path": "/var/run/mastermind-executive/privileged.sock" if arm_privileged_broker == "1" else None,
+} if readiness_schema_keys else {})
 ceo_ingress_schema_keys = set(ceo_ingress_expected) & schema_keys
 if ceo_ingress_schema_keys and ceo_ingress_schema_keys != set(ceo_ingress_expected):
     raise SystemExit("partial CeoIngress control-config schema")
@@ -954,7 +1301,9 @@ expected = {
     "control_environment_attestation_path": control_environment_attestation,
     "operator_harness_binary_digest": operator_harness_binary_digest,
     "operator_harness_version": operator_harness_version,
+    "python_runtime_provenance_digest": python_runtime_provenance_digest,
 }
+expected.update(readiness_expected)
 if ceo_ingress_schema_keys:
     expected.update(ceo_ingress_expected)
 if dialogue_bridge_schema_keys:
@@ -984,9 +1333,41 @@ if source:
     value = json.loads(source_path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise SystemExit("control config source must contain an object")
+    if value.get("python_runtime_provenance_digest") not in (None, python_runtime_provenance_digest):
+        raise SystemExit(
+            "control config python_runtime_provenance_digest conflicts with "
+            "the validated Python runtime receipt"
+        )
+    value["python_runtime_provenance_digest"] = python_runtime_provenance_digest
 else:
     value = {**expected, **defaults}
 
+# Older installed inputs can omit these optional fields. Materialize only the
+# reviewed disabled defaults admitted by this release; retain every explicit
+# host value. Arming remains the existing controller's separate transaction.
+for key, default in {
+    "ceo_submit_armed": False,
+    "exact_worker_claim_target": {"mode": "disabled"},
+}.items():
+    if key in _CONFIG_OPTIONAL:
+        value.setdefault(key, default)
+terminal_return_defaults = {
+    "terminal_return_armed": False,
+    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+}
+terminal_schema = set(terminal_return_defaults) & schema_keys
+if terminal_schema and terminal_schema != set(terminal_return_defaults):
+    raise SystemExit("partial terminal-return control-config schema")
+terminal_present = set(terminal_return_defaults) & set(value)
+if terminal_present and terminal_present != set(terminal_return_defaults):
+    raise SystemExit("partial terminal-return control-config source")
+if terminal_schema and not terminal_present:
+    value.update(terminal_return_defaults)
+
+for key, derived in readiness_expected.items():
+    if key in value and (type(value[key]) is not type(derived) or value[key] != derived):
+        raise SystemExit(f"control config {key} conflicts with privileged broker installation arm")
+    value[key] = derived
 keys = set(value)
 missing = _CONFIG_REQUIRED - keys
 unknown = keys - _CONFIG_REQUIRED - _CONFIG_OPTIONAL
@@ -1232,15 +1613,14 @@ PY
 PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$WORKER_CONFIG" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
   "$WORKER_SUPPLEMENTARY_GIDS" "$WORKSPACE_ROOT" "$RUN_ROOT" "$PROVIDER_HOME" "$INSTALLED_CODEX" "$CODEX_VERSION" \
   "$CODEX_ATTESTATION_RECEIPT" "$CONTROL_CONFIG" <<'PY'
-import json, os, pathlib, sys
+import hashlib, json, os, pathlib, sys
 (
     destination, control_uid, worker_uid, worker_gid, supplementary_gids, workspace_root,
     run_root, provider_home, codex_binary, codex_version, codex_attestation_receipt,
     control_config,
 ) = sys.argv[1:]
 control = json.loads(pathlib.Path(control_config).read_text(encoding="utf-8"))
-value = {
-    "schema_version": "mastermind.executive_worker_broker_config/v4",
+common = {
     "control_uid": int(control_uid),
     "worker_uid": int(worker_uid),
     "worker_gid": int(worker_gid),
@@ -1259,10 +1639,58 @@ value = {
     "require_secret_canary": True,
     "operator_harness_armed": bool(control.get("coo_operator_harness_armed", False)),
 }
+realm = control.get("subscription_canary_realm")
+realm_binding_id = realm.get("binding_id") if isinstance(realm, dict) else None
+realm_generation = realm.get("generation") if isinstance(realm, dict) else None
+realm_config_sha = realm.get("config_sha256") if isinstance(realm, dict) else None
+has_realm = (
+    isinstance(realm, dict)
+    and set(realm) == {"binding_id", "generation", "config_sha256"}
+    and isinstance(realm_binding_id, str) and realm_binding_id
+    and type(realm_generation) is int and realm_generation >= 1
+    and isinstance(realm_config_sha, str)
+    and len(realm_config_sha) == 64
+    and realm_config_sha == realm_config_sha.lower()
+)
+if has_realm:
+    # Attended subscription-canary lane: emit v5 with the exact Control realm.
+    # The worker side re-validates the binding identity, the realm config SHA,
+    # and the (non-boolean positive) generation on every startup; the digest
+    # fence below ensures the bytes that just landed on disk are exactly what
+    # Control signed, so the worker can never start with a different realm
+    # than the one the Control side composed against.
+    value = {
+        **common,
+        "schema_version": "mastermind.executive_worker_broker_config/v5",
+        "harness_binding_id": str(realm_binding_id),
+        "subscription_realm_enrollment": {
+            "binding_id": str(realm_binding_id),
+            "generation": int(realm_generation),
+        },
+    }
+else:
+    if realm is not None:
+        raise SystemExit("control subscription_canary_realm is malformed")
+    value = {
+        **common,
+        "schema_version": "mastermind.executive_worker_broker_config/v4",
+    }
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+payload = (json.dumps(value, sort_keys=True, indent=2) + "\n").encode("utf-8")
+temporary.write_bytes(payload)
 os.chmod(temporary, 0o440)
+if has_realm:
+    # Fence before publication: a mismatched file never replaces the active
+    # worker configuration.
+    observed = hashlib.sha256(payload).hexdigest()
+    expected = str(realm_config_sha).lower()
+    if observed != expected:
+        temporary.unlink(missing_ok=True)
+        raise SystemExit(
+            "worker config SHA-256 differs from Control's "
+            "subscription_canary_realm.config_sha256"
+        )
 os.replace(temporary, path)
 PY
 /usr/sbin/chown "root:$WORKER_GROUP" "$WORKER_CONFIG"
@@ -1411,8 +1839,25 @@ if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then
       exit 65
     }
   PRIVILEGED_BROKER_LIVE="1"
+  # Publish the closed consumer only after the installed broker is proven live.
+  MMX_CONTROL="$SYSTEM_ROOT/bin/mmx-control"
+  MMX_CONTROL_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.mmx-control.XXXXXX")"
+  /usr/bin/printf '%s\n' '#!/bin/bash' 'set -eu' \
+    '[ "$#" -eq 3 ] || exit 64' \
+    'for arg in "$@"; do case "$arg" in -*) exit 64;; esac; done' \
+    "exec \"$PYTHON_BINARY\" -I -S -B \"$RELEASE_ROOT/scripts/executive_os_phase1c.py\" --socket \"/var/run/mastermind-executive/control.sock\" check-current-worker-login \"\$1\" \"\$2\" \"\$3\"" \
+    >"$MMX_CONTROL_TEMP"
+  /usr/sbin/chown root:wheel "$MMX_CONTROL_TEMP"
+  /bin/chmod 0555 "$MMX_CONTROL_TEMP"
+  /bin/mv -f "$MMX_CONTROL_TEMP" "$MMX_CONTROL"
   /bin/echo "privileged action broker armed at $PRIVILEGED_SOCKET"
 fi
+
+# Commit the unversioned Codex helper only after every other install/validation
+# step has succeeded. Until this point a failed generation upgrade leaves the
+# previously installed helper intact, so the incumbent release remains
+# recoverable while services are deliberately stopped.
+install_codex_code_mode_host || exit 65
 
 /bin/echo "installed exact Executive OS release $EXPECTED_SHA"
 /bin/echo "services remain stopped until provider readiness and the secret canary have passing receipts"

@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+
+
 import dataclasses
 import hashlib
 import json
@@ -288,6 +291,7 @@ class FakeAdapter:
             "rendered_argv": [ref.binary.real_path, "exec", "--json", "-"],
             "environment_keys": ["CODEX_HOME", "HOME", "PATH"],
             "permission_profile_sha256": "c" * 64,
+            "isolation_manifest_sha256": self.spec.isolation_manifest_sha256,
             "prompt_sha256": hashlib.sha256(self.spec.prompt.encode()).hexdigest(),
             "expected_base_sha": self.spec.expected_base_sha,
             "observed_base_sha": ref.base_sha,
@@ -363,6 +367,7 @@ def _runtime_and_job(
     *,
     clock=None,
     lease_seconds: int = 30,
+    requested_authorities: list[str] | None = None,
 ) -> tuple[Runtime, str, Path]:
     runtime = Runtime.at(tmp_path, clock=clock, lease_seconds=lease_seconds)
     runtime.workers.register_worker(
@@ -385,7 +390,8 @@ def _runtime_and_job(
     job = runtime.jobs.create_job(
         "Create the bounded proof artifact",
         worktree=str(workspace.resolve()),
-        requested_authorities=["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"],
+        requested_authorities=(requested_authorities if requested_authorities is not None
+                               else ["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"]),
         allowed_write_paths=["research/proof.md"],
         validation_commands=[["/usr/bin/true"]],
         constraints={
@@ -439,10 +445,14 @@ def _runtime_and_routed_job(
     tmp_path: Path,
     *,
     profile_id: str = "sealed.worker.write.no-extensions.v1",
+    provider: str = "codex",
+    worker_type: str = "codex-cli",
+    quota_class: str = "codex-native",
 ) -> tuple[Runtime, str, Path]:
     registry = ExecutionCapabilityRegistry.load()
     profile = registry.resolve(profile_id)
     capability_identity = {
+        "adapter_id": worker_type,
         "execution_profile_id": profile.profile_id,
         "execution_profile_digest": profile.profile_digest,
         "capability_policy_version": registry.policy_version,
@@ -451,14 +461,15 @@ def _runtime_and_routed_job(
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
         "codex-routed-01",
-        provider="codex",
+        provider=provider,
         account_label="dedicated-worker-account",
-        worker_type="codex-cli",
+        worker_type=worker_type,
         capabilities=["code", "tests"],
         quota_classes={
-            "codex-native": {
+            quota_class: {
+                "provider": provider,
                 "capabilities": ["code", "tests"],
-                "model": "gpt-5.6-sol",
+                "model": "fixture-exact-model",
                 "effort": "xhigh",
                 "cost_class": "standard",
                 "metadata": capability_identity,
@@ -474,12 +485,12 @@ def _runtime_and_routed_job(
         allowed_write_paths=["control_plane/proof.py"],
         validation_commands=[["/usr/bin/true"]],
         constraints={
-            "provider": "codex",
-            "model": "gpt-5.6-sol",
+            "provider": provider,
+            "model": "fixture-exact-model",
             "effort": "xhigh",
             "cost_class": "standard",
             "base_sha": "c" * 40,
-            "eligible_quota_classes": ["codex-native"],
+            "eligible_quota_classes": [quota_class],
             "required_capabilities": ["code", "tests"],
             "routing_policy_version": "2026-08-24.stage2",
             **capability_identity,
@@ -507,6 +518,50 @@ def test_routed_job_launches_only_with_exact_installed_capability_profile(
         "sealed.worker.write.no-extensions.v1"
     )
 
+
+
+def test_native_claude_profile_reaches_supervisor_admission_without_arming_provider(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _ = _runtime_and_routed_job(
+        tmp_path,
+        profile_id="sealed.worker.claude.write.no-extensions.v1",
+        provider="anthropic",
+        worker_type="claude-code",
+        quota_class="claude-native",
+    )
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+
+    active = asyncio.run(supervisor.start_job(job_id))
+
+    assert adapter.spec is not None
+    assert active.lease.attempt.status is AttemptStatus.CLAIMED
+    persisted = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert persisted is not None and persisted.status is AttemptStatus.CHECKPOINTED
+    assert persisted.launch_metadata["routing"]["adapter_id"] == "claude-code"
+    assert persisted.launch_metadata["routing"]["execution_profile_id"] == (
+        "sealed.worker.claude.write.no-extensions.v1"
+    )
+
+
+def test_supervisor_refuses_cross_provider_execution_surface_before_start(
+    tmp_path: Path,
+) -> None:
+    runtime, job_id, _ = _runtime_and_routed_job(
+        tmp_path,
+        profile_id="sealed.worker.claude.write.no-extensions.v1",
+        provider="codex",
+        worker_type="codex-cli",
+    )
+    inspector = FakeInspector()
+    adapter = FakeAdapter(inspector)
+
+    with pytest.raises(SupervisorError, match="incompatible execution profile"):
+        asyncio.run(_supervisor(runtime, tmp_path, adapter).start_job(job_id))
+
+    assert adapter.spec is None
 
 def test_routed_job_refuses_capacity_profile_drift_before_provider_start(
     tmp_path: Path,
@@ -1175,6 +1230,190 @@ def test_invalid_provider_result_with_ambient_pid_fails_job_not_containment(
     seal = json.loads(Path(receipt.assignment_seal_receipt_path or "").read_text())
     assert seal["passed"] is True
     assert seal["uid_sweep"]["ambient_pids"] == [88688]
+
+
+_P2_AUTHORITY = "REQUEST_WORKER_LOGIN_CHECK"
+
+
+def _p2_grant_fixture(tmp_path):
+    from control_plane.executive_authority import ExecutiveAuthorityPolicy
+
+    runtime, job_id, _ = _runtime_and_job(tmp_path)
+    lease = runtime.attempts.claim_job(job_id, lease_owner="supervisor-fixture")
+    assert lease is not None
+    job = dataclasses.replace(runtime.jobs.get_job(job_id), orchestration_role="work")
+    grant = {
+        "schema_version": "mastermind.executive_effective_grant/v1",
+        "authorities": list(job.requested_authorities),
+        "write_paths": list(job.allowed_write_paths),
+        "validation_argv": copy.deepcopy(job.validation_commands),
+        "policy_sha": lease.attempt.authority_policy_hash,
+        "job_id": job.job_id, "role": job.orchestration_role,
+    }
+    digest = hashlib.sha256(json.dumps(grant, sort_keys=True, separators=(",", ":"),
+                                      ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    attempt = dataclasses.replace(lease.attempt, effective_grant=grant, effective_grant_digest=digest)
+    decision = ExecutiveAuthorityPolicy.load().authorize(
+        job.requested_authorities, worktree=job.worktree,
+        allowed_write_paths=job.allowed_write_paths, validation_commands=job.validation_commands,
+    )
+    return job, attempt, decision
+
+
+@pytest.mark.parametrize("orchestration", [False, True])
+def test_p2_effective_grant_validator_is_policy_and_filesystem_free(tmp_path, monkeypatch, orchestration):
+    from control_plane import executive_supervisor as module
+    from control_plane.executive_authority import ExecutiveAuthorityPolicy
+
+    job, attempt, decision = _p2_grant_fixture(tmp_path)
+    if not orchestration:
+        job = dataclasses.replace(job, orchestration_role=None)
+        attempt = dataclasses.replace(attempt, effective_grant=None, effective_grant_digest=None)
+    expected = copy.deepcopy(attempt.effective_grant)
+    assert ExecutiveSupervisor._effective_grant(job, attempt) == expected
+    validator = getattr(module, "validate_effective_grant", None)
+    assert callable(validator), "missing shared pure effective-grant validator"
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("policy or filesystem work escaped preflight")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(ExecutiveAuthorityPolicy, "load", forbidden)
+        scoped.setattr(Path, "resolve", forbidden)
+        scoped.setattr(Path, "expanduser", forbidden)
+        assert validator(job, attempt, decision) == expected
+    assert attempt.effective_grant == expected
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema_version", "wrong"), ("job_id", "JOB-999"), ("role", "review"),
+    ("policy_sha", "f" * 64), ("authorities", ["SERVICE_CONTROL"]),
+    ("write_paths", ["not-authorized.py"]), ("validation_argv", [["/bin/false"]]),
+    ("extra", True),
+])
+def test_p2_effective_grant_refuses_malformed_or_widened_scope(tmp_path, field, value):
+    from control_plane import executive_supervisor as module
+
+    job, attempt, decision = _p2_grant_fixture(tmp_path)
+    grant = {**attempt.effective_grant, field: value}
+    attempt = dataclasses.replace(attempt, effective_grant=grant)
+    validator = getattr(module, "validate_effective_grant", None)
+    assert callable(validator), "missing shared pure effective-grant validator"
+    with pytest.raises(SupervisorError, match="malformed or widened"):
+        validator(job, attempt, decision)
+    with pytest.raises(SupervisorError, match="malformed or widened"):
+        ExecutiveSupervisor._effective_grant(job, attempt)
+
+
+@pytest.mark.parametrize("fault,expected", [
+    ("digest", "digest drifted"), ("decision-policy", "policy changed"),
+    ("decision-scope", "decision does not match"),
+    ("decision-paths", "decision does not match"),
+    ("decision-validation", "decision does not match"),
+    ("decision-workspace", "decision does not match"), ("role-null", "role-null"),
+])
+def test_p2_effective_grant_refuses_binding_drift(tmp_path, fault, expected):
+    from control_plane import executive_supervisor as module
+
+    job, attempt, decision = _p2_grant_fixture(tmp_path)
+    if fault == "digest":
+        attempt = dataclasses.replace(attempt, effective_grant_digest="0" * 64)
+    elif fault == "decision-policy":
+        decision = dataclasses.replace(decision, policy_sha256="0" * 64)
+    elif fault == "decision-scope":
+        decision = dataclasses.replace(decision, requested=("READ",))
+    elif fault == "decision-paths":
+        decision = dataclasses.replace(decision, allowed_write_paths=("other.py",))
+    elif fault == "decision-validation":
+        decision = dataclasses.replace(decision, validation_commands=(("/bin/false",),))
+    elif fault == "decision-workspace":
+        decision = dataclasses.replace(decision, worktree="/not-the-assigned-workspace")
+    else:
+        job = dataclasses.replace(job, orchestration_role=None)
+    validator = getattr(module, "validate_effective_grant", None)
+    assert callable(validator), "missing shared pure effective-grant validator"
+    with pytest.raises(SupervisorError, match=expected):
+        validator(job, attempt, decision)
+
+
+@pytest.mark.parametrize("from_grant", [False, True])
+def test_p2_controller_authority_hidden_only_from_worker_projections(tmp_path, monkeypatch, from_grant):
+    authorities = ["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS", _P2_AUTHORITY]
+    runtime, job_id, _ = _runtime_and_job(tmp_path, requested_authorities=authorities)
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(runtime, tmp_path, adapter)
+    active = asyncio.run(supervisor.start_job(job_id))
+    job = runtime.jobs.get_job(job_id)
+    lease = active.lease
+    grant = None
+    if from_grant:
+        job = dataclasses.replace(job, orchestration_role="work")
+        grant = {
+            "schema_version": "mastermind.executive_effective_grant/v1",
+            "authorities": list(job.requested_authorities),
+            "write_paths": list(job.allowed_write_paths),
+            "validation_argv": copy.deepcopy(job.validation_commands),
+            "policy_sha": lease.attempt.authority_policy_hash,
+            "job_id": job.job_id, "role": job.orchestration_role,
+        }
+        digest = hashlib.sha256(json.dumps(grant, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        lease = dataclasses.replace(lease, attempt=dataclasses.replace(
+            lease.attempt, effective_grant=grant, effective_grant_digest=digest))
+    original = copy.deepcopy(grant)
+    spec = supervisor._launch_spec(job, lease, active.launch_spec.result_schema_path, grant)
+    # This projection describes the already-started process, so retain its
+    # admitted isolation snapshot rather than a later directory observation.
+    spec = dataclasses.replace(
+        spec, isolation_manifest=active.launch_spec.isolation_manifest,
+        isolation_manifest_sha256=active.launch_spec.isolation_manifest_sha256,
+    )
+    packet = json.loads(spec.prompt[spec.prompt.index("{"):])
+    assert _P2_AUTHORITY not in packet["authorities"]
+    assert _P2_AUTHORITY not in spec.authorities
+    assert set(packet["authorities"]) == set(authorities) - {_P2_AUTHORITY}
+    assert set(spec.authorities) == set(authorities) - {_P2_AUTHORITY}
+    # The launch already wrote its immutable receipt. This separate projection
+    # probe gets a distinct test-only evidence path, never an overwrite/delete.
+    monkeypatch.setattr(supervisor, "_receipt_path", lambda *args, **kwargs:
+                        tmp_path / "projection-attestation.json")
+    metadata = supervisor._launch_metadata(job=job, lease=lease, spec=spec,
+                                           process_ref=active.process_ref, effective_grant=grant)
+    assert set(metadata["authorities"]) == set(authorities)
+    assert _P2_AUTHORITY in runtime.jobs.get_job(job_id).requested_authorities
+    persisted = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert _P2_AUTHORITY in persisted.launch_metadata["authorities"]
+    assert grant == original
+
+
+@pytest.mark.parametrize("from_grant", [False, True])
+def test_p2_profile_admission_never_uses_worker_projection(tmp_path, monkeypatch, from_grant):
+    from control_plane import executive_supervisor as module
+
+    runtime, job_id, _ = _runtime_and_routed_job(
+        tmp_path, profile_id="sealed.worker.readonly.no-extensions.v1")
+    lease = runtime.attempts.claim_job(job_id, lease_owner="supervisor-fixture")
+    assert lease is not None
+    job = runtime.jobs.get_job(job_id)
+    job = dataclasses.replace(job, requested_authorities=[*job.requested_authorities, _P2_AUTHORITY])
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+    grant = {"authorities": list(job.requested_authorities)} if from_grant else None
+    # A future accidental use of the model projection at admission must fail
+    # this discriminator, even though the two real model projections use it.
+    def forbidden_projection(*args):
+        raise AssertionError("worker projection used for admission")
+    monkeypatch.setattr(module, "worker_visible_authorities", forbidden_projection, raising=False)
+    with pytest.raises(SupervisorError, match="read-only execution profile"):
+        supervisor._validate_execution_profile(job, lease, grant)
+
+
+def test_p2_worker_projection_is_closed_order_preserving_and_nonmutating():
+    from control_plane import executive_supervisor as module
+
+    assert module.CONTROLLER_ONLY_AUTHORITIES == frozenset({_P2_AUTHORITY})
+    original = ["READ", _P2_AUTHORITY, "READ", "RUN_TESTS"]
+    assert module.worker_visible_authorities(original) == ("READ", "READ", "RUN_TESTS")
+    assert original == ["READ", _P2_AUTHORITY, "READ", "RUN_TESTS"]
 
 
 class Hf1bResultAdapter(FakeAdapter):
@@ -1924,10 +2163,10 @@ class _UnboundBrokerClient:
         if "run_id" in payload:
             assert payload["run_id"] == self.attempt_id
             if self.adapter.ref is None:
-                raise RemoteBrokerError("BrokerStateError", "no such run")
+                raise RemoteBrokerError("BrokerRunNotFound", "no such run")
             # Terminal records remain available; their ProcessRef cannot match
             # the deliberately absent control metadata even after cleanup.
-            return {"run": {"process_ref": dataclasses.asdict(self.adapter.ref),
+            return {"run": {"run_id": self.attempt_id, "process_ref": dataclasses.asdict(self.adapter.ref),
                             "status": "RUNNING" if self.active else "CANCELLED"}}
         assert payload == {"fresh_uid_sweep": True}
         return {"active_run_id": self.attempt_id if self.active else None,
@@ -2044,3 +2283,133 @@ def test_restart_unbound_claim_partial_identity_never_grants_cleanup(tmp_path, m
     assert client.cancelled == []
     monkeypatch.setattr(runtime.attempts, "list_attempts", original_list)
     _assert_unbound_claim_fenced(runtime, attempt, command, work, adapter, supervisor)
+
+
+@pytest.mark.parametrize("fault", [None, "generic", "foreign", "recheck"])
+def test_restart_bound_owner_loss_never_reattaches_or_restarts(tmp_path, fault):
+    from datetime import datetime, timezone
+    from control_plane.executive_worker_broker import (
+        RemoteBrokerError, RemoteWorkerProcessController,
+    )
+
+    runtime, job_id, workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    first_adapter = RestartCapableFakeAdapter(inspector)
+    active = asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
+    original = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert original.launch_metadata["worker_recovery_binding"]
+    original_checkpoint = runtime.jobs.get_job(job_id).checkpoint
+    startup = FakeProcessController(inspector).uid_sweep_receipt(original)
+    startup.update(reason="broker_startup",
+                   observed_at=datetime.now(timezone.utc).isoformat(),
+                   residual_pids_before=[42420], signal_sent=True, found_residuals=True)
+    assert datetime.fromisoformat(startup["observed_at"]) > datetime.fromisoformat(original.started_at)
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+            self.fresh_count = 0
+        def request_sync(self, operation, payload):
+            self.calls.append((operation, dict(payload)))
+            assert operation == "status"  # no cancel, start, or reattach RPC
+            if "run_id" in payload:
+                assert payload["run_id"] == original.attempt_id
+                raise RemoteBrokerError(
+                    "BrokerStateError" if fault == "generic" else "BrokerRunNotFound",
+                    "exact run unavailable")
+            assert payload == {"fresh_uid_sweep": True}
+            self.fresh_count += 1
+            sweep = FakeProcessController(inspector).uid_sweep_receipt(original)
+            sweep["observed_at"] = datetime.now(timezone.utc).isoformat()
+            if fault == "foreign" or (fault == "recheck" and self.fresh_count > 1):
+                sweep["broker_pid"] += 1
+            return dict(adapter_id="codex-cli", worker_uid=startup["worker_uid"],
+                        broker_pid=startup["broker_pid"], active_run_id=None,
+                        active_operator_attempt_id=None, active_operator_generation_id=None,
+                        starting=False, validation_busy=False, status_sweep_busy=False,
+                        quarantined_reason=None, startup_sweep=startup, status_sweep=sweep)
+
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    second_adapter = RestartCapableFakeAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, second_adapter)
+    client = Client()
+    restarted.process_controller = RemoteWorkerProcessController(
+        client, expected_worker_uid=startup["worker_uid"])
+    outcome = restarted.reconcile_restart(requeue_lost=False)[0]
+    persisted = reopened.attempts.get_attempt(original.attempt_id)
+    assert second_adapter.start_calls == 0 and second_adapter.reattach_calls == []
+    assert restarted.take_recovered_runs() == ()
+    assert len(reopened.attempts.list_attempts(job_id)) == 1
+    assert reopened.jobs.get_job(job_id).checkpoint == original_checkpoint
+    if fault is not None:
+        assert outcome.status is ReconcileStatus.IDENTITY_AMBIGUOUS
+        assert persisted.status == original.status
+        assert persisted.fence_generation == original.fence_generation
+        assert outcome.assignment_seal_receipt_path is None
+        assert outcome.uid_sweep_receipt_path is None
+    else:
+        assert outcome.status is ReconcileStatus.MISSING_LOST
+        assert outcome.process_was_live is False
+        assert persisted.status is AttemptStatus.LOST
+        assert persisted.fence_generation == original.fence_generation + 1
+        assert reopened.jobs.get_job(job_id).status is JobStatus.LOST
+        assert Path(outcome.assignment_seal_receipt_path).is_file()
+        evidence = json.loads(Path(outcome.uid_sweep_receipt_path).read_text())
+        assert evidence["uid_sweep"]["reason"] == "status_absence"
+        assert evidence["uid_sweep"]["preceding_broker_startup_sweep"] == startup
+        assert client.fresh_count == 2
+
+
+@pytest.mark.parametrize("second", [
+    ProcessPresence.ABSENT, ProcessPresence.LIVE, ProcessPresence.UNKNOWN,
+])
+def test_restart_missing_owner_recheck_must_remain_missing(tmp_path, second):
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    adapter = RestartCapableFakeAdapter(inspector)
+    active = asyncio.run(_supervisor(runtime, tmp_path, adapter).start_job(job_id))
+    original = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    restarted = _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector))
+
+    class Controller:
+        states = iter([ProcessPresence.MISSING, second])
+        def presence(self, attempt):
+            return next(self.states)
+        def absence_verified(self, attempt):
+            raise AssertionError("generic absence must not replace the MISSING recheck")
+        def uid_sweep_receipt(self, attempt):
+            raise AssertionError("drift must not reach terminal sealing")
+        def terminate(self, attempt):
+            raise AssertionError("drift must not signal a process")
+
+    restarted.process_controller = Controller()
+    outcome = restarted.reconcile_restart(requeue_lost=False)[0]
+    assert outcome.status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert outcome.assignment_seal_receipt_path is None
+    assert outcome.uid_sweep_receipt_path is None
+    persisted = runtime.attempts.get_attempt(original.attempt_id)
+    assert persisted.status == original.status
+    assert persisted.fence_generation == original.fence_generation
+    assert restarted.take_recovered_runs() == ()
+
+
+def test_restart_unbound_generic_broker_error_never_cancels_or_proves_absence(tmp_path, monkeypatch):
+    from control_plane.executive_worker_broker import RemoteBrokerError
+
+    runtime, work, command, adapter, supervisor, attempt, client = _unbound_crash_fixture(
+        tmp_path, monkeypatch, before_start=True)
+    requests = []
+    def request(operation, payload):
+        requests.append((operation, dict(payload)))
+        assert operation == "status" and payload == {"run_id": attempt.attempt_id}
+        raise RemoteBrokerError("BrokerStateError", "ambiguous owner state")
+    client.request_sync = request
+    outcome = supervisor.reconcile_restart()[0]
+    assert outcome.status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert outcome.assignment_seal_receipt_path is None
+    assert outcome.uid_sweep_receipt_path is None
+    assert client.cancelled == [] and adapter.start_count == 0
+    assert requests == [("status", {"run_id": attempt.attempt_id})] * 2
+    persisted = runtime.attempts.get_attempt(attempt.attempt_id)
+    assert persisted.status is AttemptStatus.CLAIMED
+    assert persisted.fence_generation == attempt.fence_generation

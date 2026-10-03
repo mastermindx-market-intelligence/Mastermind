@@ -115,7 +115,7 @@ import {
 } from './fleet-status.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.7';
+export const GATEWAY_VERSION = '0.1.8';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();

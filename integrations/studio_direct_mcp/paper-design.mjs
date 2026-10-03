@@ -23,8 +23,12 @@ export const PAPER_INSPECT_TOOL = Object.freeze({
   name: 'paper_inspect',
   title: 'Inspect Paper Design',
   description:
-    'Read Paper Desktop availability and the active design identity through the guarded Mastermind adapter. ' +
-    'Start here when Paper is already on the intended file; if not, use paper_read with tool=list_files, then paper_prepare. ' +
+    'Read Paper Desktop availability and default active-design identity through the guarded Mastermind adapter. ' +
+    'DOCUMENT_UNAVAILABLE means the default active context is unavailable; it does not prove Paper Desktop or a known exact file is unavailable. ' +
+    'If an exact fileId is already known, one read-only paper_read get_basic_info(fileId) may still prove that target readable; if the fileId is unknown, stop at a typed binding gap rather than guessing or invoking blocked resource discovery. ' +
+    'The response also declares the gateway Paper surface contract. If paper_prepare is listed there but absent from the current client tool surface, ' +
+    'treat that as client publication drift and review/refresh the same Studio Direct app\'s approved action snapshot before file-transition work; a reconnect alone is not proof of refresh. ' +
+    'Do not emulate prepare through generic process or desktop commands. ' +
     'Returns a fresh snapshot guard for later edits. This tool does not modify the design.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   annotations: {
@@ -58,8 +62,9 @@ export const PAPER_READ_TOOL = Object.freeze({
   name: 'paper_read',
   title: 'Read Paper Design',
   description:
-    'Run one allowed read-only Paper operation against the active design using the guarded adapter. ' +
-    'Use tool=list_files when the target file id is unknown; then call paper_prepare before editing another file. ' +
+    'Run one allowed read-only Paper operation through the guarded adapter. ' +
+    'When an upstream read accepts fileId, it may read that exact target even if default active-file inspection is unavailable; this proves read serviceability, not write readiness. ' +
+    'The current reviewed catalog does not expose file discovery; when the target file id is unknown, obtain the exact file identity from already accepted task context or stop rather than guessing. ' +
     'Examples include node inspection, screenshots and JSX extraction. Unknown or modifying upstream tools are refused.',
   inputSchema: {
     type: 'object',
@@ -90,15 +95,16 @@ export const PAPER_PREPARE_TOOL = Object.freeze({
   title: 'Prepare Paper File',
   description:
     'Launch or focus the host-pinned Paper Desktop app on one exact Paper file id, then verify the active file and current write-schema qualification. ' +
-    'Use paper_read with tool=list_files first when the file id is unknown. This changes desktop focus but does not edit design content. ' +
-    'Only one modifying session may own a Paper file across hosts at a time.',
+    'The fileId must already be known from accepted task context or an exact-file read; resource discovery remains blocked. ' +
+    'Multiple admitted sessions may modify the same file/page across hosts; coordinate by board/artboard/node target. ' +
+    'The operation/carrier fence is target-scoped, not a file-wide lease.',
   inputSchema: {
     type: 'object',
     properties: {
       file_id: {
         type: 'string',
         pattern: '^[0-9A-HJKMNP-TV-Z]{26}$',
-        description: 'Exact Paper file id returned by list_files or paper_inspect.',
+        description: 'Exact Paper file id from accepted task context, paper_inspect, or a prior exact-file read.',
       },
     },
     required: ['file_id'],
@@ -120,7 +126,8 @@ export const PAPER_EDIT_TOOL = Object.freeze({
   description:
     'Apply one explicitly requested Paper design edit through the guarded adapter. ' +
     'Requires the exact inspected snapshot and a stable operation id. The adapter refuses standalone node-deletion tools, ' +
-    'native host export, file-open transitions and token deletion. Only one modifying session may own a Paper file across hosts at a time. ' +
+    'native host export, file-open transitions and token deletion. Multiple admitted sessions may modify the same file/page across hosts; ' +
+    'prefer disjoint board/artboard/node targets and re-read/re-plan known overlap. The operation/carrier fence is target-scoped, not a file-wide lease. ' +
     'A lost or ambiguous response is reported as EFFECT_UNKNOWN with retry_allowed=false; the gateway performs no automatic replay.',
   inputSchema: {
     type: 'object',
@@ -152,6 +159,21 @@ export const PAPER_DESIGN_TOOLS = Object.freeze([
 ]);
 
 export const PAPER_DESIGN_TOOL_NAMES = new Set(PAPER_DESIGN_TOOLS.map((tool) => tool.name));
+
+export const PAPER_DESIGN_SURFACE_CONTRACT = Object.freeze({
+  schema: 'mastermind.paper_studio_surface.v1',
+  gateway_advertises: Object.freeze(PAPER_DESIGN_TOOLS.map((tool) => tool.name)),
+  file_transition_tool: 'paper_prepare',
+  file_transition_requires_direct_tool: true,
+  client_surface_drift_state: 'STUDIO_TOOL_PUBLICATION_DRIFT',
+  client_surface_recovery: 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT',
+  reconnect_alone_proves_refresh: false,
+  generic_process_fallback_allowed: false,
+  concurrency_rule: 'MULTI_WRITER_PER_FILE_TARGET_SCOPED',
+  same_file_multi_writer_allowed: true,
+  same_page_multi_writer_allowed: true,
+  coordination_scope: 'BOARD_ARTBOARD_NODE',
+});
 
 function assertExactKeys(value, allowed, label) {
   for (const key of Object.keys(value)) {
@@ -395,7 +417,17 @@ export function createPaperDesigner(config, dependencies = {}) {
   return Object.freeze({
     async call(name, input = {}) {
       if (name === PAPER_INSPECT_TOOL.name) {
-        return dispatch('status', ['status']);
+        const result = await dispatch('status', ['status']);
+        if (!result?.isError && result?.value && typeof result.value === 'object' && !Array.isArray(result.value)) {
+          return {
+            ...result,
+            value: {
+              ...result.value,
+              gateway_surface: PAPER_DESIGN_SURFACE_CONTRACT,
+            },
+          };
+        }
+        return result;
       }
       if (name === PAPER_CATALOG_TOOL.name) {
         return dispatch('catalog', ['catalog']);
@@ -462,7 +494,10 @@ export function createPaperDesigner(config, dependencies = {}) {
               file_id: fileId,
               retry_allowed: false,
               app_open_attempted: openAttempted,
-              concurrency_rule: 'ONE_WRITER_PER_FILE_ACROSS_HOSTS',
+              concurrency_rule: 'MULTI_WRITER_PER_FILE_TARGET_SCOPED',
+              same_file_multi_writer_allowed: true,
+              same_page_multi_writer_allowed: true,
+              coordination_scope: 'BOARD_ARTBOARD_NODE',
             },
             isError: true,
             effectUnknown: openAttempted,
@@ -482,7 +517,10 @@ export function createPaperDesigner(config, dependencies = {}) {
             write_reason: catalog.isError ? (catalog.value?.state ?? 'PAPER_WRITE_QUALIFICATION_UNAVAILABLE') : null,
             already_active: alreadyActive,
             app_open_attempted: openAttempted,
-            concurrency_rule: 'ONE_WRITER_PER_FILE_ACROSS_HOSTS',
+            concurrency_rule: 'MULTI_WRITER_PER_FILE_TARGET_SCOPED',
+            same_file_multi_writer_allowed: true,
+            same_page_multi_writer_allowed: true,
+            coordination_scope: 'BOARD_ARTBOARD_NODE',
           },
           isError: false,
           effectUnknown: false,

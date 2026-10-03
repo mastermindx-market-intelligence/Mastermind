@@ -378,11 +378,11 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(svc.IDLE_TIMEOUT_MS, 1_800_000)
         self.assertEqual(svc.REQUEST_TIMEOUT_MS, 300_000)
 
-    def test_paper_runtime_pin_matches_reviewed_v4_generation(self):
-        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v4")
+    def test_paper_runtime_pin_matches_reviewed_v10_generation(self):
+        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v10")
         self.assertEqual(
             svc.PAPER_BRIDGE_SHA256,
-            paper_runtime_stage.REVIEWED_GENERATIONS["v4"]["bridge.py"],
+            paper_runtime_stage.REVIEWED_GENERATIONS["v10"]["bridge.py"],
         )
 
 

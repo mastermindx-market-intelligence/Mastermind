@@ -107,8 +107,10 @@ or extract implementation from Paper.design. Although this domain skill lives ou
 `docs/sol_skills/`, load it plus `skills/paper-design-workflow/references/connection.md` from the
 **same pinned repository commit** before making Paper capability claims or effects. For attended
 ChatGPT work, discover the exact Paper action family first; generic Studio filesystem/process tools
-do not prove Paper unavailable. Studio Direct is the preferred Web carrier when its Paper actions are
-exposed. Studio Direct absence or degradation grants **no** Desktop Commander authority. Before any
+do not prove Paper unavailable. The private Mastermind Paper app is the target normal Business
+Web carrier after explicit workspace enrollment and accepted direct-path canary; see
+`docs/PAPER_DIRECT_CHATGPT.md`. Staging alone is not enrollment. Studio Direct remains the
+legacy/non-migrated Web carrier when its Paper actions are exposed. Studio Direct absence or degradation grants **no** Desktop Commander authority. Before any
 Paper mutation, Remote Desktop Commander may be selected only when the current Chairman assignment,
 delegated authority, or accepted canonical placement independently authorizes that exact host carrier
 and Paper action, the current RDC resource permission is observed, no explicit safety/permission denial

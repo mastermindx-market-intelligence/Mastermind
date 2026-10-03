@@ -818,7 +818,7 @@ def test_installed_codex_document_uses_the_installer_destination(document):
     path = module.WORKER_CONFIG if document == "worker" else module.CODEX_ATTESTATION
     value = json.loads(filesystem.payloads[path])
     field = "codex_binary" if document == "worker" else "path"
-    value[field] = "/Library/Application Support/MastermindExecutive/bin/codex-0.147.0"
+    value[field] = "/Library/Application Support/MastermindExecutive/bin/codex-0.159.2"
     _, observed = module.parse_content_document(
         path, json.dumps(value).encode(), manifest_path=filesystem.manifest_path,
         expected_release_sha=SHA, expected_tree_sha=TREE,
