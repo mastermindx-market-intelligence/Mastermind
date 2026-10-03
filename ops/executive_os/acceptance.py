@@ -2480,6 +2480,32 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         self._activate_live_canary(control_pid, worker_pid)
         return control_pid, worker_pid, startup
 
+    def _recover_requeued_proof_capacity(
+        self, job_id: str, lost_attempt: dict[str, Any]
+    ) -> None:
+        """Requeue leaves ERROR capacity unheld and undispatchable.
+
+        Requalify only this fixed proof quota using the existing broker's fresh
+        startup/absence evidence before permitting the higher-fence dispatch.
+        """
+        response = self._control_request(
+            "recover-proof-capacity", job_id, lost_attempt["attempt_id"],
+            persist="requeued-capacity-recovery.json",
+        )
+        recovery = response.get("result")
+        snapshot = recovery.get("previous_snapshot") if isinstance(recovery, dict) else None
+        if (
+            not isinstance(recovery, dict) or not isinstance(snapshot, dict)
+            or recovery.get("schema_version") != "mastermind.executive_proof_capacity_recovery/v1"
+            or recovery.get("job_id") != job_id
+            or recovery.get("lost_attempt_id") != lost_attempt["attempt_id"]
+            or recovery.get("worker_id") != lost_attempt.get("worker_id")
+            or recovery.get("quota_class") != lost_attempt.get("quota_class")
+            or recovery.get("status") != "AVAILABLE"
+            or snapshot.get("fence_generation") != lost_attempt.get("fence_generation")
+        ):
+            raise AcceptanceError("proof quota recovery receipt is incomplete")
+
     def interrupted_job(
         self, old_control_pid: int, old_worker_pid: int
     ) -> tuple[str, int, int]:
@@ -2645,6 +2671,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 "archived_raw_worker_probe": archived_probe,
             },
         )
+        self._recover_requeued_proof_capacity(job_id, lost_attempt)
         dispatch_response = self._control_request(
             "dispatch", job_id, persist="requeued-dispatch.json"
         )
@@ -2661,6 +2688,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             not isinstance(fresh_attempt_id, str)
             or dispatched_attempt.get("job_id") != job_id
             or fresh_attempt_id == interrupted_attempt_id
+            or not isinstance(dispatched_attempt.get("fence_generation"), int)
+            or dispatched_attempt["fence_generation"] <= lost_attempt["fence_generation"]
         ):
             raise AcceptanceError("requeued dispatch returned no fresh attempt identity")
         fresh_probe = self._raw_worker_path_probe(

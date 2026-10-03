@@ -1885,6 +1885,8 @@ class ExecutiveControlService:
             Callable[[Runtime, SupervisorProtocol], OperatorSupervisorProtocol]
             | None
         ) = None,
+        proof_capacity_recovery_observer: Callable[[Any], Mapping[str, Any]] | None = None,
+        proof_capacity_recovery_worker_uid: int | None = None,
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         autonomy_guard: Callable[[], None] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
@@ -1926,6 +1928,15 @@ class ExecutiveControlService:
         self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
+        if (proof_capacity_recovery_observer is not None
+                and (not callable(proof_capacity_recovery_observer)
+                     or type(proof_capacity_recovery_worker_uid) is not int
+                     or proof_capacity_recovery_worker_uid <= 0)):
+            raise ValueError("proof recovery requires a fixed observer and worker UID")
+        if proof_capacity_recovery_observer is None and proof_capacity_recovery_worker_uid is not None:
+            raise ValueError("proof recovery UID requires its observer")
+        self._proof_capacity_recovery_observer = proof_capacity_recovery_observer
+        self._proof_capacity_recovery_worker_uid = proof_capacity_recovery_worker_uid
         self._operator_identity_verifier = operator_identity_verifier
         self._autonomy_guard = autonomy_guard
         if self.config.coo_autonomy_armed and not callable(self._autonomy_guard):
@@ -5346,6 +5357,37 @@ class ExecutiveControlService:
             result["workspace_rotation"] = rotation
             return result
 
+
+    async def _recover_proof_capacity(self, job_id: str, lost_attempt_id: str) -> dict[str, Any]:
+        runtime = self._require_runtime()
+        target = {"worker_id": self.config.worker_id, "quota_class": self.config.quota_class}
+        async with self._dispatch_lock:
+            async with self._workspace_lock:
+                prior = runtime.workers.proof_capacity_recovery_result(
+                    job_id, lost_attempt_id, **target)
+                if prior is not None:
+                    return prior
+                if any(not task.done() for task in self._dispatch_tasks.values()):
+                    raise StateConflict("proof capacity recovery requires no active dispatch")
+                job = runtime.jobs.get_job(job_id)
+                if job is None or not self._is_fixed_proof_job(job):
+                    raise StateConflict("proof capacity recovery accepts only its fixed harmless proof job")
+                observer = self._proof_capacity_recovery_observer
+                if observer is None:
+                    raise StateConflict("proof capacity recovery has no fixed broker observer")
+                snapshot = runtime.workers.proof_capacity_recovery_snapshot(
+                    job_id, lost_attempt_id, **target)
+                attempt = runtime.attempts.get_attempt(lost_attempt_id)
+                started = datetime.now(timezone.utc)
+                sweep = await self._run_physical(observer, attempt)
+                finished = datetime.now(timezone.utc)
+                if self._closing or self._service_state != "READY":
+                    raise StateConflict("proof recovery lost READY service custody")
+                return runtime.workers.recover_proof_capacity(
+                    job_id, lost_attempt_id, **target, expected_snapshot=snapshot,
+                    uid_sweep=sweep, expected_worker_uid=self._proof_capacity_recovery_worker_uid,
+                    observation_started_at=started, observation_finished_at=finished)
+
     def _submit_service_intent(self, payload: Any) -> dict[str, Any]:
         """Submit through the existing sink with v2 host composition attached."""
 
@@ -7058,6 +7100,11 @@ class ExecutiveControlService:
                     requeue_lost=False,
                 )
             )
+        if command == "recover-proof-capacity":
+            self._exact_args(args, {"job_id", "lost_attempt_id"})
+            return await self._recover_proof_capacity(
+                self._id(args["job_id"], "job_id"),
+                self._id(args["lost_attempt_id"], "lost_attempt_id"))
         if command == "requeue":
             self._exact_args(args, {"job_id"})
             job_id = self._id(args["job_id"], "job_id")

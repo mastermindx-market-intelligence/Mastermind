@@ -10247,3 +10247,241 @@ def test_service_schedules_recovered_runs_through_existing_dispatch_registry() -
         assert service._dispatch_tasks == {}
 
     asyncio.run(scenario())
+
+
+async def _requeued_missing_proof(service, *, reason="process identity absent during supervisor restart"):
+    await _request(service, "register-worker")
+    created = await _request(service, "create-proof-job")
+    job_id = created["result"]["job_id"]
+    runtime = service.runtime
+    lease = runtime.broker.claim(job_id, lease_owner="lost-fixture")
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token, provider_session_id="missing-proof-session")
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token)
+    runtime.attempts.mark_lost(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        reason=reason, verified_process_absent=True)
+    Path(created["result"]["worktree"]).chmod(0o700)
+    requeued = await _request(service, "requeue", {"job_id": job_id})
+    assert requeued["ok"], requeued
+    return job_id, runtime.attempts.get_attempt(lease.attempt.attempt_id)
+
+
+def _proof_absence(attempt):
+    from datetime import datetime, timezone, timedelta
+    from control_plane.executive_worker_broker import UIDSweepReceipt, UID_SWEEP_SCHEMA_VERSION
+    startup_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    assert datetime.fromisoformat(attempt.started_at) < startup_at <= now
+    sweep = UIDSweepReceipt(
+        schema_version=UID_SWEEP_SCHEMA_VERSION, observed_at=now.isoformat(),
+        reason="status_absence", worker_uid=451, broker_pid=42419,
+        residual_pids_before=(), residual_pids_after=(), signal_name="SIGKILL",
+        signal_sent=False, quiescent_observations=2).to_dict()
+    startup = dict(sweep, observed_at=startup_at.isoformat(), reason="broker_startup")
+    return dict(sweep, preceding_broker_startup_sweep=startup)
+
+
+def test_proof_recovery_requalifies_once_and_replays_after_fresh_claim(tmp_path, short_socket_root):
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        calls = []
+        def observe(attempt):
+            assert service._dispatch_lock.locked() and service._workspace_lock.locked()
+            calls.append(attempt.attempt_id)
+            return _proof_absence(attempt)
+        service._proof_capacity_recovery_observer = observe
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        try:
+            job_id, lost = await _requeued_missing_proof(service)
+            runtime = service.runtime
+            quota = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            assert quota.status.value == "ERROR" and quota.active_attempt_id is None
+            assert runtime.broker.claim(job_id, lease_owner="still-error") is None
+            args = {"job_id": job_id, "lost_attempt_id": lost.attempt_id}
+            recovered = await _request(service, "recover-proof-capacity", args)
+            assert recovered["ok"], recovered
+            receipt = recovered["result"]
+            assert receipt["status"] == "AVAILABLE"
+            assert receipt["previous_snapshot"]["fence_generation"] == lost.fence_generation
+            fresh = runtime.broker.claim(job_id, lease_owner="fresh")
+            assert fresh is not None
+            assert fresh.attempt.attempt_id != lost.attempt_id
+            assert fresh.attempt.fence_generation > lost.fence_generation
+            before = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            replay = await _request(service, "recover-proof-capacity", args)
+            assert replay == recovered
+            assert runtime.workers.get_quota_class(lost.worker_id, lost.quota_class) == before
+            assert calls == [lost.attempt_id]
+            events = runtime.events.list_events(job_id=job_id)
+            assert len([e for e in events if e.event_type == "PROOF_CAPACITY_RECOVERED"]) == 1
+            assert runtime.attempts.get_attempt(lost.attempt_id) == lost
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fault", [
+    "observer_failed", "missing_startup", "wrong_uid", "wrong_broker",
+    "wrong_reason", "startup_before_attempt", "stale_absence", "residual",
+    "quota_aba", "worker_offline", "job_cancelled", "held_quota",
+    "active_dispatch", "no_observer", "foreign_attempt", "extra_argument",
+    "wrong_fence", "wrong_lost_reason", "foreign_job", "quarantined_service",
+])
+def test_proof_recovery_refuses_ambiguity_without_capacity_effect(tmp_path, short_socket_root, fault):
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        calls = []
+        def observe(attempt):
+            from datetime import datetime, timezone, timedelta
+            calls.append(attempt.attempt_id)
+            if fault == "observer_failed":
+                raise ValueError("broker unavailable")
+            sweep = _proof_absence(attempt)
+            if fault == "missing_startup":
+                sweep.pop("preceding_broker_startup_sweep")
+            elif fault == "wrong_uid":
+                sweep["worker_uid"] = 452
+            elif fault == "wrong_broker":
+                sweep["preceding_broker_startup_sweep"]["broker_pid"] += 1
+            elif fault == "wrong_reason":
+                sweep["reason"] = "run_terminal"
+            elif fault == "startup_before_attempt":
+                sweep["preceding_broker_startup_sweep"]["observed_at"] = attempt.started_at
+            elif fault == "stale_absence":
+                sweep["observed_at"] = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+            elif fault == "residual":
+                sweep["residual_pids_after"] = [992]
+            elif fault == "quota_aba":
+                # A resource administrator can change ERROR -> OFFLINE -> ERROR
+                # while broker I/O runs; same status/fence is insufficient.
+                from control_plane.executive_runtime import WorkerStatus
+                for status in (WorkerStatus.OFFLINE, WorkerStatus.ERROR):
+                    service.runtime.workers.set_worker_status(
+                        attempt.worker_id, status, quota_class=attempt.quota_class)
+            return sweep
+        service._proof_capacity_recovery_observer = observe if fault != "no_observer" else None
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        blocker = None
+        try:
+            job_id, lost = await _requeued_missing_proof(
+                service, reason=("lease expired" if fault == "wrong_lost_reason"
+                                 else "process identity absent during supervisor restart"))
+            runtime = service.runtime
+            args = {"job_id": job_id, "lost_attempt_id": lost.attempt_id}
+            if fault == "worker_offline":
+                runtime.workers.set_worker_status(lost.worker_id, "OFFLINE")
+            elif fault == "job_cancelled":
+                runtime.jobs.cancel_job(job_id)
+            elif fault == "wrong_fence":
+                with runtime.store.transaction() as conn:
+                    conn.execute("UPDATE worker_quota_classes SET fence_counter=fence_counter+1 WHERE worker_id=? AND quota_class=?",
+                                 (lost.worker_id, lost.quota_class))
+            elif fault == "foreign_job":
+                foreign = runtime.jobs.create_job("foreign recovery target")
+                args["job_id"] = foreign.job_id
+            elif fault == "quarantined_service":
+                service._service_state = "AWAITING_CANARY"
+            elif fault == "held_quota":
+                # Corrupt fixture models a foreign hold. No production SQL writer.
+                with runtime.store.transaction() as conn:
+                    conn.execute("UPDATE worker_quota_classes SET held_attempt_id=? WHERE worker_id=? AND quota_class=?",
+                                 (lost.attempt_id, lost.worker_id, lost.quota_class))
+            elif fault == "active_dispatch":
+                blocker = asyncio.create_task(asyncio.Event().wait())
+                service._dispatch_tasks[job_id] = blocker
+            elif fault == "foreign_attempt":
+                args["lost_attempt_id"] = "ATT-foreign"
+            elif fault == "extra_argument":
+                args["worker_uid"] = 451
+            before = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            response = await _request(service, "recover-proof-capacity", args)
+            assert response["ok"] is False, response
+            after = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            assert after.status.value != "AVAILABLE"
+            if fault != "quota_aba":
+                assert after == before
+            assert not any(e.event_type == "PROOF_CAPACITY_RECOVERED"
+                           for e in runtime.events.list_events(job_id=job_id))
+            assert runtime.attempts.get_attempt(lost.attempt_id) == lost
+        finally:
+            if blocker is not None:
+                blocker.cancel()
+                await asyncio.gather(blocker, return_exceptions=True)
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_proof_recovery_cli_exposes_only_job_and_lost_attempt():
+    from scripts.executive_os_phase1c import _parser, _client_request
+    args = _parser().parse_args(["--socket", "/tmp/control.sock",
+                                "recover-proof-capacity", "JOB-2", "ATT-lost"])
+    assert _client_request(args) == (
+        "recover-proof-capacity", {"job_id": "JOB-2", "lost_attempt_id": "ATT-lost"})
+
+
+@pytest.mark.parametrize("fault", ["extra_key", "wrong_target", "snapshot", "sweep", "time"])
+def test_proof_recovery_rejects_malformed_durable_replay(tmp_path, short_socket_root, fault):
+    from datetime import datetime, timezone
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer = lambda attempt: pytest.fail("replay observed broker")
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        try:
+            job_id, lost = await _requeued_missing_proof(service)
+            runtime = service.runtime
+            target = dict(worker_id=lost.worker_id, quota_class=lost.quota_class)
+            began = datetime.now(timezone.utc)
+            sweep = _proof_absence(lost)
+            ended = datetime.now(timezone.utc)
+            payload = dict(
+                schema_version="mastermind.executive_proof_capacity_recovery/v1",
+                job_id=job_id, lost_attempt_id=lost.attempt_id, **target, status="AVAILABLE",
+                previous_snapshot=runtime.workers.proof_capacity_recovery_snapshot(
+                    job_id, lost.attempt_id, **target),
+                uid_sweep=sweep, observation_started_at=began.isoformat(),
+                observation_finished_at=ended.isoformat())
+            if fault == "extra_key":
+                payload["unreviewed"] = True
+            elif fault == "wrong_target":
+                payload["lost_attempt_id"] = "ATT-foreign"
+            elif fault == "snapshot":
+                payload["previous_snapshot"]["quota_version"] = True
+            elif fault == "sweep":
+                payload["uid_sweep"]["preceding_broker_startup_sweep"]["broker_pid"] += 1
+            elif fault == "time":
+                payload["observation_finished_at"] = "invalid"
+            # Insert a deliberately corrupt event as fixture input, without
+            # disabling immutability triggers or modifying a real receipt.
+            with runtime.store.transaction() as conn:
+                runtime.store.append_event(
+                    conn, aggregate_type="quota_class",
+                    aggregate_id=f"{lost.worker_id}:{lost.quota_class}",
+                    event_type="PROOF_CAPACITY_RECOVERED", actor="executive-control-service",
+                    job_id=job_id, attempt_id=lost.attempt_id, **target, payload=payload,
+                    command_id=runtime.workers._proof_recovery_command(job_id, lost.attempt_id))
+            before = runtime.workers.get_quota_class(lost.worker_id, lost.quota_class)
+            result = await _request(service, "recover-proof-capacity",
+                                    {"job_id": job_id, "lost_attempt_id": lost.attempt_id})
+            assert result["ok"] is False
+            assert "receipt" in result["error"]["message"]
+            assert runtime.workers.get_quota_class(lost.worker_id, lost.quota_class) == before
+            assert len([e for e in runtime.events.list_events(job_id=job_id)
+                        if e.event_type == "PROOF_CAPACITY_RECOVERED"]) == 1
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("uid", [None, 0, -1, True, "451"])
+def test_proof_recovery_observer_requires_positive_fixed_uid(tmp_path, uid):
+    with pytest.raises(ValueError, match="fixed observer and worker UID"):
+        ExecutiveControlService(_config(tmp_path), proof_capacity_recovery_observer=lambda a: {},
+                                proof_capacity_recovery_worker_uid=uid)
