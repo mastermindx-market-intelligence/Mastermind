@@ -1503,3 +1503,30 @@ def test_mcp_projection_uses_one_snapshot_and_observes_revocation_on_next_read(t
             process.pid, connection=connection, **_MCP_HOST) == facts
     with pytest.raises(StateConflict, match="exactly one current writer"):
         runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+
+
+def test_attempt_mcp_projection_shares_parent_capability_and_owned_snapshot(tmp_path, monkeypatch):
+    runtime, _, sealed, _, _, process, _ = _admitted_mcp(tmp_path)
+    before = _sqlite_snapshot(runtime)
+    expected = runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+    assert runtime.current_harness_mcp_binding_for_attempt(sealed.attempt_id, **_MCP_HOST) == expected
+    with runtime.store.read() as connection:
+        monkeypatch.setattr(type(runtime.store), "read", lambda _: pytest.fail("nested read"))
+        assert runtime.current_harness_mcp_binding_for_attempt(
+            sealed.attempt_id, connection=connection, **_MCP_HOST) == expected
+    monkeypatch.undo()
+    assert _sqlite_snapshot(runtime) == before
+
+
+def test_attempt_mcp_projection_rejects_unadmitted_profile(tmp_path):
+    runtime, _, sealed, *_ = _admitted_runtime(tmp_path)
+    with pytest.raises(StateConflict):
+        runtime.current_harness_mcp_binding_for_attempt(sealed.attempt_id, **_MCP_HOST)
+
+
+def test_attempt_mcp_projection_validates_host_identity_before_io(tmp_path, monkeypatch):
+    runtime, _, sealed, *_ = _admitted_mcp(tmp_path)
+    monkeypatch.setattr(type(runtime.store), "read", lambda _: pytest.fail("invalid identity read"))
+    with pytest.raises(StateConflict):
+        runtime.current_harness_mcp_binding_for_attempt(
+            sealed.attempt_id, **(_MCP_HOST | {"auth_status": ""}))

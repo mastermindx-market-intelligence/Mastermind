@@ -22754,6 +22754,31 @@ class ActiveOperatorBindingFacts:
 
 
 
+def _expected_mcp_capability(
+    *, config_name: str, server_identity: str, server_version: str,
+    tool_schema_digest: str, auth_status: str,
+) -> dict[str, Any]:
+    expected = {
+        "kind": "mcp_server",
+        "name": config_name,
+        "tool_schema_digest": tool_schema_digest,
+        "mcp_server_identity": server_identity,
+        "mcp_server_version": server_version,
+        "mcp_auth_status": auth_status,
+        "skill_content_digest": None,
+        "resource_contract_digest": None,
+    }
+    if (
+        any(type(value) is not str or not value for value in (
+            config_name, server_identity, server_version, auth_status,
+        ))
+        or type(tool_schema_digest) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", tool_schema_digest) is None
+    ):
+        raise StateConflict("MCP binding requires a complete host capability identity")
+    return expected
+
+
 @dataclasses.dataclass(frozen=True)
 class ActiveMcpCapabilityBindingFacts:
     """Same-snapshot current writer and its required, attested MCP capability."""
@@ -24124,24 +24149,11 @@ class Runtime:
         The host supplies its sealed expected capability, never tool arguments.
         This is a read projection, not socket authentication or a launch grant.
         """
-        expected = {
-            "kind": "mcp_server",
-            "name": config_name,
-            "tool_schema_digest": tool_schema_digest,
-            "mcp_server_identity": server_identity,
-            "mcp_server_version": server_version,
-            "mcp_auth_status": auth_status,
-            "skill_content_digest": None,
-            "resource_contract_digest": None,
-        }
-        if (
-            any(type(value) is not str or not value for value in (
-                config_name, server_identity, server_version, auth_status,
-            ))
-            or type(tool_schema_digest) is not str
-            or re.fullmatch(r"[0-9a-f]{64}", tool_schema_digest) is None
-        ):
-            raise StateConflict("MCP binding requires a complete host capability identity")
+        expected = _expected_mcp_capability(
+            config_name=config_name, server_identity=server_identity,
+            server_version=server_version, tool_schema_digest=tool_schema_digest,
+            auth_status=auth_status,
+        )
         if connection is None:
             with self.store.read() as owned_connection:
                 return self.current_harness_mcp_binding_for_parent_pid(
@@ -24154,6 +24166,40 @@ class Runtime:
         binding = self.current_harness_binding_for_parent_pid(
             parent_pid, connection=connection
         )
+        return self._current_harness_mcp_capability(binding, expected, connection)
+
+    def current_harness_mcp_binding_for_attempt(
+        self, attempt_id: str, *, config_name: str, server_identity: str,
+        server_version: str, tool_schema_digest: str, auth_status: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        """Qualify one exact recipient through the same current-writer owner.
+
+        No peer identity or dispatch authority is established by this read.
+        The caller must revalidate this exact binding before admission.
+        """
+        expected = _expected_mcp_capability(
+            config_name=config_name, server_identity=server_identity,
+            server_version=server_version, tool_schema_digest=tool_schema_digest,
+            auth_status=auth_status,
+        )
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_mcp_binding_for_attempt(
+                    attempt_id, config_name=config_name, server_identity=server_identity,
+                    server_version=server_version, tool_schema_digest=tool_schema_digest,
+                    auth_status=auth_status, connection=owned_connection,
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        binding = self.current_harness_binding_source(attempt_id, connection=connection)
+        return self._current_harness_mcp_capability(binding, expected, connection)
+
+    def _current_harness_mcp_capability(
+        self, binding: ActiveOperatorBindingFacts, expected: Mapping[str, Any],
+        connection: sqlite3.Connection,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        self.store._assert_owned_snapshot_connection(connection)
+        config_name = expected["name"]
         rows = connection.execute(
             """SELECT a.requested_execution_profile_json,
                       a.requested_execution_profile_digest,
