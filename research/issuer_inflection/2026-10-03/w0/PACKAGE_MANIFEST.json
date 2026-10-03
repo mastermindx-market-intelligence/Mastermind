@@ -4,40 +4,56 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-03T20:21:04.876082+00:00",
+  "prepared_at": "2026-10-03T20:28:24.741601+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "09887614ad06930ca8276aa8995a8d56aab0eb57c0a52a68ff56933b7d464489",
-      "bytes": 7132
+      "sha256": "ebeda315b4b9127680830c31be421f73ad2485f473bb0f26c97b9e0b667c2f14",
+      "bytes": 8331
     },
     "COMPARATOR_DEFINITION_CANDIDATE.json": {
-      "sha256": "44f03fba0eefb87b6426681899849ab7517e7643a432f551d8a6e459ea8b0838",
-      "bytes": 1213
+      "sha256": "9da89d63dbf96b25092944c73d672d8ec9000d8c013cb8454abe325b269c8b87",
+      "bytes": 3090
+    },
+    "R1_RESOLUTION.md": {
+      "sha256": "c8747d9f0fcc856b571acf66e9467d6c64173882f1bb78792e2f80e31b1654ad",
+      "bytes": 4086
     },
     "README.md": {
-      "sha256": "2034ab7d43b0c8f4524abcd2c29a533b31e3b87d4df8e2b8c0a096280e4217da",
-      "bytes": 2994
+      "sha256": "a5b678f64dbbbc29106f786c3f9a9369aadc7b754a72fee513ac2cfc53827a43",
+      "bytes": 3527
     },
     "SEMANTIC_ADMISSION.md": {
-      "sha256": "1370014ed31db2b934a065d0056b6fd939f9a8664df2682814c30d9f99956317",
-      "bytes": 5727
+      "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",
+      "bytes": 5932
     },
     "TRIAL_OWNER_ADMISSION.md": {
       "sha256": "a00b086febd2329af4a723283c236cc3abdc07cf5464422f48404650ced868d3",
       "bytes": 3181
     },
     "W0_ADMISSION_CANDIDATE.md": {
-      "sha256": "6d9fa58b654573db28aee349e0873c2f6fbb454d0b49320172b04b8b10b48dbf",
-      "bytes": 25444
+      "sha256": "e3e2f21f29478ce82092ed43d9974ad9c844f2ee64a8d8c127e7ea2c19007373",
+      "bytes": 26096
     },
     "W1_IMPLEMENTATION_PACKET.md": {
-      "sha256": "bbf0bdeae8351983b14138fd78086cfb0dc6ec967af30114a9dad739d4e67ece",
-      "bytes": 9641
+      "sha256": "a1e75b799a12f84bbceb7cfecf8bac6d01e33f00a5ad5e2f3fcd5bd97282466d",
+      "bytes": 9800
     },
     "evidence/CAPTURE_BOUNDARY.json": {
       "sha256": "d923b3cb21b4acd0949a6562d0d09529431d2b10653ff2b32c4e331f0beba19f",
       "bytes": 1077
+    },
+    "evidence/R1-contract-shape-tests.json": {
+      "sha256": "5a4bbe8dd444b460b757e4c852bb04f0db20befee53f08cf217088b6c9bbcbcb",
+      "bytes": 1093
+    },
+    "evidence/R1-green-test.json": {
+      "sha256": "48214306b51c3f1bfaf1d79131593261b67a2b51ed661eb434dbcb08c43644b7",
+      "bytes": 1082
+    },
+    "evidence/R1-red-test.json": {
+      "sha256": "5a1a7d37b10b9b7bd84cacaaacb84eee40f1df0bcea5bbfa654bd6aec268a919",
+      "bytes": 2708
     },
     "evidence/aapl_same_filing_annual_revenue.receipt.json": {
       "sha256": "d91c48201a58856cc6fc4b1df0e7414e48b9f8fb10691fe623dae776fb1d943f",
@@ -120,16 +136,20 @@
       "bytes": 3747
     },
     "issuer_state_transition.candidate.schema.json": {
-      "sha256": "eba8c328e9b2a42e4678c3b4717ff9d3e7e7b374c165fa14b7683fb277e71384",
-      "bytes": 27581
+      "sha256": "6247a5f696127629b0b2f9884f6feaee32c6fc6a8a340b15684542e13a1bc9e3",
+      "bytes": 29432
     },
     "replay_owner_inputs.py": {
       "sha256": "ea7eb744ec43d5bc6adab029ae9f86562dc8eca6ede41c518e94ae9096aa1ee7",
       "bytes": 6279
     },
     "test_candidate_schema.py": {
-      "sha256": "12348f912fdf81253f9a1821f2e01aaff1a7affc48d3a33dd2658249b52b2980",
-      "bytes": 10467
+      "sha256": "4b2f00610d1f52fe2247446feef726bc4bb4714381fa0bb115582c3e07a22da1",
+      "bytes": 11733
+    },
+    "test_comparator_policy.py": {
+      "sha256": "8c2bdd6a8e4ae6cf11e7b59a2aa96e930b7fd29fba622cb0dcb8cf6f873d9a2b",
+      "bytes": 10203
     },
     "test_verify_evidence.py": {
       "sha256": "bd80da3ba5869559923061525a8cb0000a592cba1cd9b2d3d0414612afe7f4b2",

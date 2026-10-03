@@ -46,7 +46,7 @@ def sample() -> dict:
                    'reconstruction_mode': 'development_reconstruction'},
         'comparison': {'state': 'not_evaluable', 'before_ref': None, 'after_ref': None,
                        'admission_ref': None, 'unit_ref': None, 'before_value': None, 'after_value': None,
-                       'absolute_change': None, 'relative_change_percent': None,
+                       'absolute_change': None, 'relative_change_exact': None, 'relative_change_percent': None,
                        'percentage_reason': None, 'refusal_reason': 'TEST_ONLY no owner admission'},
         'meaning': {'economic_family': 'TEST_ONLY_unknown', 'measurement_shape': 'TEST_ONLY_unknown',
                     'interpretation_ref': None, 'evidence_maturity': 'development_golden',
@@ -71,7 +71,8 @@ def comparable_shape() -> dict:
     value['comparison'].update(state='comparable', before_ref=owner_ref('before'),
         after_ref=owner_ref('after'), admission_ref=owner_ref('admission'), unit_ref=owner_ref('unit'),
         before_value='10', after_value='12.25', absolute_change='2.25',
-        relative_change_percent='22.5', percentage_reason=None, refusal_reason=None)
+        relative_change_exact={'numerator': '45', 'denominator': '2'},
+        relative_change_percent='22.50', percentage_reason=None, refusal_reason=None)
     return value
 
 class CandidateShapeTests(unittest.TestCase):
@@ -150,6 +151,20 @@ class CandidateShapeTests(unittest.TestCase):
         for invalid in (float('nan'), 'NaN', 'Infinity', '1e4', '01', 2.25):
             with self.subTest(value=invalid):
                 value = comparable_shape(); value['comparison']['absolute_change'] = invalid; self.invalid(value)
+    def test_display_requires_exact_rational_pair(self) -> None:
+        value = comparable_shape(); value['comparison']['relative_change_exact'] = None; self.invalid(value)
+    def test_refusal_cannot_carry_an_exact_rational(self) -> None:
+        value = sample(); value['comparison']['relative_change_exact'] = {'numerator': '0', 'denominator': '1'}; self.invalid(value)
+    def test_rational_denominator_is_positive(self) -> None:
+        for denominator in ('0', '-2', '01'):
+            with self.subTest(denominator=denominator):
+                value = comparable_shape(); value['comparison']['relative_change_exact']['denominator'] = denominator; self.invalid(value)
+    def test_percentage_display_has_exactly_two_decimal_places(self) -> None:
+        for display in ('22.5', '22.500', '22', '2.25e1'):
+            with self.subTest(display=display):
+                value = comparable_shape(); value['comparison']['relative_change_percent'] = display; self.invalid(value)
+    def test_negative_zero_display_is_noncanonical(self) -> None:
+        value = comparable_shape(); value['comparison']['relative_change_percent'] = '-0.00'; self.invalid(value)
     def test_shape_does_not_resolve_an_owner(self) -> None:
         # Deliberate proof of a required later semantic gate, not trusted data.
         value = comparable_shape(); self.valid(value)

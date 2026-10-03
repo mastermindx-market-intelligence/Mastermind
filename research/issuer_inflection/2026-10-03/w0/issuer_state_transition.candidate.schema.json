@@ -147,6 +147,7 @@
         "before_value",
         "after_value",
         "absolute_change",
+        "relative_change_exact",
         "relative_change_percent",
         "percentage_reason",
         "refusal_reason"
@@ -241,8 +242,12 @@
           "anyOf": [
             {
               "type": "string",
-              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
-              "maxLength": 96
+              "pattern": "^-?(0|[1-9][0-9]*)\\.[0-9]{2}$",
+              "maxLength": 96,
+              "not": {
+                "const": "-0.00"
+              },
+              "description": "Display only: exactly two decimal places, single integer half-even rounding from relative_change_exact. Not an exact or unrounded decimal expansion."
             },
             {
               "type": "null"
@@ -267,6 +272,16 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relative_change_exact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExactRational"
             },
             {
               "type": "null"
@@ -332,6 +347,9 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2048
+              },
+              "relative_change_exact": {
+                "type": "null"
               }
             }
           }
@@ -372,6 +390,32 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2048
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "relative_change_percent": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "relative_change_exact": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "relative_change_exact": {
+                "$ref": "#/$defs/ExactRational"
+              },
+              "percentage_reason": {
+                "type": "null"
               }
             }
           }
@@ -1174,6 +1218,27 @@
           "maxLength": 4096
         }
       }
+    },
+    "ExactRational": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numerator",
+        "denominator"
+      ],
+      "properties": {
+        "numerator": {
+          "type": "string",
+          "pattern": "^(0|-?[1-9][0-9]*)$",
+          "maxLength": 129
+        },
+        "denominator": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "maxLength": 128
+        }
+      },
+      "$comment": "Candidate exact percentage representation, reduced by gcd with positive denominator and canonical zero 0/1. Shape does not prove reduction, arithmetic, source or owner admission."
     }
   },
   "allOf": [
