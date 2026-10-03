@@ -204,6 +204,8 @@ class ClaudeAuthObservation:
     api_provider: str
     exit_code: int | None
     observed_at: str
+    # Coarse entitlement class only; raw plan/org/account identity is discarded.
+    subscription_scope: str = "unknown"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -257,6 +259,7 @@ class _ClaudeConfiguration:
     max_turns: int
     managed_observation: ManagedModelPolicyObservation
     managed_policy_generation: int
+    native_config_dir: Path | None
 
 
 @dataclasses.dataclass
@@ -706,11 +709,15 @@ def _provider_environment_key_is_denied(key: str) -> bool:
     )
 
 
-def _closed_auth_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+def _closed_auth_environment(
+    source: Mapping[str, str] | None = None,
+    *,
+    provider_home: Path | None = None,
+) -> dict[str, str]:
     incoming = os.environ if source is None else source
     if any(not isinstance(key, str) or _provider_environment_key_is_denied(key) for key in incoming):
         raise ClaudeAuthStatusError("provider credential environment is refused")
-    return {
+    result = {
         "HOME": "/var/empty",
         "PATH": _SAFE_PATH,
         "LANG": "C",
@@ -718,10 +725,39 @@ def _closed_auth_environment(source: Mapping[str, str] | None = None) -> dict[st
         "TMPDIR": "/tmp",
         "TZ": "UTC",
     }
+    if provider_home is not None:
+        home = Path(provider_home)
+        try:
+            principal_name = pwd.getpwuid(os.geteuid()).pw_name
+            canonical_home = home.resolve(strict=True)
+            config_dir = (canonical_home / ".claude").resolve(strict=True)
+        except (KeyError, OSError):
+            raise ClaudeAuthStatusError("worker auth context is unavailable") from None
+        if (
+            not principal_name
+            or _CONTROL_RE.search(principal_name)
+            or not canonical_home.is_absolute()
+            or config_dir != canonical_home / ".claude"
+        ):
+            raise ClaudeAuthStatusError("worker auth context is unavailable")
+        result.update(
+            {
+                "USER": principal_name,
+                "LOGNAME": principal_name,
+                "CLAUDE_CONFIG_DIR": str(config_dir),
+            }
+        )
+    return result
 
 
-def _closed_launch_environment(home: Path, tmp: Path, spec: WorkerLaunchSpec) -> dict[str, str]:
-    return {
+def _closed_launch_environment(
+    home: Path,
+    tmp: Path,
+    spec: WorkerLaunchSpec,
+    *,
+    native_config_dir: Path | None = None,
+) -> dict[str, str]:
+    result = {
         "HOME": str(home),
         "TMPDIR": str(tmp),
         "PATH": _SAFE_PATH,
@@ -737,6 +773,9 @@ def _closed_launch_environment(home: Path, tmp: Path, spec: WorkerLaunchSpec) ->
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_OPTIONAL_LOCKS": "0",
     }
+    if native_config_dir is not None:
+        result["CLAUDE_CONFIG_DIR"] = str(native_config_dir)
+    return result
 
 
 def _redacted_launch_argv(argv: Sequence[str]) -> tuple[str, ...]:
@@ -1000,6 +1039,238 @@ def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mappin
             process.wait()
 
 
+
+def _observe_auth_status_for_binary(
+    binary: BinaryAttestation,
+    *,
+    timeout_seconds: float = 15.0,
+    provider_home: Path | None = None,
+) -> ClaudeAuthObservation:
+    """Observe native auth while projecting only non-identifying readiness facts."""
+
+    timeout = float(timeout_seconds)
+    if not 0.1 <= timeout <= 60:
+        raise ClaudeAuthStatusError("auth observation timeout is outside the bounded contract")
+    _assert_claude_binary_unchanged(binary)
+    stdout, _stderr, exit_code = _run_bounded_auth_status(
+        (
+            binary.real_path,
+            "--safe-mode",
+            "--setting-sources",
+            "",
+            "auth",
+            "status",
+            "--json",
+        ),
+        timeout=timeout,
+        env=_closed_auth_environment(provider_home=provider_home),
+    )
+    parsed = _strict_json(
+        stdout, maximum=_MAX_AUTH_JSON_BYTES, error_type=ClaudeAuthStatusError
+    )
+    if set(parsed) - _RAW_AUTH_ALLOWED_KEYS:
+        raise ClaudeAuthStatusError(
+            "auth observation contains unsupported sensitive data"
+        )
+    logged_in = parsed.get("loggedIn")
+    if (
+        type(logged_in) is not bool
+        or exit_code not in {0, 1}
+        or (exit_code == 0) is not logged_in
+    ):
+        raise ClaudeAuthStatusError("auth observation response is unsupported")
+    if "analyticsDisabled" in parsed and type(parsed["analyticsDisabled"]) is not bool:
+        raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
+    for key in ("projectsDirectory", "configDirectory"):
+        if key in parsed and not isinstance(parsed[key], str):
+            raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
+    for key in (
+        "email", "organization", "subscriptionType", "apiKeySource",
+        "accountId", "organizationId", "orgId", "orgName",
+        "projectsDirectory", "configDirectory",
+    ):
+        if key in parsed:
+            _validate_discard_only(parsed[key])
+    if logged_in and (
+        not isinstance(parsed.get("authMethod"), str)
+        or not isinstance(parsed.get("apiProvider"), str)
+        or _CONTROL_RE.search(parsed["authMethod"])
+        or _CONTROL_RE.search(parsed["apiProvider"])
+        or _SECRET_VALUE_RE.search(parsed["authMethod"])
+        or _SECRET_VALUE_RE.search(parsed["apiProvider"])
+        or len(parsed["authMethod"].encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
+        or len(parsed["apiProvider"].encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
+    ):
+        raise ClaudeAuthStatusError("auth observation response is unsupported")
+    subscription_scope = (
+        "personal_max"
+        if logged_in
+        and isinstance(parsed.get("subscriptionType"), str)
+        and parsed["subscriptionType"].strip().lower() == "max"
+        else "unknown"
+    )
+    if not logged_in:
+        return ClaudeAuthObservation(
+            client_version=binary.version,
+            authenticated=False,
+            ready=False,
+            auth_method="unknown",
+            api_provider="unknown",
+            exit_code=exit_code,
+            observed_at=_utc_now(),
+            subscription_scope="unknown",
+        )
+    if parsed.get("authMethod") == "claude.ai" and parsed.get("apiProvider") == "firstParty":
+        method, provider, ready = "claudeai", "first_party", True
+    else:
+        method, provider, ready = "non_native", "non_native", False
+    return ClaudeAuthObservation(
+        client_version=binary.version,
+        authenticated=True,
+        ready=ready,
+        auth_method=method,
+        api_provider=provider,
+        exit_code=exit_code,
+        observed_at=_utc_now(),
+        subscription_scope=subscription_scope,
+    )
+
+
+def _darwin_managed_preferences_present(defaults: Path) -> bool:
+    """Distinguish a missing managed-preference domain from probe failure."""
+
+    if not defaults.is_file():
+        raise ClaudeWorkerContractError(
+            "managed Claude preference source is not observable"
+        )
+    try:
+        stdout, stderr, returncode = _run_bounded_auth_status(
+            (str(defaults), "read", "com.anthropic.claudecode"),
+            timeout=5.0,
+            env={"PATH": _SAFE_PATH, "LANG": "C", "LC_ALL": "C", "TZ": "UTC"},
+        )
+    except ClaudeAuthStatusError:
+        raise ClaudeWorkerContractError(
+            "managed Claude preference source is not observable"
+        ) from None
+    if returncode == 0:
+        return True
+    try:
+        diagnostic = stderr.decode("utf-8", "strict")
+    except UnicodeDecodeError:
+        raise ClaudeWorkerContractError(
+            "managed Claude preference source is ambiguous"
+        ) from None
+    if (
+        returncode == 1
+        and not stdout
+        and "Domain com.anthropic.claudecode does not exist" in diagnostic
+    ):
+        return False
+    raise ClaudeWorkerContractError(
+        "managed Claude preference source is ambiguous"
+    )
+
+
+def _darwin_managed_policy_source_present(provider_home: Path) -> bool:
+    """Observe only source presence; never read managed-policy contents."""
+
+    if platform.system() != "Darwin":
+        raise ClaudeWorkerContractError(
+            "first native Claude managed-policy observer is qualified only for macOS"
+        )
+    candidates = (
+        provider_home / ".claude" / "remote-settings.json",
+        Path("/Library/Application Support/ClaudeCode/managed-settings.json"),
+        Path("/Library/Application Support/ClaudeCode/managed-settings.d"),
+    )
+    for candidate in candidates:
+        try:
+            candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise ClaudeWorkerContractError(
+                "managed Claude policy source presence is not observable"
+            ) from None
+        return True
+
+    return _darwin_managed_preferences_present(Path("/usr/bin/defaults"))
+
+
+class PersonalMaxManagedPolicyObserver:
+    """B3 observer for the first sealed personal-Max native Claude realm.
+
+    Server-managed policy is documented as a Teams/Enterprise feature. This
+    observer therefore admits only a direct personal Max subscription and only
+    while every endpoint/cached managed-policy source is absent. The exact
+    session settings emitted by :class:`ClaudeCodeWorkerAdapter` then remain
+    the only model-selection policy beneath the CLI's restricted mode.
+    """
+
+    __slots__ = ("binary", "exact_model", "generation", "provider_home")
+
+    def __init__(
+        self,
+        *,
+        binary: BinaryAttestation,
+        exact_model: str,
+        generation: int,
+        provider_home: Path,
+    ) -> None:
+        if not isinstance(binary, BinaryAttestation):
+            raise ClaudeWorkerContractError(
+                "managed policy observer requires one typed binary attestation"
+            )
+        self.exact_model = _validate_exact_model(exact_model)
+        _validate_known_model_runtime(self.exact_model, binary.version)
+        self.generation = _canonical_policy_generation(generation)
+        home = Path(provider_home)
+        if not home.is_absolute() or home.resolve(strict=True) != home:
+            raise ClaudeWorkerContractError(
+                "managed policy observer requires one canonical provider home"
+            )
+        self.binary = binary
+        self.provider_home = home
+
+    def observe(self) -> ManagedModelPolicyObservation:
+        _assert_claude_binary_unchanged(self.binary)
+        if _darwin_managed_policy_source_present(self.provider_home):
+            raise ClaudeWorkerContractError(
+                "managed Claude policy source is present for the sealed worker"
+            )
+        auth = _observe_auth_status_for_binary(
+            self.binary,
+            timeout_seconds=15.0,
+            provider_home=self.provider_home,
+        )
+        if (
+            not auth.ready
+            or auth.authenticated is not True
+            or auth.auth_method != "claudeai"
+            or auth.api_provider != "first_party"
+            or auth.subscription_scope != "personal_max"
+        ):
+            raise ClaudeWorkerContractError(
+                "sealed Claude worker requires personal Max first-party readiness"
+            )
+        # Re-observe after the native metadata command so source appearance
+        # during preflight cannot silently pass the generation-bound seam.
+        if _darwin_managed_policy_source_present(self.provider_home):
+            raise ClaudeWorkerContractError(
+                "managed Claude policy source changed during observation"
+            )
+        _assert_claude_binary_unchanged(self.binary)
+        return ManagedModelPolicyObservation(
+            exact_model=self.exact_model,
+            binary_sha256=self.binary.sha256,
+            binary_version=self.binary.version,
+            generation=self.generation,
+            allow_alternate_models=(),
+            fallback_models=(),
+        )
+
+
 def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
     """Observe group membership through the OS, never infer it from a PGID alone."""
 
@@ -1125,6 +1396,19 @@ class ClaudeCodeWorkerAdapter:
             generation=generation,
             stage="configured",
         )
+        config_dir = None
+        if type(managed_policy_observer) is PersonalMaxManagedPolicyObserver:
+            candidate = managed_policy_observer.provider_home / ".claude"
+            try:
+                config_dir = candidate.resolve(strict=True)
+            except OSError:
+                raise ClaudeWorkerContractError(
+                    "native Claude config directory is unavailable"
+                ) from None
+            if not candidate.is_absolute() or config_dir != candidate:
+                raise ClaudeWorkerContractError(
+                    "native Claude config directory must be canonical"
+                )
         object.__setattr__(
             self,
             "_configuration",
@@ -1135,6 +1419,7 @@ class ClaudeCodeWorkerAdapter:
                 max_turns=max_turns,
                 managed_observation=observation,
                 managed_policy_generation=generation,
+                native_config_dir=config_dir,
             ),
         )
         object.__setattr__(self, "_managed_policy_observer", managed_policy_observer)
@@ -1369,81 +1654,8 @@ class ClaudeCodeWorkerAdapter:
     def observe_auth_status(self, *, timeout_seconds: float = 15.0) -> ClaudeAuthObservation:
         """Observe only the documented native auth state, never its identity data."""
 
-        timeout = float(timeout_seconds)
-        if not 0.1 <= timeout <= 60:
-            raise ClaudeAuthStatusError("auth observation timeout is outside the bounded contract")
-        _assert_claude_binary_unchanged(self.binary)
-        stdout, _stderr, exit_code = _run_bounded_auth_status(
-            (
-                self.binary.real_path,
-                "--safe-mode",
-                "--setting-sources",
-                "",
-                "auth",
-                "status",
-                # Explicit JSON; safe-mode diagnostics remain discard-only input.
-                "--json",
-            ),
-            timeout=timeout,
-            env=_closed_auth_environment(),
-        )
-        parsed = _strict_json(
-            stdout, maximum=_MAX_AUTH_JSON_BYTES, error_type=ClaudeAuthStatusError
-        )
-        if set(parsed) - _RAW_AUTH_ALLOWED_KEYS:
-            raise ClaudeAuthStatusError("auth observation contains unsupported sensitive data")
-        logged_in = parsed.get("loggedIn")
-        if (
-            type(logged_in) is not bool
-            or exit_code not in {0, 1}
-            or (exit_code == 0) is not logged_in
-        ):
-            raise ClaudeAuthStatusError("auth observation response is unsupported")
-        if "analyticsDisabled" in parsed and type(parsed["analyticsDisabled"]) is not bool:
-            raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
-        for key in ("projectsDirectory", "configDirectory"):
-            if key in parsed and not isinstance(parsed[key], str):
-                raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
-        for key in (
-            "email", "organization", "subscriptionType", "apiKeySource",
-            "accountId", "organizationId", "orgId", "orgName",
-            "projectsDirectory", "configDirectory",
-        ):
-            if key in parsed:
-                _validate_discard_only(parsed[key])
-        if logged_in and (
-            not isinstance(parsed.get("authMethod"), str)
-            or not isinstance(parsed.get("apiProvider"), str)
-            or _CONTROL_RE.search(parsed["authMethod"])
-            or _CONTROL_RE.search(parsed["apiProvider"])
-            or _SECRET_VALUE_RE.search(parsed["authMethod"])
-            or _SECRET_VALUE_RE.search(parsed["apiProvider"])
-            or len(parsed["authMethod"].encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
-            or len(parsed["apiProvider"].encode("utf-8", "strict")) > _MAX_AUTH_STRING_BYTES
-        ):
-            raise ClaudeAuthStatusError("auth observation response is unsupported")
-        if not logged_in:
-            return ClaudeAuthObservation(
-                client_version=self.binary.version,
-                authenticated=False,
-                ready=False,
-                auth_method="unknown",
-                api_provider="unknown",
-                exit_code=exit_code,
-                observed_at=_utc_now(),
-            )
-        if parsed.get("authMethod") == "claude.ai" and parsed.get("apiProvider") == "firstParty":
-            method, provider, ready = "claudeai", "first_party", True
-        else:
-            method, provider, ready = "non_native", "non_native", False
-        return ClaudeAuthObservation(
-            client_version=self.binary.version,
-            authenticated=True,
-            ready=ready,
-            auth_method=method,
-            api_provider=provider,
-            exit_code=exit_code,
-            observed_at=_utc_now(),
+        return _observe_auth_status_for_binary(
+            self.binary, timeout_seconds=timeout_seconds
         )
 
     _validate_isolation_identity = staticmethod(CodexWorkerAdapter._validate_isolation_identity)
@@ -1707,7 +1919,12 @@ class ClaudeCodeWorkerAdapter:
             require_passed=bool(spec.require_secret_canary),
         )
         argv = self._launch_argv(spec, schema)
-        environment = _closed_launch_environment(home, tmp, spec)
+        environment = _closed_launch_environment(
+            home,
+            tmp,
+            spec,
+            native_config_dir=self._configuration.native_config_dir,
+        )
         stdout_path = run_dir / "logs" / "stdout.json"
         stderr_path = run_dir / "logs" / "stderr.log"
         result_path = run_dir / "output" / "result.json"
@@ -2373,6 +2590,7 @@ __all__ = [
     "ClaudeLaunchEnvironmentUnavailableError",
     "ClaudeWorkerContractError",
     "ClaudeWorkerNotImplementedError",
+    "PersonalMaxManagedPolicyObserver",
     "attest_claude_code_binary",
     "_assert_claude_binary_unchanged",
 ]
