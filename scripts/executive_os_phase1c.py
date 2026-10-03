@@ -1519,8 +1519,12 @@ def _service_from_config(
     coo_source: Any | None = None,
     claimed_operator_adapter_factory: Callable[..., Any] | None = None,
     remote_operator_binding_source: Callable[..., Any] | None = None,
+    remote_worker_binding_source: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
     # This is trusted host composition, never a JSON/model-selected factory.
+    if (remote_worker_binding_source is not None
+            and not callable(remote_worker_binding_source)):
+        raise ServiceError("remote worker binding source must be callable")
     if (claimed_operator_adapter_factory is not None
             and not callable(claimed_operator_adapter_factory)):
         raise ServiceError("claimed operator factory must be callable")
@@ -1655,10 +1659,25 @@ def _service_from_config(
                 raise ServiceError("remote validation lookup lost Job/Attempt identity")
             return tuple(tuple(command) for command in job.validation_commands)
 
-        adapter = RemoteCodexWorkerAdapter(
-            client,
-            validation_commands_for_spec=validations,
-        )
+        if remote_worker_binding_source is None:
+            adapter = RemoteCodexWorkerAdapter(
+                client,
+                validation_commands_for_spec=validations,
+            )
+            process_controller = RemoteWorkerProcessController(client)
+        else:
+            from control_plane.remote_attempt_transport import (
+                AttemptBoundRemoteWorkerAdapter,
+            )
+
+            # Resolve only the already-claimed Worker. A missing or uncertain
+            # remote binding must never fall back to the primary local broker.
+            adapter = AttemptBoundRemoteWorkerAdapter(
+                runtime,
+                remote_worker_binding_source,
+                validation_commands_for_spec=validations,
+            )
+            process_controller = adapter.process_controller
         # Only the attended subscription-canary lane gets a claim provider;
         # ordinary composition passes ``None`` so the supervisor never calls
         # the observation owner and never enriches the LaunchSpec.
@@ -1697,7 +1716,7 @@ def _service_from_config(
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
-            process_controller=RemoteWorkerProcessController(client),
+            process_controller=process_controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
                 if exact_target_source is not None else None
