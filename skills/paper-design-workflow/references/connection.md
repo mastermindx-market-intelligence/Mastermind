@@ -70,8 +70,8 @@ retain an older approved definition until the connection/app lifecycle admits th
 developer-mode MCP connection, deploy the server change, use the connection's **Refresh** action,
 confirm the advertised metadata changed, and start a new conversation. Published plugins/apps use
 their existing supported continuous-review, rescan, or action-control update path; do not infer a
-blanket Business recreate+republish requirement or create a duplicate app/tunnel unless the current
-platform flow specifically requires recreation for that app state. Never reproduce the transition with generic Studio process/filesystem
+blanket Business recreate+republish requirement. Do not create a duplicate app/tunnel unless the
+current platform flow specifically requires recreation for that app state. Never reproduce the transition with generic Studio process/filesystem
 actions, Desktop Commander, raw `open_file`, shell, or UI automation. After the workspace action
 snapshot is current, start a fresh chat/tool selection, call `paper_inspect` again, then the direct
 `paper_prepare(file_id)`, then inspect once more before the first edit.
