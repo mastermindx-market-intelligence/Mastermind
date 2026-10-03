@@ -1,77 +1,25 @@
-# Catalyst Intelligence — Pro-Mode Census Audit
+# Catalyst Intelligence — independent audit checkpoint
 
-**Audit date:** 2026-10-03  
-**Mastermind procedure pin:** `20adcaf65c2dd1bb734ab06e215feb1a0eb65659`  
-**Macro main audited:** `5f20adbd6be6b136b2efe41585bd4ef964b5bf2e`
+**Operation:** `catalyst-intelligence-pr1181-standard-pro-audit-20261003`  
+**Requested mode:** standard Pro, explicitly no Deep Research.  
+**Scope:** reassess existing research, re-census implementation, and consolidate one Astra CEO paper in this PR; product implementation remains a later assignment.  
+**Protected procedure:** Mastermind `20adcaf65c2dd1bb734ab06e215feb1a0eb65659`, Sol Skillpack v1/1.0.1 compatible; ACTIVE_EXECUTION and WEB_CEO_DELEGATION loaded. SESSION_RELIABILITY is not enrolled/present at this pin.  
+**Reviewed input:** PR #1181 head `7878ecf8855de125adb421c6745ff838e15ec762`.  
+**Source census:** Macro main `5fc7af4a1aa2510966a7b566f97e5b894f2632f8`; Terminal identity resolved as `mastermindx-market-intelligence/mastermind-terminal`.  
+**Status:** REVIEW_IN_PROGRESS. This checkpoint is not acceptance of the prior report, release approval, current production proof, or an implementation completion claim.
 
-## Audit verdict
+## Verified material corrections so far
 
-The earlier research thesis is directionally correct but its census was too compressed. The system is not simply "fragmented but mostly absent." It has three materially different layers:
+1. The prior audit's inference “reuse Bio #6712 ontology/research; not implemented V3” is too broad. Its current 41-file carrier contains a What Matters Next engine and tests. Full product connection still requires producer/consumer proof; the ongoing source review distinguishes these claims.
+2. A generic new Catalyst Forecast Ledger is not yet justified. Mainline Bio already owns feature/forecast/outcome/evaluation records in `engine/biocatalyst/operational_store.py`. The Market Memory forward primitive explicitly describes itself as temporary/synthetic, with no production call site; do not weaken its root/profile guards to make a Catalyst writer.
+3. [Market Memory's existing forward primitive](https://github.com/mastermindx-market-intelligence/macro/blob/5fc7af4a1aa2510966a7b566f97e5b894f2632f8/engine/neuralweb/market_memory_forward_store.py) is not an immediately available general production store. [Production-record admission](https://github.com/mastermindx-market-intelligence/macro/blob/5fc7af4a1aa2510966a7b566f97e5b894f2632f8/engine/neuralweb/market_memory_production_records.py) accepts only the reviewed options signal-episode source. [Experience accrual](https://github.com/mastermindx-market-intelligence/macro/blob/5fc7af4a1aa2510966a7b566f97e5b894f2632f8/engine/neuralweb/market_memory_experience_accrual.py) owns a bounded SPY census and does not forecast, score, promote, or emit an API.
+4. [Theme Graph storage](https://github.com/mastermindx-market-intelligence/macro/blob/5fc7af4a1aa2510966a7b566f97e5b894f2632f8/engine/theme_graph/store.py) already preserves bitemporal identity/evidence and lane-restricted append-only writes. A shared Catalyst view must preserve those owners instead of introducing another identity/event authority.
+5. Independent evaluator inspection has found both useful complementary repairs and remaining paired-cohort defects in #8258/#8259. The final paper will separate a single surviving algorithm from portable tests/CI improvements; it will not equate either current PR with qualified predictive evidence.
 
-1. **live incumbent product/source capabilities on Macro main**;
-2. **large, current, unmerged specialist implementation/research carriers** that must be reconciled rather than rebuilt;
-3. **cross-sector Catalyst architecture that is still not adopted as a single production contract/product.**
+## Execution and next action
 
-The revised master plan therefore begins with **carrier adjudication + common-basis adoption**, not a greenfield Catalyst contract.
+Four read-only, task-bounded native collaboration audits are in flight: Bio/Defense; evaluation/PIT; sector/consumer census; primary-source research-quality verification. They have no GitHub write custody and no external production effects. Principal retains source publication on this existing PR branch. These are foreground task helpers, not Executive OS or Mastermind Fabric runtime Jobs.
 
-## Corrected capability ledger
+Next: consume exact-source returns, verify decisive findings, write the consolidated paper with claim corrections, owner mapping, dependency-ordered work packages and measurable acceptance gates, independently challenge the resulting paper, then replace this checkpoint and the old plan with explicit navigation to that single paper. No Slack messages or worker-runtime dispatch has been issued. No merge/deployment is part of this documentation audit.
 
-| Capability | Audited state | Evidence / correction |
-|---|---|---|
-| BioCatalyst source/product foundation | PROVEN_LIVE / PARTIAL | Macro main contains BioCatalyst operations/product artifacts. Mastermind's portfolio architecture records `WS:BIOCATALYST-RECOVERY-V2` Completed while `WS:BIOCATALYST-CORE-PRODUCT` is canonically parked. |
-| Bio Decision Intelligence V3 | PARTIAL / PARKED carrier | Macro #6712 is still OPEN/DRAFT, 41 files, head `2f935cb...`; its own completion statement says no whole-R0 acceptance, R1 start, source activation, deployment or live V3 product. Reuse its ontology/research; do not treat it as implemented V3. |
-| Defense/Government Revenue | PARTIAL | #7175 is records/research continuity only; it explicitly says no production repair. #7199 contains an unmerged FMS cadence implementation. Main has Government Revenue machinery, but investor-loop economics/expectations remain incomplete. |
-| Catalyst Anticipation | SPEC_ONLY / PARKED as dedicated engine; partial generic anticipation exists | Mastermind issue #122 is open and defines the exact PIT pre-event-footprint study. Issue #123 explicitly parks full W-ANT model building pending reusable W-LIQ ledgers/harness unless reprioritized. Macro main also has a broader Anticipation engine/page; this is not the same single-name catalyst-occurrence model. |
-| Unified Catalyst Intelligence | PARTIAL reference architecture, NOT production-adopted | #8061 is open and explicitly lists remaining real FIF delivery, Special Situations correction, real cross-sector consumers, native Paper journeys and prospective evaluation. Treat it as common-basis/reference work, not the production spine. |
-| Special Situations | PROVEN_LIVE source/product, PARTIAL Catalyst integration/evaluation | Macro main has collector, engine and build/backtest surfaces. #8087 says forecast promotion NOT QUALIFIED. #8258/#8259 are competing/adjacent draft control-window repairs; #8258 has an unresolved paired-cohort P1. |
-| Semiconductor | BUILT_NOT_PROVEN / PARKED | #7870 is a 99-file implementation carrier, open/draft/hold. It is far beyond a spec, but not mainline production adoption. |
-| Energy/Nuclear/Grid | BUILT_NOT_PROVEN / STACKED | #8002 is a 15-file implementation stacked on #7870, explicitly do-not-merge as-is. Must be unstacked after shared substrate adjudication. |
-| Mining/Resources | PARTIAL / PARKED successor work | #8083 has 20 files and local code/research, but explicitly no source activation, Paper application, merge or deployment. |
-| MedTech | PARTIAL reference contract, NOT production integrated | #8182 is ready for formal review with exact-head/current-base proof, but states source denominator not qualified, historical calibration not started, Paper not applied, production integration not built. |
-| GMI Theme/economic propagation | PARTIAL | Existing theme/catalyst binder and Theme Graph foundations are real. Cross-sector economic mechanism→issuer financial transmission remains incomplete. |
-| Prophet integration | PARTIAL | Existing Mastermind/Macro code consumes anticipation/catalyst proximity and Prophet state, but Catalyst is not a governed shared evidence plane. Prophet must retain timing/entry ownership. |
-| Options/positioning | PARTIAL | Macro main has substantial options/anticipation assets. Existing research explicitly classifies event-pricing board, ranked anticipation board, correction propagation and option-contract identity as not built or not proven. |
-| Historical evaluation | PARTIAL / BROKEN for some Catalyst claims | Existing backtests and validation machinery are real. #8258 demonstrates that pre-event control methodology is not yet release-safe; paired-cohort bias remains an explicit P1. |
-| Terminal/Paper Catalyst UX | PARTIAL / fragmented | Main has Anticipation and specialist surfaces. #8061/#8182 explicitly say native central/specialist Paper journeys remain owed. No single production What Matters Next workspace is proven. |
-
-## Material corrections to the earlier research report
-
-1. **Bio is not one status.** The recovery/source foundation is live, the old core product is parked, and V3 Decision Intelligence is an unmerged partial carrier. The master plan must preserve these distinctions.
-2. **Catalyst Anticipation already has a canonical issue-level research charter (#122) and sequencing constraint (#123).** The revised plan should consume those rather than invent a new hypothesis program.
-3. **Semiconductor and Energy are more built than the earlier census implied.** #7870 is a large implementation carrier; #8002 is a real stacked implementation. The job is composition/unstacking/adoption, not first implementation.
-4. **Special Situations evaluation is an immediate dependency, not a later cleanup.** #8258's paired-cohort P1 means common evaluation cannot safely inherit the incumbent methodology without repair.
-5. **#8061 is the most important common-basis carrier but is not the production system.** It should be adjudicated first because it already owns reviewed cross-sector reference work and enumerates the remaining product obligations.
-6. **The plan must distinguish incumbent generic Anticipation from W-ANT single-name catalyst occurrence.** Reusing the name without that boundary would create semantic collision.
-7. **The first milestone should not be a new schema document.** It should be an accepted common-basis slice using existing #8061/#6712/#8087/#8182 semantics plus one real Bio and one real Defense/Special-Situations consumer.
-
-## Orphan / carrier map
-
-- **#6712:** continue selectively; do not merge wholesale without R0/current-base reconciliation.
-- **#7175:** preserve as Defense research/continuity; implementation belongs in current GovRev owners.
-- **#7199:** candidate FMS cadence implementation; reconcile current workflow state before release.
-- **#7870:** primary Semiconductor implementation carrier; composition candidate.
-- **#8002:** stacked Energy implementation; unstack after #7870/shared-kernel decision.
-- **#8061:** common-basis/reference carrier; highest-priority adjudication.
-- **#8079:** research/design handoffs only; evidence, not implementation.
-- **#8083:** Resources successor/economics research + local code; selective port.
-- **#8087:** Special Situations horizontal integration design; continue with role-aware event identity.
-- **#8182:** MedTech R1 reference contract; finish review, then R2 cohort/calibration.
-- **#8258/#8259:** overlapping evaluation repair carriers. Do not merge both. Resolve the paired-cohort P1 and choose one surviving carrier.
-- **Mastermind #122:** canonical W-ANT research charter.
-- **Mastermind #123:** sequencing evidence that W-ANT was deliberately parked behind reusable quant substrate.
-
-## Revised critical dependency
-
-The highest-leverage first dependency is:
-
-> **Adjudicate and land the common Catalyst basis while simultaneously repairing the evaluation methodology that would otherwise invalidate cross-sector historical claims.**
-
-That means #8061/common-basis reconciliation and #8258/#8259 evaluation reconciliation precede broad new sector work.
-
-## Product invariant
-
-The target remains:
-
-`event truth → occurrence/timing → outcome → exposure → issuer economics → historical response → market expectations/incorporation → conditional payoff → research priority → revision → realized learning`
-
-Each stage is separately typed, separately evaluable and separately abstainable. There is no generic Catalyst Score.
+The earlier 77-line audit remains recoverable in Git history at the reviewed input SHA. It is superseded as an execution guide pending the consolidated reassessment.
