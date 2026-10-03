@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import ssl
 import subprocess
 import urllib.error
 import urllib.parse
@@ -34,6 +35,7 @@ CANONICAL_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Maste
 WEB_BRANCH_PREFIX = "refs/heads/sol/web-"
 COMMISSION_PATH = "research/executive_commissions/COMMISSION.md"
 _RAW_HOST = "raw.githubusercontent.com"
+_SYSTEM_CA_BUNDLE = "/etc/ssl/cert.pem"
 _MAX_COMMISSION_BYTES = 1 << 19
 _MAX_REMOTE_OUTPUT_BYTES = 1 << 18
 _MAX_WEB_REFS = 1 << 9
@@ -102,6 +104,18 @@ def list_web_branch_refs() -> tuple[tuple[str, str], ...]:
     return tuple(refs)
 
 
+def _system_tls_context() -> ssl.SSLContext:
+    """Build one verified TLS context from the fixed macOS system CA bundle."""
+
+    try:
+        context = ssl.create_default_context(cafile=_SYSTEM_CA_BUNDLE)
+    except (OSError, ssl.SSLError, ValueError) as exc:
+        raise WebCommissionSourceError("system TLS trust is unavailable") from exc
+    if context.verify_mode != ssl.CERT_REQUIRED or context.check_hostname is not True:
+        raise WebCommissionSourceError("system TLS verification policy is unavailable")
+    return context
+
+
 def fetch_commission_blob(*, commit: str) -> bytes:
     """Fetch one fixed-path blob from one exact public GitHub commit, without auth."""
 
@@ -117,7 +131,10 @@ def fetch_commission_blob(*, commit: str) -> bytes:
         },
         method="GET",
     )
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=_system_tls_context()),
+    )
     try:
         with opener.open(request, timeout=_NETWORK_TIMEOUT_SECONDS) as response:
             final = urllib.parse.urlparse(response.geturl())
