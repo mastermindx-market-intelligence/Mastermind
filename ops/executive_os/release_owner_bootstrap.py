@@ -20,6 +20,7 @@ import sys
 from typing import Any
 
 from control_plane.executive_release_contract import ReleaseContractError, parse_release_json
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 from ops.executive_os.release_owner_publication_plan import (
     PublicationFile,
     PublicationPayload,
@@ -96,6 +97,77 @@ class BootstrapReceipt:
     target_ref: str
     release_commit: str
     manifest_sha256: str
+
+
+@dataclass(frozen=True)
+class _OwnedEntry:
+    name: str
+    device: int
+    inode: int
+
+
+def _identity(info: os.stat_result) -> tuple[int, int]:
+    return int(info.st_dev), int(info.st_ino)
+
+
+def _metadata(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(info.st_mode),
+        int(info.st_uid),
+        int(info.st_gid),
+    )
+
+
+def _has_acl(descriptor: int, info: os.stat_result) -> bool:
+    try:
+        return has_macos_acl(
+            "",
+            expected_identity=info,
+            descriptor=descriptor,
+        )
+    except FilesystemSecurityError as exc:
+        raise OSError("ACL observation failed") from exc
+
+
+def _owned(name: str, info: os.stat_result) -> _OwnedEntry:
+    return _OwnedEntry(name=name, device=int(info.st_dev), inode=int(info.st_ino))
+
+
+def _matches_owned(directory_fd: int, entry: _OwnedEntry) -> bool:
+    try:
+        info = os.stat(entry.name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and _identity(info) == (
+        entry.device,
+        entry.inode,
+    )
+
+
+def _unlink_owned(directory_fd: int, entry: _OwnedEntry) -> bool:
+    """Unlink only the exact inode this bootstrap created."""
+    try:
+        info = os.stat(entry.name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or _identity(info) != (
+        entry.device,
+        entry.inode,
+    ):
+        return False
+    try:
+        os.unlink(entry.name, dir_fd=directory_fd)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _canonical_document(raw: object, code: str) -> dict[str, Any]:
@@ -243,36 +315,71 @@ def _validate_plan(plan: PublicationPlan) -> tuple[dict[str, Any], dict[str, Any
     return registration, registry, evidence, payloads
 
 
-def _open_config_root() -> tuple[int, os.stat_result]:
-    path = Path(_CONFIG_ROOT)
-    descriptor: int | None = None
-    try:
-        before = path.lstat()
-        if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
-            raise _refuse("BOOTSTRAP_ROOT_UNSAFE")
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags)
-        current = os.fstat(descriptor)
-    except BootstrapError:
-        if descriptor is not None:
-            os.close(descriptor)
-        raise
-    except OSError:
-        if descriptor is not None:
-            os.close(descriptor)
-        raise _refuse("BOOTSTRAP_ROOT_UNSAFE") from None
+def _trust_directory(
+    info: os.stat_result,
+    descriptor: int,
+    *,
+    final: bool,
+) -> None:
     if (
-        (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino)
-        or current.st_uid != _ROOT_UID
-        or current.st_gid != _WHEEL_GID
-        or stat.S_IMODE(current.st_mode) & 0o022
-        or not stat.S_ISDIR(current.st_mode)
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid not in {0, _ROOT_UID}
+        or stat.S_IMODE(info.st_mode) & 0o022
+        or (final and info.st_uid != _ROOT_UID)
+        or (final and info.st_gid != _WHEEL_GID)
+        or _has_acl(descriptor, info)
     ):
-        os.close(descriptor)
         raise _refuse("BOOTSTRAP_ROOT_UNSAFE")
-    return descriptor, current
 
+
+def _open_config_root() -> tuple[tuple[int, ...], os.stat_result]:
+    """Open and hold the complete fixed canonical directory ancestry."""
+    path = Path(_CONFIG_ROOT)
+    if (
+        not path.is_absolute()
+        or any(part in ("", ".", "..") for part in path.parts[1:])
+        or len(path.parts) > 16
+    ):
+        raise _refuse("BOOTSTRAP_ROOT_UNSAFE")
+    for name in ("O_DIRECTORY", "O_CLOEXEC", "O_NOFOLLOW"):
+        if type(getattr(os, name, None)) is not int or getattr(os, name) <= 0:
+            raise _refuse("BOOTSTRAP_ROOT_UNSAFE")
+
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    handles: list[int] = []
+    try:
+        parent = os.open("/", flags)
+        handles.append(parent)
+        info = os.fstat(parent)
+        _trust_directory(info, parent, final=(len(path.parts) == 1))
+
+        for index, component in enumerate(path.parts[1:], start=1):
+            before = os.stat(component, dir_fd=parent, follow_symlinks=False)
+            if stat.S_ISLNK(before.st_mode) or not stat.S_ISDIR(before.st_mode):
+                raise _refuse("BOOTSTRAP_ROOT_UNSAFE")
+            descriptor = os.open(component, flags, dir_fd=parent)
+            handles.append(descriptor)
+            after = os.fstat(descriptor)
+            if _metadata(before) != _metadata(after):
+                raise _refuse("BOOTSTRAP_ROOT_UNSAFE")
+            final = index == len(path.parts) - 1
+            _trust_directory(after, descriptor, final=final)
+            parent = descriptor
+        return tuple(handles), os.fstat(handles[-1])
+    except BootstrapError:
+        for descriptor in reversed(handles):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
+    except (OSError, FilesystemSecurityError):
+        for descriptor in reversed(handles):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise _refuse("BOOTSTRAP_ROOT_UNSAFE") from None
 
 def _entry_exists(directory_fd: int, name: str) -> bool:
     try:
@@ -293,12 +400,18 @@ def _write_all(fd: int, data: bytes) -> None:
         view = view[written:]
 
 
-def _make_temp(directory_fd: int, directory: os.stat_result, name: str, data: bytes) -> str:
+def _make_temp(
+    directory_fd: int,
+    directory: os.stat_result,
+    name: str,
+    data: bytes,
+) -> _OwnedEntry:
     suffix = os.urandom(12).hex()
     temporary = f"{_TEMP_PREFIX}{os.getpid()}.{suffix}.{name}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
+    created = _owned(temporary, os.fstat(fd))
     complete = False
     try:
         _write_all(fd, data)
@@ -309,28 +422,28 @@ def _make_temp(directory_fd: int, directory: os.stat_result, name: str, data: by
         os.fsync(fd)
         info = os.fstat(fd)
         if (
-            not stat.S_ISREG(info.st_mode)
+            _identity(info) != (created.device, created.inode)
+            or not stat.S_ISREG(info.st_mode)
             or info.st_dev != directory.st_dev
             or info.st_nlink != 1
             or info.st_uid != _ROOT_UID
             or info.st_gid != _WHEEL_GID
             or stat.S_IMODE(info.st_mode) != _FILE_MODE
             or info.st_size != len(data)
+            or _has_acl(fd, info)
         ):
             raise OSError("temporary postimage mismatch")
         complete = True
     finally:
         os.close(fd)
         if not complete:
+            if not _unlink_owned(directory_fd, created):
+                raise BootstrapError("BOOTSTRAP_EFFECT_UNKNOWN")
             try:
-                os.unlink(temporary, dir_fd=directory_fd)
                 os.fsync(directory_fd)
-            except FileNotFoundError:
-                pass
             except OSError as error:
                 raise BootstrapError("BOOTSTRAP_EFFECT_UNKNOWN") from error
-    return temporary
-
+    return created
 
 def _rename_no_replace(directory_fd: int, source: str, destination: str) -> None:
     """Atomically publish one temp name without ever replacing a destination."""
@@ -360,19 +473,26 @@ def _rename_no_replace(directory_fd: int, source: str, destination: str) -> None
         raise OSError(error, os.strerror(error), destination)
 
 
-def _readback(directory_fd: int, directory: os.stat_result, name: str, expected: bytes) -> None:
+def _readback(
+    directory_fd: int,
+    directory: os.stat_result,
+    entry: _OwnedEntry,
+    expected: bytes,
+) -> None:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(name, flags, dir_fd=directory_fd)
+    fd = os.open(entry.name, flags, dir_fd=directory_fd)
     try:
         info = os.fstat(fd)
         if (
-            not stat.S_ISREG(info.st_mode)
+            _identity(info) != (entry.device, entry.inode)
+            or not stat.S_ISREG(info.st_mode)
             or info.st_dev != directory.st_dev
             or info.st_nlink != 1
             or info.st_uid != _ROOT_UID
             or info.st_gid != _WHEEL_GID
             or stat.S_IMODE(info.st_mode) != _FILE_MODE
             or info.st_size != len(expected)
+            or _has_acl(fd, info)
         ):
             raise OSError("published metadata mismatch")
         chunks = bytearray()
@@ -386,22 +506,17 @@ def _readback(directory_fd: int, directory: os.stat_result, name: str, expected:
     finally:
         os.close(fd)
 
-
-def _cleanup(directory_fd: int, finals: list[str], temporaries: list[str]) -> bool:
+def _cleanup(
+    directory_fd: int,
+    finals: list[_OwnedEntry],
+    temporaries: list[_OwnedEntry],
+) -> bool:
     clean = True
-    for name in reversed(finals):
-        try:
-            os.unlink(name, dir_fd=directory_fd)
-        except FileNotFoundError:
-            pass
-        except OSError:
+    for entry in reversed(finals):
+        if not _unlink_owned(directory_fd, entry):
             clean = False
-    for name in temporaries:
-        try:
-            os.unlink(name, dir_fd=directory_fd)
-        except FileNotFoundError:
-            pass
-        except OSError:
+    for entry in temporaries:
+        if not _unlink_owned(directory_fd, entry):
             clean = False
     try:
         os.fsync(directory_fd)
@@ -409,16 +524,16 @@ def _cleanup(directory_fd: int, finals: list[str], temporaries: list[str]) -> bo
         clean = False
     return clean
 
-
 def publish_initial_resident_plan(plan: PublicationPlan) -> BootstrapReceipt:
     """Publish one first disabled resident set, or fail without replacing state."""
     # Root is checked before observing the caller's plan by design.
     if os.geteuid() != _ROOT_UID:
         raise _refuse("BOOTSTRAP_ROOT_REQUIRED")
     registration, _registry, evidence, payloads = _validate_plan(plan)
-    directory_fd, directory = _open_config_root()
-    temporaries: list[str] = []
-    finals: list[str] = []
+    ancestor_fds, directory = _open_config_root()
+    directory_fd = ancestor_fds[-1]
+    temporaries: list[_OwnedEntry] = []
+    finals: list[_OwnedEntry] = []
     try:
         key_name = Path(_KEY_PATH).name
         names = [*_RESIDENT_NAMES, key_name]
@@ -447,16 +562,19 @@ def publish_initial_resident_plan(plan: PublicationPlan) -> BootstrapReceipt:
 
         for (name, _data), temporary in zip(material, tuple(temporaries), strict=True):
             try:
-                _rename_no_replace(directory_fd, temporary, name)
+                _rename_no_replace(directory_fd, temporary.name, name)
             except FileExistsError:
                 if not _cleanup(directory_fd, finals, temporaries):
                     raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN") from None
                 raise _refuse("BOOTSTRAP_DESTINATION_OCCUPIED") from None
-            finals.append(name)
+            final = _OwnedEntry(name, temporary.device, temporary.inode)
+            finals.append(final)
             temporaries.remove(temporary)
+            if not _matches_owned(directory_fd, final):
+                raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN")
         os.fsync(directory_fd)
-        for name, data in material:
-            _readback(directory_fd, directory, name, data)
+        for (name, data), final in zip(material, finals, strict=True):
+            _readback(directory_fd, directory, final, data)
         os.fsync(directory_fd)
     except BootstrapError:
         raise
@@ -465,7 +583,14 @@ def publish_initial_resident_plan(plan: PublicationPlan) -> BootstrapReceipt:
             raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN") from None
         raise _refuse("BOOTSTRAP_PUBLISH_FAILED") from None
     finally:
-        os.close(directory_fd)
+        close_error = False
+        for descriptor in reversed(ancestor_fds):
+            try:
+                os.close(descriptor)
+            except OSError:
+                close_error = True
+        if close_error and sys.exc_info()[0] is None:
+            raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN")
 
     return BootstrapReceipt(
         schema="mastermind.executive_release_owner_bootstrap_receipt/v1",

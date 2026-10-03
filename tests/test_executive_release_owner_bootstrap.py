@@ -30,6 +30,18 @@ def _prepare_root(monkeypatch, tmp_path: Path) -> Path:
     info = root.stat()
     monkeypatch.setattr(subject, "_ROOT_UID", info.st_uid)
     monkeypatch.setattr(subject, "_WHEEL_GID", info.st_gid)
+
+    # Functional publication tests use a direct descriptor for their isolated
+    # pytest root. Production _open_config_root walks and holds every component
+    # of the fixed /Library/.../config ancestry; /private/tmp is intentionally
+    # world-writable and would correctly fail that production gate.
+    def open_test_root():
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(root, flags)
+        return (fd,), os.fstat(fd)
+
+    monkeypatch.setattr(subject, "_open_config_root", open_test_root)
     return root
 
 
@@ -275,3 +287,82 @@ def test_bootstrap_refuses_canonical_v1_evidence_with_extra_field_even_when_plan
     with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_PLAN_INVALID$"):
         subject.publish_initial_resident_plan(forged)
     assert list(root.iterdir()) == []
+
+
+def test_production_directory_trust_refuses_extended_acl(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    root.mkdir(mode=0o755)
+    info = root.stat()
+    fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    monkeypatch.setattr(subject, "_ROOT_UID", info.st_uid)
+    monkeypatch.setattr(subject, "_WHEEL_GID", info.st_gid)
+    monkeypatch.setattr(subject, "_has_acl", lambda descriptor, observed: True)
+    try:
+        with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_ROOT_UNSAFE$"):
+            subject._trust_directory(info, fd, final=True)
+    finally:
+        os.close(fd)
+
+
+def test_bootstrap_refuses_inherited_acl_on_created_file(monkeypatch, tmp_path):
+    root = _prepare_root(monkeypatch, tmp_path)
+    real_acl = subject._has_acl
+
+    def acl_only_on_files(descriptor, info):
+        if stat.S_ISREG(info.st_mode):
+            return True
+        return real_acl(descriptor, info)
+
+    monkeypatch.setattr(subject, "_has_acl", acl_only_on_files)
+    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_PUBLISH_FAILED$"):
+        subject.publish_initial_resident_plan(_v1_plan())
+    assert list(root.iterdir()) == []
+
+
+def test_bootstrap_preserves_substituted_final_and_reports_unknown(monkeypatch, tmp_path):
+    root = _prepare_root(monkeypatch, tmp_path)
+    real_readback = subject._readback
+    calls = 0
+    foreign = b"foreign-root-maintenance-secret"
+
+    def substitute_then_fail(directory_fd, directory, entry, expected):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            victim = root / "release-owner-registration.json"
+            victim.unlink()
+            victim.write_bytes(foreign)
+            victim.chmod(0o400)
+            raise OSError("injected after foreign substitution")
+        return real_readback(directory_fd, directory, entry, expected)
+
+    monkeypatch.setattr(subject, "_readback", substitute_then_fail)
+    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_EFFECT_UNKNOWN$"):
+        subject.publish_initial_resident_plan(_v1_plan())
+    assert (root / "release-owner-registration.json").read_bytes() == foreign
+
+
+def test_bootstrap_preserves_substituted_temp_and_reports_unknown(monkeypatch, tmp_path):
+    root = _prepare_root(monkeypatch, tmp_path)
+    real_fsync = subject.os.fsync
+    substituted = False
+    foreign = b"foreign-temporary"
+
+    def replace_temp_before_failed_fsync(fd):
+        nonlocal substituted
+        if not substituted:
+            temps = list(root.glob(".release-owner-bootstrap.*.tmp"))
+            if temps:
+                victim = temps[0]
+                victim.unlink()
+                victim.write_bytes(foreign)
+                substituted = True
+                raise OSError("injected after temp substitution")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(subject.os, "fsync", replace_temp_before_failed_fsync)
+    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_EFFECT_UNKNOWN$"):
+        subject.publish_initial_resident_plan(_v1_plan())
+    preserved = list(root.glob(".release-owner-bootstrap.*.tmp"))
+    assert len(preserved) == 1
+    assert preserved[0].read_bytes() == foreign
