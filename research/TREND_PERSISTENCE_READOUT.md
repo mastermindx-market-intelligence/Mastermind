@@ -1,9 +1,16 @@
-# Trend Persistence — Development and holdout readout
+# Trend Persistence — Development, holdout and walk-forward readout
 
-Wave B, stock level. Development sample (formation dates 2003–2021) and one holdout run
-(formation dates 2022-07-06 to 2026-06-02).
+Wave B, stock level. Development sample (formation dates 2003–2021), one holdout run
+(formation dates 2022-07-06 to 2026-06-02) and one walk-forward comparison on the holdout
+dates (Wave B2).
 
-**Where this stands.** The one holdout run is done (§10). All 29 development survivors passed
+**Where this stands.** The family stops at Wave B for these constructions. The walk-forward
+comparison (§11) found no model value: added to a model that already knows volatility in
+detail, the 29 confirmed features raise its rank correlation with forward drawdown by 0.001 to
+0.002 and leave its list of the stocks most likely to draw down unchanged. By the rule fixed
+before that run, no calibrated profile, shadow snapshot or advisory field is built.
+
+**The holdout.** The one holdout run is done (§10). All 29 development survivors passed
 the four pre-registered holdout gates: 21 drawdown-shape tests and 8 path-quality tests. By
 the rule fixed before the run, those two families are labelled `RESEARCH_PREDICTIVE` for
 describing downside risk, on the confirmed members only.
@@ -19,7 +26,7 @@ distinguished from one more estimate of volatility.
 Gain retention had no survivor and stays `DESCRIPTIVE`. Nothing is promoted for forward return
 (§2). The effect is small: between the top and bottom fifth of stocks on a confirmed feature,
 average forward maximum drawdown differs by 0.03 to 1.2 percentage points. No advisory field,
-score or gate follows from this, and nothing advances until the comparison in §8 has been run.
+score or gate follows from this.
 
 ## 1. Results in one view
 
@@ -30,6 +37,8 @@ score or gate follows from this, and nothing advances until the comparison in §
 | Same, with volatility at four spans, downside volatility, the quoted-price mask and price floors on printed closes? | V2 | 72 | **29** | A filter, not evidence. These 29 go to the holdout. |
 | Do the 29 hold on formation dates from 2022-07-06, on the repaired universe? | V2 holdout | 29 | **29 pass** | Passed the pre-registered gates. Small (§10). Not distinguished from volatility: next row. |
 | Does a simulated market with volatility and no persistence pass the same gates? | V2 on simulated prices | 72 / 29 | **24–41 of 72** pass development, **14–29 of the 29** pass the holdout gates | Yes. The gates do not separate these features from volatility estimates (§10). |
+| Added to a model that already has volatility in detail, do the 29 improve its out-of-sample ranking of forward drawdown by a material amount? | B2, walk-forward on the holdout dates | 2 gated horizons | **0 pass** | No. Rank IC rises by 0.001 to 0.002 on a base near 0.5 and the flagged tenth does not change (§11). Nothing is built. |
+| Once the realised volatility of the label's own window is known, is anything left beyond what two simulated volatility-only markets leave? | B2 | 29 | **3 pass** | Three distance-from-high tests, at about 0.01 rank correlation. Recorded; nothing rests on it (§11). |
 
 A development survivor has passed pre-registered gates on a sample that was inspected before
 V2 was written and that is tilted toward survivors (§5). Development alone confirms nothing.
@@ -174,6 +183,32 @@ what did not).
 | m7 | The simulated calendar has more test dates than the real one, so its spread is about 2% narrow. | minor | The simulated spread is scaled to the real number of dates. |
 | m8 | The reference stored only run means. | minor | It stores each run's p-values and test dates, the size table and the K5 table. |
 | m9 | Gaps in the tests. | minor | Tests added for each change above. |
+
+### Sixth review: the second B2 freeze, before its run
+
+A sixth read-only review, by a reviewer who had not seen the earlier ones, attacked the second
+freeze (commit `aadb15d2`). It read the committed files, ran the tests, recomputed the printed
+numbers from the committed reference and tried scratch copies of the guards. It read no real
+price. Its verdict: **pass, with one fix required before the run**.
+
+It found B1, M1, M2 and m1 to m9 closed or disclosed. Every number printed in B2 §7 matched its
+recomputation: both K5 thresholds, all 29 bars, the 24 cells of the size table, the label
+rates on the 200 threshold-setting runs and the 200 fresh ones, and the Q1 gate counts. On its
+own made-up overlapping noise the new test rejected a true zero 2.55% and 2.72% of the time at
+a stated 2.5% (20 and 60 sessions), against 4.45% and 6.82% for V2's rule.
+
+| # | Finding | Severity | Disposition |
+| --- | --- | --- | --- |
+| NEW-1 | The code's one-run guard rests on a local file. Delete the attempt file, run from another checkout, or call the comparison function directly, and a second run leaves no trace. The dirty-tree check also ignores a deleted attempt file. B2 §6 and the M3 row above claim more than the code delivers. | major | Fixed by procedure, as the reviewer allowed, with no change to the frozen files. The attempt was recorded in a comment on pull request 1155 before the run read any real price (comment `5969307706`, 2026-10-03 12:47:13Z). The run was made from the clean pushed commit. Its two output files were committed and pushed as written before this write-up (commit `d671d3c2`). The code guard itself is unchanged and is weaker than B2 §6 says. |
+| NEW-2 | The code hash ignores anything appended after the hash on the two pin lines. | minor | Nothing is appended at the commit that ran: both lines end at the closing quote. To be fixed if B2 is ever frozen again. |
+| NEW-3 | K5 controls false labels only for the two simulated markets it was built from. The jumps specification sets the bar for 26 of the 29 tests, and the two specifications' means differ by as much as K5's own margin on some tests. A volatility-only market with stronger jumps or a stronger leverage effect could clear K5 more often than 5%. Also: "none of 40 passes all four gates" has a 95% upper bound near 9%. | minor | Disclosed in B2 §8 and §10. The heading over the label-rate table in B2 §7 reads more broadly than that. Three tests carry the label in the result (§11). The value question failed, so nothing rests on it. |
+| NIT | A retry reason is kept in the result but the decision does not flag it. | — | No retry was needed: `attempts` in the result has one entry with no retry reason. |
+
+The reviewer could not check three things: the fresh runs' label rates from first principles
+(their statistics are not stored, only their labels), the size of the W1 test on the model
+difference series itself, and B2 §6's statement that the simulated calendar trains on about as
+many stock-dates as the real panel (its rough estimate was 750,000 against 525,918). The
+`numpy` and `pandas` versions are not pinned.
 
 ## 5. Substrate: what the universe actually is
 
@@ -381,6 +416,14 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
   second and third reviews: printed-against-adjusted price comparisons, floor counts under each rule,
   eligible and complete-case counts per formation date, large-move and split checks. No
   feature was related to any label there.
+- **B2's one-run guard was completed by procedure, not by code.** B2 §6 says the instrument
+  can be run once. The sixth review showed the code alone does not guarantee that (§4). The
+  attempt was recorded publicly before the run and the outputs were pushed straight after it.
+  The pre-registration was not edited.
+- **The B2 §3 count was repeated before the run.** At the frozen commit, a minute before the
+  attempt record, the price-only count of complete cases was run again to confirm the panel
+  loads and matches V2's. It relates no feature to any label, and it matched the earlier
+  count.
 
 ## 8. What happens next
 
@@ -388,19 +431,15 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
 2. One holdout run — done (§10).
 3. Code fixes N1–N3 from the re-review — done (§4).
 4. Review of the conclusion and the volatility-only benchmark — done (§4, §10).
-5. Walk-forward comparison (Wave B2), under its own pre-registration and its own review. Two
-   questions. Value: does adding the confirmed features to a volatility-aware model —
-   volatility at short half-lives, largest daily moves, curvature, and the dependence of
-   volatility on recent direction — improve its out-of-sample ranking of forward drawdown by
-   a material amount? Kind: once the realised volatility of the label's own window is known,
-   is anything left beyond what the simulated market leaves? The holdout years have been
-   seen, so B2 measures. It cannot serve as a second confirmation.
-   - If the value question fails, nothing is built and the family stops at Wave B for these
-     constructions. The features stay available as descriptive fields.
-   - If it passes and the kind question does not, anything built is named a volatility-type
-     risk estimate. It is not persistence evidence.
-6. Sector and size controls, and group persistence (Wave C), need point-in-time sector
-   history for former members first.
+5. Walk-forward comparison (Wave B2), under its own pre-registration and its own two reviews
+   — done (§11). The value question failed. By B2 §8 nothing is built and the family stops
+   at Wave B for these constructions. The features stay available as descriptive fields.
+6. Not entered: a calibrated profile, a shadow snapshot, an advisory field. Each was
+   conditional on B2's value gates.
+7. Open, and not started here: sector and size controls and group persistence (Wave C).
+   They need point-in-time sector history for former members first.
+8. Any further claim about these 29 features needs formation dates after 2026-06-02 or
+   another universe. The dates from 2022-07-06 have been used by the V2 holdout and by B2.
 
 Nothing above creates an advisory field, a score or a gate.
 
@@ -461,8 +500,9 @@ python3 -m research.trend_persistence_walkforward --reference --jobs 20 \
 Two builds on the same machine gave identical runs.
 
 The B2 run. It takes no output path and writes
-`research/data/trend_persistence_b2_result.json`. It refuses to run while that file exists, so
-it can be made once. It is not to be run for any other purpose.
+`research/data/trend_persistence_b2_result.json`. It refuses to run while that file exists.
+That guard is local (§4, sixth review). The run was made once, on 2026-10-03 (§11), and is
+not to be made again.
 
 ```
 python3 -m research.trend_persistence_walkforward \
@@ -708,6 +748,191 @@ drawdown or a price nearer its high.
   An IC ignores costs and turnover.
 - **Deviations N1, N2 and N5** (§4, §7) were recorded before the run and do not change what
   it computed.
+
+## 11. Wave B2 — walk-forward result
+
+One run, on 2026-10-03 at 12:47 UTC, from commit `aadb15d2` with a clean tree:
+pre-registration `79764bf5…80aa`, simulated reference `e2caf7e8…20f3`, code hash
+`5c976ce8…fca6`. The attempt was recorded on pull request 1155 before the run read a real
+price (§4, sixth review). It was the first attempt and needed no retry. The two files it wrote
+are committed unedited (commit `d671d3c2`): `research/data/trend_persistence_b2_result.json`
+and `research/data/trend_persistence_b2_attempt.json`. The panel is the one V2 was scored on
+(digest `48cb5e76…f178`). Before fitting anything the instrument reproduced V2's 29 holdout
+means from the committed result to 1e-9.
+
+**Decision, by the rule in B2 §8: the null on model value.** Neither gated horizon passes the
+value gates. No profile and no field is built, and the family stops at Wave B for these
+constructions. The features stay available as descriptive fields.
+
+### Value: do the features improve a volatility-aware model?
+
+Model B2 is the baseline: V2's eleven controls, their squares, eleven further volatility
+descriptors (volatility at half-lives of 3, 10 and 30 sessions, mean and largest absolute
+daily moves, downside volatility), their squares, and six products of trailing return with
+volatility. Model A is B2 plus the features confirmed at the horizon. Both are refitted before
+each of five test blocks (second half of 2022, then 2023, 2024, 2025, 2026), on earlier dates
+only. The event is a stock whose forward maximum drawdown is in the deepest tenth on its
+date.
+
+Ranking. Rank IC is the correlation, across a date's stocks, between a model's score and the
+rank of the realised forward drawdown.
+
+| Horizon | Dates | Rank IC, B2 | Rank IC, A | A − B2 | t (df) | One-sided p | Blocks above zero | W1 | W2 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| 5 | 197 | 0.3676 | 0.3683 | +0.00069 | 1.72 (13) | 0.055 | 5 of 5 | not gated | not gated |
+| 20 | 194 | 0.4946 | 0.4959 | +0.00125 | 2.04 (13) | 0.031 | 5 of 5 | fail | pass |
+| 60 | 186 | 0.5337 | 0.5354 | +0.00169 | 1.15 (7) | 0.143 | 3 of 5 | fail | fail |
+
+Flags and calibration. Capture is the share of events among the tenth of stocks a model rates
+most likely to be one. Chance is 10%. W3 asked for a gain of at least 1.0 point.
+
+| Horizon | Capture, B2 | Capture, A | A − B2 (points) | Brier, B2 | Brier, A | Calibration slope, A | W3 | W4 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| 5 | 32.03% | 32.15% | +0.12 | 0.08130 | 0.08126 | 0.978 | not gated | not gated |
+| 20 | 36.01% | 36.01% | +0.00 | 0.07822 | 0.07820 | 0.961 | fail | pass |
+| 60 | 37.87% | 37.73% | −0.14 | 0.076477 | 0.076478 | 0.948 | fail | fail |
+
+- **The ranking improves by one to two thousandths, on a base near one half.** The difference
+  is positive at all three horizons and larger than in any of the 40 simulated runs (at 20
+  sessions +0.00125 against −0.00000 to +0.00079; at 60, +0.00169 against −0.00008 to
+  +0.00058). It does not reach the pre-registered 2.5% at either gated horizon, and at 60
+  sessions it is positive in three blocks of five.
+- **The flags do not move.** A and B2 put the same share of events in their top tenth at 20
+  sessions and A puts slightly fewer there at 60. The capture difference is inside the
+  simulated range at every horizon. The mean forward drawdown of the flagged tenth is the same
+  to within 0.03 points (A −14.43% and B2 −14.42% at 20 sessions; A −25.70% and B2 −25.73% at 60).
+- **The choice of test changes the name of the outcome, not its consequence.** Under V2's rule
+  the 20-session t is 2.31 and W1 would pass. With W2 passing and W3 failing, that is B2 §8's
+  "detectable and immaterial" branch, which the simulated market produces in 25 runs of 40.
+  Both branches build nothing and stop the family here.
+
+What each layer of the model buys, as rank IC:
+
+| Horizon | B0: V2's controls | B1: plus their squares | B2: plus volatility descriptors | A: plus confirmed features |
+| ---: | ---: | ---: | ---: | ---: |
+| 5 | 0.3512 | 0.3521 | 0.3676 | 0.3683 |
+| 20 | 0.4745 | 0.4767 | 0.4946 | 0.4959 |
+| 60 | 0.5193 | 0.5219 | 0.5337 | 0.5354 |
+
+The volatility descriptors add 0.012 to 0.018 and 0.4 to 1.2 points of capture. The confirmed
+features add 0.001 to 0.002 after them and no capture.
+
+Reported, not gating:
+
+- **Ablations.** The drawdown-shape features account for the whole difference: added alone
+  they give +0.00064, +0.00121 and +0.00170 at 5, 20 and 60 sessions. The path-quality
+  features alone give +0.00011, +0.00013 and +0.00004.
+- **Audited names only.** +0.00027, +0.00086 and +0.00142.
+- **Development dates, 2009 to 2021.** A − B2 is +0.00106, +0.00208 and +0.00378, positive in
+  10, 11 and 12 of 13 years, with +0.11, +0.18 and +0.33 points of capture. The features were
+  chosen on these dates and the universe there is tilted toward survivors, so this is not an
+  out-of-sample number. It is larger than on the holdout dates and still far below W3's one
+  point.
+
+### Kind: is anything left beyond volatility?
+
+For each of the 29 tests, the feature's rank is stripped of the eleven controls, their squares
+and the realised volatility of the label's own window, which is not known at formation. What
+is left is correlated with the label rank on each date.
+
+Knowing the label window's volatility removes most of every association. The median test keeps
+14% of V2's statistic (range −14% to 50%). The eleven descriptors, which are known at
+formation, leave the median test with 69% of it.
+
+| Gate | Requirement | Pass, of 29 |
+| --- | --- | ---: |
+| K1 | same sign as development | 27 |
+| K2 | one-sided p ≤ 0.05 | 11 |
+| K3 | Benjamini–Hochberg q ≤ 0.10 across the 29 | 8 |
+| K4 | absolute mean of at least 0.005 | 7 |
+| K5 | above what both simulated markets leave, allowing for 29 tests | 4 |
+| All five | | **3** |
+
+The three are all distance from the high: `distance_to_high_60d` at 5 sessions (+0.0066),
+`distance_to_high_120d` at 20 (+0.0111) and `distance_to_high_60d` at 20 (+0.0116). The result
+records them as `beyond_simulated_volatility`. Because the value question failed, no profile
+carries that label and nothing follows from it.
+
+- **What it says.** How far a price sits below its 60- or 120-session high is associated with
+  the next 20 sessions' drawdown at about 0.011 rank correlation once the window's own
+  volatility is removed, and neither simulated volatility-only market leaves that much.
+- **What it does not say.** That this is trend persistence. The comparison is with two
+  simulated markets; a market with only volatility, but stronger jumps or a stronger link
+  from falls to volatility, could clear the same bar more often than 5% (§4, sixth review).
+  There is no sector or size control. And inside model A the same features leave the flagged
+  tenth unchanged.
+
+Every mean below is multiplied by its development sign, so a positive number agrees with
+development. The gated statistic is in bold. "Excess" is the gated statistic's distance from
+each simulated market's mean in that market's standard deviations; the bars are 2.95 and 2.87.
+The gates column runs K1 to K5; ✓ is a pass.
+
+| Feature | Horizon | V2's statistic | Controls and squares | Plus descriptors | Plus label-window volatility | Plus both | t | p | Excess, `clustered_leverage` | Excess, `clustered_leverage_jumps` | Gates | Labelled |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| `distance_to_high_120d` | 5 | +0.0211 | +0.0254 | +0.0203 | **+0.0060** | +0.0049 | +1.77 | 0.0503 | +3.13 | +3.32 | ✓··✓✓ | no |
+| `distance_to_high_20d` | 5 | +0.0073 | +0.0147 | +0.0087 | **+0.0018** | +0.0009 | +0.70 | 0.2478 | +0.32 | -0.50 | ✓···· | no |
+| `distance_to_high_60d` | 5 | +0.0132 | +0.0213 | +0.0164 | **+0.0066** | +0.0052 | +2.29 | 0.0196 | +3.67 | +3.03 | ✓✓✓✓✓ | **yes** |
+| `efficiency_20d` | 5 | +0.0243 | +0.0250 | +0.0106 | **+0.0025** | +0.0009 | +1.78 | 0.0496 | +0.92 | -0.94 | ✓✓··· | no |
+| `max_drawdown_120d` | 5 | +0.0253 | +0.0218 | +0.0163 | **+0.0016** | +0.0019 | +0.61 | 0.2751 | +0.77 | -0.22 | ✓···· | no |
+| `max_drawdown_20d` | 5 | +0.0220 | +0.0253 | +0.0104 | **+0.0019** | -0.0005 | +0.78 | 0.2242 | +0.51 | -1.28 | ✓···· | no |
+| `max_drawdown_60d` | 5 | +0.0239 | +0.0177 | +0.0143 | **+0.0033** | +0.0031 | +1.30 | 0.1088 | +1.89 | +0.64 | ✓···· | no |
+| `positive_day_fraction_120d` | 5 | +0.0208 | +0.0169 | +0.0112 | **+0.0043** | +0.0039 | +2.61 | 0.0107 | +2.84 | +1.33 | ✓✓✓·· | no |
+| `positive_day_fraction_20d` | 5 | +0.0132 | +0.0098 | +0.0081 | **+0.0005** | +0.0010 | +0.21 | 0.4177 | +0.17 | -0.60 | ✓···· | no |
+| `positive_day_fraction_60d` | 5 | +0.0224 | +0.0185 | +0.0116 | **+0.0047** | +0.0040 | +1.80 | 0.0475 | +3.30 | +1.66 | ✓✓··· | no |
+| `distance_to_high_120d` | 20 | +0.0366 | +0.0420 | +0.0356 | **+0.0111** | +0.0103 | +3.15 | 0.0039 | +5.40 | +4.33 | ✓✓✓✓✓ | **yes** |
+| `distance_to_high_20d` | 20 | +0.0118 | +0.0209 | +0.0138 | **+0.0017** | +0.0018 | +0.60 | 0.2784 | +1.60 | -0.69 | ✓···· | no |
+| `distance_to_high_60d` | 20 | +0.0260 | +0.0348 | +0.0291 | **+0.0116** | +0.0110 | +3.24 | 0.0032 | +6.23 | +4.73 | ✓✓✓✓✓ | **yes** |
+| `efficiency_20d` | 20 | +0.0308 | +0.0309 | +0.0119 | **+0.0040** | +0.0030 | +2.23 | 0.0220 | +2.53 | -0.25 | ✓✓✓·· | no |
+| `max_drawdown_120d` | 20 | +0.0409 | +0.0342 | +0.0260 | **+0.0033** | +0.0034 | +0.72 | 0.2414 | +1.25 | +0.21 | ✓···· | no |
+| `max_drawdown_20d` | 20 | +0.0295 | +0.0356 | +0.0193 | **+0.0072** | +0.0063 | +2.86 | 0.0067 | +3.82 | +1.44 | ✓✓✓✓· | no |
+| `max_drawdown_60d` | 20 | +0.0380 | +0.0318 | +0.0276 | **+0.0094** | +0.0100 | +2.25 | 0.0214 | +4.03 | +2.65 | ✓✓✓✓· | no |
+| `positive_day_fraction_120d` | 20 | +0.0244 | +0.0192 | +0.0121 | **+0.0049** | +0.0041 | +1.75 | 0.0518 | +2.43 | +0.66 | ✓···· | no |
+| `positive_day_fraction_60d` | 20 | +0.0246 | +0.0214 | +0.0129 | **+0.0057** | +0.0053 | +1.88 | 0.0410 | +3.36 | +1.04 | ✓✓·✓· | no |
+| `sessions_since_high_120d` | 20 | +0.0155 | +0.0158 | +0.0119 | **-0.0022** | -0.0022 | -0.88 | 0.8028 | -1.12 | -0.26 | ····· | no |
+| `sessions_since_high_60d` | 20 | +0.0181 | +0.0172 | +0.0126 | **+0.0012** | +0.0010 | +0.47 | 0.3222 | +0.68 | +1.41 | ✓···· | no |
+| `distance_to_high_120d` | 60 | +0.0360 | +0.0445 | +0.0382 | **+0.0015** | +0.0022 | +0.40 | 0.3499 | +1.60 | +0.37 | ✓···· | no |
+| `distance_to_high_20d` | 60 | +0.0135 | +0.0247 | +0.0171 | **+0.0031** | +0.0036 | +2.44 | 0.0224 | +3.62 | +1.08 | ✓✓✓·· | no |
+| `distance_to_high_60d` | 60 | +0.0259 | +0.0377 | +0.0325 | **+0.0041** | +0.0052 | +0.89 | 0.2024 | +3.27 | +1.37 | ✓···· | no |
+| `max_drawdown_120d` | 60 | +0.0511 | +0.0416 | +0.0323 | **+0.0037** | +0.0030 | +0.43 | 0.3415 | +1.29 | +0.19 | ✓···· | no |
+| `max_drawdown_20d` | 60 | +0.0289 | +0.0360 | +0.0232 | **+0.0044** | +0.0073 | +1.57 | 0.0800 | +3.93 | +0.19 | ✓···· | no |
+| `max_drawdown_60d` | 60 | +0.0425 | +0.0352 | +0.0307 | **+0.0026** | +0.0033 | +0.59 | 0.2879 | +1.30 | -0.08 | ✓···· | no |
+| `positive_day_fraction_60d` | 60 | +0.0188 | +0.0152 | +0.0091 | **+0.0014** | +0.0015 | +0.51 | 0.3136 | +1.18 | -0.64 | ✓···· | no |
+| `sessions_since_high_120d` | 60 | +0.0143 | +0.0162 | +0.0146 | **-0.0016** | -0.0009 | -0.37 | 0.6404 | -0.57 | -0.62 | ····· | no |
+
+Degrees of freedom are 13 at 5 and 20 sessions and 7 at 60.
+
+### V2's statistic under B2's test
+
+The fifth review found that V2's significance rule rejects too often when labels overlap. B2
+reports V2's own statistic on the same dates under both rules. Here it makes no difference:
+under either, V2's mean is significant in the development direction at a one-sided 5% for 29
+of 29 tests and at 2.5% for 28 of 29. The exception is `distance_to_high_20d` at 5 sessions
+(p = 0.031 under the new test). V2's four holdout gates are not re-applied here.
+
+### What this settles and what it does not
+
+Settled, for these 29 constructions on this universe:
+
+- A drawdown-risk profile built with them would be indistinguishable in use from one built on
+  volatility descriptors alone. No calibrated profile, shadow snapshot or advisory field is
+  built. The later waves, which were conditional on B2's value gates, are not entered.
+- V2's label stands as §10 words it: `RESEARCH_PREDICTIVE` for describing downside risk, on
+  the confirmed members, not distinguished from volatility. B2 adds that the part volatility
+  does not explain is too small to change a ranking.
+
+Not settled:
+
+- **Other constructions, and group persistence.** A null here closes these 29 tests, not the
+  idea. Sector and group persistence (Wave C) was not attempted: it needs point-in-time sector
+  history for former members.
+- **These dates are used up.** Formation dates from 2022-07-06 to 2026-06-02 were V2's holdout
+  and B2's test. A third claim cannot rest on them.
+- **One period, five blocks.** At 60 sessions the test has 7 degrees of freedom.
+- **The "beyond volatility" label is relative to two simulated markets** (above, and §4).
+- **The one-run guard in the code is weaker than B2 §6 says.** The public attempt record and
+  the immediate push of the outputs stand in for it (§4, §7).
+- **Library versions are not pinned.** The simulated reference was rebuilt twice on one
+  machine with identical results; another `numpy` or `pandas` could differ in late decimals.
 
 ## Appendix A — gate legend
 

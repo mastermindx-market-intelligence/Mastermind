@@ -904,3 +904,23 @@ def test_the_pins_match_the_committed_files_and_the_reference_says_what_the_prer
     lows = [v[wf.Q2_GATED][0] for v in ref["q2_ranges"].values()]
     highs = [v[wf.Q2_GATED][1] for v in ref["q2_ranges"].values()]
     assert round(min(lows), 4) == -0.0105 and round(max(highs), 4) == 0.0172
+
+
+def test_the_committed_result_was_produced_once_under_the_pinned_files():
+    here = os.path.dirname(wf.__file__)
+    with open(os.path.join(here, wf.RESULT_FILE)) as fh:
+        out = json.load(fh)
+    with open(os.path.join(here, wf.ATTEMPT_FILE)) as fh:
+        attempts = json.load(fh)["attempts"]
+    assert out["prereg_sha256"] == wf.PREREG_SHA256
+    assert out["reference_sha256"] == wf.REFERENCE_SHA256
+    assert out["code_sha256"] == wf.code_sha256()
+    assert out["holdout_result_sha256"] == wf.HOLDOUT_RESULT_SHA256
+    assert out["panel_sha256"] == wf.V2_PANEL_SHA256
+    assert out["attempts"] == attempts and len(attempts) == 1
+    assert attempts[0]["retry_reason"] is None and attempts[0]["git_head"] == out["git_head"]
+    # what the readout reports (§11): no gated horizon passes, three tests carry the label
+    assert out["status"] == "scored" and out["decision"]["outcome"] == "no_model_value"
+    assert out["decision"]["advances"] is False and out["decision"]["horizons"] == []
+    assert not any(out["horizons"][h]["gates"]["passed"] for h in ("20", "60"))
+    assert sum(s["beyond_simulated_volatility"] for s in out["q2"].values()) == 3
