@@ -1769,6 +1769,7 @@ def _service_from_config(
         )
 
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import (
         WEB_CEO_V3_PROFILE,
         validate_installed_mcp_profile_current,
@@ -1811,6 +1812,8 @@ def _service_from_config(
             GitHubWebCommissionSourceProvider,
         )
 
+        commission_source_provider = GitHubWebCommissionSourceProvider()
+
         reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
@@ -1820,7 +1823,11 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
-        if installed_profile in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}:
+        if installed_profile in {
+            WEB_CEO_V2_PROFILE,
+            WEB_CEO_V3_PROFILE,
+            WEB_CEO_SESSIONS_PROFILE,
+        }:
             from integrations.executive_mcp.web_ceo import (
                 WebCeoV2InstalledExecutiveReaders,
             )
@@ -1927,15 +1934,89 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+        session_factories = {}
+        if installed_profile == WEB_CEO_SESSIONS_PROFILE:
+            from integrations.session_bridge.installed import build_runtime_session_bridge
+            from integrations.session_bridge.native_backends import ExecutiveSummonAdapter
+            from integrations.session_bridge.schemas import BridgeError
+            from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
+            from control_plane import executive_ceo_ingress as session_ingress, ceo_request
+
+            def session_bridge_factory(runtime):
+                # Validate the supplied live Runtime through the incumbent
+                # namespace owner before constructing any projection or writer.
+                service._namespace_custody.bound_runtime(runtime)
+                binding = service._ceo_ingress_app_binding
+
+                def require_session_admission(_envelope=None):
+                    if (binding is not service._ceo_ingress_app_binding
+                            or not binding.armed or service._closing
+                            or service._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise BridgeError("ingress_unavailable", "Executive admission is unavailable")
+
+                async def submit_summon(payload):
+                    require_session_admission()
+                    request = dict(payload)
+                    request_ref = ceo_request.app_request_ref(request.pop("operation_key"))
+                    try:
+                        observed = await session_ingress._observe_trusted_grounding(readers)
+                        require_session_admission()
+                        receipt = await session_ingress.handle_frame(
+                            {"schema": session_ingress.SUBMIT_SCHEMA_V2,
+                             "request_ref": request_ref, "observed_grounding": observed,
+                             "request": request},
+                            runtime=runtime, grounding_provider=readers,
+                            workspace_root=config.proof_workspace_root,
+                            service_state=service._service_state,
+                            ceo_ingress_armed=binding.armed,
+                            strict_v2_admission=True,
+                            execution_binding_provider=service._require_current_coo_binding,
+                            dialogue_source_provider=commission_source_provider,
+                            admission_guard=require_session_admission,
+                        )
+                    except session_ingress.CeoIngressError as exc:
+                        # Canonical owner classifies its durable effect/refusal.
+                        raise BridgeError(exc.code, exc.message) from None
+                    # After the mutation owner returns, drift cannot be described
+                    # as a zero-effect refusal. The private transport preserves it.
+                    try:
+                        require_session_admission()
+                    except BridgeError:
+                        raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                    return receipt
+
+                adapter = ExecutiveSummonAdapter(submit_summon)
+                async def summon(principal, arguments):
+                    if not {READ_SCOPE, SUBMIT_SCOPE} <= set(principal.scopes):
+                        raise BridgeError("authority_refused", "Executive submit scopes are required")
+                    return await adapter(arguments)
+
+                def codex_owner_configured():
+                    from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
+                    # Configuration and serving listener are necessary capability
+                    # gates. A carrier receipt still proves no native attention.
+                    observation = getattr(service, "_dialogue_observation_server", None)
+                    return (
+                        raw.get("dialogue_bridge_armed") is True
+                        and getattr(raw.get("dialogue_wake_retry_policy"), "armed", False) is True
+                        and observation is not None
+                        and observation.is_serving()
+                        and w3c_plist_configured(release_sha=config.proof_base_sha)
+                    )
+
+                return build_runtime_session_bridge(
+                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    summon_handler=summon, codex_owner_configured=codex_owner_configured)
+            session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
             read_schema=app_read_schema,
-            **content_factories, **workspace_factories, **coo_factories,
+            **content_factories, **workspace_factories, **coo_factories, **session_factories,
         )
         ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
-            GitHubWebCommissionSourceProvider()
+            commission_source_provider
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (

@@ -1840,6 +1840,7 @@ class CeoIngressAppBinding:
     content_provider_factory: Callable[[Runtime], Any] | None = None
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
+    session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
     # Separate principal capability; the incumbent CEO armed bit grants none.
     # Existing launchers omit these fields, so this route is dormant by default.
@@ -1856,6 +1857,11 @@ class CeoIngressAppBinding:
             raise ValueError("App binding requires a grounding provider")
         if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
             raise ValueError("App binding read schema is not an admitted profile")
+        if (
+            self.session_bridge_provider_factory is not None
+            and not callable(self.session_bridge_provider_factory)
+        ):
+            raise ValueError("Session Bridge requires a host provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -4403,6 +4409,83 @@ class ExecutiveControlService:
                         result = {"ok": False, "error": {"code": "CONTENT_UNAVAILABLE"}}
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=(
                     MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
+                return
+            from common.session_bridge_private_contract import (
+                PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,
+                SessionBridgeIngressOwner, BridgeError, MODIFYING_TOOLS,
+                private_result as session_bridge_result,
+            )
+            if isinstance(parsed, Mapping) and parsed.get("schema") == SESSION_BRIDGE_PRIVATE_SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied", "Session Bridge requires the installed App peer"
+                    )
+                    return
+                factory = app_binding.session_bridge_provider_factory
+                if (
+                    not app_binding.armed
+                    or factory is None
+                    or self._closing
+                    or self._service_state not in {"READY", "AWAITING_CANARY"}
+                ):
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                try:
+                    provider = factory(self._require_runtime())
+                    if type(provider) is not SessionBridgeIngressOwner:
+                        raise ValueError("invalid Session Bridge provider")
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                # The integration owns semantic validation. Finish it before
+                # calling the effect handler; later failure may be committed.
+                try:
+                    tool = provider.validate_frame(parsed)
+                except BridgeError as exc:
+                    await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                    return
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                if (self._closing
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_app_binding is not app_binding
+                        or not app_binding.armed):
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                modifying = tool in MODIFYING_TOOLS
+                try:
+                    result = await provider.handle_frame(parsed)
+                    if (
+                        self._closing
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_app_binding is not app_binding
+                        or not app_binding.armed
+                    ):
+                        raise ValueError("Session Bridge binding changed")
+                except Exception:
+                    result = session_bridge_result(
+                        tool,
+                        code="effect_unknown" if modifying else "backend_unavailable",
+                        message=(
+                            "operation outcome is unknown; reconcile the original operation"
+                            if modifying else "installed Session Bridge owner is unavailable"
+                        ),
+                    )
+                # A response-write failure cannot turn an entered owner into an
+                # invalid-input/no-effect receipt, nor trigger a second send.
+                await self._send_ceo_ingress_response(
+                    writer, {"ok": True, "result": result},
+                    response_ceiling=ceo_ingress.MAX_RESPONSE_BYTES,
+                )
                 return
             if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
                 app_binding.read_schema, ceo_ingress.APP_GROUNDING_SCHEMA,
