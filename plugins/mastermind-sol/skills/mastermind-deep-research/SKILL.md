@@ -19,7 +19,7 @@ Do not expand a supplied-text summary, translation or settled lookup into deep r
 
 Before research, expand a short request into a compact contract: decision, scope/horizon, internal claims, required-source manifest, bounded proofs, external evidence, falsifiers, and post-run source-use verification. The manifest is ephemeral, never a lifecycle or database.
 
-Distinguish `SOURCE_REQUIRED`, `SOURCE_AVAILABLE`, `SOURCE_PROVEN`, `SOURCE_MISSING`, and `SOURCE_DEGRADED`. Available means visible; Proven requires a bounded read of the exact resource. Missing covers absent, unreadable, unauthorized, or wrong repository/resource. Degraded preserves stale or partial evidence and never becomes current truth.
+Use `SOURCE_REQUIRED` for manifest need. `SOURCE_AVAILABLE` requires an exact-source bounded read. `SOURCE_PROVEN` further requires that read to establish required identity, task evidence and freshness. `SOURCE_MISSING` covers absent, unreadable, unauthorized or wrong resources; `SOURCE_DEGRADED` preserves stale/partial evidence and never becomes current truth.
 
 For Mastermind code, plans, history, implementation, PR or CI claims, require GitHub and prove the exact `mastermindx-market-intelligence/Mastermind` repository by read. Generic GitHub metadata or access to a wrong repository is not proof. When current execution, runtime, responsibility, attention, surfaces, or capability matters, also require Mastermind Steward and prove it with a bounded read; plugin/app metadata alone is not evidence. Historical repository-only questions can use GitHub without gratuitously requiring Steward. Pure external questions need no internal source without Mastermind-specific claims.
 

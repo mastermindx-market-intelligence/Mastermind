@@ -149,6 +149,8 @@ def test_deep_research_source_admission_contract_is_fail_closed_and_owner_preser
     assert "wrong repo" in text.casefold() or "wrong repository" in text.casefold()
     assert "does not authorize" in text.casefold() or "cannot authorize" in text.casefold()
     assert "actually used" in text.casefold()
+    assert "`source_available` requires" in text.casefold()
+    assert "exact-source" in text.casefold()
 
 
 def test_deep_research_fixture_covers_source_admission_discriminators() -> None:
