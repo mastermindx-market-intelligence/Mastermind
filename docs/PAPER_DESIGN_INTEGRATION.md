@@ -375,10 +375,13 @@ staging into PROVEN_LIVE. Continue at the first unmet item, retaining this carri
   https://developers.openai.com/plugins/deploy/connect-chatgpt - current MCP app/tool-update
   lifecycle. Developer-mode MCP connections support an explicit **Refresh** after tool names,
   descriptions, schemas, annotations, auth, or UI resources change; confirm refreshed metadata
-  and start a new conversation. Published plugin definitions use their supported review/rescan
-  lifecycle, and workspace action controls may expose their own refresh flow. Do not generalize
-  this into a blanket Business recreate+republish rule or create a duplicate Paper app/tunnel
-  merely because an older chat still shows stale tool metadata.
+  and start a new conversation. Published Plugin Directory definitions use continuous review/rescan.
+  The current custom-app Help Center separately says published workspace MCP app tool/metadata changes
+  may require recreate + republish, while Enterprise/Edu Action control can Refresh changed actions
+  after publication. Therefore bind recovery to the exact observed app/workspace state rather than
+  generalizing either lifecycle. If recreation is required, replace the old logical Paper app through
+  the attended platform ceremony while reusing the existing tunnel/backend; do not leave a parallel
+  duplicate Paper plane merely because an older chat still shows stale tool metadata.
 - https://github.com/openai/tunnel-client - private outbound Secure MCP Tunnel, stdio support.
 - https://modelcontextprotocol.io/specification/2025-03-26/basic/transports - HTTP/SSE/session rules.
 - https://pypi.org/project/mcp/1.30.0/ - pinned official SDK maintenance line.
