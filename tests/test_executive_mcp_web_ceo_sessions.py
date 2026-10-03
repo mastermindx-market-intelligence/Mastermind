@@ -202,3 +202,174 @@ def test_auth_refusal_happens_before_bridge_backend(settings, rsa_key, mutation)
                     assert response.json()["result"]["isError"] is True
         assert owners.reply_calls == [] and owners.summon_calls == [] and projector.calls == []
     asyncio.run(run())
+
+
+async def custom_app(settings, *, projector, reply, summon):
+    return transport.build_web_ceo_sessions_mcp_app(
+        settings,
+        audit_sink=Sink(),
+        session_target_projector=projector,
+        session_reply_handler=reply,
+        session_summon_handler=summon,
+    )
+
+
+def test_modifying_handler_possible_effect_then_raises_is_effect_unknown_once(settings, rsa_key):
+    async def run():
+        projector = Projector()
+        calls = []
+        async def reply(_principal, arguments):
+            calls.append(dict(arguments))
+            raise RuntimeError("response lost after possible effect")
+        app = await custom_app(settings, projector=projector, reply=reply,
+                               summon=lambda _principal, _arguments: None)
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                _response, payload = await call(
+                    client, fixture._submit_token(rsa_key), "session_send", {
+                        "target_ref": "codex:BIND-1",
+                        "instruction": "continue",
+                        "stop_condition": "return result",
+                        "operation_key": "bridge-effect-unknown-raise-1",
+                    })
+        assert len(calls) == 1
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "effect_unknown"
+    asyncio.run(run())
+
+
+def test_modifying_handler_malformed_post_effect_result_is_effect_unknown_once(settings, rsa_key):
+    async def run():
+        projector = Projector()
+        calls = []
+        async def reply(_principal, arguments):
+            calls.append(dict(arguments))
+            return "malformed-after-possible-effect"
+        app = await custom_app(settings, projector=projector, reply=reply,
+                               summon=lambda _principal, _arguments: None)
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                _response, payload = await call(
+                    client, fixture._submit_token(rsa_key), "session_send", {
+                        "target_ref": "codex:BIND-1",
+                        "instruction": "continue",
+                        "stop_condition": "return result",
+                        "operation_key": "bridge-effect-unknown-malformed-1",
+                    })
+        assert len(calls) == 1
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "effect_unknown"
+    asyncio.run(run())
+
+
+def test_modifying_post_handler_oversize_is_effect_unknown_once(settings, rsa_key):
+    async def run():
+        projector = Projector()
+        calls = []
+        async def reply(_principal, arguments):
+            calls.append(dict(arguments))
+            return {
+                "reply_committed": True,
+                "target_ref": arguments["target_ref"],
+                "payload": "x" * (300 * 1024),
+            }
+        app = await custom_app(settings, projector=projector, reply=reply,
+                               summon=lambda _principal, _arguments: None)
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                _response, payload = await call(
+                    client, fixture._submit_token(rsa_key), "session_send", {
+                        "target_ref": "codex:BIND-1",
+                        "instruction": "continue",
+                        "stop_condition": "return result",
+                        "operation_key": "bridge-effect-unknown-oversize-1",
+                    })
+        assert len(calls) == 1
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "effect_unknown"
+    asyncio.run(run())
+
+
+def test_read_only_projector_exception_remains_backend_unavailable(settings, rsa_key):
+    async def run():
+        calls = []
+        async def projector(_principal, _kind):
+            calls.append("read")
+            raise RuntimeError("read source unavailable")
+        app = await custom_app(
+            settings, projector=projector,
+            reply=lambda _principal, _arguments: None,
+            summon=lambda _principal, _arguments: None,
+        )
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                _response, payload = await call(
+                    client, fixture._read_token(rsa_key), "session_targets", {})
+        assert calls == ["read"]
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "backend_unavailable"
+    asyncio.run(run())
+
+
+def test_read_only_projector_oversize_remains_output_too_large(settings, rsa_key):
+    async def run():
+        calls = []
+        async def projector(_principal, _kind):
+            calls.append("read")
+            return [{
+                "target_ref": "codex:BIND-1",
+                "kind": "codex",
+                "payload": "x" * (300 * 1024),
+            }]
+        app = await custom_app(
+            settings, projector=projector,
+            reply=lambda _principal, _arguments: None,
+            summon=lambda _principal, _arguments: None,
+        )
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                _response, payload = await call(
+                    client, fixture._read_token(rsa_key), "session_targets", {})
+        assert calls == ["read"]
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "output_too_large"
+    asyncio.run(run())
+
+
+def test_typed_pre_effect_binding_refusal_is_preserved(settings, rsa_key):
+    from integrations.session_bridge.schemas import BridgeError
+
+    async def run():
+        calls = []
+        async def summon(_principal, arguments):
+            calls.append(dict(arguments))
+            raise BridgeError("binding_unavailable", "trusted binding is unavailable")
+        app = await custom_app(
+            settings, projector=Projector(),
+            reply=lambda _principal, _arguments: None,
+            summon=summon,
+        )
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                _response, payload = await call(
+                    client, fixture._submit_token(rsa_key), "session_summon", {
+                        "objective": "bounded task",
+                        "execution_profile": "research_only",
+                        "operation_key": "bridge-pre-effect-binding-refusal-1",
+                    })
+        assert len(calls) == 1
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "binding_unavailable"
+    asyncio.run(run())

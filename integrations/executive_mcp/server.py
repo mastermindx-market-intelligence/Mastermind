@@ -938,17 +938,30 @@ def _build_profile_mcp_app(
                         required_scopes=configured.policies.submit.required_scopes,
                     )["_meta"]["mcp/www_authenticate"][0]
                 return result(payload, challenge=challenge)
+            direct_submit = name in direct_submit_names
             try:
                 payload = await direct_handler(principal_or_response, name, validated)
                 canonical_json(payload)
             except Exception:
                 payload = direct_error_factory(
-                    name, "backend_unavailable", "direct tool response is unavailable"
+                    name,
+                    "effect_unknown" if direct_submit else "backend_unavailable",
+                    (
+                        "direct modifying tool outcome is unknown; reconcile the original operation"
+                        if direct_submit
+                        else "direct tool response is unavailable"
+                    ),
                 )
             reply = result(payload)
             if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
                 reply = result(direct_error_factory(
-                    name, "output_too_large", "direct tool response exceeds the transport budget"
+                    name,
+                    "effect_unknown" if direct_submit else "output_too_large",
+                    (
+                        "direct modifying tool outcome is unknown; reconcile the original operation"
+                        if direct_submit
+                        else "direct tool response exceeds the transport budget"
+                    ),
                 ))
             return reply
         try:
@@ -1290,6 +1303,7 @@ def build_web_ceo_sessions_mcp_app(
         return found
 
     async def direct(principal: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        modifying = name in SESSION_SUBMIT_TOOL_NAMES
         try:
             if name == "session_targets":
                 projected = await maybe(session_target_projector(principal, arguments.get("kind")))
@@ -1304,17 +1318,32 @@ def build_web_ceo_sessions_mcp_app(
                                     message="target is not in the authenticated caller projection")
                 data = await maybe(session_reply_handler(principal, dict(arguments)))
                 if not isinstance(data, Mapping):
-                    raise bridge_schemas.BridgeError("backend_unavailable", "session reply owner returned invalid data")
+                    return envelope(
+                        name,
+                        code="effect_unknown",
+                        message="session reply outcome is unknown; reconcile the original operation",
+                    )
                 return envelope(name, data=dict(data))
             data = await maybe(session_summon_handler(principal, dict(arguments)))
             if not isinstance(data, Mapping):
-                raise bridge_schemas.BridgeError("backend_unavailable", "session admission owner returned invalid data")
+                return envelope(
+                    name,
+                    code="effect_unknown",
+                    message="session admission outcome is unknown; reconcile the original operation",
+                )
             return envelope(name, data=dict(data))
         except bridge_schemas.BridgeError as exc:
             return envelope(name, code=exc.code, message=exc.message)
         except Exception:
-            return envelope(name, code="backend_unavailable",
-                            message="authenticated Session Bridge owner is unavailable")
+            return envelope(
+                name,
+                code="effect_unknown" if modifying else "backend_unavailable",
+                message=(
+                    "authenticated Session Bridge outcome is unknown; reconcile the original operation"
+                    if modifying
+                    else "authenticated Session Bridge owner is unavailable"
+                ),
+            )
 
     return _build_profile_mcp_app(
         settings, audit_sink=audit_sink,
