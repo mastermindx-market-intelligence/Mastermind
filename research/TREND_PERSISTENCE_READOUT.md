@@ -5,9 +5,10 @@ Wave B, stock level. Development sample (formation dates 2003–2021), one holdo
 dates (Wave B2).
 
 **Where this stands.** The family stops at Wave B for these constructions. The walk-forward
-comparison (§11) found no model value: added to a model that already knows volatility in
-detail, the 29 confirmed features raise its rank correlation with forward drawdown by 0.001 to
-0.002 and leave its list of the stocks most likely to draw down unchanged. By the rule fixed
+comparison (§11) found no model value. The 29 confirmed tests cover twelve features. Added to
+a model built from trailing returns, beta and volatility in detail, those features raise its
+rank correlation with forward drawdown by 0.001 to 0.002, and at the gated horizons the tenth
+of stocks it rates most at risk catches no more of the deepest drawdowns. By the rule fixed
 before that run, no calibrated profile, shadow snapshot or advisory field is built.
 
 **The holdout.** The one holdout run is done (§10). All 29 development survivors passed
@@ -37,8 +38,8 @@ score or gate follows from this.
 | Same, with volatility at four spans, downside volatility, the quoted-price mask and price floors on printed closes? | V2 | 72 | **29** | A filter, not evidence. These 29 go to the holdout. |
 | Do the 29 hold on formation dates from 2022-07-06, on the repaired universe? | V2 holdout | 29 | **29 pass** | Passed the pre-registered gates. Small (§10). Not distinguished from volatility: next row. |
 | Does a simulated market with volatility and no persistence pass the same gates? | V2 on simulated prices | 72 / 29 | **24–41 of 72** pass development, **14–29 of the 29** pass the holdout gates | Yes. The gates do not separate these features from volatility estimates (§10). |
-| Added to a model that already has volatility in detail, do the 29 improve its out-of-sample ranking of forward drawdown by a material amount? | B2, walk-forward on the holdout dates | 2 gated horizons | **0 pass** | No. Rank IC rises by 0.001 to 0.002 on a base near 0.5 and the flagged tenth does not change (§11). Nothing is built. |
-| Once the realised volatility of the label's own window is known, is anything left beyond what two simulated volatility-only markets leave? | B2 | 29 | **3 pass** | Three distance-from-high tests, at about 0.01 rank correlation. Recorded; nothing rests on it (§11). |
+| Added to a model of trailing returns, beta and volatility in detail, do the features behind the 29 tests improve its out-of-sample ranking of forward drawdown by a material amount? | B2, walk-forward on the holdout dates | 2 gated horizons | **0 pass** | No. Rank IC rises by 0.001 to 0.002 on a base of 0.49 to 0.53 and the flagged tenth catches no more events (§11). Nothing is built. |
+| Once the realised volatility of the label's own window is known, is anything left beyond what two simulated volatility-only markets leave? | B2 | 29 | **3 pass** | Three overlapping distance-from-high tests, at about 0.01 rank correlation. Recorded; nothing rests on it (§11). |
 
 A development survivor has passed pre-registered gates on a sample that was inspected before
 V2 was written and that is tilted toward survivors (§5). Development alone confirms nothing.
@@ -209,6 +210,29 @@ The reviewer could not check three things: the fresh runs' label rates from firs
 difference series itself, and B2 §6's statement that the simulated calendar trains on about as
 many stock-dates as the real panel (its rough estimate was 750,000 against 525,918). The
 `numpy` and `pandas` versions are not pinned.
+
+### Seventh review: the B2 write-up
+
+A seventh read-only review, by a reviewer who had not seen the earlier ones, attacked §11 and
+the passages changed with it (commit `36e3899a`). It recomputed every printed number from the
+committed result, re-derived gates W1 to W4 and K1 to K5 and the decision from the stored
+statistics, and checked the commit history against the run record. It did not run the
+instrument and read no price. Its verdict: **pass with fixes**. No number, gate or decision
+differed. Every finding was about wording or disclosure.
+
+| # | Finding | Severity | Disposition |
+| --- | --- | --- | --- |
+| M1 | The baseline was described as volatility only. Model B2 also holds trailing returns, beta, their squares and return-by-volatility products, which are close relatives of the features. No model of volatility descriptors alone was fitted. | major | §11, the opening and §1 now name what the baseline holds and say it removes part of the features by construction. |
+| m1 | "The flags do not move" said more than the tables: only capture and the flagged tenth's mean drawdown were measured, and at 5 sessions capture and the Brier score do improve. | minor | Reworded. The 5-session numbers and the position of the 60-session capture difference in the simulated range are stated. |
+| m2 | The list of limits left out two that B2 §10 states: removing the label window's volatility is a decomposition and not a causal control, and only one functional form was fitted. | minor | Both added, with the cross-sectional nature of the event. |
+| m3 | "What it says" covered two of the three labelled tests and treated overlapping windows as separate findings. | minor | Reworded: one overlapping family. |
+| m4 | The write-up did not say how demanding W3 is. One point of capture is about what the whole step from B1 to B2 adds. | minor | Stated after the layer table. The null does not rest on the bar, because the observed gain is zero or negative at the gated horizons. |
+| m5 | B2 §9 promises V2's t beside every mean; the table prints only the new test's. | minor | The table says where V2's t is in the result file. |
+| — | "29 features" should be 29 tests on twelve features; "near one half" did not hold at 5 sessions; "B2" meant both the wave and a model; some terms were undefined in §11. | nit | Corrected. |
+
+The reviewer could not check the pull-request comment or its time, since it had no access to
+GitHub. The comment is `5969307706`, created 2026-10-03 12:47:13Z; the attempt file records
+the run starting at 12:47:29Z.
 
 ## 5. Substrate: what the universe actually is
 
@@ -431,9 +455,10 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
 2. One holdout run — done (§10).
 3. Code fixes N1–N3 from the re-review — done (§4).
 4. Review of the conclusion and the volatility-only benchmark — done (§4, §10).
-5. Walk-forward comparison (Wave B2), under its own pre-registration and its own two reviews
-   — done (§11). The value question failed. By B2 §8 nothing is built and the family stops
-   at Wave B for these constructions. The features stay available as descriptive fields.
+5. Walk-forward comparison (Wave B2), under its own pre-registration, two reviews before the
+   run and one of the write-up — done (§11). The value question failed. By B2 §8 nothing is
+   built and the family stops at Wave B for these constructions. The features stay available
+   as descriptive fields.
 6. Not entered: a calibrated profile, a shadow snapshot, an advisory field. Each was
    conditional on B2's value gates.
 7. Open, and not started here: sector and size controls and group persistence (Wave C).
@@ -766,13 +791,23 @@ constructions. The features stay available as descriptive fields.
 
 ### Value: do the features improve a volatility-aware model?
 
-Model B2 is the baseline: V2's eleven controls, their squares, eleven further volatility
-descriptors (volatility at half-lives of 3, 10 and 30 sessions, mean and largest absolute
-daily moves, downside volatility), their squares, and six products of trailing return with
-volatility. Model A is B2 plus the features confirmed at the horizon. Both are refitted before
-each of five test blocks (second half of 2022, then 2023, 2024, 2025, 2026), on earlier dates
-only. The event is a stock whose forward maximum drawdown is in the deepest tenth on its
-date.
+"B2" names both this wave and its baseline model. Below, "model B2" is the model and "B2 §8"
+is a section of the pre-registration.
+
+Model B2 is the baseline. It holds V2's eleven controls (trailing return at four spans,
+volatility at four, downside volatility at two, and beta), their squares, eleven further
+volatility descriptors (volatility at half-lives of 3, 10 and 30 sessions, mean and largest
+absolute daily moves, downside volatility), their squares, and six products of trailing
+return with volatility. Model A is model B2 plus the features confirmed at the horizon: 10,
+11 and 8 of them at 5, 20 and 60 sessions. Both are refitted before each of five test blocks
+(second half of 2022, then 2023, 2024, 2025, 2026), on earlier dates only. The event is a
+stock whose forward maximum drawdown is in the deepest tenth on its date.
+
+The baseline is not volatility alone. Trailing return and volatility over 20, 60 and 120
+sessions are close relatives of distance from the high and trailing drawdown over the same
+windows, so model B2 removes part of what the features measure by construction. The question
+asked is what the features add to what is already cheap to know. No model built on
+volatility descriptors alone was fitted.
 
 Ranking. Rank IC is the correlation, across a date's stocks, between a model's score and the
 rank of the realised forward drawdown.
@@ -784,7 +819,9 @@ rank of the realised forward drawdown.
 | 60 | 186 | 0.5337 | 0.5354 | +0.00169 | 1.15 (7) | 0.143 | 3 of 5 | fail | fail |
 
 Flags and calibration. Capture is the share of events among the tenth of stocks a model rates
-most likely to be one. Chance is 10%. W3 asked for a gain of at least 1.0 point.
+most likely to be one. Chance is 10%. W3 asked for a gain of at least 1.0 point. The Brier
+score is the mean squared error of the event probability; lower is better. The calibration
+slope is 1 when the probabilities are neither too spread out nor too compressed.
 
 | Horizon | Capture, B2 | Capture, A | A − B2 (points) | Brier, B2 | Brier, A | Calibration slope, A | W3 | W4 |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
@@ -792,15 +829,20 @@ most likely to be one. Chance is 10%. W3 asked for a gain of at least 1.0 point.
 | 20 | 36.01% | 36.01% | +0.00 | 0.07822 | 0.07820 | 0.961 | fail | pass |
 | 60 | 37.87% | 37.73% | −0.14 | 0.076477 | 0.076478 | 0.948 | fail | fail |
 
-- **The ranking improves by one to two thousandths, on a base near one half.** The difference
+- **The ranking improves by one to two thousandths, on a base of 0.37 to 0.53.** The difference
   is positive at all three horizons and larger than in any of the 40 simulated runs (at 20
   sessions +0.00125 against −0.00000 to +0.00079; at 60, +0.00169 against −0.00008 to
   +0.00058). It does not reach the pre-registered 2.5% at either gated horizon, and at 60
   sessions it is positive in three blocks of five.
-- **The flags do not move.** A and B2 put the same share of events in their top tenth at 20
-  sessions and A puts slightly fewer there at 60. The capture difference is inside the
-  simulated range at every horizon. The mean forward drawdown of the flagged tenth is the same
-  to within 0.03 points (A −14.43% and B2 −14.42% at 20 sessions; A −25.70% and B2 −25.73% at 60).
+- **The flagged tenth catches no more events at the gated horizons.** A and model B2 put the
+  same share of events in their top tenth at 20 sessions and A puts slightly fewer there at
+  60. The mean forward drawdown of the flagged tenth is the same to within 0.03 points (A
+  −14.43% and B2 −14.42% at 20 sessions; A −25.70% and B2 −25.73% at 60). Which names are
+  flagged was not compared. The capture difference is inside the simulated range at every
+  horizon; at 60 sessions it sits at the bottom of it (−0.1363 points against a simulated low
+  of −0.1364).
+  At 5 sessions, which does not gate, capture rises 0.12 points and the Brier score improves
+  (one-sided p = 0.006).
 - **The choice of test changes the name of the outcome, not its consequence.** Under V2's rule
   the 20-session t is 2.31 and W1 would pass. With W2 passing and W3 failing, that is B2 §8's
   "detectable and immaterial" branch, which the simulated market produces in 25 runs of 40.
@@ -808,14 +850,19 @@ most likely to be one. Chance is 10%. W3 asked for a gain of at least 1.0 point.
 
 What each layer of the model buys, as rank IC:
 
-| Horizon | B0: V2's controls | B1: plus their squares | B2: plus volatility descriptors | A: plus confirmed features |
+| Horizon | B0: V2's controls | B1: plus their squares | B2: plus volatility descriptors and return × volatility products | A: plus confirmed features |
 | ---: | ---: | ---: | ---: | ---: |
 | 5 | 0.3512 | 0.3521 | 0.3676 | 0.3683 |
 | 20 | 0.4745 | 0.4767 | 0.4946 | 0.4959 |
 | 60 | 0.5193 | 0.5219 | 0.5337 | 0.5354 |
 
-The volatility descriptors add 0.012 to 0.018 and 0.4 to 1.2 points of capture. The confirmed
-features add 0.001 to 0.002 after them and no capture.
+The step from B1 to B2 (the descriptors, their squares and the products) adds 0.012 to 0.018
+and 0.4 to 1.2 points of capture. The confirmed features add 0.001 to 0.002 after it and no
+capture at the gated horizons.
+
+W3 asks for about as much capture as that whole step adds: 1.0 to 1.2 points at 5 and 20
+sessions, 0.4 at 60. The features add none at the gated horizons, so the null does not rest
+on the height of the bar. A modest real effect would not have cleared it.
 
 Reported, not gating:
 
@@ -837,7 +884,10 @@ is left is correlated with the label rank on each date.
 
 Knowing the label window's volatility removes most of every association. The median test keeps
 14% of V2's statistic (range −14% to 50%). The eleven descriptors, which are known at
-formation, leave the median test with 69% of it.
+formation, leave the median test with 69% of it. This is a decomposition, not a causal
+control: a feature that predicts a drawdown which itself raises realised volatility loses
+credit for it. The 14% is what survives the subtraction. It does not show the rest is a
+volatility proxy.
 
 | Gate | Requirement | Pass, of 29 |
 | --- | --- | ---: |
@@ -845,7 +895,7 @@ formation, leave the median test with 69% of it.
 | K2 | one-sided p ≤ 0.05 | 11 |
 | K3 | Benjamini–Hochberg q ≤ 0.10 across the 29 | 8 |
 | K4 | absolute mean of at least 0.005 | 7 |
-| K5 | above what both simulated markets leave, allowing for 29 tests | 4 |
+| K5 | above what both simulated volatility-only markets leave, allowing for 29 tests | 4 |
 | All five | | **3** |
 
 The three are all distance from the high: `distance_to_high_60d` at 5 sessions (+0.0066),
@@ -854,8 +904,10 @@ records them as `beyond_simulated_volatility`. Because the value question failed
 carries that label and nothing follows from it.
 
 - **What it says.** How far a price sits below its 60- or 120-session high is associated with
-  the next 20 sessions' drawdown at about 0.011 rank correlation once the window's own
-  volatility is removed, and neither simulated volatility-only market leaves that much.
+  the next 5 and 20 sessions' drawdown at about 0.007 and 0.011 rank correlation once the
+  window's own volatility is removed, and neither simulated volatility-only market leaves that
+  much. The 60- and 120-session windows overlap heavily. The three labels are one overlapping
+  family, not three independent findings.
 - **What it does not say.** That this is trend persistence. The comparison is with two
   simulated markets; a market with only volatility, but stronger jumps or a stronger link
   from falls to volatility, could clear the same bar more often than 5% (§4, sixth review).
@@ -863,8 +915,10 @@ carries that label and nothing follows from it.
   tenth unchanged.
 
 Every mean below is multiplied by its development sign, so a positive number agrees with
-development. The gated statistic is in bold. "Excess" is the gated statistic's distance from
-each simulated market's mean in that market's standard deviations; the bars are 2.95 and 2.87.
+development. The gated statistic is in bold. The two simulated markets are those of §10:
+`clustered_leverage` has volatility that clusters and rises after falls, and
+`clustered_leverage_jumps` adds jumps. "Excess" is the gated statistic's distance from each
+simulated market's mean in that market's standard deviations; the bars are 2.95 and 2.87.
 The gates column runs K1 to K5; ✓ is a pass.
 
 | Feature | Horizon | V2's statistic | Controls and squares | Plus descriptors | Plus label-window volatility | Plus both | t | p | Excess, `clustered_leverage` | Excess, `clustered_leverage_jumps` | Gates | Labelled |
@@ -899,7 +953,8 @@ The gates column runs K1 to K5; ✓ is a pass.
 | `positive_day_fraction_60d` | 60 | +0.0188 | +0.0152 | +0.0091 | **+0.0014** | +0.0015 | +0.51 | 0.3136 | +1.18 | -0.64 | ✓···· | no |
 | `sessions_since_high_120d` | 60 | +0.0143 | +0.0162 | +0.0146 | **-0.0016** | -0.0009 | -0.37 | 0.6404 | -0.57 | -0.62 | ····· | no |
 
-Degrees of freedom are 13 at 5 and 20 sessions and 7 at 60.
+Degrees of freedom are 13 at 5 and 20 sessions and 7 at 60. The t shown is the new test's.
+V2's t for every mean in the table is in the result file (`q2.<test>.<series>.t_v2_rule`).
 
 ### V2's statistic under B2's test
 
@@ -907,24 +962,37 @@ The fifth review found that V2's significance rule rejects too often when labels
 reports V2's own statistic on the same dates under both rules. Here it makes no difference:
 under either, V2's mean is significant in the development direction at a one-sided 5% for 29
 of 29 tests and at 2.5% for 28 of 29. The exception is `distance_to_high_20d` at 5 sessions
-(p = 0.031 under the new test). V2's four holdout gates are not re-applied here.
+(p = 0.031 under the new test, 0.041 under V2's rule). V2's four holdout gates are not
+re-applied here.
 
 ### What this settles and what it does not
 
 Settled, for these 29 constructions on this universe:
 
-- A drawdown-risk profile built with them would be indistinguishable in use from one built on
-  volatility descriptors alone. No calibrated profile, shadow snapshot or advisory field is
-  built. The later waves, which were conditional on B2's value gates, are not entered.
+- Added to a model of trailing returns, volatility and beta (V2's controls and their squares)
+  plus the eleven volatility descriptors and the return-by-volatility products (model B2),
+  these features change neither the share of deepest-tenth drawdowns caught by the top tenth
+  nor the calibration by a material amount. Rank correlation rises by about 0.001. No
+  calibrated profile, shadow snapshot or advisory field is built. The later waves, which were
+  conditional on the value gates, are not entered.
 - V2's label stands as §10 words it: `RESEARCH_PREDICTIVE` for describing downside risk, on
-  the confirmed members, not distinguished from volatility. B2 adds that the part volatility
-  does not explain is too small to change a ranking.
+  the confirmed members, not distinguished from volatility. The walk-forward comparison adds
+  that what the features carry beyond trailing returns, beta and volatility is too small to
+  change which drawdowns a model catches.
 
 Not settled:
 
 - **Other constructions, and group persistence.** A null here closes these 29 tests, not the
   idea. Sector and group persistence (Wave C) was not attempted: it needs point-in-time sector
   history for former members.
+- **The baseline removes part of the features by construction.** The null says the features
+  add nothing material to trailing returns, beta and volatility. It does not say they carry
+  nothing.
+- **Removing the label window's volatility is a decomposition, not a causal control** (above).
+- **One functional form.** Rank-linear least squares and logistic models only. Another form
+  could give a different size.
+- **The event is cross-sectional.** It says which stocks draw down most on a date, not when
+  the market does.
 - **These dates are used up.** Formation dates from 2022-07-06 to 2026-06-02 were V2's holdout
   and B2's test. A third claim cannot rest on them.
 - **One period, five blocks.** At 60 sessions the test has 7 degrees of freedom.
