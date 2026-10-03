@@ -14,6 +14,7 @@ from pathlib import Path
 from control_plane.remote_worker_transport import (
     MAX_FRAME_BYTES,
     TransportValidationError,
+    validate_broker_operation,
     validate_host_ref,
 )
 
@@ -21,7 +22,6 @@ REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
-
 
 @dataclasses.dataclass(frozen=True)
 class RemoteWorkerGatewayConfig:
@@ -76,10 +76,17 @@ class RemoteWorkerGatewayConfig:
 
         workers = frozenset(self.allowed_worker_ids)
         operations = frozenset(self.allowed_operations)
-        if not workers or any(not _ID_RE.fullmatch(str(value)) for value in workers):
+        if not workers or any(
+            not isinstance(value, str) or _ID_RE.fullmatch(value) is None
+            for value in workers
+        ):
             raise ValueError("remote worker gateway worker allowlist is invalid")
-        if not operations or any(not _ID_RE.fullmatch(str(value)) for value in operations):
+        if not operations:
             raise ValueError("remote worker gateway operation allowlist is invalid")
+        try:
+            operations = frozenset(validate_broker_operation(value) for value in operations)
+        except TransportValidationError as exc:
+            raise ValueError("remote worker gateway operation allowlist is invalid") from exc
         object.__setattr__(self, "allowed_worker_ids", workers)
         object.__setattr__(self, "allowed_operations", operations)
 

@@ -109,8 +109,17 @@ def test_cli_census_reports_source_and_managed_workspace(tmp_path: Path):
 
 
 @pytest.mark.parametrize("enrolled", [False, True])
-def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enrolled: bool):
+@pytest.mark.parametrize("path_component", [
+    "plain",
+    "O'Brien-workspaces",
+    "space $HOME $(touch unexpected-substitution) `touch unexpected-backtick` \";*?[x]&|<>\\dir",
+])
+def test_installer_pins_host_root_and_refuses_missing_mount(
+    tmp_path: Path, enrolled: bool, path_component: str,
+):
     repo_root = Path(__file__).resolve().parents[1]
+    tmp_path = tmp_path / path_component
+    tmp_path.mkdir()
     fixture = tmp_path / "installer-repo"
     (fixture / "scripts").mkdir(parents=True)
     (fixture / "control_plane").mkdir()
@@ -130,6 +139,9 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
     _git(fixture, "init", "-q")
     _git(fixture, "config", "user.name", "Workspace Installer Test")
     _git(fixture, "config", "user.email", "workspace-installer@example.invalid")
+    # The installed multi-repository owner now validates its canonical origin.
+    # Preserve this test's shell-literal/argv/mount assertions with a valid binding.
+    _git(fixture, "remote", "add", "origin", "https://github.com/mastermindx-market-intelligence/Mastermind.git")
     _git(fixture, "add", ".")
     _git(fixture, "commit", "-qm", "fixture")
 
@@ -144,6 +156,7 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
             "volume_uuid": "11111111-1111-1111-1111-111111111111",
             "root": str(fake_home / "pinned-workspaces"),
             "min_free_bytes": 1024,
+            "_why": "Synthetic installer regression policy.",
         }))
     launcher = tmp_path / "bin" / "mmx-workspace"
     payload = tmp_path / "payload"
@@ -165,7 +178,22 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
         stderr=subprocess.PIPE,
     )
     wrapper = launcher.read_text(encoding="utf-8")
-    assert f"export MASTERMIND_SOURCE_REPO='{fixture.resolve()}'" in wrapper
+    syntax = subprocess.run(
+        ["/bin/sh", "-n", str(launcher)], capture_output=True, text=True, check=False,
+    )
+    assert syntax.returncode == 0, syntax.stderr
+    assert (payload / "common" / "__init__.py").is_file()
+    assert (payload / "common" / "commission_ref.py").is_file()
+
+    # Preserve #1120's real installed-package smoke before the argv probe below.
+    smoke_env = dict(env)
+    smoke_env["MASTERMIND_PYTHON"] = sys.executable
+    smoke = subprocess.run(
+        [str(launcher), "--help"], env=smoke_env, check=False,
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert smoke.returncode == 0, smoke.stderr
+    assert "Canonical attended-session workspace route" in smoke.stdout
 
     observed_external = ""
     if Path("/Volumes/Mastermind").is_dir():
@@ -185,16 +213,16 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
     )
     if enrolled:
         expected_root = str(fake_home / "pinned-workspaces")
-    assert f"export MASTERMIND_AGENT_WORKSPACE_ROOT='{expected_root}'" in wrapper
     expected_policy = str(enrolled_policy) if enrolled else ""
-    assert f"export MASTERMIND_WORKSPACE_STORAGE_POLICY='{expected_policy}'" in wrapper
 
     payload_script = payload / "scripts" / "mastermind_workspace.py"
     payload_script.write_text(
-        "import json, os\n"
+        "import json, os, sys\n"
         "print(json.dumps({\"source\": os.environ.get(\"MASTERMIND_SOURCE_REPO\"), "
         "\"root\": os.environ.get(\"MASTERMIND_AGENT_WORKSPACE_ROOT\"), "
-        "\"policy\": os.environ.get(\"MASTERMIND_WORKSPACE_STORAGE_POLICY\")}))\n",
+        "\"policy\": os.environ.get(\"MASTERMIND_WORKSPACE_STORAGE_POLICY\"), "
+        "\"script\": __file__, \"args\": sys.argv[1:]}))\n"
+        "sys.exit(int(os.environ.get('TEST_PAYLOAD_EXIT', '0')))\n",
         encoding="utf-8",
     )
     hostile_env = dict(env)
@@ -202,8 +230,10 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
     hostile_env["MASTERMIND_SOURCE_REPO"] = str(tmp_path / "hostile-source")
     hostile_env["MASTERMIND_AGENT_WORKSPACE_ROOT"] = str(tmp_path / "hostile-root")
     hostile_env["MASTERMIND_WORKSPACE_STORAGE_POLICY"] = str(tmp_path / "unapproved-policy")
+    arguments = ["census", "", "two words", "O'Brien", "$HOME;*?", "line\nbreak"]
     completed = subprocess.run(
-        [str(launcher)],
+        [str(launcher), *arguments],
+        cwd=tmp_path,
         env=hostile_env,
         check=True,
         text=True,
@@ -211,18 +241,36 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
         stderr=subprocess.PIPE,
     )
     observed = json.loads(completed.stdout)
-    assert observed == {"source": str(fixture.resolve()), "root": expected_root, "policy": expected_policy}
+    assert observed == {
+        "source": str(fixture.resolve()), "root": expected_root,
+        "policy": expected_policy, "script": str(payload_script), "args": arguments,
+    }
+    failed_payload = subprocess.run(
+        [str(launcher), *arguments], cwd=tmp_path,
+        env={**hostile_env, "TEST_PAYLOAD_EXIT": "23"},
+        capture_output=True, text=True, check=False,
+    )
+    assert failed_payload.returncode == 23, failed_payload.stderr
+    assert json.loads(failed_payload.stdout) == observed
+    assert not (tmp_path / "unexpected-substitution").exists()
+    assert not (tmp_path / "unexpected-backtick").exists()
 
-    original_mount_line = next(
-        line for line in wrapper.splitlines() if line.startswith("workspace_mount=")
+    # Re-generate from a valid policy with an unavailable mount, exercising the
+    # exact emitted mount literal as well as the successful path above.
+    enrolled_policy.parent.mkdir(parents=True, exist_ok=True)
+    enrolled_policy.write_text(json.dumps({
+        "version": 1, "mount_point": str(tmp_path),
+        "volume_uuid": "11111111-1111-1111-1111-111111111111",
+        "root": str(tmp_path / "workspaces"), "min_free_bytes": 1024,
+    }))
+    subprocess.run(
+        ["/bin/sh", str(fixture / "scripts" / "install_mastermind_workspace_cli.sh")],
+        cwd=fixture, env=env, capture_output=True, text=True, check=True,
     )
-    guarded = wrapper.replace(
-        original_mount_line,
-        f"workspace_mount='{tmp_path}'",
-        1,
+    syntax = subprocess.run(
+        ["/bin/sh", "-n", str(launcher)], capture_output=True, text=True, check=False,
     )
-    launcher.write_text(guarded, encoding="utf-8")
-    launcher.chmod(0o755)
+    assert syntax.returncode == 0, syntax.stderr
     refused = subprocess.run(
         [str(launcher)],
         env=hostile_env,
@@ -232,7 +280,7 @@ def test_installer_pins_host_root_and_refuses_missing_mount(tmp_path: Path, enro
         stderr=subprocess.PIPE,
     )
     assert refused.returncode == 66
-    assert "refusing fallback" in refused.stderr
+    assert f"not mounted at {tmp_path}; refusing fallback" in refused.stderr
 
 
 # Storage admission is part of the existing attended workspace route, not a
@@ -327,6 +375,30 @@ def test_invalid_storage_policy_is_not_silently_ignored(storage_cli, capsys, cha
     assert not root.exists()
 
 
+def test_storage_policy_accepts_bounded_inert_rationale_metadata(storage_cli, capsys):
+    cli, root, policy, data = storage_cli
+    data["_why"] = "operator rationale retained verbatim"
+    policy.write_text(json.dumps(data))
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 0
+    assert result["receipt"]["state"] == "READY"
+    assert result["receipt"]["admission_allowed"] is True
+    assert len(result["receipt"]["policy_sha256"]) == 64
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("why", [None, True, 7, ["text"], {"note": "text"}, "x" * 8193])
+def test_storage_policy_rejects_malformed_rationale_metadata(storage_cli, capsys, why):
+    cli, root, policy, data = storage_cli
+    data["_why"] = why
+    policy.write_text(json.dumps(data))
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 2
+    assert "STORAGE_POLICY_INVALID" in result["error"]
+    assert result["effect"] == "NOT_APPLIED"
+    assert not root.exists()
+
+
 def test_storage_policy_duplicate_keys_are_refused(storage_cli, capsys):
     cli, _, policy, data = storage_cli
     policy.write_text(json.dumps(data)[:-1] + ', "min_free_bytes": 1}')
@@ -376,12 +448,31 @@ def test_wrong_or_missing_volume_identity_blocks_admission(storage_cli, monkeypa
     assert "STORAGE_VOLUME_IDENTITY_MISMATCH" in result["error"]
 
 
-def test_unmounted_path_is_not_a_storage_volume(storage_cli, monkeypatch, capsys):
-    cli, _, _, _ = storage_cli
+def test_non_mount_path_without_exact_native_mount_identity_is_refused(storage_cli, monkeypatch, capsys):
+    cli, _, _, data = storage_cli
     monkeypatch.setattr(Path, "is_mount", lambda p: False)
+    monkeypatch.setattr(cli, "_volume_identity", lambda p: {
+        "MountPoint": "/different-volume",
+        "VolumeUUID": data["volume_uuid"],
+        "Writable": True,
+    })
     code, result = _call_storage_cli(cli, capsys, "storage")
     assert code == 2
-    assert "STORAGE_MOUNT_UNAVAILABLE" in result["error"]
+    assert "STORAGE_VOLUME_IDENTITY_MISMATCH" in result["error"]
+
+
+def test_apfs_data_mountpoint_is_accepted_from_exact_native_identity(storage_cli, monkeypatch, capsys):
+    cli, _, _, data = storage_cli
+    monkeypatch.setattr(Path, "is_mount", lambda p: False)
+    monkeypatch.setattr(cli, "_volume_identity", lambda p: {
+        "MountPoint": data["mount_point"],
+        "VolumeUUID": data["volume_uuid"],
+        "Writable": True,
+    })
+    code, result = _call_storage_cli(cli, capsys, "storage")
+    assert code == 0
+    assert result["receipt"]["state"] == "READY"
+    assert result["receipt"]["mount_point"] == data["mount_point"]
 
 
 def test_storage_observation_failure_does_not_become_free_capacity(storage_cli, monkeypatch, capsys):

@@ -93,10 +93,10 @@ class CoreTests(unittest.TestCase):
         with self.assertRaisesRegex(b.Refusal, "DOCUMENT_CHANGED"):
             self.call()
         self.assertNotIn("create_artboard", self.client.calls)
-    def test_unanchored_document_refuses(self):
+    def test_edit_without_explicit_target_refuses_before_legacy_binding(self):
         self.client.info = {"fileName": "Mastermind scratch", "pageName": "Design",
                             "nodeCount": 0, "artboards": []}
-        with self.assertRaisesRegex(b.Refusal, "DOCUMENT_ANCHOR_REQUIRED"):
+        with self.assertRaisesRegex(b.Refusal, "FILE_ID_REQUIRED"):
             self.call(expected_snapshot=b.digest(self.client.info), arguments={})
         self.assertNotIn("create_artboard", self.client.calls)
 
@@ -133,6 +133,31 @@ class CoreTests(unittest.TestCase):
                       arguments={"fileId": "file-b"})
         self.assertNotIn("create_artboard", self.client.calls)
 
+    def test_explicit_target_edit_does_not_require_active_file_switch(self):
+        active = {"fileId": "file-a", "fileName": "Active", "pageName": "Page A", "artboards": []}
+        target = {"fileId": "file-b", "fileName": "Target", "pageName": "Page B", "artboards": []}
+        owner = self
+
+        class TargetClient(Fake):
+            def __init__(self):
+                super().__init__()
+                self.info = copy.deepcopy(active)
+            def call(self, name, arguments):
+                self.calls.append(name)
+                if name == "get_basic_info":
+                    value = target if arguments.get("fileId") == "file-b" else self.info
+                    return {"structuredContent": copy.deepcopy(value)}
+                if name in b.EDIT_TOOLS:
+                    return {"content": [{"type": "text", "text": "ok"}]}
+                return {"content": [{"type": "text", "text": "ok"}]}
+
+        self.client = TargetClient()
+        result = self.call(expected_snapshot=b.digest(target), arguments={"fileId": "file-b"})
+        self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertEqual(result["before"]["identity"], {"kind": "file-id", "id": "file-b"})
+        self.assertEqual(result["after"]["identity"], {"kind": "file-id", "id": "file-b"})
+        self.assertEqual(self.client.info["fileId"], "file-a")
+
     def test_paper_0511_header_and_detail_merge(self):
         info = b.basic_object(copy.deepcopy(PAPER_0511_RESULT))
         self.assertEqual(info["fileId"], "file-0511")
@@ -158,14 +183,43 @@ class CoreTests(unittest.TestCase):
             self.call(expected_snapshot=b.digest(self.client.info), arguments={"fileId": "file-a"}, _catalog_pin="0" * 64)
         self.assertNotIn("create_artboard", self.client.calls)
 
-    def test_write_refuses_unreviewed_server_before_dispatch(self):
+    def test_default_server_policy_accepts_release_version_drift_when_catalog_matches(self):
+        catalog_pin = b.digest(self.client.catalog())
+        for version in ("0.5.12", "0.5.14"):
+            with self.subTest(version=version):
+                self.client.info = {"fileId": "file-a", "artboards": []}
+                self.client.calls.clear()
+                self.client.server = {"name": "paper-desktop", "version": version}
+                schema = b.schema_receipt(
+                    self.client,
+                    self.client.catalog(),
+                    server_pin=b.SUPPORTED_SERVER,
+                    catalog_pin=catalog_pin,
+                )
+                self.assertTrue(schema["accepted_for_write"])
+                self.assertEqual(schema["server_version_policy"], "OBSERVED_NOT_PINNED")
+                result = self.call(
+                    expected_snapshot=b.digest(self.client.info),
+                    arguments={"fileId": "file-a"},
+                    _server_pin=b.SUPPORTED_SERVER,
+                    _catalog_pin=catalog_pin,
+                )
+                self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+
         self.client.info = {"fileId": "file-a", "artboards": []}
+        self.client.calls.clear()
+        self.client.server = {"name": "not-paper-desktop", "version": "0.5.14"}
         with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-            self.call(expected_snapshot=b.digest(self.client.info), arguments={"fileId": "file-a"}, _server_pin=("paper-desktop", "0.5.11"))
+            self.call(
+                expected_snapshot=b.digest(self.client.info),
+                arguments={"fileId": "file-a"},
+                _server_pin=b.SUPPORTED_SERVER,
+                _catalog_pin=catalog_pin,
+            )
         self.assertNotIn("create_artboard", self.client.calls)
 
     def test_current_safe_tool_classes(self):
-        for name in ["list_files", "find_nodes", "get_tokens",
+        for name in ["find_nodes", "get_tokens",
                      "list_comment_threads", "get_comment_thread",
                      "list_comment_thread_authors"]:
             self.assertIn(name, b.READ_TOOLS)
@@ -173,8 +227,45 @@ class CoreTests(unittest.TestCase):
                      "set_comment_thread_status"]:
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
-                     "export_combined_pdf"]:
+                     "export_combined_pdf", "rename_pages", "list_files",
+                     "list_resources", "rename_resource"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
+        self.assertEqual(
+            b.SUPPORTED_CATALOG_SHA256,
+            "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+        )
+
+    def test_reviewed_full_catalog_fixture_and_descriptor_mutations_fail_closed(self):
+        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "ac18857_full_catalog.json"
+        catalog = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(b.digest(catalog), b.SUPPORTED_CATALOG_SHA256)
+        self.assertIn("write_html", catalog)
+        self.assertIn("rename_pages", catalog)
+        self.assertNotIn("list_files", catalog)
+
+        class CatalogFake(Fake):
+            def __init__(self, value):
+                super().__init__()
+                self.value = value
+                self.server = {"name": "paper-desktop", "version": "0.5.14"}
+            def catalog(self):
+                return copy.deepcopy(self.value)
+
+        for tool_name in ("write_html", "rename_pages"):
+            with self.subTest(tool_name=tool_name):
+                mutated = copy.deepcopy(catalog)
+                mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
+                self.assertNotEqual(b.digest(mutated), b.SUPPORTED_CATALOG_SHA256)
+                client = CatalogFake(mutated)
+                with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                    self.call(
+                        client=client,
+                        expected_snapshot=b.digest(client.info),
+                        arguments={"fileId": "file-fixture"},
+                        _server_pin=b.SUPPORTED_SERVER,
+                        _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
+                    )
+                self.assertNotIn("create_artboard", client.calls)
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
@@ -206,10 +297,97 @@ class CoreTests(unittest.TestCase):
         for name in ["delete_nodes", "export", "launch_shell"]:
             with self.subTest(name=name), self.assertRaisesRegex(b.Refusal, "TOOL_NOT_ALLOWED"):
                 self.call(tool=name)
-    def test_lock_contention_refuses_without_upstream(self):
-        with b.desktop_lock(self.root), self.assertRaisesRegex(b.Refusal, "DESKTOP_BUSY"):
-            self.call()
+    def test_lock_contention_times_out_without_upstream(self):
+        with b.desktop_lock(self.root), patch.object(b, "DESKTOP_LOCK_WAIT_SECONDS", 0):
+            with self.assertRaisesRegex(b.Refusal, "DESKTOP_BUSY"):
+                self.call()
         self.assertEqual(self.client.calls, [])
+
+    def test_transient_lock_contention_waits_then_executes(self):
+        held = threading.Event()
+        release = threading.Event()
+        started = threading.Event()
+        result, errors = [], []
+
+        def owner():
+            with b.desktop_lock(self.root):
+                held.set()
+                release.wait(timeout=2)
+
+        def waiter():
+            started.set()
+            try:
+                with patch.object(b, "DESKTOP_LOCK_WAIT_SECONDS", 1.0):
+                    result.append(self.call())
+            except Exception as exc:
+                errors.append(exc)
+
+        owner_thread = threading.Thread(target=owner)
+        owner_thread.start()
+        self.assertTrue(held.wait(timeout=1))
+        waiter_thread = threading.Thread(target=waiter)
+        waiter_thread.start()
+        self.assertTrue(started.wait(timeout=1))
+        threading.Event().wait(0.05)
+        self.assertEqual(result, [], "waiter must not enter Paper while the host lock is held")
+        release.set()
+        owner_thread.join(timeout=2)
+        waiter_thread.join(timeout=2)
+
+        self.assertFalse(errors)
+        self.assertFalse(owner_thread.is_alive())
+        self.assertFalse(waiter_thread.is_alive())
+        self.assertEqual(result[0]["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertEqual(self.client.calls.count("create_artboard"), 1)
+
+    def test_same_file_disjoint_targets_can_modify_concurrently_across_hosts(self):
+        barrier = threading.Barrier(2)
+
+        class ConcurrentFake(Fake):
+            def call(self, name, arguments):
+                if name in b.EDIT_TOOLS:
+                    self.calls.append(name)
+                    barrier.wait(timeout=3)
+                    self.info["nodeCount"] = self.info.get("nodeCount", 0) + 1
+                    return {"content": [{"type": "text", "text": "ok"}]}
+                return super().call(name, arguments)
+
+        clients = [ConcurrentFake(), ConcurrentFake()]
+        roots = [self.root / "host-a", self.root / "host-b"]
+        results = [None, None]
+        errors = []
+
+        def worker(index, node_id):
+            try:
+                results[index] = b.execute(
+                    "edit",
+                    tool="set_text_content",
+                    arguments={"fileId": "file-fixture", "nodeId": node_id, "text": node_id},
+                    expected_snapshot=b.digest(INFO),
+                    operation_id=f"paper-concurrent-{index}",
+                    allow_write=True,
+                    client=clients[index],
+                    lock_root=roots[index],
+                    _server_pin=None,
+                    _catalog_pin=None,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(0, "node-a")),
+            threading.Thread(target=worker, args=(1, "node-b")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        self.assertFalse(errors)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual([result["state"] for result in results],
+                         ["APPLIED_RESPONSE_OBSERVED", "APPLIED_RESPONSE_OBSERVED"])
+        self.assertTrue(all("set_text_content" in client.calls for client in clients))
     def test_lock_symlink_refused(self):
         target = self.root / "unrelated"
         target.write_text("unchanged")
@@ -249,6 +427,10 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(receipt["provider_homes_modified"])
         self.assertFalse(receipt["executive_production_armed"])
         self.assertTrue(receipt["client_enrollment"]["codex"]["project_trust_required"])
+        agents = (dest / "workspace/AGENTS.md").read_text()
+        self.assertIn("Multiple designers may modify the same Paper file/page", agents)
+        self.assertIn("board/artboard/node", agents)
+        self.assertNotIn("Only one designer owns the active desktop file", agents)
         enrollment = (dest / "ENROLLMENT.md").read_text()
         self.assertIn('trust_level = "trusted"', enrollment)
         self.assertIn("codex login status", enrollment)

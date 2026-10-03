@@ -103,7 +103,12 @@ def IsolatedHome():
         home = tmp / "home"
         home.mkdir()
         (home / "Library" / "LaunchAgents").mkdir(parents=True)
-        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+        pinned = tmp / "pinned-tunnel-client"
+        pinned.write_text("#!/bin/sh\n", encoding="utf-8")
+        pinned.chmod(0o755)
+        with mock.patch.dict(os.environ, {"HOME": str(home)}), mock.patch.object(
+            svc, "PINNED_TUNNEL_CLIENT", str(pinned)
+        ):
             yield tmp, home
 
 
@@ -125,6 +130,7 @@ def _make_key(home: Path, account: str = C1) -> str:
     path = home / ".config" / "tunnel-client" / "credentials" / f"{account}-runtime-key"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("test-placeholder-not-a-live-key\n", encoding="utf-8")
+    path.chmod(0o600)
     return f"file:{path}"
 
 
@@ -165,16 +171,29 @@ def _seed_gateway(account: str, port: int) -> dict:
     return roots
 
 
-def _stage_args(home, tmp, account=C1, tunnel_id=C1_TUNNEL, port=45018, key_ref=None, profile=None, binary=None):
+def _stage_args(
+    home,
+    tmp,
+    account=C1,
+    tunnel_id=C1_TUNNEL,
+    port=45018,
+    key_ref=None,
+    profile=None,
+    binary=None,
+    organization_id=None,
+    rotate_runtime_key=False,
+):
     _seed_gateway(account, port)
     key_ref = key_ref or _make_key(home, account)
-    binary = binary or _make_bin(tmp)
+    binary = binary or Path(svc.PINNED_TUNNEL_CLIENT)
     profile = profile or str(svc._canonical_profile(account))
     return mock.Mock(
         account=account,
         tunnel_id=tunnel_id,
         profile=profile,
         runtime_key_ref=key_ref,
+        organization_id=organization_id,
+        rotate_runtime_key=rotate_runtime_key,
         tunnel_client=str(binary),
     ), binary, key_ref
 
@@ -240,6 +259,68 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(argv[argv.index("--health.listen-addr") + 1], "127.0.0.1:45019")
 
 
+class TestStrictTunnelHealth(unittest.TestCase):
+    def test_requires_successful_control_plane_poll(self):
+        payload = {
+            "healthz": {"ok": True},
+            "readyz": {"ok": True},
+            "control_plane_poll": {"ok": False},
+            "result": "fail",
+        }
+        with mock.patch.object(
+            svc, "_run", return_value=FakeResult(0, json.dumps(payload), "")
+        ):
+            self.assertEqual(
+                svc._strict_tunnel_health(Path("/tc"), 45031),
+                (True, False, False),
+            )
+
+    def test_nonzero_health_exit_cannot_false_green(self):
+        payload = {
+            "healthz": {"ok": True},
+            "readyz": {"ok": True},
+            "control_plane_poll": {"ok": True},
+            "result": "ok",
+        }
+        with mock.patch.object(
+            svc, "_run", return_value=FakeResult(1, json.dumps(payload), "")
+        ):
+            self.assertEqual(
+                svc._strict_tunnel_health(Path("/tc"), 45031),
+                (False, False, False),
+            )
+
+    def test_ready_only_when_local_and_poll_are_ready(self):
+        payload = {
+            "healthz": {"ok": True},
+            "readyz": {"ok": True},
+            "control_plane_poll": {"ok": True},
+            "result": "ok",
+        }
+        with mock.patch.object(
+            svc, "_run", return_value=FakeResult(0, json.dumps(payload), "")
+        ):
+            self.assertEqual(
+                svc._strict_tunnel_health(Path("/tc"), 45031),
+                (True, True, True),
+            )
+
+
+class TestPinnedTunnelClient(unittest.TestCase):
+    def test_non_pinned_tunnel_client_refused(self):
+        with self.assertRaisesRegex(SystemExit, "pinned path"):
+            svc._resolve_tunnel_client("/tmp/not-the-pinned-client")
+
+    def test_pinned_tunnel_client_resolves_exact_path(self):
+        expected = Path(svc.PINNED_TUNNEL_CLIENT)
+        with mock.patch.object(gw, "_resolve_abs", return_value=expected) as resolve:
+            self.assertEqual(
+                svc._resolve_tunnel_client(svc.PINNED_TUNNEL_CLIENT),
+                expected,
+            )
+        resolve.assert_called_once_with("--tunnel-client", svc.PINNED_TUNNEL_CLIENT)
+
+
 class TestStageHappyPath(unittest.TestCase):
     def test_stage_writes_owned_profile_plist_and_hashes(self):
         with IsolatedHome() as (tmp, home):
@@ -289,6 +370,157 @@ class TestStageHappyPath(unittest.TestCase):
             self.assertEqual(roots["plist"].read_bytes(), before[1])
             self.assertEqual(roots["manifest"].read_bytes(), before[2])
 
+    def test_runtime_key_rotation_requires_explicit_flag_and_preserves_prior(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, old_key_ref, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            before = (
+                roots["profile"].read_bytes(),
+                roots["plist"].read_bytes(),
+                roots["manifest"].read_bytes(),
+            )
+            new_key_ref = _make_key(home, "rotated")
+            args.runtime_key_ref = new_key_ref
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "--rotate-runtime-key"):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["profile"].read_bytes(), before[0])
+            self.assertEqual(roots["plist"].read_bytes(), before[1])
+            self.assertEqual(roots["manifest"].read_bytes(), before[2])
+            self.assertNotEqual(old_key_ref, new_key_ref)
+
+    def test_runtime_key_rotation_succeeds_only_when_explicit_and_stopped(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, old_key_ref, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            new_key_ref = _make_key(home, "rotated")
+            args.runtime_key_ref = new_key_ref
+            args.rotate_runtime_key = True
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                rc2, out = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc2, 0)
+            self.assertTrue(json.loads(out)["runtimeKeyRotated"])
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(profile["control_plane"]["api_key"], new_key_ref)
+            self.assertEqual(manifest["runtimeKeyRef"], new_key_ref)
+            self.assertNotEqual(manifest["runtimeKeyRef"], old_key_ref)
+
+    def test_runtime_key_rotation_can_pair_with_one_way_org_enrichment(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            new_key_ref = _make_key(home, "rotated")
+            args.runtime_key_ref = new_key_ref
+            args.organization_id = "org-ChrisAdmin123"
+            args.rotate_runtime_key = True
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                rc2, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc2, 0)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(profile["control_plane"]["api_key"], new_key_ref)
+            self.assertEqual(
+                profile["control_plane"]["organization_id"], "org-ChrisAdmin123"
+            )
+            self.assertEqual(manifest["runtimeKeyRef"], new_key_ref)
+            self.assertEqual(manifest["organizationId"], "org-ChrisAdmin123")
+
+    def test_runtime_key_rotation_refuses_tampered_owned_profile(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            original_manifest = roots["manifest"].read_bytes()
+            roots["profile"].write_text('{"tampered":true}\n', encoding="utf-8")
+            args.runtime_key_ref = _make_key(home, "rotated")
+            args.rotate_runtime_key = True
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "profile hash diverges"):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["manifest"].read_bytes(), original_manifest)
+
+    def test_runtime_key_rotation_refuses_while_launchd_service_is_loaded(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            args.runtime_key_ref = _make_key(home, "rotated")
+            args.rotate_runtime_key = True
+            label = svc._tunnel_label(C1)
+
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(
+                        0, _print_running(str(roots["plist"]), label), ""
+                    )
+                if len(cmd) >= 4 and cmd[1:4] == [
+                    "runtimes", "status", "studio-direct-private-chatgpt1"
+                ]:
+                    return FakeResult(0, _alias_stopped_json(C1), "")
+                return FakeResult(1, "", "unused")
+
+            before = roots["manifest"].read_bytes()
+            with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)):
+                with self.assertRaisesRegex(
+                    SystemExit, "while tunnel service is running"
+                ):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["manifest"].read_bytes(), before)
+
+    def test_restage_can_add_missing_organization_once_but_not_rebind(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, args, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            args.organization_id = "org-ChrisAdmin123"
+            rec = CmdRecorder(handler=_stopped_alias_handler(C1))
+            with mock.patch.object(svc, "_run", rec):
+                rc2, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc2, 0)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            self.assertEqual(
+                profile["control_plane"]["organization_id"], "org-ChrisAdmin123"
+            )
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["organizationId"], "org-ChrisAdmin123")
+
+            accepted = (
+                roots["profile"].read_bytes(),
+                roots["plist"].read_bytes(),
+                roots["manifest"].read_bytes(),
+            )
+            args.organization_id = "org-Different123"
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "one-way addition"):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["profile"].read_bytes(), accepted[0])
+            self.assertEqual(roots["plist"].read_bytes(), accepted[1])
+            self.assertEqual(roots["manifest"].read_bytes(), accepted[2])
+
+            args.organization_id = None
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler(C1))
+            ):
+                with self.assertRaisesRegex(SystemExit, "one-way addition"):
+                    svc.cmd_stage(args)
+            self.assertEqual(roots["profile"].read_bytes(), accepted[0])
+            self.assertEqual(roots["plist"].read_bytes(), accepted[1])
+            self.assertEqual(roots["manifest"].read_bytes(), accepted[2])
+
     def test_other_account_uses_manifest_port(self):
         with IsolatedHome() as (tmp, home):
             rc, out, _, _, _, _ = _do_stage(
@@ -302,7 +534,122 @@ class TestStageHappyPath(unittest.TestCase):
             self.assertEqual(profile["mcp"]["server_urls"][0]["url"], "http://127.0.0.1:45020/mcp")
 
 
+    def test_stage_persists_optional_organization_context(self):
+        with IsolatedHome() as (tmp, home):
+            args, binary, key_ref = _stage_args(
+                home,
+                tmp,
+                account=OTHER,
+                tunnel_id=OTHER_TUNNEL,
+                port=45020,
+                organization_id="org-ChrisAdmin123",
+            )
+            rec = CmdRecorder(handler=_stopped_alias_handler(OTHER))
+            with mock.patch.object(svc, "_run", rec):
+                rc, out = _capture_stdout(lambda: svc.cmd_stage(args))
+            self.assertEqual(rc, 0)
+            payload = json.loads(out)
+            self.assertEqual(payload["organizationId"], "org-ChrisAdmin123")
+            roots = svc._build_tunnel_roots(OTHER)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            self.assertEqual(
+                profile["control_plane"]["organization_id"], "org-ChrisAdmin123"
+            )
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            self.assertEqual(manifest["organizationId"], "org-ChrisAdmin123")
+            self.assertEqual(profile["control_plane"]["api_key"], key_ref)
+            self.assertEqual(
+                plistlib.loads(roots["plist"].read_bytes())["ProgramArguments"],
+                svc._expected_argv(binary, roots["profile"], 45021),
+            )
+
+
 class TestWrongInputs(unittest.TestCase):
+    def test_invalid_organization_id_refused(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(
+                home,
+                tmp,
+                organization_id="workspace-not-an-org",
+            )
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler())
+            ):
+                with self.assertRaisesRegex(SystemExit, "organization id"):
+                    svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
+    def test_group_writable_home_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            home.chmod(0o775)
+            with self.assertRaisesRegex(SystemExit, "HOME permissions"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
+    def test_symlinked_home_refused(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            target = root / "real-home"
+            target.mkdir()
+            target.chmod(0o700)
+            link = root / "linked-home"
+            link.symlink_to(target, target_is_directory=True)
+            key = target / "runtime-key"
+            key.write_text("fixture\n", encoding="utf-8")
+            key.chmod(0o600)
+            with mock.patch.dict(os.environ, {"HOME": str(link)}):
+                with self.assertRaisesRegex(SystemExit, "HOME must be a non-symlink"):
+                    svc._parse_file_ref(f"file:{link / 'runtime-key'}")
+
+    def test_group_or_other_readable_runtime_key_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            key_path = Path(args.runtime_key_ref[5:])
+            key_path.chmod(0o640)
+            with self.assertRaisesRegex(SystemExit, "deny group/other access"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
+    def test_symlinked_runtime_key_parent_refused(self):
+        with IsolatedHome() as (tmp, home):
+            target = tmp / "credential-target"
+            target.mkdir()
+            key = target / "runtime-key"
+            key.write_text("test-placeholder-not-a-live-key\n", encoding="utf-8")
+            key.chmod(0o600)
+            link = home / "credential-link"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(SystemExit, "symlink ancestor"):
+                svc._parse_file_ref(f"file:{link / 'runtime-key'}")
+
+    def test_group_writable_runtime_key_parent_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            key_path = Path(args.runtime_key_ref[5:])
+            key_path.parent.chmod(0o770)
+            with self.assertRaisesRegex(SystemExit, "parent permissions"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
+    def test_runtime_key_owned_by_other_uid_refused_before_stage(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(home, tmp)
+            key_path = Path(args.runtime_key_ref[5:])
+            info = os.lstat(key_path)
+            foreign = mock.Mock(st_mode=info.st_mode, st_uid=os.getuid() + 1)
+            real_lstat = os.lstat
+
+            def fake_lstat(candidate):
+                if Path(candidate) == key_path:
+                    return foreign
+                return real_lstat(candidate)
+
+            with mock.patch.object(svc.os, "lstat", side_effect=fake_lstat):
+                with self.assertRaisesRegex(SystemExit, "owner mismatch"):
+                    svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
+
     def test_wrong_tunnel_id_refused_on_restage(self):
         with IsolatedHome() as (tmp, home):
             rc, _, args, _, _, _ = _do_stage(home, tmp)
@@ -334,6 +681,7 @@ class TestWrongInputs(unittest.TestCase):
                 tunnel_id=C1_TUNNEL,
                 profile=str(svc._canonical_profile(C1)),
                 runtime_key_ref="env:CONTROL_PLANE_API_KEY",
+                organization_id=None,
                 tunnel_client=str(binary),
             )
             with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())):
@@ -344,13 +692,29 @@ class TestWrongInputs(unittest.TestCase):
 
     def test_missing_key_file_refused(self):
         with IsolatedHome() as (tmp, home):
-            args, _, _ = _stage_args(
-                home, tmp, key_ref="file:/tmp/does-not-exist-studio-direct-key"
+            missing = (
+                home
+                / ".config"
+                / "tunnel-client"
+                / "credentials"
+                / "does-not-exist-runtime-key"
             )
-            with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())):
+            args, _, _ = _stage_args(home, tmp, key_ref=f"file:{missing}")
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=_stopped_alias_handler())
+            ):
                 with self.assertRaises(SystemExit) as ctx:
                     svc.cmd_stage(args)
             self.assertIn("not found", str(ctx.exception))
+
+    def test_runtime_key_outside_home_refused(self):
+        with IsolatedHome() as (tmp, home):
+            args, _, _ = _stage_args(
+                home, tmp, key_ref="file:/tmp/not-an-owned-studio-key"
+            )
+            with self.assertRaisesRegex(SystemExit, "outside HOME"):
+                svc.cmd_stage(args)
+            self.assertFalse(svc._canonical_profile(C1).exists())
 
     def test_wrong_profile_path_refused(self):
         with IsolatedHome() as (tmp, home):
@@ -371,6 +735,7 @@ class TestWrongInputs(unittest.TestCase):
                 tunnel_id=C1_TUNNEL,
                 profile=str(svc._canonical_profile(C1)),
                 runtime_key_ref="sk-not-a-file-ref",
+                organization_id=None,
                 tunnel_client=str(_make_bin(tmp)),
             )
             with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())):
@@ -450,6 +815,36 @@ class TestCollisionsAndTamper(unittest.TestCase):
                     svc.cmd_start(mock.Mock(account=C1))
             self.assertIn("exact install", str(ctx.exception))
 
+    def test_non_pinned_manifest_refuses_before_client_execution(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            foreign = _make_bin(tmp, "foreign-tunnel-client")
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            manifest["tunnelClient"] = str(foreign)
+            roots["manifest"].write_text(
+                json.dumps(manifest, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+
+            rec = CmdRecorder(handler=_stopped_alias_handler(C1))
+            with mock.patch.object(svc, "_run", rec):
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc.cmd_start(mock.Mock(account=C1))
+            self.assertFalse(
+                any(call and call[0] == str(foreign) for call in rec.calls)
+            )
+            self.assertFalse(any(call[:2] == ["launchctl", "bootstrap"] for call in rec.calls))
+
+            rec = CmdRecorder(handler=_stopped_alias_handler(C1))
+            with mock.patch.object(svc, "_run", rec):
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc.cmd_status(mock.Mock(account=C1))
+            self.assertFalse(
+                any(call and call[0] == str(foreign) for call in rec.calls)
+            )
+
     def test_profile_tamper_blocks_start(self):
         with IsolatedHome() as (tmp, home):
             rc, _, _, _, _, _ = _do_stage(home, tmp)
@@ -515,22 +910,17 @@ class TestStartStatusStop(unittest.TestCase):
                     return FakeResult(0, _alias_stopped_json(), "")
                 return FakeResult(1, "", "unused")
 
-            def probe(url):
-                if url.endswith("/healthz"):
-                    return {"ok": True, "status": 200}
-                if url.endswith("/readyz"):
-                    return {"ok": False, "status": 503}
-                return {"ok": False, "status": 0}
-
             with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)), mock.patch.object(
-                svc, "_probe_loopback", side_effect=probe
+                svc, "_strict_tunnel_health", return_value=(True, False, False)
             ), mock.patch.object(svc, "_gateway_ready", return_value=True):
                 rc2, out = _capture_stdout(lambda: svc.cmd_status(mock.Mock(account=C1)))
             self.assertEqual(rc2, 0)
             payload = json.loads(out)
             self.assertTrue(payload["running"])
+            self.assertFalse(payload["configurationDrift"])
             self.assertTrue(payload["healthy"])
             self.assertFalse(payload["ready"])
+            self.assertFalse(payload["controlPlanePollReady"])
             self.assertEqual(payload["transportTTL"], "5h")
             self.assertEqual(payload["maxConcurrentRequests"], 4)
             self.assertEqual(payload["pid"], 4321)
@@ -539,7 +929,7 @@ class TestStartStatusStop(unittest.TestCase):
 
             # A green tunnel cannot hide a local gateway that cannot admit work.
             with mock.patch.object(svc, "_run", CmdRecorder(handler=handler)), mock.patch.object(
-                svc, "_probe_loopback", return_value={"ok": True, "status": 200}
+                svc, "_strict_tunnel_health", return_value=(True, True, True)
             ), mock.patch.object(svc, "_gateway_ready", return_value=False):
                 _, out = _capture_stdout(lambda: svc.cmd_status(mock.Mock(account=C1)))
             blocked = json.loads(out)
@@ -547,13 +937,94 @@ class TestStartStatusStop(unittest.TestCase):
             self.assertFalse(blocked["gatewayReady"])
             self.assertFalse(blocked["ready"])
 
+    def test_status_reports_profile_drift_without_executing_untrusted_tunnel(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            label = svc._tunnel_label(C1)
+            profile = json.loads(roots["profile"].read_text(encoding="utf-8"))
+            profile["control_plane"]["organization_id"] = "org-UnmanifestedDrift123"
+            roots["profile"].write_text(
+                json.dumps(profile, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(
+                        0, _print_running(str(roots["plist"]), label), ""
+                    )
+                return FakeResult(1, "", "untrusted tunnel client must not run")
+
+            strict = mock.Mock(return_value=(True, True, True))
+            alias = mock.Mock(return_value=True)
+            gateway = mock.Mock(return_value=True)
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=handler)
+            ), mock.patch.object(
+                svc, "_strict_tunnel_health", strict
+            ), mock.patch.object(
+                svc, "_managed_alias_running", alias
+            ), mock.patch.object(
+                svc, "_gateway_ready", gateway
+            ):
+                rc2, out = _capture_stdout(
+                    lambda: svc.cmd_status(mock.Mock(account=C1))
+                )
+            self.assertEqual(rc2, 0)
+            payload = json.loads(out)
+            self.assertTrue(payload["loaded"])
+            self.assertTrue(payload["running"])
+            self.assertTrue(payload["configurationDrift"])
+            self.assertFalse(payload["healthy"])
+            self.assertFalse(payload["ready"])
+            self.assertFalse(payload["controlPlanePollReady"])
+            self.assertFalse(payload["gatewayReady"])
+            self.assertFalse(payload["managedAliasRunning"])
+            strict.assert_not_called()
+            alias.assert_not_called()
+            gateway.assert_not_called()
+
+    def test_status_reports_running_service_without_manifest_as_drift(self):
+        with IsolatedHome() as (tmp, home):
+            rc, _, _, _, _, _ = _do_stage(home, tmp)
+            self.assertEqual(rc, 0)
+            roots = svc._build_tunnel_roots(C1)
+            label = svc._tunnel_label(C1)
+            roots["manifest"].unlink()
+
+            def handler(cmd):
+                if cmd[:2] == ["launchctl", "print"]:
+                    return FakeResult(
+                        0, _print_running(str(roots["plist"]), label), ""
+                    )
+                return FakeResult(1, "", "untrusted tunnel client must not run")
+
+            strict = mock.Mock(return_value=(True, True, True))
+            with mock.patch.object(
+                svc, "_run", CmdRecorder(handler=handler)
+            ), mock.patch.object(
+                svc, "_strict_tunnel_health", strict
+            ):
+                rc2, out = _capture_stdout(
+                    lambda: svc.cmd_status(mock.Mock(account=C1))
+                )
+            self.assertEqual(rc2, 0)
+            payload = json.loads(out)
+            self.assertTrue(payload["running"])
+            self.assertTrue(payload["configurationDrift"])
+            self.assertFalse(payload["ready"])
+            self.assertIsNone(payload["tunnelId"])
+            strict.assert_not_called()
+
     def test_status_without_process_does_not_claim_health(self):
         with IsolatedHome() as (tmp, home):
             rc, _, _, _, _, _ = _do_stage(home, tmp)
             self.assertEqual(rc, 0)
-            probes = []
+            strict = mock.Mock(return_value=(True, True, True))
             with mock.patch.object(svc, "_run", CmdRecorder(handler=_stopped_alias_handler())), mock.patch.object(
-                svc, "_probe_loopback", side_effect=lambda url: probes.append(url) or {"ok": True}
+                svc, "_strict_tunnel_health", strict
             ):
                 rc2, out = _capture_stdout(lambda: svc.cmd_status(mock.Mock(account=C1)))
             self.assertEqual(rc2, 0)
@@ -562,7 +1033,7 @@ class TestStartStatusStop(unittest.TestCase):
             self.assertFalse(payload["healthy"])
             self.assertFalse(payload["ready"])
             self.assertEqual(payload["transportTTL"], "5h")
-            self.assertEqual(probes, [])
+            strict.assert_not_called()
 
     def test_stop_bootout_only_our_label(self):
         with IsolatedHome() as (tmp, home):

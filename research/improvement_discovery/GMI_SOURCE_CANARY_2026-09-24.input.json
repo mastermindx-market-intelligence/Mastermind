@@ -1,0 +1,210 @@
+{
+  "case_id": "gmi-revealed-source-canary-20260924",
+  "cutoff_at": null,
+  "existing_work": [
+    {
+      "disposition": "OPEN_PROPOSAL",
+      "expectation_id": "finance-private-consumer-readiness",
+      "source_ref": "finance-preflight"
+    },
+    {
+      "disposition": "OPEN_PROPOSAL",
+      "expectation_id": "finance-named-source-1",
+      "source_ref": "macro-proposal-7870"
+    },
+    {
+      "disposition": "OPEN_PROPOSAL",
+      "expectation_id": "finance-named-source-2",
+      "source_ref": "macro-proposal-7870"
+    },
+    {
+      "disposition": "OPEN_PROPOSAL",
+      "expectation_id": "finance-named-source-6",
+      "source_ref": "macro-proposal-7777"
+    }
+  ],
+  "expectations": [
+    {
+      "consumer": "Proposed existing-owner Finance research projection.",
+      "expectation_source": "finance-preflight",
+      "id": "finance-private-consumer-readiness",
+      "requirement": "Owner-accepted, authenticated, private consumer with real path proof.",
+      "scope": "gmi:finance-consumer",
+      "user_job": "Use existing Finance mechanism research through a proven consumer without duplicating the research."
+    },
+    {
+      "consumer": "Existing Finance implementation planning (not production or trade execution).",
+      "expectation_source": "finance-preflight",
+      "id": "finance-named-source-1",
+      "requirement": "Named source file contracts/theme_graph/curation_assertion.v1.schema.json exists at the observed Macro revision. This is source availability only, not behavior, deployment or absence of alternatives.",
+      "scope": "source-path:macro:contracts/theme_graph/curation_assertion.v1.schema.json",
+      "user_job": "Avoid repeating missing-dependency assumptions after source changes."
+    },
+    {
+      "consumer": "Existing Finance implementation planning (not production or trade execution).",
+      "expectation_source": "finance-preflight",
+      "id": "finance-named-source-2",
+      "requirement": "Named source file engine/theme_graph/curation_assertion.py exists at the observed Macro revision. This is source availability only, not behavior, deployment or absence of alternatives.",
+      "scope": "source-path:macro:engine/theme_graph/curation_assertion.py",
+      "user_job": "Avoid repeating missing-dependency assumptions after source changes."
+    },
+    {
+      "consumer": "Existing Finance implementation planning (not production or trade execution).",
+      "expectation_source": "finance-preflight",
+      "id": "finance-named-source-3",
+      "requirement": "Named source file app/theme_research.py exists at the observed Macro revision. This is source availability only, not behavior, deployment or absence of alternatives.",
+      "scope": "source-path:macro:app/theme_research.py",
+      "user_job": "Avoid repeating missing-dependency assumptions after source changes."
+    },
+    {
+      "consumer": "Existing Finance implementation planning (not production or trade execution).",
+      "expectation_source": "finance-preflight",
+      "id": "finance-named-source-4",
+      "requirement": "Named source file site/assets/js/theme-research.js exists at the observed Macro revision. This is source availability only, not behavior, deployment or absence of alternatives.",
+      "scope": "source-path:macro:site/assets/js/theme-research.js",
+      "user_job": "Avoid repeating missing-dependency assumptions after source changes."
+    },
+    {
+      "consumer": "Existing Finance implementation planning (not production or trade execution).",
+      "expectation_source": "finance-preflight",
+      "id": "finance-named-source-5",
+      "requirement": "Named source file site/assets/css/theme-research.css exists at the observed Macro revision. This is source availability only, not behavior, deployment or absence of alternatives.",
+      "scope": "source-path:macro:site/assets/css/theme-research.css",
+      "user_job": "Avoid repeating missing-dependency assumptions after source changes."
+    },
+    {
+      "consumer": "Existing Finance implementation planning (not production or trade execution).",
+      "expectation_source": "finance-preflight",
+      "id": "finance-named-source-6",
+      "requirement": "Named source file contracts/sector_intelligence/sector_dossier_read_model.v1.schema.json exists at the observed Macro revision. This is source availability only, not behavior, deployment or absence of alternatives.",
+      "scope": "source-path:macro:contracts/sector_intelligence/sector_dossier_read_model.v1.schema.json",
+      "user_job": "Avoid repeating missing-dependency assumptions after source changes."
+    }
+  ],
+  "observations": [
+    {
+      "expectation_id": "finance-private-consumer-readiness",
+      "finding": "The pinned R12 artifact calls the route a proposal requiring owner reconciliation. A source inventory does not establish current runtime integration or private-consumer acceptance. Finance research already has its own carrier #7786; this observation must not recreate it.",
+      "scope": "gmi:finance-consumer",
+      "scope_complete": false,
+      "source_refs": [
+        "finance-preflight"
+      ],
+      "state": "UNKNOWN"
+    },
+    {
+      "expectation_id": "finance-named-source-1",
+      "finding": "Exact source inventory: 0/1 required named files present; 1 absent. This establishes source-path coverage only, not semantic quality, alternative absence, deployment, or independent discovery.",
+      "scope": "source-path:macro:contracts/theme_graph/curation_assertion.v1.schema.json",
+      "scope_complete": true,
+      "source_refs": [
+        "finance-preflight",
+        "macro-named-inventory"
+      ],
+      "state": "GAP"
+    },
+    {
+      "expectation_id": "finance-named-source-2",
+      "finding": "Exact source inventory: 0/1 required named files present; 1 absent. This establishes source-path coverage only, not semantic quality, alternative absence, deployment, or independent discovery.",
+      "scope": "source-path:macro:engine/theme_graph/curation_assertion.py",
+      "scope_complete": true,
+      "source_refs": [
+        "finance-preflight",
+        "macro-named-inventory"
+      ],
+      "state": "GAP"
+    },
+    {
+      "expectation_id": "finance-named-source-3",
+      "finding": "Exact source inventory: 0/1 required named files present; 1 absent. This establishes source-path coverage only, not semantic quality, alternative absence, deployment, or independent discovery.",
+      "scope": "source-path:macro:app/theme_research.py",
+      "scope_complete": true,
+      "source_refs": [
+        "finance-preflight",
+        "macro-named-inventory"
+      ],
+      "state": "GAP"
+    },
+    {
+      "expectation_id": "finance-named-source-4",
+      "finding": "Exact source inventory: 0/1 required named files present; 1 absent. This establishes source-path coverage only, not semantic quality, alternative absence, deployment, or independent discovery.",
+      "scope": "source-path:macro:site/assets/js/theme-research.js",
+      "scope_complete": true,
+      "source_refs": [
+        "finance-preflight",
+        "macro-named-inventory"
+      ],
+      "state": "GAP"
+    },
+    {
+      "expectation_id": "finance-named-source-5",
+      "finding": "Exact source inventory: 0/1 required named files present; 1 absent. This establishes source-path coverage only, not semantic quality, alternative absence, deployment, or independent discovery.",
+      "scope": "source-path:macro:site/assets/css/theme-research.css",
+      "scope_complete": true,
+      "source_refs": [
+        "finance-preflight",
+        "macro-named-inventory"
+      ],
+      "state": "GAP"
+    },
+    {
+      "expectation_id": "finance-named-source-6",
+      "finding": "Exact source inventory: 0/1 required named files present; 1 absent. This establishes source-path coverage only, not semantic quality, alternative absence, deployment, or independent discovery.",
+      "scope": "source-path:macro:contracts/sector_intelligence/sector_dossier_read_model.v1.schema.json",
+      "scope_complete": true,
+      "source_refs": [
+        "finance-preflight",
+        "macro-named-inventory"
+      ],
+      "state": "GAP"
+    }
+  ],
+  "origin": "CHAIRMAN_REVEALED",
+  "schema": "mastermind.improvement_observations.v1",
+  "sources": [
+    {
+      "available_at": "2026-09-24T04:48:53Z",
+      "content_sha256": "sha256:952549144a0e108dc6dd7539ad4f5022345c12ad12e69dc9451c12fddb9fec6e",
+      "id": "finance-preflight",
+      "observed_at": "2026-09-24T05:14:56+00:00",
+      "owner": "GITHUB",
+      "ref": "https://github.com/mastermindx-market-intelligence/macro/blob/615f1050e2f7e060d54a3ddfffa80a7127b38d47/research/finance/FINANCE_R12_INTEGRATION_PREFLIGHT_V0_1_2026-09-24.json",
+      "revision": "615f1050e2f7e060d54a3ddfffa80a7127b38d47",
+      "state": "CURRENT",
+      "valid_until": "2026-09-24T11:14:56+00:00"
+    },
+    {
+      "available_at": "2026-09-23T21:59:37-07:00",
+      "content_sha256": "sha256:b10f09f43aaf50c039139b99a28461f2a4b87aab3e6fd1236f30ccd2b70c45b3",
+      "id": "macro-named-inventory",
+      "observed_at": "2026-09-24T05:14:56+00:00",
+      "owner": "GITHUB",
+      "ref": "https://github.com/mastermindx-market-intelligence/macro/tree/33c73dd9f5e65936f0052cb28f4ece4880b51a43",
+      "revision": "33c73dd9f5e65936f0052cb28f4ece4880b51a43",
+      "state": "CURRENT",
+      "valid_until": "2026-09-24T11:14:56+00:00"
+    },
+    {
+      "available_at": "2026-09-24T05:15:51+00:00",
+      "content_sha256": "sha256:e2b6f50f39bc43a23bee9bcd126b9dde14533174f7ea6ce02e6a59c19406b117",
+      "id": "macro-proposal-7777",
+      "observed_at": "2026-09-24T05:15:51+00:00",
+      "owner": "GITHUB",
+      "ref": "https://github.com/mastermindx-market-intelligence/macro/pull/7777",
+      "revision": "4122e3b7e1524482216fb156f201f8229c14011b",
+      "state": "CURRENT",
+      "valid_until": "2026-09-24T11:15:51+00:00"
+    },
+    {
+      "available_at": "2026-09-24T05:15:51+00:00",
+      "content_sha256": "sha256:0b8321708d3144f5d92a0b90839dcf4eef88bb4a20d670d607ea6142223d7cdd",
+      "id": "macro-proposal-7870",
+      "observed_at": "2026-09-24T05:15:51+00:00",
+      "owner": "GITHUB",
+      "ref": "https://github.com/mastermindx-market-intelligence/macro/pull/7870",
+      "revision": "2deb758859d71bfa688558ce648c2150f9960eb5",
+      "state": "CURRENT",
+      "valid_until": "2026-09-24T11:15:51+00:00"
+    }
+  ]
+}

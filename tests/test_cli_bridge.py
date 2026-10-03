@@ -3,6 +3,7 @@
 Pure-logic tests always run. A real round-trip is opt-in (BOT_TEST_LIVE_LLM=1) so the
 default suite never spends subscription tokens.
 """
+import asyncio
 import os
 from pathlib import Path
 
@@ -12,6 +13,45 @@ import yaml
 import bot  # noqa: F401
 
 from brain import cli_bridge, client
+
+
+def test_headless_reasoning_forces_prompt_free_permission_mode(monkeypatch):
+    """Every Claude headless turn must deny would-be prompts instead of waiting for a human."""
+    seen = {}
+
+    async def fake_via_sdk(*args, **kwargs):
+        seen["permission_mode"] = args[9]
+        return {
+            "ok": True,
+            "text": "ok",
+            "model": args[1],
+            "role": args[2],
+            "armed": False,
+            "tools_used": [],
+            "cost_usd": None,
+            "session_id": "fixture",
+            "usage": {},
+            "backend": "sdk",
+        }
+
+    monkeypatch.setattr(cli_bridge, "_SDK", True)
+    monkeypatch.setattr(cli_bridge, "cli_path", lambda: "/usr/bin/claude")
+    monkeypatch.setattr(cli_bridge, "_via_sdk", fake_via_sdk)
+
+    result = asyncio.run(
+        cli_bridge._reason(
+            "fixture",
+            role="scout",
+            log_run=False,
+            _backend_override="cli",
+            _oauth_candidates=[],
+        )
+    )
+
+    assert result["ok"] is True
+    assert cli_bridge._HEADLESS_PERMISSION_MODE == "dontAsk"
+    assert cli_bridge._cfg()["reasoning"]["permission_mode"] == "dontAsk"
+    assert seen["permission_mode"] == "dontAsk"
 
 
 def test_model_tier_routing():

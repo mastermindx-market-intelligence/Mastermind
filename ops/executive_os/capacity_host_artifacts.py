@@ -2299,7 +2299,10 @@ def _open_source_repair_parents(
 
         secured = (
             (root_descriptor, 0o755),
-            (capacity_sources, 0o755),
+            # H0 is installed under umask 077. Keep the intermediate
+            # capacity-sources boundary owner-only; only its macro child is
+            # intentionally traversable/readable.
+            (capacity_sources, 0o700),  # permission mode
             (source_descriptor, 0o755),
             (generation_descriptor, 0o755),
             (staging_descriptor, 0o700),
@@ -7466,7 +7469,10 @@ class _RepositoryView:
                         relation_parent=self.guard_descriptors[-1],
                         observed=observed,
                         native_tmp=(
-                            native_alias_name == "tmp"
+                            sys.platform == "darwin"
+                            # The alias and its canonical spelling reach the
+                            # same native root; both retain its strict policy.
+                            and components[:2] == ["private", "tmp"]
                             and component_index == 1
                             and component == "tmp"
                         ),

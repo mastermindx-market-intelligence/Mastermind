@@ -52,10 +52,153 @@ def _workspace_root() -> Path:
 
 
 
+# Installation configuration for this existing allocator, not a second registry.
+# Only the installed wrapper supplies paths. Public callers select closed aliases.
+_REPOSITORY_SCHEMA = "mastermind.workspace_repositories/v1"
+_REPOSITORIES = {
+    "mastermind": ("mastermindx-market-intelligence/Mastermind", "master"),
+    "macro": ("mastermindx-market-intelligence/macro", "main"),
+    "terminal": ("mastermindx-market-intelligence/mastermind-terminal", "master"),
+}
+_REPOSITORY_CONFIG_ENV = "MASTERMIND_WORKSPACE_REPOSITORIES"
+
+
+def _repository_git(source: Path, *arguments: str) -> str:
+    """Bounded local observation; never fetch, write config, or create metadata."""
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update({"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+                        "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_LAZY_FETCH": "1",
+                        "GIT_NO_REPLACE_OBJECTS": "1", "GIT_TERMINAL_PROMPT": "0"})
+    try:
+        result = subprocess.run(["git", "-C", str(source), *arguments],
+                                env=environment, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=10, check=False)
+        if result.returncode or len(result.stdout.encode("utf-8")) > 65536:
+            raise ValueError("repository observation failed")
+        return result.stdout.strip()
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError("REPOSITORY_SOURCE_UNAVAILABLE: local Git observation failed") from exc
+
+
+def _repository_path(value: object) -> Path:
+    if (type(value) is not str or not value or len(value) > 4096
+            or any(ord(character) < 32 for character in value)
+            or not Path(value).is_absolute()):
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: expected an absolute host-owned path")
+    return Path(value)
+
+
+def _inspect_repository_binding(alias: str, value: object) -> dict[str, str]:
+    if alias not in _REPOSITORIES or type(value) is not dict or set(value) != {"source_repository", "common_git_dir"}:
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: repository fields are not closed")
+    source = _repository_path(value["source_repository"])
+    expected_common = _repository_path(value["common_git_dir"])
+    try:
+        if source.resolve(strict=True) != source or not source.is_dir():
+            raise ValueError("source identity changed")
+        if expected_common.resolve(strict=True) != expected_common or not expected_common.is_dir():
+            raise ValueError("common directory changed")
+        top = Path(_repository_git(source, "rev-parse", "--show-toplevel")).resolve(strict=True)
+        common = Path(_repository_git(source, "rev-parse", "--git-common-dir"))
+        common = (common if common.is_absolute() else source / common).resolve(strict=True)
+        if top != source or common != expected_common:
+            raise ValueError("Git identity changed")
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: installed Git identity no longer matches") from exc
+    repository, default_branch = _REPOSITORIES[alias]
+    remote = f"https://github.com/{repository}.git"
+    # Check complete effective fetch AND push destinations, including rewrites.
+    # Multiple or noncanonical origins cannot be admitted as one bound target.
+    for direction in ((), ("--push",)):
+        if _repository_git(source, "remote", "get-url", *direction, "--all", "origin") != remote:
+            raise WorkspaceError("REPOSITORY_REMOTE_MISMATCH: origin is not the installed canonical repository")
+    return {"alias": alias, "repository_full_name": repository,
+            "default_branch": default_branch, "remote_url": remote,
+            "source_repository": str(source), "common_git_dir": str(common)}
+
+
+def _installed_repository_bindings() -> dict[str, object]:
+    raw = os.environ.get(_REPOSITORY_CONFIG_ENV, "")
+    if not raw:
+        return {}
+    try:
+        if len(raw.encode("utf-8")) > 32768:
+            raise ValueError("repository configuration exceeds bound")
+        value = json.loads(raw, object_pairs_hook=_unique_policy_pairs)
+        if (type(value) is not dict or set(value) != {"schema", "repositories"}
+                or value["schema"] != _REPOSITORY_SCHEMA
+                or type(value["repositories"]) is not dict
+                or "mastermind" not in value["repositories"]
+                or not set(value["repositories"]).issubset(_REPOSITORIES)):
+            raise ValueError("repository configuration is not closed")
+        return value["repositories"]
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: installed repository configuration is invalid") from exc
+
+
+def _selected_repository(alias: str, *, explicit: bool) -> Path:
+    bindings = _installed_repository_bindings()
+    if not bindings and alias == "mastermind" and not explicit:
+        # Preserve the unconfigured legacy administrative/test seam. Installed
+        # launchers always pin the new configuration and cannot take this path.
+        return _source_repo()
+    if alias not in bindings:
+        raise WorkspaceError("REPOSITORY_NOT_ENROLLED: requested repository is not installed on this host")
+    return Path(_inspect_repository_binding(alias, bindings[alias])["source_repository"])
+
+
+def _repository_workspace_root(root: Path, alias: str) -> Path:
+    selected = root if alias == "mastermind" else root / alias
+    # Refuse a substituted per-repository directory before the constructor runs.
+    if selected.resolve() != selected:
+        raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: repository workspace root is indirect")
+    return selected
+
+
+def _repository_discovery(root: Path) -> dict[str, object]:
+    bindings = _installed_repository_bindings()
+    rows: list[dict[str, object]] = []
+    for alias, (repository, branch) in _REPOSITORIES.items():
+        row: dict[str, object] = {"alias": alias, "repository_full_name": repository,
+                                  "default_branch": branch, "state": "NOT_ENROLLED"}
+        if alias in bindings:
+            try:
+                row.update(_inspect_repository_binding(alias, bindings[alias]))
+                row["workspace_root"] = str(_repository_workspace_root(root, alias))
+                row["state"] = "READY"
+            except WorkspaceError as exc:
+                row.update(state="UNAVAILABLE", code=str(exc).split(":", 1)[0])
+        rows.append(row)
+    return {"schema": _REPOSITORY_SCHEMA, "repositories": rows,
+            "admission_check_only": True, "workspace_created": False}
+
+
+def installation_repository_bindings(source: Path, registrations: list[str]) -> dict[str, object]:
+    """Validate installer-only paths before producing one immutable wrapper input."""
+    selected = {"mastermind": source.resolve()}
+    for registration in registrations:
+        alias, separator, raw_path = registration.partition("=")
+        if not separator or alias not in _REPOSITORIES or alias in selected:
+            raise WorkspaceError("REPOSITORY_BINDING_INVALID: duplicate or unsupported installer target")
+        selected[alias] = _repository_path(raw_path).resolve()
+    bindings: dict[str, object] = {}
+    for alias, repository in selected.items():
+        common = Path(_repository_git(repository, "rev-parse", "--git-common-dir"))
+        common = (common if common.is_absolute() else repository / common).resolve()
+        candidate = {"source_repository": str(repository), "common_git_dir": str(common)}
+        _inspect_repository_binding(alias, candidate)
+        bindings[alias] = candidate
+    if len({value["common_git_dir"] for value in bindings.values()}) != len(bindings):
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: independent repositories share Git metadata")
+    return {"schema": _REPOSITORY_SCHEMA, "repositories": bindings}
+
+
 _STORAGE_POLICY_FIELDS = frozenset(
     {"version", "mount_point", "volume_uuid", "root", "min_free_bytes"}
 )
+_STORAGE_POLICY_METADATA_FIELDS = frozenset({"_why"})
 _STORAGE_POLICY_MAX_BYTES = 16 * 1024
+_STORAGE_POLICY_MAX_RATIONALE_BYTES = 8 * 1024
 
 
 def _unique_policy_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -104,8 +247,20 @@ def _read_storage_policy(path: Path) -> tuple[dict[str, object], str]:
         ):
             raise ValueError("policy changed while reading")
         data = json.loads(payload.decode("utf-8"), object_pairs_hook=_unique_policy_pairs)
-        if not isinstance(data, dict) or set(data) != _STORAGE_POLICY_FIELDS:
+        if (
+            not isinstance(data, dict)
+            or not _STORAGE_POLICY_FIELDS.issubset(data)
+            or not set(data).issubset(_STORAGE_POLICY_FIELDS | _STORAGE_POLICY_METADATA_FIELDS)
+        ):
             raise ValueError("policy fields are not closed")
+        if "_why" in data:
+            rationale = data["_why"]
+            if (
+                type(rationale) is not str
+                or not rationale
+                or len(rationale.encode("utf-8")) > _STORAGE_POLICY_MAX_RATIONALE_BYTES
+            ):
+                raise ValueError("policy rationale metadata is invalid")
         if type(data["version"]) is not int or data["version"] != 1:
             raise ValueError("unsupported policy version")
         minimum = data["min_free_bytes"]
@@ -166,7 +321,7 @@ def _storage_status(root: Path) -> dict[str, object]:
     policy, digest = _read_storage_policy(Path(policy_path))
     try:
         mount = Path(str(policy["mount_point"]))
-        if mount.is_symlink() or not mount.is_dir() or not mount.is_mount():
+        if mount.is_symlink() or not mount.is_dir():
             raise WorkspaceError("STORAGE_MOUNT_UNAVAILABLE: enrolled volume is not mounted")
         mount = mount.resolve()
         configured_root = Path(str(policy["root"])).resolve()
@@ -181,8 +336,9 @@ def _storage_status(root: Path) -> dict[str, object]:
         observed = _volume_identity(mount)
         observed_uuid = observed.get("VolumeUUID")
         if (
-            # APFS diskutil output omits Mounted; is_mount() and the exact
-            # MountPoint/UUID above and below supply the positive witness.
+            # APFS Data is a diskutil mount even though pathlib.is_mount()
+            # reports false across the macOS firmlink. Exact native
+            # MountPoint/UUID plus Writable provide the positive witness.
             observed.get("Mounted", True) is not True
             or observed.get("MountPoint") != str(mount)
             or not isinstance(observed_uuid, str)
@@ -222,15 +378,16 @@ def _workspace_path(root: Path, lane: str, operation_id: str) -> Path:
     return root / lane / operation_id.strip().lower()
 
 
-def _emit(action: str, receipt: object, *, effect: str) -> int:
+def _emit(action: str, receipt: object, *, effect: str, repository: str | None = None) -> int:
     body = receipt.to_dict() if hasattr(receipt, "to_dict") else receipt
     print(
         json.dumps(
             {
-                "schema_version": SCHEMA,
+                "schema_version": SCHEMA if repository is None else "mastermind.workspace_cli/v2",
                 "action": action,
                 "effect": effect,
                 "receipt": body,
+                **({"repository": repository} if repository is not None else {}),
             },
             sort_keys=True,
         )
@@ -242,20 +399,25 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
 
+    sub.add_parser("repositories", help="read-only discovery of installed repository bindings")
     acquire = sub.add_parser("acquire", help="acquire or reuse one linked workspace")
     acquire.add_argument("--operation-id", required=True)
     acquire.add_argument("--base-sha", required=True)
     acquire.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
+    acquire.add_argument("--repository", choices=sorted(_REPOSITORIES))
 
-    sub.add_parser("census", help="read-only census of registered source worktrees")
+    census = sub.add_parser("census", help="read-only census of registered source worktrees")
+    census.add_argument("--repository", choices=sorted(_REPOSITORIES))
     sub.add_parser("storage", help="read-only enrolled volume and free-space admission check")
     prune = sub.add_parser("prune-missing", help="prune only registrations whose paths Git proves missing")
     prune.add_argument("--apply", action="store_true", help="apply; default is dry-run")
+    prune.add_argument("--repository", choices=sorted(_REPOSITORIES))
 
     for name in ("status", "release"):
         command = sub.add_parser(name, help=f"{name} one managed linked workspace")
         command.add_argument("--operation-id", required=True)
         command.add_argument("--lane", choices=sorted(ALLOWED_LANES), default="web")
+        command.add_argument("--repository", choices=sorted(_REPOSITORIES))
     return parser
 
 
@@ -382,24 +544,39 @@ def _prune_missing(source: Path, *, apply: bool) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    source = _source_repo()
-    root = _workspace_root()
-    destination = (
-        _workspace_path(root, args.lane, args.operation_id)
-        if args.action in {"status", "release"}
-        else None
-    )
+    selected = getattr(args, "repository", None)
+    alias = selected or "mastermind"
     try:
+        host_root = _workspace_root()
+        if args.action == "repositories":
+            return _emit("repositories", _repository_discovery(host_root), effect="NOT_APPLIED")
         if args.action == "storage":
-            return _emit("storage", _storage_status(root), effect="NOT_APPLIED")
+            return _emit("storage", _storage_status(host_root), effect="NOT_APPLIED")
+        source = _selected_repository(alias, explicit=selected is not None)
+        root = _repository_workspace_root(host_root, alias)
+        destination = (
+            _workspace_path(root, args.lane, args.operation_id)
+            if args.action in {"status", "release"}
+            else None
+        )
         if args.action == "census":
-            return _emit("census", _census(source, root), effect="NOT_APPLIED")
+            return _emit("census", _census(source, root), effect="NOT_APPLIED", repository=selected)
         if args.action == "prune-missing":
             receipt = _prune_missing(source, apply=args.apply)
-            return _emit("prune-missing", receipt, effect="APPLIED" if args.apply and receipt["lines"] else "NOT_APPLIED")
+            return _emit("prune-missing", receipt,
+                         effect="APPLIED" if args.apply and receipt["lines"] else "NOT_APPLIED",
+                         repository=selected)
         if args.action == "acquire":
-            if not _storage_status(root)["admission_allowed"]:
+            if selected is not None:
+                if (len(args.base_sha) != 40 or any(c not in "0123456789abcdef" for c in args.base_sha)
+                        or _repository_git(source, "rev-parse", "--verify", args.base_sha + "^{commit}") != args.base_sha):
+                    raise WorkspaceError("REPOSITORY_BASE_INVALID: expected an available exact commit")
+            # The enrolled policy names the host root, not a repository subroot.
+            if not _storage_status(host_root)["admission_allowed"]:
                 raise WorkspaceError("STORAGE_LOW_SPACE: available storage is below the host reserve")
+            # Storage observation may block: re-observe the source at the effect boundary.
+            if _selected_repository(alias, explicit=selected is not None) != source:
+                raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: selected repository changed")
             receipt = prepare_linked_worktree(
                 source,
                 root,
@@ -409,37 +586,32 @@ def main(argv: list[str] | None = None) -> int:
                 branch=_branch(args.operation_id, args.lane),
             )
             return _emit(
-                "acquire",
-                receipt,
+                "acquire", receipt,
                 effect="NOT_APPLIED" if receipt.reused else "APPLIED",
+                repository=selected,
             )
         if args.action == "status":
             receipt = inspect_linked_worktree(
-                source,
-                root,
-                destination,
-                expected_operation_id=args.operation_id,
+                source, root, destination, expected_operation_id=args.operation_id,
             )
-            return _emit("status", receipt, effect="NOT_APPLIED")
+            return _emit("status", receipt, effect="NOT_APPLIED", repository=selected)
         receipt = release_linked_worktree(
-            source,
-            root,
-            destination,
-            expected_operation_id=args.operation_id,
+            source, root, destination, expected_operation_id=args.operation_id,
         )
         return _emit(
-            "release",
-            receipt,
+            "release", receipt,
             effect="APPLIED" if receipt.removed else "NOT_APPLIED",
+            repository=selected,
         )
     except WorkspaceError as exc:
         print(
             json.dumps(
                 {
-                    "schema_version": SCHEMA,
+                    "schema_version": SCHEMA if selected is None else "mastermind.workspace_cli/v2",
                     "action": args.action,
                     "effect": "NOT_APPLIED",
                     "error": str(exc),
+                    **({"repository": selected} if selected is not None else {}),
                 },
                 sort_keys=True,
             ),

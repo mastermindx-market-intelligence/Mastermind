@@ -1532,6 +1532,36 @@ def test_provenance_schema_is_pinned_to_the_intent_bridge():
     assert INTENT_SCHEMA.startswith(mod.CEO_INTENT_SCHEMA_PREFIX)
 
 
+def test_service_schema_provenance_is_not_classified_as_ceo_origin(tmp_path):
+    """A durable service-schema stamp is not CEO-origin. Reader UNCHANGED."""
+    from control_plane.ceo_intent import INTENT_SCHEMA_SERVICE
+
+    runtime = Runtime.at(tmp_path, clock=_Clock(), lease_seconds=_LONG_LEASE_SECONDS)
+    intent = {
+        "schema": INTENT_SCHEMA_SERVICE,
+        "intent_id": "svc-inbox-not-ceo",
+        "actor": "svc-site-maintenance",
+        "objective": "Audit published site health; do not treat as CEO origin.",
+        "department": "executive-infrastructure",
+        "priority": 3,
+        "grounding": {
+            "mastermind_sha": "1" * 40,
+            "macro_sha": "2" * 40,
+        },
+        "principal_id": "svc-site-maintenance",
+        "task_kind": "research",
+        "execution_contract": {
+            "requested_authorities": ["READ", "RESEARCH"],
+            "authority_level": "A0",
+        },
+    }
+    receipt = submit_intent(runtime, intent)
+    provenance, warning = mod.ceo_intent_provenance(runtime, receipt["job_id"])
+    assert provenance is None
+    assert warning is None
+    assert not INTENT_SCHEMA_SERVICE.startswith(mod.CEO_INTENT_SCHEMA_PREFIX)
+
+
 def test_a_versioned_sibling_provenance_is_named_not_silently_dropped(
     tmp_path, frozen_git
 ):
