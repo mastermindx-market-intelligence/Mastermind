@@ -48,7 +48,7 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
     assert mutation.index(relay_loaded) < mutation.index(control_loaded)
     assert '"$description LaunchDaemon remained loaded after bootout"' in source
 
-    archive = '/usr/bin/git -C "$SOURCE_REPO" archive'
+    archive = 'source_git -C "$SOURCE_REPO" archive'
     assert source.index(relay_loaded) < source.index(archive)
     assert 'RELAY_PLIST=' not in source
     assert '/bin/launchctl bootstrap "system/$RELAY_LABEL"' not in source

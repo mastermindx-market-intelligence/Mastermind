@@ -862,6 +862,39 @@ SOURCE_POLICY="$SCRIPT_DIR/install_source_policy.py"
   /bin/echo "installer source policy helper is unavailable or unsafe" >&2
   exit 65
 }
+# The installer runs as root while the accepted source checkout belongs to
+# the operator. Resolve the exact worktree Git directory as that operator,
+# then trust only those two paths for this process tree. Local clone/upload-
+# pack addresses a linked worktree by its Git dir, not only by worktree root.
+# Never require or mutate persistent/root/global Git safe.directory state.
+SOURCE_GIT_DIR="$(/usr/bin/sudo -n -u "$OPERATOR_USER" /usr/bin/env -i \
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
+  /usr/bin/git --no-optional-locks -C "$SOURCE_REPO" rev-parse --absolute-git-dir)" || {
+  /bin/echo "could not resolve accepted source Git directory" >&2
+  exit 65
+}
+case "$SOURCE_GIT_DIR" in
+  /*) ;;
+  *) /bin/echo "accepted source Git directory is not absolute" >&2; exit 65 ;;
+esac
+[ -d "$SOURCE_GIT_DIR" ] && [ ! -L "$SOURCE_GIT_DIR" ] || {
+  /bin/echo "accepted source Git directory is unavailable or unsafe" >&2
+  exit 65
+}
+SOURCE_GIT_ENV=(
+  /usr/bin/env -i
+  PATH=/usr/bin:/bin:/usr/sbin:/sbin
+  LANG=C.UTF-8 LC_ALL=C.UTF-8
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  GIT_CONFIG_COUNT=2
+  GIT_CONFIG_KEY_0=safe.directory "GIT_CONFIG_VALUE_0=$SOURCE_REPO"
+  GIT_CONFIG_KEY_1=safe.directory "GIT_CONFIG_VALUE_1=$SOURCE_GIT_DIR"
+  GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0
+)
+source_git() {
+  "${SOURCE_GIT_ENV[@]}" /usr/bin/git --no-optional-locks "$@"
+}
 SOURCE_POLICY_ARGS=(
   --source-repo "$SOURCE_REPO"
   --expected-sha "$EXPECTED_SHA"
@@ -874,12 +907,12 @@ if [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "1" ]; then
 elif [ -n "$PROTECTED_MASTER_SHA" ]; then
   SOURCE_POLICY_ARGS+=(--protected-master-sha "$PROTECTED_MASTER_SHA")
 fi
-"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/install_source_policy.py" \
+"${SOURCE_GIT_ENV[@]}" "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/install_source_policy.py" \
   "${SOURCE_POLICY_ARGS[@]}" >/dev/null || {
     /bin/echo "source checkout failed the reviewed Executive install policy" >&2
     exit 65
   }
-TREE_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
+TREE_SHA="$(source_git -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 RUNTIME_ROOT="/var/db/mastermind-executive"
@@ -1048,7 +1081,7 @@ wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
+  source_git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   # mktemp creates the staging root as 0700. Both non-root service UIDs need
@@ -1119,7 +1152,7 @@ esac
 
 ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
 if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
-  /usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  source_git clone --no-hardlinks --no-checkout "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi
