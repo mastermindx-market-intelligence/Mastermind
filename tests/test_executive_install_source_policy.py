@@ -185,6 +185,30 @@ def test_frozen_mode_binds_the_installer_checkout_to_current_protected_master(
         )
 
 
+def test_root_installer_reads_operator_owned_source_without_persistent_git_trust() -> None:
+    install = INSTALL.read_text(encoding="utf-8")
+
+    assert "run_operator_source() {" in install
+    assert '/usr/bin/sudo -n -u "$OPERATOR_USER" /usr/bin/env -i' in install
+    assert "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1" in install
+    assert "GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0" in install
+    assert "safe.directory" not in install
+    assert (
+        'run_operator_source "$PYTHON_BINARY" -I -S -B '
+        '"$SCRIPT_DIR/install_source_policy.py"'
+    ) in install
+    assert 'TREE_SHA="$(run_operator_source /usr/bin/git -C "$SOURCE_REPO"' in install
+    assert (
+        'run_operator_source /usr/bin/git -C "$SOURCE_REPO" '
+        'archive --format=tar "$EXPECTED_SHA"'
+    ) in install
+    assert "run_operator_source /usr/bin/git clone --no-hardlinks --no-checkout" in install
+    assert '"/private/tmp/mastermind-admin-checkout.$EXPECTED_SHA.XXXXXX"' in install
+    assert '/bin/rm -rf -- "$ADMIN_CHECKOUT_TEMP"' in install
+    assert '\n  /usr/bin/git -C "$SOURCE_REPO"' not in install
+    assert '\n  /usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO"' not in install
+
+
 def test_installer_exposes_explicit_frozen_mode_without_reusing_historical_source_law() -> None:
     install = INSTALL.read_text(encoding="utf-8")
     assert "--allow-frozen-accepted-ancestor" in install
