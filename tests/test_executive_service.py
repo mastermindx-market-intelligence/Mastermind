@@ -10485,3 +10485,275 @@ def test_proof_recovery_observer_requires_positive_fixed_uid(tmp_path, uid):
     with pytest.raises(ValueError, match="fixed observer and worker UID"):
         ExecutiveControlService(_config(tmp_path), proof_capacity_recovery_observer=lambda a: {},
                                 proof_capacity_recovery_worker_uid=uid)
+
+
+@pytest.mark.parametrize("fault", [None, "root", "history", "extra_event", "quota", "fence"])
+def test_maintenance_preserves_baseline_across_real_proof_lineage(tmp_path, short_socket_root, fault):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer = _proof_absence
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        try:
+            old_id, old_lost = await _requeued_missing_proof(service)
+            runtime = service.runtime
+            root_receipt = service._submit_service_intent(_coo_intent(service.config,"maintenance"))
+            root_id = root_receipt["job_id"]
+            database = service.config.runtime_root/"data/control_plane/executive.sqlite3"
+            before = maintenance.snapshot(database)
+            descriptor = dict(recovery_job_id=old_id, recovery_attempt_id=old_lost.attempt_id,
+                              worker_id=service.config.worker_id, quota_class=service.config.quota_class,
+                              successor_sha=service.config.proof_base_sha)
+            await service._recover_proof_capacity(old_id,old_lost.attempt_id)
+            first = await _request(service,"create-proof-job")
+            first_id = first["result"]["job_id"]
+            assert (await _request(service,"dispatch",{"job_id":first_id}))["ok"]
+            await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+            second_id, second_lost = await _requeued_missing_proof(service)
+            await service._recover_proof_capacity(second_id,second_lost.attempt_id)
+            assert (await _request(service,"dispatch",{"job_id":second_id}))["ok"]
+            await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+            after = maintenance.snapshot(database)
+            if fault=="root":
+                next(r for r in after["tables"]["jobs"] if r["job_id"]==root_id)["version"] += 1
+            elif fault=="history":
+                after["tables"]["events"][0]["actor"]="foreign"
+            elif fault=="extra_event":
+                event=dict(after["tables"]["events"][-1],event_id=9999,job_id=root_id)
+                after["tables"]["events"].append(event)
+            elif fault=="quota":
+                after["tables"]["worker_quota_classes"][0]["metadata_json"]='{"foreign":true}'
+            elif fault=="fence":
+                after["tables"]["worker_quota_classes"][0]["fence_counter"] += 1
+            if fault:
+                with pytest.raises(maintenance.MaintenanceError):
+                    maintenance.verify_preserved(before,after,descriptor,[first_id,second_id])
+            else:
+                maintenance.verify_preserved(before,after,descriptor,[first_id,second_id])
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_recovery_never_authorizes_predecessor_dispatch(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service, _ = _service(tmp_path,socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer=_proof_absence
+        service._proof_capacity_recovery_worker_uid=451
+        await service.start()
+        try:
+            job_id,lost=await _requeued_missing_proof(service)
+            previous=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40)
+            job=service.runtime.jobs.get_job(job_id)
+            assert job.constraints["base_sha"]==previous
+            assert not service._is_fixed_proof_job(job)
+            monkeypatch.setattr(maintenance,"recovery_permitted",
+                lambda candidate,attempt_id,*args: candidate.job_id==job_id and attempt_id==lost.attempt_id)
+            assert service._is_maintenance_recovery_job(job,lost.attempt_id)
+            receipt=await service._recover_proof_capacity(job_id,lost.attempt_id)
+            assert receipt["status"]=="AVAILABLE"
+            assert not service._is_fixed_proof_job(job)
+            response=await _request(service,"dispatch",{"job_id":job_id})
+            assert response["ok"] is False
+            service.config=dataclasses.replace(service.config,ceo_submit_armed=True)
+            assert not service._is_maintenance_recovery_job(job,lost.attempt_id)
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fault",[None,"profile","event","summary","missing","other_root"])
+def test_maintenance_root_binding_keeps_frozen_base_and_harness(tmp_path, short_socket_root, monkeypatch,fault):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt=service._submit_service_intent(_coo_intent(service.config,"frozen"))
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            predecessor=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40,
+                coo_autonomy_armed=True,coo_operator_harness_armed=True)
+            # Explicitly refresh the current binding fixture after host config transition.
+            service._coo_execution_binding=service._load_coo_execution_binding()
+            with service.runtime.store.read() as conn:
+                event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
+            descriptor=dict(root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+                predecessor_sha=predecessor,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
+            summary_raw=b"reviewed acceptance"
+            carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,
+                descriptor_sha256=maintenance.digest(descriptor),
+                acceptance_summary_sha256=hashlib.sha256(summary_raw).hexdigest())
+            if fault=="profile":
+                root=dataclasses.replace(root,constraints=dict(root.constraints,execution_profile_digest="c"*64))
+            elif fault=="event":
+                descriptor["root_event_sha256"]="c"*64
+                carry["descriptor_sha256"]=maintenance.digest(descriptor)
+            elif fault=="summary":
+                carry["acceptance_summary_sha256"]="c"*64
+            elif fault=="other_root":
+                descriptor["root_job_id"]="JOB-other"
+            monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+            monkeypatch.setattr(maintenance,"summary_document",lambda sha:({},summary_raw))
+            def read(path):
+                if fault=="missing": raise FileNotFoundError(path)
+                return carry
+            monkeypatch.setattr(maintenance,"sealed_json",read)
+            if fault=="other_root":
+                assert not service._is_bound_coo_root(root)
+            elif fault:
+                with pytest.raises(StateConflict):
+                    service._is_bound_coo_root(root)
+            else:
+                assert service._is_bound_coo_root(root)
+                effective=service._coo_binding_for_root(root)
+                assert effective["base_sha"]==predecessor
+                assert effective["operator_harness_armed"] is False
+                assert service._require_initial_coo_workspace(root)["head"]==predecessor
+                service.config=dataclasses.replace(service.config,coo_autonomy_armed=False,coo_operator_harness_armed=False)
+                with pytest.raises(StateConflict,match="not armed"):
+                    await service._run_coo_cycle_once(root.job_id)
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_preparation_publishes_complete_baseline_and_refuses_drift(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        host=tmp_path/"host"
+        config=_config(tmp_path,runtime_root=host/"control/db",socket_root=short_socket_root)
+        service,_=_service(tmp_path,config=config)
+        await service.start()
+        try:
+            old_id,lost=await _requeued_missing_proof(service)
+            receipt=service._submit_service_intent(_coo_intent(config,"prepare"))
+        finally:
+            await service.close()
+        system=tmp_path/"system"
+        (system/"config").mkdir(parents=True)
+        values=dict(runtime_root=str(config.runtime_root),proof_workspace_root=str(config.proof_workspace_root),
+            worker_id=config.worker_id,quota_class=config.quota_class,proof_base_sha=config.proof_base_sha,
+            ceo_submit_armed=False,coo_autonomy_armed=False,coo_operator_harness_armed=False)
+        for key in ("worker_runs_root","receipts_root","backup_root"):
+            path=host/key
+            path.mkdir()
+            values[key]=str(path)
+        fixtures=host/"canary-fixtures"
+        fixtures.mkdir()
+        (fixtures/"sentinel").write_text("preserved fixture")
+        prior_canary=host/"prior-canary.json"
+        prior_canary.write_text('{"passed":true}')
+        values["secret_canary_receipt_path"]=str(prior_canary)
+        (system/"config/control.json").write_text(json.dumps(values))
+        (system/"config/worker-codex.json").write_text('{"operator_harness_armed":false}')
+        actual_uid=os.getuid()
+        monkeypatch.setattr(maintenance,"SYSTEM_ROOT",system)
+        monkeypatch.setattr(maintenance,"_TRUSTED_UID",actual_uid)
+        monkeypatch.setattr(maintenance,"_sealed_ancestors",lambda path:[])
+        monkeypatch.setattr(maintenance,"require_stopped",lambda:None)
+        monkeypatch.setattr(maintenance.os,"geteuid",lambda:0)
+        monkeypatch.setattr(maintenance,"sys",SimpleNamespace(platform="darwin"))
+        args=SimpleNamespace(predecessor_sha=config.proof_base_sha,successor_sha="b"*40,
+            root_job_id=receipt["job_id"],recovery_job_id=old_id,recovery_attempt_id=lost.attempt_id)
+        bundle=maintenance.prepare(args)
+        descriptor=maintenance.descriptor_for(args.successor_sha)
+        assert descriptor["root_job_id"]==receipt["job_id"]
+        assert (bundle/"prestate.sqlite3").is_file()
+        assert (bundle/"baseline.json").stat().st_mode & 0o777 == 0o400
+        assert (bundle/"descriptor.json").stat().st_mode & 0o777 == 0o444
+        assert not list(bundle.parent.glob(".preparing-*"))
+        with pytest.raises(maintenance.MaintenanceError,match="already exists"):
+            maintenance.prepare(args)
+        altered=dict(values,proof_base_sha=args.successor_sha)
+        prior_canary.write_text('{"passed":false}')
+        with pytest.raises(maintenance.MaintenanceError,match="prestate drifted"):
+            maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+        assert not (bundle/"run-started.json").exists()
+        prior_canary.write_text('{"passed":true}')
+        maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+        assert (bundle/"run-started.json").is_file()
+        with pytest.raises(FileExistsError):
+            maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_cycle_supervisor_selection_uses_root_binding_not_global_arm(tmp_path, short_socket_root, monkeypatch,frozen):
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt=service._submit_service_intent(_coo_intent(service.config,"selector"))
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            plan=dataclasses.replace(root,job_id="JOB-plan",parent_job_id=root.job_id,
+                                     depth=1,orchestration_role="plan")
+            service.config=dataclasses.replace(service.config,coo_autonomy_armed=True,coo_operator_harness_armed=True)
+            monkeypatch.setattr(service.runtime.jobs,"get_job",lambda job_id:plan)
+            monkeypatch.setattr(service,"_require_bound_coo_job",lambda job:root)
+            monkeypatch.setattr(service,"_require_coo_workspace",lambda job:{})
+            monkeypatch.setattr(service,"_coo_binding_for_root",lambda job:dict(operator_harness_armed=frozen))
+            calls=[]
+            class Selected(Exception): pass
+            class Supervisor:
+                def __init__(self,name): self.name=name
+                async def start_cycle_job(self,*args,**kw):
+                    calls.append(self.name)
+                    raise Selected()
+            monkeypatch.setattr(service,"_require_supervisor",lambda:Supervisor("sealed"))
+            monkeypatch.setattr(service,"_require_operator_supervisor",lambda:Supervisor("operator"))
+            with pytest.raises(Selected):
+                await service._dispatch_cycle_job_exact(plan.job_id,"selection-proof")
+            assert calls == ["operator" if frozen else "sealed"]
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_workspace_materializes_exact_frozen_root_once(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            intent=_coo_intent(service.config,"materialize")
+            name="auto-"+"a"*32
+            worktree=service.config.proof_workspace_root/name
+            intent["execution_contract"].update(worktree=str(worktree),branch="codex/"+name)
+            receipt=service._submit_service_intent(intent)
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            old_base=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40)
+            service._coo_execution_binding=service._load_coo_execution_binding()
+            with service.runtime.store.read() as conn:
+                event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
+            descriptor=dict(root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+                predecessor_sha=old_base,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
+            raw=b"complete acceptance"
+            carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,
+                descriptor_sha256=maintenance.digest(descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest())
+            monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+            monkeypatch.setattr(maintenance,"summary_document",lambda sha:({},raw))
+            monkeypatch.setattr(maintenance,"sealed_json",lambda path:carry)
+            calls=[]
+            original=es_mod.prepare_credentialless_clone
+            def prepare(*args,**kwargs):
+                calls.append(kwargs)
+                return original(*args,**kwargs)
+            monkeypatch.setattr(es_mod,"prepare_credentialless_clone",prepare)
+            assert service._maintenance_workspace_pending(root)
+            assert service._next_bound_coo_root()==root.job_id
+            await service._prepare_maintenance_root_workspace(root)
+            assert not service._maintenance_workspace_pending(root)
+            assert service._require_initial_coo_workspace(root)["head"]==old_base
+            await service._prepare_maintenance_root_workspace(root)
+            assert len(calls)==1
+            assert calls[0]["base_sha"]==old_base
+            assert calls[0]["branch"]==root.branch
+            assert "commission_dependency" not in calls[0]
+        finally:
+            await service.close()
+    asyncio.run(scenario())

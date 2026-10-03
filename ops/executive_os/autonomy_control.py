@@ -2307,7 +2307,15 @@ class ProductionArmHost(ProductionStatusHost):
                 gid=control_group.gr_gid,
             )
             validate_acceptance_document(summary, expected_sha=expected_sha)
-            return hashlib.sha256(raw).hexdigest()
+            from ops.executive_os.acceptance_maintenance import (
+                MaintenanceError, validate_carry_receipt,
+            )
+            summary_digest = hashlib.sha256(raw).hexdigest()
+            try:
+                validate_carry_receipt(expected_sha, summary_digest)
+            except (MaintenanceError, OSError, ValueError) as exc:
+                raise ArmAdmissionError("acceptance_receipt_invalid") from exc
+            return summary_digest
         except ArmAdmissionError:
             raise
         except (HostControlError, KeyError, OSError) as exc:

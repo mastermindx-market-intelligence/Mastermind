@@ -8920,3 +8920,30 @@ def test_ceo_admission_probe_canonical_socket_still_requires_live_attestation(
     ) is False
     # The alias passed the path check and reached the unchanged live validator.
     assert calls["inspector"].inspect_calls == [_STATUS_PID]
+
+
+@pytest.mark.parametrize("carry_passed",[True,False])
+def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkeypatch,carry_passed):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    root=tmp_path/"control/acceptance"/SHA
+    root.mkdir(parents=True)
+    root.chmod(0o700)
+    monkeypatch.setattr(control,"RUNTIME_ROOT",tmp_path)
+    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=os.getuid()))
+    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(control,"_has_acl",lambda path:False)
+    raw=b"existing full acceptance receipt"
+    monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))
+    monkeypatch.setattr(control,"validate_acceptance_document",lambda *args,**kwargs:None)
+    descriptor=dict(root_job_id="JOB-preserved")
+    monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+    receipt=dict(schema_version=maintenance.SCHEMA,passed=carry_passed,baseline_preserved=True,
+        descriptor_sha256=maintenance.digest(descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(maintenance,"sealed_json",lambda path:receipt)
+    host=control.ProductionArmHost()
+    if carry_passed:
+        assert host.validate_acceptance(SHA)==hashlib.sha256(raw).hexdigest()
+    else:
+        with pytest.raises(control.ArmAdmissionError) as raised:
+            host.validate_acceptance(SHA)
+        assert raised.value.code=="acceptance_receipt_invalid"
