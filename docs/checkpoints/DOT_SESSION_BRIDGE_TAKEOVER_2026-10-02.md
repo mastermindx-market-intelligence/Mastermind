@@ -185,3 +185,72 @@ compatibility, installed host selection, exact Codex/Claude native delivery,
 event subscription/callback behavior and SAME-originating-Web consumption
 remain separate acceptance gates. No native send, subscription, deployment or
 production mutation occurred in this reconciliation.
+
+
+## 2026-10-03 Claude Desktop live-session native attention
+
+Recovered two orphaned untracked files in the original operation workspace after
+published current-master merge \`3e81bac0f2bf6c62acd59341f5f8aab2683dc296\`.
+No active cwd/process holder or matching #1112 carrier edge owned those files.
+They are therefore continued in-place under the same project owner, not copied to
+a new branch or runtime.
+
+\`integrations/session_bridge/claude_native.py\` implements a storeless live-session
+Claude attention transport beneath the existing canonical reply/Wake owners. It
+does not create lifecycle, retry, queue, registry or auth state. Target identity
+binds host, provider session UUID, PID, process generation, executable, and Unix
+socket inode/device/owner/mode. A send result is only \`TRANSPORT_WRITTEN\`; it
+never claims target consumption or original-Web consumption. Post-connect send
+failure is \`native_effect_unknown\` and has no retry/fallback path.
+
+A real M2 failure was reproduced before repair: PID49451 is a valid Claude
+Desktop/Parall session with a private inbox socket and provider session metadata,
+but its executable path contains spaces. Reconstructing argv from \`ps command\`
+returned no observation and the projector exposed zero targets. The repair reads
+the executable from \`ps comm\`, uses Claude's own read-only ephemeral
+\`~/.claude/sessions/<pid>.json\` session/socket binding when available, and
+requires both the socket root and provider session-metadata root to be explicit
+host inputs. Metadata disagreement fails closed; it is not a Mastermind registry.
+Legacy exact \`--resume\` extraction remains only a fallback when provider metadata
+is absent.
+
+Fresh real read-only M2 canary after repair:
+- configured socket root \`/private/tmp/cc-socks\`;
+- configured provider session root \`/Users/chriswong/.claude/sessions\`;
+- allowed executable root limited to the observed Claude 6 Code binary tree;
+- exactly one Desktop/Parall Claude target projected, bound to the already-live
+  session and current generation;
+- no socket connection/message was made by the canary.
+
+The other three observed inbox PIDs belong to Claude remote \`ccd-cli\`, not this
+Desktop executable enrollment, and were intentionally excluded rather than
+silently widened.
+
+Current Claude documentation confirms same-machine cross-session delivery uses
+a per-session Unix socket on macOS and that inbound controls can deliver, hold,
+or refuse a message. A raw socket write therefore remains attention/transport
+evidence only. The canonical Agent Dialogue operation/message identity remains
+the reply-back path; no provider receipt is upgraded to delivered/consumed.
+
+TDD/verification:
+- provider-metadata regression observed RED (0 targets) before repair;
+- explicit socket-root regression observed RED before removing the guessed root;
+- explicit provider-session-root regression observed RED before host binding;
+- final Claude-native file: **19 PASS / 0 failures/errors/skips**,
+  XML SHA256 \`661b284e74bdaddc56ecdd7bc8d287b82c544ebf80b9eacdf30c27e16e740221\`;
+- bridge/dialogue/auth owning campaign including the Claude-native slice:
+  **421 PASS / 0 failures/errors/skips**, XML SHA256
+  \`7785786bc4d1a6d71c37c534c742c2c45b04aeb405cf0c249174b7002d254cc4\`;
+- Python compile and \`git diff --check\`: PASS.
+
+Codex live delivery remains owned by the separate path-disjoint
+\`executive-codex-queue-wake-20261003-c3-001\` / PR #1156; do not duplicate it in
+this branch. Claude stopped-session resume Wake remains separately owned by PR
+#991. This slice is specifically the already-live same-machine Claude inbox
+transport.
+
+Still unproven: an actual Web CEO operation committed to Dialogue, one real
+Claude Desktop inbox write under the existing effect owner, Claude consumption,
+canonical native reply, reply event/read reference, and SAME originating Web
+consumer. No production native message, installation, subscription, callback,
+or deployment has occurred in this slice.
