@@ -13,7 +13,7 @@ SKILLS = {
     "mastermind-web-ceo": ("user outcome", "smallest", "ACTIVE_EXECUTION.md", "WEB_CEO_DELEGATION.md", "no authority"),
     "mastermind-principal-architect": ("invariants", "alternatives", "migration", "falsifier", "no authority"),
     "mastermind-product-designer": ("persona", "loading", "keyboard", "screenshot", "no authority"),
-    "mastermind-deep-research": ("primary sources", "counterevidence", "falsifier", "out-of-sample", "no authority"),
+    "mastermind-deep-research": ("primary sources", "counterevidence", "falsifier", "out-of-sample", "SOURCE_ADMISSION_INCOMPLETE", "SOURCE_INCOMPLETE", "mastermindx-market-intelligence/Mastermind", "SOURCE_PROVEN", "no authority"),
     "mastermind-recovery": ("EFFECT_UNKNOWN", "RECONCILE_STATE.md", "safety or permission denial", "SESSION_RELIABILITY.md", "no authority"),
 }
 
@@ -113,3 +113,49 @@ def test_pin_reuse_is_limited_to_the_current_turn(name: str) -> None:
     text = _text(name)
     assert "already loaded in the current turn" in text
     assert "new-turn recovery must re-establish current source" in text
+
+
+DEEP_RESEARCH_ADMISSION_CASE_IDS = {
+    "research-admission-github-missing",
+    "research-admission-github-wrong-repo",
+    "research-admission-steward-missing",
+    "research-admission-public-web-no-internal",
+    "research-admission-historical-github-only",
+    "research-admission-external-only",
+    "research-admission-steward-degraded",
+    "research-admission-owner-conflict",
+    "research-admission-short-prompt",
+    "research-admission-postrun-source-omission",
+}
+
+
+def test_deep_research_source_admission_contract_is_fail_closed_and_owner_preserving() -> None:
+    text = _text("mastermind-deep-research")
+    for marker in (
+        "SOURCE_REQUIRED",
+        "SOURCE_AVAILABLE",
+        "SOURCE_PROVEN",
+        "SOURCE_MISSING",
+        "SOURCE_DEGRADED",
+        "SOURCE_ADMISSION_INCOMPLETE",
+        "SOURCE_INCOMPLETE",
+        "mastermindx-market-intelligence/Mastermind",
+        "Mastermind Steward",
+        "public web",
+        "post-run",
+    ):
+        assert marker.casefold() in text.casefold(), marker
+    assert "historical" in text.casefold()
+    assert "wrong repo" in text.casefold() or "wrong repository" in text.casefold()
+    assert "does not authorize" in text.casefold() or "cannot authorize" in text.casefold()
+    assert "actually used" in text.casefold()
+
+
+def test_deep_research_fixture_covers_source_admission_discriminators() -> None:
+    data = json.loads((ROOT / "tests/fixtures/web_ceo_skill_cases.json").read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in data["cases"]}
+    assert DEEP_RESEARCH_ADMISSION_CASE_IDS <= set(cases)
+    for case_id in DEEP_RESEARCH_ADMISSION_CASE_IDS:
+        case = cases[case_id]
+        assert case["expected_skills"] == ["mastermind-deep-research"]
+        assert case["must_observe"] and case["must_not_observe"]
