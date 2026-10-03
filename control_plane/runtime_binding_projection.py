@@ -12,7 +12,10 @@ from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.session_targets import RuntimeBinding, SessionTarget
 
 
-_PROVIDER_TO_REASONING_SURFACE = {"openai-codex": "codex"}
+_PROVIDER_TO_REASONING_SURFACE = {
+    "chatgpt": "chatgpt-sol",
+    "openai-codex": "codex",
+}
 
 
 def reasoning_surface_for_provider(provider: str) -> str:

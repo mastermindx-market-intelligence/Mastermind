@@ -686,6 +686,105 @@ def _validate_output_scope(job: Job, output: Mapping[str, Any]) -> None:
         raise SupervisorError("completed worker result contains errors")
 
 
+PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v1"
+_PLANNER_ROUTING_MODEL_LIMIT = 16
+
+
+def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | None:
+    """Project model-safe routing choices for one orchestration planner.
+
+    The projection is observational only.  It exposes no Worker ids, account
+    labels, host/session identity, credentials or provider homes, and it grants
+    no placement authority.  Plan admission and Capacity re-check every
+    selected pool/model immediately before materialization/claim.
+    """
+
+    if job.orchestration_role != "plan":
+        return None
+    root_id = str(job.root_job_id or "")
+    root = runtime.jobs.get_job(root_id)
+    if root is None:
+        raise SupervisorError("planner routing options lost their root Job")
+    raw_union = root.constraints.get("work_placement_union")
+    if not isinstance(raw_union, list) or not raw_union:
+        return {
+            "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+            "default_mode": "AUTO",
+            "default_route": {
+                "provider_realm": root.constraints.get("provider"),
+                "eligible_quota_classes": list(
+                    root.constraints.get("eligible_quota_classes") or []
+                ),
+                "model": root.constraints.get("model"),
+            },
+            "manual_override_plan_schema": "mastermind.execution_plan/v4",
+            "pools": [],
+            "degraded": ["work_placement_union_unavailable"],
+        }
+
+    workers = runtime.workers.list_workers()
+    pools: list[dict[str, Any]] = []
+    for member in raw_union:
+        if not isinstance(member, Mapping):
+            continue
+        provider = str(member.get("provider_realm") or "").strip().lower()
+        quota_class = str(member.get("quota_class") or "").strip().lower()
+        if not provider or not quota_class:
+            continue
+        models: dict[str, dict[str, int]] = {}
+        registered_count = 0
+        available_count = 0
+        for worker in workers:
+            quota = runtime.workers.get_quota_class(worker.worker_id, quota_class)
+            if quota is None or quota.provider != provider:
+                continue
+            registered_count += 1
+            if quota.status.value == "AVAILABLE":
+                available_count += 1
+            if not quota.model:
+                continue
+            model = str(quota.model).strip().lower()
+            counts = models.setdefault(
+                model,
+                {"registered_capacity_count": 0, "available_capacity_count": 0},
+            )
+            counts["registered_capacity_count"] += 1
+            if quota.status.value == "AVAILABLE":
+                counts["available_capacity_count"] += 1
+        model_rows = [
+            {"model": model, **models[model]}
+            for model in sorted(models)[:_PLANNER_ROUTING_MODEL_LIMIT]
+        ]
+        pools.append(
+            {
+                "provider_realm": provider,
+                "quota_class": quota_class,
+                "registered_capacity_count": registered_count,
+                "available_capacity_count": available_count,
+                "models": model_rows,
+                "models_truncated": len(models) > _PLANNER_ROUTING_MODEL_LIMIT,
+            }
+        )
+
+    return {
+        "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+        "default_mode": "AUTO",
+        "default_route": {
+            "provider_realm": root.constraints.get("provider"),
+            "eligible_quota_classes": list(
+                root.constraints.get("eligible_quota_classes") or []
+            ),
+            "model": root.constraints.get("model"),
+        },
+        "manual_override_plan_schema": "mastermind.execution_plan/v4",
+        "pools": sorted(
+            pools,
+            key=lambda item: (item["provider_realm"], item["quota_class"]),
+        ),
+        "degraded": [],
+    }
+
+
 class ExecutiveSupervisor:
     """Coordinate one durable job with one injected worker execution adapter."""
 
@@ -1018,6 +1117,9 @@ class ExecutiveSupervisor:
             "assigned_quota_class": attempt.quota_class,
             "checkpoint": job.checkpoint,
         }
+        routing_options = _planner_routing_options(self.runtime, job)
+        if routing_options is not None:
+            packet["routing_options"] = routing_options
         if effective_grant is not None:
             packet["effective_grant_digest"] = attempt.effective_grant_digest
             packet["orchestration"] = {

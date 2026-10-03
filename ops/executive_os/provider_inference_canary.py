@@ -5,7 +5,7 @@ as the dedicated worker principal against the pinned production binary and
 ``CODEX_HOME``. It never starts Executive services, never opens the control
 SQLite, and never writes into production workspaces or runs.
 
-Pinned Codex 0.147.0 exposes no login/exec workspace-selection flag. The
+Pinned Codex 0.159.2 exposes no login/exec workspace-selection flag. The
 config key ``forced_chatgpt_workspace_id`` exists but is not applied here:
 the intended workspace id is an operator binding, not a silent default.
 """
@@ -46,11 +46,11 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
 
 
 SCHEMA_VERSION = "mastermind.executive_provider_inference_canary/v2"
-PINNED_CODEX_VERSION = "0.147.0"
+PINNED_CODEX_VERSION = "0.159.2"
 PINNED_CODEX_TEAM_ID = "2DC432GLL2"
-PINNED_CODEX_SHA256 = "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+PINNED_CODEX_SHA256 = "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 INSTALLED_CODEX_BINARY = (
-    "/Library/Application Support/MastermindExecutive/bin/codex-0.147.0"
+    "/Library/Application Support/MastermindExecutive/bin/codex-0.159.2"
 )
 WORKER_USER = "_mastermind_worker"
 WORKER_GROUP = "_mastermind_worker"
@@ -88,6 +88,19 @@ _DISABLED_FEATURES = (
     "image_generation",
     "memories",
     "multi_agent",
+    "auth_elicitation",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "daemon_auto_start",
+    "enable_mcp_apps",
+    "mcp_2026_07_28",
+    "multi_agent_v2",
+    "shell_snapshot",
+    "shell_snapshot_v2",
+    "skill_mcp_dependency_install",
+    "skill_search",
+    "tool_call_mcp_elicitation",
+    "workspace_dependencies",
     "remote_plugin",
 )
 INERT_SCHEMA: dict[str, Any] = {
