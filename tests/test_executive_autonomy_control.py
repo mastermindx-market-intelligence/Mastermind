@@ -5830,6 +5830,41 @@ def test_production_ceo_admission_probe_accepts_awaiting_canary_on_the_fixed_con
     assert calls[0][1].get("timeout") == 10
 
 
+def test_production_ceo_admission_probe_accepts_os_canonical_alias_for_fixed_control_socket(
+    monkeypatch, tmp_path
+):
+    """The service may report the OS-canonical spelling of the fixed socket."""
+
+    host = control.ProductionCeoSubmitHost()
+    _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        inspector=_LiveFakeInspector(),
+    )
+    fixed = os.fspath(control.CONTROL_SOCKET)
+    canonical = "/private/var/run/mastermind-executive/control.sock"
+    real_realpath = os.path.realpath
+
+    def canonical_realpath(value):
+        value = os.fspath(value)
+        if value in {fixed, canonical}:
+            return "/canonical/mastermind-executive/control.sock"
+        return real_realpath(value)
+
+    monkeypatch.setattr(control.os.path, "realpath", canonical_realpath)
+    _patch_probe_subprocess(
+        monkeypatch,
+        returncode=0,
+        stdout=_probe_status_body(
+            service_state="AWAITING_CANARY",
+            socket_path=canonical,
+        ),
+    )
+
+    assert host._ceo_admission_probe(SHA, _CONFIG_DIGEST) is True
+
+
 def test_production_ceo_admission_probe_refuses_ready_service_state(monkeypatch):
     """R80 mutant: READY is the retired global-READY shape; this probe REFUSES.
 

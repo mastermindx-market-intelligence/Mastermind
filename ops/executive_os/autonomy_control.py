@@ -4101,7 +4101,18 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         result = value["result"]
         if result.get("service_state") != "AWAITING_CANARY":
             return False
-        if result.get("socket") != os.fspath(CONTROL_SOCKET):
+        status_socket = result.get("socket")
+        try:
+            # The fixed argv uses /var/run on Darwin, while the service reports
+            # the OS-canonical /private/var/run spelling. Compare canonical path
+            # identity instead of raw text; no caller-selectable socket is added.
+            if (
+                type(status_socket) is not str
+                or os.path.realpath(status_socket)
+                != os.path.realpath(os.fspath(CONTROL_SOCKET))
+            ):
+                return False
+        except (OSError, ValueError):
             return False
         status_pid = result.get("pid")
         if (
