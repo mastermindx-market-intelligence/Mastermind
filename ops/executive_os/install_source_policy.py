@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -52,6 +53,56 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     if check and completed.returncode != 0:
         raise InstallSourcePolicyError("could not inspect source checkout")
     return completed
+
+
+def _require_complete_source_closure(repo: Path, expected_head: str) -> None:
+    """Prove the install source can seed a credentialless admin checkout locally.
+
+    A linked managed workspace may inherit a partial/promisor object store. The
+    current tree can be complete while older reachable blobs are still absent,
+    which makes a later no-remote repack fail only after services are stopped.
+    Prove the full reachable closure here with lazy fetching disabled so that
+    failure remains pre-mutation and does not hydrate or rewrite the source.
+    """
+    env = dict(os.environ)
+    env.update(
+        {
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    try:
+        completed = subprocess.run(
+            [
+                "/usr/bin/git",
+                "--no-optional-locks",
+                "-C",
+                str(repo),
+                "fsck",
+                "--connectivity-only",
+                "--no-dangling",
+                expected_head,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise InstallSourcePolicyError(
+            "source checkout object closure is unreadable"
+        ) from exc
+    if completed.returncode != 0:
+        raise InstallSourcePolicyError(
+            "source checkout object closure is incomplete"
+        )
 
 
 def _require_checkout(
@@ -134,6 +185,7 @@ def validate_install_source(
     if remote.returncode != 0:
         raise InstallSourcePolicyError("checkout has no exact protected origin/master ref")
     remote_sha = _require_sha(remote.stdout.strip(), "origin/master SHA")
+    _require_complete_source_closure(source_repo, expected_sha)
 
     if not allow_frozen_accepted_ancestor:
         if protected_master_sha is not None or installer_repo is not None:
