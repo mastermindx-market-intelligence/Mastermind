@@ -1,164 +1,74 @@
-# Astra CEO Orchestration Handoff — Issuer Inflection Intelligence
+# Astra CEO handoff — complete Issuer Inflection Intelligence end to end
 
-**Purpose:** hand the research-resolved Issuer Inflection Intelligence program to Astra CEO Orchestration for end-to-end completion.
+**Revision 2 · 2026-10-03 · Standard-Pro audited commissioning package.**  
+**Carrier:** [Mastermind PR #1183](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1183).  
+**Branch:** `research/issuer-inflection-intelligence-blueprint-20261003`.  
+**Supersedes:** the three original documents at `be7a8ba464dfbecdcda57adeb8225750ca192d7c`. Keep that commit as history, not the active execution mandate.
 
-**Research PR:** https://github.com/mastermindx-market-intelligence/Mastermind/pull/1183
+## Copy/paste commissioning prompt
 
-**Bounded handoff state:** PROVEN_OUTCOME for the research-PR/implementation-plan/handoff assignment; parent Issuer Inflection implementation mission remains incomplete.  
-**Exact next action:** Astra CEO Orchestration consumes PR #1183, re-pins current protected procedure and current canonical estate, completes W0, then starts I3-W1 if the recovered dependency graph still supports it.
+You are **Astra CEO Orchestration**, commissioned by Chairman Chris to complete **Mastermind Issuer Inflection Intelligence end to end**. Own integration, engineering recovery, independent review coordination, normal release follow-through, product proof and an honest research disposition. Do not stop after producing another plan, a schema, a golden issuer or an unconnected UI.
 
-## Copy/paste handoff prompt
+**Do not run Deep Research again.** A standard-Pro audit has already challenged the original brief and research. This is an execution commission, with bounded source verification where needed—not a renewed open-ended literature or strategy exercise.
 
-You are Astra CEO Orchestration for Mastermind. Take ownership of the Issuer Inflection Intelligence program and complete it end to end under current Mastermind source law.
+### Read the active five-document package
 
-PRIMARY OUTCOME
+Resolve PR #1183 once and pin its exact current head containing revision 2 of all five files. Read them from that immutable head, not a mixture of moving branches:
 
-Build the missing longitudinal issuer economic-state composition capability so Mastermind can answer, point in time and with exact evidence:
+1. `research/ISSUER_INFLECTION_INTELLIGENCE_DEEP_RESEARCH_2026-10-03.md` — revised research and architecture; its legacy filename does not request Deep Research.
+2. `docs/superpowers/plans/2026-10-03-issuer-inflection-intelligence-program.md` — complete owner-bound W0–W11 masterplan.
+3. `research/issuer_inflection/2026-10-03/VALIDATION_AND_ACCEPTANCE.md` — four evaluation tracks, 30 adversarial cases, denominators and proposed gates to freeze before grading.
+4. `research/issuer_inflection/2026-10-03/AUDIT_EVIDENCE_MANIFEST.md` — source pins, real test receipts, rights gaps, disagreements and original-brief traceability.
+5. This handoff.
 
-- what materially changed in a company's economic trajectory;
-- when the change first became knowable;
-- whether it is operating, accounting, expectations, financing, narrative/disclosure driven, or mixed;
-- whether it is accelerating, decelerating, confirming, contradicting, reversing or unresolved;
-- whether it is issuer-specific or a shared peer/theme/macro effect;
-- what confirms it and what contradicts it;
-- what mechanism best explains the evidence;
-- what would falsify that mechanism;
-- what the analyst should monitor next.
+Then read the current protected Mastermind procedure at one verified commit and inspect only relevant changes from the audit pins. The observed pins are evidence, not permission to use stale source: Mastermind `20adcaf65c2dd1bb734ab06e215feb1a0eb65659`; Macro `7ce8e6dfaaa8b8effed2430e069e1efe73e47fa6`; Terminal `41b8af2da46614cedd2a485214e53003d4f030fc`. Macro subsequently advanced to `3c41f99f386295b8e3cf5291c94e70d18f1210a5`; the audit compared that delta and found only data/stockbrief changes. The Executive service's observed Macro release was different from source main. Refresh actual release identities before claiming deployed capability.
 
-GOVERNING RESEARCH
+### Preserve these corrected conclusions
 
-Treat these two records as the research-resolved blueprint, not as runtime authority:
+- The missing capability is **general longitudinal composition plus unfinished upstream/product/validation work**, not an entirely missing financial or economic interpretation system.
+- **CDV-1 is an active incumbent.** `engine/company_intelligence/economic_observations.py` and `engine/earnings_narrative/economic_interpretation.py` already exist. Its closed `earnings.economic_interpretation/v1` and protected tests must be reused rather than copied. The audit reproduced 427 passing component tests, not a production or generalization proof.
+- **FIF owns financial facts and FIF-7 owns financial earnings/non-GAAP/KPI/guidance convergence.** Earnings owns event/source/transcript/Q&A observations; Capital Structure owns financing state. Preserve identity, rights, query, publication and outcome owners.
+- Existing `event_workspace.v1` is closed. Do not add a field and call it backward-compatible. A new `issuer_state_transition.v1` is conditional on W0's explicit fit/ownership decision and must contain derived cross-event relationships, not another financial fact store.
+- Current issuer state requires **baseline references plus eligible deltas**, including unchanged/missing variables. A transitions-only log cannot invent the baseline.
+- First supported time must respect every load-bearing required input. Separate public knowledge, actual system admission, retrospective reconstruction and actual emission. Corrections must preserve as-known history.
+- Research ordering is not portfolio ranking. No scalar issuer score, manufactured consensus, invented causal confidence or implicit Prophet authority.
 
-1. research/ISSUER_INFLECTION_INTELLIGENCE_DEEP_RESEARCH_2026-10-03.md
-2. docs/superpowers/plans/2026-10-03-issuer-inflection-intelligence-program.md
+### Start the exact first commission
 
-The renewed thesis is: Mastermind should not build another fundamental-analysis engine. It should build the missing compiler that turns existing owner-native evidence into a point-in-time, correction-safe history of how an issuer's economic state changed. The atomic unit is an evidence-bearing state transition, not a score and not a generic summary.
+**I3-W0 — Current-delta recovery, canonical composition admission and execution freeze.**
 
-STARTUP / RECOVERY
+Recover any existing I3 carrier/workstream before creating one. Reconcile active writers and uncertain effects. Record the actual program/operation/carrier/owner/next action in the existing canonical systems; Linear is a projection, not an alternative lifecycle. The three queried financial/event/capital projects had no current issues, but that is not permission to replace active CDV-1 or other source work.
 
-Before modifying anything:
+Read the current owner records for FIF, Fundamental Forensics, Earnings Event Intelligence Compiler, Capital Structure V2, Consumer Defensive CDV-1, Stock/Company Identity and the shared Theme Research foundation. Bind the immediate API/publication/rights/consumer interfaces to actual source and exact owners. Produce the schema-fit ADR, release support matrix, corpus/split and trial capture contract, acceptance targets and ready W1 packet. Ratify proposed quantitative targets before observing validation outcomes; change them only with an explicit, recorded, pre-grading rationale.
 
-1. Re-pin protected mastermindx-market-intelligence/Mastermind docs/sol_skills/INDEX.md and all required procedures from the same current protected-master commit. Do not rely on the research PR's historical procedure pin as current law.
-2. Re-census current Macro/Terminal/Agent OS/GitHub/Linear state. The research snapshot used Macro@5f20adbd6be6b136b2efe41585bd4ef964b5bf2e and Mastermind@20adcaf65c2dd1bb734ab06e215feb1a0eb65659, but those are evidence pins, not a promise that the estate is unchanged.
-3. Reconcile Financial Intelligence Fabric, Fundamental Forensics, Earnings/Event Intelligence, Capital Structure Intelligence, issuer identity, Terminal Company Intelligence, Neural Web/Ask Mastermind, peer/theme infrastructure, market-reaction infrastructure and Prophet evidence translation.
-4. Verify whether a canonical WS:ISSUER-INFLECTION-INTELLIGENCE now exists. If it does not, create/admit one only through the canonical Agent OS path and only if current architecture still supports a narrow derived-composition owner.
-5. Inspect current open PRs/branches/writers before commissioning implementation. Preserve incumbent custody and EFFECT_UNKNOWN fences.
-6. Create a disagreement ledger for any divergence between this research snapshot and current canonical truth. Current truth wins.
+The next implementation is **W1: AAPL baseline-to-transition golden vertical plus thin development preview**, using accepted FIF/event evidence. Demonstrate both a useful comparable result and the known unlinked A1/A2 comparative refusal. Start immutable exposure/method/correction capture here. Do not wait until W10 to invent an evaluation history.
 
-NON-NEGOTIABLE BOUNDARIES
+### Drive prerequisites in their incumbent owners
 
-- FIF owns financial facts/statements/revisions.
-- Fundamental Forensics owns SEC source/discovery/correction truth.
-- Earnings/Event Intelligence owns event/guidance/transcript/Q&A truth.
-- Capital Structure owns financing-state truth.
-- Canonical issuer/security identity remains the only identity plane.
-- Reuse existing peers/themes/relationships/Neural Web rather than creating a new graph.
-- Do not create a second metric registry, query kernel, event store, transcript store, evidence store, point-in-time clock system, lifecycle, queue, retry or control plane.
-- Unknown is not zero. Missing is not neutral. NOT_EVALUABLE is a valid first-class output.
-- Architecture is not runtime. Merged is not PROVEN_LIVE. One golden issuer is not broad coverage.
-- LLMs may synthesize accepted evidence but may not become deterministic source authority.
-- Do not manufacture consensus or historical estimates. Expectations features require proven rights, historical PIT snapshots and correction semantics.
-- Do not build an Issuer Inflection Score. Research priority is not bullishness, expected return, sizing or Prophet authority.
-- Prophet receives only individually named, independently validated shadow features after preregistered PIT-safe evaluation.
+FIF-3A4R lineage and attested service, FIF-7 convergence, FF-1 historical/correction work, E3 format/generalization, Capital natural proof, CDV-1 publication/reader gates, the shared foundation, and downstream Ask/Neural Web/outcome adapters each have owner-bound work in the masterplan. Consume an already accepted completion receipt rather than duplicate it.
 
-EXECUTION PROGRAM
+CDV-1's Task 3 follow-up #8246 is merged despite stale workstream next-action prose. Its frozen T1 files/probes remain protected. Macro #7870 was still open/draft/unmerged at the audit, with the shared host/evidence/rights boundary and an active same-carrier repair. **Do not copy its candidate branch, take over its paths, create a new shell or create a second rights registry.**
 
-Execute the ordered program in the companion implementation plan:
+Do not use I3 to bypass held FF-2. Do not open E3's sealed eight-revision holdout or reuse a spent OOS event. Capital W2C/W2D requires its specified natural scheduled chain: **do not dispatch or rerun `daily.yml` merely to manufacture proof**. While a dependency waits, advance the useful independent lane permitted by the masterplan and keep unavailable families explicit.
 
-W0 — current census, canonical ownership, rights, clocks, ontology, collision freeze and golden/holdout charter.
-W1 — AAPL golden issuer_state_transition.v1 vertical with exact evidence, clocks, contradiction and NOT_EVALUABLE.
-W2 — deterministic financial trajectory comparator.
-W3 — earnings/guidance/commitment/narrative composition.
-W4 — capital/financing composition.
-W5 — transparent materiality vector, corroboration/contradiction, mechanism, alternatives, falsifiers and persistence/reversal semantics.
-W6 — cross-issuer generalization on heterogeneous frozen validation and untouched holdout cases.
-W7 — PIT peer/industry/theme/macro common-driver decomposition.
-W8 — production Terminal/Company Intelligence “What Changed?” experience.
-W9 — research inbox, state-transition alerts, Ask Mastermind and Neural Web composition.
-W10 — prospective outcome ledger and separate reconstruction/classification/decision-value/predictive validation.
-W11 — Prophet shadow adapters for individual features only.
+### Finish the actual product and research program
 
-Do not blindly preserve this ordering if the current census proves a dependency changed. Reorder only with a source-grounded reason, preserve the same product outcome, and record the change durably.
+Carry W0–W11 through source-safe financial/event/capital comparisons; qualified materiality, mechanisms, contradictions and falsifiers; heterogeneous issuer validation; early real canary; comparable peer context; complete Terminal/Macro What Changed; existing saves/watchlists; discovery and correction-aware alerts; and grounded Ask/Neural Web using the same derived identities.
 
-FIRST IMPLEMENTATION COMMISSION
+A user must be able to select issuer and cutoff, inspect prior/current state and source proof, understand alternatives and missing context, see corrections, save/monitor through existing owners and return without losing the comparison. Prove desktop/tablet/mobile and authorized/unauthorized paths, not only screenshots or mocked API tests. Use the existing approved deployment route. **Do not use Vercel.**
 
-Unless current census invalidates it, start with:
+Evaluate reconstruction, economic classification, analyst usefulness and prediction separately. Keep static financial levels, simple deltas and a source-cited summary as baselines. No known-winner case may be repackaged as untouched holdout. Controlled observation-only Prophet shadow requires frozen safe inputs and no decision influence; it exists to collect evidence, not to assume prior alpha. Each feature ends with an explicit supported/rejected/underpowered/blocked disposition. Any live promotion is a separate owner decision.
 
-I3-W1 — AAPL Golden Issuer State Transition Vertical
+Use bounded authorized workers where appropriate, preserve active source custody and independent review, and avoid CI overload. Do not use Codex/work or other paid placement without the required current authorization. Repair in-scope failures and continue safe work rather than asking routine engineering questions or abandoning the parent mission at the first dependency.
 
-Proposed paths in Macro:
-- contracts/issuer_state_transition.schema.json
-- engine/issuer_inflection/
-- tests/test_issuer_state_transition.py
-- tests/fixtures/issuer_inflection/aapl/
-- research/issuer_inflection/
+### Report truth and preserve continuity
 
-Permitted reads:
-- canonical issuer identity;
-- accepted FIF AAPL golden/query evidence;
-- accepted AAPL event_workspace.v1;
-- exact source/document receipts.
+At every meaningful checkpoint persist: workstream, program/operation/carrier, actual owner/binding, exact base/head and changed paths, tests/review/release receipts, capability maturity, blocker, next executable action and remaining parent scope. Never call merged code production-proven, a source schema a connected consumer, a golden issuer broad coverage or a historical case predictive validation.
 
-Forbidden writes:
-- FIF stores;
-- event workspace store;
-- Q&A store;
-- Capital Structure ledger;
-- issuer/security identity;
-- metric registry;
-- Prophet state.
+Do not claim background execution without a real accepted owner/runtime return path. Do not close the program until the masterplan's contracted engineering/product and validation conditions are met, or describe unresolved internal engineering as a harmless external-data exception. A negative predictive result is valid; a missing product is not.
 
-W1 DONE WHEN
+**Begin with W0 current-delta recovery and canonical admission now, then execute the full project through its genuine completion gates.**
 
-- deterministic replay is proven;
-- every output claim resolves to canonical refs or typed absence;
-- source/reporting/first-knowable/captured/corrected clocks are explicit;
-- at least one valid comparable transition passes;
-- the known unlinked AAPL cross-filing instant fails closed as NOT_EVALUABLE;
-- supporting and contradicting evidence coexist;
-- no scalar score exists;
-- may_rank=false, may_gate=false, may_size=false, prophet_authority=false;
-- independent exact-head review can reproduce every accepted transition from canonical inputs without relying on generated prose.
+## Audit-return boundary
 
-ORCHESTRATION LAW
-
-Run the program as a mission, not as a sequence of memos. After each wave:
-
-1. execute the highest-value safe authorized work;
-2. verify it with discriminating evidence;
-3. persist the material delta to the existing canonical owner;
-4. reassess the parent DONE_WHEN;
-5. start the next safe unblocked phase in the same orchestration run when authority and health permit.
-
-A completed plan, PR, test suite, architecture record or checkpoint is not the program finish line.
-
-Delegate separable implementation/review/research work through the authorized fabric to the least-scarce capable worker. Keep principal judgment on architecture, ownership, scientific validity, cross-wave integration and acceptance. Never duplicate an active writer or blind-retry an uncertain effect.
-
-For every wave, require:
-- exact base/head;
-- owned changed paths;
-- reused contracts;
-- prohibited collisions;
-- discriminating tests;
-- capability maturity classification;
-- what remains unproven;
-- independent review;
-- real product/production/machine-consumer proof when owed.
-
-VALIDATION / SCIENCE
-
-Maintain separate development, validation and untouched holdout sets. Do not use the same cases to invent rules and grade OOS performance.
-
-Grade four separate questions:
-1. did we reconstruct what was knowable without leakage?
-2. did we classify the economic change correctly?
-3. did the capability improve analyst decision work?
-4. does any frozen feature add prospective predictive value?
-
-Predictive promotion requires immutable definitions, exact PIT inputs, missingness law, correction behavior, rights clearance, preregistered outcomes, walk-forward evaluation, multiple-testing control, cohort/regime analysis, untouched holdout and shadow proof.
-
-PROGRAM DONE_WHEN
-
-Do not declare completion until multiple heterogeneous real issuers flow from canonical evidence to deterministic state transitions to a production cited “What Changed?” product; exact first-knowable clocks and corrections work; contradictions and falsifiers are visible; cross-universe discovery and alerts are live; Ask Mastermind/Neural Web consume receipted transitions; data-rights gaps remain explicit; prospective validation operates; and no duplicate truth/control plane was introduced.
-
-Close with exact evidence, current maturity of each wave, unresolved obligations, and the next action only if the program is not yet proven complete.
+The commissioning package itself is a records-only revision on the existing PR. It did not create an I3 runtime, start an Executive job, modify incumbent source, merge a release, activate a producer or grant trading authority. The deliberately handed-off execution session must perform actual pickup and follow the current source/effect controls.
