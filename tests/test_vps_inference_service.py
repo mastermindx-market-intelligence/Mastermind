@@ -13,6 +13,16 @@ from tests import test_mastermind_executive_app_asgi as auth
 rsa_key = auth.rsa_key
 
 
+def host_execution_binding(root, identity):
+    from control_plane.executive_inference_execution import build_execution_binding
+    return build_execution_binding(
+        intent_id=identity,
+        workspace_root=root,
+        base_sha="a" * 40,
+        eligible_quota_classes=("fixture",),
+    )
+
+
 def test_closed_inference_principal_and_sink(tmp_path):
     principal = esp.service_principal('svc-vps-inference')
     assert set(esp.REGISTRY) == {'svc-site-maintenance', 'svc-vps-inference'}
@@ -34,10 +44,21 @@ def test_ingress_replay_conflict_and_status(tmp_path):
     request = {'operation_key': 'inference-test', 'objective': 'Summarize the supplied research.'}
     frame = dict(schema=service.SUBMIT_SCHEMA, request=request, observed_grounding=ground)
     async def run():
-        kw = dict(runtime=rt, grounding_provider=Ground(), workspace_root=tmp_path,
-                  admission_guard=lambda _: None)
+        kw = dict(
+            runtime=rt, grounding_provider=Ground(), workspace_root=tmp_path,
+            admission_guard=lambda _: None,
+            execution_binding_provider=lambda identity: host_execution_binding(tmp_path, identity),
+        )
         first = await service.handle_frame(frame, **kw)
-        second = await service.handle_frame(frame, **dict(kw, admission_guard=None))
+        second = await service.handle_frame(
+            frame,
+            **dict(
+                kw,
+                admission_guard=None,
+                execution_binding_provider=lambda _:
+                    pytest.fail("accepted duplicate must not re-run host routing"),
+            ),
+        )
         assert first['job_id'] == second['job_id'] and second['duplicate'] is True
         assert first['intent_id'] == intent_id(request['operation_key'])
         with pytest.raises(CeoIngressError) as conflict:
@@ -48,8 +69,184 @@ def test_ingress_replay_conflict_and_status(tmp_path):
         assert receipt['terminal_result_ref'] is None
         job = rt.jobs.get_job(first['job_id'])
         assert job.owner_seat == 'coo' and not job.allowed_write_paths and not job.validation_commands
+        assert job.worktree == str(tmp_path / first['intent_id'])
+        assert job.branch == 'codex/' + first['intent_id']
+        assert job.constraints['base_sha'] == 'a' * 40
+        assert job.constraints['eligible_quota_classes'] == ['fixture']
+        assert job.constraints['task_kind'] == 'research'
+        assert job.constraints['preferred_model_aliases']
         assert len(rt.jobs.list_jobs()) == 1
     asyncio.run(run())
+
+
+def test_execution_binding_is_host_derived_and_route_closed(tmp_path):
+    from control_plane.executive_inference_contract import intent_id
+    from control_plane.executive_inference_execution import (
+        InferenceExecutionBindingError,
+        validate_execution_binding,
+    )
+    identity = intent_id("binding-policy")
+    binding = host_execution_binding(tmp_path, identity)
+    assert binding["schema"] == "mastermind.executive_service_inference_binding.v1"
+    assert binding["intent_id"] == identity
+    assert binding["worktree"] == str(tmp_path / identity)
+    assert binding["branch"] == "codex/" + identity
+    assert binding["constraints"]["task_kind"] == "research"
+    assert binding["constraints"]["risk"] == "routine"
+    assert binding["constraints"]["ambiguity"] == "low"
+    assert binding["constraints"]["required_capabilities"] == ["research"]
+    assert binding["constraints"]["eligible_quota_classes"] == ["fixture"]
+    assert "provider" not in binding["constraints"]
+    assert validate_execution_binding(
+        binding, intent_id=identity, workspace_root=tmp_path
+    ) == binding
+    forged = dict(binding, worktree=str(tmp_path / "foreign"))
+    with pytest.raises(InferenceExecutionBindingError):
+        validate_execution_binding(
+            forged, intent_id=identity, workspace_root=tmp_path
+        )
+
+    for key, value in (
+        ("preferred_model_aliases", ["forged.research"]),
+        ("required_capabilities", []),
+        ("routing_policy_version", "forged.route"),
+        ("execution_profile_digest", "0" * 64),
+    ):
+        constraints = dict(binding["constraints"])
+        constraints[key] = value
+        forged_route = dict(binding, constraints=constraints)
+        with pytest.raises(InferenceExecutionBindingError):
+            validate_execution_binding(
+                forged_route, intent_id=identity, workspace_root=tmp_path
+            )
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("intent_id", None),
+    ("intent_id", True),
+    ("base_sha", None),
+    ("base_sha", True),
+    ("eligible_quota_classes", (None,)),
+    ("eligible_quota_classes", (True,)),
+])
+def test_execution_binding_requires_exact_host_scalar_types(tmp_path, field, value):
+    from control_plane.executive_inference_execution import (
+        InferenceExecutionBindingError,
+        build_execution_binding,
+    )
+    kwargs = {
+        "intent_id": "service-inference-type-negative",
+        "workspace_root": tmp_path,
+        "base_sha": "1" * 40,
+        "eligible_quota_classes": ("fixture",),
+    }
+    kwargs[field] = value
+    with pytest.raises(InferenceExecutionBindingError):
+        build_execution_binding(**kwargs)
+
+
+def test_service_binding_drives_runtime_capacity_without_provider_override(tmp_path):
+    from control_plane import executive_inference_ingress as service
+    from control_plane.model_router import ModelRouter
+
+    rt = Runtime.at(tmp_path / "runtime")
+    router = ModelRouter.load()
+
+    def register(worker_id, model_alias, quota_class):
+        profile = router.resolve_model_alias(model_alias)
+        rt.workers.register_worker(
+            worker_id,
+            provider=profile.provider_alias,
+            account_label=f"account-{worker_id}",
+            worker_type=profile.adapter_id,
+            capabilities=list(profile.capabilities),
+            quota_classes={
+                quota_class: {
+                    "provider": profile.provider_alias,
+                    "model": profile.model,
+                    "effort": profile.effort,
+                    "cost_class": profile.cost_class,
+                    "capabilities": list(profile.capabilities),
+                    "metadata": {
+                        "adapter_id": profile.adapter_id,
+                        "model_alias": profile.model_alias,
+                        "provider_alias": profile.provider_alias,
+                        "routing_policy_version": router.policy_version,
+                        "execution_profile_id": profile.execution_profile_id,
+                        "execution_profile_digest": profile.execution_profile_digest,
+                        "capability_policy_version": profile.capability_policy_version,
+                        "capability_policy_digest": profile.capability_policy_digest,
+                    },
+                }
+            },
+        )
+
+    register("fast-research-other", "fast.research", "other")
+    register("standard-research", "standard.research", "fixture")
+    register("engineering-fixture", "fast.engineering", "fixture")
+
+    class Ground:
+        def observe(self):
+            return GROUND
+
+    receipt = asyncio.run(service.handle_frame(
+        {
+            "schema": service.SUBMIT_SCHEMA,
+            "request": {
+                "operation_key": "capacity-selection",
+                "objective": "Research the bounded question.",
+            },
+            "observed_grounding": GROUND,
+        },
+        runtime=rt,
+        grounding_provider=Ground(),
+        workspace_root=tmp_path,
+        admission_guard=lambda _: None,
+        execution_binding_provider=lambda identity: host_execution_binding(
+            tmp_path, identity
+        ),
+    ))
+    job = rt.jobs.get_job(receipt["job_id"])
+    assert job is not None
+    assert "provider" not in job.constraints and "model" not in job.constraints
+    selected = rt.broker.select_worker(job)
+    assert selected is not None
+    assert selected.worker_id == "standard-research"
+    lease = rt.broker.claim(job.job_id)
+    assert lease is not None
+    assert lease.attempt.worker_id == "standard-research"
+    assert lease.attempt.quota_class == "fixture"
+
+
+@pytest.mark.parametrize("fault", ["missing", "async", "forged"])
+def test_fresh_ingress_refuses_untrusted_execution_binding(tmp_path, fault):
+    from control_plane import executive_inference_ingress as service
+    from control_plane.executive_ceo_ingress import CeoIngressError
+    rt = Runtime.at(tmp_path / "runtime")
+    class Ground:
+        def observe(self): return GROUND
+    provider = None
+    if fault == "async":
+        async def provider(_):
+            return host_execution_binding(tmp_path, "service-inference-invalid")
+    elif fault == "forged":
+        def provider(identity):
+            value = host_execution_binding(tmp_path, identity)
+            return dict(value, worktree=str(tmp_path / "foreign"))
+    with pytest.raises(CeoIngressError):
+        asyncio.run(service.handle_frame(
+            dict(
+                schema=service.SUBMIT_SCHEMA,
+                request={"operation_key":"binding-refusal", "objective":"Research"},
+                observed_grounding=GROUND,
+            ),
+            runtime=rt,
+            grounding_provider=Ground(),
+            workspace_root=tmp_path,
+            admission_guard=lambda _: None,
+            execution_binding_provider=provider,
+        ))
+    assert rt.jobs.list_jobs() == []
 
 
 @pytest.mark.parametrize("frame", [
@@ -187,7 +384,12 @@ def test_app_result_is_bound_to_service_receipt_and_rechecks_auth(rsa_key, tmp_p
     from tests.test_fabric_inference_client import result
     app, token, current = setup_app(rsa_key, tmp_path)
     rt = Runtime.at(tmp_path/'runtime')
-    receipt = ceo_intent.submit_intent(rt, derive(REQUEST, GROUND)['envelope'], service_admission_guard=lambda _: None)
+    envelope = derive(REQUEST, GROUND)['envelope']
+    receipt = ceo_intent.submit_intent(
+        rt, envelope, workspace_root=tmp_path,
+        service_admission_guard=lambda _: None,
+        service_execution_binding=host_execution_binding(tmp_path, envelope['intent_id']),
+    )
     selection = dict(root_job_id=receipt['job_id'], job_id=receipt['job_id'],
                      attempt_id='ATT-'+'a'*32, result_envelope_digest='b'*64)
     reads = []
@@ -227,8 +429,11 @@ def test_app_handler_fixture_loss_reconciliation_and_honest_null(rsa_key, tmp_pa
     async def observe(*args): return GROUND
     monkeypatch.setattr('integrations.mastermind_executive_app.inference.observe_ingress_grounding', observe)
     async def send(path, frame):
-        result = await handle_frame(frame, runtime=rt, grounding_provider=Ground(),
-            workspace_root=tmp_path, admission_guard=lambda _: None)
+        result = await handle_frame(
+            frame, runtime=rt, grounding_provider=Ground(),
+            workspace_root=tmp_path, admission_guard=lambda _: None,
+            execution_binding_provider=lambda identity: host_execution_binding(tmp_path, identity),
+        )
         if frame['schema'] == SUBMIT_SCHEMA:
             submits.append(frame)
             return CeoIngressResponse('sent_effect_unknown')
@@ -277,7 +482,11 @@ def test_sink_guard_is_last_synchronous_check_and_duplicate_skips_it(tmp_path, m
         calls.append('create')
         return create(*args, **kwargs)
     monkeypatch.setattr(rt.jobs, 'create_job', checked_create)
-    first = ceo_intent.submit_intent(rt, envelope, service_admission_guard=guard)
+    first = ceo_intent.submit_intent(
+        rt, envelope, workspace_root=tmp_path,
+        service_admission_guard=guard,
+        service_execution_binding=host_execution_binding(tmp_path, envelope['intent_id']),
+    )
     def revoked(_): pytest.fail('accepted duplicate must not re-run guard')
     duplicate = ceo_intent.submit_intent(rt, envelope, service_admission_guard=revoked)
     assert duplicate['duplicate'] and first['job_id'] == duplicate['job_id']
@@ -315,7 +524,8 @@ def test_late_revocation_at_final_grounding_read_refuses_creation(tmp_path):
     with pytest.raises(CeoIngressError):
         asyncio.run(service.handle_frame(dict(schema=service.SUBMIT_SCHEMA,
             request=REQUEST, observed_grounding=GROUND), runtime=rt,
-            grounding_provider=Ground(), workspace_root=tmp_path, admission_guard=guard))
+            grounding_provider=Ground(), workspace_root=tmp_path, admission_guard=guard,
+            execution_binding_provider=lambda identity: host_execution_binding(tmp_path, identity)))
     assert calls == ['ground', 'ground', 'guard']
     assert rt.jobs.list_jobs() == []
 

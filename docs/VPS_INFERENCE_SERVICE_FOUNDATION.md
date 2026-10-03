@@ -1,8 +1,8 @@
 # VPS inference service foundation — BUILT_NOT_PROVEN / SOURCE_ONLY / EXECUTION_NOT_YET_COMPOSED
 
 Retained source base: `8aa115c7e6d3ef9685d140256f5aa843cc0e4437`.
-Current protected compatibility pin: `b3627c580dd37ac1c167f59ac4b7555a4330edef`.
-The candidate has been synthetically integrated on that exact protected head with its selected regression suite green. Protected movement from the retained base is path-disjoint from this foundation-owned surface after the shared-server collision was removed; the later `remote_attempt_transport` movement is an accepted dependency for the execution slice, not part of this foundation.
+Last protected compatibility pin before this binding slice: `bdf2a972e68a70270c24d4b5d61a4d60edc4f288`.
+The prior semantic head integrated on that exact protected head with its selected regression suite green and zero owned-path overlap. This binding slice remains source-only until its own fresh protected-base integration receipt is recorded; no ancestry-only merge is required.
 The semantic slice is source-only. Source publication or a PR does not imply installation,
 authentication, provider execution, call-site cutover, deployment, selection or production proof.
 
@@ -29,11 +29,18 @@ authentication, provider execution, call-site cutover, deployment, selection or 
   noncallable, raised, asynchronous or non-None verdicts refuse. The guard receives
   a defensive envelope copy. Callback presence is not authentication authority.
   The future host must synchronously recheck current binding, arming and readiness.
-- `executive_ceo_ingress._submit` forwards that keyword-only host input;
-  `executive_inference_ingress` does not run an earlier substitute guard. Direct
+- `executive_ceo_ingress._submit` forwards that keyword-only host input. Direct
   `executive_service_principal.submit` cannot bypass the sink requirement.
   Accepted duplicates resolve before the guard and status is read-only, so both
   remain readable while disarmed. Historical maintenance admission stays unchanged.
+- Fresh `svc-vps-inference` admission now also requires a separate synchronous
+  host execution binding. `executive_inference_execution` derives branch/worktree
+  from the service intent id and derives research route/profile identity from the
+  existing Model Router; only trusted host composition supplies the exact base SHA
+  and eligible quota classes. The sink rebuilds and compares the binding before Job
+  creation. The caller still cannot choose provider/model/worker/worktree, and the
+  binding never enters the caller envelope/fingerprint. Duplicate/status replay
+  never reruns live routing.
 - Host service composition is absent. All candidate `executive_service.py` changes
   were removed; `executive_runtime.py`, `executive_coo_cycle.py` and related #1041
   domain execution remain owned by #1041. Source handler fixtures are not proof
@@ -76,11 +83,13 @@ COO/Operator aggregation root, its host resolver may derive the reference throug
 No newest-child selection, synthetic root or parallel result store is permitted.
 
 The preferred routine-inference execution lane is smaller: the accepted service
-request becomes one ordinary role-null READ/RESEARCH Executive Job, Runtime/Model
-Router/Capacity select the eligible worker, and the already-merged
-`AttemptBoundRemoteWorkerAdapter` binds the exact claimed Codex/Claude worker only
-after canonical claim. The common Supervisor owns the Attempt and terminal Job
-result. This is the existing Subagent Fabric and avoids a planner/reviewer/
+request now becomes one ordinary role-null READ/RESEARCH Executive Job with the
+host-derived worktree/base/routing-profile/eligible-quota binding persisted in its
+existing Job fields. Runtime Capacity then intersects quota eligibility with the
+bound model aliases, routing-policy version and execution-profile digests before
+claim. The already-merged `AttemptBoundRemoteWorkerAdapter` can bind the exact
+claimed worker only after canonical claim. The common Supervisor owns the Attempt
+and terminal Job result. This is the existing Subagent Fabric and avoids a planner/reviewer/
 aggregation tree for every small classifier or JSON reasoning call. The host
 execution slice still must prove a trusted clean worker workspace, host-owned route
 constraints, exact result contract, and service-only dispatch admission before any
@@ -115,15 +124,18 @@ the public service API. No new private Runtime API is introduced.
 The remaining gates are separate:
 
 1. Compose the host execution slice with the incumbent #1041 service/runtime owner
-   instead of racing its files. For routine inference, admit only exact
-   `svc-vps-inference` Jobs to the existing Supervisor and post-claim
-   `AttemptBoundRemoteWorkerAdapter`; preserve #1041's COO/Operator domain path for
-   agentic research rather than forcing every call through an aggregation root.
-2. Define a trusted service execution binding: fixed clean worker workspace/base,
-   host-derived Model Router/Capacity constraints, no caller provider/model/worker,
-   and an operation-bound direct Job result. The current 4,000-character CEO
-   objective ceiling must not silently truncate real prompts; a larger bounded
-   service payload needs an owner-reviewed carrier before broad cutover.
+   instead of racing its files. The source binding contract now exists; the host
+   still must materialize/reconcile the exact credentialless workspace, provide its
+   reviewed current base/quota set, and admit only exact `svc-vps-inference` Jobs to
+   the ordinary Supervisor/Attempt path. Preserve #1041's COO/Operator domain path
+   for agentic research rather than forcing every call through an aggregation root.
+2. Add a versioned pure-inference worker result contract and operation-bound direct
+   Job result projection through the existing Supervisor/Runtime owners. The generic
+   role-null worker schema has `additionalProperties:false` and no dedicated answer
+   field, so treating `summary` as the model answer is explicitly forbidden. The
+   current 4,000-character CEO objective ceiling must also not silently truncate real
+   prompts; a larger bounded service payload needs an owner-reviewed carrier before
+   broad cutover.
 3. Compose the native MCP route only after #1112 shared-server custody clears (or its
    accepted successor provides a composition seam), then qualify the installed
    Executive/App/listener/service binding, synchronous admission owner and exact
@@ -145,15 +157,20 @@ Focused offline tests cover new service/client modules, CeoIntent, service princ
 and CeoIngress. Fixtures use local signed JWTs, temporary runtimes and explicit
 in-process adapters; they do not authenticate against an installed service or call
 providers. Regression cases cover late revocation at the final grounding read,
-sink guard refusal and direct-submit bypass, readable disarmed reconciliation,
-review-child rejection, honest null discovery and exact result/reference binding.
-These are source checks only, not runtime or provider qualification.
+sink guard refusal and direct-submit bypass, missing/async/forged host execution
+bindings, exact research-route/worktree persistence, duplicate reconciliation without
+rerunning live routing, readable disarmed reconciliation, review-child rejection,
+honest null discovery and exact result/reference binding. These are source checks
+only, not runtime or provider qualification.
 
 Repair validation inside the Codex sandbox: 197 focused tests passed; 99 existing
 socket-dependent tests were blocked by the sandbox's Unix-socket bind denial and
 were not claimed there. Independent host-shell rerun on the authorized M2 Studio executed the complete
 selected regression set, including those socket paths, with **100% pass / rc=0**.
-A synthetic current-protected integration on b3627c580dd37ac1c167f59ac4b7555a4330edef
-also passed the same selected set at **100% / rc=0**. The existing dependency-complete
-local Python environment was used without installation or provider/network calls.
-`git diff --check` passed.
+The prior #1147 semantic head also integrated on
+`bdf2a972e68a70270c24d4b5d61a4d60edc4f288` at **100% / rc=0** with zero
+owned-path overlap. After the host-binding source changes, the expanded local
+Executive/App/MCP regression selection again completed **100% / rc=0**. A fresh
+current-protected integration receipt for this new semantic head remains required
+before release. The existing dependency-complete local Python environment was used
+without installation or provider/network calls. `git diff --check` passed.

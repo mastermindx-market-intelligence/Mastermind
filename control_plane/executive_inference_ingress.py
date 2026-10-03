@@ -1,4 +1,5 @@
 """App-only service frames on CeoIngress, using its owner and sole intent sink."""
+import inspect
 from collections.abc import Mapping
 
 from control_plane import ceo_intent, ceo_request, executive_ceo_ingress as ingress
@@ -9,7 +10,10 @@ STATUS_SCHEMA = "mastermind.ceo_ingress.service_inference_status.v1"
 SCHEMAS = frozenset({SUBMIT_SCHEMA, STATUS_SCHEMA})
 
 
-async def handle_frame(frame, *, runtime, grounding_provider, workspace_root, admission_guard):
+async def handle_frame(
+    frame, *, runtime, grounding_provider, workspace_root, admission_guard,
+    execution_binding_provider=None,
+):
     if not isinstance(frame, Mapping):
         raise ingress.CeoIngressError("invalid_input", "service frame must be an object")
     schema = frame.get("schema")
@@ -36,6 +40,7 @@ async def handle_frame(frame, *, runtime, grounding_provider, workspace_root, ad
     if not is_submit:
         return {"receipt": validate_receipt(await ingress._resolve_status_intent(runtime, identity), operation),
                 "terminal_result_ref": None}
+    execution_binding = None
     if existing is None:
         trusted = await ingress._observe_trusted_grounding(grounding_provider)
         if trusted != frame["observed_grounding"]:
@@ -43,6 +48,35 @@ async def handle_frame(frame, *, runtime, grounding_provider, workspace_root, ad
         candidate = derive(frame["request"], trusted)["envelope"]
         if await ingress._observe_trusted_grounding(grounding_provider) != trusted:
             raise ingress.CeoIngressError("grounding_changed", "service grounding changed")
+        provider_call = getattr(execution_binding_provider, "__call__", None)
+        if (
+            not callable(execution_binding_provider)
+            or inspect.iscoroutinefunction(execution_binding_provider)
+            or inspect.iscoroutinefunction(provider_call)
+        ):
+            raise ingress.CeoIngressError(
+                "backend_unavailable", "service execution binding is unavailable"
+            )
+        try:
+            execution_binding = execution_binding_provider(identity)
+        except Exception as exc:
+            raise ingress.CeoIngressError(
+                "backend_unavailable", "service execution binding is unavailable"
+            ) from exc
+        if inspect.isawaitable(execution_binding):
+            close = getattr(execution_binding, "close", None)
+            if callable(close):
+                close()
+            raise ingress.CeoIngressError(
+                "backend_unavailable", "service execution binding is unavailable"
+            )
+        if not isinstance(execution_binding, Mapping):
+            raise ingress.CeoIngressError(
+                "backend_unavailable", "service execution binding is unavailable"
+            )
     # Canonical sink owns fingerprints, concurrent duplicate resolution and Job creation.
-    return validate_receipt(await ingress._submit(runtime, candidate, workspace_root,
-        service_admission_guard=admission_guard), operation)
+    return validate_receipt(await ingress._submit(
+        runtime, candidate, workspace_root,
+        service_admission_guard=admission_guard,
+        service_execution_binding=execution_binding,
+    ), operation)

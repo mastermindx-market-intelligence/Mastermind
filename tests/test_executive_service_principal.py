@@ -413,7 +413,7 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
 
     # The quoted sink predicates this law relies on are still where we cite them.
     assert "find_event_by_command_id(command_id)" in _source_window(
-        "control_plane/ceo_intent.py", 1285, 1291
+        "control_plane/ceo_intent.py", 1293, 1299
     )
     assert "if fingerprint is not None and recorded != fingerprint:" in _source_window(
         "control_plane/ceo_intent.py", 1055, 1061
@@ -422,7 +422,7 @@ def test_a1_intent_id_depends_only_on_principal_and_operation_key():
         "control_plane/ceo_intent.py", 893, 899
     )
     pins = admission_status()["identity"]["conflict_predicates"]
-    assert {pin["line"] for pin in pins} == {"L1287", "L1057", "L895"}
+    assert {pin["line"] for pin in pins} == {"L1295", "L1057", "L895"}
     for pin in pins:
         assert pin["file"] == "control_plane/ceo_intent.py"
 
@@ -714,12 +714,12 @@ def test_service_schema_is_durably_carried_with_typed_evidence(tmp_path: Path):
         "L746": _source_window("control_plane/ceo_intent.py", 744, 750),
         "L594": _source_window("control_plane/ceo_intent.py", 592, 598),
         "L1002": _source_window("control_plane/ceo_intent.py", 1000, 1006),
-        "L1347": _source_window("control_plane/ceo_intent.py", 1345, 1351),
+        "L1386": _source_window("control_plane/ceo_intent.py", 1384, 1390),
     }
     assert "_SERVICE_REQUIRED_KEYS" in windows["L746"]
     assert "def _require_service_ceiling" in windows["L594"]
     assert 'value["principal_id"] = intent["principal_id"]' in windows["L1002"]
-    assert 'owner_seat="coo"' in windows["L1347"]
+    assert 'owner_seat="coo"' in windows["L1386"]
     for predicate in status["predicates"]:
         assert predicate["line"] in windows, predicate
         assert predicate["file"] == "control_plane/ceo_intent.py"

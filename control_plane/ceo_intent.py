@@ -1233,6 +1233,7 @@ def submit_intent(
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
     service_admission_guard: Any = None,
+    service_execution_binding: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1272,6 +1273,13 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if service_execution_binding is not None and (
+        intent["schema"] != INTENT_SCHEMA_SERVICE
+        or intent.get("principal_id") != "svc-vps-inference"
+    ):
+        raise CeoIntentError(
+            "service execution binding is reserved for svc-vps-inference"
+        )
     if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
         _require_principal_context(intent, principal_context, principal_request_ref, principal_admission_guard)
         from control_plane.ceo_request import derive_worktree
@@ -1321,10 +1329,29 @@ def submit_intent(
                 # ``coo`` is the one seat that skips the typed-executive-
                 # provenance gate, and a service intent must never be seated
                 # above it.  No role, no host binding, no dialogue source.
+                inference_binding = None
                 if intent["schema"] == INTENT_SCHEMA_SERVICE:
                     _require_service_ceiling(contract)
                     if intent["principal_id"] == "svc-vps-inference":
                         _run_service_guard(intent, service_admission_guard)
+                        if service_execution_binding is None or workspace_root is None:
+                            raise CeoIntentError(
+                                "svc-vps-inference requires a trusted execution binding"
+                            )
+                        from control_plane.executive_inference_execution import (
+                            InferenceExecutionBindingError,
+                            validate_execution_binding,
+                        )
+                        try:
+                            inference_binding = validate_execution_binding(
+                                service_execution_binding,
+                                intent_id=intent["intent_id"],
+                                workspace_root=workspace_root,
+                            )
+                        except InferenceExecutionBindingError as exc:
+                            raise CeoIntentError(
+                                "svc-vps-inference execution binding refused"
+                            ) from exc
                 else:
                     _require_principal_contract(intent)
                     _run_principal_guard(intent, principal_admission_guard)
@@ -1333,9 +1360,21 @@ def submit_intent(
                     department=intent["department"],
                     priority=intent["priority"],
                     authority_level=contract.get("authority_level", "A0"),
-                    branch=contract.get("branch"),
-                    worktree=contract.get("worktree"),
-                    constraints=contract.get("constraints"),
+                    branch=(
+                        inference_binding["branch"]
+                        if inference_binding is not None
+                        else contract.get("branch")
+                    ),
+                    worktree=(
+                        inference_binding["worktree"]
+                        if inference_binding is not None
+                        else contract.get("worktree")
+                    ),
+                    constraints=(
+                        inference_binding["constraints"]
+                        if inference_binding is not None
+                        else contract.get("constraints")
+                    ),
                     attempt_limit=contract.get("attempt_limit", 10),
                     # The REQUEST's authorities travel unchanged; the policy
                     # inside create_job is the adjudicator.

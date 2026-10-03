@@ -386,6 +386,7 @@ async def _submit(
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
     service_admission_guard: Any = None,
+    service_execution_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
@@ -395,6 +396,8 @@ async def _submit(
         }
         if service_admission_guard is not None:
             submit_kwargs["service_admission_guard"] = service_admission_guard
+        if service_execution_binding is not None:
+            submit_kwargs["service_execution_binding"] = dict(service_execution_binding)
         if execution_binding is not None:
             submit_kwargs["execution_binding"] = dict(execution_binding)
         if dialogue_source is not None:

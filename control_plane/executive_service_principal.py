@@ -875,12 +875,13 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1347",
+                "line": "L1386",
                 "what": (
                     "the service branch of submit_intent passes EXPLICIT "
                     "owner_seat='coo' / escalation_target='coo' and no orchestration "
-                    "role, no execution_binding and no dialogue_source, so a service "
-                    "Job can never be seated above coo"
+                    "role, generic execution_binding, or dialogue_source; the VPS "
+                    "inference principal may receive only its separately validated "
+                    "trusted host execution binding, never a caller-supplied route"
                 ),
             },
         ),
@@ -892,7 +893,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1287",
+                    "line": "L1295",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "

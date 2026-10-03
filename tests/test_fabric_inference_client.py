@@ -6,6 +6,26 @@ from pathlib import Path
 import pytest
 
 
+def service_receipt(tmp_path, operation_key, objective):
+    from control_plane.executive_inference_contract import derive
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.executive_runtime import Runtime
+    from tests.test_vps_inference_service import GROUND, host_execution_binding
+    envelope = derive(
+        {"operation_key": operation_key, "objective": objective},
+        GROUND,
+    )["envelope"]
+    return submit_intent(
+        Runtime.at(tmp_path / "runtime"),
+        envelope,
+        workspace_root=tmp_path,
+        service_admission_guard=lambda _: None,
+        service_execution_binding=host_execution_binding(
+            tmp_path, envelope["intent_id"]
+        ),
+    )
+
+
 def test_submit_loss_reconcile_reads_only():
     from brain.fabric_inference_client import FabricInferenceClient, EffectUnknown, FabricUnavailable
     calls = []
@@ -106,13 +126,8 @@ def test_review_child_cannot_be_terminal_service_answer():
 @pytest.mark.parametrize('fault', ['none', 'null', 'child', 'foreign', 'validated', 'role', 'extra'])
 def test_client_discovers_only_operation_bound_terminal_ref(tmp_path, fault):
     from brain.fabric_inference_client import FabricInferenceClient, FabricUnavailable
-    from control_plane.executive_inference_contract import derive, intent_id
-    from control_plane.ceo_intent import submit_intent
-    from control_plane.executive_runtime import Runtime
-    from tests.test_vps_inference_service import GROUND
-    receipt = submit_intent(Runtime.at(tmp_path/'runtime'), derive(
-        {'operation_key':'stable-operation', 'objective':'Original research'}, GROUND)['envelope'],
-        service_admission_guard=lambda _: None)
+    from control_plane.executive_inference_contract import intent_id
+    receipt = service_receipt(tmp_path, 'stable-operation', 'Original research')
     selection = dict(root_job_id=receipt['job_id'], job_id=receipt['job_id'],
         attempt_id='ATT-'+'a'*32, result_envelope_digest='b'*64)
     ref = dict(selection, orchestration_role='aggregation', validation='UNVALIDATED')
@@ -166,12 +181,8 @@ def test_explicit_conflict_is_not_transport_uncertainty():
 
 def test_receipt_must_match_submitted_semantics(tmp_path):
     from brain.fabric_inference_client import FabricInferenceClient, EffectUnknown
-    from control_plane.executive_inference_contract import derive, intent_id
-    from control_plane.ceo_intent import submit_intent
-    from control_plane.executive_runtime import Runtime
-    from tests.test_vps_inference_service import GROUND
-    receipt = submit_intent(Runtime.at(tmp_path/'runtime'), derive(
-        {'operation_key':'stable-operation', 'objective':'Original research'}, GROUND)['envelope'], service_admission_guard=lambda _: None)
+    from control_plane.executive_inference_contract import intent_id
+    receipt = service_receipt(tmp_path, 'stable-operation', 'Original research')
     async def tool(name, args):
         return {'ok':True, 'status':'accepted', 'request_ref':intent_id(args['operation_key']), 'receipt':receipt}
     with pytest.raises(EffectUnknown):
@@ -183,14 +194,9 @@ def test_receipt_must_match_submitted_semantics(tmp_path):
 def test_future_resolver_uses_existing_canonical_reference_index(tmp_path, fault):
     from types import SimpleNamespace
     from control_plane import fabric_job_view as owner
-    from control_plane.executive_inference_contract import derive, terminal_result_ref_from_index
-    from control_plane.ceo_intent import submit_intent
-    from control_plane.executive_runtime import Runtime
-    from tests.test_vps_inference_service import GROUND
+    from control_plane.executive_inference_contract import terminal_result_ref_from_index
     operation = 'stable-operation'
-    receipt = submit_intent(Runtime.at(tmp_path/'runtime'), derive(
-        {'operation_key':operation, 'objective':'Read research'}, GROUND)['envelope'],
-        service_admission_guard=lambda _: None)
+    receipt = service_receipt(tmp_path, operation, 'Read research')
     root = receipt['job_id']
     attempt = 'ATT-'+'a'*32
     terminal = dict(schema_version=owner.ORCHESTRATION_TERMINAL_RECEIPT_SCHEMA,
