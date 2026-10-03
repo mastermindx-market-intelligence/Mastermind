@@ -11,10 +11,9 @@ import SessionStore, { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionPersistence, { SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence'
 import { createGovernedAcpPlugin } from '@deepseek-ai/dsh-acp'
-import { ToolRuntime, createDshGrantedToolProfile } from '@mmx/dsh-grant-profile'
+import { AgentLoop, ToolRuntime, createDshGrantedToolProfile } from '@mmx/dsh-grant-profile'
 import { bindProfileToAgent } from './scoped_profile.mjs'
 
 // The same ephemeral fixture persistence contract as N1; no donor disk/session store.
@@ -105,7 +104,8 @@ const sha = value => createHash('sha256').update(value).digest('hex')
 const canonical = value => JSON.stringify(value, (_key, row) => row !== null && typeof row === 'object'
   && !Array.isArray(row) ? Object.fromEntries(Object.keys(row).sort().map(key => [key, row[key]])) : row)
 const mode = process.env.MMX_GOVERNED_BEHAVIOR ?? 'ok'
-assert.ok(['ok', 'failed-tool', 'revoked', 'schema-mismatch', 'source-mismatch', 'invalid-result', 'hang'].includes(mode))
+assert.ok(['ok', 'failed-tool', 'revoked', 'schema-mismatch', 'source-mismatch',
+  'invalid-result', 'wrong-result-identity', 'invalid-result-status', 'hang'].includes(mode))
 const input = process.env.MMX_GOVERNED_INPUT
 assert.ok(input?.startsWith('/'))
 const projectionBytes = readFileSync(input + '/projection.json')
@@ -185,8 +185,20 @@ class FixtureAdapter extends LlmAdapter {
     }
     const read=modelResult(options,'governed-read')
     const search=mode==='failed-tool'?{error:true}:modelResult(options,'governed-search')
-    const text=JSON.stringify({answer:mode==='invalid-result'?7:'governed-research',
-      read,search,model_calls:this.calls})
+    const failed=read.error===true || search.error===true
+    const text=JSON.stringify({
+      schema_version:'mastermind.executive_worker_result/v1',
+      job_id:mode==='wrong-result-identity'?'unbound-job':seed.job_id,
+      run_id:seed.run_id,worker_id:seed.worker_id,
+      status:mode==='invalid-result-status'?'SUCCEEDED':failed?'FAILED':'COMPLETED',
+      summary:mode==='invalid-result'?7:JSON.stringify({answer:'governed-research',
+        read,search,model_calls:this.calls}),
+      completed_steps:[...(!read.error?['Read admitted memo bytes']:[]),
+        ...(!search.error?['Searched admitted nonce']:[])],
+      current_state:failed?'bounded tool refusal observed':'bounded research complete',
+      artifacts:[],next_actions:[],errors:failed?['A requested bounded tool refused']:[],
+      validations:[],
+    })
     yield {type:'block-start',index:0,blockType:'text'}
     yield {type:'text-delta',index:0,text}
     yield {type:'block-end',index:0,block:{type:'text',text}}

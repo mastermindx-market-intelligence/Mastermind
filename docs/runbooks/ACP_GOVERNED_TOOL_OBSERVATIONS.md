@@ -2,8 +2,9 @@
 
 Issue #1142 extends the existing ACP/native owner, rather than adding a worker,
 grant issuer, provider route, scheduler or result store. The default remains
-tool-denying. This slice is **BUILT_NOT_PROVEN** and must remain a draft until
-the configured real-donor journey passes and independent review accepts it.
+tool-denying. This slice is **BUILT_NOT_PROVEN** for installed use. The configured
+real-donor journey passes; independent review and normal source-release gates
+remain required.
 
 ## Boundary
 
@@ -35,18 +36,27 @@ are not provider token or monetary usage. Parent/result validation stays unchang
 
 ## Current evidence (2026-10-03)
 
-- 110 focused Python tests and 40 subtests passed, including 24 new native-channel
-  and tool-observation tests. Four opt-in N1 tests skipped in that invocation were
-  separately executed with their actual pinned supply: **4/4 passed**.
-- New configured donor scope/source/schema/model controls: **4/4 passed**. The scope
+- 72 focused ACP tests passed, including 24 native-channel/tool-observation tests
+  and all four actual pinned N1 cases. The worker-contract and ACP probe suites
+  additionally passed 63 tests and 40 subtests; these are disjoint test files.
+- Configured donor journey and adverse controls: **11/11 passed**. The scope
   control runs two actual Node tests: the unadapted profile refuses; the adapted
   profile executes all four original preflight checks, discovers real MCP tools,
   performs a real read, preserves revocation/cross-agent isolation, and disposes
   registrations and every observed MCP process.
-- Actual donor ACP read/search-to-WorkerResult positive journey: **FAILED** at the
-  first scheduled tool, after successful private readiness and `session/new`.
-  No useful result, real provider call or actual Executive parent consumption is
-  claimed. The original owner settled the native process and child transports.
+- Actual donor ACP read/search-to-WorkerResult positive journey: **PASSED**. It
+  performs exactly one admitted read and search, observes both committed results
+  in three scripted model requests, and returns the exact file bytes/hash/nonce
+  and two search matches. The test took 0.624 seconds including fixture setup on
+  mini4; this is not a provider or installed-worker latency measurement.
+- The native result now satisfies the existing non-orchestration
+  `worker_result_schema(...)`, with job/run/worker IDs from the private owner seed.
+  Actual read/search data lives in its permitted summary. Wrong identity, invalid
+  status and malformed summary refuse as INVALID_RESULT; failed/revoked tools
+  preserve their errors in a FAILED envelope. No second result contract is added.
+- Every case checks original process/child absence and unchanged inputs. No real
+  provider call or actual Executive parent consumption is claimed. Scripted usage
+  tokens are fixture values, not measured provider usage/cost.
 
 ### Two observed dependency constraints
 
@@ -56,17 +66,30 @@ are not provider token or monetary usage. Parent/result validation stays unchang
    one-use host decorator: it supplies only the exact unpublished agent identity,
    rejects explicit cross-agent dispatch, and retains normal plugin ownership and
    every existing preflight check. It neither mounts globally nor changes #1060.
-2. The published compiled #1060 test artifact bundles a private
+2. The former compiled #1060 test artifact bundled a private
    `Symbol('@deepseek-ai/dsh-tools.scheduler')`, while donor AgentLoop imports a
    distinct symbol from its own tools module. The first scheduled call fails with
-   `Cannot read properties of undefined (reading 'prepare')`. Its three exports
-   provide no public interop contract. The incumbent #1060/package owner must
-   publish a pinned compatible closure sharing one tools module with the selected
-   AgentLoop. Do not reflect private symbols, copy scheduler methods, monkeypatch
-   globals or reinterpret standalone profile tests as the full worker journey.
+   `Cannot read properties of undefined (reading 'prepare')`. The incumbent's
+   published `4159c403` repair exports AgentLoop, ToolRuntime and the grant profile
+   from one artifact. This fixture imports all three from that module, and the
+   unchanged read/search assertions now pass. The prior RED evidence is preserved.
+   Do not reflect private symbols, copy scheduler methods, monkeypatch globals or
+   substitute standalone profile tests for the full worker journey.
 
-The failing positive test remains an assertion, not an xfail/skip. CI without the
-external supply explicitly skips native qualification and cannot clear this gate.
+The positive remains an assertion, not an xfail/skip. CI without the external supply
+explicitly skips native qualification and does not establish this proof.
+
+## Remaining Executive boundary
+
+Canonical envelope compatibility is not supervisor or original-parent consumption.
+ACP currently emits `mastermind.acp_native_launch/v1`; complete Executive launch
+attestation, dedicated worker identity, the final UID-sweep receipt and installed
+ACP adapter registration are not provided by this source slice. Do not fabricate
+a passing secret-canary, sweep receipt or adapter registration, or invoke a full
+supervisor process controller against the same-UID fixture. No such run occurred.
+Existing supervisor fake-worker tests do not prove composition with this ACP owner.
+The installed readonly Executive reader is reachable again; that alone does not
+admit an ACP route or install this source.
 
 ## Exact optional test supply
 
@@ -77,8 +100,9 @@ dependency directory; this is not another Mastermind source checkout.
 | Input | Exact identity |
 |---|---|
 | Donor | `4878cdabd87d4041bdaff61d04c966883b9fd07a` |
-| #1060 source provenance | `92e71a4c1bb0d1b0a45cf6b691fce3ea62695567` |
-| Published profile artifact SHA256 | `c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4` |
+| #1060 source provenance | `4159c403cf63bac8bd18138fa232911589afe06f` |
+| Published profile artifact SHA256 | `c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c` |
+| Bundled AgentLoop | `0.2.0-rc.1`, bytes/lock identity in the published `agent-loop-manifest.json` |
 | Contributor R4 patch SHA256 | `243ec445db513db3bb9ff0cad05bc70550df972a785b8af1546d89c055cadc1f` |
 | Node 22.22.0 SHA256 | `913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4` |
 | ACP Python SDK | `0.12.1` |
@@ -91,6 +115,13 @@ by the existing canonical projection helper. This projection is test-only and
 `updates.ts` result-message converter. Install with frozen lockfiles and lifecycle
 scripts disabled; the #1060 fixture lock requires its legacy peer resolution.
 Type-check the donor ACP, agent-loop and session-projection declaration projects.
+
+Reconstruct the profile with the published `prepare.py`, `prepare_mcp.py` and
+`build-profile.mjs`. Use the exact lock with a physical `node_modules` directory
+at the dispatch-binding package: a symlinked dependency directory changes Vite's
+recorded module-path comments and therefore the artifact hash. All measured source
+inputs matched in that rejected build; a clean locked install reproduced the exact
+published c778 bytes. Never weaken the artifact pin to accept a layout mismatch.
 
 Build with the supplied Node and esbuild 0.28.1:
 
@@ -110,10 +141,9 @@ python -m pytest --noconftest -p no:cacheprovider -o addopts='' \
   tests/harness_convergence/test_dsh_acp_governed_worker.py
 ```
 
-After the incumbent publishes a composable closure, intentionally review/update
-its pinned identity and rebuild. Require the entire suite: useful actual read and
-search, failed MCP result, revocation, source/schema/model drift, invalid result,
-cancellation and cleanup. Then prove real Executive admission, confinement and
-original parent consumption through existing result interfaces. Provider canary
-remains conditional on current provider/Capacity authority. Do not redo #825's
-accepted semantics or acquire #1060's held source carrier to solve this dependency.
+Require the entire suite after any pinned supply change: useful actual read/search,
+failed MCP result, revocation, source/schema/model drift, invalid result/identity/
+status, cancellation and cleanup. Next prove complete Executive launch/cleanup
+composition, admitted routing, confinement and original parent consumption through
+existing owners. Provider canary remains conditional on current provider/Capacity
+authority. Do not redo #825's accepted semantics or acquire #1060's source carrier.

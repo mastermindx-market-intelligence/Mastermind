@@ -17,6 +17,7 @@ import pytest
 from test_dsh_acp_worker import _binary, _git
 from control_plane.worker_execution_contract import WorkerLaunchSpec, WorkerRunStatus
 from control_plane.executive_worker_broker import BrokerEffectUnknownError
+from control_plane.executive_supervisor import worker_result_schema
 from integrations.acp_worker.adapter import AcpWorkerAdapter
 from integrations.acp_worker.native import AcpNativeProcessOwner, AcpNativeProfile
 from integrations.acp_worker.tool_admission import AcpNativeToolGate, AcpObservedTool
@@ -34,9 +35,9 @@ def supply():
     root = Path(value).resolve(strict=True)
     manifest = json.loads((root / 'supply-manifest.json').read_text())
     assert manifest['donor'] == '4878cdabd87d4041bdaff61d04c966883b9fd07a'
-    assert manifest['profile_head'] == '92e71a4c1bb0d1b0a45cf6b691fce3ea62695567'
+    assert manifest['profile_head'] == '4159c403cf63bac8bd18138fa232911589afe06f'
     assert manifest['r4_patch'] == '243ec445db513db3bb9ff0cad05bc70550df972a785b8af1546d89c055cadc1f'
-    assert manifest['profile_artifact'] == 'c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4'
+    assert manifest['profile_artifact'] == 'c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c'
     for name, sha in manifest['files'].items():
         assert (root / name).resolve().is_relative_to(root)
         assert digest(root / name) == sha, name
@@ -75,9 +76,8 @@ async def exercise(tmp_path, mode='ok', *, cancel=False, model='fixture-model'):
          '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'fixture')
     base = _git(workspace, 'rev-parse', 'HEAD')
     schema = run_dir / 'input/result.schema.json'
-    schema.write_text(json.dumps({'type':'object','properties':{'answer':{'type':'string'},
-        'read':{'type':'object'},'search':{'type':'object'},'model_calls':{'type':'integer'}},
-        'required':['answer','read','search','model_calls'],'additionalProperties':False}))
+    schema.write_text(json.dumps(worker_result_schema(
+        job_id='GOVERNED-JOB', run_id='governed-run', worker_id='governed-worker')))
     projection = json.loads((root / 'projection.json').read_text())
     tools = tuple(AcpObservedTool('mcp__granted__'+tool['name'], hashlib.sha256(json.dumps(tool,
         sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()) for tool in projection['tools'])
@@ -142,7 +142,11 @@ def test_real_governed_read_search_returns_common_worker_result(tmp_path):
     receipt, unknown, events, ref, adapter, elapsed = asyncio.run(exercise(tmp_path))
     assert unknown is None and receipt is not None
     assert receipt.result.status is WorkerRunStatus.SUCCEEDED
-    result = receipt.result.structured_output
+    envelope = receipt.result.structured_output
+    assert envelope['job_id']=='GOVERNED-JOB' and envelope['run_id']==ref.run_id
+    assert envelope['worker_id']=='governed-worker' and envelope['status']=='COMPLETED'
+    assert envelope['errors']==envelope['validations']==()
+    result = json.loads(envelope['summary'])
     root, _, _ = supply()
     nonce = json.loads((root/'fixture-input/fixture.json').read_text())['nonce']
     assert result['read']['nonce']==nonce and result['search']['nonce']==nonce
@@ -160,7 +164,9 @@ def test_real_governed_read_search_returns_common_worker_result(tmp_path):
 def test_failed_actual_tool_result_is_preserved_without_forbidden_body(tmp_path,mode):
     receipt,unknown,events,ref,_,_=asyncio.run(exercise(tmp_path,mode))
     assert unknown is None and receipt.result.status is WorkerRunStatus.SUCCEEDED
-    output=receipt.result.structured_output
+    envelope=receipt.result.structured_output
+    assert envelope['status']=='FAILED' and envelope['errors']
+    output=json.loads(envelope['summary'])
     assert output['read' if mode=='failed-tool' else 'search']['error'] is True
     assert not any(e['event']=='search' for e in events)
     if mode=='failed-tool': assert not any(e['event']=='read' for e in events)
@@ -178,6 +184,13 @@ def test_discovery_or_source_drift_prevents_prompt(tmp_path,mode):
 
 def test_new_donor_invalid_result_is_not_success(tmp_path):
     receipt,unknown,*_=asyncio.run(exercise(tmp_path,'invalid-result'))
+    assert unknown is None and receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert receipt.result.structured_output is None
+
+
+@pytest.mark.parametrize('mode',['wrong-result-identity','invalid-result-status'])
+def test_canonical_result_identity_and_status_are_not_self_asserted(tmp_path,mode):
+    receipt,unknown,*_=asyncio.run(exercise(tmp_path,mode))
     assert unknown is None and receipt.result.status is WorkerRunStatus.INVALID_RESULT
     assert receipt.result.structured_output is None
 
