@@ -259,3 +259,21 @@ def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
     assert "Do not mix procedure revisions" in text
     assert "does not transfer an incumbent writer, authorize a retry, or relax admission" in text
     assert "explanatory notes, not a second closed routing taxonomy" in text
+
+
+def test_prestart_action_capability_gate_blocks_blind_session_start():
+    text = _section("Step 6 — Discover exact action capability, then react to evidence")
+    assert "Gate action-bearing START on current capability proof" in text
+    assert "THIS concrete receiver must itself perform or invoke" in text
+    assert "downstream worker-local actions" in text
+    assert "dispatch/inspection/review actions the principal itself must execute" in text
+    assert "Schema exposure alone is not positive readiness" in text
+    assert "do not emit action-bearing `START`" in text
+    assert "`UNKNOWN` / `UNPROBED`" in text
+    assert "Unknown evidence alone does not authorize receiver" in text
+    assert "replacement." in text
+    assert "`CAPACITY_SELECTABLE`" in text
+    assert "`PRESTART_REBIND`" in text
+    assert "`EXACT_SESSION_REQUIRED`" in text
+    assert "capability loss never authorizes moving the modifying operation" in text
+    assert "`EFFECT_UNKNOWN` result freezes receiver change" in text

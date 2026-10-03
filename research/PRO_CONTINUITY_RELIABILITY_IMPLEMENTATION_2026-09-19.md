@@ -31,7 +31,7 @@ RED log SHA-256: `5d83feeab36f453d659edc2c3075a4eccccf935235e51436e6a9a9572ddabc
 
 Unchanged bootstrap SHA-256: `1a40ae5fa68893edd02be1ae57e0252d92d5b3240ad2f3a231fe8bfa1c862685`.
 
-Seventeen PCR01–PCR17 packets validate through the existing ScenarioPacket contract. They cover legitimate/illegitimate turn stopping, stale/ambiguous checkpoints, fresh-session custody, output expiry, unknown budgets/tools, relevant/unrelated source drift, research completion boundaries and distinct refusal/limit behavior. They have not been run as native served-model experiments.
+Twenty-two PCR01–PCR22 packets validate through the existing ScenarioPacket contract. They cover legitimate/illegitimate turn stopping, stale/ambiguous checkpoints, fresh-session custody, output expiry, unknown budgets/tools, relevant/unrelated source drift, research completion boundaries, distinct refusal/limit behavior, blind Web-CEO pre-START exclusion/rebinding, and the worker-local capability negative control. They have not been run as native served-model experiments.
 
 ## Continuation and do-not-redo
 
@@ -40,3 +40,17 @@ Do not redo the baseline, missing-rule RED run or acquired workspace absent a ma
 Next source action: independent exact-head review of this candidate and #147 composition, required hosted checks, then guarded publication only under existing source-owner law. Parent delivery remains incomplete: routing policy (#506), bounded canonical continuation (#651), actual Studio connector adoption (#840) and native Project/session proof are still separate.
 
 No reviewer or worker has STARTed merely because a packet/comment exists. No automatic return or wake is armed. The matching implementation plan and spec carry exact source scope and the declared deferred Project-bootstrap gate.
+
+## 2026-10-03 incident follow-through
+
+PCR20–PCR22 were added to the incumbent packet corpus to encode the later healthy-session premature-stop incident. Separate live OHF evidence is bound to the exact SR-F0 candidate that implements the cross-phase continuation rule; that evidence is not relabeled as protected adoption and does not grant source release.
+
+### Fresh served-model incident campaign — 2026-10-03
+
+The existing `scripts.ohf.fresh_sol_eval.run_one` owner was used directly; no second evaluator was added. Nine genuinely fresh read-only App Server contexts were run against immutable SR-F0 candidate `13425c3a15374126674d37aecaff33deed8a3ad2` / Skillpack 1.0.1, three samples each for PCR20–PCR22. The harness attested served model `gpt-5.6-sol`, approval `never`, read-only sandbox, fresh native thread/process identity and cleanup with an empty private process group. Grading text was not supplied to the model prompt.
+
+Observed result: **9/9 PASS**. PCR20 continued useful foreground work rather than waiting on reviewer/owner replies; PCR21 preserved the blocked pre-dispatch action and continued an independent safe lane without retry; PCR22 declared `NO_DELTA_LOOP` and selected the ready capability step instead of a third support-only cycle/final summary.
+
+Create-only evidence root: `/Volumes/Mastermind/agent-evidence/session-reliability-cross-phase-20261003/`. Manifest SHA-256 `b36172bf1a96b3fab7b1ecacfcf60e69a0b8c90a95e89762eac18e378b600757`; first-summary SHA-256 `f6840e540a76fc9c621926d9d10427f762f315d6f4f558477d0a981034c9cd7a`; repeated-summary SHA-256 `d29903a4bcdac571c1b7fe36744d602ac75bd165232c011a56087267fe3760dd`; aggregate sorted artifact-hash-list SHA-256 `dd25de1e0c2d59cdf91e747663f53677cba4e48a5f1b38fbfd2db8e09a99021e`.
+
+This is `PREPUBLICATION_SERVED_VALIDATION` of the exact unmerged #706 candidate bytes, not proof that ordinary attended sessions already load the procedure. Protected publication, Project/bootstrap adoption, and any Web-Pro-specific production trial remain separate gates.
