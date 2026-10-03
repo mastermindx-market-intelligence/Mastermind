@@ -15,6 +15,47 @@ if [ "$(basename "$common_abs")" != ".git" ]; then
 fi
 source_repo="$(dirname "$common_abs")"
 
+# A protected installer may bind an additional repository-specific launcher to
+# another canonical local checkout (for example Macro) without giving runtime
+# callers a path override. The generated wrapper still hard-pins the resolved
+# source path and overwrites any hostile MASTERMIND_SOURCE_REPO environment.
+configured_source="${MASTERMIND_WORKSPACE_CLI_SOURCE_REPO:-}"
+if [ -n "$configured_source" ]; then
+  case "$configured_source" in
+    /*) ;;
+    *)
+      echo "workspace source repository must be an absolute repository root" >&2
+      exit 2
+      ;;
+  esac
+  sanitized_source="$(printf '%s' "$configured_source" | /usr/bin/tr -d '\r\n')"
+  if [ "$sanitized_source" != "$configured_source" ]; then
+    echo "workspace source repository path is invalid" >&2
+    exit 2
+  fi
+  if [ ! -d "$configured_source" ]; then
+    echo "workspace source repository is not a directory" >&2
+    exit 2
+  fi
+  configured_abs="$(cd "$configured_source" 2>/dev/null && pwd -P)" || {
+    echo "workspace source repository cannot be resolved" >&2
+    exit 2
+  }
+  configured_root="$(git -C "$configured_abs" rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "workspace source repository is not a Git worktree" >&2
+    exit 2
+  }
+  configured_root="$(cd "$configured_root" 2>/dev/null && pwd -P)" || {
+    echo "workspace source repository root cannot be resolved" >&2
+    exit 2
+  }
+  if [ "$configured_abs" != "$configured_root" ]; then
+    echo "workspace source repository must name the exact Git worktree root" >&2
+    exit 2
+  fi
+  source_repo="$configured_root"
+fi
+
 # Select the workspace root once through the canonical workspace route.
 # This is installer policy only: it does not reserve storage or perform Runtime
 # admission. An enrolled host policy remains pinned even while its mount is

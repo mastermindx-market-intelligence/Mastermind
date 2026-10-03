@@ -19,6 +19,16 @@ mmx-workspace acquire \
 
 The accepted release installs `mmx-workspace` with `scripts/install_mastermind_workspace_cli.sh`. The launcher, not the model/session, pins the canonical source checkout and host workspace root. On the Studio it also refuses execution when `/Volumes/Mastermind` is not the actual mounted workspace volume. `scripts/mastermind_workspace.py` is the versioned implementation payload and test/admin seam; it is not the production Web invocation.
 
+A host that needs attended custody for another canonical repository installs a **separate named launcher from the same accepted Mastermind release**. Source selection is installation-time policy, never a runtime path supplied by the model/session. For example, after qualifying the canonical Macro checkout:
+
+```bash
+MASTERMIND_WORKSPACE_CLI_SOURCE_REPO=/absolute/path/to/macro \
+MASTERMIND_WORKSPACE_CLI_INSTALL="$HOME/.local/bin/mmx-workspace-macro" \
+  ./scripts/install_mastermind_workspace_cli.sh
+```
+
+The installer requires the override to be the exact absolute Git worktree root, resolves it physically, and embeds that path in the generated wrapper. The wrapper overwrites any runtime `MASTERMIND_SOURCE_REPO` value, preserving the same source-pinning boundary as the default launcher. Use the repository-specific installed launcher (`mmx-workspace-macro` in this example) for acquire/status/release on that repository; do not overwrite the default launcher merely to switch repositories.
+
 The JSON receipt supplies the exact `workspace_path`, derived branch, base SHA, and shared Git common directory. Repeating `acquire` for the same operation reuses that workspace. Never point two independent operations at one workspace or mint proof/review worktrees outside this owner. Before editing, `cd` to the receipt path and confirm:
 
 ```bash

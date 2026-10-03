@@ -1196,6 +1196,39 @@ def test_linked_workspace_refuses_unmanaged_or_mismatched_identity(tmp_path: Pat
         executive_workspace.inspect_linked_worktree(source, root, unmanaged)
 
 
+def test_linked_workspace_release_accepts_head_reachable_from_origin_default_main(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    _git(source, "branch", "-m", "main")
+    remote = tmp_path / "remote-main.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "main")
+    _git(source, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id="web-main-001", lane="web",
+        base_sha=base_sha, branch="sol/web-main-001",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("published on default main\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "default-main reachable")
+    head = _git(workspace, "rev-parse", "HEAD")
+    _git(workspace, "push", "origin", "HEAD:main")
+    _git(source, "fetch", "origin", "main:refs/remotes/origin/main")
+
+    inspection = executive_workspace.inspect_linked_worktree(
+        source, root, workspace, expected_operation_id="web-main-001",
+    )
+    assert inspection.state == "RELEASABLE"
+    assert inspection.head_sha == head
+    assert inspection.recoverability == "HEAD_REACHABLE_FROM_ORIGIN_DEFAULT"
+
+
 def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_path: Path):
     source, base_sha = _repository(tmp_path)
     remote = tmp_path / "remote.git"

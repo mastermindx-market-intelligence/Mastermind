@@ -289,6 +289,19 @@ def _git_text(source: Path, *args: str) -> tuple[int, str, str]:
     return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
 
 
+def _origin_default_remote_ref(source: Path) -> str | None:
+    code, value, _ = _git_text(
+        source, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"
+    )
+    if code != 0:
+        return None
+    ref = value.strip()
+    prefix = "refs/remotes/origin/"
+    if not ref.startswith(prefix) or ref == f"{prefix}HEAD":
+        return None
+    return ref
+
+
 def _porcelain_records(source: Path) -> list[dict[str, str]]:
     code, output, error = _git_text(source, "worktree", "list", "--porcelain")
     if code != 0:
@@ -340,9 +353,13 @@ def _census(source: Path, root: Path) -> dict[str, object]:
             elif managed and locked_reason:
                 state = "MANAGED_ACTIVE"
             else:
-                ancestor_code, _, _ = _git_text(
-                    source, "merge-base", "--is-ancestor", head, "refs/remotes/origin/master"
-                )
+                origin_default_ref = _origin_default_remote_ref(source)
+                if origin_default_ref is None:
+                    ancestor_code = 1
+                else:
+                    ancestor_code, _, _ = _git_text(
+                        source, "merge-base", "--is-ancestor", head, origin_default_ref
+                    )
                 remote_head = ""
                 if branch:
                     remote_code, remote_value, _ = _git_text(
@@ -352,7 +369,7 @@ def _census(source: Path, root: Path) -> dict[str, object]:
                         remote_head = remote_value
                 if ancestor_code == 0:
                     state = "CLEAN_RECOVERABLE"
-                    recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
+                    recoverability = "HEAD_REACHABLE_FROM_ORIGIN_DEFAULT"
                 elif remote_head == head and head:
                     state = "CLEAN_RECOVERABLE"
                     recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"

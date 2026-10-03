@@ -1944,6 +1944,25 @@ def _run_status(
     return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
 
 
+def _origin_default_remote_ref(source: Path, *, env: dict[str, str]) -> str | None:
+    """Return the locally observed origin default branch without network access."""
+    code, value, _ = _run_status(
+        [
+            "git", "-C", str(source), "symbolic-ref", "--quiet",
+            "refs/remotes/origin/HEAD",
+        ],
+        cwd=None,
+        env=env,
+    )
+    if code != 0:
+        return None
+    ref = value.strip()
+    prefix = "refs/remotes/origin/"
+    if not ref.startswith(prefix) or ref == f"{prefix}HEAD":
+        return None
+    return ref
+
+
 def _managed_linked_lock_reason(*, operation_id: str, lane: str, base_sha: str) -> str:
     return (
         f"{LINKED_WORKTREE_LOCK_PREFIX} operation={operation_id} "
@@ -2215,19 +2234,23 @@ def inspect_linked_worktree(
     if head.lower() == base.lower():
         recoverability = "UNCHANGED_FROM_ACQUIRED_BASE"
     else:
-        ancestor_code, _, _ = _run_status(
-            [
-                "git",
-                "-C",
-                str(source),
-                "merge-base",
-                "--is-ancestor",
-                head,
-                "refs/remotes/origin/master",
-            ],
-            cwd=None,
-            env=env,
-        )
+        origin_default_ref = _origin_default_remote_ref(source, env=env)
+        if origin_default_ref is None:
+            ancestor_code = 1
+        else:
+            ancestor_code, _, _ = _run_status(
+                [
+                    "git",
+                    "-C",
+                    str(source),
+                    "merge-base",
+                    "--is-ancestor",
+                    head,
+                    origin_default_ref,
+                ],
+                cwd=None,
+                env=env,
+            )
         remote_head = ""
         if branch:
             remote_code, remote_value, _ = _run_status(
@@ -2238,7 +2261,7 @@ def inspect_linked_worktree(
             if remote_code == 0:
                 remote_head = remote_value
         if ancestor_code == 0:
-            recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
+            recoverability = "HEAD_REACHABLE_FROM_ORIGIN_DEFAULT"
         elif remote_head.lower() == head.lower():
             recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
         else:
@@ -2251,7 +2274,7 @@ def inspect_linked_worktree(
                 dirty=False,
                 recoverability="LOCAL_HEAD_NOT_RECOVERABLE_FROM_OBSERVED_ORIGIN_REFS",
                 removed=False,
-                reason="clean workspace has commits not observed on origin/master or origin branch",
+                reason="clean workspace has commits not observed on origin default branch or origin branch",
             )
 
     return LinkedWorkspaceReleaseReceipt(
