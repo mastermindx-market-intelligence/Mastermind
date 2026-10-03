@@ -1733,7 +1733,7 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     worker_absent = source.index(
         'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
-    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
+    archive = source.index('source_git -C "$SOURCE_REPO" archive')
     config_write = source.index('temporary.write_text(', archive)
     plist_install = source.index('/usr/bin/install -o root -g wheel -m 0644')
     assert stop < control_absent < worker_absent < archive < config_write < plist_install
@@ -1763,7 +1763,7 @@ def test_installer_waits_boundedly_for_asynchronous_launchd_bootout() -> None:
     assert "return 1" in helper
 
     mutation_start = source.index("trap leave_installed_services_stopped EXIT")
-    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive', mutation_start)
+    archive = source.index('source_git -C "$SOURCE_REPO" archive', mutation_start)
     mutation = source[mutation_start:archive]
     for label, description in (
         ("RELAY_LABEL", "relay"),

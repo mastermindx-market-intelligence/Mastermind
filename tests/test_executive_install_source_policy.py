@@ -191,3 +191,20 @@ def test_installer_exposes_explicit_frozen_mode_without_reusing_historical_sourc
     assert "--protected-master-sha" in install
     assert '"$SCRIPT_DIR/install_source_policy.py"' in install
     assert "refs/remotes/origin/master" not in install
+
+
+def test_installer_uses_exact_process_scoped_git_trust_for_operator_owned_source() -> None:
+    install = INSTALL.read_text(encoding="utf-8")
+    assert "GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1" in install
+    assert "GIT_CONFIG_COUNT=2" in install
+    assert 'GIT_CONFIG_KEY_0=safe.directory "GIT_CONFIG_VALUE_0=$SOURCE_REPO"' in install
+    assert 'GIT_CONFIG_KEY_1=safe.directory "GIT_CONFIG_VALUE_1=$SOURCE_GIT_DIR"' in install
+    assert "rev-parse --absolute-git-dir" in install
+    assert '"${SOURCE_GIT_ENV[@]}" "$PYTHON_BINARY" -I -S -B' in install
+    assert 'TREE_SHA="$(source_git -C "$SOURCE_REPO" rev-parse' in install
+    assert 'source_git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA"' in install
+    assert 'source_git clone --no-hardlinks --no-checkout "$SOURCE_REPO"' in install
+    assert '/usr/bin/git -C "$SOURCE_REPO"' not in install
+    assert '/usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO"' not in install
+    assert "safe.directory=*" not in install
+    assert "git config --global" not in install

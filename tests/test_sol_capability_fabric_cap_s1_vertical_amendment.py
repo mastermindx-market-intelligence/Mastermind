@@ -168,7 +168,7 @@ def test_existing_installer_already_places_the_package_in_exact_release_closure(
     ):
         assert (PACKAGE_ROOT / source_file).is_file()
 
-    assert '/usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA"' in installer
+    assert 'source_git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA"' in installer
     assert '/usr/sbin/chown -R root:wheel "$STAGING"' in installer
     assert '/bin/chmod -R go-w "$STAGING"' in installer
     assert '/bin/chmod 0755 "$STAGING"' in installer
