@@ -75,7 +75,7 @@ remote_health_for() {
     printf '%s' \"\$body\" | grep -Eq '\"commit\"[[:space:]]*:[[:space:]]*\"$sha\"'" >/dev/null 2>&1
 }
 
-"${GIT_OWNER[@]}" fetch -q --no-tags --force "$REMOTE" \
+"${GIT_OWNER[@]}" fetch -q --depth=1 --no-tags --force "$REMOTE" \
   "refs/heads/$BASE_BRANCH:refs/remotes/mmx-release/$BASE_BRANCH"
 REMOTE_SHA="$("${GIT_OWNER[@]}" rev-parse "refs/remotes/mmx-release/$BASE_BRANCH^{commit}")"
 [[ "$REMOTE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "remote master identity unavailable" >&2; exit 65; }
@@ -97,7 +97,7 @@ TARGET_DEPLOY="$TMP_ROOT/stage/scripts/deploy_code_to_vps.sh"
   exit 65
 }
 
-"${GIT_OWNER[@]}" fetch -q --no-tags --force "$REMOTE" \
+"${GIT_OWNER[@]}" fetch -q --depth=1 --no-tags --force "$REMOTE" \
   "refs/heads/$BASE_BRANCH:refs/remotes/mmx-release/$BASE_BRANCH"
 REMOTE_SHA_BEFORE_EFFECT="$("${GIT_OWNER[@]}" rev-parse "refs/remotes/mmx-release/$BASE_BRANCH^{commit}")"
 [ "$REMOTE_SHA_BEFORE_EFFECT" = "$TARGET_SHA" ] || {

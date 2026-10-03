@@ -51,6 +51,7 @@ def test_privileged_vps_release_binds_current_master_and_installed_executor() ->
     assert '/bin/chmod 0700 "$TMP_ROOT/repo"' in source
     assert '/usr/bin/git -C "$TMP_ROOT/repo" -c credential.helper=osxkeychain' in source
     assert '-c core.hooksPath=/dev/null' in source
+    assert source.count('fetch -q --depth=1 --no-tags --force "$REMOTE"') == 2
     assert source.count('refs/heads/$BASE_BRANCH:refs/remotes/mmx-release/$BASE_BRANCH') == 2
     assert '[ "$REMOTE_SHA" = "$TARGET_SHA" ]' in source
     assert '"${GIT_OWNER[@]}" archive "$TARGET_SHA"' in source
