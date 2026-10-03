@@ -24,7 +24,7 @@ import bot  # noqa: F401  -> vendor/macro bootstrap (sys.path + .env)
 _ROOT = Path(__file__).resolve().parent.parent
 
 SCHEMA = "mastermind_snapshot.v1"
-LIVE_URL = "http://localhost:8000"
+LIVE_URL = "https://bot.mastermind-x.com"
 
 # Keep the published JSON lean: the live "Evaluated — Not Held" panel shows the full
 # rejected list, but the static snapshot only needs a representative head + the count.
