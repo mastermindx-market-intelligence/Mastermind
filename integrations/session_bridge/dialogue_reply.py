@@ -235,18 +235,26 @@ class AgentDialogueContinueWriter:
         if binding.target_ref != target_ref:
             raise BridgeError("binding_unavailable", "target binding drifted")
         context = self._context(binding)
+        bound_thread_ts = binding.thread_ts
+        bound_reply_to_message_key = binding.reply_to_message_key
         request_message, existing_reply = await self._read(
             binding=binding,
             context=context,
         )
         try:
             current_binding = self._resolver.resolve(target_ref)
+            current_context = self._context(current_binding)
         except Exception:
             raise BridgeError(
                 "binding_unavailable",
                 "exact target binding unavailable after dialogue read",
             ) from None
-        if current_binding != binding:
+        if (
+            current_binding.target_ref != target_ref
+            or current_context != context
+            or current_binding.thread_ts != bound_thread_ts
+            or current_binding.reply_to_message_key != bound_reply_to_message_key
+        ):
             raise BridgeError(
                 "binding_unavailable",
                 "exact target binding changed during dialogue read",

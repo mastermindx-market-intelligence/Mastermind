@@ -460,3 +460,39 @@ No runtime/native/provider send, installation, callback subscription, credential
 read, new queue, lifecycle owner, or retry owner was introduced. The new
 attention reconciliation callable is a composition seam over the existing
 incumbent Wake/attention owner; it does not own state.
+
+## 2026-10-03 nested binding-alias repair after bb5d6cff
+
+Review comment5966580702 identified one remaining race in the post-read binding
+revalidation: `ExecutiveReplyBinding` is frozen only at the attribute level, so
+a resolver can reuse the same binding object while mutating nested
+`commission_ref` / `applies_to` maps during the awaited read. Direct dataclass
+equality then compares the same aliased object and can miss the drift.
+
+TDD:
+- new in-place nested `commission_ref.commit` mutation discriminator was
+  observed RED on bb5d6cff: no refusal and stale-context send proceeded;
+- repair snapshots normalized `DialogueContextV2`, `thread_ts`, and
+  `reply_to_message_key` before the await; after re-resolve it rebuilds the
+  current normalized context and compares that immutable/copy boundary plus the
+  scalar carrier coordinates and exact target_ref;
+- aliasing discriminator, separate-object rotation discriminator, and duplicate
+  attention reconciliation all PASS after repair.
+
+Fresh exact working-tree proof:
+- targeted dialogue/native/failure/Claude campaign: **58 PASS / 0 failures /
+  0 errors / 0 skips**, XML SHA256
+  `c9a1be8c7c8624d57e7e284866c91a77474d1d710c710622fdd206c781e80f8f`;
+- broader bridge/native/dialogue/auth campaign: **430 PASS / 0 failures /
+  0 errors / 0 skips**, XML SHA256
+  `71fb1cb3a15531da9035d0282c238d88fc333e437d4d2b96795ff5f150489954`;
+- full repository pytest attempted on the same bytes: **2 collection errors /
+  5 skips**, unchanged `engine.signal_archive` and `lib` import gaps, XML
+  SHA256
+  `839eaacbb4b895fabbadd79e9943685a0085ecf3c19acaaddb23395db918659a`.
+  No full-suite-green claim.
+- `git diff --check` PASS before targeted verification.
+
+No runtime/native/provider effect, install, subscription, credential change,
+retry owner or alternative source carrier was used. This repair changes only
+the original dialogue binding freshness contract and its regression test.

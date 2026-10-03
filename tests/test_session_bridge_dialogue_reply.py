@@ -256,3 +256,56 @@ def test_continue_writer_re_resolves_complete_binding_after_awaited_read():
     assert error.value.code == "binding_unavailable"
     assert resolver.calls == [original.target_ref, original.target_ref]
     assert [call[1]["operation"] for call in service.calls] == ["read_thread"]
+
+
+def test_continue_writer_re_resolve_detects_in_place_nested_binding_mutation():
+    commission = dict(COMMISSION)
+    applies = dict(APPLIES)
+    binding = ExecutiveReplyBinding(
+        target_ref="codex:bind-001:g1",
+        work_ref="WS:DOT-BRIDGE",
+        commission_ref=commission,
+        session_ref="asd-session-dotbridge01",
+        dialogue_operation_key="dot-bridge-worker-op-001",
+        watch_mode="turn_watch_v1",
+        applies_to=applies,
+        thread_ts=THREAD_TS,
+        reply_to_message_key="asd-worker-result-0001",
+    )
+
+    class AliasedResolver:
+        def __init__(self):
+            self.calls = []
+
+        def resolve(self, target_ref):
+            self.calls.append(target_ref)
+            return binding
+
+    class MutatingService(Service):
+        async def __call__(self, socket_path, request):
+            response = await super().__call__(socket_path, request)
+            if request["operation"] == "read_thread":
+                commission["commit"] = "9" * 40
+            return response
+
+    resolver = AliasedResolver()
+    service = MutatingService()
+    writer = AgentDialogueContinueWriter(
+        resolver,
+        socket_path=Path("/private/tmp/mastermind-agent-dialogue.sock"),
+        service_call=service,
+    )
+
+    with pytest.raises(BridgeError) as error:
+        asyncio.run(
+            writer(
+                binding.target_ref,
+                "Inspect the next bounded failure.",
+                "Stop after the next validated RESULT.",
+                "dot-reply-alias-001",
+            )
+        )
+
+    assert error.value.code == "binding_unavailable"
+    assert resolver.calls == [binding.target_ref, binding.target_ref]
+    assert [call[1]["operation"] for call in service.calls] == ["read_thread"]
