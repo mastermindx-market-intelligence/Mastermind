@@ -24,7 +24,7 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
     cleanup = _slice(
         source,
         "leave_installed_services_stopped() {",
-        "}\ntrap leave_installed_services_stopped EXIT",
+        "\n}\n",
     )
     mutation = _slice(
         source,

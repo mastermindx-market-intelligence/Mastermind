@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = "0.159.2"
 CODEX_SHA256 = "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 CODE_MODE_HOST_SHA256 = "ed79fbc9e1683feb29d73fb421f3e16932d178a459f63741754014c6c7ea6107"
+PREDECESSOR_CODE_MODE_HOST_SHA256 = "a059beb029cdbc989e72e23f8680be9f703cb6cf83d9598d91041f82178d018d"
 INSTALLED = f"/Library/Application Support/MastermindExecutive/bin/codex-{VERSION}"
 
 NEWLY_CLOSED_FEATURES = {
@@ -66,6 +67,10 @@ def test_installer_and_host_preparation_pin_the_same_signed_package() -> None:
     assert f'CODEX_VERSION="{VERSION}"' in install
     assert f'CODEX_SHA256="{CODEX_SHA256}"' in install
     assert f'CODEX_CODE_MODE_HOST_SHA256="{CODE_MODE_HOST_SHA256}"' in install
+    assert (
+        f'CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256="{PREDECESSOR_CODE_MODE_HOST_SHA256}"'
+        in install
+    )
     assert f'[ "$CODEX_VERSION" = "{VERSION}" ]' in install
 
     provision = _source("ops/executive_os/provision-worker-auth.sh")

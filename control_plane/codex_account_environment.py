@@ -284,10 +284,19 @@ def reset_credit_inventory(limits: Mapping[str, Any], *, now: float) -> dict[str
 
 def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
                       now: float | None = None, limit_id: str = "codex") -> dict[str, Any]:
-    """Projection of provider evidence, not an admission or a quota reservation."""
+    """Project provider evidence without admission or quota reservation.
+
+    ``windows`` retains only validated measurements for existing consumers.
+    ``window_states`` preserves each native position independently: UNKNOWN
+    before identity/bucket observation, MISSING for an omitted key,
+    NOT_APPLICABLE only for explicit null, INVALID_OR_STALE for rejected data,
+    and OBSERVED for a validated window. EXHAUSTED may coexist with an unknown
+    sibling constraint; it is not completeness or permission to reset.
+    """
     now = time.time() if now is None else now
     result: dict[str, Any] = {"observed_at_unix": now, "auth_state": "UNKNOWN",
         "capacity_state": "UNKNOWN", "plan_type": None, "windows": {},
+        "window_states": {"primary": "UNKNOWN", "secondary": "UNKNOWN"},
         "source": ["account/read", "account/rateLimits/read"],
         "account_identity_is_cached": True, "admission_granted": False,
         "limit_id": limit_id, "reset_credits": reset_credit_inventory({}, now=now)}
@@ -315,9 +324,20 @@ def account_readiness(account: Mapping[str, Any], limits: Mapping[str, Any], *,
     if not isinstance(selected, Mapping):
         return result
     for key in ("primary", "secondary"):
-        parsed = _window(selected.get(key), now)
-        if parsed is not None:
-            result["windows"][key] = parsed
+        # A depleted sibling does not make absent evidence complete. Keep the
+        # provider's explicit N/A distinct from missing or invalid measurements
+        # through the existing JSON probe output, even when capacity is exhausted.
+        if key not in selected:
+            result["window_states"][key] = "MISSING"
+        elif selected[key] is None:
+            result["window_states"][key] = "NOT_APPLICABLE"
+        else:
+            parsed = _window(selected[key], now)
+            if parsed is None:
+                result["window_states"][key] = "INVALID_OR_STALE"
+            else:
+                result["window_states"][key] = "OBSERVED"
+                result["windows"][key] = parsed
     if any(w["remaining_percent"] == 0 for w in result["windows"].values()):
         result["capacity_state"] = "EXHAUSTED"
     elif (result["windows"] and all(key in selected for key in ("primary", "secondary"))
