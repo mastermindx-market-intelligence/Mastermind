@@ -6,25 +6,19 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from common.session_bridge_private_contract import BridgeError, MODIFYING_TOOLS
+
 SERVER_NAME = "mastermind-session-bridge"
 SERVER_VERSION = "0.2.0"
 RESULT_SCHEMA = "mastermind.session_bridge_result.v1"
 
 TARGET_KINDS = ("fabric_attempt", "codex", "claude")
-MODIFYING_TOOLS = ("session_send", "session_summon")
 MAX_INSTRUCTION_CHARS = 700
 MAX_STOP_CONDITION_CHARS = 700
 MAX_OPERATION_KEY_CHARS = 96
 
 _TARGET_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _OPERATION_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
-
-
-class BridgeError(Exception):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
 
 
 @dataclasses.dataclass(frozen=True)

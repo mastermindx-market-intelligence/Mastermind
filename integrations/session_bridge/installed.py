@@ -15,6 +15,10 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from common.session_bridge_private_contract import (
+    PRIVATE_SCHEMA, PRIVATE_RESULT_SCHEMA, SessionBridgeIngressOwner,
+    private_result as _result,
+)
 from control_plane.principal_projection import (
     NeutralPrincipalProjection,
     neutral_principal_projection,
@@ -33,8 +37,6 @@ from .schemas import (
     validate_tool_arguments,
 )
 
-PRIVATE_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge.v1"
-PRIVATE_RESULT_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge_result.v1"
 _PRIVATE_KEYS = frozenset({"schema", "tool", "principal", "arguments"})
 _PRINCIPAL_KEYS = frozenset({
     "policy_id", "issuer", "issuer_digest", "resource", "subject_digest",
@@ -84,20 +86,6 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
         )
     except (TypeError, ValueError, KeyError):
         raise BridgeError("invalid_input", "verified principal projection is invalid") from None
-
-
-def _result(tool: str, *, data: Any = None, code: str | None = None,
-            message: str | None = None) -> dict[str, Any]:
-    return {
-        "schema": PRIVATE_RESULT_SCHEMA,
-        "tool": tool,
-        "ok": code is None,
-        "data": data if code is None else None,
-        "error": None if code is None else {
-            "code": code,
-            "message": message or "installed Session Bridge operation was refused",
-        },
-    }
 
 
 def validate_private_frame(value: Any) -> tuple[str, NeutralPrincipalProjection, dict[str, Any]]:
@@ -184,6 +172,16 @@ class InstalledSessionBridgeProvider:
             )
 
 
+def private_ingress_owner(provider: InstalledSessionBridgeProvider) -> SessionBridgeIngressOwner:
+    """Bind the exact installed provider through the neutral host contract."""
+    if type(provider) is not InstalledSessionBridgeProvider:
+        raise TypeError("invalid installed Session Bridge provider")
+    return SessionBridgeIngressOwner(
+        validator=lambda frame: validate_private_frame(frame)[0],
+        handler=provider.handle_frame,
+    )
+
+
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  summon_handler: Callable | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
@@ -223,8 +221,9 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
             arguments["target_ref"], arguments["instruction"],
             arguments["stop_condition"], arguments["operation_key"]))
 
-    return InstalledSessionBridgeProvider(
-        target_projector=targets, reply_handler=send, summon_handler=(summon_handler if summon_handler is not None else unavailable))
+    return private_ingress_owner(InstalledSessionBridgeProvider(
+        target_projector=targets, reply_handler=send,
+        summon_handler=(summon_handler if summon_handler is not None else unavailable)))
 
 
 class InstalledSessionBridgeClient:

@@ -575,3 +575,9 @@ group resolved it without changing production metadata checks.
 
 Production attention and parent consumption, Codex/Claude owner composition,
 CONSULT and native acceptance remain open. A queued admission is not execution.
+
+### 2026-10-03 CI ownership repair
+
+Required CI37119605779 at d0a51966 found four deterministic failures: two stale SUMMON fixtures and two architecture checks exposing a control-plane import of the integration. The fixed private schema/error/result and nominal ingress-owner contract now live in `common/session_bridge_private_contract.py`; business/principal validation and provider composition remain integration-owned. The service checks the exact neutral owner, validates before handler entry, and rechecks App binding/state/arm immediately before and after the effect. Six real ingress cases prove invalid owner/validator/arguments and pre-effect binding rotation cause zero handler calls. Post-effect uncertainty and one-response behavior remain covered. The architecture assertions were preserved unchanged.
+
+503 owning bridge/profile/composition/architecture tests passed; independent source review passed. Native attention and provider consumption remain unproved. The separate installed recovery is #1187 (exact source Git trust plus explicit bounded company device-auth deadline revalidation); its local campaigns passed 968 unique owning tests, protected release is pending. No new worker Job or full COO arm has been performed by this CI repair.

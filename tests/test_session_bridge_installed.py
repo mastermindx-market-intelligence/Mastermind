@@ -15,6 +15,7 @@ from integrations.mastermind_executive_app.gateway import (
     TRANSPORT_SENT_UNKNOWN,
 )
 from integrations.session_bridge.schemas import BridgeError
+from integrations.session_bridge.installed import private_ingress_owner
 
 ISSUER = "https://auth.example.test/"
 PRINCIPAL = VerifiedPrincipal(
@@ -239,7 +240,7 @@ def test_existing_control_service_app_peer_routes_private_session_frame(tmp_path
             binding = service._ceo_ingress_app_binding
             service._ceo_ingress_app_binding = dataclasses.replace(
                 binding,
-                session_bridge_provider_factory=lambda _runtime: provider,
+                session_bridge_provider_factory=lambda _runtime: private_ingress_owner(provider),
             )
             await service.start()
             response = await _raw_ceo_request(
@@ -358,7 +359,7 @@ def test_session_effect_cannot_be_reclassified_as_invalid_input(tmp_path, short_
             provider = InstalledSessionBridgeProvider(
                 target_projector=lambda *_: [], reply_handler=send, summon_handler=send)
             service._ceo_ingress_app_binding = dataclasses.replace(
-                service._ceo_ingress_app_binding, session_bridge_provider_factory=lambda _: provider)
+                service._ceo_ingress_app_binding, session_bridge_provider_factory=lambda _: private_ingress_owner(provider))
             original_send = service._send_ceo_ingress_response
             async def record_response(writer, payload, **kwargs):
                 writes.append(payload)
@@ -445,4 +446,68 @@ def test_real_installed_factory_projects_runtime_wake_and_binds_continuation(tmp
                                                   })
             assert result["result"]["error"]["code"] == "grounding_unavailable"
 
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("fault,code", [
+    ("unwrapped", "ingress_unavailable"),
+    ("unknown_tool", "invalid_input"),
+    ("invalid_arguments", "invalid_input"),
+    ("validator_failure", "ingress_unavailable"),
+    ("factory_binding_rotation", "ingress_unavailable"),
+    ("validator_binding_rotation", "ingress_unavailable"),
+])
+def test_neutral_ingress_boundary_refuses_before_effect(
+    tmp_path, short_socket_root, monkeypatch, fault, code
+):
+    import dataclasses
+    import json
+    from common.session_bridge_private_contract import SessionBridgeIngressOwner
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
+    from tests.test_executive_ceo_ingress import _raw_ceo_request
+    from tests.test_executive_mcp_installed_fabric_composition import factory_service
+    from integrations.session_bridge.installed import (
+        InstalledSessionBridgeProvider, PRIVATE_SCHEMA, validate_private_frame,
+    )
+
+    async def run():
+        async with factory_service(
+            tmp_path, short_socket_root, monkeypatch, profile=WEB_CEO_SESSIONS_PROFILE
+        ) as (service, raw, _):
+            calls = []
+            def send(*args):
+                calls.append(args)
+                return {"committed": True}
+            provider = InstalledSessionBridgeProvider(
+                target_projector=lambda *_: [], reply_handler=send, summon_handler=send)
+            def rotate():
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding)
+            def validator(frame):
+                if fault == "unknown_tool":
+                    return "session_execute_arbitrary"
+                if fault == "validator_failure":
+                    raise ValueError("invalid owner configuration")
+                if fault == "validator_binding_rotation":
+                    rotate()
+                return validate_private_frame(frame)[0]
+            def factory(_runtime):
+                if fault == "unwrapped":
+                    return provider
+                if fault == "factory_binding_rotation":
+                    rotate()
+                return SessionBridgeIngressOwner(validator, provider.handle_frame)
+            service._ceo_ingress_app_binding = dataclasses.replace(
+                service._ceo_ingress_app_binding, session_bridge_provider_factory=factory)
+            await service.start()
+            arguments = {"target_ref": "fabric_attempt:exact", "instruction": "Continue.",
+                         "stop_condition": "Return.", "operation_key": "boundary-test"}
+            if fault == "invalid_arguments":
+                arguments["provider"] = "unreviewed"
+            response = await _raw_ceo_request(Path(raw["ceo_ingress_socket_path"]), (
+                json.dumps({"schema": PRIVATE_SCHEMA, "tool": "session_send",
+                            "principal": principal_frame(), "arguments": arguments}) + "\n").encode())
+            assert response["ok"] is False
+            assert response["error"]["code"] == code
+            assert calls == []
     asyncio.run(run())

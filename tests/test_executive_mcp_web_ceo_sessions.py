@@ -164,6 +164,8 @@ def test_submit_scope_can_send_only_to_trusted_projection(settings, rsa_key):
                 _response, summoned = await call(client, token, "session_summon", {
                     "objective": "bounded task", "execution_profile": "research_only",
                     "operation_key": "bridge-auth-5",
+                    "department": "executive-infrastructure", "priority": 0,
+                    "workstream": "WS:SESSION-BRIDGE",
                 })
                 assert summoned["ok"] is True, summoned
         assert len(owners.reply_calls) == 1
@@ -368,6 +370,8 @@ def test_typed_pre_effect_binding_refusal_is_preserved(settings, rsa_key):
                         "objective": "bounded task",
                         "execution_profile": "research_only",
                         "operation_key": "bridge-pre-effect-binding-refusal-1",
+                    "department": "executive-infrastructure", "priority": 0,
+                    "workstream": "WS:SESSION-BRIDGE",
                     })
         assert len(calls) == 1
         assert payload["ok"] is False

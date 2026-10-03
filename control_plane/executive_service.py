@@ -4410,13 +4410,11 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=(
                     MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
                 return
-            from integrations.session_bridge.installed import (
+            from common.session_bridge_private_contract import (
                 PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,
-                InstalledSessionBridgeProvider,
-                validate_private_frame,
-                _result as session_bridge_result,
+                SessionBridgeIngressOwner, BridgeError, MODIFYING_TOOLS,
+                private_result as session_bridge_result,
             )
-            from integrations.session_bridge.schemas import BridgeError, MODIFYING_TOOLS
             if isinstance(parsed, Mapping) and parsed.get("schema") == SESSION_BRIDGE_PRIVATE_SCHEMA:
                 if not app_peer:
                     await self._send_ceo_ingress_error(
@@ -4434,18 +4432,31 @@ class ExecutiveControlService:
                         writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
                     )
                     return
-                # Validate before entering any owner. After owner entry a
-                # modification may have committed, including on binding drift.
                 try:
-                    tool, _, _ = validate_private_frame(parsed)
+                    provider = factory(self._require_runtime())
+                    if type(provider) is not SessionBridgeIngressOwner:
+                        raise ValueError("invalid Session Bridge provider")
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                # The integration owns semantic validation. Finish it before
+                # calling the effect handler; later failure may be committed.
+                try:
+                    tool = provider.validate_frame(parsed)
                 except BridgeError as exc:
                     await self._send_ceo_ingress_error(writer, exc.code, exc.message)
                     return
-                try:
-                    provider = factory(self._require_runtime())
-                    if type(provider) is not InstalledSessionBridgeProvider:
-                        raise ValueError("invalid Session Bridge provider")
                 except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                if (self._closing
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_app_binding is not app_binding
+                        or not app_binding.armed):
                     await self._send_ceo_ingress_error(
                         writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
                     )
