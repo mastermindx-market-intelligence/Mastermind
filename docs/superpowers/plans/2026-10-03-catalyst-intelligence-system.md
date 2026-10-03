@@ -1,353 +1,251 @@
-# Catalyst Intelligence System — End-to-End Implementation Plan
+# Catalyst Intelligence System — Audited Master Implementation Plan
 
-> **For Astra CEO Orchestration:** execute this as a governed multi-phase program. Reuse existing carriers before creating replacements. Every phase must produce a capability delta and verification evidence. Do not equate merged code, green CI, or a research artifact with production proof.
+> **For agentic workers:** use current Mastermind execution procedure plus the authorized implementation workflow. This plan is an implementation contract, not a second lifecycle/control plane.
 
-**Goal:** finish Mastermind Catalyst Intelligence as a cross-sector, point-in-time, statistically validated decision-intelligence system spanning Bio, Defense/Government Revenue, Special Situations, Semiconductor, Energy/Nuclear/Grid, Mining/Resources and MedTech.
+**Goal:** finish Mastermind Catalyst Intelligence as a correction-safe, point-in-time, cross-sector decision-intelligence system that turns events into issuer economics, expectation gaps, research priority and prospective learning while preserving specialist models and Prophet entry ownership.
 
-**Research basis:** `docs/research/CATALYST_INTELLIGENCE_RESEARCH_2026-10-03.md`
+**Spec:** `docs/research/CATALYST_INTELLIGENCE_RESEARCH_2026-10-03.md`
 
-**Protected-source pin for plan creation:** `Mastermind@20adcaf65c2dd1bb734ab06e215feb1a0eb65659`
+**Census audit:** `docs/research/CATALYST_INTELLIGENCE_PRO_MODE_CENSUS_AUDIT_2026-10-03.md`
+
+**Audit pins:** Mastermind `20adcaf65c2dd1bb734ab06e215feb1a0eb65659`; Macro `5f20adbd6be6b136b2efe41585bd4ef964b5bf2e`.
 
 ## Global constraints
 
-- Reuse #6712, #7175, #7870, #8002, #8061, #8083, #8087, #8182 and #8258/#8259 where compatible; do not rebuild them under new names.
-- Keep EventFact, timing, outcome, exposure, materiality, history, expectations/incorporation, payoff and ResearchPriority separate.
-- Prophet retains technical/entry ownership.
-- Options evidence may originate research but cannot manufacture event facts.
-- All model inputs and evaluations are strict point-in-time.
-- Corrections/revisions are append-only/superseding, not retroactive rewrites.
-- Theme propagation must encode economic mechanisms, not tags.
-- No specialist engine may publish a probability without calibration population/version and abstention behavior.
-- No historical alpha claim ships without dependency-aware cohorts, matched controls/pseudo-events, factor-neutral returns and untouched holdout.
-- Paper and Terminal consume canonical backend view models; they do not become parallel scoring engines.
-- Data rights/entitlements are explicit per field/source.
+- Repin current heads before implementation.
+- Reuse #6712, #7175, #7199, #7870, #8002, #8061, #8079, #8083, #8087, #8182 and #8258/#8259 where compatible.
+- Mastermind #122 is the W-ANT hypothesis charter; #123 records its parked sequencing. Do not invent a second Catalyst Anticipation definition.
+- No generic Catalyst Score.
+- Keep event truth, occurrence, timing, outcome, exposure, materiality, historical response, expectations/incorporation, payoff, research priority and realized learning distinct.
+- Prophet retains technical/entry authority. ResearchPriority has zero direct trade/sizing authority.
+- All inferential inputs are strict PIT and correction-aware. Later corrections supersede; they never rewrite frozen historical inputs.
+- Historical claims require matched cohorts, pseudo-events, factor/sector-neutral returns, dependency/effective-N handling, walk-forward validation, untouched holdouts and FDR controls.
+- Paper/Terminal consume canonical backend view models; frontend code does not invent quant semantics.
+- Do not merge both #8258 and #8259. Reconcile to one evaluator repair.
+- Do not merge stacked #8002 as-is.
+
+## Review focus
+
+1. Temporal leakage: later corrections or event-day observations entering pre-event features must fail closed.
+2. Dependent observations: repeated filings, related securities, same transaction/program/trial/project cannot inflate N.
+3. Cohort mismatch: promotion-bearing event and control statistics use comparable surviving pairs.
+4. Authority collision: Catalyst context never silently mutates Prophet entry state or sizing.
+5. Coverage illusion: missing source/rights/identity/economic data produces typed abstention, not optimistic defaults.
 
 ## Program DONE_WHEN
 
-The program is complete only when all of the following are true:
+The program is complete only when:
+- a common Catalyst basis is landed and consumed by Bio + Defense + Special Situations;
+- real correction-safe events render in one What Matters Next workspace;
+- Event Studio exposes auditable cohorts and historical distributions;
+- Bio V3 and Defense financial transmission produce frozen prospective assessments;
+- Expectations/Incorporation composes consensus, price and options evidence with explicit coverage;
+- W-ANT receives an explicit PROMOTE_ADVISORY / KEEP_SHADOW / REJECT result from untouched/prospective evidence;
+- Semiconductor, Energy/Nuclear/Grid, Resources and MedTech use the same envelopes/evaluator without losing specialist semantics;
+- Prophet/Catalyst authority separation is tested;
+- the Forecast Ledger grades occurrence, timing, outcome, reaction, MFE/MAE/drawdown and abstention;
+- Terminal/Paper production proof covers discovery → dossier → revision → realized learning;
+- data rights and PIT/revision states are visible and enforceable.
 
-1. Bio and Defense emit the same canonical Catalyst contract without losing specialist semantics.
-2. What Matters Next is live in Terminal with real events and correction/revision state.
-3. Event Studio exposes cohort definitions and historical response distributions.
-4. Prophet and Options consume/emit governed Catalyst context without authority collision.
-5. Catalyst Forecast Ledger freezes prospective predictions and grades realized outcomes.
-6. Bio Decision Intelligence and Defense financial transmission pass prospective shadow proof.
-7. Catalyst Anticipation has a preregistered holdout result and is either promoted or explicitly rejected.
-8. Special Situations evaluation defects are repaired and transaction identity is canonical.
-9. Semiconductor, Energy/Nuclear/Grid, Mining economics and MedTech run through the same shared contracts/evaluator.
-10. Production/browser proof demonstrates the end-user workflow from event discovery through thesis revision and post-event learning.
+## Phase 0 — Carrier adjudication
 
-## Workstream topology
+**Objective:** convert fragmented work into an exact adoption map.
 
-### WS0 — Recovery and carrier adjudication
-
-**Objective:** establish exactly what survives from prior Catalyst work before new implementation.
-
-**Reuse:** Macro #6712, #7175, #7870, #8002, #8061, #8083, #8087, #8182, #8258/#8259; current Mastermind/Macro/Terminal heads.
-
-**Tasks**
-- [ ] Freeze exact current heads and compare every listed carrier to default branch.
-- [ ] Produce per-carrier disposition: `CONTINUE | SELECTIVE_PORT | SUPERSEDED | DISCARD`.
-- [ ] Identify overlapping schemas, tests, UI components and evaluation code.
-- [ ] Assign one canonical destination for each surviving artifact.
+- [ ] Compare #6712, #7175, #7199, #7870, #8002, #8061, #8079, #8083, #8087, #8182, #8258 and #8259 to current Macro main.
+- [ ] Reconcile Mastermind #122/#123 against current sequencing.
+- [ ] Classify every carrier CONTINUE / SELECTIVE_PORT / SUPERSEDED / DISCARD.
+- [ ] Resolve #8258/#8259 to one surviving evaluator carrier.
+- [ ] Resolve #7870 shared-kernel extraction before #8002.
 - [ ] Record DO_NOT_REBUILD decisions.
 
-**DONE_WHEN:** every named carrier has an exact-head disposition and landing path; no useful implementation remains orphaned by ambiguity.
+**DONE_WHEN:** every named carrier has one destination and no overlapping writer is ambiguous.
 
-### WS1 — Catalyst Intelligence Contract v1
+## Phase 1 — Catalyst Common Basis v1
 
-**Objective:** establish one shared language without flattening specialist models.
-
-**Produces**
-- `EventFact`
-- `EventOccurrenceAssessment`
-- `TimingAssessment`
-- `OutcomeProbabilityAssessment`
-- `ExposureRelationship`
-- `IssuerMaterialityAssessment`
-- `HistoricalResponseDistribution`
-- `ExpectationBaseline`
-- `IncorporationEvidence`
-- `ConditionalPayoffDistribution`
-- `ResearchPriority`
-- `ThesisRevision`
-- `RealizedOutcome/EvaluationRecord`
+**Objective:** adopt the smallest shared contract already supported by #8061/#6712/#8087/#8182.
 
-**Required fields:** PIT clocks, source vintages, model/method version, calibration population, coverage, uncertainty, identity version, dependency group, rights metadata, abstention reason.
+Core envelopes:
+`EventFact`, `EventOccurrenceAssessment`, `TimingAssessment`, `OutcomeProbabilityAssessment`, `ExposureRelationship`, `IssuerMaterialityAssessment`, `HistoricalResponseDistribution`, `ExpectationBaseline`, `IncorporationEvidence`, `ConditionalPayoffDistribution`, `ResearchPriority`, `ThesisRevision`, `RealizedOutcome`, `EvaluationRecord`.
 
-**Tests**
-- [ ] correction creates a new superseding state;
-- [ ] historical `as_known_at` replay is unchanged by later correction;
-- [ ] specialist extension round-trips without schema loss;
-- [ ] ResearchPriority has no trade/entry authority;
-- [ ] missing coverage produces abstention rather than fabricated probability.
-
-**DONE_WHEN:** Bio, Defense and Special Situations adapters pass the same contract tests on main.
-
-### WS2 — Canonical Event Evaluation OS
-
-**Objective:** make every specialist engine prove itself under one statistical discipline.
-
-**Reuse:** existing event-study/abnormal-return code and #8258/#8259 repairs.
-
-**Build**
-- cohort registry;
-- matched-control generator;
-- pseudo-event generator;
-- market/sector/factor-neutral return service;
-- dependency-group/deduplication rules;
-- walk-forward splitter;
-- untouched holdout registry;
-- FDR/multiple-testing controls;
-- effective-N/clustered inference;
-- calibration metrics;
-- MFE/MAE/drawdown/time-to-repricing metrics;
-- abstention-quality reporting.
+Every assessment carries as-known/effective/published/ingested/corrected clocks as applicable, evidence refs, model/method version, calibration population, identity version, dependency group, coverage, uncertainty, rights and abstention reason.
 
-**Tests**
-- [ ] estimation/pre-event windows cannot overlap the focal event;
-- [ ] linked securities/programs/trials cannot count as independent observations;
-- [ ] post-cutoff data cannot enter features;
-- [ ] repeated filings do not inflate N;
-- [ ] holdout configuration cannot be tuned after freeze.
+Tests:
+- [ ] correction preserves earlier as-known replay;
+- [ ] specialist extension round-trips;
+- [ ] missing coverage yields NOT_ESTIMABLE;
+- [ ] ResearchPriority cannot mutate trade/entry state;
+- [ ] model output cannot overwrite EventFact.
 
-**DONE_WHEN:** Bio and Special Situations run through the same evaluator and synthetic leakage/double-counting tests fail closed.
+**DONE_WHEN:** real Bio, Defense and Special-Situations adapters pass the same contract tests.
 
-### WS3 — PIT Catalyst Store and Forecast Ledger
+## Phase 2 — Evaluation OS repair
 
-**Objective:** create the durable truth/assessment substrate.
+**Objective:** prevent invalid historical evidence becoming shared infrastructure.
 
-**Reuse:** GMI Theme Graph bitemporal/identity laws and existing evidence infrastructure.
+Reuse incumbent event-study code and one reconciled #8258/#8259 carrier.
 
-**Build**
-- event-family registry;
-- canonical event identity;
-- source/effective/published/ingested/corrected clocks;
-- supersession links;
-- assessment snapshots;
-- model snapshot IDs;
-- feature snapshot hashes;
-- rights/entitlement metadata;
-- append-only Catalyst Forecast Ledger.
+Build/repair paired event/control eligibility, matched controls, pseudo-events, factor-neutral returns, dependency groups, effective-N, walk-forward splits, untouched holdouts, FDR, calibration, return/MFE/MAE/drawdown/time-to-repricing and abstention-quality metrics.
 
-**DONE_WHEN:** any event can be replayed exactly "as known on date X"; later corrections alter current view but not frozen predictions.
+Critical tests:
+- [ ] event day cannot enter a pre-event control;
+- [ ] excluded control removes its paired event from promotion-bearing comparison;
+- [ ] repeated filings do not multiply events;
+- [ ] related securities share dependency group;
+- [ ] post-cutoff corrections cannot enter features;
+- [ ] frozen holdout cannot be retuned.
 
-### WS4 — What Matters Next + Terminal/Paper view model
+**DONE_WHEN:** Special Situations and one Bio family run through the same evaluator and leakage/dependency mutants are killed.
 
-**Objective:** ship the first visible cross-sector product slice.
+## Phase 3 — PIT Catalyst state + Forecast Ledger
 
-**Row contract:** event, timing, outcome distribution, issuer role, materiality, historical response, expectation state, Prophet state, Options state, ResearchPriority, revision, evidence freshness.
+Reuse existing identity/evidence/Theme Graph owners; do not create a second truth store.
 
-**Surfaces**
-- What Matters Next;
-- Catalyst Timeline;
-- Event Studio;
-- Anticipation Radar;
-- Post-Event Learning.
+Build event-family registry, canonical identity/aliases, source clocks/supersession, immutable assessment snapshots, feature/model snapshot IDs, rights state, dependency group and prospective Forecast Ledger.
 
-**DONE_WHEN:** real Bio and Defense events appear in the same Terminal workspace and Paper can render the same canonical view model with no duplicated intelligence logic.
+**DONE_WHEN:** an event is exactly reconstructable as known at cutoff X and later correction does not mutate the frozen prediction.
 
-### WS5 — Bio Decision Intelligence V3 completion
+## Phase 4 — What Matters Next
 
-**Objective:** make Bio the reference complete specialist engine.
+Ship the first shared product slice before deeper infrastructure outruns user value.
 
-**Reuse:** #6712 and existing trial/regulatory/browser/history work.
+Each row: event, timing, outcome, issuer role, materiality, historical response, expectations, incorporation, Prophet, Options, ResearchPriority, revision and evidence freshness/rights.
 
-**Build**
-- event truth across trial/regulatory milestones;
-- asset/indication/trial/submission identity;
-- conditional phase/indication/modality PoS;
-- timing distributions;
-- asset→issuer economics;
-- market size/competitive context;
-- cash-through-catalyst and dilution;
-- historical analogue cohorts;
-- expectation/incorporation;
-- prospective scorecard.
+Surfaces: What Matters Next, Catalyst Timeline, Event Studio and Post-Event Learning. Anticipation Radar stays shadow until Phase 9.
 
-**Baselines:** phase/indication base rate; Prophet alone; fundamentals without/with Options.
+**DONE_WHEN:** real Bio + Defense + Special Situations cases appear in the same Terminal flow and Paper renders the same backend view model.
 
-**DONE_WHEN:** every eligible event has a frozen pre-event package for timing/outcome/materiality/history/expectation/priority and is later graded by family.
+## Phase 5 — Bio Decision Intelligence V3
 
-### WS6 — Defense program→issuer→financial transmission
+Reuse the live Bio foundation and selective #6712 artifacts. Do not reactivate the parked old core product as a substitute for V3.
 
-**Objective:** turn procurement data into issuer economics.
+Build broad event universe, asset/indication/trial/submission identity, timing, calibrated PoS, issuer economics, cash/dilution, competition, historical cohorts, expectations/incorporation, alerts/dossier and prospective grading.
 
-**Reuse:** Government Revenue engine and #7175.
+**DONE_WHEN:** eligible events freeze timing/outcome/materiality/history/expectation/priority before resolution and are graded afterward.
 
-**Build**
-- state machine: budget→authorization→appropriation→opportunity→award/mod→obligation/outlay;
-- FMS state;
-- prime/subsupplier mapping;
-- issuer/security identity;
-- segment/program exposure;
-- backlog/revenue recognition timing;
-- margin/FCF bridge;
-- consensus/expectation gap;
-- negative dependency/risk events.
+## Phase 6 — Defense/Government Revenue investor loop
 
-**Invariant:** award ceiling is never treated as revenue.
+Reuse GovRev mainline + #7175 + adjudicated #7199.
 
-**DONE_WHEN:** a major program event traces source→program→award state→supplier/issuer→financial exposure→recognition timing with uncertainty and evidence.
+State chain:
+`budget request → authorization → appropriation → program → opportunity → award/modification → obligation/outlay → prime/sub → segment backlog/revenue → margin/FCF → market recognition`.
 
-### WS7 — Expectations & Incorporation
+Invariant: FMS notification, award ceiling, obligation and recognized revenue are distinct.
 
-**Objective:** answer "good/bad relative to what is already expected?"
+**DONE_WHEN:** LMT/RTX/NOC/LHX reference cases trace primary source → program → role → issuer → financial exposure → timing → expectation gap with uncertainty.
 
-**Reuse:** Options intelligence, Prophet, consensus/company guidance, incorporation research.
+## Phase 7 — Expectations & Incorporation
 
-**Build**
-- consensus/guidance baseline;
-- implied move;
-- event-horizon IV;
-- skew and term structure;
-- historical realized-vs-implied move;
-- pre-event residual return;
-- attention/crowding;
-- expectation-estimability state.
+Reuse Options, consensus/guidance, Prophet state and price history.
 
-**Output states:** `EXPECTATION_ESTIMABLE | PARTIAL | NOT_ESTIMABLE`.
+Build implied move, event-horizon IV, skew/term structure, realized-vs-implied history, pre-event residual move, consensus/guidance delta and attention/crowding where rights permit.
 
-**DONE_WHEN:** ablations prove whether Options and expectation features add information; non-incremental components remain non-promoted.
+States: EXPECTATION_ESTIMABLE / PARTIAL / NOT_ESTIMABLE.
 
-### WS8 — Catalyst Anticipation shadow program
+**DONE_WHEN:** ablations quantify incremental value and non-incremental features remain unpromoted.
 
-**Objective:** test whether public market footprint predicts material event classes beyond ordinary momentum/volume.
+## Phase 8 — Theme Graph economic propagation
 
-**Design**
-- daily PIT issuer risk sets;
-- horizons such as 5/20/60/120 trading days;
-- scheduled vs inferable-unscheduled vs unexpected populations;
-- discrete-time hazard/competing-risk models;
-- issuer/time-blocked walk-forward splits;
-- no linked event/security family crossing train/holdout.
+Add typed economic edges for program funding, supplier/product, project equipment, commodity input, royalties, customer capex, regulation and approval. Each edge carries sign, mechanism, magnitude/range, lag, evidence, PIT validity and falsifier.
 
-**Ablations**
-`base rate → momentum/volume → Prophet → public precursors → Options → combined`.
+**DONE_WHEN:** one Defense, one Semiconductor/Energy and one Bio/MedTech case trace event/theme → mechanism → company → financial impact → expectation gap.
 
-**Metrics:** Brier, log loss, calibration, precision-recall, lead time, coverage, false-alert burden, severe false-positive rate.
+## Phase 9 — Catalyst Anticipation / W-ANT
 
-**DONE_WHEN:** prospective shadow report either demonstrates stable incremental value on untouched data or records a formal negative result. No leak/insider semantics.
+Consume Mastermind #122. Reconcile #123's parked dependency before START.
 
-### WS9 — Theme Graph economic propagation
+Question:
+`P(material catalyst class within H | PIT public information + market footprint)`.
 
-**Objective:** make themes causal/economic rather than descriptive tags.
+Separate scheduled, publicly inferable unscheduled and genuinely unexpected events. Use issuer-day risk sets, discrete-time hazard/competing risks, 5/20/60/120-session horizons and issuer/time-blocked splits.
 
-**Build typed edges** for program funding, product/supplier links, project equipment, commodity inputs, royalties, customer capex, regulation and approvals.
+Ablations: base rate → momentum/volume → Prophet → public precursors → Options → combined.
 
-Each edge carries sign, mechanism, magnitude/range, lag, evidence, PIT validity and falsifier.
+Metrics: Brier, log loss, calibration, PR, lead time, false-alert burden, coverage and severe false positives.
 
-**DONE_WHEN:** a catalyst/theme can be traced to company financial impact and expectation gap with inspectable evidence and no duplicate graph authority.
+**DONE_WHEN:** untouched/prospective evidence yields PROMOTE_ADVISORY / KEEP_SHADOW / REJECT. Never imply leaks or insider knowledge.
 
-### WS10 — Special Situations horizontal engine
+## Phase 10 — Special Situations horizontal source
 
-**Objective:** make Special Situations a canonical cross-sector catalyst source.
+Reuse live collector/engine + #8087 after evaluator repair.
 
-**Build**
-- transaction identity;
-- party/security roles;
-- terms/conditions;
-- close/timing distribution;
-- downside state;
-- financing/regulatory dependencies;
-- lifecycle realization;
-- corrected evaluation cohorts.
+Build transaction identity, party/security roles, terms/conditions, close/timing distribution, downside, financing/regulatory dependencies, lifecycle and role-aware affected securities.
 
-**DONE_WHEN:** one transaction is one canonical event even when projected across multiple securities; evaluation no longer double-counts linked observations.
+**DONE_WHEN:** one transaction remains one independent event across related filings/securities and direct-target economics do not leak onto indirect funds.
 
-### WS11 — Sector expansion factory
+## Phase 11 — Sector expansion factory
 
-**Objective:** land specialist verticals on shared contracts rather than bespoke architectures.
+Dependency order:
 
-**Order:** Semiconductor → Energy/Nuclear/Grid → Mining economics → MedTech.
+1. **Semiconductor:** adjudicate #7870; preserve reusable kernel; add HBM/packaging/utilization/customer-capex/export-control/industrial-policy economics.
+2. **Energy/Nuclear/Grid:** unstack #8002; model license/PPA/FID/EPC/interconnection/commissioning/orderbook/fuel-cycle states.
+3. **Resources:** selectively port #8083; model project stage, ownership/JV, royalties/streams, capex/funding gap, commodity sensitivity and dilution.
+4. **MedTech:** finish #8182 review then R2 reconstructable cohorts; add pathway-specific regulatory, reimbursement, adoption and materiality models.
 
-**Semiconductor:** HBM/packaging/utilization/customer capex/export-control/industrial-policy events and economics.
+**DONE_WHEN:** each emits Common Basis v1, renders in WMN and runs through Evaluation OS.
 
-**Energy/Nuclear/Grid:** license/PPA/FID/EPC/interconnection/commissioning/orderbook/fuel-cycle events.
+## Phase 12 — Prophet/Company/Thesis integration
 
-**Mining:** project-state machine, ownership/JV, royalties/streams, capex/funding gap, commodity sensitivity, dilution.
+Catalyst may raise/lower research priority, flag negative risk, confirm/contradict Prophet, request re-evaluation, revise thesis premises and provide timing context. It may not silently change Prophet entry state or sizing.
 
-**MedTech:** PMA/510(k)/De Novo/HDE, clinical evidence, reimbursement, adoption, commercial readiness.
+**DONE_WHEN:** integration tests prove both information flow and authority separation.
 
-**DONE_WHEN:** each vertical emits Contract v1, appears in What Matters Next and is evaluated by the common Evaluation OS.
+## Phase 13 — Production acceptance
 
-### WS12 — Prophet/Company/Thesis integration
-
-**Objective:** make Catalyst alter research state without stealing technical ownership.
-
-**Catalyst may emit**
-- research-priority up/down;
-- negative catalyst risk;
-- confirms Prophet;
-- contradicts Prophet;
-- post-admission re-evaluation request;
-- thesis premise revision;
-- timing context.
-
-**DONE_WHEN:** end-to-end tests prove Catalyst cannot silently change Prophet entry state, while material Catalyst revisions visibly update research/thesis context.
-
-### WS13 — Production proof and acceptance
-
-**Objective:** prove the actual user workflow.
-
-**Scenarios**
-1. Bio scheduled event from source revision through forecast and realized grading.
+Required scenarios:
+1. Bio scheduled event from source revision through frozen assessment and grading.
 2. Defense program event through issuer economics and expectation gap.
-3. Special Situations transaction with multi-security roles.
-4. Options-led Anticipation candidate that remains a research candidate until event evidence exists.
-5. Negative catalyst revision that changes thesis/research priority but not Prophet entry authority.
-6. Theme event propagating through mechanism→exposure→financial impact.
-7. Correction after a frozen forecast demonstrating immutable historical replay.
+3. Special Situations transaction with multiple securities but one dependency group.
+4. Options-led W-ANT candidate remains research-only until event evidence.
+5. Negative catalyst revision changes thesis/research priority but not Prophet entry.
+6. Theme propagation reaches financial impact through typed mechanism edges.
+7. Post-forecast correction preserves historical replay.
+8. Missing/expired entitlement produces degraded/abstain state.
 
-**DONE_WHEN:** browser/production evidence shows all scenarios, Forecast Ledger is accruing, and monitoring exposes data freshness/coverage/calibration failures.
+**DONE_WHEN:** browser/production proof covers all eight and freshness/coverage/calibration monitoring is visible.
 
 ## Dependency graph
 
-`WS0 → WS1 → (WS2, WS3) → WS4`
+`P0 → P1 → (P2 || P3) → P4`
 
-`WS1+WS2+WS3 → WS5, WS6, WS10`
+`P1+P2+P3 → (P5 || P6 || P10)`
 
-`WS3+WS5/WS6 → WS7`
+`P3+P5/P6 → P7`
 
-`WS2+WS3+WS7 → WS8`
+`P1+P3 → P8`
 
-`WS1+WS3+Theme Graph → WS9`
+`P2+P3+P7 + W-ANT dependency reconciliation → P9`
 
-`WS1+WS2+WS3+WS4 → WS11`
+`P1+P2+P3+P4 → P11`
 
-`WS4+WS5+WS6+WS7 → WS12 → WS13`
+`P4+P5+P6+P7 → P12 → P13`
 
-WS2 and WS3 can run in parallel after Contract v1. Bio and Defense can run in parallel after the shared substrate. Anticipation must not block the core product.
+W-ANT does not block core Catalyst delivery.
 
-## Ten highest-leverage next build actions
+## Ten highest-leverage next actions
 
-| # | Objective | Reuse | Missing delta | Dependencies | DONE_WHEN |
-|---|---|---|---|---|---|
-| 1 | Ratify Contract v1 | #6712, #8061, Theme Graph | canonical schemas/owners/tests | WS0 | Bio/Defense/Special Sits pass same contract |
-| 2 | Adjudicate orphan carriers | listed PRs | exact-head disposition | none | every carrier has landing decision |
-| 3 | Build Evaluation OS | event-study + #8258/#8259 | cohorts/controls/PIT/holdouts/calibration | Contract | leakage/double-count tests fail closed |
-| 4 | Build PIT store + Forecast Ledger | Theme Graph/evidence | clocks/supersession/snapshots/rights | Contract | exact as-known replay works |
-| 5 | Ship What Matters Next | specialist feeds + Terminal/Paper | common view model | Contract/store | real Bio+Defense rows live |
-| 6 | Finish Bio V3 | #6712 | PoS/economics/incorporation/scorecard | shared substrate | frozen forecasts grade prospectively |
-| 7 | Finish Defense economics | GovRev + #7175 | supplier/issuer/financial/expectation bridge | shared substrate | source→program→issuer→financial trace |
-| 8 | Build Expectations layer | Options/Prophet/consensus | event-conditioned incorporation | store + verticals | incremental-value ablations complete |
-| 9 | Run Anticipation shadow | parked research | PIT risk sets/hazard/holdout | Evaluation + expectations | prospective promote/reject decision |
-| 10 | Land sector factory | #7870/#8002/#8083/#8182 | shared adapters + specialist models | shared substrate | all four verticals on common UX/evaluator |
+| # | Action | Reuse | Missing delta | DONE_WHEN |
+|---|---|---|---|---|
+| 1 | Adjudicate #8061/common basis | #8061/#6712/#8087/#8182 | one production contract | real 3-sector adapters pass |
+| 2 | Resolve #8258 vs #8259 | evaluator/reviews | paired-cohort-safe survivor | P1 closed + exact-head proof |
+| 3 | Freeze carrier disposition map | all named carriers | adoption destinations | no ambiguous writer |
+| 4 | Land PIT assessment/Forecast Ledger | evidence/Theme Graph | snapshots/supersession | as-known replay proven |
+| 5 | Ship real WMN slice | specialist incumbents | common view model | Bio+Defense+Special Sits visible |
+| 6 | Complete Bio V3 | live Bio + #6712 | calibrated DI/economics | prospective cases grading |
+| 7 | Complete Defense loop | GovRev + #7175/#7199 | financial transmission | source→issuer economics trace |
+| 8 | Build Expectations layer | Options/Prophet/consensus | event-conditioned baseline | ablations complete |
+| 9 | Execute W-ANT shadow | #122 + evaluator | risk sets/hazard/prospective proof | promote/keep/reject |
+| 10 | Compose sector factory | #7870/#8002/#8083/#8182 | unstack/adapters/calibration | four verticals on common UX/eval |
 
-## Astra CEO Orchestration handoff packet
+## Astra CEO Orchestration handoff
 
-**Mission:** complete Catalyst Intelligence end to end under the research thesis above.
+**Mission:** execute this plan end to end. First repin current Mastermind procedure and Macro main, then reconcile the audited carriers. Treat this plan/research as implementation guidance, not authority.
 
-**Critical path:** WS0 → WS1 → WS2/WS3 → WS4 → Bio/Defense → Expectations → Prophet/Thesis → production proof.
+**Critical path:** carrier adjudication → common basis → evaluation/PIT substrate → What Matters Next → Bio/Defense → expectations → Prophet/thesis integration → production acceptance.
 
-**Parallel lanes:** Evaluation OS and PIT store after Contract v1; Bio and Defense after shared substrate; Special Situations and Theme Graph propagation can advance independently where path-disjoint.
+**Parallel lanes:** Evaluation OS and PIT substrate after common basis; Bio and Defense after substrate; Special Situations after evaluator repair; Theme Graph propagation where path-disjoint.
 
-**Held until dependencies:** Anticipation promotion; Semiconductor/Energy expansion; any trade authority.
+**DO_NOT_REDO:** incumbent Bio foundation, GovRev collectors/program machinery, live Special Situations collector/engine, Theme Graph identity/evidence, Options primitives, #7870 implementation, #8002 specialist module, #8083 economics research, #8182 R1 contract, #122 hypothesis framing.
 
-**Do not redo:** Bio V3 ontology, GovRev collector/program foundations, Theme Graph identity/bitemporal substrate, existing event-study primitives, specialist work in the named parked carriers unless current-head adjudication rejects it.
+**Return only for:** genuine source/authority collision, unresolved modifying effect, data-rights purchase/credential gate, inability to reconstruct PIT state, evaluator leakage that invalidates promotion, or production acceptance failure requiring Chairman scope change.
 
-**Return conditions to Astra:** architecture collision, incompatible shared contract, data-rights blocker, failed PIT reconstruction, evaluation leakage, inability to preserve Prophet authority, or production proof failure.
-
-**Acceptance evidence:** exact PR/head refs, passing contract/evaluation tests, PIT replay proof, prospective Forecast Ledger records, Terminal/Paper browser proof, and per-vertical calibration/coverage scorecards.
-
-**Final product rule:** no generic Catalyst Score and no claim of predictive edge without prospective evidence.
+**Do not stop at:** research, planning, a schema PR, a green test suite, one merged specialist PR, or a checkpoint while safe critical-path work remains.
