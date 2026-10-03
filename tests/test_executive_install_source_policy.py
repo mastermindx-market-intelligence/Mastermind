@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
+import ops.executive_os.install_source_policy as source_policy
 from ops.executive_os.install_source_policy import (
     InstallSourcePolicyError,
     validate_install_source,
@@ -191,3 +193,118 @@ def test_installer_exposes_explicit_frozen_mode_without_reusing_historical_sourc
     assert "--protected-master-sha" in install
     assert '"$SCRIPT_DIR/install_source_policy.py"' in install
     assert "refs/remotes/origin/master" not in install
+
+
+def test_git_uses_exact_command_scoped_safe_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(source_policy.subprocess, "run", fake_run)
+    result = source_policy._git(repo, "rev-parse", "HEAD")
+
+    trusted = str(repo.resolve())
+    assert result.stdout == "ok\n"
+    assert calls == [[
+        "/usr/bin/git", "--no-optional-locks",
+        "-c", f"safe.directory={trusted}",
+        "-C", trusted, "rev-parse", "HEAD",
+    ]]
+
+
+def test_git_refuses_symlink_alias_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo, target_is_directory=True)
+    monkeypatch.setattr(
+        source_policy.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("Git must not spawn for an alias"),
+    )
+    with pytest.raises(InstallSourcePolicyError, match="path is unsafe"):
+        source_policy._git(alias, "rev-parse", "HEAD")
+
+
+def test_git_refuses_wildcard_safe_directory_value_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo*"
+    repo.mkdir()
+    monkeypatch.setattr(
+        source_policy.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("Git must not spawn for wildcard trust"),
+    )
+    with pytest.raises(InstallSourcePolicyError, match="path is unsafe"):
+        source_policy._git(repo, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("operation", ["tree", "archive", "clone"])
+def test_installer_source_reads_work_without_persistent_ownership_trust(
+    tmp_path: Path, operation: str, linked: bool
+) -> None:
+    repo, _accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    if linked:
+        worktree = tmp_path / "linked-source"
+        _git(repo, "worktree", "add", "--detach", str(worktree), protected)
+        repo = worktree
+    source_config = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "config"
+    config_before = source_config.read_bytes()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    checkout = tmp_path / "admin"
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "SOURCE_REPO": str(repo.resolve()),
+        "EXPECTED_SHA": protected,
+        "STAGING": str(staging),
+        "ADMIN_CHECKOUT": str(checkout),
+    }
+    baseline = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "rev-parse", "HEAD"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert baseline.returncode != 0
+    assert "dubious ownership" in baseline.stderr
+
+    selectors = {
+        "tree": 'TREE_SHA="$(',
+        "archive": 'archive --format=tar "$EXPECTED_SHA"',
+        "clone": 'clone --no-hardlinks --no-checkout',
+    }
+    statements = [
+        line.strip() for line in INSTALL.read_text(encoding="utf-8").splitlines()
+        if selectors[operation] in line
+    ]
+    assert len(statements) == 1
+    script = "set -euo pipefail\n" + statements[0] + "\n"
+    if operation == "tree":
+        script += 'printf "%s\\n" "$TREE_SHA"\n'
+    completed = subprocess.run(
+        ["/bin/bash", "-c", script],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    if operation == "tree":
+        assert completed.stdout.strip() == _git(repo, "rev-parse", f"{protected}^{{tree}}")
+    elif operation == "archive":
+        assert (staging / "state.txt").read_text(encoding="utf-8") == "protected\n"
+    else:
+        assert _git(checkout, "rev-parse", "HEAD") == protected
+        assert not (checkout / "state.txt").exists()
+        assert "safe.directory" not in (checkout / ".git" / "config").read_text(encoding="utf-8")
+    assert source_config.read_bytes() == config_before
