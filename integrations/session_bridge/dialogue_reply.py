@@ -239,6 +239,18 @@ class AgentDialogueContinueWriter:
             binding=binding,
             context=context,
         )
+        try:
+            current_binding = self._resolver.resolve(target_ref)
+        except Exception:
+            raise BridgeError(
+                "binding_unavailable",
+                "exact target binding unavailable after dialogue read",
+            ) from None
+        if current_binding != binding:
+            raise BridgeError(
+                "binding_unavailable",
+                "exact target binding changed during dialogue read",
+            )
         message = self._message(
             request_message=request_message,
             context=context,

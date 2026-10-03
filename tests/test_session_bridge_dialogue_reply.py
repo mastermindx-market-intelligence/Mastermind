@@ -1,5 +1,8 @@
 import asyncio
+import dataclasses
 from pathlib import Path
+
+import pytest
 
 from integrations.session_bridge.dialogue_reply import (
     AgentDialogueContinueWriter,
@@ -214,3 +217,42 @@ def test_continue_writer_preserves_effect_unknown_and_does_not_retry():
         "read_thread",
         "send_message",
     ]
+
+
+def test_continue_writer_re_resolves_complete_binding_after_awaited_read():
+    original = _binding()
+    rotated = dataclasses.replace(
+        original,
+        session_ref="asd-session-dotbridge02",
+        dialogue_operation_key="dot-bridge-worker-op-002",
+    )
+
+    class RotatingResolver:
+        def __init__(self):
+            self.calls = []
+
+        def resolve(self, target_ref):
+            self.calls.append(target_ref)
+            return original if len(self.calls) == 1 else rotated
+
+    resolver = RotatingResolver()
+    service = Service()
+    writer = AgentDialogueContinueWriter(
+        resolver,
+        socket_path=Path("/private/tmp/mastermind-agent-dialogue.sock"),
+        service_call=service,
+    )
+
+    with pytest.raises(BridgeError) as error:
+        asyncio.run(
+            writer(
+                original.target_ref,
+                "Inspect the next bounded failure.",
+                "Stop after the next validated RESULT.",
+                "dot-reply-reresolve-001",
+            )
+        )
+
+    assert error.value.code == "binding_unavailable"
+    assert resolver.calls == [original.target_ref, original.target_ref]
+    assert [call[1]["operation"] for call in service.calls] == ["read_thread"]

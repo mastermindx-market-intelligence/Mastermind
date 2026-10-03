@@ -270,3 +270,47 @@ def test_reply_coordinator_missing_committed_message_key_is_effect_unknown_witho
         ))
     assert caught.value.code == "effect_unknown"
     assert calls == ["write"]
+
+
+def test_duplicate_carrier_reconciles_attention_without_rewaking_native_target():
+    events = []
+
+    def writer(*_args):
+        events.append("carrier")
+        return {
+            "reply_committed": True,
+            "action": "DUPLICATE",
+            "message_key": "asd-canonical-message-duplicate-001",
+        }
+
+    async def wake(target_ref, reference):
+        events.append(("wake", target_ref, reference))
+        return {"state": "ATTENTION_ACCEPTED"}
+
+    async def reconcile(target_ref, reference):
+        events.append(("reconcile", target_ref, reference))
+        return {"state": "ATTENTION_ACCEPTED", "reconciled": True}
+
+    sender = CanonicalReplyCoordinator(
+        reply_writer=writer,
+        attention_waker=wake,
+        attention_reconciler=reconcile,
+    )
+    result = asyncio.run(
+        sender(
+            "claude:target-001",
+            "Continue.",
+            "Stop after result.",
+            "duplicate-attention-op-001",
+        )
+    )
+
+    from integrations.session_bridge.native_wire import AttentionReference
+
+    expected = AttentionReference(
+        operation_key="duplicate-attention-op-001",
+        message_key="asd-canonical-message-duplicate-001",
+    )
+    assert events == ["carrier", ("reconcile", "claude:target-001", expected)]
+    assert result["carrier"]["action"] == "DUPLICATE"
+    assert result["attention"] == {"state": "ATTENTION_ACCEPTED", "reconciled": True}

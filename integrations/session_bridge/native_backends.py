@@ -73,12 +73,16 @@ class CanonicalReplyCoordinator:
         self,
         *,
         reply_writer: Callable[[str, str, str, str], Any],
-        attention_waker: Callable[[str, str], Any],
+        attention_waker: Callable[[str, AttentionReference], Any],
+        attention_reconciler: Callable[[str, AttentionReference], Any] | None = None,
     ) -> None:
         if not callable(reply_writer) or not callable(attention_waker):
             raise TypeError("reply_writer and attention_waker must be callable")
+        if attention_reconciler is not None and not callable(attention_reconciler):
+            raise TypeError("attention_reconciler must be callable when supplied")
         self._reply_writer = reply_writer
         self._attention_waker = attention_waker
+        self._attention_reconciler = attention_reconciler
 
     async def __call__(
         self,
@@ -112,15 +116,32 @@ class CanonicalReplyCoordinator:
                 "reconcile the original operation",
             ) from None
 
-        try:
-            attention = await _maybe_await(
-                self._attention_waker(target_ref, reference)
-            )
-        except Exception:
-            # The reply is already committed. Retain its exact receipt even
-            # when attention fails; do not retry or expose backend diagnostics.
-            # Cancellation remains cancellation, not an inferred no-effect.
-            attention = {"state": "EFFECT_UNKNOWN"}
+        if carrier.get("action") == "DUPLICATE":
+            # The canonical message was already committed by an earlier call.
+            # Never replay native attention on duplicate reconciliation. If an
+            # incumbent attention owner exposes a read-only reconciliation seam,
+            # consume only that result; otherwise preserve effect uncertainty.
+            if self._attention_reconciler is None:
+                attention = {"state": "EFFECT_UNKNOWN"}
+            else:
+                try:
+                    attention = await _maybe_await(
+                        self._attention_reconciler(target_ref, reference)
+                    )
+                    if not isinstance(attention, Mapping):
+                        attention = {"state": "EFFECT_UNKNOWN"}
+                except Exception:
+                    attention = {"state": "EFFECT_UNKNOWN"}
+        else:
+            try:
+                attention = await _maybe_await(
+                    self._attention_waker(target_ref, reference)
+                )
+            except Exception:
+                # The reply is already committed. Retain its exact receipt even
+                # when attention fails; do not retry or expose backend diagnostics.
+                # Cancellation remains cancellation, not an inferred no-effect.
+                attention = {"state": "EFFECT_UNKNOWN"}
         return {
             "target_ref": target_ref,
             "reply_committed": True,

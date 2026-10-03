@@ -356,3 +356,107 @@ Codex remains owned by the path-disjoint PR #1156 queue/Wake lane. Do not
 duplicate it here. MISSION_COMPLETE remains false: installed Session Bridge
 profile composition, real Claude owner binding, production send/consume/reply,
 MCP Events return, and SAME originating Web consumer proof remain owed.
+
+## 2026-10-03 Claude native-owner + authenticated-effect repair
+
+Protected procedure pin remains `bdf2a972e68a70270c24d4b5d61a4d60edc4f288`
+with the same compatible INDEX/ACTIVE_EXECUTION/RECONCILE/CLOSEOUT blobs.
+
+The branch advanced before this repair to published head
+`71ce38d3758ee39b29eef289d8276947835691a8`:
+- `883553612` added the first Claude native-attention source slice.
+- `71ce38d37` repaired the exact-head authenticated modifying-error finding from
+  PR comment5966360785 so ambiguous post-effect send/summon failures remain
+  effect-unknown rather than retry-looking availability errors.
+
+A separate pre-commit review at comment5966312581 found that the first Claude
+slice incorrectly made a raw cc-socks transport the Mastermind production owner.
+The same incumbent workspace then produced a repair, and this session consumed
+that in-place work only after the prior pytest process completed and no cwd holder
+remained.
+
+Current repair:
+- `claude_native.py` is now a provider-neutral adapter over the incumbent
+  Claude session-management owner. No socket path, token, title, newest-session
+  selection, transcript, provider auth or lifecycle state crosses the bridge.
+- exact Claude targets bind management-owned session UUID + host + generation.
+- non-addressable, detached, duplicate, changed-generation and implicit/newest
+  targets refuse before send.
+- one management-owner send occurs only for the exact resolved target.
+- response loss/malformed receipt reconciles through the SAME management owner
+  and same operation key, never by a second send or raw-socket fallback.
+- accepted attention is not PICKUP_ACK, START, target consumption, RESULT or
+  parent consumption.
+- `CanonicalReplyCoordinator` now passes the exact committed Dialogue
+  message_key plus operation_key as AttentionReference to native attention; if a
+  committed result lacks the canonical message key, it returns effect_unknown
+  and does not wake.
+
+Current upstream Claude Code documentation confirms that local cross-session
+messages use per-session sockets on macOS/Linux and that socket arrivals still
+pass through the receiving session's inbound controls; therefore socket transport
+write alone cannot prove Claude consumption. Mastermind still chooses the
+incumbent session-management owner as its production boundary under current
+architecture, rather than making raw socket discovery/writes a second owner.
+
+Fresh verification on the current uncommitted repair bytes:
+- focused Claude/authenticated-effect/return slice: PASS (progress output
+  72+26 = 98 cases; zero failure output);
+- broader bridge/native/dialogue owning campaign: PASS (progress output
+  5x72+67 = 427 cases; zero failure output);
+- git diff --check: PASS before the broader run;
+- full repository pytest was independently attempted on the same repair bytes
+  by the incumbent process and stopped only on the already-known unrelated
+  collection imports `engine.signal_archive` and `lib`; no full-suite green
+  claim.
+
+No live Claude send, subscription, credential read, provider mutation or install
+was performed by this repair. Source publication/review and installed
+session-management binding remain separate. The downstream #1147 service
+inference mount request touches shared executive_mcp/server.py and is held out of
+this bridge repair until the current #1112 source is clean/reviewed; no competing
+server composition is started.
+
+## 2026-10-03 continuity P1 repair after 8d032727
+
+Current exact branch/remote baseline for this increment:
+`8d032727fa37cc5651666e0d09559366ba85b120`. No other cwd holder was
+present at the pre-commit fence.
+
+This increment closes the two remaining source-continuity blockers from review
+comment5966522155:
+
+1. Duplicate carrier reply no longer replays native attention.
+   `CanonicalReplyCoordinator` now accepts an optional injected
+   `attention_reconciler` owned by the incumbent attention/Wake owner.
+   When the canonical Dialogue writer returns `action=DUPLICATE`, the
+   coordinator never calls `attention_waker` again. It consumes only a
+   same-owner reconciliation result when supplied; without one, or on malformed
+   / failed reconciliation, attention remains `EFFECT_UNKNOWN`.
+   No automatic no-effect retry or fallback was added.
+
+2. Dialogue target binding is re-resolved after the awaited carrier read.
+   `AgentDialogueContinueWriter` snapshots the complete
+   `ExecutiveReplyBinding`, awaits `read_thread`, then resolves the same
+   target again before constructing/returning a duplicate or entering
+   `send_message`. Any complete binding change or resolver failure refuses as
+   `binding_unavailable`; no send occurs.
+
+TDD evidence:
+- both new regressions were observed RED on 8d032727: stale binding sent after
+  one resolve; duplicate coordinator lacked a reconciliation seam;
+- the two regressions then PASS after the minimal source repair;
+- targeted native/dialogue/failure/Claude campaign: 57 PASS;
+- broader bridge/native/dialogue/auth owning campaign: 429 PASS, zero failure
+  output;
+- `git diff --check` PASS before the targeted campaign.
+
+The full-repository campaign was not repeated for these two source edits because
+the immediately preceding incumbent run on the Claude/auth repair stopped only
+on the same unrelated collection imports `engine.signal_archive` and `lib`.
+No full-suite-green claim.
+
+No runtime/native/provider send, installation, callback subscription, credential
+read, new queue, lifecycle owner, or retry owner was introduced. The new
+attention reconciliation callable is a composition seam over the existing
+incumbent Wake/attention owner; it does not own state.
