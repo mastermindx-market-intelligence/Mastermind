@@ -25,7 +25,7 @@
 
 ## Task 1 — Source regressions and native pressure inputs
 Files: tests/test_pro_continuity_reliability.py; research/fixtures/pro_continuity_reliability_2026-09-19.json.
-Consumes existing scripts.ohf.fresh_sol_eval.ScenarioPacket; produces 19 exact evaluator packets, not model results.
+Consumes existing scripts.ohf.fresh_sol_eval.ScenarioPacket; produces 22 exact evaluator packets, not model results.
 - [x] Write contract tests before modifying the procedure files.
 - [x] Run pytest --noconftest -p no:cacheprovider -q tests/test_pro_continuity_reliability.py on unchanged protected procedure; 14 expected assertions fail, no collection errors.
 - [x] Keep the existing active-execution baseline (28 tests) as the regression reference.
@@ -50,3 +50,12 @@ Files: docs/sol_skills/{ACTIVE_EXECUTION,INDEX,COLD_START,CLOSEOUT,WEB_CEO_DELEG
 
 ## Safe return
 Return exact commit/PR, actual tests, remaining owner gates and a compact next-action pointer. Do not claim a receiver STARTed, a verified organizational checkpoint or Project settings changed without that owner's evidence.
+
+### 2026-10-03 incident regressions
+
+PCR20–PCR22 extend the same existing evaluator packet owner for the observed premature-finalization failure:
+- pending reviewer/owner replies are lane-local when independent useful work remains;
+- a pre-dispatch blocked compound action stays frozen while genuinely independent action families continue;
+- two support/status cycles with no capability delta or resolved blocker trigger NO_DELTA_LOOP and a real capability step.
+
+These are source/evaluator inputs only. Served-model evidence remains a separate no-effect OHF campaign bound to exact candidate Skillpack bytes.

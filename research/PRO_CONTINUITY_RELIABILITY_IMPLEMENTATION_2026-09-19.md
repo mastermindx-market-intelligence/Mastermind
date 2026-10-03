@@ -31,7 +31,7 @@ RED log SHA-256: `5d83feeab36f453d659edc2c3075a4eccccf935235e51436e6a9a9572ddabc
 
 Unchanged bootstrap SHA-256: `1a40ae5fa68893edd02be1ae57e0252d92d5b3240ad2f3a231fe8bfa1c862685`.
 
-Nineteen PCR01–PCR19 packets validate through the existing ScenarioPacket contract. They cover legitimate/illegitimate turn stopping, stale/ambiguous checkpoints, fresh-session custody, output expiry, unknown budgets/tools, relevant/unrelated source drift, research completion boundaries, distinct refusal/limit behavior, blind Web-CEO pre-START exclusion/rebinding, and the worker-local capability negative control. They have not been run as native served-model experiments.
+Twenty-two PCR01–PCR22 packets validate through the existing ScenarioPacket contract. They cover legitimate/illegitimate turn stopping, stale/ambiguous checkpoints, fresh-session custody, output expiry, unknown budgets/tools, relevant/unrelated source drift, research completion boundaries, distinct refusal/limit behavior, blind Web-CEO pre-START exclusion/rebinding, and the worker-local capability negative control. They have not been run as native served-model experiments.
 
 ## Continuation and do-not-redo
 
@@ -40,3 +40,7 @@ Do not redo the baseline, missing-rule RED run or acquired workspace absent a ma
 Next source action: independent exact-head review of this candidate and #147 composition, required hosted checks, then guarded publication only under existing source-owner law. Parent delivery remains incomplete: routing policy (#506), bounded canonical continuation (#651), actual Studio connector adoption (#840) and native Project/session proof are still separate.
 
 No reviewer or worker has STARTed merely because a packet/comment exists. No automatic return or wake is armed. The matching implementation plan and spec carry exact source scope and the declared deferred Project-bootstrap gate.
+
+## 2026-10-03 incident follow-through
+
+PCR20–PCR22 were added to the incumbent packet corpus to encode the later healthy-session premature-stop incident. Separate live OHF evidence is bound to the exact SR-F0 candidate that implements the cross-phase continuation rule; that evidence is not relabeled as protected adoption and does not grant source release.

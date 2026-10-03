@@ -95,10 +95,10 @@ def test_bootstrap_still_uses_protected_source_and_contains_no_live_operation():
     assert "SAME repository + commit" in raw
     assert "pro-continuity-reliability-20260919-sol-001" not in raw
 
-@pytest.mark.parametrize("scenario_id", [f"PCR{i:02d}" for i in range(1,20)])
+@pytest.mark.parametrize("scenario_id", [f"PCR{i:02d}" for i in range(1,23)])
 def test_pressure_cases_use_existing_fresh_sol_packet(scenario_id):
     rows = json.loads(CORPUS.read_text(encoding="utf-8"))
-    assert [r["scenario_id"] for r in rows] == [f"PCR{i:02d}" for i in range(1,20)]
+    assert [r["scenario_id"] for r in rows] == [f"PCR{i:02d}" for i in range(1,23)]
     row = next(r for r in rows if r["scenario_id"] == scenario_id)
     assert set(row) == {"scenario_id", "prompt", "pass_requires"}
     packet = ScenarioPacket(**row)
@@ -181,6 +181,34 @@ def test_worker_local_actions_do_not_overblock_principal_prestart_gate():
     assert "START is allowed" in p19["pass_requires"]
 
 
+
+def test_external_wait_with_independent_work_does_not_end_turn():
+    rows = {row["scenario_id"]: row for row in json.loads(CORPUS.read_text(encoding="utf-8"))}
+    p20 = rows["PCR20"]
+    assert "neither has picked up or started durable execution" in p20["prompt"]
+    assert "Independent authorized read-only" in p20["prompt"]
+    assert "external waits as lane-local" in p20["pass_requires"]
+    assert "same healthy turn" in p20["pass_requires"]
+    assert "not durable execution" in p20["pass_requires"]
+
+
+def test_pre_dispatch_blocked_compound_action_keeps_independent_lanes_alive():
+    rows = {row["scenario_id"]: row for row in json.loads(CORPUS.read_text(encoding="utf-8"))}
+    p21 = rows["PCR21"]
+    assert "blocked before dispatch" in p21["prompt"]
+    assert "Do not retry or repackage" in p21["prompt"]
+    assert "genuinely independent safe lane" in p21["pass_requires"]
+    assert "universal unavailability" in p21["pass_requires"]
+
+
+def test_two_support_only_cycles_force_no_delta_replan_and_real_step():
+    rows = {row["scenario_id"]: row for row in json.loads(CORPUS.read_text(encoding="utf-8"))}
+    p22 = rows["PCR22"]
+    assert "last two cycles" in p22["prompt"]
+    assert "Neither cycle produced a capability delta" in p22["prompt"]
+    assert "Classify NO_DELTA_LOOP" in p22["pass_requires"]
+    assert "execute the real capability step" in p22["pass_requires"]
+
 def test_closeout_handoff_declares_completion_conditionally():
     raw = section("CLOSEOUT.md", "Step 7 — Create the continuation handoff")
     for clause in (
@@ -217,13 +245,13 @@ def test_negative_worker_capability_blocker_is_not_self_authenticating_human_gat
         assert clause in step6
 
 
-def test_pressure_corpus_documentation_matches_nineteen_current_packets():
+def test_pressure_corpus_documentation_matches_twenty_two_current_packets():
     plan = repo_text("docs/superpowers/plans/2026-09-19-pro-continuity-safety.md")
     spec = repo_text("docs/superpowers/specs/2026-09-19-pro-continuity-safety.md")
     report = repo_text("research/PRO_CONTINUITY_RELIABILITY_IMPLEMENTATION_2026-09-19.md")
-    assert "produces 19 exact evaluator packets" in plan
-    assert "Nineteen pressure packets" in spec
-    assert "Nineteen PCR01–PCR19 packets" in report
-    assert "produces 17 exact evaluator packets" not in plan
-    assert "Seventeen pressure packets" not in spec
-    assert "Seventeen PCR01–PCR17 packets" not in report
+    assert "produces 22 exact evaluator packets" in plan
+    assert "Twenty-two pressure packets" in spec
+    assert "Twenty-two PCR01–PCR22 packets" in report
+    assert "produces 19 exact evaluator packets" not in plan
+    assert "Nineteen pressure packets" not in spec
+    assert "Nineteen PCR01–PCR19 packets" not in report

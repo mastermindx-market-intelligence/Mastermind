@@ -38,6 +38,12 @@ Existing #147 owns replay-prevention/linter semantics and overlaps procedure fil
 
 ## Acceptance and proof ceiling
 
-Source proof: original active-execution baseline; missing-rule RED tests before edits; selected transitive tests; existing ScenarioPacket compatibility; whitespace and exact changed-path review. Nineteen pressure packets are inputs to the existing fresh-Sol evaluator, not observations that any model passed.
+Source proof: original active-execution baseline; missing-rule RED tests before edits; selected transitive tests; existing ScenarioPacket compatibility; whitespace and exact changed-path review. Twenty-two pressure packets are inputs to the existing fresh-Sol evaluator, not observations that any model passed.
 
 Release remains held for independent exact-head review, #147 compatibility and required hosted checks. Production acceptance additionally requires actual canonical checkpoint input, fresh-session consumption without transcript replay, correct pending-effect handling, actual Studio connector output proof and approved Project readback. No failure-rate reduction, automatic resume, worker START or Project-memory change is asserted by this source slice.
+
+## 2026-10-03 incident discriminators
+
+The source contract now includes three additional pressure cases: lane-local external waits, action-family-local pre-dispatch failure, and support-only NO_DELTA loops. They specifically prevent a healthy Pro session from treating a reviewer request, missing reply, checkpoint, or two administrative cycles as a valid turn-ending capability result while independent safe work remains.
+
+Fresh served-model evaluation must keep grading text out of the prompt, preserve exact candidate/procedure identity, use a no-write capability surface, and record cleanup. Passing source tests alone is not adoption.
