@@ -1479,13 +1479,18 @@ def test_acceptance_requires_exact_reviewed_macos_directory_group_sets() -> None
         )
 
 
-def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> None:
+def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt(tmp_path: Path) -> None:
     import pytest
 
     from ops.executive_os.acceptance import AcceptanceError, _durable_assignment_paths
 
-    workspace_root = Path("/var/db/mastermind-executive/jobs/workspaces")
-    run_root = Path("/var/db/mastermind-executive/jobs/runs")
+    workspace_root = tmp_path.resolve() / "workspaces"
+    run_root = tmp_path.resolve() / "runs"
+    workspace_root.mkdir()
+    run_root.mkdir()
+    (workspace_root / "proof-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").mkdir()
+    (run_root / "attempt-1" / "output").mkdir(parents=True)
+    (run_root / "attempt-1" / "output" / "result.json").write_text("{}")
     job = {
         "job_id": "job-1",
         "current_attempt_id": "attempt-1",
@@ -1495,6 +1500,7 @@ def test_acceptance_derives_assignment_roots_from_durable_job_and_attempt() -> N
         "attempt_id": "attempt-1",
         "job_id": "job-1",
         "result_path": str(run_root / "attempt-1" / "output" / "result.json"),
+        "status": "COMPLETED",
     }
     assert _durable_assignment_paths(
         job, attempt, workspace_root=workspace_root, run_root=run_root
