@@ -68,10 +68,13 @@ class _TurnFrameGuard(ProbeClient):
 
     def admit_update(self, update: Any) -> int:
         # Structural bounds remain in StrictFrameReader. The typed production
-        # turn applies the phase/session-aware read-only policy below.
-        self._turn.validate_update(update, commit=False)
-        if self._turn._error:
-            raise ValueError(self._turn._error)
+        # turn applies the phase/session-aware read-only policy below. A
+        # pre-existing cancellation/refusal must not turn a valid already-in-
+        # flight frame into a framing violation; reject only when THIS update
+        # introduces a semantic refusal.
+        reason = self._turn.validate_update(update, commit=False)
+        if reason is not None:
+            raise ValueError(reason)
         return 0
 
 
