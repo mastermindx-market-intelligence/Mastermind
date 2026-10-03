@@ -1,0 +1,1235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:mastermind:research-proposal:issuer-state-transition:v1",
+  "$comment": "UNADMITTED W0 REVIEW CANDIDATE. This file is not a registered runtime contract, permission or new owner registry. OwnerRef values must resolve through existing owners; string shape is not proof. Semantic admission and publication controls remain mandatory.",
+  "title": "Issuer state transition \u2014 conditional W0 candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "transition_id",
+    "issuer_ref",
+    "definition_ref",
+    "baseline",
+    "inputs",
+    "cutoffs",
+    "clocks",
+    "comparison",
+    "meaning",
+    "evidence",
+    "mechanism",
+    "materiality",
+    "correction",
+    "rights",
+    "authority",
+    "reproducibility"
+  ],
+  "properties": {
+    "schema": {
+      "const": "issuer_state_transition.v1"
+    },
+    "transition_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "issuer_ref": {
+      "$ref": "#/$defs/OwnerRef"
+    },
+    "definition_ref": {
+      "$ref": "#/$defs/OwnerRef"
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cutoff_ref",
+        "variables"
+      ],
+      "properties": {
+        "cutoff_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Variable"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Input"
+      },
+      "minItems": 1,
+      "maxItems": 200
+    },
+    "cutoffs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_snapshot_at",
+        "recorded_at",
+        "selection_policy_ref"
+      ],
+      "properties": {
+        "source_snapshot_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "selection_policy_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        }
+      }
+    },
+    "clocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "earliest_public_support",
+        "earliest_system_support",
+        "reconstructed_at",
+        "emitted_at",
+        "reconstruction_mode"
+      ],
+      "properties": {
+        "earliest_public_support": {
+          "$ref": "#/$defs/TimeBound"
+        },
+        "earliest_system_support": {
+          "$ref": "#/$defs/TimeBound"
+        },
+        "reconstructed_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "emitted_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reconstruction_mode": {
+          "enum": [
+            "development_reconstruction",
+            "historical_reconstruction",
+            "prospective_context"
+          ]
+        }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "before_ref",
+        "after_ref",
+        "admission_ref",
+        "unit_ref",
+        "before_value",
+        "after_value",
+        "absolute_change",
+        "relative_change_percent",
+        "percentage_reason",
+        "refusal_reason"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "comparable",
+            "unchanged",
+            "missing",
+            "unsupported",
+            "not_evaluable"
+          ]
+        },
+        "before_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "after_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "admission_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "before_value": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 96
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "after_value": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 96
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "absolute_change": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 96
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relative_change_percent": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 96
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "percentage_reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "refusal_reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "comparable",
+                  "unchanged"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "before_ref": {
+                "$ref": "#/$defs/OwnerRef"
+              },
+              "after_ref": {
+                "$ref": "#/$defs/OwnerRef"
+              },
+              "admission_ref": {
+                "$ref": "#/$defs/OwnerRef"
+              },
+              "unit_ref": {
+                "$ref": "#/$defs/OwnerRef"
+              },
+              "before_value": {
+                "type": "string",
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "maxLength": 96
+              },
+              "after_value": {
+                "type": "string",
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "maxLength": 96
+              },
+              "absolute_change": {
+                "type": "string",
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "maxLength": 96
+              },
+              "refusal_reason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "absolute_change": {
+                "type": "null"
+              },
+              "relative_change_percent": {
+                "type": "null"
+              },
+              "refusal_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "unchanged"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "absolute_change": {
+                "const": "0"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "relative_change_percent": {
+                "type": "null"
+              },
+              "state": {
+                "enum": [
+                  "comparable",
+                  "unchanged"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "percentage_reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              }
+            }
+          }
+        }
+      ]
+    },
+    "meaning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "economic_family",
+        "measurement_shape",
+        "interpretation_ref",
+        "evidence_maturity",
+        "lifecycle",
+        "limitations"
+      ],
+      "properties": {
+        "economic_family": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "measurement_shape": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "interpretation_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence_maturity": {
+          "enum": [
+            "development_golden",
+            "source_observed",
+            "owner_interpreted",
+            "validated_classification"
+          ]
+        },
+        "lifecycle": {
+          "enum": [
+            "current",
+            "superseded",
+            "retracted"
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "minItems": 0,
+          "maxItems": 50
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "minItems": 1,
+      "maxItems": 200
+    },
+    "mechanism": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Mechanism"
+      },
+      "minItems": 0,
+      "maxItems": 20
+    },
+    "materiality": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Materiality"
+      },
+      "minItems": 0,
+      "maxItems": 40
+    },
+    "correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relation",
+        "previous_derived_refs",
+        "source_correction_refs",
+        "reason"
+      ],
+      "properties": {
+        "relation": {
+          "enum": [
+            "original",
+            "supersedes",
+            "retracts",
+            "method_revision"
+          ]
+        },
+        "previous_derived_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "source_correction_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "relation": {
+                "const": "original"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "previous_derived_refs": {
+                "maxItems": 0
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "previous_derived_refs": {
+                "minItems": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              }
+            }
+          }
+        }
+      ]
+    },
+    "rights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "decision_refs",
+        "consumer_purpose_refs"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "not_admitted",
+            "admitted",
+            "revoked"
+          ]
+        },
+        "decision_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "consumer_purpose_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 0,
+          "maxItems": 30
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "admitted"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "decision_refs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/OwnerRef"
+                },
+                "minItems": 1,
+                "maxItems": 100
+              },
+              "consumer_purpose_refs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/OwnerRef"
+                },
+                "minItems": 1,
+                "maxItems": 30
+              }
+            }
+          }
+        }
+      ]
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class",
+        "may_rank",
+        "may_gate",
+        "may_size",
+        "may_originate",
+        "may_open_entry",
+        "may_trade",
+        "may_modify_prophet"
+      ],
+      "properties": {
+        "class": {
+          "const": "context_only"
+        },
+        "may_rank": {
+          "const": false
+        },
+        "may_gate": {
+          "const": false
+        },
+        "may_size": {
+          "const": false
+        },
+        "may_originate": {
+          "const": false
+        },
+        "may_open_entry": {
+          "const": false
+        },
+        "may_trade": {
+          "const": false
+        },
+        "may_modify_prophet": {
+          "const": false
+        }
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_refs",
+        "method_sha256",
+        "definition_sha256",
+        "semantic_projection_sha256",
+        "canonicalization_ref",
+        "narrative_ref"
+      ],
+      "properties": {
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 1,
+          "maxItems": 200
+        },
+        "method_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "definition_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "semantic_projection_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "canonicalization_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "narrative_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "OwnerRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner_ref",
+        "schema",
+        "object_id",
+        "revision_id",
+        "content_sha256",
+        "selector"
+      ],
+      "properties": {
+        "owner_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "object_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "revision_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "selector": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "TimeBound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lower",
+        "upper",
+        "precision",
+        "owner_clock_name",
+        "policy_ref"
+      ],
+      "properties": {
+        "lower": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "upper": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "precision": {
+          "enum": [
+            "exact",
+            "second",
+            "date",
+            "bounded",
+            "unknown"
+          ]
+        },
+        "owner_clock_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "policy_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "precision": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "lower": {
+                "type": "null"
+              },
+              "upper": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "lower": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+              },
+              "upper": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Variable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "variable_ref",
+        "state",
+        "value_ref",
+        "reason"
+      ],
+      "properties": {
+        "variable_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "state": {
+          "enum": [
+            "available",
+            "unchanged",
+            "missing",
+            "unsupported",
+            "not_evaluable",
+            "superseded"
+          ]
+        },
+        "value_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "available",
+                  "unchanged"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value_ref": {
+                "$ref": "#/$defs/OwnerRef"
+              },
+              "reason": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "ref",
+        "source_refs",
+        "period_ref",
+        "basis_ref",
+        "source_available",
+        "system_admitted"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "before",
+            "after",
+            "baseline",
+            "supporting",
+            "opposing",
+            "context"
+          ]
+        },
+        "ref": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "period_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "basis_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "source_available": {
+          "$ref": "#/$defs/TimeBound"
+        },
+        "system_admitted": {
+          "$ref": "#/$defs/TimeBound"
+        }
+      }
+    },
+    "Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "ref",
+        "dependence_group_ref",
+        "limitation"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "supports",
+            "opposes",
+            "context",
+            "missing"
+          ]
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dependence_group_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limitation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "missing"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "limitation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "ref": {
+                "$ref": "#/$defs/OwnerRef"
+              },
+              "dependence_group_ref": {
+                "$ref": "#/$defs/OwnerRef"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Mechanism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hypothesis",
+        "support_refs",
+        "opposing_refs",
+        "alternative_hypotheses",
+        "next_observable",
+        "falsifier",
+        "check_by",
+        "maturity"
+      ],
+      "properties": {
+        "hypothesis": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "support_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "opposing_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OwnerRef"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "alternative_hypotheses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "next_observable": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "falsifier": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "check_by": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maturity": {
+          "const": "hypothesis_not_causal_proof"
+        }
+      }
+    },
+    "Materiality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "definition_ref",
+        "component",
+        "measured_value",
+        "unit_ref",
+        "categorical_state",
+        "explanation"
+      ],
+      "properties": {
+        "definition_ref": {
+          "$ref": "#/$defs/OwnerRef"
+        },
+        "component": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "measured_value": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 96
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categorical_state": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "rights": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "not_admitted",
+                  "revoked"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "clocks": {
+            "properties": {
+              "emitted_at": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "meaning": {
+            "properties": {
+              "evidence_maturity": {
+                "const": "development_golden"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "clocks": {
+            "properties": {
+              "emitted_at": {
+                "type": "null"
+              },
+              "reconstruction_mode": {
+                "const": "development_reconstruction"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

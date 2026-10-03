@@ -1,0 +1,123 @@
+{
+  "kind": "static_review_candidate_not_runtime_registry",
+  "program": "issuer-inflection-intelligence",
+  "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
+  "parent_carrier": "Mastermind#1183",
+  "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
+  "prepared_at": "2026-10-03T20:06:46.582101+00:00",
+  "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
+  "files": {
+    "COMPARATOR_DEFINITION_CANDIDATE.json": {
+      "sha256": "44f03fba0eefb87b6426681899849ab7517e7643a432f551d8a6e459ea8b0838",
+      "bytes": 1213
+    },
+    "README.md": {
+      "sha256": "dd1fe02840c3c8f033c78b3f765889c2ee28c94dade2b94f713067e1e43eff76",
+      "bytes": 2522
+    },
+    "SEMANTIC_ADMISSION.md": {
+      "sha256": "1370014ed31db2b934a065d0056b6fd939f9a8664df2682814c30d9f99956317",
+      "bytes": 5727
+    },
+    "TRIAL_OWNER_ADMISSION.md": {
+      "sha256": "a00b086febd2329af4a723283c236cc3abdc07cf5464422f48404650ced868d3",
+      "bytes": 3181
+    },
+    "W0_ADMISSION_CANDIDATE.md": {
+      "sha256": "6d9fa58b654573db28aee349e0873c2f6fbb454d0b49320172b04b8b10b48dbf",
+      "bytes": 25444
+    },
+    "W1_IMPLEMENTATION_PACKET.md": {
+      "sha256": "bbf0bdeae8351983b14138fd78086cfb0dc6ec967af30114a9dad739d4e67ece",
+      "bytes": 9641
+    },
+    "evidence/CAPTURE_BOUNDARY.json": {
+      "sha256": "d923b3cb21b4acd0949a6562d0d09529431d2b10653ff2b32c4e331f0beba19f",
+      "bytes": 1077
+    },
+    "evidence/aapl_same_filing_annual_revenue.receipt.json": {
+      "sha256": "d91c48201a58856cc6fc4b1df0e7414e48b9f8fb10691fe623dae776fb1d943f",
+      "bytes": 14162
+    },
+    "evidence/aapl_same_filing_annual_revenue.response.json": {
+      "sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
+      "bytes": 76239
+    },
+    "evidence/aapl_unlinked_assets.receipt.json": {
+      "sha256": "a863535fc3a0e7c0a9b1db28bd67ff70a4626cb267ca5441a28d025c43a2b20d",
+      "bytes": 4543
+    },
+    "evidence/aapl_unlinked_assets.response.json": {
+      "sha256": "aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21",
+      "bytes": 68681
+    },
+    "evidence/event-workspace-delta.json": {
+      "sha256": "27b4db86233cc37eea1ba3614f249263d9715e54a1f50cc6b42b667584141ae6",
+      "bytes": 14106
+    },
+    "evidence/independent-replay-method.json": {
+      "sha256": "f5ea102d912a563e4d108758329aa7479967e088f81c5f874dee57eb00f88b03",
+      "bytes": 1555
+    },
+    "evidence/independent-replay-query-hashes.json": {
+      "sha256": "65a4b0ab2e49a2f3dbfc5f1efd5668c61605dbbb7acc18778e7211bbf62d6e80",
+      "bytes": 324
+    },
+    "evidence/independent-replay-result.json": {
+      "sha256": "93835ced6e8ba67c038743a291cda7a430ef755cb46273fea179a9d51eb75fcd",
+      "bytes": 451
+    },
+    "evidence/issuer-master-input.json": {
+      "sha256": "52ea472a345ed7ec61e39cc5fcbc5cc8589eb202d260439f02a323f95438d2d2",
+      "bytes": 214
+    },
+    "evidence/method-before-execution.json": {
+      "sha256": "b183fa79087c1f2bc4f53f6eba345553cfbb1eed55d6751c1ce3af525dbf7c08",
+      "bytes": 1189
+    },
+    "evidence/pytest-attempt-1.json": {
+      "sha256": "752ac864696f8fa628573c1815a6884ecc3790bedfd23937c434598dc88a0c97",
+      "bytes": 1605
+    },
+    "evidence/pytest-attempt-2.json": {
+      "sha256": "521419170adb8f4447895fcb8b3d0576023618ef2ce0115c11d00e657bb2346e",
+      "bytes": 1722
+    },
+    "evidence/pytest-attempt-3.json": {
+      "sha256": "1e03a7f4a43b3eb62600aa0f8db3857f18cdf9c46820d631f1aa8ea6e709ef98",
+      "bytes": 1784
+    },
+    "evidence/pytest-attempt-4.json": {
+      "sha256": "49b1212cfc5544703504a49d18a3639d71c39908cb87e3bce2a04a56ecf29a2c",
+      "bytes": 2076
+    },
+    "evidence/runtime-observations.json": {
+      "sha256": "da032bf79c0e73f2d834a2686b84d7d6b29f8a92734191d2756951f57d1452f2",
+      "bytes": 2506
+    },
+    "evidence/security-master-input.json": {
+      "sha256": "c20de4a21943552365e9445621ebb5fc9d56096f58a1a8b81fbc30bdfb23b197",
+      "bytes": 216
+    },
+    "evidence/targeted-source-delta.json": {
+      "sha256": "2831b7972f59a63738f8fc69db670de6a7dd24d6534442c45d2a41e31686cc75",
+      "bytes": 3747
+    },
+    "issuer_state_transition.candidate.schema.json": {
+      "sha256": "eba8c328e9b2a42e4678c3b4717ff9d3e7e7b374c165fa14b7683fb277e71384",
+      "bytes": 27581
+    },
+    "replay_owner_inputs.py": {
+      "sha256": "ea7eb744ec43d5bc6adab029ae9f86562dc8eca6ede41c518e94ae9096aa1ee7",
+      "bytes": 6279
+    },
+    "test_verify_evidence.py": {
+      "sha256": "bd80da3ba5869559923061525a8cb0000a592cba1cd9b2d3d0414612afe7f4b2",
+      "bytes": 2741
+    },
+    "verify_evidence.py": {
+      "sha256": "b6d8d2ae66354b8f58734fc03d04fadec6fd26269a21f4993b2f97ca15a34034",
+      "bytes": 6685
+    }
+  }
+}
