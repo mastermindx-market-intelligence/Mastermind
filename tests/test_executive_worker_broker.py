@@ -3574,3 +3574,90 @@ def test_unbound_cleanup_malformed_exact_status_never_cancels(status):
     with pytest.raises(BrokerProtocolError, match="exact run status is malformed"):
         controller.cleanup_unbound_run("run-unbound")
     assert calls == [("status", {"run_id": "run-unbound"})]
+
+
+@pytest.mark.parametrize("orchestration", [False, True])
+def test_remote_start_preserves_shared_launch_contract(tmp_path, orchestration):
+    from control_plane.executive_supervisor import OrchestrationLaunchSpec
+    from control_plane.worker_execution_contract import worker_launch_spec_sha256
+
+    broker, adapter, sweeper, peer, value = _fixture(tmp_path)
+    base = _launch_spec_from_wire(value, broker.policy)
+    legacy_wire = _launch_spec_to_json(base)
+    legacy_hash = worker_launch_spec_sha256(base)
+    assert "effective_grant_digest" not in legacy_wire
+    assert "subscription_canary_claim" not in legacy_wire
+    spec = (
+        OrchestrationLaunchSpec(
+            **{field.name: getattr(base, field.name) for field in dataclasses.fields(base)},
+            effective_grant_digest="a" * 64,
+        )
+        if orchestration else base
+    )
+    wire = _launch_spec_to_json(spec)
+    restored = _launch_spec_from_wire(wire, broker.policy)
+    assert type(restored) is type(spec)
+    assert restored == spec
+    assert worker_launch_spec_sha256(restored) == worker_launch_spec_sha256(spec)
+    if orchestration:
+        assert worker_launch_spec_sha256(restored) != legacy_hash
+    else:
+        assert wire == legacy_wire
+
+    class Client:
+        async def request(self, operation, payload):
+            response = await broker.execute(_request(operation, payload), peer=peer)
+            return response["result"]
+
+    async def scenario():
+        broker.initialize()
+        remote = RemoteCodexWorkerAdapter(Client())
+        ref = await remote.start(spec)
+        assert adapter.spec == spec
+        assert type(adapter.spec) is type(spec)
+        assert "effective_grant_digest" not in remote.launch_attestation(ref)
+        assert sweeper.calls == ["broker_startup"]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("digest", [None, "", True, 7, [], "A" * 64, "g" * 64, "a" * 63, "a" * 65])
+def test_broker_rejects_invalid_grant_digest_before_start(tmp_path, digest):
+    broker, adapter, _sweeper, peer, value = _fixture(tmp_path)
+    value["effective_grant_digest"] = digest
+    with pytest.raises(BrokerProtocolError, match="exact lowercase SHA-256"):
+        asyncio.run(broker.execute(
+            _request("start", {"launch_spec": value, "validation_commands": []}),
+            peer=peer,
+        ))
+    assert adapter.spec is None
+    assert broker._starting is False
+    assert broker._active_run_id is None
+    assert broker._runs == {}
+
+
+def test_orchestration_spec_still_rejects_unknown_fields_before_start(tmp_path):
+    broker, adapter, _sweeper, peer, value = _fixture(tmp_path)
+    value.update(effective_grant_digest="a" * 64, effective_grant={"authorities": ["SERVICE_CONTROL"]})
+    with pytest.raises(BrokerProtocolError, match="unknown fields"):
+        asyncio.run(broker.execute(
+            _request("start", {"launch_spec": value, "validation_commands": []}),
+            peer=peer,
+        ))
+    assert adapter.spec is None
+    assert broker._runs == {}
+
+
+@pytest.mark.parametrize("digest", ["", "A" * 64, "a" * 63, "a" * 65, None])
+def test_local_orchestration_launch_spec_rejects_invalid_digest(tmp_path, digest):
+    from control_plane.worker_execution_contract import (
+        OrchestrationLaunchSpec, WorkerRecoveryContractError,
+    )
+
+    broker, _adapter, _sweeper, _peer, value = _fixture(tmp_path)
+    base = _launch_spec_from_wire(value, broker.policy)
+    with pytest.raises(WorkerRecoveryContractError, match="exact lowercase SHA-256"):
+        OrchestrationLaunchSpec(
+            **{field.name: getattr(base, field.name) for field in dataclasses.fields(base)},
+            effective_grant_digest=digest,
+        )
