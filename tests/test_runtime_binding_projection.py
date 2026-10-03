@@ -102,7 +102,8 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
     )
 
 
-def _admitted_runtime(tmp_path, *, provider: str = "openai-codex", exec_identity=None):
+def _admitted_runtime(tmp_path, *, provider: str = "openai-codex", exec_identity=None,
+                      profile_transform=None, attestation_transform=None):
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
         "worker-a",
@@ -132,6 +133,8 @@ def _admitted_runtime(tmp_path, *, provider: str = "openai-codex", exec_identity
     )
     assert dispatch is not None and dispatch.lease_token is not None
     profile = _profile(dispatch, provider=provider)
+    if profile_transform is not None:
+        profile = profile_transform(profile)
     harness = runtime.operator_harness
     sealed = harness.seal_operator_harness_attempt(
         dispatch.attempt.attempt_id,
@@ -185,7 +188,8 @@ def _admitted_runtime(tmp_path, *, provider: str = "openai-codex", exec_identity
         fence_generation=sealed.fence_generation,
         lease_token=dispatch.lease_token,
         requested=profile,
-        attestation=_attestation(profile),
+        attestation=(attestation_transform(_attestation(profile))
+                     if attestation_transform is not None else _attestation(profile)),
         principal_observation=principal,
     )
     return runtime, dispatch, sealed, epoch, generation, process, profile
@@ -1332,3 +1336,170 @@ def test_current_writer_projects_only_exec_identity_sealed_in_admission(tmp_path
     )
     assert facts.pid == process.pid
     assert _sqlite_snapshot(runtime) == before
+
+
+_MCP_HOST = dict(config_name="company-consultation-v1",
+                 server_identity="mastermind-company-consultation-mcp",
+                 server_version="1.0.0", tool_schema_digest="c" * 64,
+                 auth_status="unsupported")
+
+
+def _admitted_mcp(tmp_path, *, capability_changes=None, placement="required",
+                  observed_transform=None):
+    import dataclasses
+    from control_plane.operator_harness_contract import (
+        CapabilityIdentity, ObservedCapabilityIdentity,
+    )
+    capability = CapabilityIdentity(
+        name=_MCP_HOST["config_name"], kind="mcp_server",
+        harness_binary_digest="a" * 64,
+        tool_schema_digest=_MCP_HOST["tool_schema_digest"],
+        mcp_server_identity=_MCP_HOST["server_identity"],
+        mcp_server_version=_MCP_HOST["server_version"],
+        mcp_auth_status=_MCP_HOST["auth_status"],
+    )
+    if capability_changes:
+        capability = dataclasses.replace(capability, **capability_changes)
+    raw = dataclasses.asdict(capability)
+    raw.pop("harness_binary_digest")
+    observed = ObservedCapabilityIdentity(**raw)
+    def profile(value):
+        manifest = CapabilityManifest(
+            required=(capability,) if placement == "required" else (),
+            allowed_ambient=(capability,) if placement == "ambient" else (),
+        )
+        if placement == "duplicate":
+            manifest = CapabilityManifest(required=(capability, capability))
+        return dataclasses.replace(value, capabilities=manifest)
+    def attestation(value):
+        value = dataclasses.replace(value, capabilities=(observed,),
+                                    effective_mcp=(capability.name,))
+        return observed_transform(value) if observed_transform else value
+    return _admitted_runtime(tmp_path, profile_transform=profile,
+                             attestation_transform=attestation,
+                             exec_identity={"unique_id": 99101, "pidversion": 271})
+
+
+def test_exact_required_mcp_projection_is_storeless_and_snapshot_bound(tmp_path, monkeypatch):
+    runtime, _, sealed, _, generation, process, _ = _admitted_mcp(tmp_path)
+    before = _sqlite_snapshot(runtime)
+    facts = runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+    assert facts.binding.attempt_id == sealed.attempt_id
+    assert facts.binding.process_generation_id == generation.process_generation_id
+    assert facts.binding.admitted_unique_id == 99101
+    assert facts.requested_capability.name == _MCP_HOST["config_name"]
+    assert facts.observed_capability.mcp_server_identity == _MCP_HOST["server_identity"]
+    assert len(facts.requested_profile_digest) == len(facts.observed_attestation_digest) == 64
+    assert _sqlite_snapshot(runtime) == before
+    with runtime.store.read() as connection:
+        monkeypatch.setattr(type(runtime.store), "read",
+                            lambda _: pytest.fail("nested Runtime read"))
+        assert runtime.current_harness_mcp_binding_for_parent_pid(
+            process.pid, connection=connection, **_MCP_HOST) == facts
+
+
+def test_ordinary_binding_does_not_imply_mcp_capability(tmp_path):
+    runtime, _, _, _, _, process, _ = _admitted_runtime(tmp_path)
+    assert runtime.current_harness_binding_for_parent_pid(process.pid)
+    with pytest.raises(StateConflict):
+        runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+
+
+@pytest.mark.parametrize("changes", [
+    {"name": "other-server"}, {"kind": "skill"},
+    {"tool_schema_digest": "d" * 64}, {"mcp_server_identity": "other"},
+    {"mcp_server_version": "2.0.0"}, {"mcp_auth_status": "oAuth"},
+    {"skill_content_digest": "e" * 64}, {"resource_contract_digest": "f" * 64},
+])
+def test_mcp_projection_refuses_inexact_requested_and_observed_identity(tmp_path, changes):
+    runtime, _, _, _, _, process, _ = _admitted_mcp(tmp_path, capability_changes=changes)
+    with pytest.raises(StateConflict):
+        runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+
+
+@pytest.mark.parametrize("placement", ["ambient", "duplicate"])
+def test_mcp_projection_requires_one_required_grant(tmp_path, placement):
+    runtime, _, _, _, _, process, _ = _admitted_mcp(tmp_path, placement=placement)
+    with pytest.raises(StateConflict):
+        runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+
+
+@pytest.mark.parametrize("fault", [
+    "missing", "duplicate", "wrong_schema", "effective_missing",
+    "effective_duplicate", "same_skill", "same_plugin",
+])
+def test_mcp_projection_rejects_ambiguous_or_drifted_attestation(tmp_path, fault):
+    import dataclasses
+    def mutate(value):
+        if fault == "missing":
+            return dataclasses.replace(value, capabilities=())
+        if fault == "duplicate":
+            return dataclasses.replace(value, capabilities=value.capabilities * 2)
+        if fault == "wrong_schema":
+            return dataclasses.replace(value, capabilities=(
+                dataclasses.replace(value.capabilities[0], tool_schema_digest="d" * 64),))
+        if fault == "effective_missing":
+            return dataclasses.replace(value, effective_mcp=())
+        if fault == "effective_duplicate":
+            return dataclasses.replace(value, effective_mcp=value.effective_mcp * 2)
+        if fault == "same_skill":
+            return dataclasses.replace(value, effective_skills=value.effective_mcp)
+        return dataclasses.replace(value, effective_plugins_or_apps=value.effective_mcp)
+    runtime, _, _, _, _, process, _ = _admitted_mcp(tmp_path, observed_transform=mutate)
+    with pytest.raises(StateConflict):
+        runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+
+
+@pytest.mark.parametrize("subject", ["profile", "attestation"])
+@pytest.mark.parametrize("fault", ["digest", "noncanonical"])
+def test_mcp_projection_rejects_corrupt_sealed_json_pair(tmp_path, subject, fault):
+    runtime, _, sealed, _, generation, process, _ = _admitted_mcp(tmp_path)
+    with runtime.store.transaction() as connection:
+        if subject == "profile":
+            connection.execute("DROP TRIGGER attempts_ohf_profile_pair_update")
+            table, field, identity, token = (
+                "attempts", "requested_execution_profile", "attempt_id", sealed.attempt_id)
+        else:
+            connection.execute("DROP TRIGGER process_generation_projection_update")
+            table, field, identity, token = (
+                "process_generations", "observed_attestation", "process_generation_id",
+                generation.process_generation_id)
+        if fault == "digest":
+            connection.execute(f"UPDATE {table} SET {field}_digest=? WHERE {identity}=?",
+                               ("0" * 64, token))
+        else:
+            raw = connection.execute(
+                f"SELECT {field}_json FROM {table} WHERE {identity}=?", (token,)).fetchone()[0]
+            raw += " "
+            connection.execute(
+                f"UPDATE {table} SET {field}_json=?,{field}_digest=? WHERE {identity}=?",
+                (raw, hashlib.sha256(raw.encode()).hexdigest(), token))
+    with pytest.raises(StateConflict):
+        runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("config_name", ""), ("server_identity", None), ("server_version", True),
+    ("auth_status", ""), ("tool_schema_digest", "C" * 64),
+])
+def test_mcp_projection_rejects_incomplete_host_identity_before_read(tmp_path, monkeypatch, field, value):
+    runtime = Runtime.at(tmp_path)
+    expected = {**_MCP_HOST, field: value}
+    monkeypatch.setattr(type(runtime.store), "read", lambda _: pytest.fail("invalid host identity read"))
+    with pytest.raises(StateConflict, match="complete host capability identity"):
+        runtime.current_harness_mcp_binding_for_parent_pid(3001, **expected)
+
+
+def test_mcp_projection_uses_one_snapshot_and_observes_revocation_on_next_read(tmp_path):
+    runtime, _, _, _, generation, process, _ = _admitted_mcp(tmp_path)
+    with runtime.store.read() as connection:
+        facts = runtime.current_harness_mcp_binding_for_parent_pid(
+            process.pid, connection=connection, **_MCP_HOST)
+        with runtime.store.transaction() as writer:
+            writer.execute(
+                "UPDATE process_generations SET executive_writer_held=0 WHERE process_generation_id=?",
+                (generation.process_generation_id,))
+        assert runtime.current_harness_mcp_binding_for_parent_pid(
+            process.pid, connection=connection, **_MCP_HOST) == facts
+    with pytest.raises(StateConflict, match="exactly one current writer"):
+        runtime.current_harness_mcp_binding_for_parent_pid(process.pid, **_MCP_HOST)
