@@ -1200,3 +1200,120 @@ def test_projection_refuses_corrupt_resume_applied_payload(tmp_path):
 
     with pytest.raises(StateConflict, match="TX-3"):
         project_runtime_binding(runtime, sealed.attempt_id, _target())
+
+
+def test_parent_pid_lookup_returns_exact_current_writer_facts(tmp_path):
+    runtime, dispatch, sealed, epoch, generation, process, _ = _admitted_runtime(tmp_path)
+    before = _sqlite_snapshot(runtime)
+    facts = runtime.current_harness_binding_for_parent_pid(process.pid)
+    assert facts == runtime.current_harness_binding_source(sealed.attempt_id)
+    assert (facts.job_id, facts.worker_id) == (dispatch.attempt.job_id, "worker-a")
+    assert (facts.process_generation_id, facts.session_epoch_id) == (
+        generation.process_generation_id, epoch.session_epoch_id,
+    )
+    assert (facts.pid, facts.pgid, facts.process_start_identity, facts.boot_id) == (
+        process.pid, process.pgid, process.process_start_identity, process.boot_id,
+    )
+    assert _sqlite_snapshot(runtime) == before
+
+
+def test_parent_pid_lookup_reuses_owned_snapshot_without_nested_read(tmp_path, monkeypatch):
+    runtime, _, sealed, _, _, process, _ = _admitted_runtime(tmp_path)
+    with runtime.store.read() as connection:
+        monkeypatch.setattr(type(runtime.store), "read",
+                            lambda _: pytest.fail("nested Runtime read"))
+        facts = runtime.current_harness_binding_for_parent_pid(
+            process.pid, connection=connection
+        )
+    assert facts.attempt_id == sealed.attempt_id
+
+
+@pytest.mark.parametrize("pid", [None, True, False, 0, -1, 1 << 31, "3001", 3001.0])
+def test_parent_pid_lookup_rejects_nonexact_hint_before_read(tmp_path, monkeypatch, pid):
+    runtime = Runtime.at(tmp_path)
+    monkeypatch.setattr(type(runtime.store), "read",
+                        lambda _: pytest.fail("invalid PID must not read"))
+    with pytest.raises(StateConflict, match="exact positive PID"):
+        runtime.current_harness_binding_for_parent_pid(pid)
+
+
+def test_parent_pid_lookup_absent_writer_refuses(tmp_path):
+    runtime, _, _, _, _, process, _ = _admitted_runtime(tmp_path)
+    with pytest.raises(StateConflict, match="exactly one current writer"):
+        runtime.current_harness_binding_for_parent_pid(process.pid + 1)
+
+
+@pytest.mark.parametrize("mutation", ["released", "epoch", "expired", "placement", "process"])
+def test_parent_pid_lookup_cannot_bypass_current_source_law(tmp_path, mutation):
+    runtime, _, sealed, epoch, generation, process, _ = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        if mutation == "released":
+            connection.execute(
+                "UPDATE process_generations SET executive_writer_held=0 WHERE process_generation_id=?",
+                (generation.process_generation_id,),
+            )
+        elif mutation == "epoch":
+            connection.execute(
+                "UPDATE harness_session_epochs SET state='TERMINAL' WHERE session_epoch_id=?",
+                (epoch.session_epoch_id,),
+            )
+        elif mutation == "expired":
+            connection.execute(
+                "UPDATE attempts SET lease_expires_at_ms=1 WHERE attempt_id=?",
+                (sealed.attempt_id,),
+            )
+        elif mutation == "placement":
+            # Corrupt only this disposable fixture to exercise defensive reads.
+            connection.execute("DROP TRIGGER attempts_orchestration_pairs_immutable")
+            connection.execute(
+                "UPDATE attempts SET placement_snapshot_digest=? WHERE attempt_id=?",
+                ("f" * 64, sealed.attempt_id),
+            )
+        else:
+            connection.execute("DROP TRIGGER process_generation_projection_update")
+            connection.execute(
+                "UPDATE process_generations SET process_start_identity='reused-pid' WHERE process_generation_id=?",
+                (generation.process_generation_id,),
+            )
+    with pytest.raises(StateConflict):
+        runtime.current_harness_binding_for_parent_pid(process.pid)
+
+
+def test_parent_pid_lookup_does_not_cross_snapshots(tmp_path):
+    runtime, _, _, _, generation, process, _ = _admitted_runtime(tmp_path)
+    with runtime.store.read() as connection:
+        before = runtime.current_harness_binding_for_parent_pid(process.pid, connection=connection)
+        with runtime.store.transaction() as writer:
+            writer.execute(
+                "UPDATE process_generations SET executive_writer_held=0 WHERE process_generation_id=?",
+                (generation.process_generation_id,),
+            )
+        assert runtime.current_harness_binding_for_parent_pid(
+            process.pid, connection=connection
+        ) == before
+    with pytest.raises(StateConflict, match="exactly one current writer"):
+        runtime.current_harness_binding_for_parent_pid(process.pid)
+
+
+def test_parent_pid_lookup_rejects_two_candidates_before_projection(tmp_path, monkeypatch):
+    runtime, _, _, _, generation, process, _ = _admitted_runtime(tmp_path)
+    with runtime.store.transaction() as connection:
+        # Impossible through normal writer admission; fail closed even if stored
+        # cardinality is corrupted instead of choosing the first PID match.
+        connection.execute("DROP INDEX process_generations_one_epoch_writer")
+        connection.execute("DROP INDEX process_generations_one_executive_writer")
+        row = dict(connection.execute(
+            "SELECT * FROM process_generations WHERE process_generation_id=?",
+            (generation.process_generation_id,),
+        ).fetchone())
+        row["process_generation_id"] = "projection-duplicate-parent"
+        row["generation_number"] = 2
+        connection.execute(
+            "INSERT INTO process_generations (" + ",".join(row) + ") VALUES (" +
+            ",".join("?" for _ in row) + ")",
+            tuple(row.values()),
+        )
+    monkeypatch.setattr(Runtime, "current_harness_binding_source",
+                        lambda *a, **k: pytest.fail("ambiguous parent must not project"))
+    with pytest.raises(StateConflict, match="exactly one current writer"):
+        runtime.current_harness_binding_for_parent_pid(process.pid)
