@@ -24,29 +24,38 @@ if [ -x /opt/homebrew/bin/python3 ]; then
 else
   profile_python=python3
 fi
-profile_output="$("$profile_python" - "$repo/scripts/mastermind_workspace.py" "$HOME" <<'PY'
+profile_output="$("$profile_python" - "$repo/scripts/mastermind_workspace.py" "$HOME" "$source_repo" "$@" <<'PY'
+import argparse
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 script = Path(sys.argv[1])
 home = Path(sys.argv[2])
+source = Path(sys.argv[3])
+parser = argparse.ArgumentParser(description="Install host-owned attended repository bindings", allow_abbrev=False)
+parser.add_argument("--repository-source", action="append", default=[], metavar="ALIAS=/absolute/source")
+arguments = parser.parse_args(sys.argv[4:])
 spec = importlib.util.spec_from_file_location("mastermind_workspace_install_profile", script)
 if spec is None or spec.loader is None:
     raise SystemExit("cannot load workspace installation profile")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 profile = module.installation_storage_profile(home)
+repositories = module.installation_repository_bindings(source, arguments.repository_source)
 for key in ("root", "mount_point", "policy_path"):
     value = profile[key]
     if "\n" in value or "\r" in value:
         raise SystemExit("workspace installation profile contains a newline")
     print(value)
+print(json.dumps(repositories, sort_keys=True, separators=(",", ":")))
 PY
 )"
 workspace_root="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '1p')"
 workspace_mount="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '2p')"
 storage_policy="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '3p')"
+repository_bindings="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '4p')"
 if [ -z "$workspace_root" ]; then
   echo "workspace installation profile did not return a root" >&2
   exit 2
@@ -72,6 +81,7 @@ quoted_mount="$(shell_quote "$workspace_mount")"
 quoted_source="$(shell_quote "$source_repo")"
 quoted_root="$(shell_quote "$workspace_root")"
 quoted_policy="$(shell_quote "$storage_policy")"
+quoted_repositories="$(shell_quote "$repository_bindings")"
 quoted_payload="$(shell_quote "$payload_root/scripts/mastermind_workspace.py")"
 
 wrapper_tmp="$target.tmp.$$"
@@ -89,6 +99,7 @@ fi
 export MASTERMIND_SOURCE_REPO=$quoted_source
 export MASTERMIND_AGENT_WORKSPACE_ROOT=$quoted_root
 export MASTERMIND_WORKSPACE_STORAGE_POLICY=$quoted_policy
+export MASTERMIND_WORKSPACE_REPOSITORIES=$quoted_repositories
 if [ -n "\${MASTERMIND_PYTHON:-}" ]; then
   exec "\$MASTERMIND_PYTHON" $quoted_payload "\$@"
 elif [ -x /opt/homebrew/bin/python3 ]; then
