@@ -7399,7 +7399,12 @@ def _validated_sealed_worker_launch_material(
     binary = attestation.get("binary") if isinstance(attestation, dict) else None
     if (
         not isinstance(attestation, dict)
-        or set(attestation) != attestation_keys
+        # Historical terminal v1 receipts remain readable. New principal sealing
+        # requires the explicit isolation digest; no persisted receipt is backfilled.
+        or set(attestation) not in (
+            attestation_keys, attestation_keys | {"isolation_manifest_sha256"}
+        )
+        or (allow_unsealed_principal and "isolation_manifest_sha256" not in attestation)
         or attestation.get("schema_version")
         != "mastermind.executive_launch_attestation/v1"
         or metadata.get("schema_version") != "mastermind.executive_process_launch/v1"
@@ -7435,7 +7440,13 @@ def _validated_sealed_worker_launch_material(
         )
         or any(
             re.fullmatch(r"[0-9a-f]{64}", str(attestation.get(name))) is None
-            for name in {"permission_profile_sha256", "prompt_sha256"}
+            for name in (
+                {"permission_profile_sha256", "prompt_sha256"}
+                | (
+                    {"isolation_manifest_sha256"}
+                    if "isolation_manifest_sha256" in attestation else set()
+                )
+            )
         )
         or not isinstance(attestation.get("secret_canary_verdict"), dict)
         or attestation["secret_canary_verdict"].get("passed") is not True
@@ -16421,6 +16432,7 @@ class AttemptRegistry:
                     "rendered_argv",
                     "environment_keys",
                     "permission_profile_sha256",
+                    "isolation_manifest_sha256",
                     "prompt_sha256",
                     "expected_base_sha",
                     "observed_base_sha",
@@ -16460,7 +16472,10 @@ class AttemptRegistry:
                     raise StateConflict(
                         "launch attestation environment allow-list is invalid"
                     )
-                for digest_field in ("permission_profile_sha256", "prompt_sha256"):
+                for digest_field in (
+                    "permission_profile_sha256", "prompt_sha256",
+                    "isolation_manifest_sha256",
+                ):
                     digest = attestation.get(digest_field)
                     if (
                         not isinstance(digest, str)

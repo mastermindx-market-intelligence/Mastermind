@@ -291,6 +291,7 @@ class FakeAdapter:
             "rendered_argv": [ref.binary.real_path, "exec", "--json", "-"],
             "environment_keys": ["CODEX_HOME", "HOME", "PATH"],
             "permission_profile_sha256": "c" * 64,
+            "isolation_manifest_sha256": self.spec.isolation_manifest_sha256,
             "prompt_sha256": hashlib.sha256(self.spec.prompt.encode()).hexdigest(),
             "expected_base_sha": self.spec.expected_base_sha,
             "observed_base_sha": ref.base_sha,
@@ -1361,6 +1362,12 @@ def test_p2_controller_authority_hidden_only_from_worker_projections(tmp_path, m
             lease.attempt, effective_grant=grant, effective_grant_digest=digest))
     original = copy.deepcopy(grant)
     spec = supervisor._launch_spec(job, lease, active.launch_spec.result_schema_path, grant)
+    # This projection describes the already-started process, so retain its
+    # admitted isolation snapshot rather than a later directory observation.
+    spec = dataclasses.replace(
+        spec, isolation_manifest=active.launch_spec.isolation_manifest,
+        isolation_manifest_sha256=active.launch_spec.isolation_manifest_sha256,
+    )
     packet = json.loads(spec.prompt[spec.prompt.index("{"):])
     assert _P2_AUTHORITY not in packet["authorities"]
     assert _P2_AUTHORITY not in spec.authorities
