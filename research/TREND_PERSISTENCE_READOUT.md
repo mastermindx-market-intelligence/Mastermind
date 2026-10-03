@@ -1,11 +1,15 @@
-# Trend Persistence — Development readout
+# Trend Persistence — Development and holdout readout
 
-Wave B, stock level. Development sample only (formation dates 2003–2021).
+Wave B, stock level. Development sample (formation dates 2003–2021) and one holdout run
+(formation dates 2022-07-06 to 2026-06-02).
 
-**Where this stands.** Nothing is promoted. Every feature in this family is still
-`DESCRIPTIVE`. The holdout (2022 onward) has not been scored. One claim — downside risk — is
-queued for a single confirmatory holdout run under `TREND_PERSISTENCE_PREREG_V2.md`
-(revision 2, re-frozen after the second review in §4).
+**Where this stands.** The one holdout run is done (§10). All 29 development survivors were
+confirmed: 21 drawdown-shape tests and 8 path-quality tests. By the rule fixed before the run,
+those two families are `RESEARCH_PREDICTIVE` for describing downside risk, on the confirmed
+members only. Gain retention had no survivor and stays `DESCRIPTIVE`. Nothing is promoted for
+forward return (§2). The effect is small: between the top and bottom fifth of stocks on a
+confirmed feature, average forward maximum drawdown differs by 0.03 to 1.2 percentage points.
+No advisory field, score or gate follows from this.
 
 ## 1. Results in one view
 
@@ -14,10 +18,11 @@ queued for a single confirmatory holdout run under `TREND_PERSISTENCE_PREREG_V2.
 | Do these features say anything about forward return vs SPY beyond momentum, volatility and beta? | V1 | 72 | **0** | Null. Closed for these constructions, this universe, these horizons. |
 | Do they say anything about forward maximum drawdown beyond momentum, one volatility window and beta? | V1 | 72 | 34 | Not usable as evidence: volatility was under-controlled (§4). |
 | Same, with volatility at four spans, downside volatility, the quoted-price mask and price floors on printed closes? | V2 | 72 | **29** | A filter, not evidence. These 29 go to the holdout. |
+| Do the 29 hold on formation dates from 2022-07-06, on the repaired universe? | V2 holdout | 29 | **29 confirmed** | Confirmed and small (§10). Earns a walk-forward comparison, nothing more. |
 
-A survivor here has passed pre-registered development gates. It has not been confirmed
-out of sample, and development alone cannot confirm it: the development universe is tilted
-toward survivors (§5) and the sample was inspected before V2 was written.
+A development survivor has passed pre-registered gates on a sample that was inspected before
+V2 was written and that is tilted toward survivors (§5). Development alone confirms nothing.
+The holdout run is the confirmation (§10).
 
 ## 2. V1 — forward return relative to SPY: null
 
@@ -315,12 +320,16 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
 ## 8. What happens next
 
 1. Re-review of the changes revision 2 made — done (§4).
-2. One holdout run: the 29 survivors, formation dates from 2022-07-06, repaired universe.
-3. Per family: confirmed members move to `RESEARCH_PREDICTIVE` for downside-risk
-   description and earn a walk-forward comparison; otherwise the family stays `DESCRIPTIVE`
-   and the failed confirmation is printed.
+2. One holdout run — done (§10).
+3. Code fixes N1–N3 from the re-review (§4).
+4. Walk-forward comparison (Wave B2), under its own pre-registration: does adding the
+   confirmed features to a momentum-and-volatility model improve its out-of-sample
+   description of forward drawdown, and by how much? The holdout years have now been seen, so
+   B2 measures size and calibration. It cannot serve as a second confirmation.
+5. Sector and size controls, and group persistence (Wave C), need point-in-time sector
+   history for former members first.
 
-No outcome of step 2 creates an advisory field, a score or a gate.
+Nothing above creates an advisory field, a score or a gate.
 
 ## 9. Reproduce
 
@@ -341,17 +350,141 @@ The committed results were scored on these inputs (sha256, first 16 hex digits):
 `sp1500_pit_membership.parquet` `7b34316c0561619b`, store-sourced block `4c86f65bb07784fe`, printed
 closes `fae48d0d4fb90e19`. V2 panel digest: `48cb5e76269b3a50…`.
 
-The holdout run, once, after the re-review:
+The holdout run. It was run once, on 2026-10-03; the result is
+`research/data/trend_persistence_v2_holdout.json`:
 
 ```
 python3 -m research.trend_persistence_panel --design v2 --sample holdout \
     --prereg-hash <sha256 of TREND_PERSISTENCE_PREREG_V2.md> \
     --dev-result research/data/trend_persistence_v2_dev.json \
-    --breadth-dir <breadth> --store-dir <massive_stock_day> --out <file>
+    --breadth-dir <breadth> --store-dir <massive_stock_day> \
+    --out research/data/trend_persistence_v2_holdout.json
 ```
 
 It refuses a panel whose digest differs from the development result's, so it has to be run
 on the same inputs.
+
+## 10. V2 — holdout result
+
+One run, on 2026-10-03, with the instrument as reviewed (code identical to commit `9a429b70`),
+pre-registration `2882865d…2d17`, and the committed development result. The panel digest
+(`48cb5e76…`) equals development's. Result: `research/data/trend_persistence_v2_holdout.json`.
+
+**All 29 development survivors are confirmed.** Each passes the four pre-registered gates:
+development sign, one-sided HAC p ≤ 0.05, false-discovery q ≤ 0.10 across the 29, absolute
+mean IC ≥ 0.005.
+
+| Family | Tests in V2 | Survived development | Confirmed | Tier after the run |
+| --- | ---: | ---: | ---: | --- |
+| drawdown shape | 27 | 21 | 21 | `RESEARCH_PREDICTIVE`, downside-risk description, the 21 members |
+| path quality | 36 | 8 | 8 | `RESEARCH_PREDICTIVE`, downside-risk description, the 8 members |
+| gain retention | 9 | 0 | — | `DESCRIPTIVE`; null printed in §6 |
+
+The tier is the one V2 §8 fixed before the run. It earns a walk-forward comparison against a
+momentum-and-volatility model. It earns no advisory use.
+
+| Horizon | Formation dates | First | Last | Median names | Store-sourced | Floor on printed close | Label carried through a delisting |
+| ---: | ---: | --- | --- | ---: | ---: | ---: | ---: |
+| 5 | 197 | 2022-07-06 | 2026-06-02 | 1,483 | 10.6% | 98.7% | 0.07% |
+| 20 | 194 | 2022-07-06 | 2026-05-11 | 1,482 | 10.8% | 98.7% | 0.23% |
+| 60 | 186 | 2022-07-06 | 2026-03-13 | 1,482 | 11.2% | 98.6% | 0.66% |
+
+### How large the effect is
+
+Small. Three ways to see it.
+
+- **Mean IC.** After the eleven controls the confirmed ICs run from 0.007 to 0.051 in
+  absolute value, median 0.024.
+- **What the controls absorb.** `max_drawdown_120d` at 60 sessions is the strongest test. Its
+  raw rank IC with forward drawdown is 0.42. With the four momentum controls it is 0.39. With
+  V1's six controls it is 0.10. With V2's eleven it is 0.05. Most of what these features say
+  about forward drawdown is volatility said another way.
+- **In drawdown terms.** Sort stocks each date into fifths by the feature, after removing the
+  controls. For the strongest test the bottom fifth's forward maximum drawdown averages
+  −16.4% and the top fifth's −15.2%: 1.2 points over 60 sessions. Across the 29 tests the gap
+  between the end fifths runs from 0.03 to 1.2 points, median 0.2.
+
+The shape differs by feature. For `max_drawdown` over 60 and 120 sessions the five group
+means are ordered (one pair, at the 5-session horizon, is 0.02 points out of order). For
+`distance_to_high` and `max_drawdown_20d` the difference is the bottom fifth: stocks furthest
+below their high, given the controls, draw down more, and the other four fifths are not
+ordered. For `efficiency_20d` the lower two fifths are deeper than the upper two by 0.1 to
+0.3 points. For `positive_day_fraction` and `sessions_since_high` the end fifths differ by
+0.2 points or less and the middle fifths are the deepest; the rank correlation is confirmed
+but the groups do not line up.
+
+Holdout ICs did not shrink from development: the median ratio is 0.98. A set chosen for
+passing gates usually shrinks. Drawdown shape held level; the path-quality ICs rose
+(`efficiency_20d` at 20 sessions, +0.017 to +0.031).
+
+### Brackets
+
+- **Leavers' carried labels removed.** All 29 keep their sign and stay at 0.005 or above.
+- **Audited names only** (store-sourced names removed). 27 of 29 keep their sign and stay at
+  0.005 or above. The two that do not are `distance_to_high_20d` at 5 sessions (−0.0002) and
+  at 20 sessions (+0.0038). Those two confirmations rest on the repaired names, which are
+  adjusted for splits only (V2 §10). `distance_to_high_20d` at 5 sessions is also the test
+  that cleared development's IC floor by 0.00002, and its holdout p (0.042) is the weakest.
+  It is confirmed by the rule and is the marginal member.
+
+### Every confirmed test
+
+All four holdout gates pass on every row. "Six controls" and "Momentum only" are the same
+statistic under V1's control set and under the four trailing returns alone. The last two
+columns are the average forward maximum drawdown of the bottom and top fifth by
+control-neutral feature rank.
+
+| Feature | Sessions | Dev IC | Holdout IC | Dates | HAC t | p, one-sided | Leavers dropped | Audited only | Six controls | Momentum only | Raw | Bottom fifth | Top fifth |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `distance_to_high_20d` | 5 | +0.0100 | +0.0073 | 197 | +1.73 | 0.0415 | +0.0068 | -0.0002 | +0.023 | +0.148 | +0.148 | -3.49% | -3.45% |
+| `distance_to_high_20d` | 20 | +0.0167 | +0.0118 | 194 | +3.09 | 0.0010 | +0.0096 | +0.0038 | +0.027 | +0.200 | +0.192 | -8.84% | -8.66% |
+| `distance_to_high_20d` | 60 | +0.0145 | +0.0135 | 186 | +4.26 | <0.0001 | +0.0079 | +0.0055 | +0.032 | +0.223 | +0.213 | -16.22% | -15.83% |
+| `distance_to_high_60d` | 5 | +0.0165 | +0.0132 | 197 | +3.40 | 0.0003 | +0.0126 | +0.0055 | +0.019 | +0.186 | +0.182 | -3.59% | -3.44% |
+| `distance_to_high_60d` | 20 | +0.0255 | +0.0260 | 194 | +4.89 | <0.0001 | +0.0234 | +0.0173 | +0.034 | +0.264 | +0.239 | -9.14% | -8.64% |
+| `distance_to_high_60d` | 60 | +0.0273 | +0.0259 | 186 | +4.19 | <0.0001 | +0.0195 | +0.0180 | +0.035 | +0.290 | +0.259 | -16.74% | -15.83% |
+| `distance_to_high_120d` | 5 | +0.0216 | +0.0211 | 197 | +5.27 | <0.0001 | +0.0205 | +0.0150 | +0.042 | +0.208 | +0.209 | -3.61% | -3.46% |
+| `distance_to_high_120d` | 20 | +0.0355 | +0.0366 | 194 | +7.27 | <0.0001 | +0.0344 | +0.0308 | +0.067 | +0.295 | +0.273 | -9.17% | -8.64% |
+| `distance_to_high_120d` | 60 | +0.0406 | +0.0360 | 186 | +6.20 | <0.0001 | +0.0304 | +0.0329 | +0.070 | +0.324 | +0.300 | -16.72% | -15.84% |
+| `max_drawdown_20d` | 5 | +0.0185 | +0.0220 | 197 | +6.25 | <0.0001 | +0.0215 | +0.0147 | +0.051 | +0.230 | +0.242 | -3.58% | -3.35% |
+| `max_drawdown_20d` | 20 | +0.0280 | +0.0295 | 194 | +6.19 | <0.0001 | +0.0278 | +0.0230 | +0.058 | +0.306 | +0.313 | -9.00% | -8.46% |
+| `max_drawdown_20d` | 60 | +0.0275 | +0.0289 | 186 | +8.58 | <0.0001 | +0.0237 | +0.0218 | +0.062 | +0.336 | +0.340 | -16.45% | -15.62% |
+| `max_drawdown_60d` | 5 | +0.0246 | +0.0239 | 197 | +6.18 | <0.0001 | +0.0235 | +0.0210 | +0.029 | +0.241 | +0.266 | -3.49% | -3.30% |
+| `max_drawdown_60d` | 20 | +0.0412 | +0.0380 | 194 | +6.71 | <0.0001 | +0.0366 | +0.0343 | +0.043 | +0.337 | +0.354 | -8.82% | -8.28% |
+| `max_drawdown_60d` | 60 | +0.0472 | +0.0425 | 186 | +6.31 | <0.0001 | +0.0403 | +0.0394 | +0.047 | +0.373 | +0.388 | -16.18% | -15.17% |
+| `max_drawdown_120d` | 5 | +0.0269 | +0.0253 | 197 | +7.02 | <0.0001 | +0.0252 | +0.0253 | +0.054 | +0.250 | +0.281 | -3.54% | -3.29% |
+| `max_drawdown_120d` | 20 | +0.0442 | +0.0409 | 194 | +6.74 | <0.0001 | +0.0408 | +0.0426 | +0.083 | +0.350 | +0.375 | -8.96% | -8.28% |
+| `max_drawdown_120d` | 60 | +0.0557 | +0.0511 | 186 | +5.16 | <0.0001 | +0.0523 | +0.0541 | +0.097 | +0.391 | +0.420 | -16.41% | -15.18% |
+| `sessions_since_high_60d` | 20 | -0.0124 | -0.0181 | 194 | -4.78 | <0.0001 | -0.0174 | -0.0178 | -0.015 | -0.041 | -0.088 | -8.35% | -8.50% |
+| `sessions_since_high_120d` | 20 | -0.0164 | -0.0155 | 194 | -4.13 | <0.0001 | -0.0153 | -0.0169 | -0.025 | -0.041 | -0.109 | -8.45% | -8.49% |
+| `sessions_since_high_120d` | 60 | -0.0154 | -0.0143 | 186 | -3.48 | 0.0003 | -0.0143 | -0.0175 | -0.026 | -0.044 | -0.123 | -15.50% | -15.56% |
+| `efficiency_20d` | 5 | +0.0172 | +0.0243 | 197 | +6.03 | <0.0001 | +0.0240 | +0.0223 | +0.029 | +0.050 | +0.011 | -3.47% | -3.37% |
+| `efficiency_20d` | 20 | +0.0173 | +0.0308 | 194 | +7.44 | <0.0001 | +0.0302 | +0.0293 | +0.036 | +0.066 | +0.010 | -8.76% | -8.48% |
+| `positive_day_fraction_20d` | 5 | +0.0107 | +0.0132 | 197 | +4.17 | <0.0001 | +0.0130 | +0.0113 | +0.010 | +0.027 | +0.057 | -3.35% | -3.32% |
+| `positive_day_fraction_60d` | 5 | +0.0139 | +0.0224 | 197 | +7.07 | <0.0001 | +0.0222 | +0.0202 | +0.018 | +0.043 | +0.090 | -3.38% | -3.31% |
+| `positive_day_fraction_60d` | 20 | +0.0150 | +0.0246 | 194 | +6.06 | <0.0001 | +0.0240 | +0.0225 | +0.020 | +0.056 | +0.109 | -8.54% | -8.43% |
+| `positive_day_fraction_60d` | 60 | +0.0117 | +0.0188 | 186 | +4.05 | <0.0001 | +0.0180 | +0.0166 | +0.016 | +0.055 | +0.117 | -15.64% | -15.59% |
+| `positive_day_fraction_120d` | 5 | +0.0136 | +0.0208 | 197 | +7.52 | <0.0001 | +0.0208 | +0.0200 | +0.022 | +0.057 | +0.114 | -3.35% | -3.33% |
+| `positive_day_fraction_120d` | 20 | +0.0149 | +0.0244 | 194 | +6.56 | <0.0001 | +0.0244 | +0.0242 | +0.026 | +0.075 | +0.142 | -8.48% | -8.44% |
+
+A positive IC means a higher feature value goes with a shallower forward drawdown.
+`max_drawdown` and `distance_to_high` are zero or negative, so higher means a shallower past
+drawdown or a price nearer its high.
+
+### What this does not show
+
+- **One period.** Four years, one rate cycle. At 60 sessions that is about fifteen
+  non-overlapping windows. The t-statistics are HAC on overlapping labels; the
+  non-overlapping check is a development gate and by design is not run on the holdout.
+- **Few ideas.** 29 tests are four ideas: depth of the trailing drawdown, distance from the
+  high, how long since the high, and how steady the advance was.
+- **No sector or size control.** Point-in-time sector history does not exist for former
+  members (the current map covers 3 of 1,083). Part of the effect may be sector membership.
+- **Controls enter as ranks.** Volatility at four spans and downside volatility at two are
+  removed rank-linearly. A dependence on volatility that is not rank-linear can pass through.
+- **Not a strategy and not a forecast of return.** V1 found nothing for forward return (§2).
+  An IC ignores costs and turnover.
+- **Deviations N1, N2 and N5** (§4, §7) were recorded before the run and do not change what
+  it computed.
 
 ## Appendix A — gate legend
 
