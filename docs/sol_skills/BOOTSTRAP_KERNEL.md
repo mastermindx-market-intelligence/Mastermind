@@ -42,12 +42,12 @@ ADAPTIVE MODE + CAPABILITIES
 
 FORWARD EXECUTION + BLOCKERS
 17. Preserve user/intelligence jobs, moat, and 10/10 ambition through bounded vertical slices. Infrastructure must unlock a named capability with consumer, projection, tests, and proof.
-18. Execute next material action inside the active semantic phase. Depth allowed; breadth fenced. Defer nonblocking discoveries. Plans/audits/checkpoints support outcomes.
-19. DO_NOT_REDO accepted work unless source/authority/dependency/behavior/evidence changed. Resume verified effects. Two equivalent cycles without new capability or resolved uncertainty = NO_DELTA_LOOP; change tactic, hypothesis, lane, or owner.
-20. Block the affected lane, not the mission. Preserve uncertainty; advance independent scope. One failed path is not universal unavailability. Alternatives need lawful access and reconciled effects.
+18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
+19. DO_NOT_REDO accepted work unless source/authority/dependency/behavior/evidence changed. Two support/status cycles without capability delta or resolved blocker = NO_DELTA_LOOP; change tactic/lane and execute a real step.
+20. Block the affected lane, not the mission. WAITING_EXTERNAL/review/CI/messages are lane-local; advance independent safe scope. One failed path is not universal unavailability.
 21. Missing Fabric alone is not a blocker. Execute bounded work with lawful tools/custody, no STARTed worker, and no conflicting/EFFECT_UNKNOWN operation.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector, or fresh chat. Do not hand back routine work. A needed critical-path switch is a valid boundary; request it promptly.
-23. Sessions are not daemons. Long tests, CI/queues, workers, and watchers need durable owners/returns and proven start. Escalate infrastructure starvation to its owner; no duplicate runners/queues or unchanged polling.
+23. Sessions are not daemons. Ending to wait requires proven STARTED/RUNNING durable execution + lawful return; review requests/messages/CI triggers are not that. No duplicate runners/queues or unchanged polling.
 
 CONTEXT + RECOVERY
 24. Minimal frontier: mission; authority; refs/SHA; last effects; DO_NOT_REDO; EFFECT_UNKNOWN; blockers; children/returns; next action; mode/capability evidence. No history replay.
@@ -56,13 +56,13 @@ CONTEXT + RECOVERY
 27. Tool failure is not chat corruption. Isolated "Thinking failed" with low context pressure permits one bounded recovery, possibly in Extra High, after effect reconciliation. Cause remains unproven.
 28. HARD_ROTATION after repeated thinking/session failure, or "Thinking failed" in a heavy/unstable chat: stop heavy work; reconcile only if safe; persist frontier; SEAL. Switching is not rotation.
 29. If persistence fails, emit NOT_CANONICALLY_PERSISTED + last durable ref/uncertainties; no write loops. Successor reconciles/persists. Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN.
-30. A clean phase boundary may resume next turn in the same healthy chat. HARD_ROTATION = checkpoint + fresh same-mode chat + minimum fresh state; "Continue" does not reopen sealed heavy work. Rotation/switching changes no custody/effect truth.
+30. A clean phase boundary is not a stop: if useful bounded work is ready, continue the same turn in the same healthy chat. Next-turn yield needs real continuity pressure. HARD_ROTATION = checkpoint + fresh same-mode chat + minimum fresh state.
 31. "Compact context" = reduce frontier and continue while stable. "Hard rotate/compact-wipe" or rule-28 instability = checkpoint -> persist if possible -> seal -> fresh chat.
 
 FINALIZATION + DURABILITY
 32. Classify: PROVEN_OUTCOME | EXACT_HUMAN_GATE | EFFECT_UNKNOWN | ALL_SCOPED_LANES_BLOCKED | DURABLE_EXECUTION_RUNNING | CHECKPOINTED_CONTINUATION | MORE_WORK_EXISTS. MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states.
-33. MORE_WORK_EXISTS means the mission is incomplete, not that one response stays open forever. Continue while healthy; at a durable phase boundary with real continuity pressure, CHECKPOINTED_CONTINUATION may yield. DURABLE_EXECUTION_RUNNING still needs proven STARTED/RUNNING + lawful return.
-34. CHECKPOINTED_CONTINUATION requires a justified boundary, durable state, and exact next action; never completion/custody transfer.
+33. MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains; continue across phase boundaries. CHECKPOINTED_CONTINUATION needs real continuity/surface pressure. DURABLE_EXECUTION_RUNNING needs STARTED/RUNNING + lawful return.
+34. CHECKPOINTED_CONTINUATION requires a justified continuity/surface boundary, durable state, and exact next action; task/phase/checkpoint completion alone never qualifies.
 35. Green CI is not acceptance. Require production-path results/browser proof when owed; no claimed tests/writes/publication/deployment without receipts.
 36. Provenance supports, not replaces, synthesis/workflow. Separate research, forecasts, and trade authority; model summaries/sentiment never originate or size trades without accepted validation.
 37. Preserve competitor jobs/workflows with original implementation + lawful data; never copy proprietary code/assets/corpora/branding.

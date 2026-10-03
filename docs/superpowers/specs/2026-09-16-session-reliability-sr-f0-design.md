@@ -186,3 +186,28 @@ Failure handling distinguishes client stream detachment, ended turn/tool executi
 conversation state, and surviving workspace/process/effect state. A UI "Stopped thinking" symptom
 does not prove the underlying request stopped. Reconcile the exact original request/PID/effect before
 duplicate Continue, retry, mode migration, or context rotation.
+
+
+## 2026-10-03 refinement — status-only stops and external-wait leakage
+
+A fresh attended Pro case exposed a separate reliability defect from stream/session failure: a turn can
+remain technically healthy yet stop after support work because a review request, owner inquiry, projection
+lookup, or checkpoint is mistaken for a capability delta or a legitimate wait boundary.
+
+The controlling invariant is now **mission continuation across phase boundaries**. Finishing a task,
+semantic phase, test suite, plan, PR step, checkpoint, or review request triggers verify/save -> reassess
+the parent mission -> start the next highest-value safe unblocked phase in the same healthy turn. A clean
+boundary alone never satisfies `CHECKPOINTED_CONTINUATION`.
+
+`WAITING_EXTERNAL` is lane-local. Pending review, CI, capacity, or owner reply blocks only the dependent
+lane. Ending solely to wait requires a real accepted/started durable executor with a lawful return path;
+a request, notification, delivery, or trigger is not that executor.
+
+Support actions remain useful but are not self-authenticating progress. Two support/status cycles without
+a capability delta or newly resolved blocker are `NO_DELTA_LOOP` and force a changed tactic/lane plus a
+real capability step before finalization.
+
+Source-contract tests must discriminate these rules. Fresh-model adoption evidence is a separate evaluator
+carrier: incident scenarios must include pending external review with independent work remaining, a
+pre-dispatch compound-read failure with independent read lanes still healthy, and two support-only cycles
+with no capability delta. Static wording is necessary but is not served-model proof.

@@ -53,7 +53,9 @@ remains inside the same bounded phase and effects are recoverable.
 Every broad filesystem, Studio, browser, process, or log exploration must answer a named active-phase
 question with a stop condition. Nonblocking discoveries are deferred. One true blocker may open one
 bounded blocking subphase; a second broad blocker triggers a phase-boundary decision instead of
-recursive scope growth. Completing a checkpoint does not itself end the turn.
+recursive scope growth. Completing a checkpoint, task, or semantic phase does not itself end the turn.
+After a phase closes, verify/save its result, reassess the parent mission, and start the next bounded
+safe critical-path phase in the same healthy turn when one is ready.
 
 ## Session-health classifications
 
@@ -79,8 +81,10 @@ Extra High when task fit and current capability evidence justify it. Mode recove
 rotation, permission, carrier transfer, or proof of failure cause.
 
 Output pressure alone does not change `SESSION_HEALTHY`. With reconciled effects, a current durable
-frontier, and bounded same-phase work, select/compress further output and continue normal execution
-even when cumulative raw output remains above the soft target.
+frontier, and bounded critical-path work, select/compress further output and continue normal execution
+even when cumulative raw output remains above the soft target. A clean phase boundary is not continuity
+pressure: if the next authorized bounded phase is ready, start it rather than yielding merely because
+the previous phase ended.
 
 ### `ROTATION_REQUIRED`
 
@@ -273,9 +277,11 @@ private tool payloads, and company-confidential evidence not required by support
 
 ## Closeout and rotation sequence
 
-A clean semantic phase boundary under material continuity pressure may use
-`CHECKPOINTED_CONTINUATION` and resume on the next turn in the same healthy chat. That is not
-context rotation. The sequence below is for `ROTATION_REQUIRED` or an explicitly retired session.
+A clean semantic phase boundary under **material continuity pressure** may use
+`CHECKPOINTED_CONTINUATION` and resume on the next turn in the same healthy chat. Without that pressure
+(or another independently valid ACTIVE_EXECUTION continuation gate), a clean task/phase/checkpoint
+boundary is a save-and-reassess point: start the next useful authorized phase in the same healthy turn.
+That is not context rotation. The sequence below is for `ROTATION_REQUIRED` or an explicitly retired session.
 
 1. stop new modifying effects;
 2. reconcile every existing effect and timed-out process by exact identity;
@@ -306,5 +312,7 @@ A session-reliability continuation passes when:
 - a repeated terminal failure rotates instead of receiving more `Continue` prompts;
 - a fresh successor recovers the exact next action without raw transcript rehydration;
 - deliberate repository edits and accepted effects are neither lost nor duplicated;
+- a completed task/phase/checkpoint does not end a healthy turn while a useful authorized next phase is ready;
+- external waits remain lane-local unless ACTIVE_EXECUTION proves a valid all-lanes/durable-execution stop;
 - the stop boundary is recoverable through existing canonical owners; and
 - no new lifecycle, session registry, transcript store, retry ledger, or memory plane was created.

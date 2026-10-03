@@ -124,3 +124,31 @@ SR-F0 now targets a small **recovery gap** while preserving long productive turn
 Sol Pro work is explicitly valid when it remains in one bounded phase. Phase completion, scope
 expansion, stream detachment, terminal turn failure, session instability, and surviving workspace or
 effect state are separate conditions and must not be collapsed into one context-limit diagnosis.
+
+
+## 2026-10-03 incident — healthy Pro turn stopped on support activity
+
+A later case demonstrated premature finalization without a stream crash. The active mission remained
+explicitly incomplete, but the turn requested an independent review, sent owner/coordination inquiries,
+performed a narrow projection lookup, persisted a checkpoint, and returned to the Chairman. No accepted
+review, source-owner admission, implementation step, or durable background executor had been established.
+
+This isolates a second failure family:
+
+- **external-wait leakage:** pending review/owner response was treated as if it blocked the whole mission;
+- **support-work substitution:** request/notification/status/checkpoint activity was treated as capability
+  advancement even though it closed no gate;
+- **phase-boundary over-permission:** the continuation contract still allowed a generic chunk boundary to
+  justify yielding despite healthy useful work remaining;
+- **action-family over-generalization:** one pre-dispatch blocked compound read risked being treated as a
+  global platform boundary even though independent read-only lanes were unaffected.
+
+The correct response is not to bypass unresolved source/admission gates or prematurely begin downstream
+implementation. It is to freeze only the affected lane, advance independent safe gate-closing work, and
+continue across task/phase boundaries until ACTIVE_EXECUTION has a genuine stop/recovery disposition.
+
+Closure is three-layered: protected procedure/source contracts, fresh served-model incident regressions,
+and—only after its existing exact-session/native binding is admitted—a runtime continuation backstop in
+Executive OS/Session Bridge. The backstop must reuse existing lifecycle/dialogue owners, never replay an
+uncertain mutation, bypass a denial, create a new loop plane, or treat `MISSION_COMPLETE=false` by itself
+as authority to wake a session.

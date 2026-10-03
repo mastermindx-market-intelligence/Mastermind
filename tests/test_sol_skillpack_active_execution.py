@@ -348,8 +348,7 @@ def test_phase_barrier_separates_mission_incomplete_from_current_turn_lifetime()
         "recovery gap",
         "PHASE BARRIER",
         "MORE_WORK_EXISTS",
-        "mission is incomplete",
-        "does not require the current assistant generation to remain open",
+        "start it in the same healthy turn",
         "same healthy chat",
         "A checkpoint may occur mid-turn",
     ):
@@ -358,8 +357,63 @@ def test_phase_barrier_separates_mission_incomplete_from_current_turn_lifetime()
 
 def test_phase_barrier_pins_healthy_same_turn_continuation_decision():
     text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
-    assert "surface remains healthy, continue in the same turn" in text
-    assert "output pressure alone does not require a turn boundary" in text
+    assert "**start that next phase in the same turn**" in text
+    assert "not itself a turn boundary" in text
+    assert "Healthy output pressure alone does not require" in text
+
+
+def test_support_only_cycles_are_not_capability_delta_or_stop_reason():
+    text = " ".join(_section("Step 3 — Require a capability delta, not activity").split())
+    for phrase in (
+        "review requests",
+        "notifications",
+        "status reads",
+        "projection lookups",
+        "checkpoint/comments",
+        "CI observations",
+        "actually closes a gate or changes what can safely happen next",
+        "NO_DELTA_LOOP",
+        "execute the highest-value ready capability step",
+    ):
+        assert phrase in text
+
+
+def test_waiting_external_is_lane_local_and_not_durable_execution():
+    blocker = " ".join(_section("Step 4 — Treat a blocker as lane-local first").split())
+    offload = " ".join(_section("Step 7 — Offload work that should outlive the reasoning turn").split())
+    for phrase in (
+        "`WAITING_EXTERNAL` is lane-local",
+        "review request",
+        "owner message",
+        "pending CI/check",
+        "move to it in the same turn",
+    ):
+        assert phrase in blocker
+    assert "is not `DURABLE_EXECUTION_RUNNING`" in offload
+    assert "accepted/started execution identity and lawful return/wake path" in offload
+
+
+def test_checkpointed_continuation_rejects_clean_phase_or_wait_as_exit_coupon():
+    text = " ".join(_section("Step 8 — Final-response gate").split())
+    for phrase in (
+        "observed continuity risk",
+        "materially heavy/context-expanding next phase",
+        "ordinary clean task/phase/chunk/checkpoint boundary",
+        "review request",
+        "owner message",
+        "pending CI",
+        "insufficient while healthy useful authorized work remains",
+        "clean phase boundary is a save-and-reassess point",
+    ):
+        assert phrase in text
+    assert "A specific chunk boundary or observed continuity risk" not in text
+
+
+def test_more_work_exists_continues_across_task_and_phase_boundaries():
+    text = " ".join(_section("Step 8 — Final-response gate").split())
+    assert "If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**" in text
+    assert "including across task and phase boundaries" in text
+    assert "support-only cycle cannot manufacture that gate" in text
 
 
 def test_persistence_failure_does_not_invent_human_or_effect_state():

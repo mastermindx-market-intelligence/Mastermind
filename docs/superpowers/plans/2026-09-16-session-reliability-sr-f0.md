@@ -140,3 +140,21 @@ Implement and verify the Chairman refinement without turning SR-F0 into a timer 
   detachment, same-chat continuation, and no mode-bounce behavior.
 - [ ] After lawful same-carrier source custody is available, commit/publish the current-base candidate,
   run hosted CI/security, obtain independent non-author review, and prove Project/bootstrap adoption.
+
+
+## Amendment — 2026-10-03 cross-phase anti-stall closure
+
+- [x] Treat ordinary task/phase/checkpoint completion as a save-and-reassess point, not a turn boundary.
+- [x] Require same-turn start of the next bounded safe critical-path phase while the surface is healthy.
+- [x] Make `WAITING_EXTERNAL` lane-local; review/CI/owner-message waits do not stop independent useful work.
+- [x] Define review requests, notifications, status/projection reads, checkpoint comments and CI observations
+  as support work unless their observed result actually closes a gate or changes safe next action.
+- [x] Make two support-only cycles with no capability delta/resolved blocker trigger `NO_DELTA_LOOP` and a
+  changed tactic/lane, not another status final.
+- [x] Tighten `CHECKPOINTED_CONTINUATION`: a clean chunk/phase boundary alone is insufficient; require real
+  continuity/landing-reserve or required surface/context pressure plus a current durable frontier.
+- [x] Project the same rule into the compact Project kernel while staying below the 8,000-character target.
+- [x] Add discriminating source-contract and mutation tests for cross-phase continuation and external waits.
+- [ ] After exact-head source verification, obtain hosted CI/current-base proof and independent rereview.
+- [ ] Run the incident-derived fresh-model evaluator cases on the separate evaluation carrier; do not call
+  procedural source publication live adoption.

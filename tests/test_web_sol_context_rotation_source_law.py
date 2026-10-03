@@ -472,7 +472,7 @@ def _sr_f0_semantic_guard_errors(*, law: str, skill: str, active: str) -> list[s
         errors.append("budget-alone-rotation")
     if "output pressure alone does not require a turn boundary" not in phase:
         errors.append("pressure-only-turn-boundary")
-    if "surface remains healthy, continue in the same turn" not in phase:
+    if "surface remains healthy, **start that next phase in the same turn**" not in phase:
         errors.append("healthy-phase-continuation")
     return errors
 
@@ -522,8 +522,8 @@ def test_semantic_mutation_guard_rejects_threshold_and_healthy_phase_reversal() 
     )
 
     bad_active = active.replace(
-        "surface remains healthy, continue in the same turn",
-        "surface remains healthy, stop the current turn immediately",
+        "surface remains healthy, **start that next phase in the same turn**",
+        "surface remains healthy, **stop the current turn immediately**",
     )
     assert "healthy-phase-continuation" in _sr_f0_semantic_guard_errors(
         law=law, skill=skill, active=bad_active
@@ -544,3 +544,40 @@ def test_rotation_law_persistence_frontier_uses_cause_based_disposition_mapping(
         "`NOT_CANONICALLY_PERSISTED`",
     ):
         assert phrase in law
+
+
+def test_cross_phase_continuation_is_projected_into_session_reliability_and_kernel() -> None:
+    skill = " ".join(_read("docs/sol_skills/SESSION_RELIABILITY.md").split())
+    kernel_raw = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    kernel = " ".join(kernel_raw.split())
+    for phrase in (
+        "Completing a checkpoint, task, or semantic phase does not itself end the turn",
+        "start the next bounded safe critical-path phase in the same healthy turn",
+        "A clean phase boundary is not continuity pressure",
+        "start it rather than yielding merely because the previous phase ended",
+    ):
+        assert phrase in skill
+    for phrase in (
+        "After any task/phase completes, verify/save it, reassess the mission",
+        "WAITING_EXTERNAL/review/CI/messages are lane-local",
+        "Ending to wait requires proven STARTED/RUNNING durable execution + lawful return",
+        "A clean phase boundary is not a stop",
+        "MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains",
+        "task/phase/checkpoint completion alone never qualifies",
+    ):
+        assert phrase in kernel
+    project_block = kernel_raw.split("```text\n", 1)[1].split("```", 1)[0]
+    assert len(project_block) < 8000
+
+
+def test_cross_phase_mutation_guard_rejects_phase_boundary_as_stop() -> None:
+    law = _read(LAW_PATH)
+    skill = _read("docs/sol_skills/SESSION_RELIABILITY.md")
+    active = _read("docs/sol_skills/ACTIVE_EXECUTION.md")
+    bad_active = active.replace(
+        "surface remains healthy, **start that next phase in the same turn**",
+        "surface remains healthy, **stop at this phase boundary**",
+    )
+    assert "healthy-phase-continuation" in _sr_f0_semantic_guard_errors(
+        law=law, skill=skill, active=bad_active
+    )

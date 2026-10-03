@@ -306,12 +306,17 @@ justify bypassing the currently admitted graph or increasing budget/depth from p
 After each material action, ask only what changed in externally recoverable capability state.
 
 Supporting work includes archaeology, manifests, reviews, ledgers, receipts, documentation, test
-runs, refactors, handoffs and status summaries. Supporting work is valuable when it unlocks, de-risks,
-or proves the capability. It is not itself forward motion merely because it is thorough.
+runs, refactors, handoffs, review requests, notifications, status reads, projection lookups,
+checkpoint/comments, CI observations and status summaries. Supporting work is valuable when it unlocks,
+de-risks, proves the capability, or resolves a blocking uncertainty. It is not itself forward motion
+merely because it is thorough or externally visible. A review request, owner message, checkpoint,
+status read, projection lookup, or CI observation is a capability delta only when its observed result
+actually closes a gate or changes what can safely happen next.
 
 If two consecutive material work cycles produce **no capability delta and no newly resolved blocking
 uncertainty**, declare `NO_DELTA_LOOP` and re-plan immediately. Do not produce a third equivalent
-artifact/status cycle. Change tactic, change the in-scope lane, or name the real blocker.
+artifact/status cycle or finalize with another support-only summary. Change tactic, change the in-scope
+lane, or name the real blocker, then execute the highest-value ready capability step.
 
 ## Step 4 — Treat a blocker as lane-local first
 
@@ -324,6 +329,12 @@ When the active lane hits a boundary:
 4. if one exists, switch to it immediately and continue;
 5. stop the whole turn for the blocker only when every materially useful in-scope lane is blocked,
    or when proceeding elsewhere would violate dependency/authority law.
+
+`WAITING_EXTERNAL` is lane-local. A review request, owner message, pending CI/check, missing reply,
+capacity hold, or notification does not make the mission wait as a whole. While any independent useful
+lane remains authorized and safe, move to it in the same turn. Waiting alone can justify finalization
+only through an otherwise-valid Step 8 class; a mere request/delivery/notification is not durable
+execution and does not establish an all-lanes blocker.
 
 Example: a local administrator authentication ceremony blocks installation, but nonprivileged
 preflight, exact release qualification, or a disjoint implementation dependency remains available.
@@ -415,7 +426,9 @@ allows it. Record the exact Job/Attempt/process/operation identity and return pa
 
 Never claim work will continue in the background unless a real external durable owner has accepted or
 started it and canonical evidence supports that claim. `QUEUED`, delivered, acknowledged, started,
-running, completed and accepted remain distinct.
+running, completed and accepted remain distinct. A GitHub review request, Slack notification, owner
+inquiry, CI trigger, or message delivery is not `DURABLE_EXECUTION_RUNNING`; without an accepted/started
+execution identity and lawful return/wake path, continue useful foreground work instead of ending to wait.
 
 If no such durable execution capability is production-proven for the needed action, continue useful
 work in the present turn and report that limitation truthfully at the eventual stop boundary.
@@ -467,18 +480,21 @@ the turn to stop.
 
 When `PHASE_DONE_WHEN` is satisfied, perform a **PHASE BARRIER** before materially different work:
 
-1. If the next phase is still critical-path, bounded, on the same lawful carrier, effects are
-   reconciled, and the exact surface remains healthy, continue in the same turn.
+1. If the next phase is still critical-path, bounded, authorized, effects are reconciled, and the exact
+   surface remains healthy, **start that next phase in the same turn**. A completed phase, test suite,
+   PR step, plan, checkpoint, or review request is not itself a turn boundary.
 2. If the next phase is useful but continuity pressure is material, persist the cumulative frontier
    and use `CHECKPOINTED_CONTINUATION`; resume on the next turn in the same healthy chat.
 3. If the session itself is heavy/unstable enough to satisfy `ROTATION_REQUIRED`, persist, seal, and
    continue through the existing context-rotation owner instead of repeatedly issuing `Continue`.
 
-`MORE_WORK_EXISTS` means the parent mission is incomplete; it does not require the current assistant
-generation to remain open after every verified semantic boundary. Normal same-chat next-turn
-continuation is distinct from hard/fresh-chat rotation. Healthy output pressure alone does not require
-a turn boundary; with reconciled effects and a current durable frontier, keep bounded same-phase work
-running while selecting/compressing further output.
+`MORE_WORK_EXISTS` means the parent mission is incomplete. At every completed task/phase, verify and
+save the result, reassess the parent mission, select the next highest-value safe unblocked dependency,
+and start it in the same healthy turn when ready; do not wait for another Chairman `Continue` merely
+because a phase ended. Normal same-chat next-turn continuation is distinct from hard/fresh-chat
+rotation. Healthy output pressure alone does not require a turn boundary; with reconciled effects and
+a current durable frontier, keep bounded critical-path work running while selecting/compressing further
+output.
 
 At a verified semantic phase boundary, checkpoint accepted deltas and rotate before another
 high-context phase only when the exact surface is `ROTATION_REQUIRED`, all modifying effects are
@@ -516,8 +532,11 @@ only when every useful lane is blocked, and `MORE_WORK_EXISTS` when safe indepen
 * `CHECKPOINTED_CONTINUATION` — a procedural turn disposition, not an Executive Job/Attempt status.
   The mission is explicitly incomplete (`MISSION_COMPLETE: false`). This is permitted only when
   all of the following hold:
-  1. A specific chunk boundary or observed continuity risk justifies ending this turn. A completed
-     plan or arbitrary time target is insufficient; elapsed time alone never satisfies this gate.
+  1. An observed continuity risk, materially heavy/context-expanding next phase that would consume the
+     safe landing reserve, or a genuinely required surface/context transition justifies ending this turn.
+     An ordinary clean task/phase/chunk/checkpoint boundary, review request, owner message, pending CI,
+     completed plan, or arbitrary time target is insufficient while healthy useful authorized work remains;
+     elapsed time alone never satisfies this gate.
   2. The current cumulative checkpoint has a verified persistence receipt/readback from its existing
      owner, with an exact immutable revision or digest. It covers all material effects through this
      boundary, not merely an older snapshot.
@@ -529,8 +548,9 @@ only when every useful lane is blocked, and `MORE_WORK_EXISTS` when safe indepen
      effect must remain explicitly frozen, never silently transferred or retried.
 
 A checkpoint is not itself a reason to stop. A permitted continuation protects the remaining mission;
-it never makes a partial delivery PROVEN_OUTCOME. A genuinely safe next unit should continue unless
-one of these verified stop/continuation conditions applies.
+it never makes a partial delivery PROVEN_OUTCOME. A clean phase boundary is a save-and-reassess point,
+not an exit coupon. A genuinely safe next unit should continue across phase boundaries unless one of
+these verified stop/continuation conditions applies.
 
 A capability-based `EXACT_HUMAN_GATE`, `PLATFORM_FAILURE`, or
 `ALL_SCOPED_LANES_BLOCKED` requires the Step 6 negative-capability evidence for every capability
@@ -551,11 +571,12 @@ human/admin ceremony, a proven persistence/platform outage as `ALL_SCOPED_LANES_
 every useful lane is blocked, and `MORE_WORK_EXISTS` when safe independent work remains. Never
 fabricate `CHECKPOINTED_CONTINUATION`; the emergency note proves neither persistence nor effect state.
 
-If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize** merely to stop work.
-Select the highest-leverage unblocked dependency and continue execution while the active phase and
-surface remain healthy. At a verified phase boundary, however, when the `CHECKPOINTED_CONTINUATION`
-gates are independently satisfied, reclassify to that explicit incomplete-mission disposition rather
-than pretending that `MORE_WORK_EXISTS` requires one assistant generation to remain open forever.
+If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**. Select the highest-leverage
+unblocked dependency and continue execution while the surface remains healthy, including across task and
+phase boundaries. `CHECKPOINTED_CONTINUATION` may replace `MORE_WORK_EXISTS` only when its independent
+continuity/surface-transition gate is actually satisfied; a completed chunk or support-only cycle cannot
+manufacture that gate. Do not keep one assistant generation open through actual instability merely to
+avoid a legitimate recovery boundary.
 
 A requested effort window such as "work for 60–120 minutes" is not a correctness boundary. Use the
 productive turn fully; stop on outcome/gate evidence, not because an arbitrary amount of time elapsed
