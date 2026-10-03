@@ -238,8 +238,9 @@ def test_publication_drift_uses_current_same_app_refresh_lifecycle():
     skill = norm(SKILL)
     connection = norm(CONNECTION)
     integration = norm(INTEGRATION)
+    runbook = norm(ROOT / "docs/PAPER_DIRECT_CHATGPT.md")
 
-    for text in (skill, connection):
+    for text in (skill, connection, runbook):
         assert "developer-mode MCP connection" in text
         assert "Refresh" in text
         assert "start a new conversation" in text
@@ -248,3 +249,4 @@ def test_publication_drift_uses_current_same_app_refresh_lifecycle():
     assert "Current OpenAI Business behavior also does not support updating a published app in place" not in connection
     assert "Business published apps currently require recreate + republish" not in integration
     assert "do not create a duplicate app/tunnel" in connection.lower()
+    assert "do not create a duplicate app/tunnel" in runbook.lower()
