@@ -18,11 +18,13 @@ from pathlib import Path
 from typing import Any
 
 from brain import regime_frame as _rf
+from brain import rates_evidence as _rates
 
 _ROOT = Path(__file__).resolve().parent.parent
 _ARTIFACT_DIR = _ROOT / "data" / "decision_context"
 _LATEST_PATH = _ARTIFACT_DIR / "latest.json"
 _MARKET_VIEW_PATH = _ROOT / "data" / "market_view" / "latest.json"
+_RATES_COMMAND_PATH = _ROOT / "vendor" / "macro" / "data" / "rates_command" / "latest.json"
 _SCHEMA_VERSION = "decision_context.v2"
 
 # Unit and horizon metadata prevents incomparable magnitudes from masquerading as one scale.
@@ -445,6 +447,8 @@ def assemble(
     market_view: dict[str, Any] | None,
     *,
     neural_web: dict[str, Any] | None = None,
+    rates_command: dict[str, Any] | None = None,
+    rates_cutoff: str | None = None,
     region: str = "us",
     seq: int = 0,
     built_at: str | None = None,
@@ -481,6 +485,9 @@ def assemble(
     )
     regime_state = _regime_state(regime)
     neural_state = _neural_web_state(neural_web or {}, context_asof=context_asof)
+    rates_state = _rates.project_rates(
+        rates_command, market_asof=context_asof, analysis_cutoff=rates_cutoff
+    )
     cycle_detail = (regime_state.get("cycle") or {}).get("business_cycle") or {}
     temporal_anomalies = []
     if cycle_detail.get("future_dated"):
@@ -545,6 +552,7 @@ def assemble(
         },
         "signals": signals,
         "neural_web": neural_state,
+        "rates_evidence": rates_state,
         "data_quality": {
             "signals_total": len(signals),
             "present": present,
@@ -595,6 +603,7 @@ def prompt_summary(ctx: dict[str, Any] | None = None) -> dict[str, Any]:
         "data_quality": ctx.get("data_quality"),
         "neural_web_health": neural.get("health_summary"),
         "neural_web_contexts": neural.get("contexts"),
+        "rates_evidence": ctx.get("rates_evidence"),
     }
 
 
@@ -604,6 +613,8 @@ def build(
     regime: dict[str, Any] | None = None,
     market_view: dict[str, Any] | None = None,
     neural_web: dict[str, Any] | None = None,
+    rates_command: dict[str, Any] | None = None,
+    rates_cutoff: str | None = None,
     write: bool = True,
     seq: int = 0,
 ) -> dict[str, Any]:
@@ -619,10 +630,14 @@ def build(
             neural_web = _nwc.context()
         except Exception:  # noqa: BLE001
             neural_web = {}
+    if rates_command is None:
+        rates_command = _read_json(_RATES_COMMAND_PATH)
     out = assemble(
         regime,
         market_view,
         neural_web=neural_web,
+        rates_command=rates_command,
+        rates_cutoff=rates_cutoff,
         region=region,
         seq=seq,
     )
