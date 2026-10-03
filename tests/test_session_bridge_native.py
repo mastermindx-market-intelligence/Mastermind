@@ -5,6 +5,7 @@ from integrations.session_bridge.native_backends import (
     CanonicalTargetReader,
     ExactTargetRouter,
     ExecutiveSummonAdapter,
+    ExecutiveSummonBinding,
 )
 from integrations.session_bridge.schemas import BridgeError
 
@@ -146,23 +147,59 @@ def test_target_reader_keeps_provider_projections_separate():
     }
 
 
-def test_summon_delegates_without_provider_preference():
+class _SummonResolver:
+    def __init__(self, binding):
+        self.binding = binding
+        self.calls = []
+
+    def resolve(self, *, operation_key, execution_profile):
+        self.calls.append((operation_key, execution_profile))
+        return self.binding
+
+
+def test_summon_uses_trusted_host_binding_without_provider_preference():
     seen = []
+    resolver = _SummonResolver(ExecutiveSummonBinding(
+        department="executive-infrastructure",
+        priority=7,
+        workstream="WS:DOT-SESSION-BRIDGE",
+        allowed_write_paths=("integrations/session_bridge", "tests"),
+        validation={"pytest_targets": ["tests/test_session_bridge_native.py"], "git_diff_check": True},
+        attempt_limit=2,
+    ))
     adapter = ExecutiveSummonAdapter(
-        lambda args: seen.append(args) or {"accepted": True, "dispatched": False}
+        lambda args: seen.append(args) or {"accepted": True, "dispatched": False},
+        binding_resolver=resolver,
     )
-    result = adapter(
-        {
-            "objective": "repair the failing test",
-            "execution_profile": "bounded_code_change",
-            "operation_key": "dot-summon-001",
-        }
-    )
+    result = adapter({
+        "objective": "repair the failing test",
+        "execution_profile": "bounded_code_change",
+        "operation_key": "dot-summon-001",
+    })
     assert result == {"accepted": True, "dispatched": False}
-    assert seen == [
-        {
-            "objective": "repair the failing test",
-            "execution_profile": "bounded_code_change",
-            "operation_key": "dot-summon-001",
-        }
-    ]
+    assert resolver.calls == [("dot-summon-001", "bounded_code_change")]
+    assert seen == [{
+        "operation_key": "dot-summon-001",
+        "objective": "repair the failing test",
+        "department": "executive-infrastructure",
+        "priority": 7,
+        "execution_profile": "bounded_code_change",
+        "attempt_limit": 2,
+        "workstream": "WS:DOT-SESSION-BRIDGE",
+        "allowed_write_paths": ["integrations/session_bridge", "tests"],
+        "validation": {"pytest_targets": ["tests/test_session_bridge_native.py"], "git_diff_check": True},
+    }]
+
+
+def test_research_summon_refuses_host_write_scope():
+    resolver = _SummonResolver(ExecutiveSummonBinding(
+        department="research",
+        allowed_write_paths=("integrations/session_bridge",),
+    ))
+    adapter = ExecutiveSummonAdapter(lambda _args: None, binding_resolver=resolver)
+    try:
+        adapter({"objective": "inspect", "execution_profile": "research_only", "operation_key": "dot-summon-002"})
+    except BridgeError as exc:
+        assert exc.code == "binding_unavailable"
+    else:
+        raise AssertionError("research summon must refuse trusted write scope")

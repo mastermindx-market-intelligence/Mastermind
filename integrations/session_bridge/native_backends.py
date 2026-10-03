@@ -5,9 +5,10 @@ process, or session state. They compose incumbent canonical owners only.
 """
 from __future__ import annotations
 
+import dataclasses
 import inspect
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from .schemas import BridgeError
 
@@ -99,9 +100,15 @@ class CanonicalReplyCoordinator:
                 "canonical dialogue reply was not proven committed",
             )
 
-        attention = await _maybe_await(
-            self._attention_waker(target_ref, operation_key)
-        )
+        try:
+            attention = await _maybe_await(
+                self._attention_waker(target_ref, operation_key)
+            )
+        except Exception:
+            # The reply is already committed. Retain its exact receipt even
+            # when attention fails; do not retry or expose backend diagnostics.
+            # Cancellation remains cancellation, not an inferred no-effect.
+            attention = {"state": "EFFECT_UNKNOWN"}
         return {
             "target_ref": target_ref,
             "reply_committed": True,
@@ -134,21 +141,110 @@ class CanonicalTargetReader:
             if reader is None:
                 raise BridgeError("invalid_input", "unsupported target kind")
             return reader()
-        return {name: reader() for name, reader in self._readers.items()}
+        values: dict[str, Any] = {}
+        remaining = iter(self._readers.items())
+        for name, reader in remaining:
+            value = reader()
+            if inspect.isawaitable(value):
+                async def finish() -> dict[str, Any]:
+                    values[name] = await value
+                    # Invoke subsequent readers lazily, leaving no unawaited
+                    # sibling coroutine if this read fails or is cancelled.
+                    for next_name, next_reader in remaining:
+                        values[next_name] = await _maybe_await(next_reader())
+                    return values
+                return finish()
+            values[name] = value
+        return values
+
+
+@dataclasses.dataclass(frozen=True)
+class ExecutiveSummonBinding:
+    """Trusted host-owned fields required by canonical Executive admission."""
+
+    department: str
+    priority: int = 0
+    workstream: str | None = None
+    allowed_write_paths: tuple[str, ...] = ()
+    validation: Mapping[str, Any] | None = None
+    attempt_limit: int = 2
+
+
+class ExecutiveSummonBindingResolver(Protocol):
+    def resolve(
+        self, *, operation_key: str, execution_profile: str
+    ) -> ExecutiveSummonBinding: ...
 
 
 class ExecutiveSummonAdapter:
-    """Delegate summon to incumbent Executive admission and Capacity placement."""
+    """Build one canonical intent using trusted host scope, then submit it.
 
-    def __init__(self, submit_intent: Callable[[Mapping[str, Any]], Any]) -> None:
+    The Dot supplies only objective/profile/operation identity. Department,
+    priority, workstream, write scope, validation and attempt ceiling come from
+    the authenticated host's binding resolver. Provider/host placement remains
+    entirely with Executive/Capacity.
+    """
+
+    def __init__(
+        self,
+        submit_intent: Callable[[Mapping[str, Any]], Any],
+        *,
+        binding_resolver: ExecutiveSummonBindingResolver,
+    ) -> None:
         if not callable(submit_intent):
             raise TypeError("submit_intent must be callable")
+        if not hasattr(binding_resolver, "resolve") or not callable(binding_resolver.resolve):
+            raise TypeError("binding_resolver must expose resolve()")
         self._submit_intent = submit_intent
+        self._binding_resolver = binding_resolver
 
     def __call__(self, arguments: Mapping[str, Any]) -> Any:
-        # No model-visible provider/host preference is accepted here. Capacity
-        # and Executive routing retain selection authority.
-        return self._submit_intent(dict(arguments))
+        operation_key = arguments["operation_key"]
+        execution_profile = arguments["execution_profile"]
+        try:
+            binding = self._binding_resolver.resolve(
+                operation_key=operation_key,
+                execution_profile=execution_profile,
+            )
+        except Exception:
+            raise BridgeError(
+                "binding_unavailable", "trusted Executive summon binding unavailable"
+            ) from None
+        if not isinstance(binding, ExecutiveSummonBinding):
+            raise BridgeError("binding_unavailable", "trusted Executive summon binding invalid")
+        if not isinstance(binding.department, str) or not binding.department:
+            raise BridgeError("binding_unavailable", "trusted Executive department unavailable")
+        if isinstance(binding.priority, bool) or not isinstance(binding.priority, int):
+            raise BridgeError("binding_unavailable", "trusted Executive priority invalid")
+        if not 1 <= binding.attempt_limit <= 3:
+            raise BridgeError("binding_unavailable", "trusted Executive attempt limit invalid")
+
+        payload: dict[str, Any] = {
+            "operation_key": operation_key,
+            "objective": arguments["objective"],
+            "department": binding.department,
+            "priority": binding.priority,
+            "execution_profile": execution_profile,
+            "attempt_limit": binding.attempt_limit,
+        }
+        if binding.workstream is not None:
+            payload["workstream"] = binding.workstream
+
+        if execution_profile == "bounded_code_change":
+            if not binding.allowed_write_paths or not isinstance(binding.validation, Mapping):
+                raise BridgeError(
+                    "binding_unavailable",
+                    "bounded code summon requires trusted write scope and validation",
+                )
+            payload["allowed_write_paths"] = list(binding.allowed_write_paths)
+            payload["validation"] = dict(binding.validation)
+        elif binding.allowed_write_paths or binding.validation is not None:
+            raise BridgeError(
+                "binding_unavailable",
+                "research summon binding must not carry write scope",
+            )
+
+        return self._submit_intent(payload)
 
 
 __all__ = [
@@ -156,4 +252,6 @@ __all__ = [
     "CanonicalTargetReader",
     "ExactTargetRouter",
     "ExecutiveSummonAdapter",
+    "ExecutiveSummonBinding",
+    "ExecutiveSummonBindingResolver",
 ]

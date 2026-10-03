@@ -184,15 +184,12 @@ class AgentDialogueContinueWriter:
         stop_condition: str,
         operation_key: str,
     ) -> dict[str, Any]:
+        # Identity excludes payload and return version. The incumbent engine
+        # compares the fingerprint under this key, including concurrent sends.
+        # The trusted host still owns binding the operation to its exact carrier.
         digest = hashlib.sha256(
             (
-                operation_key
-                + "\n"
-                + str(request_message["message_key"])
-                + "\n"
-                + instruction
-                + "\n"
-                + stop_condition
+                "mastermind.session_bridge.continue.v1\n" + operation_key
             ).encode("utf-8")
         ).hexdigest()[:40]
         try:
@@ -279,12 +276,23 @@ class AgentDialogueContinueWriter:
             code = "carrier_effect_unknown" if exc.code == "SEND_EFFECT_UNKNOWN" else "carrier_unavailable"
             raise BridgeError(code, exc.code) from None
         except Exception:
-            raise BridgeError("carrier_unavailable", "dialogue send failed") from None
-        if not isinstance(response, dict) or response.get("ok") is not True:
-            error = response.get("error") if isinstance(response, dict) else None
-            detail = error.get("code") if isinstance(error, dict) else "dialogue send refused"
-            code = "carrier_effect_unknown" if detail == "SEND_EFFECT_UNKNOWN" else "dialogue_refused"
-            raise BridgeError(code, str(detail))
+            # Only the service's typed pre-commit refusal proves no effect.
+            raise BridgeError("carrier_effect_unknown", "dialogue send outcome is unknown") from None
+        if not isinstance(response, dict):
+            raise BridgeError("carrier_effect_unknown", "dialogue send outcome is unknown")
+        if response.get("ok") is not True:
+            error = response.get("error")
+            detail = error.get("code") if isinstance(error, dict) else None
+            if set(response) != {"ok", "error"} or response.get("ok") is not False or (
+                not isinstance(error, dict) or set(error) != {"code"}
+            ):
+                raise BridgeError("carrier_effect_unknown", "dialogue send outcome is unknown")
+            try:
+                typed_error = DialogueServiceError(detail)
+            except (TypeError, ValueError):
+                raise BridgeError("carrier_effect_unknown", "dialogue send outcome is unknown") from None
+            code = "carrier_effect_unknown" if typed_error.code == "SEND_EFFECT_UNKNOWN" else "dialogue_refused"
+            raise BridgeError(code, typed_error.code)
         receipt = response.get("result")
         if (
             not isinstance(receipt, dict)

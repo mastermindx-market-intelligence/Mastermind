@@ -132,3 +132,56 @@ then explicit existing-host composition/native enrollment and original-Web consu
 proof. Do not replay either denied operation or send verification to another actor.
 No push, deployment, live native message, subscription or automatic wake was attempted.
 MISSION_COMPLETE:false. Local source/proof persistence is not installed acceptance.
+
+## 2026-10-03 in-place published-history reconciliation
+
+Current protected procedure pin for this phase:
+`bdf2a972e68a70270c24d4b5d61a4d60edc4f288`. INDEX, ACTIVE_EXECUTION,
+RECONCILE_STATE, CLOSEOUT, DELIVERY_WORKFLOW and
+AGENT_DIALOGUE_SESSION_CLOSE_LAW retain the same previously accepted blob
+identities and remain compatible with bootstrap major 1.
+
+The original workspace was still exactly HEAD
+`27edfba07ca9550508f0bc5149d8efe3ae1fd3c0`, branch
+`sol/dot-session-bridge-20260930-sol-001`, with MERGE_HEAD
+`6a238750ce67e978571e9aa7d1707cc3a18c450a`. The two earlier conflicts were
+reconciled in this same carrier. No replacement worktree, branch, account or
+provider was used.
+
+Resolution:
+- `integrations/executive_mcp/server.py` retains the local stronger
+  VerifiedPrincipal/direct-tool composition. The published local-handler builder
+  is superseded rather than reintroduced.
+- `integrations/session_bridge/server.py` retains the published static
+  build_tools/build_handlers helper surface while still refusing a standalone
+  unauthenticated server.
+- all non-conflicting published dialogue/effect changes from 6a238750 remain in
+  the merge index.
+- the published `tests/test_executive_mcp_session_bridge.py` was updated from
+  the superseded singular host builder to cover the surviving static helper
+  contract; current principal-aware host behavior remains covered by
+  `tests/test_executive_mcp_web_ceo_sessions.py`.
+
+Fresh merged-tree verification before commit:
+- targeted bridge/auth/native/return campaign: PASS;
+- owning campaign including Agent Dialogue V2: **402 tests PASS,
+  0 failures, 0 errors, 0 skips**;
+- owning XML SHA256:
+  `55d4cd370688f4b34420efd85ae0159285ad55b36df7b534e95206798c43c303`;
+- full repository pytest attempted in the existing dependency-complete
+  Python 3.12 environment and stopped during collection on the same two
+  unrelated imports: `tests.test_self_tune` cannot import
+  `engine.signal_archive`; `tests.test_single_name_factor` cannot import
+  `lib`. Full-run XML: 7 collected / 2 errors / 5 skips, SHA256
+  `39950ccc06d933bcae0e06a848d0b0d69114173bbc912854b6cfc8e4542f4155`.
+  No full-repository green claim.
+
+The old PR1002/PR124 server-collision concern was rechecked against current
+master and neither has an outstanding authored delta on
+`integrations/executive_mcp/server.py`. That uncertainty is closed.
+
+This resolves the source-history merge conflict only. Publication, latest-master
+compatibility, installed host selection, exact Codex/Claude native delivery,
+event subscription/callback behavior and SAME-originating-Web consumption
+remain separate acceptance gates. No native send, subscription, deployment or
+production mutation occurred in this reconciliation.
