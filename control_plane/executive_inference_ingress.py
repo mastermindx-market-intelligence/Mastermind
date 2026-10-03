@@ -8,6 +8,10 @@ from control_plane.executive_inference_contract import PRINCIPAL_ID, derive, int
 SUBMIT_SCHEMA = "mastermind.ceo_ingress.service_inference_submit.v1"
 STATUS_SCHEMA = "mastermind.ceo_ingress.service_inference_status.v1"
 SCHEMAS = frozenset({SUBMIT_SCHEMA, STATUS_SCHEMA})
+# Dedicated service frame ceiling. Historical CEO ingress remains at 8 KiB;
+# this larger frame is admitted only for the two closed inference schemas and
+# stays below the existing 64 KiB public Executive HTTP request fence.
+MAX_FRAME_BYTES = 60 * 1024
 
 
 async def handle_frame(

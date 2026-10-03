@@ -373,9 +373,10 @@ class CeoIngressClient:
         request_ceiling = MAX_REQUEST_BYTES
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
-        # Only the separately versioned, closed release frame can use the
-        # larger token envelope; every historical schema retains its limits.
+        # Only separately versioned, closed frame families can use larger
+        # envelopes; every historical CEO schema retains its 8 KiB limit.
         from control_plane import executive_release_ingress as release_ingress
+        from control_plane import executive_inference_ingress as inference_ingress
         if isinstance(frame, Mapping) and frame.get("schema") == release_ingress.FRAME_SCHEMA:
             try:
                 release_ingress.validate_frame(frame)
@@ -386,6 +387,8 @@ class CeoIngressClient:
             request_ceiling = release_ingress.MAX_FRAME_BYTES
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
+        elif isinstance(frame, Mapping) and frame.get("schema") in inference_ingress.SCHEMAS:
+            request_ceiling = inference_ingress.MAX_FRAME_BYTES
         try:
             encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
                 "utf-8"
