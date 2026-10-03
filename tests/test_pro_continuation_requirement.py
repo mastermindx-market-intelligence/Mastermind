@@ -8,7 +8,7 @@ from control_plane.sol_action_target import (
     ActionTargetState,
     SolActionTargetResolution,
 )
-from integrations.session_bridge.continuation_required import (
+from control_plane.pro_continuation_requirement import (
     ContinuationProjectionError,
     TrustedTurnDisposition,
     project_continuation_requirement,
