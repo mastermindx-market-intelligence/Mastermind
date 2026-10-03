@@ -70,13 +70,16 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+ACP_EXECUTION_SURFACE = "acp-agent"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    ACP_EXECUTION_SURFACE,
 })
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
     "claude-code": frozenset({"claude-code"}),
+    "acp": frozenset({ACP_EXECUTION_SURFACE}),
 }
 _SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
 
