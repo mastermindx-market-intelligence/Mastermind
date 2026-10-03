@@ -425,7 +425,12 @@ def project_runtime_capability_evidence(
     projection_issues = tuple(
         sorted(set(projection_issues) | set(status_issues))
     )
-    if control_room_time is not None and abs(
+    if control_room_time is None:
+        freshness = "UNKNOWN"
+        projection_issues = tuple(
+            sorted(set(projection_issues) | {"CONTROL_ROOM_EPOCH_MISSING"})
+        )
+    elif abs(
         (observed_time - control_room_time).total_seconds()
     ) > MAX_CONTROL_ROOM_PAIRING_SKEW_SECONDS:
         freshness = "UNKNOWN"

@@ -121,8 +121,9 @@ def test_unavailable_and_unknown_are_not_promoted_to_false_green():
 
     assert rows["studio_direct_reachability"].availability.value == "UNAVAILABLE"
     assert rows["studio_direct_reachability"].proof_state.value == "DARK_OR_DISCONNECTED"
-    assert rows["studio_direct_file_read"].availability.value == "UNKNOWN"
-    assert rows["studio_direct_terminal_read_probe"].availability.value == "UNKNOWN"
+    assert rows["studio_direct_file_read"].availability.value == "UNAVAILABLE"
+    assert rows["studio_direct_terminal_read_probe"].availability.value == "UNAVAILABLE"
+    assert "DEPENDENCY_UNAVAILABLE" in rows["studio_direct_file_read"].issues
     assert "SOURCE_UNAVAILABLE" in rows["studio_direct_file_read"].issues
 
 
@@ -142,6 +143,45 @@ def test_ambiguous_observation_preserves_known_ping_and_unknown_subcapabilities(
     assert rows["studio_direct_file_read"].availability.value == "UNKNOWN"
     assert rows["studio_direct_terminal_read_probe"].availability.value == "UNKNOWN"
     assert "OBSERVATION_AMBIGUOUS" in rows["studio_direct_file_read"].issues
+
+
+def test_exposed_subcapabilities_are_unavailable_when_gateway_is_disconnected():
+    receipt = parse_studio_direct_read_observation(
+        _raw(
+            quality="PARTIAL",
+            gateway_reachable=False,
+            file_read_exposed=True,
+            file_read_proven=False,
+            terminal_read_probe_exposed=True,
+            terminal_read_probe_proven=False,
+        )
+    )
+    rows = _by_name(project_studio_direct_read_capabilities(receipt))
+
+    for name in ("studio_direct_file_read", "studio_direct_terminal_read_probe"):
+        assert rows[name].availability.value == "UNAVAILABLE"
+        assert rows[name].proof_state.value == "DARK_OR_DISCONNECTED"
+        assert rows[name].read_serviceable is False
+        assert "DEPENDENCY_UNAVAILABLE" in rows[name].issues
+
+
+def test_exposed_subcapabilities_are_unknown_when_gateway_reachability_is_unknown():
+    receipt = parse_studio_direct_read_observation(
+        _raw(
+            quality="PARTIAL",
+            gateway_reachable=None,
+            file_read_exposed=True,
+            file_read_proven=False,
+            terminal_read_probe_exposed=True,
+            terminal_read_probe_proven=False,
+        )
+    )
+    rows = _by_name(project_studio_direct_read_capabilities(receipt))
+
+    for name in ("studio_direct_file_read", "studio_direct_terminal_read_probe"):
+        assert rows[name].availability.value == "UNKNOWN"
+        assert rows[name].read_serviceable is False
+        assert "DEPENDENCY_AVAILABILITY_UNKNOWN" in rows[name].issues
 
 
 @pytest.mark.parametrize(
@@ -262,8 +302,8 @@ def test_unavailable_capability_source_survives_steward_projection():
     records = {record.capability_id: record for record in projection.records}
 
     assert records["studio_direct_reachability"].availability == "UNAVAILABLE"
-    assert records["studio_direct_file_read"].availability == "UNKNOWN"
-    assert records["studio_direct_terminal_read_probe"].availability == "UNKNOWN"
+    assert records["studio_direct_file_read"].availability == "UNAVAILABLE"
+    assert records["studio_direct_terminal_read_probe"].availability == "UNAVAILABLE"
 
 
 def test_malformed_or_duplicate_runtime_capability_status_is_refused():
@@ -370,6 +410,29 @@ def test_control_room_read_port_preserves_missing_evidence_as_unknown():
     assert evidence.freshness == "UNKNOWN"
     assert evidence.records == ()
     assert evidence.issues == ("RUNTIME_CAPABILITY_SOURCE_MISSING",)
+
+
+@pytest.mark.parametrize("epoch_value", [pytest.param("absent", id="absent"), pytest.param(None, id="null")])
+def test_control_room_read_port_missing_epoch_cannot_publish_fresh_capability(epoch_value):
+    status = project_studio_direct_read_capabilities(
+        parse_studio_direct_read_observation(_raw())
+    )
+    room = dict(_control_room())
+    room["runtime_capability_status"] = status.to_dict()
+    if epoch_value == "absent":
+        room.pop("generated_at")
+    else:
+        room["generated_at"] = None
+    port = ControlRoomRuntimeCapabilityReadPort(
+        lambda: room,
+        clock=lambda: datetime(2026, 10, 3, 7, 10, 0, tzinfo=timezone.utc),
+    )
+
+    evidence = asyncio.run(port.read())
+
+    assert evidence.freshness == "UNKNOWN"
+    assert "CONTROL_ROOM_EPOCH_MISSING" in evidence.issues
+    assert {record.freshness for record in evidence.records} == {"UNKNOWN"}
 
 
 def test_control_room_and_capability_epochs_must_be_composed_close_together():

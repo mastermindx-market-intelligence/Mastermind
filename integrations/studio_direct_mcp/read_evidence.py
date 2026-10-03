@@ -21,6 +21,7 @@ from typing import Any
 from control_plane.sol_capability_status import (
     CapabilityFact,
     CapabilityState,
+    DependencyFact,
     PrivilegeClass,
     project_sol_capability_status,
 )
@@ -246,6 +247,20 @@ def _state(*, available: bool | None, proven: bool) -> CapabilityState:
     return CapabilityState.BUILT_NOT_PROVEN
 
 
+def _gateway_dependency(receipt: StudioDirectReadObservation) -> DependencyFact:
+    """Required owner-native reachability dependency for Studio subcapabilities."""
+
+    available = receipt.gateway_reachable
+    return DependencyFact(
+        name="studio-direct.gateway",
+        state=_state(available=available, proven=available is True),
+        required=True,
+        available=available,
+        source_ref=SOURCE_REF,
+        issues=_quality_issues(receipt.quality),
+    )
+
+
 def _fact(
     receipt: StudioDirectReadObservation,
     *,
@@ -253,6 +268,7 @@ def _fact(
     required_scope: str,
     available: bool | None,
     proven: bool,
+    dependencies: tuple[DependencyFact, ...] = (),
 ) -> CapabilityFact:
     issues = list(_quality_issues(receipt.quality))
     if available is True and not proven:
@@ -273,7 +289,7 @@ def _fact(
         confirmation_required=False,
         prepared_action_required=False,
         canonical_owner=CANONICAL_OWNER,
-        dependencies=(),
+        dependencies=dependencies,
         schema_digest=_SCHEMA_DIGEST,
         source_state=_state(available=available, proven=proven),
         observed_available=available,
@@ -294,6 +310,7 @@ def project_studio_direct_read_capabilities(
         raise StudioDirectEvidenceError(
             "receipt must be StudioDirectReadObservation"
         )
+    gateway_dependency = _gateway_dependency(receipt)
     facts = (
         _fact(
             receipt,
@@ -308,6 +325,7 @@ def project_studio_direct_read_capabilities(
             required_scope="filesystem:read",
             available=receipt.file_read_exposed,
             proven=receipt.file_read_proven,
+            dependencies=(gateway_dependency,),
         ),
         _fact(
             receipt,
@@ -315,6 +333,7 @@ def project_studio_direct_read_capabilities(
             required_scope="terminal:read_probe",
             available=receipt.terminal_read_probe_exposed,
             proven=receipt.terminal_read_probe_proven,
+            dependencies=(gateway_dependency,),
         ),
     )
     generation = receipt.gateway_generation or "unknown"
