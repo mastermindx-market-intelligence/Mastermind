@@ -90,6 +90,29 @@ verdict: pass with fixes, and the holdout must not run until they land.
 The repairs change eligibility, so V2 was re-frozen as revision 2 and development was scored
 again (§6, §7).
 
+### Re-review of revision 2
+
+A third read-only review, by a different reviewer, attacked the diff that made the repairs
+(`28c445e0..9a429b70`). It reproduced the committed development result with no field
+differing, confirmed the pin and the panel digest, reproduced every count in V2 §3 and the
+repaired coverage columns, and confirmed on known splits that the store's closes are
+unadjusted. It related no feature to any label on 2022 onward. Its verdict: pass with fixes —
+no blocker, no major finding, and the holdout may be run once as the code stands, with the
+items below fixed or recorded first.
+
+They are recorded here before the run. The instrument that runs the holdout is the
+instrument that was reviewed, unchanged; the code fixes follow the run.
+
+| # | Finding | Severity | Disposition |
+| --- | --- | --- | --- |
+| N1 | A holdout run is bound to the development result the caller supplies, not to a digest pinned in code. Development could be scored on other inputs and the holdout then run on those. | minor | Deviation from V2 §0 (Binding). The run uses the committed development result; panel digest `48cb5e76…` is printed on both results. A code pin follows the run. |
+| N2 | On holdout dates the instrument still computes the share of positive dates, the non-overlapping t and the era means, then deletes them. V2 §7 says they are not computed. | minor | Deviation from V2 §7. They are never printed or read. Fixed after the run. |
+| N3 | No test covers the printed-$1 leg of the quoted-price mask or the loader that applies it. | minor | Test added after the run. |
+| N4 | A wrong print in the store on an audited name now moves its quote test. PLMR prints $0.01–0.03 for 14 sessions from 2023-03-16 against a real price near $55, which takes it out of the cross-section until its windows clear. 81 member cells since the store began are unquoted by a print under $1 while the adjusted price is $1 or more; most are real sub-$1 prints. | minor | Disclosed here. V2 §10 says store prints are taken as they are. |
+| N4 | The audited panel keys prices by today's ticker. Where a symbol changed hands (DOC, HR, SAFE, CNR among them), the audited column holds the successor company's prices for the earlier member. | minor | Disclosed here. It predates this work and affects development and holdout alike. For those names the floor test reads the right company's printed close while features, controls and labels read the audited column. |
+| N5 | V2 §3 says about 50 names are on the fallback. The count is 34, and they are not only class shares and renamed symbols (MPT, DCH and GAP are among them). | note | An error in the frozen text. It changes no rule, so the document is not re-frozen. |
+| N6 | `score` trusts the digest stored in the panel it is handed. | note | The edge V2 §0 already declares. |
+
 ## 5. Substrate: what the universe actually is
 
 Members by the membership file, and how many have a price, on the first session of the
@@ -278,14 +301,20 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
   git history at commit `28c445e0`.
 - **V1's development result was re-emitted** on the revised instrument so that it carries a
   panel digest. Every statistic and the survivor set are identical.
+- **A holdout run is bound to the supplied development result, not to a pin in code** (N1,
+  §4). V2 §0 reads as if the committed result were enforced. The run below uses the committed
+  result.
+- **Unlisted statistics are computed and discarded on holdout dates** (N2, §4). V2 §7 says
+  they are not computed. They are never printed.
+- **V2 §3 misstates the fallback names** (N5, §4): 34 names, not about 50.
 - **More price-only work on 2022 onward** was done for revision 2, by the author and by the
-  second review: printed-against-adjusted price comparisons, floor counts under each rule,
+  second and third reviews: printed-against-adjusted price comparisons, floor counts under each rule,
   eligible and complete-case counts per formation date, large-move and split checks. No
   feature was related to any label there.
 
 ## 8. What happens next
 
-1. Re-review of the changes revision 2 made.
+1. Re-review of the changes revision 2 made — done (§4).
 2. One holdout run: the 29 survivors, formation dates from 2022-07-06, repaired universe.
 3. Per family: confirmed members move to `RESEARCH_PREDICTIVE` for downside-risk
    description and earn a walk-forward comparison; otherwise the family stays `DESCRIPTIVE`
