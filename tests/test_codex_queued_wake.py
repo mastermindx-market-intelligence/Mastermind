@@ -217,3 +217,51 @@ def test_awaited_post_guard_cannot_rewrite_the_detached_queue_observation():
     out = asyncio.run(client(rpc, checked_guard).deliver_wake(**args()))
     assert out.accepted and not out.delivered
     assert rpc.rows[0]["input"][0]["text"].startswith(CODEX_WAKE_INSTRUCTION)
+
+
+@pytest.mark.parametrize("phase", ["guard", "rpc"])
+def test_inline_callbacks_cannot_overrun_the_deadline_before_a_loop_yield(monkeypatch, phase):
+    async def exercise():
+        loop = asyncio.get_running_loop(); real_time = loop.time
+        offset = [0.0]
+        monkeypatch.setattr(loop, "time", lambda: real_time() + offset[0])
+        rpc = Rpc()
+        def guard(*_):
+            if phase == "guard": offset[0] += 2.0
+            return True
+        async def inline_rpc(frame):
+            result = await rpc(frame)
+            if phase == "rpc": offset[0] += 2.0
+            return result
+        try:
+            c = client(inline_rpc, guard, timeout_seconds=1)
+            with pytest.raises(WakePreSubmitError if phase == "guard" else WakeEffectUnknownError):
+                await c.deliver_wake(**args())
+            assert len(rpc.calls) == (0 if phase == "guard" else 1)
+        finally:
+            monkeypatch.setattr(loop, "time", real_time)
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("phase", ["guard", "rpc"])
+def test_inline_reconcile_callbacks_cannot_overrun_the_deadline(monkeypatch, phase):
+    async def exercise():
+        rpc = Rpc(); await client(rpc).deliver_wake(**args())
+        loop = asyncio.get_running_loop(); real_time = loop.time; offset = [0.0]
+        monkeypatch.setattr(loop, "time", lambda: real_time() + offset[0])
+        def guard(*_):
+            if phase == "guard": offset[0] += 2.0
+            return True
+        async def inline_rpc(frame):
+            result = await rpc(frame)
+            if phase == "rpc": offset[0] += 2.0
+            return result
+        try:
+            c = client(inline_rpc, guard, timeout_seconds=1)
+            fields = args(); fields.pop("instruction")
+            with pytest.raises(WakeEffectUnknownError): await c.reconcile_wake(**fields)
+            assert sum(f["method"] == "thread/queue/add" for f in rpc.calls) == 1
+            assert len(rpc.calls) == (1 if phase == "guard" else 2)
+        finally:
+            monkeypatch.setattr(loop, "time", real_time)
+    asyncio.run(exercise())

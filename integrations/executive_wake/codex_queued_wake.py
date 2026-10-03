@@ -95,6 +95,14 @@ class CodexQueuedWakeClient:
             raise ValueError("original queued Wake binding is not current")
 
     @staticmethod
+    def _before_deadline(deadline: float) -> None:
+        # asyncio's timeout callback cannot fire until the loop regains control.
+        # A synchronous guard or inline coroutine must still obey the same budget
+        # BEFORE provider entry and before accepted evidence can be returned.
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError("queued Wake deadline exceeded")
+
+    @staticmethod
     def _input(nudge_id: str, ids: tuple[str, ...]) -> list[dict[str, Any]]:
         text = CODEX_WAKE_INSTRUCTION + "\n" + json.dumps(
             {"nudge_id": nudge_id, "opaque_ids": ids}, sort_keys=True, separators=(",", ":"))
@@ -135,8 +143,10 @@ class CodexQueuedWakeClient:
                 raise ValueError("queued Wake instruction is not canonical")
             expected_input = self._input(nudge_id, ids)
             request_id = nudge_id + ":queue-add"
-            async with asyncio.timeout(self._timeout):
+            deadline = asyncio.get_running_loop().time() + self._timeout
+            async with asyncio.timeout_at(deadline):
                 await self._guard_current(nudge_id, ids)
+                self._before_deadline(deadline)
                 submitted = True
                 result = self._result(await self._rpc({
                     "id": request_id, "method": "thread/queue/add", "params": {
@@ -148,6 +158,7 @@ class CodexQueuedWakeClient:
                 if row["clientUserMessageId"] != nudge_id or row["input"] != expected_input:
                     raise ValueError("queued result changed the original Wake")
                 await self._guard_current(nudge_id, ids)
+                self._before_deadline(deadline)
                 return self._accepted(native_handle, nudge_id)
         except Exception:
             if submitted:
@@ -164,9 +175,11 @@ class CodexQueuedWakeClient:
             seen_cursors: set[str] = set()
             seen_rows: set[str] = set()
             matched = False
-            async with asyncio.timeout(self._timeout):
+            deadline = asyncio.get_running_loop().time() + self._timeout
+            async with asyncio.timeout_at(deadline):
                 for page in range(self._max_pages):
                     await self._guard_current(nudge_id, ids)
+                    self._before_deadline(deadline)
                     request_id = nudge_id + ":queue-list:" + str(page)
                     params = {"threadId": native_handle, "limit": self._page_size}
                     if cursor is not None:
@@ -174,6 +187,7 @@ class CodexQueuedWakeClient:
                     result = self._result(await self._rpc({
                         "id": request_id, "method": "thread/queue/list", "params": params}), request_id)
                     await self._guard_current(nudge_id, ids)
+                    self._before_deadline(deadline)
                     if (set(result) != {"data", "nextCursor"} or type(result["data"]) is not list
                             or len(result["data"]) > self._page_size):
                         raise ValueError("incomplete queue page")
