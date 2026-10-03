@@ -264,6 +264,9 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     if profile == 'web_ceo_v3':
         from integrations.mosyle_mdm.client import MosyleInventoryClient
         assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
+        assert callable(kwargs.pop('session_target_projector'))
+        assert callable(kwargs.pop('session_reply_handler'))
+        assert callable(kwargs.pop('session_summon_handler'))
     assert kwargs == {'audit_sink': sink, **(mounts if mounted else {})}
     assert len(mount_calls) == int(mounted)
     assert launches == [((app,), dict(host='127.0.0.1', port=8443, access_log=False,

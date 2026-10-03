@@ -1210,103 +1210,76 @@ def build_web_ceo_v2_mcp_app(
     )
 
 
-def build_web_ceo_v3_mcp_app(
-    settings: Any,
-    *,
-    audit_sink: Any,
-    mdm_reader: Any,
-    workspace_app=None,
-    content_app=None,
-    os_app=None,
-) -> Any:
-    """Web-CEO v3 composition: v2 owners plus one read-only MDM sensor."""
-
-    from integrations.executive_mcp.web_ceo_v3 import (
-        WEB_CEO_V3_SERVER_NAME,
-        WEB_CEO_V3_SERVER_VERSION,
-        validate_web_ceo_v3_tool_arguments,
-    )
-    from integrations.mastermind_executive_app.app import create_web_ceo_v3_app
-
-    return _build_profile_mcp_app(
-        settings,
-        audit_sink=audit_sink,
-        profile_server_name=WEB_CEO_V3_SERVER_NAME,
-        profile_server_version=WEB_CEO_V3_SERVER_VERSION,
-        profile_tools=tuple(build_web_ceo_v3_tools()),
-        profile_validator=validate_web_ceo_v3_tool_arguments,
-        profile_create_app=lambda configured: create_web_ceo_v3_app(
-            configured, mdm_reader=mdm_reader
-        ),
-        workspace_app=workspace_app,
-        content_app=content_app,
-        os_app=os_app,
-    )
-
-
-def build_web_ceo_sessions_mcp_app(
-    settings: Any,
-    *,
-    audit_sink: Any,
+def _session_bridge_direct_contract(
     session_target_projector: Any,
     session_reply_handler: Any,
     session_summon_handler: Any,
-    workspace_app=None,
-    content_app=None,
-    os_app=None,
-) -> Any:
-    """Authenticated Session Bridge profile over the existing Executive OAuth host.
+) -> dict[str, Any]:
+    """Reuse one authenticated Session Bridge policy in every host profile."""
 
-    The three injected callables are incumbent-owner composition seams. They
-    receive the verified principal directly; this host owns no target registry,
-    dialogue state, admission queue, credential store, or retry policy.
-    """
     import inspect
     from collections.abc import Mapping
     from integrations.executive_mcp.web_ceo_sessions import (
-        WEB_CEO_SESSIONS_SERVER_NAME, WEB_CEO_SESSIONS_SERVER_VERSION,
-        SESSION_TOOL_NAMES, SESSION_SUBMIT_TOOL_NAMES,
-        validate_web_ceo_sessions_tool_arguments,
+        SESSION_TOOL_NAMES,
+        SESSION_SUBMIT_TOOL_NAMES,
     )
-    from integrations.mastermind_executive_app.app import create_web_ceo_v2_app
     from integrations.session_bridge import schemas as bridge_schemas
 
-    for name, value in (("session_target_projector", session_target_projector),
-                        ("session_reply_handler", session_reply_handler),
-                        ("session_summon_handler", session_summon_handler)):
+    for name, value in (
+        ("session_target_projector", session_target_projector),
+        ("session_reply_handler", session_reply_handler),
+        ("session_summon_handler", session_summon_handler),
+    ):
         if not callable(value):
             raise TypeError(f"{name} must be callable")
 
     async def maybe(value: Any) -> Any:
         return await value if inspect.isawaitable(value) else value
 
-    def envelope(tool: str, *, data: Any = None, code: str | None = None, message: str | None = None):
+    def envelope(
+        tool: str,
+        *,
+        data: Any = None,
+        code: str | None = None,
+        message: str | None = None,
+    ) -> dict[str, Any]:
         return {
             "schema": bridge_schemas.RESULT_SCHEMA,
             "server_version": bridge_schemas.SERVER_VERSION,
-            "tool": tool, "ok": code is None,
+            "tool": tool,
+            "ok": code is None,
             "data": data if code is None else None,
             "error": None if code is None else {"code": code, "message": message},
         }
 
     def refs(value: Any) -> set[str]:
         if not isinstance(value, (list, tuple)) or len(value) > 256:
-            raise bridge_schemas.BridgeError("backend_unavailable", "authorized target projection is unavailable")
-        found = set()
+            raise bridge_schemas.BridgeError(
+                "backend_unavailable", "authorized target projection is unavailable"
+            )
+        found: set[str] = set()
         for row in value:
             if not isinstance(row, Mapping):
-                raise bridge_schemas.BridgeError("backend_unavailable", "authorized target projection is unavailable")
+                raise bridge_schemas.BridgeError(
+                    "backend_unavailable", "authorized target projection is unavailable"
+                )
             target_ref = bridge_schemas.validate_target_ref(row.get("target_ref"))
             if target_ref in found:
-                raise bridge_schemas.BridgeError("backend_unavailable", "authorized target projection is ambiguous")
+                raise bridge_schemas.BridgeError(
+                    "backend_unavailable", "authorized target projection is ambiguous"
+                )
             found.add(target_ref)
         return found
 
-    async def direct(principal: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def direct(
+        principal: Any, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         modifying = name in SESSION_SUBMIT_TOOL_NAMES
         try:
             if name == "session_targets":
-                projected = await maybe(session_target_projector(principal, arguments.get("kind")))
+                projected = await maybe(
+                    session_target_projector(principal, arguments.get("kind"))
+                )
                 refs(projected)
                 return envelope(name, data=projected)
             if name == "session_send":
@@ -1314,14 +1287,19 @@ def build_web_ceo_sessions_mcp_app(
                 kind = target_ref.partition(":")[0]
                 projected = await maybe(session_target_projector(principal, kind))
                 if target_ref not in refs(projected):
-                    return envelope(name, code="authority_refused",
-                                    message="target is not in the authenticated caller projection")
+                    return envelope(
+                        name,
+                        code="authority_refused",
+                        message="target is not in the authenticated caller projection",
+                    )
                 data = await maybe(session_reply_handler(principal, dict(arguments)))
                 if not isinstance(data, Mapping):
                     return envelope(
                         name,
                         code="effect_unknown",
-                        message="session reply outcome is unknown; reconcile the original operation",
+                        message=(
+                            "session reply outcome is unknown; reconcile the original operation"
+                        ),
                     )
                 return envelope(name, data=dict(data))
             data = await maybe(session_summon_handler(principal, dict(arguments)))
@@ -1329,7 +1307,9 @@ def build_web_ceo_sessions_mcp_app(
                 return envelope(
                     name,
                     code="effect_unknown",
-                    message="session admission outcome is unknown; reconcile the original operation",
+                    message=(
+                        "session admission outcome is unknown; reconcile the original operation"
+                    ),
                 )
             return envelope(name, data=dict(data))
         except bridge_schemas.BridgeError as exc:
@@ -1345,21 +1325,99 @@ def build_web_ceo_sessions_mcp_app(
                 ),
             )
 
+    return {
+        "direct_tool_names": SESSION_TOOL_NAMES,
+        "direct_submit_names": SESSION_SUBMIT_TOOL_NAMES,
+        "direct_handler": direct,
+        "direct_error_factory": lambda tool, code, message: envelope(
+            tool, code=code, message=message
+        ),
+    }
+
+
+def build_web_ceo_v3_mcp_app(
+    settings: Any,
+    *,
+    audit_sink: Any,
+    mdm_reader: Any,
+    session_target_projector: Any,
+    session_reply_handler: Any,
+    session_summon_handler: Any,
+    workspace_app=None,
+    content_app=None,
+    os_app=None,
+) -> Any:
+    """Web-CEO v3 composition: v2 owners plus one read-only MDM sensor."""
+
+    from integrations.executive_mcp.web_ceo_v3 import (
+        WEB_CEO_V3_SERVER_NAME,
+        WEB_CEO_V3_SERVER_VERSION,
+        validate_web_ceo_v3_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_web_ceo_v3_app
+
+    direct = _session_bridge_direct_contract(
+        session_target_projector,
+        session_reply_handler,
+        session_summon_handler,
+    )
     return _build_profile_mcp_app(
-        settings, audit_sink=audit_sink,
+        settings,
+        audit_sink=audit_sink,
+        profile_server_name=WEB_CEO_V3_SERVER_NAME,
+        profile_server_version=WEB_CEO_V3_SERVER_VERSION,
+        profile_tools=tuple(build_web_ceo_v3_tools()),
+        profile_validator=validate_web_ceo_v3_tool_arguments,
+        profile_create_app=lambda configured: create_web_ceo_v3_app(
+            configured, mdm_reader=mdm_reader
+        ),
+        workspace_app=workspace_app,
+        content_app=content_app,
+        os_app=os_app,
+        **direct,
+    )
+
+
+def build_web_ceo_sessions_mcp_app(
+    settings: Any,
+    *,
+    audit_sink: Any,
+    session_target_projector: Any,
+    session_reply_handler: Any,
+    session_summon_handler: Any,
+    workspace_app=None,
+    content_app=None,
+    os_app=None,
+) -> Any:
+    """Authenticated Session Bridge profile over the existing Executive OAuth host."""
+
+    from integrations.executive_mcp.web_ceo_sessions import (
+        WEB_CEO_SESSIONS_SERVER_NAME,
+        WEB_CEO_SESSIONS_SERVER_VERSION,
+        validate_web_ceo_sessions_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_web_ceo_v2_app
+
+    direct = _session_bridge_direct_contract(
+        session_target_projector,
+        session_reply_handler,
+        session_summon_handler,
+    )
+    return _build_profile_mcp_app(
+        settings,
+        audit_sink=audit_sink,
         profile_server_name=WEB_CEO_SESSIONS_SERVER_NAME,
         profile_server_version=WEB_CEO_SESSIONS_SERVER_VERSION,
         profile_tools=tuple(build_web_ceo_sessions_tools()),
         profile_validator=validate_web_ceo_sessions_tool_arguments,
         profile_create_app=create_web_ceo_v2_app,
-        workspace_app=workspace_app, content_app=content_app, os_app=os_app,
-        direct_tool_names=SESSION_TOOL_NAMES,
-        direct_submit_names=SESSION_SUBMIT_TOOL_NAMES, direct_handler=direct,
-        direct_error_factory=lambda tool, code, message: envelope(
-            tool, code=code, message=message
-        ),
+        workspace_app=workspace_app,
+        content_app=content_app,
+        os_app=os_app,
         inner_server_version="1.2.0",
+        **direct,
     )
+
 
 def build_web_ceo_sessions_tools() -> list[mcp_types.Tool]:
     from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_TOOL_SPECS
