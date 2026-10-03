@@ -44,6 +44,12 @@
     }
   },
   "resources": {
+    "worker-browser-isolated": {
+      "kind": "browser-fabric-pending",
+      "mode": "isolated",
+      "transport": "stdio",
+      "admission": "required"
+    },
     "worker-browser-b1-local": {
       "kind": "browser-devserver",
       "manifest_path": "config/worker_browser_b1_control_room_devserver.json",
@@ -58,6 +64,22 @@
   },
   "plugins": {},
   "profiles": {
+    "operator.browser.isolated.v1": {
+      "enabled": false,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [],
+      "resources": ["worker-browser-isolated"],
+      "plugins": [],
+      "forbidden": []
+    },
     "operator.appserver.readonly.v1": {
       "enabled": true,
       "execution_surface": "codex-app-server",
