@@ -1,0 +1,298 @@
+{
+  "schema": "market_experience.f0_membership_source_receipt.v1",
+  "recorded_on": "2026-09-24",
+  "operation_id": "market-experience-direction-20260924-astra-001",
+  "evidence_class": "REAL_UPSTREAM_SOURCE_QUALIFICATION_NOT_CORPUS_ADMISSION",
+  "source": {
+    "repository": "fja05680/sp500",
+    "commit": "a2430f2af0c79ddf0748e91de11bdeb1616ab5a7",
+    "interval": {
+      "path": "sp500_ticker_start_end.csv",
+      "git_blob": "3ed3b0e8d9e6e63730c153ee1f13ddaf6ed281bb",
+      "bytes": 28058
+    },
+    "snapshot": {
+      "path": "S&P 500 Historical Components & Changes (Updated).csv",
+      "git_blob": "656b033be9418db272f1903f4f8e79a2a8664e6a",
+      "bytes": 5530907
+    },
+    "readme_git_blob": "43072b7901eaaedbc63a523a1040ac91b5c65dbb",
+    "license_git_blob": "1702a4df51e2c2a0a96ede6b10afeb880b976bbd",
+    "acquisition": "exact GitHub blob reads from the pinned commit; no moving-master source",
+    "source_bytes_committed": false
+  },
+  "structure": {
+    "interval_rows": 1262,
+    "interval_unique_symbols": 1209,
+    "interval_start_min": "1996-01-02",
+    "interval_finite_end_max": "2026-08-18",
+    "interval_open_spans": 503,
+    "snapshot_rows": 2720,
+    "snapshot_unique_symbols": 1209,
+    "snapshot_date_min": "1996-01-02",
+    "snapshot_date_max": "2026-08-18",
+    "invalid_interval_rows": 0,
+    "invalid_snapshot_rows": 0,
+    "inverted_intervals": 0,
+    "overlapping_intervals": 0,
+    "interval_normalization_collisions": 0,
+    "snapshot_normalization_collisions": 0
+  },
+  "semantics": {
+    "converter_end_date": "FIRST_ABSENT_SNAPSHOT",
+    "accepted_interval_interpretation": "start_inclusive_end_exclusive",
+    "existing_reader": "Mastermind loop/single_name_panel.py::members_asof",
+    "existing_reader_behavior": "end_date is exclusive",
+    "conflicting_research_reader": "Macro scripts/s13_reversal_phase0.py::_eligible uses inclusive end",
+    "native_reader_changed": false
+  },
+  "quarter_end_2019_2023": {
+    "requested": 20,
+    "covered": 20,
+    "exclusive_exact": 20,
+    "inclusive_exact": 20,
+    "note": "Quarter ends do not hit a removal boundary in this sample; boundary diagnostics distinguish the semantics.",
+    "comparisons": [
+      {
+        "date": "2019-03-31",
+        "snapshot_date": "2019-02-27",
+        "member_count": 505,
+        "member_sha256": "08705dae185d20c35a78468b2d746b5aa92ddb62c3b87e6c12ef287ab381ab1a",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2019-06-30",
+        "snapshot_date": "2019-06-07",
+        "member_count": 505,
+        "member_sha256": "7324c64d4b099bad99391838bf5ec2dda6422b4ecf766f4c6b952ebe6030f605",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2019-09-30",
+        "snapshot_date": "2019-09-26",
+        "member_count": 505,
+        "member_sha256": "ee8bdbd0488d9d81f40680dfc333e99130879188ed2e78cd8e30dde78f7f7048",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2019-12-31",
+        "snapshot_date": "2019-12-23",
+        "member_count": 505,
+        "member_sha256": "86f8f79fae49bc9db3e8ebd9d8e7b6d49881d718c7aac9ae48c0aa6946db50ea",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2020-03-31",
+        "snapshot_date": "2020-03-03",
+        "member_count": 505,
+        "member_sha256": "799aeafae740d5140ac6c73c0f78e647dde215c51dfb86a2bc9392d828ec6ad1",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2020-06-30",
+        "snapshot_date": "2020-06-22",
+        "member_count": 505,
+        "member_sha256": "cf37ac763844c5e6d09755e1c1eeec8e37505bbfc90dadf10aa12bc8f829c9ff",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2020-09-30",
+        "snapshot_date": "2020-09-21",
+        "member_count": 505,
+        "member_sha256": "3b3f5c08b8c0fdb6b23076d1db5c30922c5605516b2aec007c6975f166a31d6b",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2020-12-31",
+        "snapshot_date": "2020-12-21",
+        "member_count": 505,
+        "member_sha256": "b7a3dc867eb10c70ec3ed4484270626af2baeb2c28768d2642b19791a024625c",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2021-03-31",
+        "snapshot_date": "2021-03-22",
+        "member_count": 505,
+        "member_sha256": "5c45086490601c1b80201310c3a651870540a44efce62feb130335786093f326",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2021-06-30",
+        "snapshot_date": "2021-06-04",
+        "member_count": 505,
+        "member_sha256": "0ec00e79c91d04e0fa2de85ca757b6df5c268592e504891b6a2e1344c0923c56",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2021-09-30",
+        "snapshot_date": "2021-09-20",
+        "member_count": 505,
+        "member_sha256": "595069c17717c45b84d182b4721f388acab62be4b94064b6e6e3fe4c696d4ec6",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2021-12-31",
+        "snapshot_date": "2021-12-20",
+        "member_count": 505,
+        "member_sha256": "474af5cfa50d6934c9a10a5de193281978cf0c7c76685c782bd4576ea37a79f3",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2022-03-31",
+        "snapshot_date": "2022-03-02",
+        "member_count": 505,
+        "member_sha256": "cb6a081937220c12e318e1f4df8d277d4fbe0c54a73e84abca58121a8c8348a3",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2022-06-30",
+        "snapshot_date": "2022-06-28",
+        "member_count": 503,
+        "member_sha256": "313bb2b9c487030ff0e05a2adb9699931ddb51393edcecdea682213eeaca8722",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2022-09-30",
+        "snapshot_date": "2022-09-19",
+        "member_count": 503,
+        "member_sha256": "96d8f2a1ee490a78db0f324fd09e07b35f14f61105a4bf9487d5729fee5283f3",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2022-12-31",
+        "snapshot_date": "2022-12-22",
+        "member_count": 503,
+        "member_sha256": "0efa2ee15b2c55be0b121bdcfe4b397cb71341c7509a0c76460f518591a62318",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2023-03-31",
+        "snapshot_date": "2023-03-20",
+        "member_count": 503,
+        "member_sha256": "56daf2f417a434cb85903670c5b19201fd58d584c27a1b30c32a521b39714fce",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2023-06-30",
+        "snapshot_date": "2023-06-20",
+        "member_count": 503,
+        "member_sha256": "1b43ac737553fb4a8f3eaaf807c897efdf2cff9091b3c60bf3f9a412610b660d",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2023-09-30",
+        "snapshot_date": "2023-09-18",
+        "member_count": 503,
+        "member_sha256": "7a54e32e4ada20cbe9abf1b9256803ef0520ec1c2af9ee509a2ccfb1936d90dc",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      },
+      {
+        "date": "2023-12-31",
+        "snapshot_date": "2023-12-18",
+        "member_count": 503,
+        "member_sha256": "31952a67dac0d64b18c47b1a2faad72ff5b2f6d9a65d43aae4a72f47ac40f3fc",
+        "exclusive_extra": 0,
+        "exclusive_missing": 0,
+        "inclusive_extra": 0,
+        "inclusive_missing": 0
+      }
+    ]
+  },
+  "coverage_boundary": {
+    "date": "2026-08-18",
+    "snapshot_count": 503,
+    "exclusive_extra": [],
+    "exclusive_missing": [],
+    "inclusive_extra": [
+      "AVB",
+      "EQR"
+    ],
+    "inclusive_missing": [],
+    "snapshot_member_sha256": "cae7dbf283aaacc995378610cbcf893ee0031923e9c1fe1e74d2a640d16e29c3",
+    "exclusive_member_sha256": "cae7dbf283aaacc995378610cbcf893ee0031923e9c1fe1e74d2a640d16e29c3",
+    "inclusive_member_sha256": "26cad673c69db834119215cf29ded06a70f3a282112e6218bd95a50f45448d1a"
+  },
+  "limitations": [
+    "Upstream README says the 1996-2019 seed came from book-associated data and later changes were maintained from Wikipedia/manual research.",
+    "Upstream README warns selected changes are incomplete and early years may be missing members.",
+    "Ticker membership is not durable issuer identity; canonical Data OS historical identity must be joined separately.",
+    "This source does not prove historical Mastermind possession or announcement-time availability.",
+    "MIT repository license is not treated as a determination of underlying S&P/index-data rights."
+  ],
+  "rights": {
+    "repository_license_file": "MIT",
+    "underlying_index_data_rights": "UNKNOWN",
+    "internal_source_qualification": true,
+    "model_training": false,
+    "user_redistribution": false,
+    "stock_pilot_admitted": false
+  },
+  "verification": {
+    "targeted_tests": "27 passed",
+    "test_files": [
+      "tests/test_market_experience_f0_membership_source_audit.py",
+      "tests/test_market_experience_membership_boundaries.py"
+    ],
+    "prior_import_seam": "Full loop.single_name_panel import required an unavailable vendored Macro lib; the repository-native members_asof function is instead AST-extracted and executed directly in the passing test.",
+    "production_writer_run": false,
+    "provider_spend_usd": 0,
+    "model_calls": 0
+  }
+}
