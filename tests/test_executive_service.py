@@ -10656,6 +10656,7 @@ def test_maintenance_preparation_publishes_complete_baseline_and_refuses_drift(t
         monkeypatch.setattr(maintenance,"_sealed_ancestors",lambda path:[])
         monkeypatch.setattr(maintenance,"require_stopped",lambda:None)
         monkeypatch.setattr(maintenance.os,"geteuid",lambda:0)
+        monkeypatch.setattr(maintenance,"sys",SimpleNamespace(platform="darwin"))
         args=SimpleNamespace(predecessor_sha=config.proof_base_sha,successor_sha="b"*40,
             root_job_id=receipt["job_id"],recovery_job_id=old_id,recovery_attempt_id=lost.attempt_id)
         bundle=maintenance.prepare(args)
