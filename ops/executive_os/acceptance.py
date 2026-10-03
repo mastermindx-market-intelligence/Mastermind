@@ -1188,7 +1188,7 @@ class Acceptance:
             self._write_json(persist, response)
         return response
 
-    def _broker_status(self, persist: str) -> dict[str, Any]:
+    def _broker_status(self, persist: str | None = None) -> dict[str, Any]:
         code = (
             "import json,sys; "
             "from control_plane.executive_worker_broker import WorkerBrokerClient; "
@@ -1245,8 +1245,21 @@ class Acceptance:
             or value.get("quarantined_reason") is not None
         ):
             raise AcceptanceError("worker broker did not attest the dedicated principal boundary")
-        self._write_json(persist, value)
+        if persist is not None:
+            self._write_json(persist, value)
         return value
+
+    def _wait_replacement_broker(self, expected_pid: int) -> dict[str, Any]:
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
+            try:
+                broker = self._broker_status()
+                if broker.get("broker_pid") == expected_pid:
+                    return broker
+            except AcceptanceError:
+                pass
+            time.sleep(0.25)
+        raise AcceptanceError("replacement worker broker socket did not become ready")
 
     def _launchd_pid(self, label: str) -> int | None:
         completed = _run(
@@ -2365,7 +2378,111 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             return True
         return True
 
-    def interrupted_job(self, old_control_pid: int) -> tuple[str, int]:
+    def _assert_owner_loss_reconciliation(
+        self, outcome: Any, evidence: Any, startup_sweep: dict[str, Any], worker_pid: int,
+    ) -> None:
+        if (
+            not isinstance(outcome, dict)
+            or outcome.get("status") != "MISSING_LOST"
+            or outcome.get("process_was_live") is not False
+        ):
+            raise AcceptanceError("restart did not prove exact missing owner loss")
+        if (
+            not isinstance(evidence, dict)
+            or evidence.get("schema_version") != "mastermind.executive_reconciliation_evidence/v1"
+            or evidence.get("outcome") != {**outcome, "uid_sweep_receipt_path": None}
+        ):
+            raise AcceptanceError("durable reconciliation outcome differs from exact live outcome")
+        sweep = evidence.get("uid_sweep")
+        preceding_startup = (
+            sweep.get("preceding_broker_startup_sweep") if isinstance(sweep, dict) else None
+        )
+        if (
+            not isinstance(sweep, dict)
+            or not _uid_sweep_is_passing(sweep)
+            or sweep.get("reason") != "status_absence"
+            or sweep.get("worker_uid") != self.worker_identity.pw_uid
+            or sweep.get("broker_pid") != worker_pid
+            or preceding_startup != startup_sweep
+        ):
+            raise AcceptanceError("control-owned startup and fresh UID sweeps did not pass")
+        try:
+            startup_at = datetime.fromisoformat(startup_sweep["observed_at"])
+            absent_at = datetime.fromisoformat(sweep["observed_at"])
+            if absent_at.utcoffset() is None or absent_at < startup_at:
+                raise ValueError("absence observation predates startup")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AcceptanceError("fresh absence sweep time is invalid") from exc
+
+    def _restart_interrupted_owners(
+        self, old_control_pid: int, old_worker_pid: int, helper_pid: int,
+        attempt_started_at: str,
+    ) -> tuple[int, int, dict[str, Any]]:
+        # A control-only restart must recover the existing broker-owned run.
+        # For this LOST proof, interrupt both canonical owners, control first.
+        _run(
+            ["/bin/launchctl", "kill", "SIGKILL", f"system/{CONTROL_LABEL}"],
+            label="abrupt active control-service kill",
+        )
+        _run(
+            ["/bin/launchctl", "kill", "SIGKILL", f"system/{WORKER_LABEL}"],
+            label="abrupt active worker-broker kill",
+        )
+        worker_pid = self._wait_pid(WORKER_LABEL, different_from=old_worker_pid)
+        control_pid = self._wait_control(different_from=old_control_pid)
+        pending = self._control_request(
+            "status", persist="interrupted-preactivation-control-status.json"
+        )["result"]
+        if (
+            pending.get("service_state") != "AWAITING_CANARY"
+            or pending.get("startup_reconciliation") != []
+        ):
+            raise AcceptanceError("replacement control reconciled before canary activation")
+        self._assert_process_principal(
+            control_pid, self.control_identity.pw_uid, self.control_group.gr_gid,
+            "replacement control service",
+        )
+        self._assert_process_principal(
+            worker_pid, self.worker_identity.pw_uid, self.worker_group.gr_gid,
+            "replacement worker broker",
+        )
+        broker = self._wait_replacement_broker(worker_pid)
+        startup = broker.get("startup_sweep")
+        if (
+            broker.get("adapter_id") != "codex-cli"
+            or broker.get("broker_pid") != worker_pid
+            or broker.get("worker_uid") != self.worker_identity.pw_uid
+            or broker.get("active_run_id") is not None
+            or broker.get("active_operator_attempt_id") is not None
+            or broker.get("active_operator_generation_id") is not None
+            or broker.get("starting") is not False
+            or broker.get("validation_busy") is not False
+            or broker.get("status_sweep_busy") is not False
+            or broker.get("quarantined_reason") is not None
+            or not isinstance(startup, dict)
+            or not _uid_sweep_is_passing(startup)
+            or startup.get("reason") != "broker_startup"
+            or startup.get("worker_uid") != self.worker_identity.pw_uid
+            or startup.get("broker_pid") != worker_pid
+            or helper_pid not in startup.get("residual_pids_before", [])
+        ):
+            raise AcceptanceError("replacement broker has no exact startup cleanup proof")
+        try:
+            started = datetime.fromisoformat(attempt_started_at)
+            swept = datetime.fromisoformat(startup["observed_at"])
+            if started.utcoffset() is None or swept.utcoffset() is None or swept <= started:
+                raise ValueError("startup sweep predates the interrupted attempt")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AcceptanceError("replacement broker startup time is invalid") from exc
+        if self._pid_exists(helper_pid):
+            raise AcceptanceError("replacement startup left the detached helper alive")
+        self._write_json("interrupted-preactivation-broker-status.json", broker)
+        self._activate_live_canary(control_pid, worker_pid)
+        return control_pid, worker_pid, startup
+
+    def interrupted_job(
+        self, old_control_pid: int, old_worker_pid: int
+    ) -> tuple[str, int, int]:
         created = self._control_request("create-proof-job", persist="interrupted-job-created.json")
         job_id = created["result"].get("job_id")
         if not isinstance(job_id, str):
@@ -2381,17 +2498,16 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         interrupted_attempt_id = running.get("current_attempt_id")
         if not isinstance(interrupted_attempt_id, str):
             raise AcceptanceError("active proof job has no durable attempt identity")
-        self._assert_attempt_attestation(running, "interrupted-attempt-before-kill.json")
+        interrupted_attempt = self._assert_attempt_attestation(
+            running, "interrupted-attempt-before-kill.json"
+        )
         helper_pid = self._spawn_detached_helper()
         still_active = self._job(job_id)
         if still_active.get("status") not in {"RUNNING", "CHECKPOINTED"}:
             raise AcceptanceError("proof job finished before abrupt-restart fault injection")
-        _run(
-            ["/bin/launchctl", "kill", "SIGKILL", f"system/{CONTROL_LABEL}"],
-            label="abrupt active control-service kill",
+        new_pid, new_worker_pid, startup_sweep = self._restart_interrupted_owners(
+            old_control_pid, old_worker_pid, helper_pid, interrupted_attempt.get("started_at")
         )
-        new_pid = self._wait_control(different_from=old_control_pid)
-        self._activate_live_canary(new_pid, self._wait_pid(WORKER_LABEL))
         lost = self._wait_job(job_id, {"LOST"}, timeout=90.0)
         if not lost.get("checkpoint"):
             raise AcceptanceError("LOST attempt did not preserve its checkpoint")
@@ -2418,8 +2534,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         evidence_path_raw = (
             outcome.get("uid_sweep_receipt_path") if isinstance(outcome, dict) else None
         )
-        if not isinstance(evidence_path_raw, str):
-            raise AcceptanceError("restart reconciliation has no control-owned UID evidence")
+        if (
+            not isinstance(outcome, dict)
+            or outcome.get("status") != "MISSING_LOST"
+            or outcome.get("process_was_live") is not False
+            or not isinstance(evidence_path_raw, str)
+        ):
+            raise AcceptanceError("restart reconciliation has no exact MISSING_LOST UID evidence")
         evidence_path = Path(evidence_path_raw)
         evidence_info = evidence_path.lstat()
         if (
@@ -2430,20 +2551,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         ):
             raise AcceptanceError("restart reconciliation UID evidence is not control-private")
         evidence = _safe_json(evidence_path)
-        sweep = evidence.get("uid_sweep")
-        terminal_sweep = (
-            sweep.get("preceding_terminal_sweep") if isinstance(sweep, dict) else None
+        self._assert_owner_loss_reconciliation(
+            outcome, evidence, startup_sweep, new_worker_pid
         )
-        if (
-            not isinstance(sweep, dict)
-            or not _uid_sweep_is_passing(sweep)
-            or sweep.get("reason") != "status_absence"
-            or not isinstance(terminal_sweep, dict)
-            or not _uid_sweep_is_passing(terminal_sweep)
-            or terminal_sweep.get("reason") != "run_terminal"
-            or helper_pid not in terminal_sweep.get("residual_pids_before", [])
-        ):
-            raise AcceptanceError("control-owned terminal and fresh UID sweeps did not pass")
         self._write_json("interrupted-reconciliation-evidence.json", evidence)
 
         seal_path_raw = (
@@ -2598,7 +2708,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 "raw_worker_probe": archive_after_terminal,
             },
         )
-        return job_id, new_pid
+        return job_id, new_pid, new_worker_pid
 
     def backup_restore(self, expected_jobs: Sequence[str]) -> None:
         backup = self._control_request("backup", persist="backup-created.json")
@@ -2780,10 +2890,12 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
     def run(self) -> None:
         self.validate_install()
         self.initialize_runtime_and_fixtures()
-        control_pid, _worker_pid = self.start_and_attest_services()
+        control_pid, worker_pid = self.start_and_attest_services()
         success_job_id = self.successful_job()
         control_pid = self.restart_after_completion(success_job_id, control_pid)
-        interrupted_job_id, control_pid = self.interrupted_job(control_pid)
+        interrupted_job_id, control_pid, worker_pid = self.interrupted_job(
+            control_pid, worker_pid
+        )
         self.backup_restore((success_job_id, interrupted_job_id))
         control_pid = self._wait_control()
         self._wait_pid(WORKER_LABEL)

@@ -1697,7 +1697,9 @@ def _service_from_config(
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
-            process_controller=RemoteWorkerProcessController(client),
+            process_controller=RemoteWorkerProcessController(
+                client, expected_worker_uid=int(raw["worker_uid"])
+            ),
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
                 if exact_target_source is not None else None

@@ -207,6 +207,7 @@ class ProcessPresence(str, Enum):
 
     LIVE = "LIVE"
     ABSENT = "ABSENT"
+    MISSING = "MISSING"
     TERMINAL_OWNED = "TERMINAL_OWNED"
     UNKNOWN = "UNKNOWN"
 
@@ -2923,8 +2924,13 @@ class ExecutiveSupervisor:
                 # retained terminal run still cannot match missing control
                 # metadata, so repeating presence() would recreate the wedge.
                 presence = ProcessPresence.ABSENT
-            elif presence is ProcessPresence.ABSENT:
-                if not self.process_controller.absence_verified(attempt):
+            elif presence in {ProcessPresence.ABSENT, ProcessPresence.MISSING}:
+                verified = (
+                    self.process_controller.presence(attempt) is ProcessPresence.MISSING
+                    if presence is ProcessPresence.MISSING
+                    else self.process_controller.absence_verified(attempt)
+                )
+                if not verified:
                     presence = ProcessPresence.UNKNOWN
                 else:
                     # This must be fresh for an initially absent process too;

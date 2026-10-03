@@ -236,6 +236,10 @@ class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
 
 
+class BrokerRunNotFound(BrokerStateError):
+    """The exact run has no record at this canonical broker owner."""
+
+
 class WorkerAdapterNotImplementedError(WorkerBrokerError):
     """A reviewed adapter is not implemented for broker execution."""
 
@@ -1548,7 +1552,7 @@ class ExecutiveWorkerBroker:
         try:
             return self._runs[run_id]
         except KeyError as exc:
-            raise BrokerStateError(f"run {run_id!r} is unknown to this broker") from exc
+            raise BrokerRunNotFound(f"run {run_id!r} is unknown to this broker") from exc
 
     def _authorize_peer(self, peer: PeerCredentials) -> None:
         if int(peer.uid) != int(self.policy.control_uid):
@@ -4250,7 +4254,7 @@ class RemoteCodexWorkerAdapter:
             )
             terminal_sweep = _uid_sweep_from_json(cancelled.get("uid_sweep"))
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
         status = await self.client.request("status", {"fresh_uid_sweep": True})
         sweep = _uid_sweep_from_json(status.get("status_sweep"))
@@ -4364,8 +4368,15 @@ class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
 class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
-    def __init__(self, client: WorkerBrokerClient) -> None:
+    def __init__(
+        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None
+    ) -> None:
+        if expected_worker_uid is not None and (
+            type(expected_worker_uid) is not int or expected_worker_uid <= 0
+        ):
+            raise ValueError("expected worker UID must be a positive integer")
         self.client = client
+        self.expected_worker_uid = expected_worker_uid
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
 
     def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
@@ -4379,15 +4390,32 @@ class RemoteWorkerProcessController:
     def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
         """Synchronous counterpart used by restart/control recovery seams."""
 
+        # The supervisor grants this path only to a wholly unbound claim.
+        # An exact missing record needs no cancellation; generic errors do not
+        # grant absence. A retained run still receives one canonical cancel.
+        missing = False
         try:
-            result = self.client.request_sync(
-                "cancel",
-                {"run_id": run_id, "reason": "ambiguous control-side start response"},
-            )
-            self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            status = self.client.request_sync("status", {"run_id": run_id})
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
+            missing = True
+        if not missing:
+            if (
+                not isinstance(status, Mapping)
+                or not isinstance(status.get("run"), Mapping)
+                or status["run"].get("run_id") != run_id
+            ):
+                raise BrokerProtocolError("unbound cleanup exact run status is malformed")
+            try:
+                result = self.client.request_sync(
+                    "cancel",
+                    {"run_id": run_id, "reason": "ambiguous control-side start response"},
+                )
+                self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            except RemoteBrokerError as exc:
+                if exc.code != "BrokerRunNotFound":
+                    raise
         if not self._fresh_overall_absence(run_id):
             raise BrokerStateError("ambiguous start cleanup did not prove broker absence")
         return self._uid_sweeps[run_id]
@@ -4424,42 +4452,85 @@ class RemoteWorkerProcessController:
             and attestation.get("launch_nonce") == process.launch_nonce
         )
 
-    def _fresh_overall_absence(self, run_id: str) -> bool:
+    def _fresh_overall_absence(
+        self, attempt_or_run_id: Any, *, require_current_broker_startup: bool = False
+    ) -> bool:
+        run_id = getattr(attempt_or_run_id, "attempt_id", attempt_or_run_id)
+        if require_current_broker_startup and self.expected_worker_uid is None:
+            return False
         try:
             status = self.client.request_sync(
                 "status", {"fresh_uid_sweep": True}
             )
-        except (WorkerBrokerError, OSError):
-            return False
-        try:
+            if not isinstance(status, Mapping):
+                return False
             sweep = _uid_sweep_from_json(status.get("status_sweep"))
-        except BrokerProtocolError:
+        except (WorkerBrokerError, OSError):
             return False
         absent = (
             status.get("active_run_id") is None
+            and status.get("active_operator_attempt_id") is None
+            and status.get("active_operator_generation_id") is None
             and status.get("starting") is False
             and status.get("validation_busy") is False
             and status.get("status_sweep_busy") is False
             and status.get("quarantined_reason") is None
         )
-        if absent:
-            # Restart reconciliation needs both facts: the terminal sweep that
-            # killed residual same-UID descendants and the subsequent fresh
-            # idle sweep that closes the race before fence rotation. Preserve
-            # the former inside the latter across repeated absence checks.
-            previous = self._uid_sweeps.get(run_id)
-            preceding = None
-            if isinstance(previous, Mapping):
-                candidate = previous.get("preceding_terminal_sweep")
-                if isinstance(candidate, Mapping):
-                    preceding = dict(candidate)
-                elif previous.get("reason") != "status_absence":
-                    preceding = dict(previous)
-            combined = dict(sweep)
-            if preceding is not None:
-                combined["preceding_terminal_sweep"] = preceding
-            self._uid_sweeps[run_id] = combined
-        return absent
+        if not absent:
+            return False
+        if self.expected_worker_uid is not None:
+            if not {
+                "adapter_id", "broker_pid", "worker_uid", "active_run_id",
+                "active_operator_attempt_id", "active_operator_generation_id",
+                "starting", "validation_busy", "status_sweep_busy",
+                "quarantined_reason", "status_sweep",
+            }.issubset(status):
+                return False
+            broker_pid = status.get("broker_pid")
+            if (
+                status.get("adapter_id") != "codex-cli"
+                or not _positive_pid(broker_pid)
+                or type(status.get("worker_uid")) is not int
+                or status["worker_uid"] != self.expected_worker_uid
+                or sweep.get("reason") != "status_absence"
+                or sweep.get("worker_uid") != self.expected_worker_uid
+                or sweep.get("broker_pid") != broker_pid
+            ):
+                return False
+        startup = None
+        if require_current_broker_startup:
+            try:
+                startup = _uid_sweep_from_json(status.get("startup_sweep"))
+                started = dt.datetime.fromisoformat(attempt_or_run_id.started_at)
+                startup_at = dt.datetime.fromisoformat(startup["observed_at"])
+                observed = dt.datetime.fromisoformat(sweep["observed_at"])
+                if (
+                    any(value.utcoffset() is None for value in (started, startup_at, observed))
+                    or not started < startup_at <= observed
+                    or startup.get("reason") != "broker_startup"
+                    or startup.get("worker_uid") != self.expected_worker_uid
+                    or startup.get("broker_pid") != broker_pid
+                ):
+                    return False
+            except (WorkerBrokerError, AttributeError, KeyError, TypeError, ValueError):
+                return False
+        # Keep the proof from this same overall status. A terminal run sweep
+        # and a replacement broker's startup sweep have distinct meanings.
+        previous = self._uid_sweeps.get(run_id)
+        preceding = None
+        if isinstance(previous, Mapping):
+            candidate = previous.get("preceding_terminal_sweep")
+            if isinstance(candidate, Mapping):
+                preceding = dict(candidate)
+            elif previous.get("reason") != "status_absence":
+                preceding = dict(previous)
+        combined = dict(sweep)
+        if preceding is not None:
+            combined["preceding_terminal_sweep"] = preceding
+        if startup is not None:
+            combined["preceding_broker_startup_sweep"] = startup
+        self._uid_sweeps[run_id] = combined
+        return True
 
     def presence(self, attempt: Any):
         from control_plane.executive_supervisor import ProcessPresence
@@ -4467,12 +4538,14 @@ class RemoteWorkerProcessController:
         try:
             status = self.client.request_sync("status", {"run_id": attempt.attempt_id})
         except RemoteBrokerError as exc:
-            if exc.code == "BrokerStateError" and self._fresh_overall_absence(
-                attempt.attempt_id
+            if exc.code == "BrokerRunNotFound" and self._fresh_overall_absence(
+                attempt, require_current_broker_startup=True
             ):
-                return ProcessPresence.ABSENT
+                return ProcessPresence.MISSING
             return ProcessPresence.UNKNOWN
         except (WorkerBrokerError, OSError):
+            return ProcessPresence.UNKNOWN
+        if not isinstance(status, Mapping):
             return ProcessPresence.UNKNOWN
         run = status.get("run")
         if not isinstance(run, dict):
@@ -4495,20 +4568,20 @@ class RemoteWorkerProcessController:
             # operation and replay task. This is neither a live Attempt process
             # nor ambiguous identity, and it may not pass a global UID sweep yet.
             return ProcessPresence.TERMINAL_OWNED
-        if self._fresh_overall_absence(attempt.attempt_id):
+        if self._fresh_overall_absence(attempt):
             return ProcessPresence.ABSENT
         return ProcessPresence.UNKNOWN
 
     def absence_verified(self, attempt: Any) -> bool:
         from control_plane.executive_supervisor import ProcessPresence
 
-        return self.presence(attempt) is ProcessPresence.ABSENT
+        return self.presence(attempt) in {ProcessPresence.ABSENT, ProcessPresence.MISSING}
 
     def terminate(self, attempt: Any) -> None:
         from control_plane.executive_supervisor import ProcessPresence
 
         presence = self.presence(attempt)
-        if presence is ProcessPresence.ABSENT:
+        if presence in {ProcessPresence.ABSENT, ProcessPresence.MISSING}:
             return
         if presence is not ProcessPresence.LIVE:
             raise BrokerStateError("remote process identity is ambiguous; refusing cancellation")
@@ -4925,6 +4998,7 @@ __all__ = [
     "BrokerPreSubmitError",
     "BrokerProtocolError",
     "BrokerStateError",
+    "BrokerRunNotFound",
     "DedicatedUIDError",
     "DedicatedUIDSweeper",
     "ExecutiveWorkerBroker",

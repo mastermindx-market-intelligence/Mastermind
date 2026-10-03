@@ -2163,10 +2163,10 @@ class _UnboundBrokerClient:
         if "run_id" in payload:
             assert payload["run_id"] == self.attempt_id
             if self.adapter.ref is None:
-                raise RemoteBrokerError("BrokerStateError", "no such run")
+                raise RemoteBrokerError("BrokerRunNotFound", "no such run")
             # Terminal records remain available; their ProcessRef cannot match
             # the deliberately absent control metadata even after cleanup.
-            return {"run": {"process_ref": dataclasses.asdict(self.adapter.ref),
+            return {"run": {"run_id": self.attempt_id, "process_ref": dataclasses.asdict(self.adapter.ref),
                             "status": "RUNNING" if self.active else "CANCELLED"}}
         assert payload == {"fresh_uid_sweep": True}
         return {"active_run_id": self.attempt_id if self.active else None,
@@ -2283,3 +2283,133 @@ def test_restart_unbound_claim_partial_identity_never_grants_cleanup(tmp_path, m
     assert client.cancelled == []
     monkeypatch.setattr(runtime.attempts, "list_attempts", original_list)
     _assert_unbound_claim_fenced(runtime, attempt, command, work, adapter, supervisor)
+
+
+@pytest.mark.parametrize("fault", [None, "generic", "foreign", "recheck"])
+def test_restart_bound_owner_loss_never_reattaches_or_restarts(tmp_path, fault):
+    from datetime import datetime, timezone
+    from control_plane.executive_worker_broker import (
+        RemoteBrokerError, RemoteWorkerProcessController,
+    )
+
+    runtime, job_id, workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    first_adapter = RestartCapableFakeAdapter(inspector)
+    active = asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
+    original = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    assert original.launch_metadata["worker_recovery_binding"]
+    original_checkpoint = runtime.jobs.get_job(job_id).checkpoint
+    startup = FakeProcessController(inspector).uid_sweep_receipt(original)
+    startup.update(reason="broker_startup",
+                   observed_at=datetime.now(timezone.utc).isoformat(),
+                   residual_pids_before=[42420], signal_sent=True, found_residuals=True)
+    assert datetime.fromisoformat(startup["observed_at"]) > datetime.fromisoformat(original.started_at)
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+            self.fresh_count = 0
+        def request_sync(self, operation, payload):
+            self.calls.append((operation, dict(payload)))
+            assert operation == "status"  # no cancel, start, or reattach RPC
+            if "run_id" in payload:
+                assert payload["run_id"] == original.attempt_id
+                raise RemoteBrokerError(
+                    "BrokerStateError" if fault == "generic" else "BrokerRunNotFound",
+                    "exact run unavailable")
+            assert payload == {"fresh_uid_sweep": True}
+            self.fresh_count += 1
+            sweep = FakeProcessController(inspector).uid_sweep_receipt(original)
+            sweep["observed_at"] = datetime.now(timezone.utc).isoformat()
+            if fault == "foreign" or (fault == "recheck" and self.fresh_count > 1):
+                sweep["broker_pid"] += 1
+            return dict(adapter_id="codex-cli", worker_uid=startup["worker_uid"],
+                        broker_pid=startup["broker_pid"], active_run_id=None,
+                        active_operator_attempt_id=None, active_operator_generation_id=None,
+                        starting=False, validation_busy=False, status_sweep_busy=False,
+                        quarantined_reason=None, startup_sweep=startup, status_sweep=sweep)
+
+    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    second_adapter = RestartCapableFakeAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, second_adapter)
+    client = Client()
+    restarted.process_controller = RemoteWorkerProcessController(
+        client, expected_worker_uid=startup["worker_uid"])
+    outcome = restarted.reconcile_restart(requeue_lost=False)[0]
+    persisted = reopened.attempts.get_attempt(original.attempt_id)
+    assert second_adapter.start_calls == 0 and second_adapter.reattach_calls == []
+    assert restarted.take_recovered_runs() == ()
+    assert len(reopened.attempts.list_attempts(job_id)) == 1
+    assert reopened.jobs.get_job(job_id).checkpoint == original_checkpoint
+    if fault is not None:
+        assert outcome.status is ReconcileStatus.IDENTITY_AMBIGUOUS
+        assert persisted.status == original.status
+        assert persisted.fence_generation == original.fence_generation
+        assert outcome.assignment_seal_receipt_path is None
+        assert outcome.uid_sweep_receipt_path is None
+    else:
+        assert outcome.status is ReconcileStatus.MISSING_LOST
+        assert outcome.process_was_live is False
+        assert persisted.status is AttemptStatus.LOST
+        assert persisted.fence_generation == original.fence_generation + 1
+        assert reopened.jobs.get_job(job_id).status is JobStatus.LOST
+        assert Path(outcome.assignment_seal_receipt_path).is_file()
+        evidence = json.loads(Path(outcome.uid_sweep_receipt_path).read_text())
+        assert evidence["uid_sweep"]["reason"] == "status_absence"
+        assert evidence["uid_sweep"]["preceding_broker_startup_sweep"] == startup
+        assert client.fresh_count == 2
+
+
+@pytest.mark.parametrize("second", [
+    ProcessPresence.ABSENT, ProcessPresence.LIVE, ProcessPresence.UNKNOWN,
+])
+def test_restart_missing_owner_recheck_must_remain_missing(tmp_path, second):
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    inspector = FakeInspector()
+    adapter = RestartCapableFakeAdapter(inspector)
+    active = asyncio.run(_supervisor(runtime, tmp_path, adapter).start_job(job_id))
+    original = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
+    restarted = _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector))
+
+    class Controller:
+        states = iter([ProcessPresence.MISSING, second])
+        def presence(self, attempt):
+            return next(self.states)
+        def absence_verified(self, attempt):
+            raise AssertionError("generic absence must not replace the MISSING recheck")
+        def uid_sweep_receipt(self, attempt):
+            raise AssertionError("drift must not reach terminal sealing")
+        def terminate(self, attempt):
+            raise AssertionError("drift must not signal a process")
+
+    restarted.process_controller = Controller()
+    outcome = restarted.reconcile_restart(requeue_lost=False)[0]
+    assert outcome.status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert outcome.assignment_seal_receipt_path is None
+    assert outcome.uid_sweep_receipt_path is None
+    persisted = runtime.attempts.get_attempt(original.attempt_id)
+    assert persisted.status == original.status
+    assert persisted.fence_generation == original.fence_generation
+    assert restarted.take_recovered_runs() == ()
+
+
+def test_restart_unbound_generic_broker_error_never_cancels_or_proves_absence(tmp_path, monkeypatch):
+    from control_plane.executive_worker_broker import RemoteBrokerError
+
+    runtime, work, command, adapter, supervisor, attempt, client = _unbound_crash_fixture(
+        tmp_path, monkeypatch, before_start=True)
+    requests = []
+    def request(operation, payload):
+        requests.append((operation, dict(payload)))
+        assert operation == "status" and payload == {"run_id": attempt.attempt_id}
+        raise RemoteBrokerError("BrokerStateError", "ambiguous owner state")
+    client.request_sync = request
+    outcome = supervisor.reconcile_restart()[0]
+    assert outcome.status is ReconcileStatus.IDENTITY_AMBIGUOUS
+    assert outcome.assignment_seal_receipt_path is None
+    assert outcome.uid_sweep_receipt_path is None
+    assert client.cancelled == [] and adapter.start_count == 0
+    assert requests == [("status", {"run_id": attempt.attempt_id})] * 2
+    persisted = runtime.attempts.get_attempt(attempt.attempt_id)
+    assert persisted.status is AttemptStatus.CLAIMED
+    assert persisted.fence_generation == attempt.fence_generation
