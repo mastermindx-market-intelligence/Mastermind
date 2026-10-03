@@ -185,7 +185,6 @@ def validate_install_source(
     if remote.returncode != 0:
         raise InstallSourcePolicyError("checkout has no exact protected origin/master ref")
     remote_sha = _require_sha(remote.stdout.strip(), "origin/master SHA")
-    _require_complete_source_closure(source_repo, expected_sha)
 
     if not allow_frozen_accepted_ancestor:
         if protected_master_sha is not None or installer_repo is not None:
@@ -196,6 +195,7 @@ def validate_install_source(
             raise InstallSourcePolicyError(
                 "expected SHA is not the checkout's exact origin/master"
             )
+        _require_complete_source_closure(source_repo, expected_sha)
         return {
             "expected_sha": expected_sha,
             "mode": "exact_protected_master",
@@ -231,6 +231,7 @@ def validate_install_source(
         raise InstallSourcePolicyError(
             "frozen accepted release is not an ancestor of protected master"
         )
+    _require_complete_source_closure(source_repo, expected_sha)
 
     if installer_repo is not None:
         _require_checkout(
