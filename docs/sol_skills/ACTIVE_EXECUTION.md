@@ -20,8 +20,8 @@ provider runtimes keep their existing authority.
 Advance the highest-leverage unfinished capability through the real critical path until either:
 
 * the requested outcome is production-proven at the level the commission requires; or
-* every materially useful in-scope lane is stopped by a genuine authority, effect-uncertainty,
-  platform, or external-human boundary; or
+* every materially useful in-scope lane has collapsed to a genuine external human/platform/effect
+  boundary, or is already owned by proven durable execution with a lawful return path; or
 * Step 8 permits a verified CHECKPOINTED_CONTINUATION while the mission remains incomplete.
 
 A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
@@ -267,8 +267,14 @@ When the active lane hits a boundary:
 2. freeze that lane without inventing success or retry authority;
 3. inspect the already-authorized program DAG for the highest-leverage path-disjoint dependency;
 4. if one exists, switch to it immediately and continue;
-5. stop the whole turn for the blocker only when every materially useful in-scope lane is blocked,
-   or when proceeding elsewhere would violate dependency/authority law.
+5. if every current lane is blocked, treat that census as `ALL_SCOPED_LANES_BLOCKED`
+   **diagnostic evidence, not a finalization class**. For every internal Mastermind dependency,
+   convert the blocker into an owned next action: resolve it, route it to the canonical owner under
+   current authority, or prove an already-running durable owner plus return path. "Not my lane" can
+   forbid direct mutation; it never completes the mission. Stop only when the remaining frontier has
+   collapsed to a genuine external human/platform/effect boundary, or when real durable execution
+   owns the wait. A bounded worker may return BLOCKED to its parent; that does not terminally classify
+   the parent mission.
 
 Example: a local administrator authentication ceremony blocks installation, but nonprivileged
 preflight, exact release qualification, or a disjoint implementation dependency remains available.
@@ -414,10 +420,9 @@ Before ending a substantial active-execution turn, classify the state into exact
 * `EFFECT_UNKNOWN` — an unresolved modifying effect makes every remaining useful in-scope action
   unsafe or dependent on that unknown effect; same-carrier reconciliation is required before any
   further scoped continuation can be safe;
-* `ALL_SCOPED_LANES_BLOCKED` — every materially useful authorized lane is blocked, with exact blockers
-  and next owners known;
-* `PLATFORM_FAILURE` — the required platform/tool substrate is unavailable and no independent useful
-  in-scope lane remains;
+* `PLATFORM_FAILURE` — the required external platform/tool substrate is proven unavailable, no safe
+  internal resolver or independent useful in-scope lane remains, and the exact unavailable action is
+  evidenced. An internal repo/PR/owner dependency is not a platform failure;
 * `DURABLE_EXECUTION_RUNNING` — real external durable execution is proven started/running under its
   canonical owner, with a lawful return/wake path armed; local turn continuation would add no useful
   work until that result arrives.
@@ -441,9 +446,9 @@ A checkpoint is not itself a reason to stop. A permitted continuation protects t
 it never makes a partial delivery PROVEN_OUTCOME. A genuinely safe next unit should continue unless
 one of these verified stop/continuation conditions applies.
 
-A capability-based `EXACT_HUMAN_GATE`, `PLATFORM_FAILURE`, or
-`ALL_SCOPED_LANES_BLOCKED` requires the Step 6 negative-capability evidence for every capability
-claim that materially justifies the stop: exact requested action family, current discovery result,
+A capability-based `EXACT_HUMAN_GATE` or `PLATFORM_FAILURE` requires the Step 6
+negative-capability evidence for every capability claim that materially justifies the stop: exact
+requested action family, current discovery result,
 permission/preflight result or explicit refusal/error, target/binding scope, exhausted safe probes,
 and the exact human/admin ceremony when applicable. If that evidence is missing and a useful safe
 discovery/preflight is still possible, the truthful classification is `MORE_WORK_EXISTS`, not a
@@ -455,8 +460,9 @@ If no authorized persistent path is reachable, avoid further effects that enlarg
 gap; leave an emergency recovery note under the genuine platform/gate disposition, not a fabricated
 CHECKPOINTED_CONTINUATION. Such a note neither proves persistence nor changes the effect state.
 
-If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**. Select the highest-leverage
-unblocked dependency and continue execution.
+If the truthful classification is `MORE_WORK_EXISTS` or the current lane census is
+`ALL_SCOPED_LANES_BLOCKED`, **do not finalize**. Select the highest-leverage unblocked dependency,
+demolish/route an internal blocker, or establish proven durable execution with a return path.
 
 A requested effort window such as "work for 60–120 minutes" is not a correctness boundary. Use the
 productive turn fully; stop on outcome/gate evidence, not because an arbitrary amount of time elapsed

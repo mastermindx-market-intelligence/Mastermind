@@ -60,7 +60,8 @@ def test_final_response_gate_is_closed_vocabulary_and_more_work_cannot_finalize(
         "MORE_WORK_EXISTS",
     ):
         assert state in text
-    assert "If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**" in text
+    assert "If the truthful classification is `MORE_WORK_EXISTS` or the current lane census is" in text
+    assert "`ALL_SCOPED_LANES_BLOCKED`, **do not finalize**" in text
 
 
 def test_non_delta_loop_forces_replan_before_third_artifact_cycle():
@@ -74,7 +75,9 @@ def test_blocked_lane_does_not_end_turn_while_independent_work_exists():
     text = _read(ACTIVE)
     assert "Treat a blocker as lane-local first" in text
     assert "switch to it immediately and continue" in text
-    assert "every materially useful in-scope lane is blocked" in text
+    assert "`ALL_SCOPED_LANES_BLOCKED`" in text
+    assert "**diagnostic evidence, not a finalization class**" in text
+    assert "\"Not my lane\" can" in text
 
 
 def test_effect_unknown_is_terminal_only_when_no_safe_independent_lane_remains():

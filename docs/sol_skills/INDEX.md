@@ -236,6 +236,9 @@ specific law.
     dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
     turn, while another useful independent lane remains. Supporting artifacts do not substitute for
     capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
+    `ALL_SCOPED_LANES_BLOCKED` is diagnostic, not a principal finalization class: internal
+    Mastermind dependencies must be resolved, routed to their canonical owner, or bound to proven
+    durable execution + return. "Not my lane" can block direct mutation; it cannot end the mission.
     ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission
     incomplete, current checkpoint readback, justified boundary and exact next action, without
     transferring custody or inventing a wake. Durable execution after a turn still requires a
