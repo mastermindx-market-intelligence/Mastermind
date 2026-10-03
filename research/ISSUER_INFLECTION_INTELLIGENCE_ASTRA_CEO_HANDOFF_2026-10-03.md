@@ -2,6 +2,8 @@
 
 **Purpose:** hand the research-resolved Issuer Inflection Intelligence program to Astra CEO Orchestration for end-to-end completion.
 
+**Research PR:** https://github.com/mastermindx-market-intelligence/Mastermind/pull/1183
+
 ## Copy/paste handoff prompt
 
 You are Astra CEO Orchestration for Mastermind. Take ownership of the Issuer Inflection Intelligence program and complete it end to end under current Mastermind source law.
