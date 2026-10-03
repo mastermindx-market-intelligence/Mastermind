@@ -22739,6 +22739,13 @@ class ActiveOperatorBindingFacts:
     provider: str
     account_label: str
     owner_seat: str
+    job_id: str
+    worker_id: str
+    process_generation_id: str
+    pid: int
+    pgid: int
+    process_start_identity: str
+    boot_id: str
 
 
 def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
@@ -24035,6 +24042,55 @@ class Runtime:
                 attempt_token=attempt_token,
             )
 
+    def current_harness_binding_for_parent_pid(
+        self,
+        parent_pid: int,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveOperatorBindingFacts:
+        """Select one current OHF writer by an internally observed PID hint.
+
+        This read-only projection does not authenticate an MCP peer. The host
+        must additionally prove the connected child's kernel parent identity
+        equals this exact process instance before each effect.
+        """
+        if type(parent_pid) is not int or not 0 < parent_pid <= (1 << 31) - 1:
+            raise StateConflict("runtime parent lookup requires an exact positive PID")
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_binding_for_parent_pid(
+                    parent_pid, connection=owned_connection
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        rows = connection.execute(
+            """
+            SELECT a.attempt_id,g.process_generation_id,g.session_epoch_id,
+                   g.pid,g.pgid,g.process_start_identity,g.boot_id
+            FROM main.process_generations g
+            JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+            JOIN main.attempts a ON a.attempt_id=e.attempt_id
+            WHERE g.pid=? AND g.executive_writer_held=1
+              AND g.ended_at_ms IS NULL AND e.state='CURRENT'
+            LIMIT 2
+            """,
+            (parent_pid,),
+        ).fetchall()
+        if len(rows) != 1:
+            raise StateConflict("runtime parent lookup requires exactly one current writer")
+        row = rows[0]
+        facts = self.current_harness_binding_source(
+            str(row["attempt_id"]), connection=connection
+        )
+        if any(
+            getattr(facts, key) != row[key]
+            for key in (
+                "attempt_id", "session_epoch_id", "process_generation_id",
+                "pid", "pgid", "process_start_identity", "boot_id",
+            )
+        ):
+            raise StateConflict("runtime parent lookup process identity drifted")
+        return facts
+
     def current_harness_binding_source(
         self,
         attempt_id: str,
@@ -24534,6 +24590,13 @@ class Runtime:
             provider=str(placement["provider"]),
             account_label=str(placement["account_label"]),
             owner_seat=str(row["owner_seat"]),
+            job_id=str(row["job_id"]),
+            worker_id=str(row["worker_id"]),
+            process_generation_id=str(row["process_generation_id"]),
+            pid=int(row["generation_pid"]),
+            pgid=int(row["generation_pgid"]),
+            process_start_identity=str(row["generation_process_start_identity"]),
+            boot_id=str(row["generation_boot_id"]),
         )
 
 

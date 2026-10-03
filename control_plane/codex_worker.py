@@ -269,6 +269,7 @@ class ProcessIdentity:
     effective_gid: int
     real_uid: int
     real_gid: int
+    parent_pid: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1142,6 +1143,7 @@ class ProcessInspector:
                 effective_gid=int(info.pbi_gid),
                 real_uid=int(info.pbi_ruid),
                 real_gid=int(info.pbi_rgid),
+                parent_pid=int(info.pbi_ppid),
             )
 
         try:
