@@ -3,7 +3,9 @@
 import ast
 import hashlib
 import os
+import struct
 import subprocess
+import zlib
 import sys
 import tempfile
 import time
@@ -15,12 +17,15 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 RECIPE_DIR = os.path.join(REPO_ROOT, "integrations", "workbench_action_mcp", "recipes")
 CANARY_CHECKSUM = os.path.join(RECIPE_DIR, "canary_checksum.py")
 CANARY_REFUSE = os.path.join(RECIPE_DIR, "canary_refuse.py")
+SOURCE_FINGERPRINT_PNG = os.path.join(RECIPE_DIR, "source_fingerprint_png.py")
 PYTHON = os.path.realpath(sys.executable)
 CLOSED_ENV = {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONSAFEPATH": "1"}
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 HELLO_SHA256 = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
 CHECKSUM_REFUSAL = b"checksum-refused\n"
 VALIDATION_REFUSAL = b"validation-refused\n"
+PNG_REFUSAL = b"fingerprint-png-refused\n"
+PNG_OK = b"fingerprint-png-ok\n"
 
 CHECKSUM_SEQUENCE = [
     "line=01", "line=02", "line=03", "line=04", "line=05", "line=06",
@@ -169,7 +174,14 @@ def test_recipe_source_has_exact_imports_and_no_escape_apis():
         "spawnve", "spawnvp", "spawnvpe", "execl", "execle", "execlp",
         "execlpe", "execv", "execve", "execvp", "execvpe",
     }
-    for recipe in (CANARY_CHECKSUM, CANARY_REFUSE):
+    expected = {
+        CANARY_CHECKSUM: {"hashlib", "os", "stat", "sys"},
+        CANARY_REFUSE: {"hashlib", "os", "stat", "sys"},
+        SOURCE_FINGERPRINT_PNG: {
+            "hashlib", "os", "stat", "struct", "sys", "zlib"
+        },
+    }
+    for recipe, expected_imports in expected.items():
         with open(recipe, "r", encoding="utf-8") as source_file:
             tree = ast.parse(source_file.read(), filename=recipe)
         imported = set()
@@ -187,13 +199,14 @@ def test_recipe_source_has_exact_imports_and_no_escape_apis():
                     and node.func.value.id == "os"
                 ):
                     assert node.func.attr not in prohibited_os_calls
-        assert imported == {"hashlib", "os", "stat", "sys"}
+        assert imported == expected_imports
 
 
-def test_recipe_inventory_contains_only_two_recipes_and_empty_init():
-    """Adding another executable recipe would bypass the fixed two-recipe review."""
+def test_recipe_inventory_contains_only_three_recipes_and_empty_init():
+    """Adding another executable recipe would bypass the fixed three-recipe review."""
     assert sorted(name for name in os.listdir(RECIPE_DIR) if name.endswith(".py")) == [
         "__init__.py", "canary_checksum.py", "canary_refuse.py",
+        "source_fingerprint_png.py",
     ]
     with open(os.path.join(RECIPE_DIR, "__init__.py"), "rb") as init_file:
         assert init_file.read() == b""
@@ -456,5 +469,89 @@ def test_refusal_recipe_valid_file_emits_exact_deliberate_refusal():
             b"validation-refused\n", 7,
         )
         assert _read_file(path) == before
+    finally:
+        os.unlink(path)
+
+
+
+def _png_chunks(payload):
+    assert payload.startswith(b"\x89PNG\r\n\x1a\n")
+    offset = 8
+    rows = []
+    while offset < len(payload):
+        assert offset + 12 <= len(payload)
+        size = struct.unpack(">I", payload[offset : offset + 4])[0]
+        kind = payload[offset + 4 : offset + 8]
+        data = payload[offset + 8 : offset + 8 + size]
+        crc = struct.unpack(">I", payload[offset + 8 + size : offset + 12 + size])[0]
+        assert zlib.crc32(kind + data) & 0xFFFFFFFF == crc
+        rows.append((kind, data))
+        offset += 12 + size
+        if kind == b"IEND":
+            break
+    assert offset == len(payload)
+    return rows
+
+
+def test_source_fingerprint_png_is_deterministic_valid_and_source_bound():
+    path = _make_file(b"hello world")
+    try:
+        before = _read_file(path)
+        outputs = []
+        for _ in range(2):
+            with open(path, "rb") as input_file:
+                result = _invoke(
+                    SOURCE_FINGERPRINT_PNG,
+                    input_file.fileno(),
+                    HELLO_SHA256,
+                    "fixture.bin",
+                    pass_fd=input_file.fileno(),
+                    require_blocked=True,
+                )
+            outputs.append(result)
+        first, second = outputs
+        assert first == second
+        png, stderr, returncode = first
+        assert returncode == 0
+        assert stderr == PNG_OK
+        assert 0 < len(png) <= 65536
+        chunks = _png_chunks(png)
+        assert [kind for kind, _data in chunks] == [b"IHDR", b"tEXt", b"IDAT", b"IEND"]
+        width, height, depth, color_type, compression, filtering, interlace = struct.unpack(
+            ">IIBBBBB", chunks[0][1]
+        )
+        assert (width, height, depth, color_type) == (320, 96, 8, 2)
+        assert (compression, filtering, interlace) == (0, 0, 0)
+        key, metadata = chunks[1][1].split(b"\x00", 1)
+        assert key == b"MastermindArtifact"
+        assert metadata == (
+            b"recipe=source_fingerprint_png;path=fixture.bin;sha256="
+            + HELLO_SHA256.encode("ascii")
+            + b";result=MATCH"
+        )
+        raw_scanlines = zlib.decompress(chunks[2][1])
+        assert len(raw_scanlines) == height * (1 + width * 3)
+        assert all(
+            raw_scanlines[row * (1 + width * 3)] == 0
+            for row in range(height)
+        )
+        assert _read_file(path) == before
+    finally:
+        os.unlink(path)
+
+
+def test_source_fingerprint_png_hash_mismatch_is_fixed_refusal():
+    path = _make_file(b"hello world")
+    try:
+        with open(path, "rb") as input_file:
+            result = _invoke(
+                SOURCE_FINGERPRINT_PNG,
+                input_file.fileno(),
+                EMPTY_SHA256,
+                "fixture.bin",
+                pass_fd=input_file.fileno(),
+                require_blocked=True,
+            )
+        _assert_fixed_refusal(result, PNG_REFUSAL)
     finally:
         os.unlink(path)

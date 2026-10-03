@@ -346,7 +346,7 @@ def test_stdio_initialize_list_shutdown_roundtrip(tmp_path: Path) -> None:
             "workspace_manifest", "read_project_file", "preview_text_replace",
             "prepare_text_patch", "commit_text_patch", "reconcile_text_patch",
             "prepare_project_command", "run_project_command",
-            "read_action_result", "reconcile_action",
+            "read_action_result", "read_action_artifact", "reconcile_action",
         }
         process.assert_exit(0)
         assert not process.fallback_used

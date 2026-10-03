@@ -37,6 +37,7 @@ COMMAND_TOOLS = {
     "prepare_project_command",
     "run_project_command",
     "read_action_result",
+    "read_action_artifact",
     "reconcile_action",
 }
 
@@ -92,6 +93,7 @@ def test_manifest_validates_live_scope_and_describes_unified_profile(tmp_path) -
         "prepare_project_command",
         "run_project_command",
         "read_action_result",
+        "read_action_artifact",
         "reconcile_action",
     ]
     assert manifest["data"]["effects"] == {
@@ -104,6 +106,7 @@ def test_manifest_validates_live_scope_and_describes_unified_profile(tmp_path) -
     assert [recipe["recipe_id"] for recipe in manifest["data"]["recipes"]] == [
         "canary_checksum",
         "canary_refuse",
+        "source_fingerprint_png",
     ]
     assert [row["tool"] for row in _audit_lines(audit)] == ["workspace_manifest"]
 
