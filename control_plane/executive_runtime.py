@@ -59,6 +59,7 @@ from control_plane.executive_coo_policy import (
     EXPECTED_POLICY_SHA256,
 )
 from control_plane.executive_orchestration_principal import (
+    base_process_identity,
     OperatorPrincipalObservation,
     OrchestrationPrincipalError,
     build_execution_principal_snapshot,
@@ -18067,7 +18068,7 @@ class OperatorHarnessRegistry:
                     != generation.process_generation_id
                     or observed_principal.provider_session_id
                     != found["provider_session_id"]
-                    or observed_principal.process_identity != expected_process
+                    or base_process_identity(observed_principal.process_identity) != expected_process
                     or placement.get("worker_id") != row["worker_id"]
                     or placement.get("quota_class") != row["quota_class"]
                     or not isinstance(grant, dict)
@@ -18280,7 +18281,7 @@ class OperatorHarnessRegistry:
                 "decision": LaunchDecision.ALLOW.value,
                 "attestation_digest": current["observed_attestation_digest"],
             }
-            or observation["process_identity"]
+            or base_process_identity(observation["process_identity"])
             != {
                 "pid": current["pid"],
                 "pgid": current["pgid"],
@@ -22746,6 +22747,8 @@ class ActiveOperatorBindingFacts:
     pgid: int
     process_start_identity: str
     boot_id: str
+    admitted_unique_id: int | None = None
+    admitted_pidversion: int | None = None
 
 
 def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
@@ -24573,7 +24576,7 @@ class Runtime:
             }
             or observation["process_generation_id"] != row["process_generation_id"]
             or observation["provider_session_id"] != row["epoch_provider_session"]
-            or observation["process_identity"]
+            or base_process_identity(observation["process_identity"])
             != {
                 "pid": row["generation_pid"],
                 "pgid": row["generation_pgid"],
@@ -24597,6 +24600,8 @@ class Runtime:
             pgid=int(row["generation_pgid"]),
             process_start_identity=str(row["generation_process_start_identity"]),
             boot_id=str(row["generation_boot_id"]),
+            admitted_unique_id=observation["process_identity"].get("unique_id"),
+            admitted_pidversion=observation["process_identity"].get("pidversion"),
         )
 
 

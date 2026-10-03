@@ -102,7 +102,7 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
     )
 
 
-def _admitted_runtime(tmp_path, *, provider: str = "openai-codex"):
+def _admitted_runtime(tmp_path, *, provider: str = "openai-codex", exec_identity=None):
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
         "worker-a",
@@ -166,6 +166,7 @@ def _admitted_runtime(tmp_path, *, provider: str = "openai-codex"):
             "pgid": process.pgid,
             "process_start_identity": process.process_start_identity,
             "boot_id": process.boot_id,
+            **(exec_identity or {}),
         },
         os_principal_name="fixture-principal",
         os_principal_uid=os.getuid(),
@@ -1317,3 +1318,17 @@ def test_parent_pid_lookup_rejects_two_candidates_before_projection(tmp_path, mo
                         lambda *a, **k: pytest.fail("ambiguous parent must not project"))
     with pytest.raises(StateConflict, match="exactly one current writer"):
         runtime.current_harness_binding_for_parent_pid(process.pid)
+
+
+@pytest.mark.parametrize("exec_identity", [None, {"unique_id": 8001, "pidversion": 4}])
+def test_current_writer_projects_only_exec_identity_sealed_in_admission(tmp_path, exec_identity):
+    runtime, dispatch, sealed, epoch, generation, process, profile = _admitted_runtime(
+        tmp_path, exec_identity=exec_identity,
+    )
+    before = _sqlite_snapshot(runtime)
+    facts = runtime.current_harness_binding_source(sealed.attempt_id)
+    assert (facts.admitted_unique_id, facts.admitted_pidversion) == (
+        (8001, 4) if exec_identity else (None, None)
+    )
+    assert facts.pid == process.pid
+    assert _sqlite_snapshot(runtime) == before
