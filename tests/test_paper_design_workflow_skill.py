@@ -247,4 +247,4 @@ def test_publication_drift_uses_current_same_app_refresh_lifecycle():
     assert "current OpenAI behavior requires recreate + republish" not in skill
     assert "Current OpenAI Business behavior also does not support updating a published app in place" not in connection
     assert "Business published apps currently require recreate + republish" not in integration
-    assert "do not create a duplicate app/tunnel" in connection
+    assert "do not create a duplicate app/tunnel" in connection.lower()
