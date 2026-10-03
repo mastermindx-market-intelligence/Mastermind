@@ -26,6 +26,7 @@ from typing import Any, Callable
 from . import web_sol_instance as wsi
 from . import web_sol_protocol as wsp
 from . import web_sol_census_protocol as census
+from . import web_sol_runtime_binding as wrb
 
 NATIVE_HOST_NAME = "com.mastermind.web_sol_surface"
 EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
@@ -61,6 +62,11 @@ _PROBE_KEYS = frozenset(
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
 _TYPED_REENTRY_NONCES: set[str] = set()
 MAX_TYPED_REENTRY_NONCES = 256
+# One existing process-local submit fence, shared by continuation and cognition.
+# Durable/restart reconciliation remains with the incumbent effect owners.
+_SUBMIT_CONTINUATION_NONCES: set[str] = set()
+_SUBMIT_CONTINUATION_TURNS: set[str] = set()
+MAX_SUBMIT_CONTINUATION_EFFECTS = 256
 
 
 class NativeHostError(RuntimeError):
@@ -481,15 +487,74 @@ def _timeout_code(request: dict[str, Any]) -> str:
         return "foreground_effect_unknown"
     if request.get("action") == "TYPED_REENTRY":
         return "typed_reentry_timeout"
+    if request.get("action") == "SUBMIT_CONTINUATION":
+        return "continuation_submit_effect_unknown"
+    if request.get("action") == "SUBMIT_COGNITION_ASSIGNMENT":
+        return "cognition_submit_effect_unknown"
+    if request.get("action") == "OBSERVE_CONTINUATION_ACK":
+        return "semantic_ack_timeout"
+    if request.get("action") == "OBSERVE_COGNITION_RESULT":
+        return "cognition_result_timeout"
     return "census_timeout" if request.get("schema") == census.REQUEST_SCHEMA else "inspect_timeout"
+
+
+def _receipt_match_fields(request: dict[str, Any]) -> tuple[str, ...]:
+    if request.get("schema") == census.REQUEST_SCHEMA:
+        return census.IDENTITY_FIELDS
+    fields = list(_MATCH_FIELDS)
+    if request.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
+        fields.extend(("operation_id", "result_digest", "obligation_digest"))
+    if request.get("action") in {
+        wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
+        wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+    }:
+        fields.extend(
+            (
+                "turn_id",
+                "directive_digest",
+                "session_alias",
+                "runtime_binding_id",
+                "runtime_binding_generation",
+                "runtime_binding_fingerprint",
+                "wake_obligation_ids",
+                "wake_obligation_digest",
+            )
+        )
+    if request.get("action") == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        fields.extend(wsp._COGNITION_BINDING_PAYLOAD_KEYS)
+    if request.get("action") == wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value:
+        fields.extend(wsp._COGNITION_BINDING_PAYLOAD_KEYS)
+    return tuple(fields)
 
 
 def _receipt_matches(
     request: dict[str, Any],
     receipt: dict[str, Any],
 ) -> bool:
-    fields = census.IDENTITY_FIELDS if request.get("schema") == census.REQUEST_SCHEMA else _MATCH_FIELDS
-    return all(receipt.get(field) == request[field] for field in fields)
+    if request.get("action") == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value:
+        expected_identity = {
+            field: request["cognition_payload"][field]
+            for field in wsp._COGNITION_IDENTITY_KEYS
+        }
+        if receipt.get("cognition_identity") != expected_identity:
+            return False
+    if request.get("action") == wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value:
+        observation = receipt.get("cognition_observation")
+        if observation is None:
+            return (
+                receipt.get("status") in wsp._COGNITION_OBSERVE_REFUSAL_STATUSES
+                and all(receipt.get(field) == request[field]
+                        for field in _receipt_match_fields(request))
+            )
+        if not isinstance(observation, dict):
+            return False
+        for field in wsp._COGNITION_OBSERVE_IDENTITY_KEYS:
+            if observation.get(field) != request["cognition_observe_payload"].get(field):
+                return False
+    return all(
+        receipt.get(field) == request[field]
+        for field in _receipt_match_fields(request)
+    )
 
 
 def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
@@ -497,6 +562,14 @@ def _untrusted_receipt_code(request: dict[str, Any], default: str) -> str:
         return "foreground_effect_unknown"
     if request.get("action") == "TYPED_REENTRY":
         return "typed_reentry_effect_unknown"
+    if request.get("action") == "SUBMIT_CONTINUATION":
+        return "continuation_submit_effect_unknown"
+    if request.get("action") == "SUBMIT_COGNITION_ASSIGNMENT":
+        return "cognition_submit_effect_unknown"
+    if request.get("action") == "OBSERVE_CONTINUATION_ACK":
+        return "semantic_ack_invalid"
+    if request.get("action") == "OBSERVE_COGNITION_RESULT":
+        return "cognition_result_invalid"
     return default
 
 
@@ -510,6 +583,39 @@ def _validate_timeout_seconds(timeout_seconds: float) -> float:
     return float(timeout_seconds)
 
 
+def _require_current_runtime_binding(
+    request: dict[str, Any],
+    *,
+    expected_instance_id: str | None,
+    boot_nonce: str | None,
+) -> None:
+    if request.get("action") not in {
+        wsp.SurfaceAction.SUBMIT_CONTINUATION.value,
+        wsp.SurfaceAction.OBSERVE_CONTINUATION_ACK.value,
+        wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value,
+        wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value,
+    }:
+        return
+    if expected_instance_id is None or boot_nonce is None:
+        raise NativeHostError("runtime_binding_context_missing")
+    try:
+        current = wrb.derive_runtime_binding_wire(
+            adapter_instance_id=expected_instance_id,
+            conversation_fingerprint=request["conversation_fingerprint"],
+            session_alias=request["session_alias"],
+            boot_nonce=boot_nonce,
+        )
+    except (KeyError, wrb.WebSolRuntimeBindingError) as exc:
+        raise NativeHostError("runtime_binding_stale") from exc
+    for field in (
+        "runtime_binding_id",
+        "runtime_binding_generation",
+        "runtime_binding_fingerprint",
+    ):
+        if request[field] != current[field]:
+            raise NativeHostError("runtime_binding_stale")
+
+
 def forward_request(
     request: dict[str, Any],
     *,
@@ -518,6 +624,8 @@ def forward_request(
     timeout_seconds: float,
     deadline: Deadline | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    expected_instance_id: str | None = None,
+    boot_nonce: str | None = None,
 ) -> dict[str, Any]:
     """Forward one exact action once and wait for its matching receipt."""
 
@@ -526,6 +634,11 @@ def forward_request(
     accepted = census.validate_census_window(request) if is_census else wsp.validate_request(request)
     if not is_census:
         accepted = wsp.validate_action_window(accepted, now=datetime.now(timezone.utc))
+        _require_current_runtime_binding(
+            accepted,
+            expected_instance_id=expected_instance_id,
+            boot_nonce=boot_nonce,
+        )
     if (
         accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value
         and accepted["nonce"] in _TYPED_REENTRY_NONCES
@@ -541,16 +654,37 @@ def forward_request(
         )
     if accepted.get("action") == wsp.SurfaceAction.TYPED_REENTRY.value:
         _TYPED_REENTRY_NONCES.add(accepted["nonce"])
-    fields = census.IDENTITY_FIELDS if is_census else _MATCH_FIELDS
+    is_cognition = accepted.get("action") == wsp.SurfaceAction.SUBMIT_COGNITION_ASSIGNMENT.value
+    is_cognition_observe = (
+        accepted.get("action") == wsp.SurfaceAction.OBSERVE_COGNITION_RESULT.value
+    )
+    if accepted.get("action") == wsp.SurfaceAction.SUBMIT_CONTINUATION.value or is_cognition:
+        turn_id = accepted["cognition_payload"]["turn_id"] if is_cognition else accepted["turn_id"]
+        prefix = "cognition" if is_cognition else "continuation"
+        if accepted["nonce"] in _SUBMIT_CONTINUATION_NONCES:
+            raise NativeHostError(f"{prefix}_nonce_reused")
+        if turn_id in _SUBMIT_CONTINUATION_TURNS:
+            raise NativeHostError(f"{prefix}_turn_reused")
+        if (
+            len(_SUBMIT_CONTINUATION_NONCES) >= MAX_SUBMIT_CONTINUATION_EFFECTS
+            or len(_SUBMIT_CONTINUATION_TURNS) >= MAX_SUBMIT_CONTINUATION_EFFECTS
+        ):
+            raise wsp._error(
+                "$.turn_id",
+                f"submit effect ledger full; {accepted['action']} is closed",
+            )
+        _SUBMIT_CONTINUATION_NONCES.add(accepted["nonce"])
+        _SUBMIT_CONTINUATION_TURNS.add(turn_id)
+    fields = _receipt_match_fields(accepted)
     exchange_deadline = deadline or Deadline(ends_at=monotonic() + timeout)
     _remaining_or_timeout(
         exchange_deadline,
         monotonic,
-        _timeout_code(accepted),
+        "cognition_not_submitted" if is_cognition else _timeout_code(accepted),
     )
-    write_chrome(accepted)
     ignored = 0
     try:
+        write_chrome(accepted)
         while True:
             remaining = _remaining_or_timeout(
                 exchange_deadline,
@@ -588,7 +722,17 @@ def forward_request(
                 )
             _remaining_or_timeout(exchange_deadline, monotonic, _timeout_code(accepted))
             return receipt
-    except BaseException:
+    except NativeHostError:
+        if is_cognition_observe:
+            raise
+        if is_cognition:
+            raise ChromeChannelError("cognition_submit_effect_unknown") from None
+        raise
+    except Exception as exc:
+        if is_cognition_observe:
+            raise ChromeChannelError("cognition_result_invalid") from exc
+        if is_cognition:
+            raise ChromeChannelError("cognition_submit_effect_unknown") from exc
         raise
 
 
@@ -834,6 +978,8 @@ def _serve_client(
                 timeout_seconds=timeout,
                 deadline=deadline,
                 monotonic=monotonic,
+                expected_instance_id=expected_instance_id,
+                boot_nonce=boot_nonce,
             )
             write_frame(
                 writer,

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import web_sol_deployment as deployment
+from integrations.chairman_surfaces import web_sol_protocol as wsp
 from scripts import web_sol_deployment_apply as cli
 
 
@@ -54,7 +55,7 @@ def _bundle(tmp_path: Path) -> tuple[deployment.DeploymentBundle, Path]:
         binding_id="33333333-3333-4333-8333-333333333333",
     )
     release = deployment.WebSolRelease(
-        package_version="0.2.0",
+        package_version=wsp.WEB_SOL_PACKAGE_VERSION,
         source_commit="a" * 40,
         repository_root=tmp_path / "repo",
         python_executable=Path(sys.executable),

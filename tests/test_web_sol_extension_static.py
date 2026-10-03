@@ -12,6 +12,10 @@ EXTENSION = ROOT / "integrations" / "chairman_surfaces" / "web_sol_extension"
 MANIFEST = EXTENSION / "manifest.json"
 BACKGROUND = EXTENSION / "background.js"
 CONTENT = EXTENSION / "content.js"
+SEMANTIC = EXTENSION / "semantic_ack_core.js"
+CONTINUATION = EXTENSION / "continuation_core.js"
+COGNITION_RESULT = EXTENSION / "cognition_result_core.js"
+COGNITION_TRANSPORT = EXTENSION / "cognition_transport_core.js"
 
 CHATGPT_MATCHES = {"https://chatgpt.com/*", "https://chat.openai.com/*"}
 EXPECTED_EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
@@ -35,7 +39,7 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
 
     assert manifest["manifest_version"] == 3
     assert manifest["name"] == "Mastermind Web Sol Surface Adapter"
-    assert manifest["version"] == "0.2.0"
+    assert manifest["version"] == "0.6.0"
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))
@@ -80,17 +84,26 @@ def test_manifest_has_one_background_and_one_exact_chatgpt_content_script():
     assert manifest["content_scripts"] == [
         {
             "matches": sorted(CHATGPT_MATCHES),
-            "js": ["content.js"],
+            "js": [
+                "semantic_ack_core.js",
+                "cognition_result_core.js",
+                "cognition_transport_core.js",
+                "content.js",
+            ],
             "run_at": "document_idle",
         }
     ]
 
 
 def test_extension_files_are_present_and_small():
-    for path in (BACKGROUND, CONTENT):
+    ceilings = {
+        BACKGROUND: 58, CONTENT: 36, SEMANTIC: 12, CONTINUATION: 12,
+        COGNITION_RESULT: 12, COGNITION_TRANSPORT: 20,
+    }
+    for path, kib in ceilings.items():
         payload = path.read_bytes()
         assert payload
-        assert len(payload) <= (32 if path == BACKGROUND else 24) * 1024
+        assert len(payload) <= kib * 1024
 
 
 def test_extension_source_contains_no_content_extraction_or_powerful_browser_api():
@@ -98,6 +111,10 @@ def test_extension_source_contains_no_content_extraction_or_powerful_browser_api
         BACKGROUND.read_text(encoding="utf-8")
         + "\n"
         + CONTENT.read_text(encoding="utf-8")
+        + "\n"
+        + SEMANTIC.read_text(encoding="utf-8")
+        + "\n"
+        + CONTINUATION.read_text(encoding="utf-8")
     ).lower()
 
     forbidden_fragments = {
@@ -115,13 +132,46 @@ def test_extension_source_contains_no_content_extraction_or_powerful_browser_api
         "executescript",
         "xmlhttprequest",
         "websocket",
-        "fetch(",
         "eval(",
         "new function",
         "document.cookie",
     }
     for fragment in forbidden_fragments:
         assert fragment not in source
+
+
+def test_cognition_cores_are_pure_and_load_for_background_and_content_use():
+    source = (
+        COGNITION_RESULT.read_text(encoding="utf-8")
+        + "\n"
+        + COGNITION_TRANSPORT.read_text(encoding="utf-8")
+    ).lower()
+    for fragment in (
+        "chrome.runtime", "chrome.tabs", "document.queryselector",
+        "localstorage", "sessionstorage", "xmlhttprequest", "websocket",
+    ):
+        assert fragment not in source
+
+
+def test_semantic_provider_read_is_one_exact_same_origin_no_store_get():
+    source = CONTENT.read_text(encoding="utf-8")
+    assert source.count("fetch(") == 1
+    assert "`/backend-api/conversation/${encodeURIComponent(conversationId)}`" in source
+    assert "new URL(" in source
+    assert "endpoint.origin !== location.origin" in source
+    assert "endpoint.search || endpoint.hash" in source
+    assert "response.body?.getReader?.()" in source
+    assert "snapshot.conversation_id !== conversationId" in source
+    assert 'method: "GET"' in source
+    assert 'credentials: "include"' in source
+    assert 'cache: "no-store"' in source
+    assert 'redirect: "error"' in source
+    assert 'headers: {Accept: "application/json"}' in source
+    assert "PROVIDER_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024" in source
+    assert "chrome.cookies" not in source
+    assert "document.cookie" not in source
+    assert "localStorage" not in source
+    assert "sessionStorage" not in source
 
 
 def test_content_script_uses_only_bounded_probe_vocabulary():

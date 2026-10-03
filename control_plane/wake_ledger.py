@@ -12,6 +12,7 @@ codec.  There is still no Wake table.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 from enum import Enum
 from typing import Mapping, Sequence
@@ -30,6 +31,7 @@ from control_plane.wake_events import (
     WakeKind,
     WakeObligation,
     WakeObligationError,
+    canonical_json_bytes,
     parse_obligation,
     utc_now_iso,
 )
@@ -86,6 +88,9 @@ SNAPSHOT_DIGEST_RE = re.compile(r"^[0-9a-f]{16,64}$")
 OPERATOR_AUTHORITY_RECEIPT_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 NUDGE_ID_RE = re.compile(r"^NUDGE-[0-9a-f]{32}$")
 ATTEMPT_COMMAND_ID_RE = re.compile(r"^WAKE-[0-9a-f]{32}:A[1-9][0-9]*$")
+WEB_SOL_SEMANTIC_ACK_PROVENANCE_SCHEMA = "mastermind.web_sol_semantic_ack_provenance/v1"
+WEB_SOL_SEMANTIC_ACK_PRODUCER_KIND = "web_sol_semantic_ack"
+_WEB_SOL_SEMANTIC_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _RESOLUTION_CODE_BY_SOURCE = {
     SourceKind.EXECUTIVE_RUNTIME_EVENT: SourceResolutionCode.RUNTIME_REVIEW_ABSENT,
     SourceKind.EXECUTIVE_INBOX_ATTENTION: SourceResolutionCode.INBOX_ATTENTION_ABSENT,
@@ -168,6 +173,144 @@ class TrustedAckContext:
 
 
 @dataclasses.dataclass(frozen=True)
+class WebSolSemanticAckProvenance:
+    schema: str
+    producer_kind: str
+    producer_version: int
+    nudge_id: str
+    nudge_group_digest: str
+    provider_turn_digest: str
+    conversation_fingerprint: str
+    runtime_binding_fingerprint: str
+    native_host_life_digest: str
+    projection_digest: str
+    terminal_ack_trailer: bool
+
+
+def web_sol_nudge_group_digest(
+    *,
+    nudge_id: str,
+    attempt_command_ids: Sequence[str],
+    obligation_ids: Sequence[str],
+) -> str:
+    if NUDGE_ID_RE.fullmatch(str(nudge_id or "")) is None:
+        raise WakeLedgerError("Web-Sol semantic provenance nudge_id is malformed")
+    commands = tuple(str(item) for item in attempt_command_ids)
+    obligations = tuple(str(item) for item in obligation_ids)
+    if (
+        not commands
+        or commands != tuple(sorted(set(commands)))
+        or any(ATTEMPT_COMMAND_ID_RE.fullmatch(item) is None for item in commands)
+    ):
+        raise WakeLedgerError("Web-Sol semantic provenance nudge group is malformed")
+    if (
+        not obligations
+        or obligations != tuple(sorted(set(obligations)))
+        or any(WAKE_ID_RE.fullmatch(item) is None for item in obligations)
+    ):
+        raise WakeLedgerError("Web-Sol semantic provenance obligation group is malformed")
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "schema": "mastermind.web_sol_semantic_ack_group/v1",
+                "nudge_id": nudge_id,
+                "attempt_command_ids": list(commands),
+                "obligation_ids": list(obligations),
+            }
+        )
+    ).hexdigest()
+
+
+def parse_web_sol_semantic_ack_provenance(
+    value: WebSolSemanticAckProvenance | None,
+) -> WebSolSemanticAckProvenance | None:
+    if value is None:
+        return None
+    if not isinstance(value, WebSolSemanticAckProvenance):
+        raise WakeLedgerError("Web-Sol semantic provenance is malformed")
+    if value.schema != WEB_SOL_SEMANTIC_ACK_PROVENANCE_SCHEMA:
+        raise WakeLedgerError("Web-Sol semantic provenance schema is unsupported")
+    if value.producer_kind != WEB_SOL_SEMANTIC_ACK_PRODUCER_KIND:
+        raise WakeLedgerError("Web-Sol semantic provenance producer is unsupported")
+    if type(value.producer_version) is not int or value.producer_version != 1:
+        raise WakeLedgerError("Web-Sol semantic provenance producer version is unsupported")
+    if NUDGE_ID_RE.fullmatch(str(value.nudge_id or "")) is None:
+        raise WakeLedgerError("Web-Sol semantic provenance nudge_id is malformed")
+    for name in (
+        "nudge_group_digest",
+        "provider_turn_digest",
+        "conversation_fingerprint",
+        "runtime_binding_fingerprint",
+        "native_host_life_digest",
+        "projection_digest",
+    ):
+        if _WEB_SOL_SEMANTIC_DIGEST_RE.fullmatch(str(getattr(value, name) or "")) is None:
+            raise WakeLedgerError(f"Web-Sol semantic provenance {name} is malformed")
+    if value.terminal_ack_trailer is not True:
+        raise WakeLedgerError("Web-Sol semantic provenance requires terminal ACK trailer")
+    return value
+
+
+def web_sol_semantic_ack_provenance_payload(
+    value: WebSolSemanticAckProvenance,
+) -> dict[str, object]:
+    parsed = parse_web_sol_semantic_ack_provenance(value)
+    assert parsed is not None
+    return {
+        "schema": parsed.schema,
+        "producer_kind": parsed.producer_kind,
+        "producer_version": parsed.producer_version,
+        "nudge_id": parsed.nudge_id,
+        "nudge_group_digest": parsed.nudge_group_digest,
+        "provider_turn_digest": parsed.provider_turn_digest,
+        "conversation_fingerprint": parsed.conversation_fingerprint,
+        "runtime_binding_fingerprint": parsed.runtime_binding_fingerprint,
+        "native_host_life_digest": parsed.native_host_life_digest,
+        "projection_digest": parsed.projection_digest,
+        "terminal_ack_trailer": parsed.terminal_ack_trailer,
+    }
+
+
+def web_sol_semantic_ack_provenance_from_payload(
+    value: object,
+) -> WebSolSemanticAckProvenance | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise WakeLedgerError("Web-Sol semantic provenance payload is malformed")
+    expected_keys = {
+        "schema",
+        "producer_kind",
+        "producer_version",
+        "nudge_id",
+        "nudge_group_digest",
+        "provider_turn_digest",
+        "conversation_fingerprint",
+        "runtime_binding_fingerprint",
+        "native_host_life_digest",
+        "projection_digest",
+        "terminal_ack_trailer",
+    }
+    if set(value) != expected_keys:
+        raise WakeLedgerError("Web-Sol semantic provenance payload keys are not closed")
+    return parse_web_sol_semantic_ack_provenance(
+        WebSolSemanticAckProvenance(
+            schema=str(value["schema"]),
+            producer_kind=str(value["producer_kind"]),
+            producer_version=value["producer_version"],
+            nudge_id=str(value["nudge_id"]),
+            nudge_group_digest=str(value["nudge_group_digest"]),
+            provider_turn_digest=str(value["provider_turn_digest"]),
+            conversation_fingerprint=str(value["conversation_fingerprint"]),
+            runtime_binding_fingerprint=str(value["runtime_binding_fingerprint"]),
+            native_host_life_digest=str(value["native_host_life_digest"]),
+            projection_digest=str(value["projection_digest"]),
+            terminal_ack_trailer=value["terminal_ack_trailer"],
+        )
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class WakeAcknowledgement:
     obligation_id: str
     ack_mode: AckMode
@@ -180,6 +323,7 @@ class WakeAcknowledgement:
     operator_authority_receipt: str | None = None
     binding_generation: int | None = None
     delivered_command_id: str | None = None
+    semantic_provenance: WebSolSemanticAckProvenance | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -580,6 +724,9 @@ def parse_acknowledgement(
         raise WakeLedgerError("trusted ack contains a malformed obligation_id")
     if oid not in claims:
         raise WakeLedgerError("trusted ack does not include this obligation_id")
+    semantic_provenance = parse_web_sol_semantic_ack_provenance(
+        ack.semantic_provenance
+    )
     if ack.ack_mode is AckMode.REASONING_SESSION:
         if BINDING_ID_RE.fullmatch(str(ack.binding_id or "")) is None:
             raise WakeLedgerError("reasoning_session ack requires trusted binding context")
@@ -592,6 +739,8 @@ def parse_acknowledgement(
                 "reasoning_session ack requires matching DELIVERED command evidence"
             )
     elif ack.ack_mode is AckMode.HUMAN_OPERATOR:
+        if semantic_provenance is not None:
+            raise WakeLedgerError("human_operator ack cannot carry Web-Sol semantic provenance")
         if OPERATOR_AUTHORITY_RECEIPT_RE.fullmatch(str(ack.operator_authority_receipt or "")) is None:
             raise WakeLedgerError("human_operator ack requires operator_authority_receipt")
         if ack.binding_generation is not None or ack.delivered_command_id is not None:
@@ -1025,7 +1174,7 @@ def resolution_event_payload(resolution: SourceResolution) -> dict[str, object]:
 
 
 def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
-    return {
+    payload = {
         "obligation_id": ack.obligation_id,
         "ack_mode": ack.ack_mode.value,
         "target_seat": ack.target_seat,
@@ -1038,6 +1187,11 @@ def ack_event_payload(ack: WakeAcknowledgement) -> dict[str, object]:
         "binding_generation": ack.binding_generation,
         "delivered_command_id": ack.delivered_command_id,
     }
+    if ack.semantic_provenance is not None:
+        payload["semantic_provenance"] = web_sol_semantic_ack_provenance_payload(
+            ack.semantic_provenance
+        )
+    return payload
 
 
 def attempt_event_payload(attempt: DeliveryAttempt) -> dict[str, object]:
@@ -1224,6 +1378,9 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
                 operator_authority_receipt=payload.get("operator_authority_receipt"),
                 binding_generation=payload.get("binding_generation"),
                 delivered_command_id=payload.get("delivered_command_id"),
+                semantic_provenance=web_sol_semantic_ack_provenance_from_payload(
+                    payload.get("semantic_provenance")
+                ),
             ),
             obligation_id=oid,
         )

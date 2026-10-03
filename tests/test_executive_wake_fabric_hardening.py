@@ -369,7 +369,7 @@ def test_production_armed_is_a_global_kill_switch():
         for transport_id, descriptor in WAKE_TRANSPORT_DESCRIPTORS.items()
         if descriptor.transport_implemented
     }
-    assert implemented == {"codex-app-server"}
+    assert implemented == {"codex-app-server", "chatgpt-gui"}
     assert WAKE_TRANSPORT_DESCRIPTORS["claude-code-session"].transport_implemented is False
 
 

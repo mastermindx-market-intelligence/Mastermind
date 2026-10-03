@@ -473,7 +473,11 @@ __all__ = [
 _CENSUS_SOURCE_KINDS = (
     ("manifest.json", "extension_manifest"),
     ("background.js", "extension_background"),
+    ("semantic_ack_core.js", "extension_semantic_ack_core"),
     ("content.js", "extension_content"),
+    ("continuation_core.js", "extension_continuation_core"),
+    ("cognition_result_core.js", "extension_cognition_result_core"),
+    ("cognition_transport_core.js", "extension_cognition_transport_core"),
     ("census.html", "extension_census_html"),
     ("census.css", "extension_census_css"),
     ("census_core.js", "extension_census_core"),
@@ -481,7 +485,7 @@ _CENSUS_SOURCE_KINDS = (
 )
 _CENSUS_SOURCE_NAMES = frozenset(name for name, _kind in _CENSUS_SOURCE_KINDS)
 _CENSUS_MAX_FILE_BYTES = 262144
-_CENSUS_MAX_TOTAL_BYTES = 1048576
+_CENSUS_MAX_TOTAL_BYTES = 1572864
 
 
 def _manifest_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -511,7 +515,13 @@ def _validate_census_manifest(payload: bytes, release: WebSolRelease) -> None:
                 or manifest["host_permissions"] != origins
                 or manifest["background"] != {"service_worker": "background.js"}
                 or manifest["content_scripts"] != [{"matches": origins,
-                    "js": ["content.js"], "run_at": "document_idle"}]):
+                    "js": [
+                        "semantic_ack_core.js",
+                        "cognition_result_core.js",
+                        "cognition_transport_core.js",
+                        "content.js",
+                    ],
+                    "run_at": "document_idle"}]):
             raise ValueError("unsupported_manifest")
         action = manifest["action"]
         if (not isinstance(action, dict) or set(action) != {"default_title", "default_popup"}
@@ -538,7 +548,7 @@ def render_census_extension_bundle(
     source_files: Mapping[str, bytes],
     expected_source_digests: Mapping[str, str],
 ) -> DeploymentBundle:
-    """Render ten complete CENSUS1 artifacts; perform no installation.
+    """Render the complete CENSUS1 package artifacts; perform no installation.
 
     The caller must authenticate the source commit and supply independently
     established asset digests. Matching caller-supplied hashes proves integrity,

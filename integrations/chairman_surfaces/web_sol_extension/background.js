@@ -2,7 +2,12 @@
 
 importScripts("instance_config.js");
 importScripts("census_core.js");
+importScripts("continuation_core.js");
+importScripts("cognition_result_core.js");
+importScripts("cognition_transport_core.js");
 
+const K = globalThis.MMXWebSolContinuation;
+const C = globalThis.MMXWebSolCognitionTransport;
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
 const REPROBE_KIND = "MMX_WEB_SOL_REPROBE";
 const ACTION_SCHEMA = "mastermind.web_sol_surface_action.v1";
@@ -12,8 +17,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.2.0";
-const EXPECTED_CAPABILITY_DIGEST = "89a0dcb05a6c1c31000f841671e6cbf6c29a69dd73ed9726c8b5b99535485e50";
+const PACKAGE_VERSION = "0.6.0";
+const EXPECTED_CAPABILITY_DIGEST = "cfd95e5a99fa30b42b793475740bd91a0f2807695de91bca3bc89069c0fd09ba";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -24,17 +29,49 @@ const RECONNECT_ALARM_PREFIX = "mmx-web-sol-native-reconnect-v1-";
 const HANDSHAKE_ALARM_PREFIX = "mmx-web-sol-native-handshake-v1-";
 const RECONNECT_DELAYS_MINUTES = Object.freeze([1, 5, 15]);
 const HANDSHAKE_TIMEOUT_MINUTES = 0.5;
+const CONTINUATION_ACK_RESULT_SCHEMA = "mastermind.web_sol_continuation_ack_result.v1";
+const CONTINUATION_ACK_OBSERVE_KIND = "MMX_WEB_SOL_OBSERVE_CONTINUATION_ACK";
+const ACTION_KEYS = new Set([
+  "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
+  "action", "operation_key", "issued_at", "expires_at", "nonce",
+]);
+const COGNITION_RESULT_SCHEMA = "mastermind.web_sol_cognition_submit_result.v1";
+const COGNITION_SUBMIT_KIND = "MMX_WEB_SOL_SUBMIT_COGNITION_ASSIGNMENT";
+const COGNITION_OBSERVE_KIND = "MMX_WEB_SOL_OBSERVE_COGNITION_RESULT";
+const COGNITION_IDENTITY_KEYS = Object.freeze([
+  "turn_id", "assignment_digest", "result_schema_digest", "job_id",
+  "attempt_id", "worker_id", "root_job_id", "role",
+]);
+const COGNITION_CONTENT_RESPONSE_KEYS = new Set([
+  "schema", "conversation_fingerprint", "document_epoch", "effect",
+  "session_alias", "runtime_binding_id", "runtime_binding_generation",
+  "runtime_binding_fingerprint", "cognition_identity",
+]);
 
 const OBSERVATION_KEYS = new Set([
   "schema", "target_present", "exact_conversation_loaded", "page_responsive",
   "document_ready_state", "visibility", "composer_available", "generation_state",
   "auth_required", "provider_error_present",
 ]);
-const ACTION_KEYS = new Set([
-  "schema", "binding_id", "conversation_fingerprint", "binding_fingerprint",
-  "action", "operation_key", "issued_at", "expires_at", "nonce",
+const COGNITION_REQUEST_KEYS = new Set([
+  ...ACTION_KEYS, "session_alias", "runtime_binding_id",
+  "runtime_binding_generation", "runtime_binding_fingerprint",
+  "cognition_payload",
+]);
+const COGNITION_OBSERVE_REQUEST_KEYS = new Set([
+  ...ACTION_KEYS, "session_alias", "runtime_binding_id",
+  "runtime_binding_generation", "runtime_binding_fingerprint",
+  "cognition_observe_payload",
 ]);
 const TYPED_REENTRY_KEYS = new Set([...ACTION_KEYS, "operation_id", "result_digest", "obligation_digest"]);
+const SEMANTIC_CONTENT_RESULT_KEYS = new Set([
+  "schema", "conversation_fingerprint", "turn_id", "directive_digest",
+  "session_alias", "runtime_binding_id", "runtime_binding_generation",
+  "runtime_binding_fingerprint", "wake_obligation_ids",
+  "wake_obligation_digest", "provider_native_turn_id",
+  "acknowledged_obligation_ids", "terminal_ack_trailer",
+  "document_epoch", "status",
+]);
 const INSTANCE_CONFIG_KEYS = new Set([
   "schema", "instanceId", "nativeHost", "protocolMajor",
   "clientPackageVersion", "nativePackageVersion", "extensionPackageVersion",
@@ -75,6 +112,19 @@ function isNonce(value) {
   return typeof value === "string" && value.length >= 16 && value.length <= 128 && !/\s/.test(value);
 }
 
+function validTurnId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,255}$/.test(value);
+}
+
+function validEntityId(value) {
+  return typeof value === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+}
+
+function validDocumentEpoch(value) {
+  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+}
+
 function validInstanceConfig(value) {
   if (!exactKeys(value, INSTANCE_CONFIG_KEYS)) return false;
   if (value.schema !== INSTANCE_CONFIG_SCHEMA || value.protocolMajor !== TRANSPORT_PROTOCOL_MAJOR) return false;
@@ -110,13 +160,13 @@ function validProbeEvent(event) {
   if (!event || typeof event !== "object" || Array.isArray(event)) return false;
   if (event.kind !== PROBE_KIND) return false;
   if (event.conversation_fingerprint !== null && !isHex64(event.conversation_fingerprint)) return false;
+  if (event.document_epoch !== undefined && !validDocumentEpoch(event.document_epoch)) return false;
   return validProbeObservation(event.observation);
 }
 
 function validActionRequest(request) {
   if (!exactKeys(request, ACTION_KEYS) || request.schema !== ACTION_SCHEMA) return false;
   if (request.action !== "INSPECT" && request.action !== "FOREGROUND") return false;
-  if (request.action === "TYPED_REENTRY") return false;
   if (!isHex64(request.conversation_fingerprint) || !isHex64(request.binding_fingerprint)) return false;
   if (typeof request.binding_id !== "string" ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id)) return false;
@@ -152,14 +202,45 @@ function requestWindowStatus(request, nowMs = Date.now()) {
   return null;
 }
 
-function removeTabMapping(tabId) {
+function removeTabMapping(tabId, dropState = true) {
   const previous = tabFingerprints.get(tabId);
   if (!previous) return;
-  tabFingerprints.delete(tabId);
-  const entries = targets.get(previous);
-  if (!entries) return;
-  entries.delete(tabId);
-  if (entries.size === 0) targets.delete(previous);
+  if (previous.fingerprint) {
+    const entries = targets.get(previous.fingerprint);
+    if (entries) {
+      entries.delete(tabId);
+      if (entries.size === 0) targets.delete(previous.fingerprint);
+    }
+  }
+  if (dropState) {
+    tabFingerprints.delete(tabId);
+  } else {
+    tabFingerprints.set(tabId, {
+      fingerprint: null,
+      navigationGeneration: previous.navigationGeneration,
+      documentEpoch: null,
+      window: null,
+    });
+  }
+}
+
+function advanceTabNavigationGeneration(tabId) {
+  if (!Number.isInteger(tabId)) return null;
+  const previous = tabFingerprints.get(tabId) || {
+    fingerprint: null,
+    navigationGeneration: 0,
+    documentEpoch: null,
+    window: null,
+  };
+  removeTabMapping(tabId, false);
+  const navigationGeneration = previous.navigationGeneration + 1;
+  tabFingerprints.set(tabId, {
+    fingerprint: null,
+    navigationGeneration,
+    documentEpoch: null,
+    window: null,
+  });
+  return navigationGeneration;
 }
 
 function recordProbe(event, sender) {
@@ -169,15 +250,34 @@ function recordProbe(event, sender) {
   const tabId = sender.tab.id;
   const windowId = sender.tab.windowId;
   if (!Number.isInteger(tabId) || !Number.isInteger(windowId)) return false;
-  removeTabMapping(tabId);
-  if (!event.conversation_fingerprint || !event.observation.target_present) return true;
+  const previous = tabFingerprints.get(tabId) || {
+    fingerprint: null,
+    navigationGeneration: 0,
+    documentEpoch: null,
+    window: null,
+  };
+  removeTabMapping(tabId, false);
+  const documentEpoch = validDocumentEpoch(event.document_epoch)
+    ? event.document_epoch
+    : null;
+  const state = {
+    fingerprint: null,
+    navigationGeneration: previous.navigationGeneration,
+    documentEpoch,
+    window: windowId,
+  };
+  if (!event.conversation_fingerprint || !event.observation.target_present) {
+    tabFingerprints.set(tabId, state);
+    return true;
+  }
+  state.fingerprint = event.conversation_fingerprint;
   let entries = targets.get(event.conversation_fingerprint);
   if (!entries) {
     entries = new Map();
     targets.set(event.conversation_fingerprint, entries);
   }
   entries.set(tabId, windowId);
-  tabFingerprints.set(tabId, event.conversation_fingerprint);
+  tabFingerprints.set(tabId, state);
   return true;
 }
 
@@ -190,7 +290,7 @@ function unknownObservation() {
   };
 }
 
-function receipt(request, status, observation) {
+function receipt(request, status, observation, semantic = null) {
   const result = {
     schema: RECEIPT_SCHEMA, binding_id: request.binding_id,
     conversation_fingerprint: request.conversation_fingerprint,
@@ -202,6 +302,35 @@ function receipt(request, status, observation) {
     result.operation_id = request.operation_id;
     result.result_digest = request.result_digest;
     result.obligation_digest = request.obligation_digest;
+  }
+  if (["SUBMIT_CONTINUATION", "OBSERVE_CONTINUATION_ACK"].includes(request.action)) {
+    for (const key of K.correlationKeys) {
+      result[key] = key === "wake_obligation_ids" ? [...request[key]] : request[key];
+    }
+  }
+  if (request.action === "SUBMIT_COGNITION_ASSIGNMENT") {
+    for (const key of [
+      "session_alias", "runtime_binding_id", "runtime_binding_generation",
+      "runtime_binding_fingerprint",
+    ]) {
+      result[key] = request[key];
+    }
+    result.cognition_identity = cognitionIdentity(request.cognition_payload);
+  }
+  if (request.action === "OBSERVE_COGNITION_RESULT") {
+    for (const key of [
+      "session_alias", "runtime_binding_id", "runtime_binding_generation",
+      "runtime_binding_fingerprint",
+    ]) {
+      result[key] = request[key];
+    }
+    result.cognition_observation = semantic || null;
+  }
+  if (request.action === "OBSERVE_CONTINUATION_ACK") {
+    result.provider_native_turn_id = semantic?.provider_native_turn_id ?? null;
+    result.acknowledged_obligation_ids = semantic?.acknowledged_obligation_ids
+      ? [...semantic.acknowledged_obligation_ids] : [];
+    result.terminal_ack_trailer = semantic?.terminal_ack_trailer === true;
   }
   return result;
 }
@@ -216,7 +345,14 @@ function resolveExactTarget(conversationFingerprint) {
   if (entries.size !== 1) return {status: "AMBIGUOUS_TARGET"};
   const [entry] = entries.entries();
   const [tabId, windowId] = entry;
-  return {status: null, tabId, windowId};
+  const state = tabFingerprints.get(tabId);
+  if (!Number.isInteger(windowId) || !state ||
+      state.fingerprint !== conversationFingerprint || state.window !== windowId ||
+      !Number.isSafeInteger(state.navigationGeneration) ||
+      state.navigationGeneration < 0) return {status: "TARGET_NOT_FOUND"};
+  const navigationGeneration = state.navigationGeneration;
+  const documentEpoch = state.documentEpoch;
+  return {status: null, tabId, windowId, navigationGeneration, documentEpoch};
 }
 
 async function freshProbe(tabId, expectedConversationFingerprint) {
@@ -230,15 +366,34 @@ async function freshProbe(tabId, expectedConversationFingerprint) {
     const tab = await chrome.tabs.get(tabId);
     if (!recordProbe(event, {tab})) return null;
   } catch (_error) {
-    removeTabMapping(tabId);
+    removeTabMapping(tabId, false);
     return null;
   }
   return event;
 }
 
+function sameResolvedTarget(left, right) {
+  return Boolean(left && right && !left.status && !right.status &&
+    left.tabId === right.tabId && left.windowId === right.windowId &&
+    left.navigationGeneration === right.navigationGeneration &&
+    left.documentEpoch === right.documentEpoch);
+}
+
+function cognitionProbeRefusal(request, event) {
+  if (!event || event.conversation_fingerprint !== request.conversation_fingerprint) {
+    return "TARGET_CHANGED";
+  }
+  if (!event.observation.target_present || !event.observation.exact_conversation_loaded) {
+    return "TARGET_CHANGED";
+  }
+  if (event.observation.auth_required === true) return "AUTH_REQUIRED";
+  if (event.observation.provider_error_present === true) return "PROVIDER_ERROR";
+  return "COGNITION_NOT_SUBMITTED";
+}
+
 async function refreshTabMapping(tabId) {
   if (!Number.isInteger(tabId)) return;
-  removeTabMapping(tabId);
+  removeTabMapping(tabId, false);
   await freshProbe(tabId, null);
 }
 
@@ -360,6 +515,386 @@ async function handleTypedReentry(request) {
   return receipt(request, "CONSUMED", result.observation);
 }
 
+function validSubmitContinuationRequest(request) {
+  return request?.action === "SUBMIT_CONTINUATION" && K?.validRequest(request) === true;
+}
+
+function validSubmitCognitionRequest(request) {
+  if (!exactKeys(request, COGNITION_REQUEST_KEYS) ||
+      request.schema !== ACTION_SCHEMA ||
+      typeof request.issued_at !== "string" || typeof request.expires_at !== "string" ||
+      request.action !== "SUBMIT_COGNITION_ASSIGNMENT" ||
+      !isHex64(request.conversation_fingerprint) ||
+      !isHex64(request.binding_fingerprint) ||
+      typeof request.binding_id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id) ||
+      typeof request.operation_key !== "string" || !request.operation_key ||
+      request.operation_key.length > 256 || /\s/.test(request.operation_key) ||
+      !isNonce(request.nonce)) return false;
+  if (!validTurnId(request.session_alias) ||
+      typeof request.runtime_binding_id !== "string" ||
+      !/^bind-wsx-[0-9a-f]{48}$/.test(request.runtime_binding_id) ||
+      !Number.isSafeInteger(request.runtime_binding_generation) ||
+      request.runtime_binding_generation < 1 ||
+      !isHex64(request.runtime_binding_fingerprint) ||
+      !C?.validSubmitPayload?.(request.cognition_payload)) return false;
+  const payload = request.cognition_payload;
+  return payload.runtime_binding_id === request.runtime_binding_id &&
+    payload.runtime_binding_generation === request.runtime_binding_generation &&
+    payload.runtime_binding_fingerprint === request.runtime_binding_fingerprint;
+}
+
+function validObserveCognitionRequest(request) {
+  if (!request || !exactKeys(request, COGNITION_OBSERVE_REQUEST_KEYS) ||
+      request.schema !== ACTION_SCHEMA ||
+      typeof request.issued_at !== "string" || typeof request.expires_at !== "string" ||
+      request.action !== "OBSERVE_COGNITION_RESULT" ||
+      !isHex64(request.conversation_fingerprint) ||
+      !isHex64(request.binding_fingerprint) ||
+      typeof request.binding_id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.binding_id) ||
+      typeof request.operation_key !== "string" || !request.operation_key ||
+      request.operation_key.length > 256 || /\s/.test(request.operation_key) ||
+      !isNonce(request.nonce)) return false;
+  if (!validTurnId(request.session_alias) ||
+      typeof request.runtime_binding_id !== "string" ||
+      !/^bind-wsx-[0-9a-f]{48}$/.test(request.runtime_binding_id) ||
+      !Number.isSafeInteger(request.runtime_binding_generation) ||
+      request.runtime_binding_generation < 1 ||
+      !isHex64(request.runtime_binding_fingerprint) ||
+      !C?.validObservePayload?.(request.cognition_observe_payload)) return false;
+  const payload = request.cognition_observe_payload;
+  return payload.runtime_binding_id === request.runtime_binding_id &&
+    payload.runtime_binding_generation === request.runtime_binding_generation &&
+    payload.runtime_binding_fingerprint === request.runtime_binding_fingerprint;
+}
+
+function cognitionIdentity(payload) {
+  return Object.fromEntries(COGNITION_IDENTITY_KEYS.map((field) => [field, payload[field]]));
+}
+
+function validCognitionContentResponse(value, request, expectedDocumentEpoch) {
+  if (!exactKeys(value, COGNITION_CONTENT_RESPONSE_KEYS) ||
+      value.schema !== COGNITION_RESULT_SCHEMA ||
+      !["NOT_SUBMITTED", "SUBMIT_TRIGGERED", "SUBMIT_EFFECT_UNKNOWN"]
+        .includes(value.effect)) return false;
+  const payload = request.cognition_payload;
+  return value.conversation_fingerprint === request.conversation_fingerprint &&
+    value.document_epoch === expectedDocumentEpoch &&
+    value.session_alias === request.session_alias &&
+    value.runtime_binding_id === request.runtime_binding_id &&
+    value.runtime_binding_generation === request.runtime_binding_generation &&
+    value.runtime_binding_fingerprint === request.runtime_binding_fingerprint &&
+    exactKeys(value.cognition_identity, new Set(COGNITION_IDENTITY_KEYS)) &&
+    COGNITION_IDENTITY_KEYS.every((field) =>
+      value.cognition_identity[field] === payload[field]);
+}
+
+async function handleSubmitCognition(request, transportCurrent) {
+  // Reuse the canonical renderer to validate the digest before reserving an effect.
+  if (!await C.renderAssignmentPrompt(request.cognition_payload)) {
+    return receipt(request, "COGNITION_NOT_SUBMITTED", unknownObservation());
+  }
+  if (!transportCurrent()) return null;
+  const initial = resolveExactTarget(request.conversation_fingerprint);
+  if (initial.status || !initial.documentEpoch) {
+    return receipt(request, initial.status || "TARGET_CHANGED", unknownObservation());
+  }
+  const before = await freshProbe(initial.tabId, request.conversation_fingerprint);
+  if (!before || before.document_epoch !== initial.documentEpoch) {
+    return receipt(request, "TARGET_CHANGED", before ? before.observation : unknownObservation());
+  }
+  const probe = before.observation;
+  const windowStatus = requestWindowStatus(request);
+  if (windowStatus) return receipt(request, windowStatus, probe);
+  if (!sameResolvedTarget(initial, resolveExactTarget(request.conversation_fingerprint))) {
+    return receipt(request, "TARGET_CHANGED", probe);
+  }
+  if (!probe.target_present || !probe.exact_conversation_loaded ||
+      !probe.page_responsive || probe.visibility !== "visible" ||
+      probe.document_ready_state === "loading" ||
+      probe.composer_available !== true || probe.generation_state !== "idle" ||
+      probe.auth_required !== false || probe.provider_error_present !== false) {
+    return receipt(request, cognitionProbeRefusal(request, before), probe);
+  }
+  // No await separates this generation check, reservation and first dispatch.
+  if (!transportCurrent()) return null;
+  if (!K.reserveEffect(request.nonce, request.cognition_payload.turn_id)) {
+    return receipt(request, "COGNITION_NOT_SUBMITTED", probe);
+  }
+  let submission;
+  try {
+    submission = await chrome.tabs.sendMessage(initial.tabId, {
+      kind: COGNITION_SUBMIT_KIND,
+      expected_conversation_fingerprint: request.conversation_fingerprint,
+      expected_document_epoch: initial.documentEpoch,
+      session_alias: request.session_alias,
+      cognition_payload: JSON.parse(JSON.stringify(request.cognition_payload)),
+    }, {frameId: 0});
+  } catch (_error) {
+    return receipt(request, "COGNITION_SUBMIT_EFFECT_UNKNOWN", probe);
+  }
+  if (!transportCurrent()) return null;
+  if (!validCognitionContentResponse(submission, request, initial.documentEpoch)) {
+    return receipt(request, "COGNITION_SUBMIT_EFFECT_UNKNOWN", probe);
+  }
+  let after = null;
+  for await (const _attempt of K.startObservationTicks(true)) {
+    if (!transportCurrent()) return null;
+    after = await freshProbe(initial.tabId, request.conversation_fingerprint);
+    if (!transportCurrent()) return null;
+    const current = resolveExactTarget(request.conversation_fingerprint);
+    if (!after || after.document_epoch !== initial.documentEpoch ||
+        !sameResolvedTarget(initial, current) || requestWindowStatus(request)) break;
+    // Reconcile the full target before accepting any downstream response, even NOT_SUBMITTED.
+    if (submission.effect === "NOT_SUBMITTED") {
+      return receipt(request, "COGNITION_NOT_SUBMITTED", after.observation);
+    }
+    if (submission.effect === "SUBMIT_EFFECT_UNKNOWN") break;
+    const observed = after.observation;
+    if (!observed.target_present || !observed.exact_conversation_loaded ||
+        !observed.page_responsive || observed.auth_required !== false ||
+        observed.provider_error_present !== false) break;
+    if (observed.generation_state === "active") {
+      return receipt(request, "COGNITION_STARTED", observed);
+    }
+  }
+  return receipt(request, "COGNITION_SUBMIT_EFFECT_UNKNOWN", after ? after.observation : probe);
+}
+
+async function validCognitionObserveResponse(value, request, expectedDocumentEpoch) {
+  if (!exactKeys(value, new Set([
+    "schema", "conversation_fingerprint", "document_epoch", "session_alias",
+    "cognition_observation",
+  ])) || value.schema !== "mastermind.web_sol_cognition_observe_result/v1" ||
+      !C?.validObservePayload?.(request.cognition_observe_payload) ||
+      value.conversation_fingerprint !== request.conversation_fingerprint ||
+      value.document_epoch !== expectedDocumentEpoch ||
+      value.session_alias !== request.session_alias ||
+      !value.cognition_observation ||
+      typeof value.cognition_observation !== "object") return false;
+  const observed = value.cognition_observation;
+  const identity = new Set([
+    "turn_id", "assignment_digest", "result_schema_digest", "runtime_binding_id",
+    "runtime_binding_generation", "runtime_binding_fingerprint", "job_id", "attempt_id",
+    "worker_id", "root_job_id", "role",
+  ]);
+  const identityValid = observed.schema === "mastermind.web_sol_cognition_result_observation/v1" &&
+    exactKeys(observed, new Set([...identity, "schema", "status", "document_epoch",
+      "provider_native_turn_id", "provider_turn_artifact_digest", "result", "result_digest",
+      "result_byte_length"])) && observed.document_epoch === expectedDocumentEpoch &&
+    [...identity].every((field) =>
+      observed[field] === request.cognition_observe_payload[field]);
+  if (!identityValid) return false;
+  if (["COGNITION_RESULT_PENDING", "COGNITION_RESULT_REFUSED"].includes(observed.status)) {
+    return observed.result === null && observed.result_digest === null &&
+      observed.result_byte_length === 0 && observed.provider_native_turn_id === null &&
+      observed.provider_turn_artifact_digest === null;
+  }
+  if (observed.status !== "COGNITION_RESULT_READY" ||
+      !validTurnId(observed.provider_native_turn_id) ||
+      !isHex64(observed.provider_turn_artifact_digest) ||
+      !isHex64(observed.result_digest)) return false;
+  // Reuse the canonical result reducer; Python still validates the entire wire envelope.
+  const text = JSON.stringify(observed.result);
+  const expected = {job_id: observed.job_id, run_id: observed.attempt_id,
+    worker_id: observed.worker_id, role: observed.role, root_job_id: observed.root_job_id};
+  const result = globalThis.MMXWebSolCognitionResult.reduceCanonicalResultText(text, expected);
+  if (result?.status !== "RESULT_READY" ||
+      result.canonical_result_byte_length !== observed.result_byte_length) return false;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  const hex = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+  return hex === observed.result_digest;
+}
+
+async function handleObserveCognition(request, transportCurrent) {
+  if (!C?.validObservePayload?.(request.cognition_observe_payload)) {
+    return receipt(request, "UNKNOWN", unknownObservation());
+  }
+  if (!transportCurrent()) return null;
+  const initial = resolveExactTarget(request.conversation_fingerprint);
+  if (initial.status || !initial.documentEpoch) {
+    return receipt(request, initial.status || "TARGET_CHANGED", unknownObservation());
+  }
+  const before = await freshProbe(initial.tabId, request.conversation_fingerprint);
+  if (!transportCurrent()) return null;
+  if (!before || before.document_epoch !== initial.documentEpoch) {
+    return receipt(request, "TARGET_CHANGED", before ? before.observation : unknownObservation());
+  }
+  const probe = before.observation;
+  const windowStatus = requestWindowStatus(request);
+  if (windowStatus) return receipt(request, windowStatus, probe);
+  if (!sameResolvedTarget(initial, resolveExactTarget(request.conversation_fingerprint))) {
+    return receipt(request, "TARGET_CHANGED", probe);
+  }
+  if (!probe.target_present || !probe.exact_conversation_loaded ||
+      !probe.page_responsive || probe.auth_required === true ||
+      probe.provider_error_present === true) {
+    return receipt(request, cognitionProbeRefusal(request, before), probe);
+  }
+  let observation;
+  try {
+    const response = await chrome.tabs.sendMessage(initial.tabId, {
+      kind: COGNITION_OBSERVE_KIND,
+      expected_conversation_fingerprint: request.conversation_fingerprint,
+      expected_document_epoch: initial.documentEpoch,
+      session_alias: request.session_alias,
+      cognition_observe_payload: JSON.parse(JSON.stringify(request.cognition_observe_payload)),
+    }, {frameId: 0});
+    if (!transportCurrent()) return null;
+    const valid = await validCognitionObserveResponse(response, request, initial.documentEpoch);
+    if (!transportCurrent()) return null;
+    if (!valid) return receipt(request, "UNKNOWN", probe);
+    observation = response.cognition_observation;
+  } catch (_error) {
+    if (!transportCurrent()) return null;
+    return receipt(request, "UNKNOWN", probe);
+  }
+  const after = await freshProbe(initial.tabId, request.conversation_fingerprint);
+  if (!transportCurrent()) return null;
+  const current = resolveExactTarget(request.conversation_fingerprint);
+  const windowStatusAfter = requestWindowStatus(request);
+  if (!after || after.document_epoch !== initial.documentEpoch ||
+      !sameResolvedTarget(initial, current) || windowStatusAfter) {
+    return receipt(request, windowStatusAfter || "TARGET_CHANGED",
+      after ? after.observation : probe);
+  }
+  const observed = after.observation;
+  if (!observed.target_present || !observed.exact_conversation_loaded ||
+      !observed.page_responsive || observed.auth_required !== false ||
+      observed.provider_error_present !== false) {
+    return receipt(request, cognitionProbeRefusal(request, after), observed);
+  }
+  if (observation.status === "COGNITION_RESULT_READY" &&
+      (observed.generation_state !== "idle" || observed.document_ready_state === "loading")) {
+    return receipt(request, "UNKNOWN", observed);
+  }
+  if (!["COGNITION_RESULT_READY", "COGNITION_RESULT_PENDING", "COGNITION_RESULT_REFUSED"]
+      .includes(observation.status)) {
+    return receipt(request, "UNKNOWN", observed);
+  }
+  const result = receipt(request, observation.status, observed);
+  result.cognition_observation = observation;
+  return result;
+}
+
+
+function validObserveContinuationAckRequest(request) {
+  return request?.action === "OBSERVE_CONTINUATION_ACK" && K?.validRequest(request) === true;
+}
+async function handleSubmitContinuation(request) {
+  const outcome = await K.handle(request, {resolveExactTarget, freshProbe,
+    requestWindowStatus, unknownObservation, sendMessage: (i, v) => chrome.tabs.sendMessage(i, v, {frameId: 0})});
+  return receipt(request, outcome.status, outcome.observation || unknownObservation());
+}
+
+function semanticContentRequest(request) {
+  return {
+    kind: CONTINUATION_ACK_OBSERVE_KIND,
+    expected_conversation_fingerprint: request.conversation_fingerprint,
+    turn_id: request.turn_id,
+    directive_digest: request.directive_digest,
+    session_alias: request.session_alias,
+    runtime_binding_id: request.runtime_binding_id,
+    runtime_binding_generation: request.runtime_binding_generation,
+    runtime_binding_fingerprint: request.runtime_binding_fingerprint,
+    wake_obligation_ids: [...request.wake_obligation_ids],
+    wake_obligation_digest: request.wake_obligation_digest,
+  };
+}
+
+
+function sameStringArray(left, right) {
+  return Array.isArray(left) && Array.isArray(right) &&
+    left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function validSemanticContentResult(value, request) {
+  if (!exactKeys(value, SEMANTIC_CONTENT_RESULT_KEYS) ||
+      value.schema !== CONTINUATION_ACK_RESULT_SCHEMA ||
+      !["CONTINUATION_ACKNOWLEDGED", "CONTINUATION_ACK_PENDING",
+        "CONTINUATION_ACK_REFUSED"].includes(value.status)) return false;
+  for (const key of [
+    "conversation_fingerprint", "turn_id", "directive_digest", "session_alias",
+    "runtime_binding_id", "runtime_binding_generation", "runtime_binding_fingerprint",
+    "wake_obligation_digest",
+  ]) {
+    if (value[key] !== request[key]) return false;
+  }
+  if (!sameStringArray(value.wake_obligation_ids, request.wake_obligation_ids) ||
+      typeof value.document_epoch !== "string" || !/^[0-9a-f]{32}$/.test(value.document_epoch) ||
+      typeof value.terminal_ack_trailer !== "boolean") return false;
+  if (value.status === "CONTINUATION_ACKNOWLEDGED") {
+    return validTurnId(value.provider_native_turn_id) &&
+      sameStringArray(value.acknowledged_obligation_ids, request.wake_obligation_ids) &&
+      value.terminal_ack_trailer === true;
+  }
+  return value.provider_native_turn_id === null &&
+    sameStringArray(value.acknowledged_obligation_ids, []) &&
+    value.terminal_ack_trailer === false;
+}
+
+function semanticProbeEligible(event, request) {
+  return event && event.conversation_fingerprint === request.conversation_fingerprint &&
+    validDocumentEpoch(event.document_epoch) &&
+    event.observation.target_present && event.observation.exact_conversation_loaded &&
+    event.observation.auth_required !== true &&
+    event.observation.provider_error_present !== true;
+}
+
+function sameSemanticTarget(left, right) {
+  return left && right && !left.status && !right.status &&
+    left.tabId === right.tabId &&
+    left.navigationGeneration === right.navigationGeneration &&
+    left.documentEpoch === right.documentEpoch;
+}
+
+async function handleObserveContinuationAck(request) {
+  const resolved = resolveExactTarget(request.conversation_fingerprint);
+  if (resolved.status) return receipt(request, resolved.status, unknownObservation());
+  const before = await freshProbe(resolved.tabId, request.conversation_fingerprint);
+  const bound = resolveExactTarget(request.conversation_fingerprint);
+  if (!semanticProbeEligible(before, request) ||
+      bound.status || bound.tabId !== resolved.tabId ||
+      bound.documentEpoch !== before.document_epoch) {
+    return receipt(
+      request,
+      "CONTINUATION_ACK_REFUSED",
+      before ? before.observation : unknownObservation(),
+    );
+  }
+  let semantic;
+  try {
+    semantic = await chrome.tabs.sendMessage(
+      bound.tabId,
+      semanticContentRequest(request),
+      {frameId: 0},
+    );
+  } catch (_error) {
+    return receipt(request, "CONTINUATION_ACK_REFUSED", before.observation);
+  }
+  if (!validSemanticContentResult(semantic, request) ||
+      semantic.document_epoch !== bound.documentEpoch) {
+    return receipt(request, "CONTINUATION_ACK_REFUSED", before.observation);
+  }
+  const current = resolveExactTarget(request.conversation_fingerprint);
+  if (!sameSemanticTarget(current, bound) || requestWindowStatus(request)) {
+    return receipt(request, "CONTINUATION_ACK_REFUSED", before.observation);
+  }
+  const after = await freshProbe(bound.tabId, request.conversation_fingerprint);
+  const finalTarget = resolveExactTarget(request.conversation_fingerprint);
+  if (!semanticProbeEligible(after, request) ||
+      after.document_epoch !== bound.documentEpoch ||
+      !sameSemanticTarget(finalTarget, bound)) {
+    return receipt(
+      request,
+      "CONTINUATION_ACK_REFUSED",
+      after ? after.observation : unknownObservation(),
+    );
+  }
+  return receipt(request, semantic.status, after.observation, semantic);
+}
+
 const CENSUS_REQUEST_SCHEMA = "mastermind.web_sol_census_request.v1";
 const CENSUS_RECEIPT_SCHEMA = "mastermind.web_sol_census_receipt.v1";
 const CENSUS_HEADERS = Object.freeze(["schema", "scope", "adapter_instance_id", "started_at", "completed_at",
@@ -438,8 +973,23 @@ function validCensusPopup(event, sender) {
 async function handleNativeRequest(request, port) {
   if (request && request.schema === CENSUS_REQUEST_SCHEMA) return handleCensusRequest(request, port);
   const typedReentry = validTypedReentryRequest(request);
-  if (!typedReentry && !validActionRequest(request)) return;
-  const accepted = Object.freeze({...request});
+  const submitContinuation = validSubmitContinuationRequest(request);
+  const submitCognition = validSubmitCognitionRequest(request);
+  const observeContinuationAck = validObserveContinuationAckRequest(request);
+  const observeCognition = validObserveCognitionRequest(request);
+  if (!typedReentry && !submitContinuation && !observeContinuationAck &&
+      !submitCognition &&
+      !observeCognition &&
+      !validActionRequest(request)) return;
+  // A cognition action belongs to the admitted native connection, including across awaits.
+  const cognitionToken = nativePortToken, cognitionEpoch = nativePortEpoch;
+  const cognitionBoot = transportBootNonce;
+  const cognitionTransportCurrent = () => nativePort === port &&
+    nativePortToken === cognitionToken && nativePortEpoch === cognitionEpoch &&
+    transportBootNonce === cognitionBoot && !!cognitionBoot && transportHandshakeReady;
+  if ((submitCognition || observeCognition) && !cognitionTransportCurrent()) return;
+  const accepted = Object.freeze((submitCognition || observeCognition) ?
+    JSON.parse(JSON.stringify(request)) : {...request});
   const windowStatus = requestWindowStatus(accepted);
   if (windowStatus) {
     port.postMessage(receipt(accepted, windowStatus, unknownObservation()));
@@ -448,7 +998,12 @@ async function handleNativeRequest(request, port) {
   const result = accepted.action === "INSPECT"
     ? await handleInspect(accepted)
     : accepted.action === "FOREGROUND" ? await handleForeground(accepted)
-    : typedReentry ? await handleTypedReentry(accepted) : null;
+    : submitCognition ? await handleSubmitCognition(accepted, cognitionTransportCurrent)
+    : observeCognition ? await handleObserveCognition(accepted, cognitionTransportCurrent)
+    : typedReentry ? await handleTypedReentry(accepted)
+    : submitContinuation ? await handleSubmitContinuation(accepted)
+    : observeContinuationAck ? await handleObserveContinuationAck(accepted) : null;
+  if ((submitCognition || observeCognition) && !cognitionTransportCurrent()) return;
   if (result) port.postMessage(result);
   return result;
 }
@@ -686,13 +1241,17 @@ chrome.runtime.onMessage.addListener((event, sender, sendResponse) => {
 });
 
 function refreshFromTabEvent(tabId) {
-  refreshTabMapping(tabId).catch(() => removeTabMapping(tabId));
+  refreshTabMapping(tabId).catch(() => removeTabMapping(tabId, false));
 }
 
 if (chrome.tabs) {
   if (chrome.tabs.onUpdated) {
     chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-      if (changeInfo && (typeof changeInfo.url === "string" || changeInfo.status === "complete")) {
+      if (!changeInfo) return;
+      if (typeof changeInfo.url === "string") {
+        advanceTabNavigationGeneration(tabId);
+        refreshFromTabEvent(tabId);
+      } else if (changeInfo.status === "complete") {
         refreshFromTabEvent(tabId);
       }
     });
@@ -704,7 +1263,7 @@ if (chrome.tabs) {
     chrome.tabs.onAttached.addListener((tabId) => refreshFromTabEvent(tabId));
   }
   if (chrome.tabs.onDetached) {
-    chrome.tabs.onDetached.addListener((tabId) => removeTabMapping(tabId));
+    chrome.tabs.onDetached.addListener((tabId) => advanceTabNavigationGeneration(tabId));
   }
   if (chrome.tabs.onReplaced) {
     chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
