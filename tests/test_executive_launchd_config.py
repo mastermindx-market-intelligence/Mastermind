@@ -1004,7 +1004,15 @@ def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() ->
     source_policy = (OPS / "install_source_policy.py").read_text(encoding="utf-8")
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
-    assert '["/usr/bin/git", "--no-optional-locks", "-C", str(repo), *args]' in source_policy
+    assert (
+        '"/usr/bin/git",\n'
+        '                "--no-optional-locks",\n'
+        '                "-c",\n'
+        '                f"safe.directory={trust_value}",\n'
+        '                "-C",\n'
+        '                trust_value,\n'
+        '                *args,'
+    ) in source_policy
     assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
     assert "--refresh" not in source_policy
     assert (
@@ -1733,7 +1741,7 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     worker_absent = source.index(
         'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
-    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive')
+    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive')
     config_write = source.index('temporary.write_text(', archive)
     plist_install = source.index('/usr/bin/install -o root -g wheel -m 0644')
     assert stop < control_absent < worker_absent < archive < config_write < plist_install
@@ -1763,7 +1771,7 @@ def test_installer_waits_boundedly_for_asynchronous_launchd_bootout() -> None:
     assert "return 1" in helper
 
     mutation_start = source.index("trap leave_installed_services_stopped EXIT")
-    archive = source.index('/usr/bin/git -C "$SOURCE_REPO" archive', mutation_start)
+    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive', mutation_start)
     mutation = source[mutation_start:archive]
     for label, description in (
         ("RELAY_LABEL", "relay"),
