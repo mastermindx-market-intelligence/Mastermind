@@ -308,3 +308,72 @@ def test_installer_source_reads_work_without_persistent_ownership_trust(
         assert not (checkout / "state.txt").exists()
         assert "safe.directory" not in (checkout / ".git" / "config").read_text(encoding="utf-8")
     assert source_config.read_bytes() == config_before
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_acceptance_reads_different_owner_without_changing_git_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked: bool
+) -> None:
+    from ops.executive_os.acceptance import Acceptance
+
+    repo, _accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    if linked:
+        linked_repo = tmp_path / "acceptance-source"
+        _git(repo, "worktree", "add", "--detach", str(linked_repo), protected)
+        repo = linked_repo
+    tree = _git(repo, "rev-parse", f"{protected}^{{tree}}")
+    git_dir = Path(_git(repo, "rev-parse", "--absolute-git-dir"))
+    common = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    paths = [git_dir / "index", common / "config"]
+    before = [(p.read_bytes(), p.stat()) for p in paths]
+    # Force status to inspect a changed stat without permitting index refresh.
+    tracked = repo / "state.txt"
+    info = tracked.stat()
+    os.utime(tracked, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    bare = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    assert bare.returncode != 0 and "dubious ownership" in bare.stderr
+
+    proof = object.__new__(Acceptance)
+    proof.source_repository = repo
+    proof.expected_sha = protected
+    assert proof._source_tree_sha() == tree
+    for path, (raw, old_stat) in zip(paths, before):
+        assert path.read_bytes() == raw
+        assert path.stat() == old_stat
+    assert not (git_dir / "index.lock").exists()
+
+
+@pytest.mark.parametrize("failure", ["dirty", "head", "remote", "alias", "wildcard"])
+def test_acceptance_source_refuses_drift_and_unsafe_trust(
+    tmp_path: Path, failure: str
+) -> None:
+    from ops.executive_os.acceptance import Acceptance, AcceptanceError
+
+    repo, accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    if failure == "dirty":
+        (repo / "untracked.txt").write_text("unreviewed", encoding="utf-8")
+    elif failure == "head":
+        _git(repo, "checkout", "--detach", accepted)
+    elif failure == "remote":
+        _git(repo, "update-ref", "refs/remotes/origin/master", accepted)
+    elif failure == "alias":
+        alias = tmp_path / "source-alias"
+        alias.symlink_to(repo, target_is_directory=True)
+        repo = alias
+    elif failure == "wildcard":
+        renamed = tmp_path / "source*"
+        repo.rename(renamed)
+        repo = renamed
+
+    proof = object.__new__(Acceptance)
+    proof.source_repository = repo
+    proof.expected_sha = protected
+    with pytest.raises(AcceptanceError) as caught:
+        proof._source_tree_sha()
+    assert isinstance(caught.value.__cause__, InstallSourcePolicyError)
