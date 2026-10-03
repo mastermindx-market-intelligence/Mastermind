@@ -4,16 +4,20 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-03T20:06:46.582101+00:00",
+  "prepared_at": "2026-10-03T20:21:04.876082+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
+    "ADMISSION_STATUS.md": {
+      "sha256": "09887614ad06930ca8276aa8995a8d56aab0eb57c0a52a68ff56933b7d464489",
+      "bytes": 7132
+    },
     "COMPARATOR_DEFINITION_CANDIDATE.json": {
       "sha256": "44f03fba0eefb87b6426681899849ab7517e7643a432f551d8a6e459ea8b0838",
       "bytes": 1213
     },
     "README.md": {
-      "sha256": "dd1fe02840c3c8f033c78b3f765889c2ee28c94dade2b94f713067e1e43eff76",
-      "bytes": 2522
+      "sha256": "2034ab7d43b0c8f4524abcd2c29a533b31e3b87d4df8e2b8c0a096280e4217da",
+      "bytes": 2994
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "1370014ed31db2b934a065d0056b6fd939f9a8664df2682814c30d9f99956317",
@@ -50,6 +54,14 @@
     "evidence/aapl_unlinked_assets.response.json": {
       "sha256": "aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21",
       "bytes": 68681
+    },
+    "evidence/candidate-contract-tests.json": {
+      "sha256": "174892a00ac32fc195fb4f7ea1c2b6634c5defc2ce844275de39dade1efb7a32",
+      "bytes": 1059
+    },
+    "evidence/current-base-procedure-delta.json": {
+      "sha256": "484f269ea11f1156ca43062f9eae9e04b2c725d53bfe049fe4dc3b60f385e584",
+      "bytes": 1811
     },
     "evidence/event-workspace-delta.json": {
       "sha256": "27b4db86233cc37eea1ba3614f249263d9715e54a1f50cc6b42b667584141ae6",
@@ -91,6 +103,10 @@
       "sha256": "49b1212cfc5544703504a49d18a3639d71c39908cb87e3bce2a04a56ecf29a2c",
       "bytes": 2076
     },
+    "evidence/review-recovery-observation.json": {
+      "sha256": "1323d5537c05668ca5c6c083ed765923d6acbf049a1193788ae5a457a7fb0144",
+      "bytes": 2630
+    },
     "evidence/runtime-observations.json": {
       "sha256": "da032bf79c0e73f2d834a2686b84d7d6b29f8a92734191d2756951f57d1452f2",
       "bytes": 2506
@@ -110,6 +126,10 @@
     "replay_owner_inputs.py": {
       "sha256": "ea7eb744ec43d5bc6adab029ae9f86562dc8eca6ede41c518e94ae9096aa1ee7",
       "bytes": 6279
+    },
+    "test_candidate_schema.py": {
+      "sha256": "12348f912fdf81253f9a1821f2e01aaff1a7affc48d3a33dd2658249b52b2980",
+      "bytes": 10467
     },
     "test_verify_evidence.py": {
       "sha256": "bd80da3ba5869559923061525a8cb0000a592cba1cd9b2d3d0414612afe7f4b2",

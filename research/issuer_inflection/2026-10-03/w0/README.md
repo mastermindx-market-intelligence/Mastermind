@@ -2,7 +2,7 @@
 
 Parent: Mastermind PR #1183. Commission: `11a64ce93328d5248967987be0d2a51883765797`. This directory is subordinate execution evidence, not another masterplan or canonical workstream.
 
-Read `W0_ADMISSION_CANDIDATE.md`, then `TRIAL_OWNER_ADMISSION.md` and `W1_IMPLEMENTATION_PACKET.md`. The independent review must distinguish proposed interface admission from executed evidence.
+Read `ADMISSION_STATUS.md` for the current gate/return state, then `W0_ADMISSION_CANDIDATE.md`, `TRIAL_OWNER_ADMISSION.md` and `W1_IMPLEMENTATION_PACKET.md`. The independent review must distinguish proposed interface admission from executed evidence.
 
 ## What actually ran
 
@@ -19,3 +19,7 @@ Run the capsule's local integrity check with `python3 research/issuer_inflection
 ## Open gates
 
 Independent exact-head review, source-owner/interface acceptance, actual canonical workstream/runtime/capture binding, closed derived schema acceptance, and connected W1 implementation/preview remain open. No new canonical schema is registered here. Full W0–W11 remains governed by the original audited plan.
+
+## Candidate contract checks
+
+Run `PYTHONDONTWRITEBYTECODE=1 python3 research/issuer_inflection/2026-10-03/w0/test_candidate_schema.py` for the 24 synthetic shape/compatibility tests. They reject closed-shape and authority/emission violations while explicitly demonstrating the unresolved semantic gates. They do not evaluate AAPL, classify an inflection, resolve a real rights decision or grant schema admission.
