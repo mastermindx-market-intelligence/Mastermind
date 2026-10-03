@@ -24,7 +24,7 @@ OAUTH_DIGEST = "e" * 64
 TOOL_DIGEST = "8eec65289bf72818fe8362cb02587b6cc78c6eb526a1f602edbd22ffff030918"
 SNAPSHOT_DIGEST = "1" * 64
 PLUGIN_ID = "Plugin_" + "2" * 32
-STEWARD_ID = "plugin_asdk_app_" + "3" * 32
+STEWARD_ID = "asdk_app_" + "3" * 32
 
 
 def digest_text(value: str) -> str:
@@ -92,7 +92,7 @@ def request() -> dict[str, object]:
     }
 
 
-def test_current_registered_app_id_compiles_private_native_reference() -> None:
+def test_canonical_app_id_compiles_private_native_reference() -> None:
     value = request()
     result = preflight_research_generation(value)
     assert result["assembly_status"] == "READY_TO_COMPILE"
@@ -110,11 +110,11 @@ def test_current_registered_app_id_compiles_private_native_reference() -> None:
     assert compiled.public_receipt["production_acceptance_granted"] is False
 
 
-def test_historical_asdk_app_id_is_not_accepted_for_research_generation() -> None:
+def test_directory_plugin_identity_is_not_accepted_as_native_app_id() -> None:
     value = request()
-    old_id = "asdk_app_" + "3" * 32
-    value["steward"]["app_id"] = old_id
-    value["steward"]["approved_app_id_digest"] = digest_text(old_id)
+    plugin_identity = "plugin_asdk_app_" + "3" * 32
+    value["steward"]["app_id"] = plugin_identity
+    value["steward"]["approved_app_id_digest"] = digest_text(plugin_identity)
     with pytest.raises(ResearchGenerationError, match="APP_IDENTITY_MISMATCH"):
         preflight_research_generation(value)
 
