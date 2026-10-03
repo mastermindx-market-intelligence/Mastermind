@@ -879,7 +879,7 @@ fi
     /bin/echo "source checkout failed the reviewed Executive install policy" >&2
     exit 65
   }
-TREE_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
+TREE_SHA="$(/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 RUNTIME_ROOT="/var/db/mastermind-executive"
@@ -1048,7 +1048,7 @@ wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   # mktemp creates the staging root as 0700. Both non-root service UIDs need
@@ -1119,7 +1119,10 @@ esac
 
 ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
 if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
-  /usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  # Root reads the operator-owned source through Git transport; the local-copy
+  # optimization has a distinct ownership boundary. Trust only the validated
+  # source path for this command, never persist a host-wide exception.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi
