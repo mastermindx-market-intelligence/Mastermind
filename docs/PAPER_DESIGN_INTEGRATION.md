@@ -376,7 +376,7 @@ staging into PROVEN_LIVE. Continue at the first unmet item, retaining this carri
   lifecycle. Developer-mode MCP connections support an explicit **Refresh** after tool names,
   descriptions, schemas, annotations, auth, or UI resources change; confirm refreshed metadata
   and start a new conversation. Published Plugin Directory definitions use continuous review/rescan.
-  The current custom-app Help Center separately says published workspace MCP app tool/metadata changes
+  The current custom-app Help Center separately says published custom workspace MCP app tool/metadata changes
   may require recreate + republish, while Enterprise/Edu Action control can Refresh changed actions
   after publication. Therefore bind recovery to the exact observed app/workspace state rather than
   generalizing either lifecycle. If recreation is required, replace the old logical Paper app through
