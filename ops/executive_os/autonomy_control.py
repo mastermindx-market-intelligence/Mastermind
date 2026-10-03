@@ -4101,7 +4101,17 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         result = value["result"]
         if result.get("service_state") != "AWAITING_CANARY":
             return False
-        if result.get("socket") != os.fspath(CONTROL_SOCKET):
+        # The service resolves its host-owned socket declaration (on macOS,
+        # /var/run is /private/var/run). Admit only these two fixed spellings;
+        # never resolve an arbitrary path supplied in the status response.
+        try:
+            canonical_control_socket = CONTROL_SOCKET.resolve(strict=False)
+        except (OSError, RuntimeError):
+            return False
+        if result.get("socket") not in (
+            os.fspath(CONTROL_SOCKET),
+            os.fspath(canonical_control_socket),
+        ):
             return False
         status_pid = result.get("pid")
         if (
