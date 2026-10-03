@@ -1004,7 +1004,15 @@ def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() ->
     source_policy = (OPS / "install_source_policy.py").read_text(encoding="utf-8")
     acceptance = (OPS / "acceptance.py").read_text(encoding="utf-8")
 
-    assert '["/usr/bin/git", "--no-optional-locks", "-C", str(repo), *args]' in source_policy
+    assert (
+        '"/usr/bin/git",\n'
+        '                "--no-optional-locks",\n'
+        '                "-c",\n'
+        '                f"safe.directory={trust_value}",\n'
+        '                "-C",\n'
+        '                trust_value,\n'
+        '                *args,'
+    ) in source_policy
     assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
     assert "--refresh" not in source_policy
     assert (
