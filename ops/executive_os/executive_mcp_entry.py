@@ -442,6 +442,7 @@ def main(argv=None):
         elif profile == WEB_CEO_SESSIONS_PROFILE:
             from integrations.session_bridge.installed import InstalledSessionBridgeClient
 
+            from integrations.session_bridge.return_tools import NativeReplyReadTool
             session_client = InstalledSessionBridgeClient(
                 settings.ceo_ingress_socket_path
             )
@@ -451,6 +452,7 @@ def main(argv=None):
                 session_target_projector=session_client.targets,
                 session_reply_handler=session_client.send,
                 session_summon_handler=session_client.summon,
+                session_reply_read_tool=NativeReplyReadTool(session_client),
                 **mounts,
             )
         elif profile == WEB_CEO_V2_PROFILE:

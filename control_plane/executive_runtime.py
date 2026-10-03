@@ -59,6 +59,7 @@ from control_plane.executive_coo_policy import (
     EXPECTED_POLICY_SHA256,
 )
 from control_plane.executive_orchestration_principal import (
+    base_process_identity,
     OperatorPrincipalObservation,
     OrchestrationPrincipalError,
     build_execution_principal_snapshot,
@@ -76,6 +77,8 @@ from control_plane.executive_retry_safety import (
 from control_plane.operator_harness_contract import (
     AttemptExecutionMode,
     CandidateResult,
+    CapabilityIdentity,
+    ObservedCapabilityIdentity,
     CheckpointObservation,
     EventCursor,
     LaunchDecision,
@@ -18264,7 +18267,7 @@ class OperatorHarnessRegistry:
                     != generation.process_generation_id
                     or observed_principal.provider_session_id
                     != found["provider_session_id"]
-                    or observed_principal.process_identity != expected_process
+                    or base_process_identity(observed_principal.process_identity) != expected_process
                     or placement.get("worker_id") != row["worker_id"]
                     or placement.get("quota_class") != row["quota_class"]
                     or not isinstance(grant, dict)
@@ -18477,7 +18480,7 @@ class OperatorHarnessRegistry:
                 "decision": LaunchDecision.ALLOW.value,
                 "attestation_digest": current["observed_attestation_digest"],
             }
-            or observation["process_identity"]
+            or base_process_identity(observation["process_identity"])
             != {
                 "pid": current["pid"],
                 "pgid": current["pgid"],
@@ -22943,6 +22946,45 @@ class ActiveOperatorBindingFacts:
     pgid: int
     process_start_identity: str
     boot_id: str
+    admitted_unique_id: int | None = None
+    admitted_pidversion: int | None = None
+
+
+
+def _expected_mcp_capability(
+    *, config_name: str, server_identity: str, server_version: str,
+    tool_schema_digest: str, auth_status: str,
+) -> dict[str, Any]:
+    expected = {
+        "kind": "mcp_server",
+        "name": config_name,
+        "tool_schema_digest": tool_schema_digest,
+        "mcp_server_identity": server_identity,
+        "mcp_server_version": server_version,
+        "mcp_auth_status": auth_status,
+        "skill_content_digest": None,
+        "resource_contract_digest": None,
+    }
+    if (
+        any(type(value) is not str or not value for value in (
+            config_name, server_identity, server_version, auth_status,
+        ))
+        or type(tool_schema_digest) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", tool_schema_digest) is None
+    ):
+        raise StateConflict("MCP binding requires a complete host capability identity")
+    return expected
+
+
+@dataclasses.dataclass(frozen=True)
+class ActiveMcpCapabilityBindingFacts:
+    """Same-snapshot current writer and its required, attested MCP capability."""
+
+    binding: ActiveOperatorBindingFacts
+    requested_capability: CapabilityIdentity
+    observed_capability: ObservedCapabilityIdentity
+    requested_profile_digest: str
+    observed_attestation_digest: str
 
 
 def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
@@ -24288,6 +24330,138 @@ class Runtime:
             raise StateConflict("runtime parent lookup process identity drifted")
         return facts
 
+    def current_harness_mcp_binding_for_parent_pid(
+        self,
+        parent_pid: int,
+        *,
+        config_name: str,
+        server_identity: str,
+        server_version: str,
+        tool_schema_digest: str,
+        auth_status: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        """Read exact current-writer and required MCP capability facts together.
+
+        The host supplies its sealed expected capability, never tool arguments.
+        This is a read projection, not socket authentication or a launch grant.
+        """
+        expected = _expected_mcp_capability(
+            config_name=config_name, server_identity=server_identity,
+            server_version=server_version, tool_schema_digest=tool_schema_digest,
+            auth_status=auth_status,
+        )
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_mcp_binding_for_parent_pid(
+                    parent_pid, config_name=config_name,
+                    server_identity=server_identity, server_version=server_version,
+                    tool_schema_digest=tool_schema_digest, auth_status=auth_status,
+                    connection=owned_connection,
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        binding = self.current_harness_binding_for_parent_pid(
+            parent_pid, connection=connection
+        )
+        return self._current_harness_mcp_capability(binding, expected, connection)
+
+    def current_harness_mcp_binding_for_attempt(
+        self, attempt_id: str, *, config_name: str, server_identity: str,
+        server_version: str, tool_schema_digest: str, auth_status: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        """Qualify one exact recipient through the same current-writer owner.
+
+        No peer identity or dispatch authority is established by this read.
+        The caller must revalidate this exact binding before admission.
+        """
+        expected = _expected_mcp_capability(
+            config_name=config_name, server_identity=server_identity,
+            server_version=server_version, tool_schema_digest=tool_schema_digest,
+            auth_status=auth_status,
+        )
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_mcp_binding_for_attempt(
+                    attempt_id, config_name=config_name, server_identity=server_identity,
+                    server_version=server_version, tool_schema_digest=tool_schema_digest,
+                    auth_status=auth_status, connection=owned_connection,
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        binding = self.current_harness_binding_source(attempt_id, connection=connection)
+        return self._current_harness_mcp_capability(binding, expected, connection)
+
+    def _current_harness_mcp_capability(
+        self, binding: ActiveOperatorBindingFacts, expected: Mapping[str, Any],
+        connection: sqlite3.Connection,
+    ) -> ActiveMcpCapabilityBindingFacts:
+        self.store._assert_owned_snapshot_connection(connection)
+        config_name = expected["name"]
+        rows = connection.execute(
+            """SELECT a.requested_execution_profile_json,
+                      a.requested_execution_profile_digest,
+                      g.observed_attestation_json,g.observed_attestation_digest
+               FROM main.attempts a
+               JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
+               JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
+               WHERE a.attempt_id=? AND g.process_generation_id=?
+                 AND e.session_epoch_id=? AND e.state='CURRENT'
+                 AND g.executive_writer_held=1 AND g.ended_at_ms IS NULL
+               LIMIT 2""",
+            (binding.attempt_id, binding.process_generation_id, binding.session_epoch_id),
+        ).fetchall()
+        if len(rows) != 1:
+            raise StateConflict("MCP binding requires one exact admitted generation")
+        row = rows[0]
+        from control_plane.operator_harness_wire import (
+            OperatorHarnessWireError,
+            observed_harness_attestation,
+            requested_execution_profile,
+        )
+        try:
+            requested = requested_execution_profile(_load_canonical_digest_pair(
+                row["requested_execution_profile_json"],
+                row["requested_execution_profile_digest"],
+                name="MCP requested profile",
+            ))
+            observed = observed_harness_attestation(_load_canonical_digest_pair(
+                row["observed_attestation_json"], row["observed_attestation_digest"],
+                name="MCP observed attestation",
+            ))
+            comparison = compare_launch(requested, observed)
+        except (PersistenceError, OperatorHarnessWireError, TypeError, ValueError) as exc:
+            raise StateConflict("MCP binding sealed evidence is invalid") from exc
+        required = [
+            value for value in requested.capabilities.required
+            if value.name == config_name
+        ]
+        attested = [
+            value for value in observed.capabilities if value.name == config_name
+        ]
+        if (
+            comparison.decision is not LaunchDecision.ALLOW
+            or len(required) != 1 or len(attested) != 1
+            or any(value.name == config_name for value in requested.capabilities.allowed_ambient)
+            or observed.effective_mcp.count(config_name) != 1
+            or config_name in observed.effective_skills
+            or config_name in observed.effective_plugins_or_apps
+        ):
+            raise StateConflict("MCP binding requires an exact required and attested capability")
+        if (
+            any(getattr(required[0], key) != value for key, value in expected.items())
+            or any(getattr(attested[0], key) != value for key, value in expected.items())
+            or required[0].harness_binary_digest != requested.harness_binary_digest
+            or observed.harness_binary_digest != requested.harness_binary_digest
+        ):
+            raise StateConflict("MCP binding capability identity drifted")
+        return ActiveMcpCapabilityBindingFacts(
+            binding=binding,
+            requested_capability=required[0],
+            observed_capability=attested[0],
+            requested_profile_digest=str(row["requested_execution_profile_digest"]),
+            observed_attestation_digest=str(row["observed_attestation_digest"]),
+        )
+
     def current_harness_binding_source(
         self,
         attempt_id: str,
@@ -24770,7 +24944,7 @@ class Runtime:
             }
             or observation["process_generation_id"] != row["process_generation_id"]
             or observation["provider_session_id"] != row["epoch_provider_session"]
-            or observation["process_identity"]
+            or base_process_identity(observation["process_identity"])
             != {
                 "pid": row["generation_pid"],
                 "pgid": row["generation_pgid"],
@@ -24794,6 +24968,8 @@ class Runtime:
             pgid=int(row["generation_pgid"]),
             process_start_identity=str(row["generation_process_start_identity"]),
             boot_id=str(row["generation_boot_id"]),
+            admitted_unique_id=observation["process_identity"].get("unique_id"),
+            admitted_pidversion=observation["process_identity"].get("pidversion"),
         )
 
 
@@ -26793,6 +26969,7 @@ class ReleaseMaintenanceRegistry:
 
 __all__ = [
     "ActiveOperatorBindingFacts",
+    "ActiveMcpCapabilityBindingFacts",
     "Attempt",
     "AttemptLease",
     "AttemptRegistry",

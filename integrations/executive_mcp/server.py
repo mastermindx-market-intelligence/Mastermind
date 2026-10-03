@@ -1251,6 +1251,7 @@ def build_web_ceo_sessions_mcp_app(
     session_target_projector: Any,
     session_reply_handler: Any,
     session_summon_handler: Any,
+    session_reply_read_tool=None,
     workspace_app=None,
     content_app=None,
     os_app=None,
@@ -1345,8 +1346,8 @@ def build_web_ceo_sessions_mcp_app(
                 ),
             )
 
-    return _build_profile_mcp_app(
-        settings, audit_sink=audit_sink,
+    configuration = dict(
+        audit_sink=audit_sink,
         profile_server_name=WEB_CEO_SESSIONS_SERVER_NAME,
         profile_server_version=WEB_CEO_SESSIONS_SERVER_VERSION,
         profile_tools=tuple(build_web_ceo_sessions_tools()),
@@ -1360,6 +1361,13 @@ def build_web_ceo_sessions_mcp_app(
         ),
         inner_server_version="1.2.0",
     )
+    if session_reply_read_tool is not None:
+        from integrations.session_bridge.return_tools import NativeReplyReadTool
+        if type(session_reply_read_tool) is not NativeReplyReadTool:
+            raise TypeError("the canonical reply-read tool is required")
+        configuration = session_reply_read_tool.extend_host_configuration(configuration)
+    return _build_profile_mcp_app(settings, **configuration)
+
 
 def build_web_ceo_sessions_tools() -> list[mcp_types.Tool]:
     from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_TOOL_SPECS

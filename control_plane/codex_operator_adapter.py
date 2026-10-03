@@ -19,11 +19,16 @@ import pwd
 import re
 import stat
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from control_plane.executive_process_identity import (
+    _ProcessInstanceObservation,
+    _observe_process_instance,
+)
 from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityProfile,
     NativeHelperGrant,
@@ -316,6 +321,12 @@ def _default_base_sha(workspace: Path) -> str:
         ) from exc
 
 
+def _default_process_instance(pid: int) -> _ProcessInstanceObservation | None:
+    # Non-Darwin harnesses keep their historical evidence shape. CONSULT's
+    # Darwin host qualifier requires the execution pair and refuses its absence.
+    return _observe_process_instance(pid) if sys.platform == "darwin" else None
+
+
 def _default_process_identity(pid: int) -> ProcessIdentityObservation:
     try:
         pgid = os.getpgid(pid)
@@ -420,6 +431,7 @@ class _GenerationState:
     provider_session_tree_id: str
     process: ProcessIdentityObservation
     attestation: ObservedHarnessAttestation
+    process_instance: tuple[int, int] | None = None
     resource: Any | None = None
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
@@ -616,6 +628,7 @@ class CodexOperatorAdapter:
         turn_input_loader: TurnInputLoader | None = None,
         base_sha_resolver: BaseShaResolver = _default_base_sha,
         process_identity_observer: ProcessIdentityObserver = _default_process_identity,
+        process_instance_observer: Callable[[int], _ProcessInstanceObservation | None] = _default_process_instance,
         client_factory: ClientFactory = _default_client_factory,
         extra_env: Mapping[str, str] | None = None,
         skill_canary_binding: CodexSkillCanaryBinding | None = None,
@@ -676,6 +689,7 @@ class CodexOperatorAdapter:
         self.turn_input_loader = turn_input_loader
         self.base_sha_resolver = base_sha_resolver
         self.process_identity_observer = process_identity_observer
+        self.process_instance_observer = process_instance_observer
         self.client_factory = client_factory
         self.extra_env = dict(extra_env or {})
         self.skill_canary_binding = skill_canary_binding
@@ -1217,6 +1231,40 @@ class CodexOperatorAdapter:
         thread = result.get("thread")
         return str(thread.get("id") or "") if isinstance(thread, Mapping) else ""
 
+    def _process_instance(self, pid: int) -> tuple[int, int] | None:
+        try:
+            value = self.process_instance_observer(pid)
+            if value is None and sys.platform != "darwin":
+                return None
+            if (
+                not isinstance(value, _ProcessInstanceObservation)
+                or type(value.unique_id) is not int or value.unique_id <= 0
+                or type(value.pidversion) is not int or value.pidversion <= 0
+            ):
+                raise ValueError("execution identity unavailable")
+            return value.unique_id, value.pidversion
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity is not observable",
+                effect_unknown=True,
+            ) from exc
+
+    def _require_process_continuity(
+        self, process: ProcessIdentityObservation,
+        instance: tuple[int, int] | None,
+    ) -> None:
+        pid = int(process.pid or 0)
+        if (
+            self.process_identity_observer(pid) != process
+            or self._process_instance(pid) != instance
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity changed before admission",
+                effect_unknown=True,
+            )
+
     def _initialize_and_attest(
         self,
         client: AppServerClient,
@@ -1411,9 +1459,11 @@ class CodexOperatorAdapter:
                     "Codex App Server lacks its attested private process group",
                     effect_unknown=True,
                 )
+            process_instance = self._process_instance(client.pid)
             attestation = self._initialize_and_attest(
                 client, requested, launch_binary_digest, resource_binding
             )
+            self._require_process_continuity(process, process_instance)
             if _sha256_file(self.binary_path) != launch_binary_digest:
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
@@ -1508,6 +1558,7 @@ class CodexOperatorAdapter:
                     "thread/started did not confirm the provider session",
                     effect_unknown=True,
                 )
+            self._require_process_continuity(process, process_instance)
             # Drain (never bare-clear) so a skills/changed notification that
             # arrived during thread/start itself -- the other half of the
             # M7 fence -- is scanned rather than dropped as startup noise.
@@ -1535,6 +1586,7 @@ class CodexOperatorAdapter:
             provider_session_tree_id=provider_session_tree_id,
             process=process,
             attestation=attestation,
+            process_instance=process_instance,
             resource=(
                 resource_binding.resource if resource_binding is not None else None
             ),
@@ -2022,13 +2074,8 @@ class CodexOperatorAdapter:
         """Observe the exact launched PID's effective host identity."""
 
         state = self._state(generation)
-        process = self.process_identity_observer(int(state.process.pid or 0))
-        if process != state.process:
-            raise CodexAdapterError(
-                AdapterFailureClass.PROCESS_CRASH,
-                "launched process identity changed before admission",
-                effect_unknown=True,
-            )
+        process = state.process
+        self._require_process_continuity(process, state.process_instance)
         try:
             completed = subprocess.run(
                 ["ps", "-o", "uid=", "-p", str(process.pid)],
@@ -2046,13 +2093,17 @@ class CodexOperatorAdapter:
                 "launched process credentials are not observable",
                 effect_unknown=True,
             ) from exc
+        self._require_process_continuity(process, state.process_instance)
+        identity = {
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        }
+        if state.process_instance is not None:
+            identity.update(unique_id=state.process_instance[0], pidversion=state.process_instance[1])
         return OSProcessCredentialObservation(
-            process_identity={
-                "pid": process.pid,
-                "pgid": process.pgid,
-                "process_start_identity": process.process_start_identity,
-                "boot_id": process.boot_id,
-            },
+            process_identity=identity,
             os_principal_name=principal_name,
             os_principal_uid=uid,
         )

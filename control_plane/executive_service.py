@@ -1872,6 +1872,46 @@ class CeoIngressAppBinding:
             raise ValueError("armed principal admission requires a host guard")
 
 
+class CompanyConsultationHostProtocol(Protocol):
+    async def handle_connection(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class CompanyConsultationBinding:
+    """Trusted optional transport composition; grants remain Runtime-owned."""
+    socket_path: Path
+    worker_uid: int
+    group_gid: int
+    host_factory: Callable[[Runtime], CompanyConsultationHostProtocol]
+    activated_socket: socket.socket | None = None
+
+    def __post_init__(self) -> None:
+        path = Path(self.socket_path)
+        if (not path.is_absolute() or "\0" in os.fspath(path)
+                or os.path.normpath(os.fspath(path)) != os.fspath(path)
+                or len(os.fsencode(path)) > 103
+                or type(self.worker_uid) is not int or self.worker_uid <= 0
+                or type(self.group_gid) is not int or self.group_gid <= 0
+                or not callable(self.host_factory)):
+            raise ValueError("Company consultation binding is invalid")
+        object.__setattr__(self, "socket_path", path)
+        activated = self.activated_socket
+        if activated is not None:
+            if activated.family != socket.AF_UNIX:
+                raise ValueError("Company consultation socket must use AF_UNIX")
+            bound = activated.getsockname()
+            if isinstance(bound, bytes):
+                bound = os.fsdecode(bound)
+            if (not isinstance(bound, str) or not bound
+                    or not Path(bound).is_absolute()
+                    or os.path.normpath(bound) != bound
+                    or bound not in {os.fspath(path), os.fspath(path.resolve(strict=False))}):
+                raise ValueError("Company consultation activated path mismatch")
+            _require_listening_if_queryable(activated)
+
+
 class ExecutiveControlService:
     """One private AF_UNIX service around one durable Executive runtime."""
 
@@ -1908,6 +1948,7 @@ class ExecutiveControlService:
             TerminalReturnProjectorFactory | None
         ) = None,
         terminal_return_binding_resolver: Any | None = None,
+        company_consultation_binding: CompanyConsultationBinding | None = None,
         dialogue_observation_socket_path: Path | str | None = None,
         dialogue_observation_peer_uid: int | None = None,
         dialogue_observation_group_gid: int | None = None,
@@ -2276,6 +2317,27 @@ class ExecutiveControlService:
             self._dialogue_observation_ready = False
             self._dialogue_observation_tasks: set[asyncio.Task[Any]] = set()
             self._dialogue_observation_inode: tuple[int, int] | None = None
+
+        binding = company_consultation_binding
+        if binding is not None:
+            if type(binding) is not CompanyConsultationBinding:
+                raise ValueError("Company consultation requires its trusted binding")
+            if binding.socket_path.resolve(strict=False) in {
+                path.resolve(strict=False) for path in (
+                    config.socket_path, config.terminal_return_socket_path,
+                    self._ceo_ingress_socket_path, self._dialogue_observation_socket_path,
+                ) if path is not None
+            }:
+                raise ValueError("Company consultation socket must be distinct")
+        self._company_consultation_binding = binding
+        self._company_consultation_host: CompanyConsultationHostProtocol | None = None
+        self._company_consultation_server: asyncio.AbstractServer | None = None
+        self._company_consultation_ready = False
+        self._company_consultation_tasks: set[asyncio.Task[Any]] = set()
+        self._company_consultation_writers: set[asyncio.StreamWriter] = set()
+        self._company_consultation_inode: tuple[int, int] | None = None
+        self._company_consultation_activated_socket = (
+            binding.activated_socket if binding is not None else None)
 
     def _load_coo_execution_binding(self) -> dict[str, Any]:
         """Resolve one reviewed sealed-COO alias into host-owned Job identity."""
@@ -2994,6 +3056,89 @@ class ExecutiveControlService:
         assert self._server is not None
         await self._server.start_serving()
 
+    async def _bind_company_consultation_server(self, *, start_serving: bool) -> None:
+        from common.company_consultation_host_contract import MAX_REQUEST_BYTES
+        binding = self._company_consultation_binding
+        assert binding is not None
+        path, gid = binding.socket_path, binding.group_gid
+        activated = self._company_consultation_activated_socket
+        options: dict[str, Any] = {}
+        if sys.version_info >= (3, 13):
+            options["cleanup_socket"] = False
+        if activated is None:
+            parent = path.parent
+            existed = parent.exists()
+            parent.mkdir(mode=0o710, parents=True, exist_ok=True)
+            info = parent.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                    or info.st_uid != os.geteuid()):
+                raise ServiceError("Company consultation parent custody is unavailable")
+            if not existed:
+                os.chown(parent, os.geteuid(), gid, follow_symlinks=False)
+                parent.chmod(0o710)
+                info = parent.lstat()
+            if info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o710:
+                raise ServiceError("Company consultation parent permissions differ")
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                raise ServiceError("Company consultation pre-existing socket is ambiguous")
+            self._company_consultation_server = await asyncio.start_unix_server(
+                self._handle_company_consultation_connection, path=str(path),
+                limit=MAX_REQUEST_BYTES + 1, start_serving=start_serving, **options)
+            info = path.lstat()
+            if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.geteuid():
+                raise ServiceError("Company consultation socket custody is unavailable")
+            self._company_consultation_inode = (info.st_dev, info.st_ino)
+            os.chown(path, os.geteuid(), gid, follow_symlinks=False)
+            path.chmod(0o660)
+        else:
+            self._company_consultation_activated_socket = None
+            self._company_consultation_server = await asyncio.start_unix_server(
+                self._handle_company_consultation_connection, sock=activated,
+                limit=MAX_REQUEST_BYTES + 1, start_serving=start_serving, **options)
+        info = path.lstat()
+        if (not stat.S_ISSOCK(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != os.geteuid() or info.st_gid != gid
+                or stat.S_IMODE(info.st_mode) != 0o660
+                or (activated is None and (info.st_dev, info.st_ino)
+                    != self._company_consultation_inode)):
+            raise ServiceError("Company consultation socket permissions or identity differ")
+
+    async def _start_company_consultation_serving(self) -> None:
+        assert self._company_consultation_server is not None
+        await self._company_consultation_server.start_serving()
+
+    async def _handle_company_consultation_connection(self, reader, writer) -> None:
+        task = asyncio.current_task()
+        self._company_consultation_tasks.add(task)
+        self._company_consultation_writers.add(writer)
+        try:
+            binding = self._company_consultation_binding
+            host = self._company_consultation_host
+            if (binding is None or host is None or self._closing
+                    or not self._company_consultation_ready or self._service_state != "READY"):
+                return
+            connection = writer.get_extra_info("socket")
+            if connection is None or _peer_uid(connection) != binding.worker_uid:
+                return
+            # The concrete host captures and holds this exact peer again, then
+            # revalidates the current parent/grant adjacent to every effect.
+            await host.handle_connection(reader, writer)
+        except _CLIENT_GONE:
+            pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except _CLIENT_GONE:
+                pass
+            finally:
+                self._company_consultation_tasks.discard(task)
+                self._company_consultation_writers.discard(writer)
+
     async def start(self) -> None:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
@@ -3063,11 +3208,17 @@ class ExecutiveControlService:
                 if self._service_state != "QUARANTINED":
                     await self._finalize_release_admission_on_startup()
                 await self._replay_terminal_returns_on_startup()
+            if self._company_consultation_binding is not None:
+                self._namespace_custody.bound_runtime(self.runtime)
+                self._company_consultation_host = self._company_consultation_binding.host_factory(self.runtime)
+                if not callable(getattr(self._company_consultation_host, "handle_connection", None)):
+                    raise ServiceError("Company consultation host composition is unavailable")
             if self._workspace_control_room is not None:
                 await self._workspace_control_room.start()
             if (
                 self._ceo_ingress_socket_path is not None
                 or self._dialogue_observation_socket_path is not None
+                or self._company_consultation_binding is not None
             ):
                 # Every configured listener binds with no-accept only after
                 # Runtime reconciliation and the terminal phase audit.  Once
@@ -3079,16 +3230,22 @@ class ExecutiveControlService:
                     await self._bind_dialogue_observation_server(
                         start_serving=False
                     )
+                if self._company_consultation_binding is not None:
+                    await self._bind_company_consultation_server(start_serving=False)
                 await self._bind_operator_server(start_serving=False)
                 if self._ceo_ingress_socket_path is not None:
                     await self._start_ceo_ingress_serving()
                 if self._dialogue_observation_socket_path is not None:
                     await self._start_dialogue_observation_serving()
+                if self._company_consultation_binding is not None:
+                    await self._start_company_consultation_serving()
                 await self._start_operator_serving()
                 if self._ceo_ingress_socket_path is not None:
                     self._ceo_ingress_ready = True
                 if self._dialogue_observation_socket_path is not None:
                     self._dialogue_observation_ready = True
+                if self._company_consultation_binding is not None:
+                    self._company_consultation_ready = True
             else:
                 # Byte-compatible-unchanged: identical to the previous
                 # unconditional call (start_serving defaults to True).
@@ -3116,6 +3273,7 @@ class ExecutiveControlService:
         # anything else so a mid-startup failure or a fresh restart never
         # observes a stale true value.
         self._ceo_ingress_ready = False
+        self._company_consultation_ready = False
         if hasattr(self, "_dialogue_observation_ready"):
             self._dialogue_observation_ready = False
         self._closing = True
@@ -3136,6 +3294,12 @@ class ExecutiveControlService:
         if hasattr(self, "_dialogue_observation_server"):
             self._dialogue_observation_server = None
         ceo_ingress_server, self._ceo_ingress_server = self._ceo_ingress_server, None
+        company_server, self._company_consultation_server = self._company_consultation_server, None
+        if company_server is not None:
+            company_server.close()
+        if self._company_consultation_activated_socket is not None:
+            self._company_consultation_activated_socket.close()
+            self._company_consultation_activated_socket = None
         if server is not None:
             server.close()
         if observation_server is not None:
@@ -3144,10 +3308,12 @@ class ExecutiveControlService:
             ceo_ingress_server.close()
         # Python 3.12 Server.wait_closed also waits for accepted transports.
         # Close/drain those transports before awaiting listener completion.
-        for listener in (server, observation_server, ceo_ingress_server):
+        for listener in (server, observation_server, ceo_ingress_server, company_server):
             if listener is not None:
                 self._listener_drains.add(asyncio.create_task(listener.wait_closed()))
 
+        for writer in tuple(self._company_consultation_writers):
+            writer.close()
         for writer in tuple(self._operator_writers):
             writer.close()
         await self._drain_service_tasks(self._operator_handlers)
@@ -3267,6 +3433,9 @@ class ExecutiveControlService:
         if observation_task_set is not None:
             observation_task_set.clear()
 
+        await self._drain_service_tasks(self._company_consultation_tasks)
+        self._company_consultation_tasks.clear()
+        self._company_consultation_host = None
         await self._drain_service_tasks(self._physical_workers)
         await self._drain_service_tasks(self._listener_drains)
         for listener_drain in self._listener_drains:
@@ -3312,6 +3481,21 @@ class ExecutiveControlService:
                     self._dialogue_observation_socket_path.unlink()
         if hasattr(self, "_dialogue_observation_inode"):
             self._dialogue_observation_inode = None
+        binding = self._company_consultation_binding
+        if (binding is not None and binding.activated_socket is None
+                and self._company_consultation_inode is not None):
+            try:
+                info = binding.socket_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if (stat.S_ISSOCK(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+                        and (info.st_dev, info.st_ino) == self._company_consultation_inode
+                        and info.st_uid == os.geteuid()
+                        and info.st_gid == binding.group_gid
+                        and stat.S_IMODE(info.st_mode) == 0o660):
+                    binding.socket_path.unlink()
+        self._company_consultation_inode = None
         self._release_service_lock()
         if deferred_terminal_cancel is not None:
             raise deferred_terminal_cancel
@@ -7216,6 +7400,7 @@ async def send_control_request(
 
 
 __all__ = [
+    "CompanyConsultationBinding",
     "BackupBackendProtocol",
     "CONTROL_PROTOCOL_VERSION",
     "DEFAULT_MAX_REQUEST_BYTES",
