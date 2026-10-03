@@ -49,17 +49,29 @@ def _trailing_return(s, sessions: int) -> float | None:
         return None
 
 
+def _log_returns(w):
+    try:
+        import numpy as np
+        return np.log(w.astype(float)).diff().dropna()
+    except Exception:
+        return None
+
+
 def _path_efficiency(s, sessions: int) -> float | None:
-    """Net absolute move / sum absolute daily moves; 1 is maximally direct."""
+    """Absolute net log move / absolute log path length; bounded in [0, 1]."""
     try:
         if s is None or len(s) <= sessions:
             return None
         w = s.iloc[-1 - sessions :]
-        gross = w.pct_change().dropna().abs().sum()
+        r = _log_returns(w)
+        if r is None or not len(r):
+            return None
+        gross = float(r.abs().sum())
         if gross <= 0:
             return None
-        net = abs(float(w.iloc[-1] / w.iloc[0] - 1.0))
-        return _finite_float(net / gross)
+        net = abs(float(r.sum()))
+        value = _finite_float(net / gross)
+        return min(1.0, max(0.0, value)) if value is not None else None
     except Exception:
         return None
 
@@ -70,6 +82,22 @@ def _positive_day_fraction(s, sessions: int) -> float | None:
             return None
         r = s.iloc[-1 - sessions :].pct_change().dropna()
         return _finite_float((r > 0).mean()) if len(r) else None
+    except Exception:
+        return None
+
+
+def _directional_consistency(s, sessions: int) -> float | None:
+    """Fraction of daily log moves agreeing with the window's net direction."""
+    try:
+        if s is None or len(s) <= sessions:
+            return None
+        r = _log_returns(s.iloc[-1 - sessions :])
+        if r is None or not len(r):
+            return None
+        net = float(r.sum())
+        if net == 0:
+            return _finite_float((r == 0).mean())
+        return _finite_float((r * (1.0 if net > 0 else -1.0) > 0).mean())
     except Exception:
         return None
 
@@ -93,7 +121,8 @@ def _gain_retention(s, sessions: int) -> float | None:
 
 def _drawdown_shape(s, sessions: int) -> dict[str, float | int | None]:
     out: dict[str, float | int | None] = {
-        "max_drawdown": None, "current_drawdown": None, "sessions_since_high": None,
+        "max_drawdown": None, "current_drawdown": None,
+        "sessions_since_high": None, "distance_to_high": None,
     }
     try:
         if s is None or len(s) <= sessions:
@@ -104,6 +133,8 @@ def _drawdown_shape(s, sessions: int) -> dict[str, float | int | None]:
         out["max_drawdown"] = _finite_float(dd.min())
         out["current_drawdown"] = _finite_float(dd.iloc[-1])
         peak = float(w.max())
+        if peak > 0:
+            out["distance_to_high"] = _finite_float(float(w.iloc[-1]) / peak - 1.0)
         locs = [i for i, v in enumerate(w.tolist()) if float(v) == peak]
         if locs:
             out["sessions_since_high"] = int(len(w) - 1 - locs[-1])
@@ -136,6 +167,7 @@ def extract(prices, *, benchmark=None, asof=None) -> dict[str, Any]:
     for w in (20, 60, 120):
         out["path_quality"][f"efficiency_{w}d"] = _path_efficiency(s, w)
         out["path_quality"][f"positive_day_fraction_{w}d"] = _positive_day_fraction(s, w)
+        out["path_quality"][f"directional_consistency_{w}d"] = _directional_consistency(s, w)
         out["gain_retention"][f"retained_{w}d"] = _gain_retention(s, w)
         out["drawdown"][f"{w}d"] = _drawdown_shape(s, w)
     return out
