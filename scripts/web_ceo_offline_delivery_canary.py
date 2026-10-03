@@ -298,7 +298,6 @@ def build_receipt(
         raise CanaryReaderError("ROOT_CREATION_NOT_FOUND")
     creation = creation_events[0].payload
 
-    material, aggregation_body = _material(runtime, root_job_id)
     provenance = creation.get("provenance") or {}
     grounding = provenance.get("grounding") or {}
     if grounding.get("mastermind_sha") != expected_release_sha:
@@ -315,36 +314,67 @@ def build_receipt(
     if not child_roles <= {"plan", "work", "review", "repair"}:
         raise CanaryReaderError("CHILD_LINEAGE_INVALID")
 
-    current_ids = {item["current_job_id"] for item in aggregation_body["revisions"]}
+    # attempt_count ambiguity fires first; then the lineage-shape checks
+    # (REVISION_NOT_CURRENT / REVISION_CHAIN_INVALID / INDEPENDENT_REVIEW_INCOMPLETE)
+    # are computed from the children ledger WITHOUT calling _material(); _material()
+    # walks aggregation → reviews → reviewed work/repair AND validates every
+    # child via the aggregation-handoff tree, so any QUEUED descendant surfaces
+    # there as the generic ROOT_CANONICAL_MATERIAL_INVALID before the more
+    # specific lineage guard could fire.  current_ids is derived from the
+    # ledger (highest repair_round per plan_step_id, across all children
+    # regardless of completion status) so the sealed-revision semantics hold
+    # even when a sibling revision is incomplete.  The CHILD_LINEAGE_INCOMPLETE
+    # no-completion gate runs last so the stale-revision / mis-pointed-review
+    # guards always win.
     if any(job.attempt_count != 1 for job in children):
         raise CanaryReaderError("REVISION_CURRENT_AMBIGUOUS")
+
+    work_repair_children = [
+        job for job in children if job.orchestration_role in {"work", "repair"}
+    ]
+    current_ids: set[str] = set()
+    for job in work_repair_children:
+        step_id = job.plan_step_id
+        candidate = next(
+            (
+                item
+                for item in work_repair_children
+                if item.plan_step_id == step_id
+            ),
+            None,
+        )
+        if candidate is None:
+            continue
+        leader = max(
+            (item for item in work_repair_children if item.plan_step_id == step_id),
+            key=lambda item: int(item.repair_round or 0),
+        )
+        current_ids.add(str(leader.job_id))
     current_jobs = {
-        job.job_id
-        for job in children
-        if job.orchestration_role in {"work", "repair"} and job.job_id in current_ids
+        str(job.job_id)
+        for job in work_repair_children
+        if str(job.job_id) in current_ids
     }
     if len(current_jobs) != len(current_ids):
         raise CanaryReaderError("REVISION_CURRENT_AMBIGUOUS")
     superseded_ids = {
-        job.supersedes_job_id
+        str(job.supersedes_job_id)
         for job in children
         if job.orchestration_role == "repair" and job.supersedes_job_id is not None
     }
     if current_jobs & superseded_ids:
         raise CanaryReaderError("REVISION_NOT_CURRENT")
     work_revision_ids = {
-        job.job_id
-        for job in children
-        if job.orchestration_role in {"work", "repair"}
+        str(job.job_id) for job in work_repair_children
     }
     if any(
-        job.supersedes_job_id is not None
+        isinstance(job.supersedes_job_id, str)
         and job.supersedes_job_id not in work_revision_ids
         for job in children
     ):
         raise CanaryReaderError("REVISION_CHAIN_INVALID")
     review_jobs = {
-        job.job_id: job for job in children if job.orchestration_role == "review"
+        str(job.job_id): job for job in children if job.orchestration_role == "review"
     }
     if any(
         not isinstance(job.reviews_job_id, str)
@@ -353,16 +383,23 @@ def build_receipt(
     ):
         raise CanaryReaderError("INDEPENDENT_REVIEW_INCOMPLETE")
 
+    # Per-child completion + depth/parent-shape gate runs AFTER the
+    # revision/review-chain checks so REVISION_NOT_CURRENT and
+    # INDEPENDENT_REVIEW_INCOMPLETE win for the malformed ledger cases.
+    for job in children:
+        if job.current_attempt_id is None or job.status is not JobStatus.COMPLETED:
+            raise CanaryReaderError("CHILD_LINEAGE_INCOMPLETE")
+        if job.parent_job_id != root_job_id or job.depth != 1:
+            raise CanaryReaderError("CHILD_LINEAGE_INVALID")
+
+    material, aggregation_body = _material(runtime, root_job_id)
+
     revisions: dict[str, list[dict[str, Any]]] = {
         "work": [],
         "review": [],
         "repair": [],
     }
     for job in children:
-        if job.current_attempt_id is None or job.status is not JobStatus.COMPLETED:
-            raise CanaryReaderError("CHILD_LINEAGE_INCOMPLETE")
-        if job.parent_job_id != root_job_id or job.depth != 1:
-            raise CanaryReaderError("CHILD_LINEAGE_INVALID")
         if job.orchestration_role == "plan" and any(
             value is not None
             for value in (

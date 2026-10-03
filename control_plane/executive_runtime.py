@@ -30,7 +30,7 @@ import threading
 from types import MappingProxyType
 from abc import ABC, abstractmethod
 from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import datetime, timezone
 from enum import Enum
 import inspect
@@ -53,10 +53,14 @@ from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
 )
+from control_plane.executive_agent_capabilities import COO_DOMAIN_EXECUTION_PROFILE
 from control_plane.executive_coo_policy import (
     CooCyclePolicy,
     CooCyclePolicyError,
     EXPECTED_POLICY_SHA256,
+    EXPECTED_POLICY_SHA256_BY_VERSION,
+    EXPECTED_V1_POLICY_SHA256,
+    load_pinned_coo_cycle_policy,
 )
 from control_plane.executive_orchestration_principal import (
     OperatorPrincipalObservation,
@@ -101,11 +105,16 @@ from control_plane.operator_harness_contract import (
 )
 from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
+_COO_PROVIDER_BUDGET_SCHEMA = (
+    "mastermind.executive_coo_provider_work_budget_reservation/v1"
+)
+_COO_PROVIDER_BUDGET_EVENT = "COO_PROVIDER_WORK_BUDGET_RESERVED"
+_COO_CYCLE_DOMAIN_BUDGET_CAPABILITY = object()
 
 
 def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
@@ -293,6 +302,9 @@ _NORMALIZED_V4_SCHEMA_DIGEST = (
 )
 _NORMALIZED_V5_SCHEMA_DIGEST = (
     "b2fe4455306b2bdcf4f698d958e420e4f885e941dc1f0b8db602cbb39edcedbd"
+)
+_NORMALIZED_V6_SCHEMA_DIGEST = (
+    "36ce034ea1587c5ba311a4160e96dae0bd646905102969a770d22ae739aa8f28"
 )
 _V2_ROOT_CREATION_CAPABILITY = object()
 _COO_CYCLE_PLANNER_CREATION_CAPABILITY = object()
@@ -695,6 +707,18 @@ def _normalise_constraints(
                 )
             result[key] = normalized
 
+    if "delegation_scope_digest" in raw:
+        delegation_scope_digest = raw["delegation_scope_digest"]
+        if (
+            not isinstance(delegation_scope_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", delegation_scope_digest) is None
+        ):
+            raise StateConflict(
+                "constraint delegation_scope_digest must be an exact lowercase "
+                "SHA-256 digest"
+            )
+        result["delegation_scope_digest"] = delegation_scope_digest
+
     capability_keys = {
         "execution_profile_id",
         "execution_profile_digest",
@@ -740,6 +764,10 @@ def _normalise_constraints(
         result["provider"] = provider
     if capabilities:
         result["required_capabilities"] = capabilities
+    if "remaining_depth" in raw:
+        if type(raw["remaining_depth"]) is not int or raw["remaining_depth"] < 0:
+            raise StateConflict("remaining_depth must be a non-negative integer")
+        result["remaining_depth"] = raw["remaining_depth"]
     for key in ("model", "effort", "cost_class"):
         normalized = str(raw.get(key) or "").strip().lower()
         if normalized:
@@ -1794,12 +1822,35 @@ def _validated_interactive_active_plan_seal(
         != attempt_row["execution_principal_snapshot_digest"]
         or seal["placement_snapshot_digest"]
         != attempt_row["placement_snapshot_digest"]
-        or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _attempt_root_policy_sha(connection, attempt_row)
     ):
         raise StateConflict(
             "interactive active plan seal does not match its durable identity"
         )
     return seal
+
+
+def _validated_domain_active_plan_seal(
+    connection: sqlite3.Connection,
+    *,
+    attempt_row: sqlite3.Row,
+    job_row: sqlite3.Row,
+) -> dict[str, Any]:
+    """Validate a typed active-domain plan seal against its durable identity.
+
+    The same ORCHESTRATION_WORK_ADMITTED/CURRENT writer identity that authorises
+    an interactive plan seal also authorises a domain plan seal: both are
+    operator-harness work admissions and both write the same sealed envelope.
+    The planner Job identity itself was already validated by the call site via
+    ``_coo_domain_admitted``; this helper reuses the same generation binding
+    because the harness contract is profile-agnostic.
+    """
+
+    return _validated_interactive_active_plan_seal(
+        connection,
+        attempt_row=attempt_row,
+        job_row=job_row,
+    )
 
 
 def _admitted_current_generation_for_interactive_seal(
@@ -1934,6 +1985,771 @@ def _interactive_tx5_admitted(row: sqlite3.Row) -> bool:
     if not closed:
         raise StateConflict("interactive capability profile is not closed")
     return True
+
+
+def _coo_domain_admitted(row: sqlite3.Row, *, allow_disabled: bool = False) -> bool:
+    if row["orchestration_role"] != "plan":
+        return False
+    constraints = _strict_canonical_json_loads(
+        str(row["constraints_json"]), name="COO domain constraints"
+    )
+    if not isinstance(constraints, dict):
+        raise StateConflict("COO domain constraints are malformed")
+    if constraints.get("execution_profile_id") != COO_DOMAIN_EXECUTION_PROFILE:
+        return False
+    delegation = constraints.get("delegation_scope_digest")
+    _role, provenance, _digest = _decode_orchestration_job_fields(row)
+    if (
+        row["parent_job_id"] != row["root_job_id"]
+        or int(row["depth"]) != 1
+        or provenance is None
+        or provenance.get("creator") != "coo_cycle"
+        or provenance.get("command_id")
+        != f"coo-cycle:{row['root_job_id']}:create-domain:0"
+        or provenance.get("job_id") != row["job_id"]
+        or provenance.get("parent_job_id") != row["parent_job_id"]
+        or provenance.get("root_job_id") != row["root_job_id"]
+        or provenance.get("role") != "plan"
+        or provenance.get("source_id") != row["root_job_id"]
+    ):
+        raise StateConflict("COO domain provenance is not deterministic")
+    registry = ExecutionCapabilityRegistry.load()
+    try:
+        profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+        if profile.enabled:
+            registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+        else:
+            registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+    except (KeyError, CapabilityPolicyError) as exc:
+        raise StateConflict("COO domain capability profile is invalid") from exc
+    closed = (
+        profile.execution_surface == "codex-app-server"
+        and profile.auth_realm == "dedicated-worker-account"
+        and profile.sandbox_policy == "read-only"
+        and profile.approval_policy == "never"
+        and profile.network_policy == "disabled"
+        and profile.native_helper_policy is NativeHelperPolicy.DISABLED
+        and profile.native_helper is None
+        and not profile.skills
+        and not profile.skill_grants
+        and not profile.mcp_server_grants
+        and not profile.resource_grants
+        and not profile.plugins
+        and not profile.forbidden
+        and not profile.write_capable
+    )
+    expected_identity = {
+        "execution_profile_id": profile.profile_id,
+        "execution_profile_digest": profile.profile_digest,
+        "capability_policy_version": registry.policy_version,
+        "capability_policy_digest": registry.policy_digest,
+    }
+    if any(constraints.get(key) != value for key, value in expected_identity.items()):
+        raise StateConflict("COO domain capability identity is stale or malformed")
+    if not isinstance(delegation, str) or re.fullmatch(r"[0-9a-f]{64}", delegation) is None:
+        raise StateConflict("COO domain delegation envelope is malformed")
+    if not closed:
+        raise StateConflict("COO domain capability profile is not closed")
+    if not allow_disabled and not profile.enabled:
+        raise StateConflict("COO domain execution profile is production-disarmed")
+    return True
+
+
+def _coo_domain_row(
+    connection: sqlite3.Connection,
+    root_row: sqlite3.Row,
+    *,
+    required: bool = False,
+) -> sqlite3.Row | None:
+    rows = connection.execute(
+        """
+        SELECT * FROM jobs
+        WHERE root_job_id=? AND job_id<>? AND orchestration_role='plan' AND depth=1
+        """,
+        (str(root_row["job_id"]), str(root_row["job_id"])),
+    ).fetchall()
+    domains = [row for row in rows if _coo_domain_admitted(row, allow_disabled=True)]
+    if len(domains) > 1:
+        raise StateConflict("COO root has multiple admitted domain orchestrators")
+    if domains:
+        return domains[0]
+    if required:
+        raise StateConflict("COO hierarchy requires its admitted domain orchestrator")
+    return None
+
+
+def _coo_provider_budget_body(
+    *,
+    root_job_id: str,
+    domain_job_id: str,
+) -> dict[str, Any]:
+    policy = CooCyclePolicy.load()
+    registry = ExecutionCapabilityRegistry.load()
+    try:
+        profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+        if profile.enabled:
+            registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+        else:
+            registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+    except (KeyError, CapabilityPolicyError) as exc:
+        raise StateConflict("COO provider budget profile is invalid") from exc
+    if (
+        policy.schema_version != 2
+        or policy.policy_sha256 != EXPECTED_POLICY_SHA256
+        or policy.max_provider_work_units_per_root != 32
+        or policy.reserved_domain_consumption_units != 1
+    ):
+        raise StateConflict("COO provider budget requires the exact current v2 policy")
+    body = {
+        "schema_version": _COO_PROVIDER_BUDGET_SCHEMA,
+        "root_job_id": root_job_id,
+        "domain_job_id": domain_job_id,
+        "policy_schema_version": policy.schema_version,
+        "policy_sha256": policy.policy_sha256,
+        "execution_profile_id": profile.profile_id,
+        "execution_profile_digest": profile.profile_digest,
+        "capability_policy_version": registry.policy_version,
+        "capability_policy_digest": registry.policy_digest,
+        "max_provider_work_units_per_root": (
+            policy.max_provider_work_units_per_root
+        ),
+        "reserved_domain_consumption_units": (
+            policy.reserved_domain_consumption_units
+        ),
+        "spent_provider_work_units": 0,
+        "available_provider_work_units": (
+            policy.max_provider_work_units_per_root
+            - policy.reserved_domain_consumption_units
+        ),
+        "reservation_status": "reservation_only",
+    }
+    body["reservation_digest"] = orchestration_digest(body)
+    return body
+
+
+def _validated_coo_provider_budget_event(
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    domain_job_id: str,
+) -> dict[str, Any]:
+    budget_command_id = (
+        f"coo-cycle:{root_row['job_id']}:reserve-provider-budget:0"
+    )
+    events = connection.execute(
+        """
+        SELECT * FROM events
+        WHERE event_type=? AND (
+          command_id=? OR aggregate_id IN (?,?)
+          OR job_id IN (?,?)
+        )
+        ORDER BY event_id
+        """,
+        (
+            _COO_PROVIDER_BUDGET_EVENT,
+            budget_command_id,
+            str(root_row["job_id"]),
+            domain_job_id,
+            str(root_row["job_id"]),
+            domain_job_id,
+        ),
+    ).fetchall()
+    if len(events) != 1:
+        raise StateConflict("COO provider budget evidence is missing or duplicated")
+    event = events[0]
+    payload = _strict_canonical_json_loads(
+        str(event["payload_json"]), name="COO provider budget payload"
+    )
+    expected = _coo_provider_budget_body(
+        root_job_id=str(root_row["job_id"]), domain_job_id=domain_job_id
+    )
+    if (
+        event["command_id"] != budget_command_id
+        or event["aggregate_type"] != "job"
+        or event["aggregate_id"] != str(root_row["job_id"])
+        or event["actor"] != "coo"
+        or event["job_id"] != str(root_row["job_id"])
+        or event["attempt_id"] is not None
+        or event["worker_id"] is not None
+        or event["quota_class"] is not None
+        or json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        != json.dumps(
+            expected,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    ):
+        raise StateConflict("COO provider budget evidence is foreign or drifted")
+    return expected
+
+
+def _append_or_validate_coo_provider_budget(
+    store: RuntimeStore,
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    domain_job_id: str,
+) -> dict[str, Any]:
+    events = connection.execute(
+        """
+        SELECT 1 FROM events
+        WHERE event_type=? AND (
+          aggregate_id IN (?,?) OR job_id IN (?,?)
+          OR command_id=?
+        )
+        """,
+        (
+            _COO_PROVIDER_BUDGET_EVENT,
+            str(root_row["job_id"]),
+            domain_job_id,
+            str(root_row["job_id"]),
+            domain_job_id,
+            f"coo-cycle:{root_row['job_id']}:reserve-provider-budget:0",
+        ),
+    ).fetchall()
+    if events:
+        raise StateConflict(
+            "COO provider budget reservation already exists for a new domain"
+        )
+    payload = _coo_provider_budget_body(
+        root_job_id=str(root_row["job_id"]), domain_job_id=domain_job_id
+    )
+    store.append_event(
+        connection,
+        aggregate_type="job",
+        aggregate_id=str(root_row["job_id"]),
+        event_type=_COO_PROVIDER_BUDGET_EVENT,
+        actor="coo",
+        job_id=str(root_row["job_id"]),
+        payload=payload,
+        command_id=(
+            f"coo-cycle:{root_row['job_id']}:reserve-provider-budget:0"
+        ),
+    )
+    return _validated_coo_provider_budget_event(
+        connection, root_row=root_row, domain_job_id=domain_job_id
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _StoppedDomainEvidence:
+    """Private exact-stop context, produced only after historical proof validation.
+
+    It confers no lease or provider authority. The immutable ledger verifier shares
+    this context with post-stop projection reads on the SAME transaction only.
+    """
+    connection: sqlite3.Connection
+    row: sqlite3.Row
+    generation: sqlite3.Row
+    plan_seal: dict[str, Any]
+    stop_intent_id: int
+    stop_evidence: dict[str, Any]
+
+
+_DOMAIN_TERMINAL_SCHEMA = "mastermind.executive_coo_domain_terminal/v1"
+_DOMAIN_CLEANUP_GATE = "RESIDUAL_PROCESS_CENSUS_UNAVAILABLE"
+
+
+def _domain_event_wire(event: sqlite3.Row) -> dict[str, Any]:
+    result = {key: event[key] for key in (
+        "event_id", "sequence", "command_id", "event_type", "aggregate_type",
+        "aggregate_id", "job_id", "attempt_id", "worker_id", "quota_class",
+        "actor", "created_at_ms",
+    )}
+    result["payload"] = _strict_canonical_json_loads(str(event["payload_json"]), name="domain evidence")
+    return result
+
+
+def _domain_event_owner(event: sqlite3.Row, row: sqlite3.Row, *, actor: str) -> bool:
+    return (event["job_id"] == row["job_id"]
+            and event["attempt_id"] == row["attempt_id"]
+            and event["worker_id"] == row["worker_id"]
+            and event["quota_class"] == row["quota_class"] and event["actor"] == actor)
+
+
+def _domain_receipt_inventory(
+    connection: sqlite3.Connection, *, event_type: str, command_id: str,
+    root_id: str, row: sqlite3.Row, source: Any,
+) -> list[sqlite3.Row]:
+    """Affiliation census usable before append and on every historical read.
+
+    Reconciles owner-specific digest, exact-int final_event_id, and the
+    atomic (provider_session_id, provider_native_turn_id) pair as independent
+    identity links carried by the full domain-consumption/terminal material.
+    Shared worker/quota/artifact values are not independent affiliation, and
+    bool/float must never acquire int identity under the final_event_id key.
+    """
+    identities = {root_id, row["job_id"], row["attempt_id"], command_id}
+    final_event_ids: set[int] = set()
+    native_pairs: set[tuple[str, str]] = set()
+    if source is not None:
+        owner_keys = {
+            "terminal_evidence_digest", "seal_receipt_digest", "domain_job_id", "domain_attempt_id",
+            "process_generation_id", "session_epoch_id", "turn_id", "operation_id", "command_id",
+            "candidate_event_command_id", "applied_event_command_id", "dispatch_event_command_id",
+            "intent_event_command_id", "initial_plan_event_command_id", "final_charge_id",
+            "reservation_identity", "current_projection_digest", "consumed_body_digest", "raw_observation_digest",
+            # owner-specific event-digest links already sealed in the
+            # consumption seal — independent of the *_event_command_id identity.
+            "candidate_event_digest", "applied_event_digest", "dispatch_event_digest",
+            "intent_event_digest", "initial_plan_event_digest", "final_event_digest",
+        }
+        def _record_native(value: dict[str, Any]) -> None:
+            session = value.get("provider_session_id")
+            native = value.get("provider_native_turn_id")
+            if type(session) is str and type(native) is str:
+                native_pairs.add((session, native))
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                _record_native(value)
+                for key, nested in value.items():
+                    if key in owner_keys and isinstance(nested, str):
+                        identities.add(nested)
+                    if key == "final_event_id" and type(nested) is int:
+                        final_event_ids.add(nested)
+                    collect(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    collect(nested)
+        collect(source)
+    def claims(value: Any) -> bool:
+        if isinstance(value, dict):
+            session = value.get("provider_session_id")
+            native = value.get("provider_native_turn_id")
+            if (type(session) is str and type(native) is str
+                    and (session, native) in native_pairs):
+                return True
+            for key, nested in value.items():
+                if key == "final_event_id" and type(nested) is int and nested in final_event_ids:
+                    return True
+                if claims(nested):
+                    return True
+            return False
+        if isinstance(value, list):
+            return any(claims(v) for v in value)
+        return isinstance(value, str) and value in identities
+    affiliated = []
+    for event in connection.execute("SELECT * FROM events WHERE event_type=? OR command_id=?", (event_type, command_id)):
+        body = _strict_canonical_json_loads(str(event["payload_json"]), name="domain receipt census")
+        if (any(event[key] in identities for key in ("job_id", "attempt_id", "aggregate_id", "command_id"))
+                or claims(body)):
+            affiliated.append(event)
+    return affiliated
+
+
+def _domain_receipt_event(
+    connection: sqlite3.Connection, *, event_type: str, command_id: str,
+    root_id: str, row: sqlite3.Row,
+) -> sqlite3.Row:
+    """Independent header and nested identity census; aliases/orphans are evidence."""
+    canonical = _ohf_evidence_event(connection, command_id)
+    source = (_strict_canonical_json_loads(str(canonical["payload_json"]), name="domain canonical receipt")
+              if canonical is not None else None)
+    affiliated = _domain_receipt_inventory(connection, event_type=event_type, command_id=command_id,
+                                           root_id=root_id, row=row, source=source)
+    if len(affiliated) != 1:
+        raise StateConflict("domain receipt census has missing/duplicate/orphan/alias evidence")
+    event = affiliated[0]
+    if (event["command_id"] != command_id or event["event_type"] != event_type
+            or event["aggregate_type"] != "job" or event["aggregate_id"] != root_id
+            or event["job_id"] != root_id or event["attempt_id"] != row["attempt_id"]
+            or event["worker_id"] != row["worker_id"] or event["quota_class"] != row["quota_class"]
+            or event["actor"] != "coo"):
+        raise StateConflict("domain receipt header identity drifted")
+    return event
+
+
+def _stopped_domain_evidence(
+    connection: sqlite3.Connection, row: sqlite3.Row, consumption: dict[str, Any],
+) -> _StoppedDomainEvidence:
+    """HISTORICAL exact-stop proof. Never enters LIVE lease/writer admission."""
+    from control_plane.operator_harness_wire import reconcile_observation, to_wire
+    job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+    if (job is None or not _coo_domain_admitted(job)
+            or job["current_attempt_id"] != row["attempt_id"]
+            or job["assigned_worker_id"] != row["worker_id"]
+            or job["assigned_quota_class"] != row["quota_class"]
+            or row["status"] not in {"CHECKPOINTED", "COMPLETED"}
+            or job["status"] != row["status"]
+            or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value):
+        raise StateConflict("stopped domain lost its exact original Attempt/Job")
+    authority = _authorize_job_row(job)
+    if row["authority_policy_hash"] != authority.policy_sha256:
+        raise StateConflict("stopped domain current authority pin moved")
+    for name in ("requested_execution_profile", "effective_grant", "placement_snapshot", "execution_principal_snapshot"):
+        try:
+            value = _load_canonical_digest_pair(row[name+"_json"], row[name+"_digest"], name="stopped domain "+name)
+        except PersistenceError as exc:
+            raise StateConflict("stopped domain immutable owner metadata drifted") from exc
+        if not isinstance(value, dict):
+            raise StateConflict("stopped domain immutable owner metadata is missing")
+    plan = _sealed_role_result_payload(connection, attempt_id=str(row["attempt_id"]), expected_role="plan")
+    _validated_orchestration_terminal_generation(connection, attempt_row=row, seal=plan)
+    generations = connection.execute(
+        "SELECT g.*,e.attempt_id,e.worker_id AS epoch_worker,e.epoch_number,e.state,"
+        "e.provider_session_id AS epoch_session FROM process_generations g "
+        "JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id WHERE e.attempt_id=?",
+        (row["attempt_id"],),
+    ).fetchall()
+    if len(generations) != 1:
+        raise StateConflict("stopped domain requires its sole original G1/epoch")
+    generation = generations[0]
+    if (type(consumption.get("fence_generation")) is not int
+            or consumption["fence_generation"] != row["fence_generation"]
+            or generation["generation_number"] != 1 or generation["epoch_number"] != 1
+            or generation["state"] != "ABANDONED"
+            or generation["process_generation_id"] != consumption.get("process_generation_id")
+            or generation["session_epoch_id"] != consumption.get("session_epoch_id")
+            or generation["provider_session_id"] != consumption.get("provider_session_id")
+            or plan["process_generation_id"] != generation["process_generation_id"]):
+        raise StateConflict("domain shutdown is not its exact consumption G1/fence")
+    operation = OperationId(f"ohf-op:coo-domain-terminal:{row['attempt_id']}:{generation['process_generation_id']}")
+    applied_command = operation_receipt_command_id(operation, OperationReceiptKind.APPLIED)
+    unknown_command = operation_receipt_command_id(operation, OperationReceiptKind.EFFECT_UNKNOWN)
+    receipts = []
+    for event in connection.execute("SELECT * FROM events WHERE event_type IN (?,?,?)", (
+            OperationReceiptKind.INTENT.value, OperationReceiptKind.APPLIED.value, OperationReceiptKind.EFFECT_UNKNOWN.value)):
+        body = _strict_canonical_json_loads(str(event["payload_json"]), name="domain stop receipt")
+        if not isinstance(body, dict):
+            raise StateConflict("domain stop receipt is malformed")
+        if (event["aggregate_id"] == operation.command_id
+                or event["command_id"] in {operation.command_id, applied_command, unknown_command}
+                or body.get("operation_id") == operation.command_id
+                or (body.get("operation_kind") in {"graceful_stop", "cancel"}
+                    and (event["attempt_id"] == row["attempt_id"]
+                         or body.get("process_generation_id") == generation["process_generation_id"]
+                         or body.get("attempt_id") == row["attempt_id"]))):
+            receipts.append(event)
+    if len(receipts) != 2:
+        raise StateConflict("domain stop requires unique INTENT/APPLIED without UNKNOWN")
+    by_command = {event["command_id"]: event for event in receipts}
+    intent, applied = by_command.get(operation.command_id), by_command.get(applied_command)
+    if intent is None or applied is None:
+        raise StateConflict("domain stop is unacknowledged or UNKNOWN")
+    expected_intent = dict(schema_version=OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+        operation_kind="graceful_stop", attempt_id=row["attempt_id"], session_epoch_id=generation["session_epoch_id"],
+        process_generation_id=generation["process_generation_id"], worker_id=row["worker_id"],
+        provider_session_id=generation["provider_session_id"])
+    expected_applied = dict(schema_version=OHF_INTERNAL_GENERATION_OPERATION_SCHEMA_VERSION,
+        operation_kind="graceful_stop", process_generation_id=generation["process_generation_id"],
+        process_liveness="PROVEN_DEAD", provider_writer_state="RELEASED", executive_writer_released=True)
+    for event, payload, kind in ((intent, expected_intent, OperationReceiptKind.INTENT), (applied, expected_applied, OperationReceiptKind.APPLIED)):
+        if (not _domain_event_owner(event, row, actor="supervisor")
+                or event["aggregate_type"] != "operator_operation" or event["aggregate_id"] != operation.command_id
+                or event["event_type"] != kind.value
+                or _json_dumps(_domain_event_wire(event)["payload"]) != _json_dumps(payload)):
+            raise StateConflict("domain stop APPLIED/death/release identity drifted")
+    observations, abandoned = [], []
+    for event in connection.execute("SELECT * FROM events WHERE event_type IN ('OHF_RECONCILE_OBSERVED','OHF_EPOCH_ABANDONED')"):
+        body = _strict_canonical_json_loads(str(event["payload_json"]), name="domain cleanup evidence")
+        if (event["attempt_id"] == row["attempt_id"]
+                or event["aggregate_id"] in {generation["process_generation_id"], generation["session_epoch_id"]}
+                or (isinstance(body, dict) and body.get("process_generation_id") == generation["process_generation_id"])):
+            (observations if event["event_type"] == 'OHF_RECONCILE_OBSERVED' else abandoned).append(event)
+    if len(observations) != 1 or len(abandoned) != 1:
+        raise StateConflict("domain stop lacks unique incumbent observation/epoch release evidence")
+    observed, abandon = observations[0], abandoned[0]
+    wire = _domain_event_wire(observed)
+    payload = wire["payload"]
+    try:
+        typed = reconcile_observation(payload["observation"])
+        process = _ohf_process(typed.observed_process)
+    except Exception:
+        raise StateConflict("domain stop observation is not the closed typed wire") from None
+    if (set(payload) != {"schema_version", "process_generation_id", "observation"}
+            or payload["schema_version"] != OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION
+            or payload["process_generation_id"] != generation["process_generation_id"]
+            or to_wire(typed) != payload["observation"]
+            or type(typed.observed_process.pid) is not int
+            or type(typed.observed_process.pgid) is not int
+            or typed.process_liveness is not ProcessLiveness.PROVEN_DEAD
+            or typed.provider_writer_state is not ProviderWriterState.RELEASED
+            or typed.observed_provider_session_id != generation["provider_session_id"]
+            or process != tuple(generation[key] for key in ("pid", "pgid", "process_start_identity", "boot_id"))
+            or typed.provider_session_reachable is not False
+            or typed.observed_config_digest != json.loads(generation["observed_attestation_json"])["effective_config_digest"]
+            or not _domain_event_owner(observed, row, actor="supervisor")
+            or observed["command_id"] != operation.command_id+":observation"
+            or observed["aggregate_type"] != "process_generation"
+            or observed["aggregate_id"] != generation["process_generation_id"]
+            or not _domain_event_owner(abandon, row, actor="supervisor")
+            or abandon["aggregate_type"] != "harness_session_epoch"
+            or abandon["aggregate_id"] != generation["session_epoch_id"]
+            or _domain_event_wire(abandon)["payload"] != {"transaction_group": "TX-8"}
+            or not intent["event_id"] < observed["event_id"] < applied["event_id"] < abandon["event_id"]
+            or generation["ended_at_ms"] != observed["created_at_ms"]):
+        raise StateConflict("domain stop incumbent cleanup observation drifted")
+    evidence = dict(intent=_domain_event_wire(intent), applied=_domain_event_wire(applied),
+                    observation=wire, epoch_release=_domain_event_wire(abandon))
+    return _StoppedDomainEvidence(connection, row, generation, plan, int(intent["event_id"]), evidence)
+
+
+def _domain_terminal_anchor(connection: sqlite3.Connection, row: sqlite3.Row) -> _StoppedDomainEvidence:
+    """Nonrecursive initial-plan anchor; full consumption is validated by terminal consumers."""
+    job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+    command = f"coo-cycle:{job['root_job_id']}:domain-terminal:{row['attempt_id']}"
+    event = _domain_receipt_event(connection, event_type="COO_DOMAIN_TERMINAL_SEALED", command_id=command,
+                                root_id=str(job["root_job_id"]), row=row)
+    terminal = _domain_event_wire(event)["payload"]
+    if (row["status"] != "COMPLETED" or job["status"] != "COMPLETED"
+            or _json_dumps(terminal) != _json_dumps(json.loads(row["result_json"]))
+            or _json_dumps(terminal) != _json_dumps(json.loads(job["result_json"]))):
+        raise StateConflict("domain terminal result differs from its immutable receipt")
+    stopped = _stopped_domain_evidence(connection, row, terminal["consumption_seal"])
+    if (terminal.get("schema_version") != _DOMAIN_TERMINAL_SCHEMA
+            or terminal.get("initial_plan_seal") != stopped.plan_seal
+            or terminal.get("stop_evidence") != stopped.stop_evidence):
+        raise StateConflict("domain terminal original plan/stop anchor drifted")
+    return stopped
+
+
+def _domain_terminal_material(connection: sqlite3.Connection, *, root: sqlite3.Row, row: sqlite3.Row) -> dict[str, Any]:
+    """Reconstruct the full consumed-domain terminal wire from canonical evidence."""
+    from control_plane.executive_orchestration_result import RawRoleResultObservation, canonical_bytes, canonical_digest
+    root_id = str(root["job_id"])
+    raw_events = connection.execute(
+        "SELECT * FROM events WHERE event_type='COO_DOMAIN_CONSUMPTION_SEALED' AND job_id=?", (root_id,),
+    ).fetchall()
+    if len(raw_events) != 1:
+        raise StateConflict("domain terminal requires one complete consumption seal")
+    saved = _domain_event_wire(raw_events[0])["payload"]
+    if not isinstance(saved, dict):
+        raise StateConflict("domain consumption seal is malformed")
+    turn = TurnRef(saved["turn_id"], saved["session_epoch_id"], saved["process_generation_id"], str(row["attempt_id"]))
+    seal_command = f"coo-cycle:{root_id}:domain-consumption-seal:{row['attempt_id']}:{turn.turn_id}"
+    _domain_receipt_event(connection, event_type="COO_DOMAIN_CONSUMPTION_SEALED", command_id=seal_command, root_id=root_id, row=row)
+    stopped = _stopped_domain_evidence(connection, row, saved)
+    final_rows = connection.execute("SELECT * FROM coo_provider_charges WHERE attempt_id=? AND effect_class='FINAL'", (row["attempt_id"],)).fetchall()
+    if len(final_rows) != 1:
+        raise StateConflict("domain terminal requires its unique actual FINAL charge")
+    operation = OperationId(str(final_rows[0]["operation_id"]))
+    generation = stopped.generation
+    validated = _domain_consumption_ledger_material(
+        connection, store=None, row=row, durable=generation, plan_seal=stopped.plan_seal,
+        operation_id=operation, expected_consumption_projection_digest=saved["current_projection_digest"],
+        evidence_turn=turn, timestamp=0, _stopped=stopped,
+    )
+    if validated != turn:
+        raise StateConflict("stopped FINAL turn evidence differs from consumption")
+    body_bytes = canonical_bytes(saved["consumption_result"])
+    observation = RawRoleResultObservation(
+        attempt_id=turn.attempt_id, session_epoch_id=turn.session_epoch_id,
+        process_generation_id=turn.process_generation_id, turn_id=turn.turn_id,
+        provider_session_id=saved["provider_session_id"], provider_native_turn_id=saved["provider_native_turn_id"],
+        provider_turn_artifact_digest=saved["provider_turn_artifact_digest"],
+        canonical_result_json=body_bytes.decode("utf-8"), canonical_result_digest=saved["consumed_body_digest"],
+        canonical_result_byte_length=saved["raw_observation_byte_length"], schema_version=saved["raw_observation_schema_version"],
+    )
+    _coo_validate_raw_role_result_observation(observation)
+    domain = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+    consumption = _domain_consumption_seal_receipt(
+        connection, store=None, row=row, root=root, domain=domain, observation=observation, turn=turn,
+        fence_generation=row["fence_generation"], lease_authority_digest=saved["lease_authority_digest"],
+        command_id=seal_command, final_row=final_rows[0], operation_id=operation, stopped=stopped,
+    )
+    projection = _coo_domain_consumption_projection(connection, root_row=root, domain_job_id=str(row["job_id"]),
+        domain_attempt_id=str(row["attempt_id"]), _stopped_domain=stopped)
+    owner = {key: row[key] for key in (
+        "attempt_id", "job_id", "worker_id", "quota_class", "fence_generation", "lease_owner", "authority_policy_hash",
+        "requested_execution_profile_digest", "effective_grant_digest", "placement_snapshot_digest",
+        "execution_principal_snapshot_digest", "execution_mode",
+    )}
+    for key in ("requested_execution_profile", "effective_grant", "placement_snapshot", "execution_principal_snapshot"):
+        owner[key] = _load_canonical_digest_pair(row[key+"_json"], row[key+"_digest"], name="domain terminal owner "+key)
+    material = dict(schema_version=_DOMAIN_TERMINAL_SCHEMA, status="COMPLETED", root_job_id=root_id,
+        domain_job_id=str(row["job_id"]), domain_attempt_id=str(row["attempt_id"]),
+        command_id=f"coo-cycle:{root_id}:domain-terminal:{row['attempt_id']}",
+        original_owner=owner, initial_plan_seal=stopped.plan_seal, consumption_seal=consumption,
+        consumption_projection=projection, stop_evidence=stopped.stop_evidence,
+        consumed_result=consumption["consumption_result"]["consumed_result"], cleanup_gate=_DOMAIN_CLEANUP_GATE)
+    # No residual-child census producer exists in ReconcileObservation. This wire
+    # proves only canonical exact-process cleanup; native residual qualification
+    # remains the named acceptance gate. Never manufacture a residual count.
+    encoded = canonical_bytes(material)
+    if len(encoded) > 32 * 1024 * 1024:
+        raise StateConflict("domain terminal full evidence exceeds its finite wire ceiling")
+    material["terminal_evidence_digest"] = canonical_digest(material)
+    material["terminal_evidence_byte_length"] = len(encoded)
+    return material
+
+
+def _validated_domain_terminal_material(connection: sqlite3.Connection, *, root: sqlite3.Row, row: sqlite3.Row) -> dict[str, Any]:
+    try:
+        return _domain_terminal_material(connection, root=root, row=row)
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise StateConflict("domain terminal full material is invalid") from exc
+
+
+def _read_domain_terminal(connection: sqlite3.Connection, root: sqlite3.Row) -> dict[str, Any] | None:
+    from control_plane.executive_orchestration_result import canonical_bytes
+    domain = _coo_domain_row(connection, root)
+    if domain is None:
+        return None
+    row = connection.execute("SELECT * FROM attempts WHERE attempt_id=?", (domain["current_attempt_id"],)).fetchone()
+    if row is None:
+        raise StateConflict("domain terminal requires its current original Attempt")
+    _domain_terminal_anchor(connection, row)
+    material = _validated_domain_terminal_material(connection, root=root, row=row)
+    event = _domain_receipt_event(connection, event_type="COO_DOMAIN_TERMINAL_SEALED", command_id=material["command_id"],
+                                root_id=str(root["job_id"]), row=row)
+    if canonical_bytes(_domain_event_wire(event)["payload"]) != canonical_bytes(material):
+        raise StateConflict("domain terminal immutable full material drifted")
+    return material
+
+
+def _coo_domain_consumption_projection(
+    connection: sqlite3.Connection,
+    *,
+    root_row: sqlite3.Row,
+    domain_job_id: str,
+    domain_attempt_id: str,
+    _stopped_domain: _StoppedDomainEvidence | None = None,
+) -> dict[str, Any]:
+    """Derive exact reviewed leaves for the domain's second turn.
+
+    Digest is computed over the complete bound material (domain_job_id and
+    domain_attempt_id included) so the digest itself is the canonical binding.
+    """
+
+    admission, plan_body = _validated_plan_admission(connection, root_row, _stopped_domain=_stopped_domain)
+    revisions, _history = _current_orchestration_tree_material(
+        connection,
+        root_row,
+        admission,
+        plan_body,
+        allow_active_domain_job_id=domain_job_id,
+        _stopped_domain=_stopped_domain,
+    )
+    projection = {
+        "schema_version": "mastermind.executive_coo_domain_consumption_projection/v1",
+        "root_job_id": str(root_row["job_id"]),
+        "domain_job_id": domain_job_id,
+        "domain_attempt_id": domain_attempt_id,
+        "plan_attempt_id": str(admission["plan_attempt_id"]),
+        "plan_digest": str(admission["plan_digest"]),
+        "revisions": revisions,
+    }
+    revision_results: list[dict[str, Any]] = []
+    for revision in revisions:
+        work = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?",
+            (str(revision["current_job_id"]),),
+        ).fetchone()
+        if work is None:
+            raise StateConflict("projection revision lost its current Job")
+        work_attempt, work_seal, _work_terminal, work_result_digest = (
+            _validated_role_completion_material(
+                connection,
+                job_row=work,
+                expected_role=str(work["orchestration_role"]),
+                root_job_id=str(root_row["job_id"]),
+            )
+        )
+        if (
+            str(work["job_id"]) != revision["current_job_id"]
+            or str(work_attempt["attempt_id"]) != revision["current_attempt_id"]
+            or work_result_digest != revision["current_result_digest"]
+            or work_attempt["effective_grant_digest"]
+            != revision["effective_grant_digest"]
+            or work_attempt["placement_snapshot_digest"]
+            != revision["placement_snapshot_digest"]
+            or work_attempt["execution_principal_snapshot_digest"]
+            != revision["execution_principal_snapshot_digest"]
+        ):
+            raise StateConflict("projection revision body identity drifted")
+
+        qualifying_review_job_id = revision["qualifying_review_job_id"]
+        qualifying_review_attempt_id = revision["qualifying_review_attempt_id"]
+        qualifying_review_result: dict[str, Any] | None = None
+        if qualifying_review_job_id is not None:
+            review = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?",
+                (str(qualifying_review_job_id),),
+            ).fetchone()
+            if review is None:
+                raise StateConflict("projection review revision lost its Job")
+            review_attempt, review_seal, _review_terminal, review_result_digest = (
+                _validated_role_completion_material(
+                    connection,
+                    job_row=review,
+                    expected_role="review",
+                    root_job_id=str(root_row["job_id"]),
+                )
+            )
+            review_body = review_seal["result_envelope"]["role_result"]
+            if (
+                str(review["job_id"]) != qualifying_review_job_id
+                or str(review_attempt["attempt_id"])
+                != qualifying_review_attempt_id
+                or review_result_digest
+                != revision["qualifying_review_result_digest"]
+                or review_attempt["effective_grant_digest"]
+                != revision["qualifying_review_effective_grant_digest"]
+                or review_attempt["execution_principal_snapshot_digest"]
+                != revision["qualifying_review_principal_snapshot_digest"]
+                or review["reviews_job_id"] != work["job_id"]
+                or review_body.get("reviewed_job_id") != work["job_id"]
+                or review_body.get("reviewed_attempt_id") != work_attempt["attempt_id"]
+                or review_body.get("reviewed_result_digest") != work_result_digest
+                or review_body.get("repair_round") != work["repair_round"]
+                or review_body.get("verdict") != "approve"
+                or not _review_attempt_is_independent(
+                    connection,
+                    review_attempt_id=str(review_attempt["attempt_id"]),
+                    reviewed_attempt_id=str(work_attempt["attempt_id"]),
+                )
+            ):
+                raise StateConflict("projection qualifying review identity drifted")
+            qualifying_review_result = dict(review_body)
+        elif (
+            revision["review_required"]
+            or qualifying_review_attempt_id is not None
+            or revision["qualifying_review_result_digest"] is not None
+            or revision["qualifying_review_effective_grant_digest"] is not None
+            or revision["qualifying_review_principal_snapshot_digest"] is not None
+        ):
+            raise StateConflict("projection revision omitted its qualifying review")
+
+        revision_results.append(
+            {
+                "ordinal": revision["ordinal"],
+                "plan_step_id": revision["plan_step_id"],
+                "current_job_id": revision["current_job_id"],
+                "current_attempt_id": revision["current_attempt_id"],
+                "work_result": dict(
+                    work_seal["result_envelope"]["role_result"]
+                ),
+                "qualifying_review_job_id": qualifying_review_job_id,
+                "qualifying_review_attempt_id": qualifying_review_attempt_id,
+                "review_result": qualifying_review_result,
+            }
+        )
+
+    projection["revision_results_schema_version"] = (
+        "mastermind.executive_coo_domain_revision_results/v1"
+    )
+    projection["revision_results"] = revision_results
+    from control_plane.executive_orchestration_result import (
+        MAX_CANONICAL_RESULT_BYTES,
+        canonical_bytes,
+    )
+
+    try:
+        projection["consumption_projection_digest"] = orchestration_digest(projection)
+        encoded_projection = canonical_bytes(projection)
+    except Exception as exc:
+        raise StateConflict("domain consumption projection is not canonical") from exc
+    if len(encoded_projection) > MAX_CANONICAL_RESULT_BYTES:
+        raise StateConflict("domain consumption projection exceeds its byte ceiling")
+    return projection
 
 
 def _interactive_in_flight_turn_id(
@@ -2875,12 +3691,150 @@ _MIGRATION_5: tuple[str, ...] = (
     """,
 )
 
+# Migration 6 is an additive, immutable provider charge identity ledger.  Each
+# row independently exposes root, Job, Attempt, worker, operation, effect,
+# TurnRef, reservation, and Event identity without depending on later Event
+# type, command header, job header, or payload projections.  It carries no
+# provider execution behavior.
+_MIGRATION_6: tuple[str, ...] = (
+    """
+    CREATE TABLE coo_provider_charges (
+      charge_id TEXT NOT NULL PRIMARY KEY
+        CHECK(length(charge_id) BETWEEN 1 AND 128),
+      root_job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE RESTRICT,
+      job_id TEXT NOT NULL REFERENCES jobs(job_id) ON DELETE RESTRICT,
+      attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id) ON DELETE RESTRICT,
+      worker_id TEXT NOT NULL REFERENCES workers(worker_id) ON DELETE RESTRICT,
+      operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 256),
+      effect_class TEXT NOT NULL CHECK(effect_class IN ('ORDINARY','FINAL')),
+      turn_id TEXT NOT NULL CHECK(length(turn_id) BETWEEN 1 AND 128),
+      reservation_identity TEXT NOT NULL CHECK(length(reservation_identity) BETWEEN 1 AND 256),
+      event_id INTEGER NOT NULL REFERENCES events(event_id) ON DELETE RESTRICT,
+      created_at_ms INTEGER NOT NULL CHECK(created_at_ms >= 0),
+      UNIQUE(root_job_id, turn_id),
+      UNIQUE(root_job_id, operation_id),
+      UNIQUE(charge_id, event_id),
+      UNIQUE(event_id)
+    ) WITHOUT ROWID
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_lineage_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NOT EXISTS (
+      SELECT 1 FROM jobs
+      WHERE job_id=NEW.job_id AND root_job_id=NEW.root_job_id
+    ) OR NOT EXISTS (
+      SELECT 1 FROM attempts
+      WHERE attempt_id=NEW.attempt_id AND job_id=NEW.job_id
+        AND worker_id=NEW.worker_id
+    )
+    BEGIN SELECT RAISE(ABORT, 'COO provider charge lineage is invalid'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_identity_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN EXISTS (
+      SELECT 1 FROM coo_provider_charges
+      WHERE charge_id=NEW.charge_id OR event_id=NEW.event_id
+         OR (root_job_id=NEW.root_job_id AND
+             (turn_id=NEW.turn_id OR operation_id=NEW.operation_id))
+    )
+    BEGIN SELECT RAISE(ABORT, 'duplicate COO provider charge identity'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_hierarchy_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NOT EXISTS (
+      SELECT 1 FROM jobs AS root
+      JOIN jobs AS charged ON charged.job_id=NEW.job_id
+      LEFT JOIN jobs AS domain ON domain.job_id=charged.parent_job_id
+      WHERE root.job_id=NEW.root_job_id
+        AND root.root_job_id=root.job_id
+        AND root.parent_job_id IS NULL
+        AND root.depth=0 AND root.orchestration_role='aggregation'
+        AND charged.root_job_id=root.job_id
+        AND (
+          (charged.depth=1 AND charged.parent_job_id=root.job_id
+           AND charged.orchestration_role='plan'
+           AND json_extract(charged.constraints_json,'$.execution_profile_id')
+               ='operator.coo.domain.readonly.v1')
+          OR
+          (charged.depth=2 AND charged.orchestration_role IN ('work','review')
+           AND domain.depth=1 AND domain.parent_job_id=root.job_id
+           AND domain.root_job_id=root.job_id
+           AND domain.orchestration_role='plan'
+           AND json_extract(domain.constraints_json,'$.execution_profile_id')
+               ='operator.coo.domain.readonly.v1')
+        )
+        AND (NEW.effect_class='ORDINARY' OR charged.depth=1)
+    )
+    BEGIN SELECT RAISE(ABORT, 'COO provider charge hierarchy is invalid'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_event_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NOT EXISTS (
+      SELECT 1 FROM events AS e
+      JOIN attempts AS a ON a.attempt_id=NEW.attempt_id
+      WHERE e.event_id=NEW.event_id
+        AND e.aggregate_type='job' AND e.aggregate_id=NEW.job_id
+        AND e.job_id=NEW.job_id AND e.attempt_id=NEW.attempt_id
+        AND e.worker_id=NEW.worker_id AND e.quota_class=a.quota_class
+        AND e.actor='coo'
+        AND e.event_type=CASE NEW.effect_class
+            WHEN 'FINAL' THEN 'COO_DOMAIN_CONSUMPTION_CHARGED'
+            ELSE 'COO_PROVIDER_CHARGE_RECORDED' END
+        AND json_extract(e.payload_json,'$.charge_id')=NEW.charge_id
+        AND json_extract(e.payload_json,'$.root_job_id')=NEW.root_job_id
+        AND json_extract(e.payload_json,'$.operation_id')=NEW.operation_id
+        AND json_extract(e.payload_json,'$.effect_class')=NEW.effect_class
+        AND json_extract(e.payload_json,'$.turn_id')=NEW.turn_id
+        AND json_extract(e.payload_json,'$.reservation_identity')
+            =NEW.reservation_identity
+        AND (NEW.effect_class='ORDINARY' OR
+             (json_extract(e.payload_json,'$.domain_job_id')=NEW.job_id
+              AND json_extract(e.payload_json,'$.domain_attempt_id')
+                  =NEW.attempt_id))
+    )
+    BEGIN SELECT RAISE(ABORT, 'COO provider charge Event binding is invalid'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_immutable_update
+    BEFORE UPDATE ON coo_provider_charges
+    BEGIN SELECT RAISE(ABORT, 'COO provider charges are immutable'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_immutable_delete
+    BEFORE DELETE ON coo_provider_charges
+    BEGIN SELECT RAISE(ABORT, 'COO provider charges are immutable'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_ordinary_ceiling_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NEW.effect_class='ORDINARY'
+     AND (SELECT COUNT(*) FROM coo_provider_charges
+          WHERE root_job_id=NEW.root_job_id AND effect_class='ORDINARY') >= 31
+    BEGIN SELECT RAISE(ABORT, 'root ordinary COO provider charge ceiling is exhausted'); END
+    """,
+    """
+    CREATE TRIGGER coo_provider_charges_final_identity_insert
+    BEFORE INSERT ON coo_provider_charges
+    WHEN NEW.effect_class='FINAL'
+     AND EXISTS (
+       SELECT 1 FROM coo_provider_charges
+       WHERE root_job_id=NEW.root_job_id AND effect_class='FINAL'
+     )
+    BEGIN SELECT RAISE(ABORT, 'root already has a final COO provider charge'); END
+    """,
+)
+
 _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (1, "executive_runtime_core", _MIGRATION_1),
     (2, "durable_parent_child_review_contract", _MIGRATION_2),
     (3, "ohf_session_epochs_and_process_generations", _MIGRATION_3),
     (4, "executive_phase1fc_orchestration_contract", _MIGRATION_4),
     (5, "executive_finite_drive_arm_contract", _MIGRATION_5),
+    (6, "executive_coo_provider_charge_identity", _MIGRATION_6),
 )
 
 
@@ -3710,9 +4664,9 @@ class RuntimeStore:
         """Mutation-free preflight for every normal writable existing-store open.
 
         This runs before chmod, WAL selection, directory creation, or a writable
-        SQLite connection.  Exact v1-v4 stores are therefore routed only to the
-        separately explicit offline upgrade API; ordinary startup cannot append
-        migration 5 or create a sidecar as a by-product of discovering staleness.
+        SQLite connection.  Exact pre-v6 stores are therefore routed only to
+        separately explicit offline upgrade APIs; ordinary startup cannot append
+        migration 6 or create a sidecar as a by-product of discovering staleness.
         """
 
         connection: sqlite3.Connection | None = None
@@ -3759,7 +4713,9 @@ class RuntimeStore:
         current = versions[-1]
         if current < SCHEMA_VERSION:
             required_upgrade = (
-                "upgrade_v4_to_v5" if current == 4 else "upgrade_v3_to_v4"
+                "upgrade_v5_to_v6" if current == 5
+                else "upgrade_v4_to_v5" if current == 4
+                else "upgrade_v3_to_v4"
             )
             raise ExecutiveSchemaUpgradeRequired(
                 f"existing Executive schema v{current} requires explicit offline "
@@ -3769,9 +4725,9 @@ class RuntimeStore:
             raise PersistenceError(
                 f"executive runtime schema v{current} is unsupported by v{SCHEMA_VERSION} code"
             )
-        if schema_digest != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if schema_digest != _NORMALIZED_V6_SCHEMA_DIGEST:
             raise PersistenceError(
-                "existing Executive schema v5 does not match the exact reviewed DDL"
+                "existing Executive schema v6 does not match the exact reviewed DDL"
             )
         if self._upgrade_barrier_present():
             raise PersistenceError(
@@ -3946,9 +4902,9 @@ class RuntimeStore:
                 raise PersistenceError(
                     f"migration {version} checksum/name does not match code"
                 )
-        if _normalized_schema_digest(connection) != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if _normalized_schema_digest(connection) != _NORMALIZED_V6_SCHEMA_DIGEST:
             raise PersistenceError(
-                "executive runtime schema v5 does not match the exact reviewed DDL"
+                "executive runtime schema v6 does not match the exact reviewed DDL"
             )
 
     def _open_existing_writable(self) -> sqlite3.Connection:
@@ -4075,7 +5031,7 @@ class RuntimeStore:
     def _migrate(self, connection: sqlite3.Connection) -> None:
         if not self._database_was_absent:
             raise PersistenceError(
-                "generic migration is fresh-database-only under schema v5"
+                "generic migration is fresh-database-only under schema v6"
             )
         try:
             connection.execute("BEGIN EXCLUSIVE")
@@ -4097,7 +5053,7 @@ class RuntimeStore:
             }
             if existing:
                 raise ExecutiveSchemaUpgradeRequired(
-                    "generic migration refuses a pre-existing migration vector under schema v5"
+                "generic migration refuses a pre-existing migration vector under schema v6"
                 )
             known_versions = {version for version, _, _ in _MIGRATIONS}
             unknown = sorted(set(existing) - known_versions)
@@ -6695,7 +7651,7 @@ def _validated_coo_cycle_block_event(
         or not isinstance(selected_id, str)
         or not selected_id
         or reason not in COO_CYCLE_BLOCK_REASONS
-        or payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+        or payload.get("policy_sha") not in EXPECTED_POLICY_SHA256_BY_VERSION.values()
         or not isinstance(evidence_value, dict)
         or not isinstance(payload.get("evidence_digest"), str)
         or payload["evidence_digest"] != orchestration_digest(evidence_value)
@@ -6719,23 +7675,32 @@ def _validated_coo_cycle_block_event(
         or event_row["attempt_id"] != selected["current_attempt_id"]
     ):
         raise StateConflict("COO_CYCLE_BLOCKED Job/Attempt binding drifted")
-    plan_event = connection.execute(
+    plan_events = connection.execute(
         "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
         (expected_root_id,),
-    ).fetchone()
-    handoff_event = connection.execute(
+    ).fetchall()
+    if len(plan_events) > 1:
+        raise StateConflict("COO block requires unique root orchestration events")
+    plan_event = plan_events[0] if plan_events else None
+    handoff_events = connection.execute(
         """
         SELECT payload_json FROM events
         WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?
         """,
         (expected_root_id,),
-    ).fetchone()
-    plan_digest = (
+    ).fetchall()
+    if len(handoff_events) > 1:
+        raise StateConflict("COO block requires unique root orchestration events")
+    handoff_event = handoff_events[0] if handoff_events else None
+    plan_admission = (
         _strict_canonical_json_loads(
             str(plan_event["payload_json"]), name="COO_PLAN_ADMITTED payload"
-        ).get("plan_digest")
+        )
         if plan_event is not None
         else None
+    )
+    plan_digest = (
+        plan_admission.get("plan_digest") if plan_admission is not None else None
     )
     handoff_digest = (
         _strict_canonical_json_loads(
@@ -6745,11 +7710,39 @@ def _validated_coo_cycle_block_event(
         if handoff_event is not None
         else None
     )
-    if (
-        payload.get("plan_digest") != plan_digest
-        or payload.get("handoff_digest") != handoff_digest
-    ):
-        raise StateConflict("COO_CYCLE_BLOCKED plan/handoff digest drifted")
+    historical_policy = (
+        _historical_admitted_coo_policy_sha(plan_admission)
+        if plan_admission is not None
+        else None
+    )
+    # Case A: no admission yet — block must use current reviewed policy
+    if plan_admission is None:
+        if (
+            payload.get("plan_digest") is not None
+            or payload.get("handoff_digest") is not None
+            or payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+        ):
+            raise StateConflict("COO_CYCLE_BLOCKED plan/handoff pin drifted")
+    # Cases B/C: admission exists — block must match admission's policy pin
+    else:
+        # Exception: invalid_policy diagnostic on corrupted admission — the block
+        # carries current reviewed policy as its pin, not the corrupted historical.
+        # All identity fields must still match (plan_digest, handoff_digest) so
+        # a tampered or post-write drifted block is refused even on this path.
+        if reason == "invalid_policy" and historical_policy is None:
+            if (
+                payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+                or payload.get("plan_digest") != plan_digest
+                or payload.get("handoff_digest") != handoff_digest
+            ):
+                raise StateConflict("COO_CYCLE_BLOCKED plan/handoff pin drifted")
+        elif (
+            payload.get("plan_digest") != plan_digest
+            or payload.get("handoff_digest") != handoff_digest
+            or historical_policy is None
+            or payload.get("policy_sha") != historical_policy
+        ):
+            raise StateConflict("COO_CYCLE_BLOCKED plan/handoff pin drifted")
     _validated_retry_safety_block_evidence(
         connection,
         evidence_value,
@@ -7941,7 +8934,7 @@ def _sealed_worker_result_payload(
         ),
         "placement_snapshot_digest": str(attempt_row["placement_snapshot_digest"]),
         "effective_grant_digest": str(attempt_row["effective_grant_digest"]),
-        "policy_sha": CooCyclePolicy.load().policy_sha256,
+        "policy_sha": _attempt_root_policy_sha(connection, attempt_row),
     }
 
 
@@ -8224,7 +9217,7 @@ def _validated_orchestration_terminal_generation(
         or admission.get("effective_grant_digest")
         != attempt_row["effective_grant_digest"]
         or admission.get("effective_grant_digest") != seal["effective_grant_digest"]
-        or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+        or admission.get("policy_sha") != _attempt_root_policy_sha(connection, attempt_row)
         or admission.get("policy_sha") != seal["policy_sha"]
         or admission.get("launch_decision") != LaunchDecision.ALLOW.value
         or not isinstance(decision, dict)
@@ -8290,7 +9283,7 @@ def _validated_sealed_worker_terminal_evidence(
         seal["observed_attestation_digest"] != attestation_digest
         or seal["work_admission_command_id"]
         != f"sealed-worker-launch:{attempt_row['attempt_id']}"
-        or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _attempt_root_policy_sha(connection, attempt_row)
         or seal["execution_principal_snapshot_digest"]
         != attempt_row["execution_principal_snapshot_digest"]
         or seal["placement_snapshot_digest"] != attempt_row["placement_snapshot_digest"]
@@ -8720,6 +9713,7 @@ def _work_dependency_manifest(
 def _validated_plan_admission(
     connection: sqlite3.Connection,
     root_row: sqlite3.Row,
+    *, _stopped_domain: _StoppedDomainEvidence | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return the immutable reservation and its revalidated typed plan."""
 
@@ -8758,7 +9752,21 @@ def _validated_plan_admission(
         raise StateConflict("COO plan admission is not the closed wire")
     digest_input = dict(admission)
     reservation_digest = digest_input.pop("reservation_digest", None)
-    policy = CooCyclePolicy.load()
+    policy_digest = (
+        admission.get("policy_sha")
+        if isinstance(admission, dict)
+        and type(admission.get("policy_sha")) is str
+        else ""
+    )
+    try:
+        if policy_digest == EXPECTED_POLICY_SHA256:
+            policy = load_pinned_coo_cycle_policy(2, policy_sha256=policy_digest)
+        elif policy_digest == EXPECTED_V1_POLICY_SHA256:
+            policy = load_pinned_coo_cycle_policy(1, policy_sha256=policy_digest)
+        else:
+            raise CooCyclePolicyError("pinned COO policy digest is unknown")
+    except (CooCyclePolicyError, TypeError) as exc:
+        raise StateConflict(f"COO plan policy pin is unavailable: {exc}") from exc
     expected_command = (
         f"coo-cycle:{root_row['job_id']}:admit-plan:{admission.get('plan_attempt_id')}"
     )
@@ -8795,6 +9803,11 @@ def _validated_plan_admission(
         in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
         and _interactive_tx5_admitted(plan_attempt)
     )
+    active_domain = plan_attempt is not None and (
+        plan_attempt["status"]
+        in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+        and _coo_domain_admitted(plan_attempt, allow_disabled=True)
+    )
     completed_history = plan_attempt is not None and (
         plan_attempt["status"] == AttemptStatus.COMPLETED.value
         or connection.execute(
@@ -8808,16 +9821,47 @@ def _validated_plan_admission(
         is not None
     )
     if (
-        not (completed_history or active_interactive)
+        not (completed_history or active_interactive or active_domain)
         or plan_attempt["plan_role"] != "plan"
         or plan_attempt["plan_parent"] != root_row["job_id"]
         or plan_attempt["plan_root"] != root_row["job_id"]
     ):
         raise StateConflict(
-            "COO plan admission lost its active interactive or completed planner Attempt"
+            "COO plan admission lost its active planner or completed planner Attempt"
         )
-    if active_interactive:
-        seal = _validated_interactive_active_plan_seal(
+    if active_domain and _stopped_domain is None and connection.execute(
+            "SELECT 1 FROM process_generations g JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id "
+            "WHERE e.attempt_id=? AND e.state='CURRENT' AND g.executive_writer_held=1 AND g.ended_at_ms IS NULL",
+            (plan_attempt["attempt_id"],)).fetchone() is None:
+        # Immutable post-stop reads use the exact canonical stop context. This is
+        # not LIVE admission and never grants token, lease, writer, or provider work.
+        receipts = connection.execute("SELECT payload_json FROM events WHERE event_type='COO_DOMAIN_CONSUMPTION_SEALED' AND job_id=?", (root_row["job_id"],)).fetchall()
+        if len(receipts) != 1:
+            raise StateConflict("stopped plan admission lacks its consumption receipt")
+        consumption = _strict_canonical_json_loads(str(receipts[0]["payload_json"]), name="stopped plan consumption")
+        _stopped_domain = _stopped_domain_evidence(connection, plan_attempt, consumption)
+    domain_terminal_anchor = None
+    if _stopped_domain is not None:
+        if (connection is not _stopped_domain.connection
+                or plan_attempt["attempt_id"] != _stopped_domain.row["attempt_id"]):
+            raise StateConflict("stopped plan admission context is foreign")
+        seal = _stopped_domain.plan_seal
+    elif completed_history and _coo_domain_admitted(plan_attempt):
+        domain_terminal_anchor = _domain_terminal_anchor(connection, plan_attempt)
+        seal = domain_terminal_anchor.plan_seal
+    elif not active_interactive and not active_domain:
+        historical_policy_sha = policy.policy_sha256
+        seal = _validated_orchestration_role_result_payload(
+            connection,
+            attempt_row=plan_attempt,
+            expected_role="plan",
+            terminal_payload={
+                "schema_version": "mastermind.orchestration_terminal_receipt/v1",
+                "policy_sha": historical_policy_sha,
+            },
+        )
+    elif active_domain:
+        seal = _validated_domain_active_plan_seal(
             connection,
             attempt_row=plan_attempt,
             job_row=connection.execute(
@@ -8826,10 +9870,13 @@ def _validated_plan_admission(
             ).fetchone(),
         )
     else:
-        seal = _validated_orchestration_role_result_payload(
+        seal = _validated_interactive_active_plan_seal(
             connection,
             attempt_row=plan_attempt,
-            expected_role="plan",
+            job_row=connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?",
+                (plan_attempt["job_id"],),
+            ).fetchone(),
         )
     if (
         seal["job_id"] != plan_attempt["plan_job_id"]
@@ -8840,9 +9887,15 @@ def _validated_plan_admission(
         != plan_attempt["placement_snapshot_digest"]
         or seal["execution_principal_snapshot_digest"]
         != plan_attempt["execution_principal_snapshot_digest"]
+        or seal["policy_sha"] != policy.policy_sha256
     ):
         raise StateConflict("sealed planner evidence does not match its Attempt")
-    if not active_interactive:
+    if (not active_interactive and not active_domain
+            and _stopped_domain is None and domain_terminal_anchor is None):
+        # Only a historically completed planner carries the post-shutdown
+        # terminal receipt.  An active interactive or active COO-domain plan
+        # is admitted from its nonterminal (RUNNING/CHECKPOINTED) seal and has
+        # no terminal receipt by design.
         _orchestration_terminal_receipt(
             connection,
             attempt_id=str(admission["plan_attempt_id"]),
@@ -8998,7 +10051,8 @@ def _validated_plan_admission(
         if (
             member is None
             or member_role != "work"
-            or member["parent_job_id"] != root_row["job_id"]
+            or member["root_job_id"] != root_row["job_id"]
+            or int(member["depth"]) not in {1, 2}
             or member["plan_attempt_id"] != admission["plan_attempt_id"]
             or member["plan_digest"] != admission["plan_digest"]
             or member["plan_step_id"] != step["step_id"]
@@ -9047,6 +10101,13 @@ def _validated_plan_admission(
             placement=step.get("placement"),
             plan_schema_version=str(plan_body["schema_version"]),
             dependency_manifest=dependency_manifest,
+            # An active COO-domain plan mints depth-two direct children under
+            # the admitted domain, not depth-one children under the root.
+            parent_domain_row=(
+                _coo_domain_row(connection, root_row)
+                if active_domain or _stopped_domain is not None or domain_terminal_anchor is not None else None
+            ),
+            policy=policy,
         )
     try:
         expected_total = policy.reserved_children_total(tuple(requirements))
@@ -9055,6 +10116,200 @@ def _validated_plan_admission(
     if admission["reserved_children_total"] != expected_total:
         raise StateConflict("COO plan admission total reservation drifted")
     return admission, plan_body
+
+
+def _admitted_coo_policy(admission: Mapping[str, Any]) -> CooCyclePolicy:
+    """Replay the exact policy identity admitted by one immutable root."""
+
+    policy_sha = admission.get("policy_sha")
+    if type(policy_sha) is not str:
+        raise StateConflict("COO plan admission policy pin is malformed")
+    if policy_sha not in EXPECTED_POLICY_SHA256_BY_VERSION.values():
+        raise StateConflict("COO plan admission policy pin is unavailable")
+    version = 2 if policy_sha == EXPECTED_POLICY_SHA256 else 1
+    try:
+        return load_pinned_coo_cycle_policy(version, policy_sha256=policy_sha)
+    except CooCyclePolicyError as exc:
+        raise StateConflict(f"COO plan policy pin is unavailable: {exc}") from exc
+
+
+def _unique_root_plan_admission_rows(
+    connection: sqlite3.Connection, root_job_id: str
+) -> list[sqlite3.Row]:
+    """Return the unique root admission rows, or refuse duplicates."""
+
+    rows = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+        ORDER BY event_id
+        """,
+        (root_job_id,),
+    ).fetchall()
+    if len(rows) > 1:
+        raise StateConflict("COO block requires unique root orchestration events")
+    return rows
+
+
+def _historical_admitted_coo_policy_sha(admission: Any) -> str | None:
+    """Return the immutable pin for one valid admission, else None.
+
+    Unknown, corrupt, or malformed admissions are not a valid historical root
+    and never authorize work.
+    """
+
+    if not isinstance(admission, Mapping):
+        return None
+    try:
+        return _admitted_coo_policy(admission).policy_sha256
+    except (StateConflict, CooCyclePolicyError):
+        return None
+
+
+def _required_admitted_coo_policy_sha(admission: Any) -> str:
+    """Return a valid admitted root pin or refuse all block identity use."""
+
+    if not isinstance(admission, Mapping):
+        raise StateConflict("COO root admission policy is unknown or corrupt")
+    try:
+        return _admitted_coo_policy(admission).policy_sha256
+    except (StateConflict, CooCyclePolicyError) as exc:
+        raise StateConflict(
+            "COO root admission policy is unknown or corrupt"
+        ) from exc
+
+
+def _resolve_coo_block_policy_sha(
+    connection: sqlite3.Connection,
+    root_job_id: str,
+    *,
+    supplied_policy_sha: str | None,
+    reason: str,
+) -> str:
+    """Derive the block policy independently of the caller-supplied pin.
+
+    A unique valid ``COO_PLAN_ADMITTED`` event is the immutable root pin. A
+    caller-supplied known but different hash refuses before any write.
+    Absence before admission uses the current reviewed policy. Unknown or
+    corrupt admission is not a valid historical root; the reviewed
+    diagnostic policy is used only as a diagnostic pin.
+    """
+
+    rows = _unique_root_plan_admission_rows(connection, root_job_id)
+    if not rows:
+        expected = EXPECTED_POLICY_SHA256
+    else:
+        payload = _json_loads(str(rows[0]["payload_json"]), fallback={})
+        if reason == "invalid_policy":
+            historical = _historical_admitted_coo_policy_sha(payload)
+            expected = (
+                historical if historical is not None else EXPECTED_POLICY_SHA256
+            )
+        else:
+            expected = _required_admitted_coo_policy_sha(payload)
+    if (
+        supplied_policy_sha is not None
+        and supplied_policy_sha != expected
+    ):
+        raise StateConflict(
+            "COO block policy digest differs from the root policy"
+        )
+    if expected not in EXPECTED_POLICY_SHA256_BY_VERSION.values():
+        raise StateConflict(
+            "COO block policy digest is not the reviewed policy"
+        )
+    return expected
+
+
+def _attempt_root_policy_sha(
+    connection: sqlite3.Connection, attempt_row: sqlite3.Row
+) -> str:
+    job_row = connection.execute(
+        "SELECT job_id,root_job_id,orchestration_role FROM jobs WHERE job_id=?",
+        (attempt_row["job_id"],),
+    ).fetchone()
+    if (
+        job_row is None
+        or job_row["orchestration_role"]
+        not in {"plan", "work", "review", "repair", "aggregation"}
+        or job_row["root_job_id"] is None
+    ):
+        raise StateConflict("orchestration evidence lost its root Job")
+    if job_row["orchestration_role"] == "plan":
+        if job_row["job_id"] != job_row["root_job_id"]:
+            rows = connection.execute(
+                """
+                SELECT payload_json FROM events
+                WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+                ORDER BY event_id
+                """,
+                (job_row["root_job_id"],),
+            ).fetchall()
+            if len(rows) == 0:
+                pass
+            elif len(rows) != 1:
+                raise StateConflict(
+                    "orchestration evidence requires one root plan admission"
+                )
+            else:
+                return _admitted_coo_policy(
+                    _strict_canonical_json_loads(
+                        str(rows[0]["payload_json"]), name="COO plan admission"
+                    )
+                ).policy_sha256
+        try:
+            return CooCyclePolicy.load().policy_sha256
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
+    if job_row["orchestration_role"] == "aggregation":
+        full_job_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job_row["job_id"],)
+        ).fetchone()
+        if full_job_row is None:
+            raise StateConflict("orchestration evidence lost its root Job")
+        handoff = _validated_aggregation_handoff(connection, full_job_row)
+        return str(handoff["policy_sha"])
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("orchestration evidence lost its root Job")
+    rows = connection.execute(
+        """
+        SELECT payload_json FROM events
+        WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+        ORDER BY event_id
+        """,
+        (root_row["job_id"],),
+    ).fetchall()
+    if len(rows) != 1:
+        raise StateConflict("orchestration evidence requires one root plan admission")
+    admission = _strict_canonical_json_loads(
+        str(rows[0]["payload_json"]), name="COO plan admission"
+    )
+    if not isinstance(admission, dict):
+        raise StateConflict("COO plan admission is not the closed wire")
+    policy_sha = admission.get("policy_sha")
+    if type(policy_sha) is not str:
+        raise StateConflict("COO plan admission policy pin is malformed")
+    if policy_sha not in EXPECTED_POLICY_SHA256_BY_VERSION.values():
+        raise StateConflict("COO plan admission policy pin is unavailable")
+    return policy_sha
+
+
+def _root_admitted_orchestration_policy(
+    connection: sqlite3.Connection, job_row: sqlite3.Row
+) -> CooCyclePolicy:
+    """Resolve a root-owned role policy from its durable admission."""
+
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+    ).fetchone()
+    if root_row is None:
+        raise StateConflict("orchestration Job lost its root")
+    admission = _validated_plan_admission(connection, root_row)[0]
+    return _admitted_coo_policy(admission)
+
 
 def _review_attempt_is_independent(
     connection: sqlite3.Connection,
@@ -9409,12 +10664,15 @@ def _current_orchestration_tree_material_for_dispatch(
     """Re-derive reservation/current-lineage eligibility without terminal claims."""
 
     children = connection.execute(
-        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
-        (root_row["job_id"],),
+        "SELECT * FROM jobs WHERE root_job_id=? AND job_id<>? ORDER BY job_id",
+        (root_row["job_id"], root_row["job_id"]),
     ).fetchall()
     if len(children) > int(admission["reserved_children_total"]):
         raise StateConflict("orchestration tree exceeds its reserved child total")
-    policy = CooCyclePolicy.load()
+    _admission, _plan_body = _validated_plan_admission(connection, root_row)
+    if (_admission, _plan_body) != (admission, plan_body):
+        raise StateConflict("dispatch admission replay policy identity drifted")
+    policy = _admitted_coo_policy(admission)
     reservations = {str(item["plan_step_id"]): item for item in admission["steps"]}
     result: list[dict[str, Any]] = []
     for step in plan_body["steps"]:
@@ -9485,7 +10743,19 @@ def _current_orchestration_tree_material_for_dispatch(
     expected_ids = {str(step["step_id"]) for step in plan_body["steps"]}
     if any(
         row["orchestration_role"] not in {"plan", "work", "repair", "review"}
-        or int(row["depth"]) != 1
+        or int(row["depth"]) not in {1, 2}
+        or (
+            row["orchestration_role"] != "plan"
+            and row["parent_job_id"]
+            not in {
+                str(root_row["job_id"]),
+                *(
+                    str(item["job_id"])
+                    for item in children
+                    if item["depth"] == 1 and item["orchestration_role"] == "plan"
+                ),
+            }
+        )
         or (
             row["orchestration_role"] != "plan"
             and row["plan_step_id"] not in expected_ids
@@ -9503,6 +10773,7 @@ def _accepted_current_step_revision(
     admission: dict[str, Any],
     plan_body: dict[str, Any],
     plan_step_id: str,
+    _stopped_domain: _StoppedDomainEvidence | None = None,
 ) -> dict[str, Any]:
     """Return the canonical accepted current revision for one plan step.
 
@@ -9525,11 +10796,14 @@ def _accepted_current_step_revision(
     reservation = reservation_by_step[plan_step_id]
 
     children = connection.execute(
-        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
-        (root_row["job_id"],),
+        "SELECT * FROM jobs WHERE root_job_id=? AND job_id<>? ORDER BY job_id",
+        (root_row["job_id"], root_row["job_id"]),
     ).fetchall()
 
-    policy = CooCyclePolicy.load()
+    _admission, _plan_body = _validated_plan_admission(connection, root_row, _stopped_domain=_stopped_domain)
+    if (_admission, _plan_body) != (admission, plan_body):
+        raise StateConflict("aggregation admission replay policy identity drifted")
+    policy = _admitted_coo_policy(admission)
     revisions = [
         row
         for row in children
@@ -9812,23 +11086,27 @@ def _current_orchestration_tree_material(
     root_row: sqlite3.Row,
     admission: dict[str, Any],
     plan_body: dict[str, Any],
+    *,
+    allow_active_domain_job_id: str | None = None,
+    _stopped_domain: _StoppedDomainEvidence | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Derive the exact current revisions, approvals, and adverse history."""
 
     children = connection.execute(
-        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
-        (root_row["job_id"],),
+        "SELECT * FROM jobs WHERE root_job_id=? AND job_id<>? ORDER BY job_id",
+        (root_row["job_id"], root_row["job_id"]),
     ).fetchall()
     living = [
         str(row["job_id"])
         for row in children
         if JobStatus(row["status"]) not in _TERMINAL_JOB_STATUSES
+        and str(row["job_id"]) != str(allow_active_domain_job_id or "")
     ]
     if living:
         raise StateConflict(
             "aggregation handoff refuses living child Jobs: " + ", ".join(living)
         )
-    if any(int(row["depth"]) != 1 for row in children):
+    if any(int(row["depth"]) not in {1, 2} for row in children):
         raise StateConflict("orchestration tree contains a non-direct child")
     known_steps = {str(step["step_id"]) for step in plan_body["steps"]}
     allowed_roles = {"plan", "work", "repair", "review"}
@@ -9861,6 +11139,7 @@ def _current_orchestration_tree_material(
             admission=admission,
             plan_body=plan_body,
             plan_step_id=step_id,
+            _stopped_domain=_stopped_domain,
         )
         revisions = [
             row
@@ -9969,6 +11248,8 @@ def _assert_orchestration_lineage_for_create(
     rejected_review_job_id: str | None = None,
     rejected_review_result_digest: str | None = None,
     allow_active_interactive_plan: bool = False,
+    allow_active_domain_plan: bool = False,
+    parent_domain_row: sqlite3.Row | None = None,
 ) -> None:
     parent_role, parent_provenance, _ = _decode_orchestration_job_fields(parent_row)
     if (
@@ -9994,7 +11275,7 @@ def _assert_orchestration_lineage_for_create(
         or (
             plan_attempt["status"] != AttemptStatus.COMPLETED.value
             and not (
-                allow_active_interactive_plan
+                (allow_active_interactive_plan or allow_active_domain_plan)
                 and plan_attempt["status"]
                 in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
             )
@@ -10004,13 +11285,23 @@ def _assert_orchestration_lineage_for_create(
         or plan_attempt["plan_root"] != parent_row["root_job_id"]
     ):
         raise StateConflict("plan lineage does not name the completed plan child")
-    if allow_active_interactive_plan:
+    if allow_active_interactive_plan or allow_active_domain_plan:
         job_row = connection.execute(
             "SELECT * FROM jobs WHERE job_id=?", (plan_attempt["job_id"],)
         ).fetchone()
-        if job_row is None or not _interactive_tx5_admitted(job_row):
+        if job_row is None:
+            raise StateConflict(
+                "active plan lineage is not recognized"
+            )
+        if allow_active_interactive_plan and not _interactive_tx5_admitted(job_row):
             raise StateConflict(
                 "active interactive plan lineage is not recognized"
+            )
+        if allow_active_domain_plan and not _coo_domain_admitted(
+            job_row, allow_disabled=True
+        ):
+            raise StateConflict(
+                "active domain plan lineage is not recognized"
             )
     _, sealed_plan_digest = _sealed_role_result(
         connection, attempt_id=str(plan_attempt_id), expected_role="plan"
@@ -10025,7 +11316,13 @@ def _assert_orchestration_lineage_for_create(
         ).fetchone()
         if (
             reviewed is None
-            or reviewed["parent_job_id"] != parent_row["job_id"]
+            or (
+                reviewed["parent_job_id"] != parent_row["job_id"]
+                and not (
+                    parent_domain_row is not None
+                    and reviewed["parent_job_id"] == parent_domain_row["job_id"]
+                )
+            )
             or reviewed["root_job_id"] != parent_row["root_job_id"]
             or reviewed["orchestration_role"] not in {"work", "repair"}
             or reviewed["status"] != JobStatus.COMPLETED.value
@@ -10044,7 +11341,13 @@ def _assert_orchestration_lineage_for_create(
         ).fetchone()
         if (
             predecessor is None
-            or predecessor["parent_job_id"] != parent_row["job_id"]
+            or (
+                predecessor["parent_job_id"] != parent_row["job_id"]
+                and not (
+                    parent_domain_row is not None
+                    and predecessor["parent_job_id"] == parent_domain_row["job_id"]
+                )
+            )
             or predecessor["root_job_id"] != parent_row["root_job_id"]
             or predecessor["orchestration_role"] not in {"work", "repair"}
             or predecessor["status"] != JobStatus.COMPLETED.value
@@ -10142,6 +11445,9 @@ def _validated_aggregation_handoff(
         "command_id",
         "handoff_digest",
     }
+    domain_terminal = _read_domain_terminal(connection, job_row)
+    if domain_terminal is not None:
+        keys |= {"domain_terminal", "consumed_result"}
     if not isinstance(handoff, dict) or set(handoff) != keys:
         raise StateConflict("aggregation handoff is not the closed wire")
     digest = handoff.get("handoff_digest")
@@ -10179,6 +11485,10 @@ def _validated_aggregation_handoff(
         or handoff["allowed_evidence_reads"] != ["attempts", "events", "jobs"]
     ):
         raise StateConflict("aggregation handoff no longer matches the current tree")
+    if domain_terminal is not None and (
+            _json_dumps(handoff["domain_terminal"]) != _json_dumps(domain_terminal)
+            or handoff["consumed_result"] != domain_terminal["consumed_result"]):
+        raise StateConflict("aggregation handoff domain consumption/terminal material drifted")
     return handoff
 
 
@@ -10301,7 +11611,10 @@ def _assert_orchestration_dispatch_eligible(
             raise StateConflict("aggregation dispatch requires an eligible queued root")
         _validated_aggregation_handoff(connection, job_row)
         return
-    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != 1:
+    if job_row["root_job_id"] != root["job_id"] or int(job_row["depth"]) not in {
+        1,
+        2,
+    }:
         raise StateConflict(
             "orchestration dispatch target is outside the direct root subtree"
         )
@@ -10374,7 +11687,10 @@ def _assert_orchestration_requeue_eligible(
     if role == "aggregation":
         _validated_aggregation_handoff(connection, job_row)
         return
-    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != 1:
+    if job_row["root_job_id"] != root["job_id"] or int(job_row["depth"]) not in {
+        1,
+        2,
+    }:
         raise StateConflict(
             "orchestration requeue target is outside the direct subtree"
         )
@@ -10472,10 +11788,17 @@ def _insert_cycle_child(
     plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
     allow_active_interactive_plan: bool = False,
+    allow_active_domain_plan: bool = False,
+    parent_domain_row: sqlite3.Row | None = None,
+    policy: CooCyclePolicy | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
-    policy = CooCyclePolicy.load()
+    if policy is None:
+        try:
+            policy = CooCyclePolicy.load()
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
     if role not in {"work", "review", "repair"}:
         raise StateConflict("cycle child insertion role is invalid")
     if _COMMAND_ID_RE.fullmatch(command_id) is None:
@@ -10485,8 +11808,11 @@ def _insert_cycle_child(
             str(root_row["constraints_json"]), name="root constraints"
         )
     )
+    domain = _coo_domain_row(connection, root_row)
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
+    if domain is not None:
+        constraints["remaining_depth"] = 0
     if role == "work" and placement is not None:
         constraints = _project_work_placement(
             constraints,
@@ -10552,7 +11878,18 @@ def _insert_cycle_child(
             "rejected_review_result_digest"
         ),
         allow_active_interactive_plan=allow_active_interactive_plan,
+        allow_active_domain_plan=allow_active_domain_plan,
+        parent_domain_row=parent_domain_row,
     )
+    if domain is None and parent_domain_row is not None:
+        raise StateConflict("depth-two child requires the admitted COO domain")
+    if parent_domain_row is not None and domain["job_id"] != parent_domain_row["job_id"]:
+        raise StateConflict("depth-two direct parent is not the admitted COO domain")
+    if domain is not None and (
+        not isinstance(constraints, dict)
+        or constraints.get("remaining_depth") != 0
+    ):
+        raise StateConflict("depth-two child requires integer remaining_depth=0")
     numbers = [
         int(match.group(1))
         for row in connection.execute("SELECT job_id FROM jobs")
@@ -10600,7 +11937,9 @@ def _insert_cycle_child(
         "source_digest": source_digest,
         "command_id": command_id,
         "job_id": job_id,
-        "parent_job_id": str(root_row["job_id"]),
+        "parent_job_id": str(
+            domain["job_id"] if domain is not None else root_row["job_id"]
+        ),
         "root_job_id": str(root_row["job_id"]),
         "role": role,
     }
@@ -10637,9 +11976,9 @@ def _insert_cycle_child(
             timestamp,
             timestamp,
             timestamp,
+            str(domain["job_id"] if domain is not None else root_row["job_id"]),
             root_row["job_id"],
-            root_row["job_id"],
-            1,
+            2 if domain is not None else 1,
             "coo",
             "coo",
             root_row["business_impact"],
@@ -10664,9 +12003,11 @@ def _insert_cycle_child(
         job_id=job_id,
         payload={
             "status": JobStatus.QUEUED.value,
-            "parent_job_id": str(root_row["job_id"]),
+            "parent_job_id": str(
+                domain["job_id"] if domain is not None else root_row["job_id"]
+            ),
             "root_job_id": str(root_row["job_id"]),
-            "depth": 1,
+            "depth": 2 if domain is not None else 1,
             "owner_seat": "coo",
             "escalation_target": "coo",
             "business_impact": str(root_row["business_impact"]),
@@ -10722,9 +12063,11 @@ def _reconcile_cycle_child_creation(
     provenance_source_id: str | None = None,
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
+    policy: CooCyclePolicy | None = None,
     placement: dict[str, Any] | None = None,
     plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
+    parent_domain_row: sqlite3.Row | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
 
@@ -10750,6 +12093,8 @@ def _reconcile_cycle_child_creation(
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
+    if parent_domain_row is not None:
+        expected_constraints["remaining_depth"] = 0
     if role == "work" and placement is not None:
         expected_constraints = _project_work_placement(
             expected_constraints,
@@ -10789,9 +12134,13 @@ def _reconcile_cycle_child_creation(
     source_digest = provenance_source_digest or plan_digest
     expected_payload: dict[str, Any] = {
         "status": JobStatus.QUEUED.value,
-        "parent_job_id": str(root_row["job_id"]),
+        "parent_job_id": str(
+            root_row["job_id"]
+            if parent_domain_row is None
+            else parent_domain_row["job_id"]
+        ),
         "root_job_id": str(root_row["job_id"]),
-        "depth": 1,
+        "depth": 1 if parent_domain_row is None else 2,
         "owner_seat": "coo",
         "escalation_target": "coo",
         "business_impact": str(root_row["business_impact"]),
@@ -10831,9 +12180,13 @@ def _reconcile_cycle_child_creation(
         or row["priority"] != root_row["priority"]
         or row["authority_level"] != root_row["authority_level"]
         or row["branch"] != root_row["branch"]
-        or row["parent_job_id"] != root_row["job_id"]
+        or row["parent_job_id"] != (
+            root_row["job_id"]
+            if parent_domain_row is None
+            else parent_domain_row["job_id"]
+        )
         or row["root_job_id"] != root_row["job_id"]
-        or int(row["depth"]) != 1
+        or int(row["depth"]) != (1 if parent_domain_row is None else 2)
         or row["owner_seat"] != "coo"
         or row["escalation_target"] != "coo"
         or row["business_impact"] != root_row["business_impact"]
@@ -10849,6 +12202,21 @@ def _reconcile_cycle_child_creation(
         or stored_validations != validation_commands
         or stored_constraints != expected_constraints
         or int(row["attempt_limit"]) != int(attempt_limit)
+        or (
+            policy is not None
+            and (
+                cost_class not in policy.allowed_child_cost_classes
+                or (
+                    role == "review"
+                    and int(attempt_limit) != policy.review_job_attempt_limit
+                )
+                or (
+                    role in {"work", "repair"}
+                    and int(attempt_limit)
+                    > policy.max_attempts_per_orchestration_job
+                )
+            )
+        )
         or payload != expected_payload
     ):
         raise StateConflict("cycle child command replay semantic payload drifted")
@@ -11590,6 +12958,588 @@ def _finite_charged_reservation(
     return timestamp
 
 
+
+def _coo_validate_raw_role_result_observation(observation: Any) -> None:
+    """Revalidate native typed ingress; frozen labels alone are not authority."""
+    from control_plane.executive_orchestration_result import RawRoleResultObservation
+    if type(observation) is not RawRoleResultObservation:
+        raise StateConflict("domain consumption requires an actual typed raw observation")
+    try:
+        fields = {field.name: getattr(observation, field.name)
+                  for field in dataclasses.fields(RawRoleResultObservation)}
+        if type(fields["canonical_result_byte_length"]) is not int:
+            raise ValueError("byte length must be an exact integer")
+        RawRoleResultObservation(**fields)
+    except Exception:
+        raise StateConflict("domain consumption raw observation failed ingress validation") from None
+
+
+def _domain_consumption_seal_receipt(
+    connection: sqlite3.Connection, *, store: RuntimeStore | None, row: sqlite3.Row,
+    root: sqlite3.Row, domain: sqlite3.Row, observation: Any, turn: TurnRef,
+    fence_generation: int, lease_authority_digest: str, command_id: str,
+    final_row: sqlite3.Row, operation_id: OperationId,
+    stopped: _StoppedDomainEvidence | None = None,
+) -> dict[str, Any]:
+    """Shared immutable receipt reconstruction; authorization lives at callers."""
+    from control_plane.executive_orchestration_result import (
+        DOMAIN_CONSUMPTION_SCHEMA, MAX_CANONICAL_RESULT_BYTES, RAW_OBSERVATION_SCHEMA,
+        canonical_bytes, canonical_digest, parse_and_validate_domain_consumption,
+    )
+    root_token = str(root["job_id"])
+    timestamp = store.now_ms() if store is not None else 0
+    with nullcontext(connection):
+        stored_generation = connection.execute(
+            "SELECT g.provider_session_id,e.provider_session_id AS epoch_provider_session_id "
+            "FROM process_generations g JOIN harness_session_epochs e "
+            "ON e.session_epoch_id=g.session_epoch_id "
+            "WHERE g.process_generation_id=? AND g.session_epoch_id=?",
+            (turn.process_generation_id, turn.session_epoch_id),
+        ).fetchone()
+        # 4. Bind raw observation to the exact later turn.
+        if (
+            stored_generation is None
+            or observation.provider_session_id != stored_generation["provider_session_id"]
+            or observation.provider_session_id != stored_generation["epoch_provider_session_id"]
+            or observation.attempt_id != turn.attempt_id
+            or observation.session_epoch_id != turn.session_epoch_id
+            or observation.process_generation_id
+            != turn.process_generation_id
+            or observation.turn_id != turn.turn_id
+        ):
+            raise StateConflict(
+                "raw role result observation is outside the later turn"
+            )
+        # 5. Required unique APPLIED receipt for the operation, with
+        #    the same native acknowledgement the raw observation binds.
+        applied_event = _ohf_evidence_event(
+            connection,
+            operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            ),
+        )
+        if applied_event is None:
+            raise StateConflict(
+                "domain consumption seal requires its APPLIED receipt"
+            )
+        applied_payload = _strict_canonical_json_loads(
+            str(applied_event["payload_json"]),
+            name="domain consumption APPLIED receipt",
+        )
+        if (
+            not isinstance(applied_payload, dict)
+            or applied_payload.get("operation_kind")
+            != OperationKind.BEGIN_TURN.value
+            or applied_payload.get("attempt_id") != turn.attempt_id
+            or applied_payload.get("session_epoch_id")
+            != turn.session_epoch_id
+            or applied_payload.get("process_generation_id")
+            != turn.process_generation_id
+            or applied_payload.get("turn_id") != turn.turn_id
+            or applied_payload.get("acknowledged") is not True
+            or applied_payload.get("provider_native_turn_id")
+            != observation.provider_native_turn_id
+        ):
+            raise StateConflict(
+                "domain consumption seal APPLIED receipt identity drifted"
+            )
+        # 6. Unique committed dispatch for the operation.
+        dispatch_id = f"{operation_id.command_id}:dispatch"
+        dispatches: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+        for event in connection.execute(
+            "SELECT * FROM events WHERE event_type='OHF_PROVIDER_DISPATCH_COMMITTED'"
+        ):
+            body = _strict_canonical_json_loads(
+                str(event["payload_json"]),
+                name="domain consumption seal dispatch",
+            )
+            if (
+                event["command_id"] == dispatch_id
+                or event["aggregate_id"] == operation_id.command_id
+                or (
+                    isinstance(body, dict)
+                    and body.get("operation_id") == operation_id.command_id
+                )
+            ):
+                dispatches.append((event, body))
+        if len(dispatches) != 1:
+            raise StateConflict(
+                "domain consumption seal requires one committed later dispatch"
+            )
+        dispatch_event, dispatch_body = dispatches[0]
+        if (
+            dispatch_event["command_id"] != dispatch_id
+            or dispatch_event["aggregate_type"] != "operator_operation"
+            or dispatch_event["aggregate_id"] != operation_id.command_id
+            or dispatch_event["job_id"] != str(row["job_id"])
+            or dispatch_event["attempt_id"] != turn.attempt_id
+            or dispatch_event["worker_id"] != str(row["worker_id"])
+            or dispatch_event["quota_class"] != str(row["quota_class"])
+            or dispatch_event["actor"] != "supervisor"
+            or not isinstance(dispatch_body, dict)
+            or dispatch_body.get("schema_version")
+            != "mastermind.operator_harness_provider_dispatch/v1"
+            or dispatch_body.get("operation_kind")
+            != OperationKind.BEGIN_TURN.value
+        ):
+            raise StateConflict(
+                "domain consumption seal dispatch provenance drifted"
+            )
+        # 7. Unique candidate Event for the later turn, with artifact
+        #    / native / cursor / turn identity matching the observation.
+        later_candidate = None
+        for event in connection.execute(
+            """
+            SELECT * FROM events
+            WHERE event_type='OHF_CANDIDATE_RESULT_RECORDED'
+              AND attempt_id=?
+            ORDER BY event_id
+            """,
+            (turn.attempt_id,),
+        ):
+            payload = _strict_canonical_json_loads(
+                str(event["payload_json"]),
+                name="domain consumption seal candidate Event",
+            )
+            turn_ref = (
+                payload.get("turn")
+                if isinstance(payload, dict)
+                else None
+            )
+            if (
+                isinstance(payload, dict)
+                and isinstance(turn_ref, dict)
+                and turn_ref.get("attempt_id") == turn.attempt_id
+                and turn_ref.get("session_epoch_id")
+                == turn.session_epoch_id
+                and turn_ref.get("process_generation_id")
+                == turn.process_generation_id
+                and turn_ref.get("turn_id") == turn.turn_id
+            ):
+                if later_candidate is not None:
+                    raise StateConflict(
+                        "domain consumption seal later candidate is not unique"
+                    )
+                later_candidate = (event, payload)
+        if later_candidate is None:
+            raise StateConflict(
+                "domain consumption seal requires its exact later candidate"
+            )
+        candidate_event, candidate_payload = later_candidate
+        candidate = (
+            candidate_payload.get("candidate")
+            if isinstance(candidate_payload, dict)
+            else None
+        )
+        cursor_block = (
+            candidate_payload.get("cursor")
+            if isinstance(candidate_payload, dict)
+            else None
+        )
+        if (
+            not isinstance(candidate, dict)
+            or candidate.get("artifact_digest")
+            != observation.provider_turn_artifact_digest
+            or candidate.get("attempt_id") != turn.attempt_id
+            or candidate.get("session_epoch_id")
+            != turn.session_epoch_id
+            or candidate.get("process_generation_id")
+            != turn.process_generation_id
+            or not isinstance(cursor_block, dict)
+            or cursor_block.get("turn_id") != turn.turn_id
+            or cursor_block.get("attempt_id") != turn.attempt_id
+            or cursor_block.get("session_epoch_id")
+            != turn.session_epoch_id
+            or cursor_block.get("process_generation_id")
+            != turn.process_generation_id
+        ):
+            raise StateConflict(
+                "domain consumption seal candidate / cursor binding drifted"
+            )
+        from control_plane.operator_harness_wire import (
+            candidate_result, event_cursor, normalized_event, to_wire,
+        )
+        try:
+            typed_candidate = candidate_result(candidate)
+            typed_cursor = event_cursor(cursor_block)
+            if not isinstance(candidate_payload.get("events"), list):
+                raise ValueError("candidate events must be a list")
+            typed_events = tuple(normalized_event(value) for value in candidate_payload["events"])
+        except Exception:
+            raise StateConflict("domain consumption candidate wire is invalid") from None
+        if (
+            candidate_event["command_id"] != f"ohf-candidate:{turn.turn_id}"
+            or candidate_event["aggregate_type"] != "operator_turn"
+            or candidate_event["aggregate_id"] != turn.turn_id
+            or candidate_event["job_id"] != row["job_id"]
+            or candidate_event["attempt_id"] != row["attempt_id"]
+            or candidate_event["worker_id"] != row["worker_id"]
+            or candidate_event["quota_class"] != row["quota_class"]
+            or candidate_event["actor"] != "supervisor"
+            or set(candidate_payload) != {"schema_version", "turn", "candidate", "events", "cursor"}
+            or candidate_payload["schema_version"] != OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
+            or candidate_payload["turn"] != _ohf_jsonable(turn)
+            or typed_candidate.complete_job_permitted is not False
+            or to_wire(typed_candidate) != candidate
+            or to_wire(typed_cursor) != cursor_block
+            or type(typed_cursor.local_sequence) is not int
+            or to_wire(typed_events) != candidate_payload["events"]
+            or any(event.attempt_id != turn.attempt_id
+                   or event.session_epoch_id != turn.session_epoch_id
+                   or event.process_generation_id != turn.process_generation_id
+                   or event.turn_id not in {None, turn.turn_id}
+                   for event in typed_events)
+        ):
+            raise StateConflict("domain consumption candidate provenance drifted")
+        # 8. Bind the initial plan seal identity (typed planner seal
+        #    already validated by ``_domain_consumption_evidence_admitted``).
+        plan_seal_events = connection.execute(
+            """
+            SELECT * FROM events
+            WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED'
+              AND attempt_id=?
+            ORDER BY event_id
+            """,
+            (turn.attempt_id,),
+        ).fetchall()
+        if len(plan_seal_events) != 1:
+            raise StateConflict(
+                "domain consumption seal requires initial plan seal"
+            )
+        plan_seal_payload = _strict_canonical_json_loads(
+            str(plan_seal_events[0]["payload_json"]),
+            name="domain consumption seal plan seal",
+        )
+        if (
+            not isinstance(plan_seal_payload, dict)
+            or plan_seal_payload.get("attempt_id") != turn.attempt_id
+            or plan_seal_payload.get("job_id") != str(row["job_id"])
+            or plan_seal_payload.get("worker_id") != str(row["worker_id"])
+            or plan_seal_payload.get("quota_class")
+            != str(row["quota_class"])
+            or plan_seal_payload.get("orchestration_role") != "plan"
+        ):
+            raise StateConflict(
+                "domain consumption seal plan seal identity drifted"
+            )
+        initial_plan_attempt_id = str(
+            plan_seal_payload.get("attempt_id")
+        )
+        initial_plan_digest = str(
+            plan_seal_payload.get("role_result_digest")
+        )
+        # 9. Re-read the actual sealed work / repair / independent
+        #    review body projection; the projection re-validates every
+        #    revision's identity and recomputes the canonical digest.
+        projection = _coo_domain_consumption_projection(
+            connection,
+            root_row=root,
+            domain_job_id=str(domain["job_id"]),
+            domain_attempt_id=str(domain["current_attempt_id"]),
+            _stopped_domain=stopped,
+        )
+        current_projection_schema_version = str(
+            projection["schema_version"]
+        )
+        current_projection_digest = str(
+            projection["consumption_projection_digest"]
+        )
+        if current_projection_schema_version != (
+            "mastermind.executive_coo_domain_consumption_projection/v1"
+        ):
+            raise StateConflict(
+                "domain consumption projection schema is unsupported"
+            )
+        # 10. Validate the six-field canonical body against derived
+        #     root / domain / current attempt / projection digest.
+        try:
+            consumed = parse_and_validate_domain_consumption(
+                observation.canonical_result_json,
+                expected_root_job_id=root_token,
+                expected_domain_job_id=str(domain["job_id"]),
+                expected_domain_attempt_id=str(
+                    domain["current_attempt_id"]
+                ),
+                expected_projection_digest=current_projection_digest,
+            )
+        except Exception:
+            raise StateConflict(
+                "domain consumption canonical body failed closed validation"
+            ) from None
+        consumed_result_text = str(consumed["consumed_result"])
+        consumed_result_bytes = consumed_result_text.encode("utf-8")
+        consumed_result_byte_length = len(consumed_result_bytes)
+        if consumed_result_byte_length > MAX_CANONICAL_RESULT_BYTES:
+            raise StateConflict(
+                "domain consumption canonical result exceeds 8 MiB"
+            )
+        consumed_body_canonical = canonical_bytes(consumed)
+        if len(consumed_body_canonical) > MAX_CANONICAL_RESULT_BYTES:
+            raise StateConflict(
+                "domain consumption canonical body exceeds 8 MiB"
+            )
+        consumed_body_digest = canonical_digest(consumed)
+        consumed_result_digest = hashlib.sha256(
+            consumed_result_bytes
+        ).hexdigest()
+        # 11. Build the seal payload and enforce an explicit finite
+        #     UTF-8 receipt byte ceiling (no truncation, no
+        #     redaction-as-mutation).
+        final_event_payload = _strict_canonical_json_loads(
+            str(
+                connection.execute(
+                    "SELECT payload_json FROM events WHERE event_id=?",
+                    (int(final_row["event_id"]),),
+                ).fetchone()["payload_json"]
+            ),
+            name="domain consumption FINAL charge payload",
+        )
+        intent_event = _ohf_evidence_event(connection, operation_id.command_id)
+        if intent_event is None:
+            raise StateConflict("domain consumption INTENT disappeared")
+        intent_payload = _strict_canonical_json_loads(str(intent_event["payload_json"]), name="domain seal INTENT")
+        seal_payload: dict[str, Any] = {
+            "schema_version": (
+                "mastermind.executive_coo_domain_consumption_seal/v1"
+            ),
+            "root_job_id": root_token,
+            "domain_job_id": str(domain["job_id"]),
+            "domain_attempt_id": str(domain["current_attempt_id"]),
+            "domain_worker_id": str(row["worker_id"]),
+            "domain_quota_class": str(row["quota_class"]),
+            "operation_id": operation_id.command_id,
+            "turn_id": turn.turn_id,
+            "session_epoch_id": turn.session_epoch_id,
+            "process_generation_id": turn.process_generation_id,
+            "fence_generation": int(fence_generation),
+            "lease_authority_digest": lease_authority_digest,
+            "command_id": command_id,
+            "consumption_result": consumed,
+            "selected_revisions": projection["revisions"],
+            "selected_revision_result_identities": [
+                {key: value for key, value in result.items()
+                 if key not in {"work_result", "review_result"}}
+                for result in projection["revision_results"]
+            ],
+            "consumed_result_byte_length": consumed_result_byte_length,
+            "consumed_result_digest": consumed_result_digest,
+            "consumed_body_digest": consumed_body_digest,
+            "consumed_body_byte_length": len(consumed_body_canonical),
+            "raw_observation_digest": canonical_digest(
+                observation.to_dict()
+            ),
+            "raw_observation_byte_length": (
+                observation.canonical_result_byte_length
+            ),
+            "provider_session_id": observation.provider_session_id,
+            "provider_native_turn_id": (
+                observation.provider_native_turn_id
+            ),
+            "provider_turn_artifact_digest": (
+                observation.provider_turn_artifact_digest
+            ),
+            "raw_observation_schema_version": (
+                observation.schema_version
+            ),
+            "consumed_body_schema_version": DOMAIN_CONSUMPTION_SCHEMA,
+            "candidate_event_command_id": str(
+                candidate_event["command_id"]
+            ),
+            "candidate_event_digest": canonical_digest(candidate_payload),
+            "applied_event_command_id": str(applied_event["command_id"]),
+            "applied_event_digest": canonical_digest(applied_payload),
+            "dispatch_event_command_id": str(dispatch_event["command_id"]),
+            "dispatch_event_digest": canonical_digest(dispatch_body),
+            "intent_event_command_id": operation_id.command_id,
+            "intent_event_digest": canonical_digest(intent_payload),
+            "initial_plan_event_digest": canonical_digest(plan_seal_payload),
+            "final_charge_id": final_row["charge_id"],
+            "reservation_identity": final_row["reservation_identity"],
+            "final_event_id": int(final_row["event_id"]),
+            "final_event_digest": canonical_digest(final_event_payload),
+            "initial_plan_event_command_id": str(
+                plan_seal_events[0]["command_id"]
+            ),
+            "initial_plan_attempt_id": initial_plan_attempt_id,
+            "initial_plan_digest": initial_plan_digest,
+            "current_projection_schema_version": (
+                current_projection_schema_version
+            ),
+            "current_projection_digest": current_projection_digest,
+        }
+        from scripts.ohf.redaction import evidence_contains_secret
+        if evidence_contains_secret(consumed):
+            raise StateConflict("domain consumption result contains sensitive evidence")
+        # The full observed body is already <=8MiB. Bound finite receipt
+        # metadata separately to64KiB; do not duplicate or truncate bodies.
+        metadata = {key: value for key, value in seal_payload.items()
+                    if key != "consumption_result"}
+        if len(canonical_bytes(metadata)) > 64 * 1024:
+            raise StateConflict("domain consumption seal metadata exceeds64KiB")
+        encoded_seal = canonical_bytes(seal_payload)
+        if len(encoded_seal) > MAX_CANONICAL_RESULT_BYTES + 64 * 1024:
+            raise StateConflict(
+                "domain consumption seal receipt exceeds 8 MiB"
+            )
+        seal_receipt_digest = hashlib.sha256(encoded_seal).hexdigest()
+        seal_payload["seal_receipt_digest"] = seal_receipt_digest
+        seal_payload["seal_receipt_byte_length"] = len(encoded_seal)
+        # The receipt digest must be reproducible from the canonical
+        # body sans the digest / byte length identity fields.
+        materialised_digest = hashlib.sha256(
+            canonical_bytes(
+                {
+                    key: value
+                    for key, value in seal_payload.items()
+                    if key
+                    not in {
+                        "seal_receipt_digest",
+                        "seal_receipt_byte_length",
+                    }
+                }
+            )
+        ).hexdigest()
+        if materialised_digest != seal_receipt_digest:
+            raise StateConflict(
+                "domain consumption seal receipt digest is not self-consistent"
+            )
+        if len(canonical_bytes(seal_payload)) > MAX_CANONICAL_RESULT_BYTES + 64 * 1024:
+            raise StateConflict("domain consumption full receipt exceeds its byte ceiling")
+        # Reconcile all independent header/payload links BEFORE replay.
+        seal_events = []
+        for event in connection.execute(
+            "SELECT * FROM events WHERE event_type='COO_DOMAIN_CONSUMPTION_SEALED'"
+        ):
+            body = _strict_canonical_json_loads(str(event["payload_json"]), name="domain seal census")
+            if not isinstance(body, dict):
+                raise StateConflict("domain seal census is malformed")
+            # Follow independent identity links even when an orphan has
+            # null/foreign headers or contradictory top-level identities.
+            # Shared worker/quota/artifact values are not affiliation.
+            identity_keys = (
+                "root_job_id", "domain_job_id", "domain_attempt_id",
+                "operation_id", "turn_id", "session_epoch_id",
+                "process_generation_id", "command_id",
+                "candidate_event_command_id", "applied_event_command_id",
+                "dispatch_event_command_id", "intent_event_command_id",
+                "initial_plan_event_command_id", "initial_plan_attempt_id",
+                "final_charge_id", "reservation_identity", "final_event_id",
+                "current_projection_digest", "consumed_body_digest",
+                "candidate_event_digest", "applied_event_digest",
+                "intent_event_digest", "initial_plan_event_digest",
+                "final_event_digest", "raw_observation_digest",
+                "initial_plan_digest", "seal_receipt_digest",
+            )
+            nested = body.get("consumption_result")
+            nested_link = isinstance(nested, dict) and any(
+                nested.get(key) == consumed[key]
+                for key in (
+                    "root_job_id", "domain_job_id", "domain_attempt_id",
+                    "consumption_projection_digest",
+                )
+            )
+            native_link = (
+                body.get("provider_session_id") == observation.provider_session_id
+                and body.get("provider_native_turn_id") == observation.provider_native_turn_id
+            )
+            if (
+                # Aggregate/header identities may independently point
+                # at any exact owner-specific receipt or operation link.
+                any(event[key] in {str(seal_payload[name]) for name in identity_keys}
+                    for key in ("job_id", "aggregate_id", "attempt_id"))
+                or any(body.get(key) == seal_payload[key] for key in identity_keys)
+                or nested_link or native_link
+            ):
+                seal_events.append(event)
+        if len(seal_events) > 1:
+            raise StateConflict("domain consumption seal census is not unique")
+        if seal_events and seal_events[0]["command_id"] != command_id:
+            raise StateConflict("domain consumption seal has an alias or foreign prior receipt")
+        # 12. Reject any prior COO_DOMAIN_CONSUMPTION_SEALED row for
+        #     this root or a duplicate/alias command_id before any
+        #     append.  Idempotent replay: identical command_id with
+        #     an identical payload returns the same payload.
+        existing = connection.execute(
+            "SELECT * FROM events WHERE command_id=?", (command_id,),
+        ).fetchone()
+        if existing is not None:
+            if (
+                existing["event_type"] != "COO_DOMAIN_CONSUMPTION_SEALED"
+                or existing["job_id"] != root_token
+                or existing["aggregate_id"] != root_token
+                or existing["aggregate_type"] != "job"
+                or existing["actor"] != "coo"
+                or existing["attempt_id"] != row["attempt_id"]
+                or existing["worker_id"] != row["worker_id"]
+                or existing["quota_class"] != row["quota_class"]
+            ):
+                raise StateConflict(
+                    "domain consumption seal command is owned by another action"
+                )
+            existing_payload = _strict_canonical_json_loads(
+                str(existing["payload_json"]),
+                name="domain consumption seal replay payload",
+            )
+            numeric_keys = (
+                "fence_generation", "consumed_result_byte_length",
+                "consumed_body_byte_length", "raw_observation_byte_length",
+                "final_event_id", "seal_receipt_byte_length",
+            )
+            if any(type(existing_payload.get(key)) is not int for key in numeric_keys):
+                raise StateConflict("domain consumption seal replay numeric types drifted")
+            stored_material = canonical_bytes({
+                key: value for key, value in existing_payload.items()
+                if key not in {"seal_receipt_digest", "seal_receipt_byte_length"}
+            })
+            if (hashlib.sha256(stored_material).hexdigest()
+                    != existing_payload.get("seal_receipt_digest")
+                    or len(stored_material) != existing_payload["seal_receipt_byte_length"]):
+                raise StateConflict("domain consumption seal replay digest or byte length drifted")
+            if canonical_bytes(existing_payload) != canonical_bytes(seal_payload):
+                raise StateConflict(
+                    "domain consumption seal replay payload drifted"
+                )
+            return dict(existing_payload)
+        prior_seal = connection.execute(
+            "SELECT 1 FROM events WHERE event_type=? AND job_id=?",
+            ("COO_DOMAIN_CONSUMPTION_SEALED", root_token),
+        ).fetchone()
+        if prior_seal is not None:
+            raise StateConflict(
+                "domain consumption seal is already recorded for root"
+            )
+        foreign_seal = connection.execute(
+            "SELECT 1 FROM events WHERE event_type=? AND job_id=? AND command_id<>?",
+            (
+                "COO_DOMAIN_CONSUMPTION_SEALED",
+                root_token,
+                command_id,
+            ),
+        ).fetchone()
+        if foreign_seal is not None:
+            raise StateConflict(
+                "domain consumption seal has a foreign prior row"
+            )
+        if stopped is not None or store is None:
+            raise StateConflict("stopped domain cannot create a consumption seal")
+        _finite_existing_effect(store, connection, root_token)
+        store.append_event(
+            connection,
+            aggregate_type="job",
+            aggregate_id=root_token,
+            event_type="COO_DOMAIN_CONSUMPTION_SEALED",
+            actor="coo",
+            job_id=root_token,
+            attempt_id=str(domain["current_attempt_id"]),
+            worker_id=str(row["worker_id"]),
+            quota_class=str(row["quota_class"]),
+            command_id=command_id,
+            payload=seal_payload,
+            timestamp_ms=timestamp,
+        )
+        return dict(seal_payload)
+
+
 class JobRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -11646,6 +13596,7 @@ class JobRegistry:
         *,
         spec: _JobCreationSpec,
         _c2_capability: object | None = None,
+        _coo_cycle_domain_budget_capability: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -11721,6 +13672,18 @@ class JobRegistry:
             raise StateConflict(
                 "private C2 capability requires exact carrier provenance"
             )
+        if _coo_cycle_domain_budget_capability is not None and (
+            _coo_cycle_domain_budget_capability
+            is not _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY
+            or spec.orchestration_role != "plan"
+            or spec.parent_job_id is None
+            or spec.parent_root_job_id != spec.parent_job_id
+            or spec.owner_seat != "coo"
+            or spec.requested_authorities != ("READ",)
+            or spec.allowed_write_paths
+            or spec.validation_commands
+        ):
+            raise StateConflict("private COO domain budget capability is invalid")
 
         numbers: list[int] = []
         for row in connection.execute("SELECT job_id FROM jobs"):
@@ -11859,6 +13822,18 @@ class JobRegistry:
         ).fetchone()
         if row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("created Job disappeared inside its transaction")
+        if _coo_cycle_domain_budget_capability is not None:
+            root_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (spec.parent_job_id,)
+            ).fetchone()
+            if root_row is None:  # pragma: no cover - FK just admitted parent
+                raise PersistenceError("COO budget root disappeared in transaction")
+            _append_or_validate_coo_provider_budget(
+                self.store,
+                connection,
+                root_row=root_row,
+                domain_job_id=job_id,
+            )
         return _job_from_row(row)
 
     def create_v2_orchestration_root(
@@ -12144,6 +14119,148 @@ class JobRegistry:
                     constraints[key] = root_constraints[key]
         return constraints
 
+    def create_cycle_domain(
+        self,
+        root_job_id: str,
+        *,
+        command_id: str,
+    ) -> Job:
+        """Create the sole production-disarmed read-only domain parent."""
+
+        root_token = str(root_job_id or "").strip()
+        expected_command = f"coo-cycle:{root_token}:create-domain:0"
+        if command_id != expected_command:
+            raise StateConflict("domain command_id is not exact-root deterministic")
+        root = self.get_job(root_token)
+        if root is None:
+            raise StateConflict(f"root job {root_token!r} does not exist")
+        if (
+            root.orchestration_role != "aggregation"
+            or root.parent_job_id is not None
+            or root.root_job_id != root.job_id
+            or not isinstance(root.orchestration_provenance, dict)
+            or root.orchestration_provenance.get("creator") != "ceo_intent"
+        ):
+            raise StateConflict("domain creation requires a strict v2 aggregation root")
+        try:
+            policy = CooCyclePolicy.load()
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
+        # Creation never upgrades an immutable root pin to current policy.
+        # Only the old unbound, disarmed metadata path remains compatible.
+        registry = ExecutionCapabilityRegistry.load()
+        root_constraints = dict(root.constraints)
+        pin_keys = (
+            "capability_policy_version", "capability_policy_digest",
+            "execution_profile_id", "execution_profile_digest",
+        )
+        try:
+            profile = registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+            normalized = _normalise_constraints(root_constraints)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StateConflict("domain root capability binding is malformed") from exc
+        checked_keys = set(pin_keys) | set(OPERATOR_HARNESS_BINDING_KEYS)
+        checked_keys.add("base_sha")
+        if any(
+            normalized.get(key) != root_constraints.get(key)
+            for key in checked_keys
+        ):
+            raise StateConflict("domain root capability binding is not canonical")
+
+        def require_current_pin(prefix: str) -> None:
+            values = [root_constraints.get(prefix + key) for key in pin_keys]
+            if not all(isinstance(value, str) and value for value in values):
+                raise StateConflict("domain creation requires a complete immutable "
+                                    + prefix + "capability binding")
+            version, digest, profile_id, profile_digest = values
+            if version != registry.policy_version or digest != registry.policy_digest:
+                raise StateConflict("domain immutable " + prefix
+                                    + "capability policy pin is no longer current")
+            try:
+                selected = registry.profiles[profile_id]
+                if profile_id == COO_DOMAIN_EXECUTION_PROFILE and not selected.enabled:
+                    registry.validate_disabled_profile_shape(profile_id)
+                else:
+                    selected = registry.resolve(profile_id)
+            except (KeyError, CapabilityPolicyError) as exc:
+                raise StateConflict("domain immutable " + prefix
+                                    + "selected profile is not admissible") from exc
+            if profile_digest != selected.profile_digest:
+                raise StateConflict("domain immutable " + prefix
+                                    + "selected profile pin is no longer current")
+
+        if (
+            profile.enabled
+            or set(pin_keys) & set(root_constraints)
+            or set(OPERATOR_HARNESS_BINDING_KEYS) & set(root_constraints)
+        ):
+            require_current_pin("")
+        if root_constraints.get("operator_harness_armed") is True:
+            # Validate the whole sealed binding before the helper can fall back.
+            binding_keys = set(OPERATOR_HARNESS_BINDING_KEYS) | {"base_sha"}
+            if not all(root_constraints.get(key) for key in binding_keys):
+                raise StateConflict("domain creation requires a complete armed "
+                                    "operator binding")
+            require_current_pin("operator_")
+        # Registry loading enforces the same closed read-only ceiling in both
+        # states. Disabled metadata creates no dispatch permission.
+        if profile.enabled:
+            profile = registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+        else:
+            registry.validate_disabled_profile_shape(COO_DOMAIN_EXECUTION_PROFILE)
+        constraints = self._operator_child_constraints(root)
+        constraints["execution_profile_id"] = COO_DOMAIN_EXECUTION_PROFILE
+        constraints["execution_profile_digest"] = profile.profile_digest
+        constraints["capability_policy_version"] = registry.policy_version
+        constraints["capability_policy_digest"] = registry.policy_digest
+        constraints["remaining_depth"] = 1
+        constraints["delegation_scope_digest"] = orchestration_digest(
+            {
+                "schema_version": "mastermind.coo_domain_delegation/v1",
+                "root_job_id": root.job_id,
+                "authority_policy_sha256": ExecutiveAuthorityPolicy.load().sha256,
+                "execution_profile_id": COO_DOMAIN_EXECUTION_PROFILE,
+                "execution_profile_digest": profile.profile_digest,
+                "capability_policy_sha256": registry.policy_digest,
+                "remaining_depth": 1,
+            }
+        )
+        if not constraints.get("routing_policy_version"):
+            constraints["routing_policy_version"] = "coo-domain-routing"
+        return self.create_job(
+            f"Orchestrate the bounded COO domain for {root.job_id}: {root.objective}",
+            department=root.department,
+            priority=root.priority,
+            authority_level=root.authority_level,
+            branch=root.branch,
+            worktree=root.worktree,
+            constraints=constraints,
+            attempt_limit=min(
+                root.attempt_limit,
+                policy.max_attempts_per_orchestration_job,
+            ),
+            requested_authorities=["READ"],
+            allowed_write_paths=[],
+            validation_commands=[],
+            command_id=command_id,
+            parent_job_id=root.job_id,
+            owner_seat="coo",
+            escalation_target="coo",
+            business_impact=root.business_impact,
+            review_required=False,
+            orchestration_role="plan",
+            orchestration_provenance={
+                "schema_version": "mastermind.executive_orchestration_provenance_source/v1",
+                "creator": "coo_cycle",
+                "source_id": root.job_id,
+                "source_digest": str(root.orchestration_provenance_digest),
+            },
+            _coo_cycle_planner_capability=_COO_CYCLE_PLANNER_CREATION_CAPABILITY,
+            _coo_cycle_domain_budget_capability=(
+                _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY
+            ),
+        )
+
     def create_interactive_operator(
         self,
         root_job_id: str,
@@ -12215,6 +14332,275 @@ class JobRegistry:
             },
             _coo_cycle_planner_capability=_COO_CYCLE_PLANNER_CREATION_CAPABILITY,
         )
+
+    def project_cycle_domain_consumption(
+        self,
+        root_job_id: str,
+        *,
+        domain_attempt_id: str,
+    ) -> dict[str, Any]:
+        """Return only exact reviewed child material for the domain actor."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("domain projection root does not exist")
+            domain = _coo_domain_row(connection, root, required=True)
+            attempt = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?", (domain_attempt_id,)
+            ).fetchone()
+            if (
+                domain is None
+                or attempt is None
+                or attempt["job_id"] != domain["job_id"]
+                or attempt["status"]
+                not in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+                or domain["current_attempt_id"] != domain_attempt_id
+            ):
+                raise StateConflict("domain consumption requires an active domain")
+            _coo_domain_admitted(domain, allow_disabled=True)
+            projection = _coo_domain_consumption_projection(
+                connection,
+                root_row=root,
+                domain_job_id=str(domain["job_id"]),
+                domain_attempt_id=str(attempt["attempt_id"]),
+            )
+            return projection
+
+    def project_cycle_domain_provider_budget(
+        self,
+        root_job_id: str,
+    ) -> dict[str, Any]:
+        """Return the durable root reservation without interpreting charges."""
+
+        root_token = str(root_job_id or "").strip()
+        with self.store.read() as connection:
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,)
+            ).fetchone()
+            if root is None:
+                raise StateConflict("provider budget root does not exist")
+            domain = _coo_domain_row(connection, root, required=True)
+            if domain is None:  # pragma: no cover - required raises above
+                raise StateConflict("COO provider budget domain is missing")
+            budget = _validated_coo_provider_budget_event(
+                connection,
+                root_row=root,
+                domain_job_id=str(domain["job_id"]),
+            )
+            return dict(budget)
+
+    def seal_cycle_domain_consumption(
+        self,
+        root_job_id: str,
+        *,
+        domain_attempt_id: str,
+        observation: Any,
+        command_id: str,
+        turn: TurnRef | None = None,
+        fence_generation: int | None = None,
+        lease_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Typed later domain-consumption result seal for the root Job header.
+
+        Extends the public fail-closed stub with typed exact later TurnRef,
+        current fence_generation and lease_token authority; preserves the
+        missing-authority / caller-text legacy refusal.  Only an actual
+        ``RawRoleResultObservation`` (revalidated on ingress — exact integer
+        UTF-8 byte count, schema/digest/canonical body, and immutable
+        identity even if the frozen dataclass labels are altered) may seal.
+
+        One Runtime transaction:
+
+        * Resolve the unique actual FINAL ``coo_provider_charges`` row and
+          derive the operation it claims;
+        * Invoke the existing full R124 evidence validator on the same
+          transaction / current lease (``_domain_consumption_evidence_admitted``
+          reuses ``_domain_consumption_turn`` for read-only validation — it
+          must not reserve or dispatch new work);
+        * Require the exact later TurnRef and the unique APPLIED native
+          acknowledgement plus the actual candidate/Event/cursor/artifact
+          provenance matching the raw observation;
+        * Re-read the actual sealed work / repair / independent-review body
+          projection through ``_coo_domain_consumption_projection``; the
+          projection itself re-validates every revision's identity and the
+          ``consumption_projection_digest`` — never treat candidate presence
+          as observed body;
+        * Parse the six-field canonical body via
+          ``parse_and_validate_domain_consumption`` against derived
+          root/domain/current attempt/projection digest.
+
+        Appends exactly one canonical versioned ``COO_DOMAIN_CONSUMPTION_SEALED``
+        event at the root Job header with actual domain Attempt / worker /
+        quota, full ``consumed_result``, exact raw / native / candidate /
+        INTENT / dispatch / APPLIED / FINAL / initial-plan / current-body
+        identities and digests, plus a finite explicit UTF-8 receipt byte
+        ceiling.  No truncation, redaction-as-mutation, second role seal,
+        terminalization, Job result mutation, stop/release/transfer, new
+        credit / lease / session / Attempt / grant or provider operation.
+
+        Exact replay revalidates the original full receipt, current native
+        and canonical inventory and returns the identical payload with all
+        durable tables unchanged; changed command / body / native / turn /
+        digest / projection or UNKNOWN refuses.  A second domain seal,
+        alias, duplicate / orphan / malformed evidence refuses.  The current
+        aggregation validates the distinct complete post-stop domain receipt;
+        this LIVE seal alone grants no terminal or native runtime qualification.
+        """
+
+        from control_plane.executive_orchestration_result import (
+            DOMAIN_CONSUMPTION_SCHEMA,
+            MAX_CANONICAL_RESULT_BYTES,
+            RAW_OBSERVATION_SCHEMA,
+            RawRoleResultObservation,
+            canonical_bytes,
+            canonical_digest,
+            parse_and_validate_domain_consumption,
+        )
+
+        if turn is None or fence_generation is None or lease_token is None:
+            raise StateConflict(
+                "domain consumption seal requires observed subsequent domain-consumption "
+                "turn integration; existence-only candidate event evidence is insufficient"
+            )
+        if type(turn) is not TurnRef:
+            raise StateConflict("domain consumption seal requires typed later TurnRef")
+        try:
+            TurnRef(**{field.name: getattr(turn, field.name)
+                       for field in dataclasses.fields(TurnRef)})
+        except Exception:
+            raise StateConflict("domain consumption TurnRef failed ingress validation") from None
+        if not isinstance(domain_attempt_id, str) or domain_attempt_id != turn.attempt_id:
+            raise StateConflict("domain consumption caller Attempt does not match its turn")
+        if (
+            not isinstance(fence_generation, int)
+            or isinstance(fence_generation, bool)
+        ):
+            raise StateConflict(
+                "domain consumption seal requires integer fence_generation"
+            )
+        if not isinstance(lease_token, str) or not lease_token:
+            raise StateConflict(
+                "domain consumption seal requires current lease_token authority"
+            )
+        if not isinstance(root_job_id, str) or not root_job_id.strip():
+            raise StateConflict("domain consumption seal requires a root Job")
+        root_token = str(root_job_id).strip()
+        _coo_validate_raw_role_result_observation(observation)
+        assert isinstance(observation, RawRoleResultObservation)
+        expected_command_id = (
+            f"coo-cycle:{root_token}:domain-consumption-seal:"
+            f"{turn.attempt_id}:{turn.turn_id}"
+        )
+        if not isinstance(command_id, str) or command_id != expected_command_id:
+            raise StateConflict("domain consumption seal command is not its exact canonical identity")
+        registry = OperatorHarnessRegistry(self.store)
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            # 1. Locate the unique actual FINAL row for the attempt.
+            final_rows = connection.execute(
+                """
+                SELECT * FROM coo_provider_charges
+                WHERE attempt_id=? AND effect_class='FINAL'
+                ORDER BY event_id
+                """,
+                (turn.attempt_id,),
+            ).fetchall()
+            if len(final_rows) != 1:
+                raise StateConflict(
+                    "domain consumption seal requires its exact FINAL charge"
+                )
+            final_row = final_rows[0]
+            if str(final_row["root_job_id"]) != root_token:
+                raise StateConflict(
+                    "domain consumption seal FINAL charge is foreign to root"
+                )
+            operation_id = OperationId(str(final_row["operation_id"]))
+            # 2. Resolve root + domain + leased Attempt + plan seal.
+            root = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (root_token,),
+            ).fetchone()
+            if root is None:
+                raise StateConflict(
+                    "domain consumption seal root does not exist"
+                )
+            domain = _coo_domain_row(connection, root, required=True)
+            if domain is None:
+                raise StateConflict(
+                    "domain consumption seal requires an admitted domain"
+                )
+            if str(final_row["job_id"]) != str(domain["job_id"]):
+                raise StateConflict(
+                    "domain consumption seal FINAL job does not match domain"
+                )
+            if str(final_row["attempt_id"]) != str(domain["current_attempt_id"]):
+                raise StateConflict(
+                    "domain consumption seal FINAL attempt is not current domain attempt"
+                )
+            if turn.attempt_id != str(domain["current_attempt_id"]):
+                raise StateConflict(
+                    "domain consumption seal TurnRef attempt is not current domain attempt"
+                )
+            row = registry._leased(
+                connection,
+                attempt_id=turn.attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={
+                    AttemptStatus.CHECKPOINTED,
+                },
+            )
+            # 3. Full R124 evidence validator on the SAME transaction /
+            #    current lease — read-only; never reserves or dispatches.
+            admitted = registry._domain_consumption_evidence_admitted(
+                connection,
+                row=row,
+                turn=turn,
+                operation_id=operation_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+            )
+            if admitted is not True:
+                raise StateConflict("domain consumption lacks admitted FINAL evidence")
+            return _domain_consumption_seal_receipt(
+                connection, store=self.store, row=row, root=root, domain=domain, observation=observation,
+                turn=turn, fence_generation=fence_generation,
+                lease_authority_digest=hashlib.sha256(lease_token.encode("utf-8")).hexdigest(),
+                command_id=command_id, final_row=final_row, operation_id=operation_id,
+            )
+
+    def domain_terminal_payload(
+        self, root_job_id: str, *, domain_attempt_id: str,
+        fence_generation: int, lease_token: str,
+    ) -> dict[str, Any]:
+        if type(fence_generation) is not int or fence_generation <= 0 or type(lease_token) is not str or not lease_token:
+            raise StateConflict("domain terminal requires original caller-held fence/token")
+        with self.store.read() as connection:
+            row = OperatorHarnessRegistry(self.store)._leased(
+                connection, attempt_id=domain_attempt_id, fence_generation=fence_generation,
+                lease_token=lease_token, timestamp=self.store.now_ms(), statuses={AttemptStatus.CHECKPOINTED},
+            )
+            root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+            if root is None:
+                raise StateConflict("domain terminal root is missing")
+            material = _validated_domain_terminal_material(connection, root=root, row=row)
+            if material["consumption_seal"]["lease_authority_digest"] != hashlib.sha256(lease_token.encode()).hexdigest():
+                raise StateConflict("domain terminal token differs from original consumption owner")
+            return material
+
+    def read_cycle_domain_terminal(self, root_job_id: str) -> dict[str, Any]:
+        with self.store.read() as connection:
+            root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root_job_id,)).fetchone()
+            if root is None:
+                raise StateConflict("domain terminal root is missing")
+            material = _read_domain_terminal(connection, root)
+            if material is None:
+                raise StateConflict("root has no consumed domain terminal")
+            return material
 
     def admit_cycle_plan(
         self,
@@ -12295,6 +14681,8 @@ class JobRegistry:
                 )
             planner = children[0]
             interactive = False
+            domain_active = False
+            domain = _coo_domain_row(connection, root)
             if _interactive_tx5_admitted(planner):
                 expected_command = (
                     f"coo-cycle:{root_token}:admit-plan:"
@@ -12344,6 +14732,55 @@ class JobRegistry:
                     job_row=planner,
                 )
                 interactive = True
+            elif _coo_domain_admitted(planner, allow_disabled=True):
+                expected_command = (
+                    f"coo-cycle:{root_token}:admit-plan:"
+                    f"{planner['current_attempt_id']}"
+                )
+                if command_id != expected_command:
+                    raise StateConflict(
+                        "plan-admission command_id is not deterministic"
+                    )
+                if (
+                    planner["status"]
+                    not in (JobStatus.RUNNING.value, JobStatus.CHECKPOINTED.value)
+                    or planner["current_attempt_id"] is None
+                ):
+                    raise StateConflict(
+                        "domain plan admission requires an active parent"
+                    )
+                plan_attempt = connection.execute(
+                    """
+                    SELECT a.*,j.orchestration_role AS plan_role,
+                           j.parent_job_id AS plan_parent,j.root_job_id AS plan_root,
+                           j.depth AS plan_depth
+                    FROM attempts a JOIN jobs j ON j.job_id=a.job_id
+                    WHERE a.attempt_id=?
+                    """,
+                    (planner["current_attempt_id"],),
+                ).fetchone()
+                if (
+                    plan_attempt is None
+                    or plan_attempt["plan_role"] != "plan"
+                    or plan_attempt["plan_parent"] != root_token
+                    or plan_attempt["plan_root"] != root_token
+                    or plan_attempt["plan_depth"] != 1
+                    or plan_attempt["execution_mode"]
+                    != AttemptExecutionMode.OPERATOR_HARNESS.value
+                    or plan_attempt["status"]
+                    not in (AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value)
+                    or plan_attempt["worker_id"] is None
+                    or plan_attempt["quota_class"] is None
+                ):
+                    raise StateConflict(
+                        "domain plan admission parent identity is invalid"
+                    )
+                seal = _validated_domain_active_plan_seal(
+                    connection,
+                    attempt_row=plan_attempt,
+                    job_row=planner,
+                )
+                domain_active = True
             else:
                 plan_attempt = connection.execute(
                     "SELECT * FROM attempts WHERE attempt_id=?",
@@ -12509,6 +14946,9 @@ class JobRegistry:
                     placement=step.get("placement"),
                     plan_schema_version=str(plan_body["schema_version"]),
                     allow_active_interactive_plan=interactive,
+                    allow_active_domain_plan=domain_active,
+                    parent_domain_row=domain,
+                    policy=policy,
                 )
                 created_ids.append(str(member["job_id"]))
                 reservation_steps.append(
@@ -12574,6 +15014,9 @@ class JobRegistry:
                         plan_schema_version=str(plan_body["schema_version"]),
                         dependency_manifest=manifest,
                         allow_active_interactive_plan=interactive,
+                        allow_active_domain_plan=domain_active,
+                        parent_domain_row=domain,
+                        policy=policy,
                     )
                     created_ids.append(str(member["job_id"]))
                     reservation_steps[ordinal]["initial_work_job_id"] = str(
@@ -12708,6 +15151,8 @@ class JobRegistry:
                 plan_body=plan_body,
                 plan_step_id=step_token,
             )
+            domain = _coo_domain_row(connection, root)
+            policy = _admitted_coo_policy(admission)
             supplied_manifest = _validate_work_dependency_manifest(
                 dependency_manifest,
                 root_job_id=root_token,
@@ -12752,6 +15197,8 @@ class JobRegistry:
                     placement=step.get("placement"),
                     plan_schema_version=str(plan_body["schema_version"]),
                     dependency_manifest=expected_manifest,
+                    parent_domain_row=domain,
+                    policy=policy,
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
@@ -12768,7 +15215,8 @@ class JobRegistry:
                 raise StateConflict("deferred V3/V4 step already consumed a reserved slot")
             child_count = int(
                 connection.execute(
-                    "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root_token,)
+                    "SELECT COUNT(*) FROM jobs WHERE root_job_id=? AND depth=2",
+                    (root_token,),
                 ).fetchone()[0]
             )
             if (
@@ -12796,6 +15244,9 @@ class JobRegistry:
                 placement=step.get("placement"),
                 plan_schema_version=str(plan_body["schema_version"]),
                 dependency_manifest=expected_manifest,
+                allow_active_domain_plan=domain is not None,
+                parent_domain_row=domain,
+                policy=policy,
             )
             created_id = str(row["job_id"])
         result = self.get_job(str(created_id))
@@ -12849,7 +15300,9 @@ class JobRegistry:
                 str(root["validation_commands_json"]), name="root validations"
             )
             review_validations = root_validations if has_tests else []
-            policy = CooCyclePolicy.load()
+            admission_policy = _validated_plan_admission(connection, root)[0]
+            policy = _admitted_coo_policy(admission_policy)
+            domain = _coo_domain_row(connection, root)
             reviews = connection.execute(
                 "SELECT * FROM jobs WHERE reviews_job_id=? ORDER BY job_id",
                 (reviewed_job_id,),
@@ -12915,6 +15368,8 @@ class JobRegistry:
                     creation_evidence={
                         "reviewed_result_digest": reviewed_result_digest
                     },
+                    parent_domain_row=domain,
+                    policy=policy,
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
@@ -12985,6 +15440,9 @@ class JobRegistry:
                 provenance_source_id=reviewed_job_id,
                 provenance_source_digest=reviewed_result_digest,
                 creation_evidence={"reviewed_result_digest": reviewed_result_digest},
+                allow_active_domain_plan=domain is not None,
+                parent_domain_row=domain,
+                policy=policy,
             )
             created_id = str(row["job_id"])
         result = self.get_job(str(created_id))
@@ -13020,6 +15478,7 @@ class JobRegistry:
                 connection,
                 root
             )
+            domain = _coo_domain_row(connection, root)
             rejected_attempt, _work_seal, _work_terminal, rejected_result_digest = (
                 _validated_role_completion_material(
                     connection,
@@ -13109,6 +15568,7 @@ class JobRegistry:
                         "rejected_review_job_id": rejecting_review_job_id,
                         "rejected_review_result_digest": review_result_digest,
                     },
+                    parent_domain_row=domain,
                 )
                 return _job_from_row(row)
             _assert_cycle_root_open_for_child_mutation(connection, root)
@@ -13118,7 +15578,7 @@ class JobRegistry:
                     connection, root, admission, plan_body
                 )
             }.get(str(rejected["plan_step_id"]))
-            policy = CooCyclePolicy.load()
+            policy = _admitted_coo_policy(admission)
             if (
                 current is None
                 or current["current_job_id"] != rejected_job_id
@@ -13154,6 +15614,9 @@ class JobRegistry:
                     "rejected_review_job_id": rejecting_review_job_id,
                     "rejected_review_result_digest": review_result_digest,
                 },
+                parent_domain_row=domain,
+                allow_active_domain_plan=domain is not None,
+                policy=policy,
             )
             created_id = str(row["job_id"])
         result = self.get_job(str(created_id))
@@ -13210,6 +15673,7 @@ class JobRegistry:
             if prior is not None:
                 raise StateConflict("aggregation root already has a different handoff")
             _assert_cycle_root_open_for_child_mutation(connection, root)
+            domain_terminal = _read_domain_terminal(connection, root)
             admission, plan_body = _validated_plan_admission(
                 connection,
                 root
@@ -13230,6 +15694,9 @@ class JobRegistry:
                 "allowed_evidence_reads": ["attempts", "events", "jobs"],
                 "command_id": command_id,
             }
+            if domain_terminal is not None:
+                handoff["domain_terminal"] = domain_terminal
+                handoff["consumed_result"] = domain_terminal["consumed_result"]
             handoff["handoff_digest"] = orchestration_digest(handoff)
             timestamp = _finite_fresh_effect(self.store, connection, root_token)
             self.store.append_event(
@@ -13506,19 +15973,26 @@ class JobRegistry:
                     receipt=receipt,
                 )
 
-            plan_event = connection.execute(
+            plan_events = connection.execute(
                 "SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
                 (root_token,),
-            ).fetchone()
-            handoff_event = connection.execute(
+            ).fetchall()
+            handoff_events = connection.execute(
                 "SELECT payload_json FROM events WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?",
                 (root_token,),
-            ).fetchone()
-            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
-            if policy_digest != EXPECTED_POLICY_SHA256:
+            ).fetchall()
+            if len(plan_events) > 1 or len(handoff_events) > 1:
                 raise StateConflict(
-                    "COO block policy digest is not the reviewed policy"
+                    "COO block requires unique root orchestration events"
                 )
+            plan_event = plan_events[0] if plan_events else None
+            handoff_event = handoff_events[0] if handoff_events else None
+            policy_digest = _resolve_coo_block_policy_sha(
+                connection,
+                root_token,
+                supplied_policy_sha=policy_sha,
+                reason="state_conflict",
+            )
             evidence_value = {"retry_safety": retry_receipt}
             _validated_retry_safety_block_evidence(
                 connection,
@@ -13838,16 +16312,20 @@ class JobRegistry:
                 selected_job_id=selected_token,
                 attempt_id=selected["current_attempt_id"],
             )
-            plan_event = connection.execute(
+            plan_events = connection.execute(
                 """SELECT payload_json FROM events
                    WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?""",
                 (root_token,),
-            ).fetchone()
-            handoff_event = connection.execute(
+            ).fetchall()
+            handoff_events = connection.execute(
                 """SELECT payload_json FROM events
                    WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?""",
                 (root_token,),
-            ).fetchone()
+            ).fetchall()
+            if len(plan_events) > 1 or len(handoff_events) > 1:
+                raise StateConflict("COO block requires unique root orchestration events")
+            plan_event = plan_events[0] if plan_events else None
+            handoff_event = handoff_events[0] if handoff_events else None
             plan_payload = (
                 _json_loads(plan_event["payload_json"], fallback={})
                 if plan_event
@@ -13858,11 +16336,12 @@ class JobRegistry:
                 if handoff_event
                 else {}
             )
-            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
-            if policy_digest != EXPECTED_POLICY_SHA256:
-                raise StateConflict(
-                    "COO block policy digest is not the reviewed policy"
-                )
+            policy_digest = _resolve_coo_block_policy_sha(
+                connection,
+                root_token,
+                supplied_policy_sha=policy_sha,
+                reason=reason,
+            )
             payload = {
                 "schema_version": "mastermind.coo_cycle_block/v1",
                 "root_job_id": root_token,
@@ -13955,6 +16434,7 @@ class JobRegistry:
         _v2_root_capability: object | None = None,
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
+        _coo_cycle_domain_budget_capability: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -14010,6 +16490,9 @@ class JobRegistry:
                 )
         else:
             try:
+                # Roots and planners are created before COO_PLAN_ADMITTED exists.
+                # Admitted-root children replace this with the exact root pin
+                # after the parent row is visible in the insertion transaction.
                 coo_policy = CooCyclePolicy.load()
             except CooCyclePolicyError as exc:
                 raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
@@ -14178,7 +16661,8 @@ class JobRegistry:
                 existing = connection.execute(
                     """
                     SELECT e.event_type,e.job_id,e.aggregate_type,e.aggregate_id,
-                           e.payload_json,j.*
+                           e.payload_json,j.*,
+                           j.job_id AS replay_job_id
                     FROM events e LEFT JOIN jobs j ON j.job_id=e.job_id
                     WHERE e.command_id=?
                     """,
@@ -14193,6 +16677,10 @@ class JobRegistry:
                     ):
                         raise StateConflict(
                             "planner command_id is owned by another semantic action"
+                        )
+                    if existing["replay_job_id"] is None:
+                        raise StateConflict(
+                            "planner JOB_CREATED replay Job identity is missing"
                         )
                     replay_job = _job_from_row(existing)
                     replay_provenance = replay_job.orchestration_provenance or {}
@@ -14220,11 +16708,58 @@ class JobRegistry:
                         or replay_payload.get("orchestration_role") != "plan"
                         or replay_payload.get("orchestration_provenance_digest")
                         != replay_job.orchestration_provenance_digest
-                    ):
-                        raise StateConflict(
-                            "planner command replay semantic target drifted"
+                        ):
+                            raise StateConflict(
+                                "planner command replay semantic target drifted"
+                            )
+                    if _coo_cycle_domain_budget_capability is _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY:
+                        root_row = connection.execute(
+                            "SELECT * FROM jobs WHERE job_id=?",
+                            (str(parent_job_id),),
+                        ).fetchone()
+                        if root_row is None:
+                            raise StateConflict(
+                                "COO provider budget replay root is missing"
+                            )
+                        _validated_coo_provider_budget_event(
+                            connection,
+                            root_row=root_row,
+                            domain_job_id=str(replay_job.job_id),
                         )
                     return replay_job
+            if (
+                orchestration_role == "plan"
+                and _coo_cycle_planner_capability
+                is _COO_CYCLE_PLANNER_CREATION_CAPABILITY
+                and _coo_cycle_domain_budget_capability is not None
+            ):
+                if (
+                    _coo_cycle_domain_budget_capability
+                    is not _COO_CYCLE_DOMAIN_BUDGET_CAPABILITY
+                ):
+                    raise StateConflict("invalid COO domain budget capability")
+                budget_root = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (str(parent_job_id),)
+                ).fetchone()
+                if (
+                    budget_root is None
+                    or budget_root["job_id"] != budget_root["root_job_id"]
+                    or budget_root["parent_job_id"] is not None
+                    or budget_root["orchestration_role"] != "aggregation"
+                ):
+                    raise StateConflict("COO domain budget root identity is invalid")
+                existing_domains = connection.execute(
+                    """
+                    SELECT COUNT(*) FROM jobs
+                    WHERE root_job_id=? AND job_id<>?
+                      AND orchestration_role='plan' AND depth=1
+                    """,
+                    (str(budget_root["job_id"]), str(budget_root["job_id"])),
+                ).fetchone()[0]
+                if int(existing_domains) != 0:
+                    raise StateConflict(
+                        "COO domain budget writer found an existing domain"
+                    )
             parent_row = None
             if parent_job_id is not None:
                 parent_row = connection.execute(
@@ -14236,6 +16771,19 @@ class JobRegistry:
                 if parent_row is None:
                     raise StateConflict(f"parent job {parent_job_id!r} does not exist")
                 _decode_orchestration_job_fields(parent_row)
+                if orchestration_role in {"work", "review", "repair"}:
+                    admitted = connection.execute(
+                        """
+                        SELECT 1 FROM events
+                        WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+                        LIMIT 1
+                        """,
+                        (str(parent_row["root_job_id"] or parent_row["job_id"]),),
+                    ).fetchone()
+                    if admitted is not None:
+                        coo_policy = _root_admitted_orchestration_policy(
+                            connection, parent_row
+                        )
                 if (
                     orchestration_role is None
                     and parent_row["orchestration_role"] is not None
@@ -14429,6 +16977,11 @@ class JobRegistry:
                     command_id=command_id,
                     event_provenance=provenance,
                     timestamp_ms=timestamp,
+                ),
+                _coo_cycle_domain_budget_capability=(
+                    _coo_cycle_domain_budget_capability
+                    if orchestration_role == "plan"
+                    else None
                 ),
             )
         return job
@@ -15512,7 +18065,11 @@ class AttemptRegistry:
             quarantined_workers: set[str] = set()
             if orchestration_role is not None:
                 try:
-                    coo_policy = CooCyclePolicy.load()
+                    coo_policy = (
+                        _root_admitted_orchestration_policy(connection, job_row)
+                        if job_row["orchestration_role"] in {"work", "review", "repair"}
+                        else CooCyclePolicy.load()
+                    )
                 except CooCyclePolicyError as exc:
                     raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
                 limit = int(job_row["attempt_limit"])
@@ -16749,6 +19306,10 @@ class AttemptRegistry:
             if job_row is None:
                 raise StateConflict("terminal Attempt lost its Job")
             orchestration_role = job_row["orchestration_role"]
+            # Set only after _validated_domain_terminal_material succeeds.
+            # The exact accepted terminal gate constrains the downstream
+            # capacity disposition and JOB_COMPLETED payload.
+            domain_cleanup_gate: str | None = None
             if status is AttemptStatus.COMPLETED:
                 if orchestration_role == "aggregation":
                     structured = _validated_aggregation_terminal_payload(
@@ -16756,6 +19317,42 @@ class AttemptRegistry:
                         attempt_row=row,
                         payload=payload,
                     )
+                elif (orchestration_role == "plan" and _coo_domain_admitted(job_row)
+                      and (
+                          connection.execute("SELECT 1 FROM events WHERE event_type='COO_DOMAIN_CONSUMPTION_SEALED' AND job_id=?", (job_row["root_job_id"],)).fetchone() is not None
+                          or connection.execute("SELECT 1 FROM coo_provider_charges WHERE attempt_id=? AND effect_class='FINAL'", (row["attempt_id"],)).fetchone() is not None
+                          or connection.execute(
+                              "SELECT COUNT(*) FROM events WHERE attempt_id=? AND event_type=? AND "
+                              "CASE WHEN json_valid(payload_json) THEN json_extract(payload_json,'$.operation_kind') END='begin_turn'",
+                              (row["attempt_id"], OperationReceiptKind.INTENT.value),
+                          ).fetchone()[0] > 1
+                      )):
+                    if (type(fence_generation) is not int or fence_generation <= 0
+                            or type(lease_token) is not str or not lease_token):
+                        raise StateConflict("domain terminal requires exact typed caller fence/token")
+                    root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)).fetchone()
+                    structured = _validated_domain_terminal_material(connection, root=root, row=row)
+                    if (_json_dumps(payload) != _json_dumps(structured)
+                            or structured["consumption_seal"]["lease_authority_digest"] != hashlib.sha256(lease_token.encode()).hexdigest()):
+                        raise StateConflict("domain terminal payload/original lease identity drifted")
+                    if _domain_receipt_inventory(
+                            connection, event_type="COO_DOMAIN_TERMINAL_SEALED", command_id=structured["command_id"],
+                            root_id=str(root["job_id"]), row=row, source=structured):
+                        raise StateConflict("domain terminal has prior duplicate/orphan/alias evidence")
+                    self.store.append_event(
+                        connection, aggregate_type="job", aggregate_id=str(root["job_id"]),
+                        event_type="COO_DOMAIN_TERMINAL_SEALED", actor="coo", job_id=str(root["job_id"]),
+                        attempt_id=str(row["attempt_id"]), worker_id=str(row["worker_id"]), quota_class=str(row["quota_class"]),
+                        command_id=structured["command_id"], payload=structured, timestamp_ms=timestamp,
+                    )
+                    # RESIDUAL_PROCESS_CENSUS_UNAVAILABLE is the truthful
+                    # gate supplied by the validated terminal wire; until
+                    # canonical exact-process residual qualification exists,
+                    # the accepted domain branch keeps the exact quota
+                    # class nonavailable and carries the gate through the
+                    # completion event so downstream consumers cannot
+                    # infer reusable capacity from a completed domain Job.
+                    domain_cleanup_gate = structured.get("cleanup_gate")
                 elif orchestration_role is not None:
                     structured = _validated_orchestration_child_terminal_payload(
                         connection,
@@ -16805,15 +19402,44 @@ class AttemptRegistry:
                 """
                 UPDATE worker_quota_classes
                 SET held_attempt_id=NULL,
-                    status=CASE WHEN status='BUSY' THEN 'AVAILABLE' ELSE status END,
+                    status=CASE WHEN status='BUSY' THEN ? ELSE status END,
                     updated_at_ms=?,version=version+1
                 WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
                 """,
-                (timestamp, row["worker_id"], row["quota_class"], attempt_id),
+                (
+                    WorkerStatus.ERROR.value if domain_cleanup_gate is not None
+                    else WorkerStatus.AVAILABLE.value,
+                    timestamp,
+                    row["worker_id"],
+                    row["quota_class"],
+                    attempt_id,
+                ),
             )
             event_payload: dict[str, Any] = {"status": job_status.value}
             if review_evidence is not None:
                 event_payload["review"] = review_evidence
+            # Carry the validated domain cleanup gate through the ordinary
+            # completion projection so consumers do not silently infer
+            # reusable capacity from a completed-but-not-cleanly-closed Job.
+            # Re-read the exact canonical quota row inside the same
+            # transaction so the projection reports the actual retained
+            # disposition (BUSY->ERROR with the cleanup gate; DRAINING/OFFLINE
+            # nonavailable preserved) rather than unconditionally emitting
+            # a synthetic ERROR constant. The cleared-hold predicate confirms
+            # the update actually applied to the exact (worker_id, quota_class)
+            # row; a missing or status-NULL readback fails closed and rolls back.
+            if domain_cleanup_gate is not None:
+                canonical_quota_row = connection.execute(
+                    "SELECT status FROM worker_quota_classes "
+                    "WHERE worker_id=? AND quota_class=? AND held_attempt_id IS NULL",
+                    (row["worker_id"], row["quota_class"]),
+                ).fetchone()
+                if canonical_quota_row is None or canonical_quota_row["status"] is None:
+                    raise StateConflict(
+                        "domain terminal could not re-read canonical quota after update"
+                    )
+                event_payload["cleanup_gate"] = domain_cleanup_gate
+                event_payload["capacity_status"] = canonical_quota_row["status"]
             self.store.append_event(
                 connection,
                 aggregate_type="job",
@@ -17338,6 +19964,1193 @@ def _ohf_process(process: ProcessIdentityObservation) -> tuple[int, int, str, st
     if pid <= 0 or pgid <= 0 or not start or not boot:
         raise StateConflict("OHF process identity is incomplete")
     return pid, pgid, start, boot
+
+
+def _ohf_evidence_event(connection: sqlite3.Connection, command_id: str) -> sqlite3.Row | None:
+    return connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+
+
+def _domain_consumption_ledger_material(
+    connection: sqlite3.Connection, *, store: RuntimeStore | None,
+    row: sqlite3.Row, durable: sqlite3.Row, plan_seal: dict[str, Any],
+    operation_id: OperationId, expected_consumption_projection_digest: str,
+    evidence_turn: TurnRef | None, timestamp: int,
+    _stopped: _StoppedDomainEvidence | None = None,
+) -> TurnRef:
+    """Immutable common ledger checks after distinct LIVE or exact STOPPED admission.
+
+    STOPPED callers have no RuntimeStore and cannot reach fresh reservation writes.
+    No current lease token is obtained from storage by this evidence reader.
+    """
+    # 4. Strict v2 root + domain admission.
+    job_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+    ).fetchone()
+    if (
+        job_row is None
+        or job_row["orchestration_role"] != "plan"
+        or job_row["depth"] != 1
+    ):
+        raise StateConflict(
+            "domain consumption requires depth-1 plan domain Job"
+        )
+    root_row = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+    ).fetchone()
+    if (
+        root_row is None
+        or root_row["job_id"] != root_row["root_job_id"]
+        or root_row["depth"] != 0
+        or root_row["parent_job_id"] is not None
+        or root_row["orchestration_role"] != "aggregation"
+    ):
+        raise StateConflict(
+            "domain consumption requires strict v2 aggregation root"
+        )
+    if _authorize_job_row(root_row).policy_sha256 != root_row["authority_policy_hash"]:
+        raise StateConflict("domain consumption root current authority pin moved")
+    registry = ExecutionCapabilityRegistry.load()
+    try:
+        profile = (
+            registry.profiles[COO_DOMAIN_EXECUTION_PROFILE]
+            if COO_DOMAIN_EXECUTION_PROFILE in registry.profiles
+            else None
+        )
+        if profile is None:
+            raise StateConflict(
+                "COO domain execution profile is missing"
+            )
+        if profile.enabled:
+            registry.resolve(COO_DOMAIN_EXECUTION_PROFILE)
+        else:
+            registry.validate_disabled_profile_shape(
+                COO_DOMAIN_EXECUTION_PROFILE
+            )
+    except CapabilityPolicyError as exc:
+        raise StateConflict(
+            "COO domain execution profile is production-disarmed or invalid"
+        ) from exc
+    if not _coo_domain_admitted(job_row):
+        if profile.enabled:
+            raise StateConflict(
+                "domain consumption requires an admitted COO domain profile"
+            )
+        raise StateConflict(
+            "COO domain execution profile is production-disarmed"
+        )
+    if (
+        (_stopped is None and row["status"] != AttemptStatus.CHECKPOINTED.value)
+        or job_row["current_attempt_id"] != str(row["attempt_id"])
+    ):
+        raise StateConflict(
+            "domain consumption requires current CHECKPOINTED domain Attempt"
+        )
+    # 5. Budget Event + reservation identity anchor.
+    budget = _validated_coo_provider_budget_event(
+        connection,
+        root_row=root_row,
+        domain_job_id=str(job_row["job_id"]),
+    )
+    reservation_digest = str(budget["reservation_digest"])
+    # 6. Settled reviewed projection digest.
+    projection = _coo_domain_consumption_projection(
+        connection,
+        root_row=root_row,
+        domain_job_id=str(job_row["job_id"]),
+        domain_attempt_id=str(row["attempt_id"]),
+        _stopped_domain=_stopped,
+    )
+    if (
+        projection["consumption_projection_digest"]
+        != expected_consumption_projection_digest
+    ):
+        raise StateConflict(
+            "domain consumption projection digest does not match"
+        )
+    current_projection_digest = str(
+        projection["consumption_projection_digest"]
+    )
+    # 7. Require exactly the completed initial BEGIN_TURN + APPLIED
+    #    + candidate for the same epoch/generation/Attempt; reject
+    #    absent / duplicate / foreign / unacknowledged / interrupted
+    #    or EFFECT_UNKNOWN initial evidence.
+    initial_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+    initial_applieds: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+    initial_unknowns: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+    initial_candidates: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+    later_applieds: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+    later_unknowns: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+    later_intents: list[tuple[sqlite3.Row, dict[str, Any]]] = []
+
+    initial_operation_claims = {
+        str(event["command_id"])
+        for event in connection.execute(
+            """SELECT command_id FROM events WHERE event_type=?
+               AND CASE WHEN json_valid(payload_json) THEN
+                   json_extract(payload_json,'$.turn_id') END = ?""",
+            (OperationReceiptKind.INTENT.value, str(plan_seal["turn_id"])),
+        )
+    }
+    def claims_initial_context(
+        event_row: sqlite3.Row, payload: dict[str, Any]
+    ) -> bool:
+        current_attempt = str(row["attempt_id"])
+        current_job = str(job_row["job_id"])
+        turn_ref = payload.get("turn")
+        candidate_turn = (
+            turn_ref
+            if isinstance(turn_ref, dict)
+            else {
+                name: payload.get(name)
+                for name in {
+                    "attempt_id",
+                    "session_epoch_id",
+                    "process_generation_id",
+                    "turn_id",
+                }
+            }
+        )
+        return (
+            event_row["aggregate_id"] in initial_operation_claims
+            or (isinstance(payload.get("operation_id"), str) and payload["operation_id"] in initial_operation_claims)
+        ) or any(
+            identity in (
+                current_attempt,
+                current_job,
+                str(durable["session_epoch_id"]),
+                str(durable["process_generation_id"]),
+                plan_seal["turn_id"],
+            )
+            for identity in (
+                str(event_row["attempt_id"]),
+                str(event_row["job_id"]),
+                payload.get("job_id"),
+                payload.get("attempt_id"),
+                payload.get("session_epoch_id"),
+                payload.get("process_generation_id"),
+                payload.get("turn_id"),
+                payload.get("initial_turn_id"),
+                str(event_row["aggregate_id"]),
+            )
+        ) or (
+            isinstance(candidate_turn, dict)
+            and (
+                candidate_turn.get("turn_id") == plan_seal["turn_id"]
+                or candidate_turn.get("attempt_id") == current_attempt
+                or candidate_turn.get("session_epoch_id")
+                == str(durable["session_epoch_id"])
+                or candidate_turn.get("process_generation_id")
+                == str(durable["process_generation_id"])
+            )
+        )
+
+    saved_later_intent = _ohf_evidence_event(connection, operation_id.command_id)
+    saved_later_turn = None
+    if saved_later_intent is not None:
+        saved_later_payload = _strict_canonical_json_loads(
+            str(saved_later_intent["payload_json"]),
+            name="domain consumption saved later intent",
+        )
+        if not isinstance(saved_later_payload, dict):
+            raise StateConflict("domain consumption replay intent drifted")
+        saved_later_turn = saved_later_payload.get("turn_id")
+
+    if evidence_turn is not None and (
+        saved_later_intent is None
+        or saved_later_turn != evidence_turn.turn_id
+        or evidence_turn.attempt_id != str(row["attempt_id"])
+        or evidence_turn.session_epoch_id != str(durable["session_epoch_id"])
+        or evidence_turn.process_generation_id != str(durable["process_generation_id"])
+    ):
+        raise StateConflict("domain evidence lacks its exact reserved later turn")
+
+    def claims_later_operation(
+        event_row: sqlite3.Row, payload: dict[str, Any]
+    ) -> bool:
+        return (
+            operation_id.command_id in (
+                str(event_row["aggregate_id"]),
+                str(event_row["command_id"]),
+                payload.get("operation_id"),
+            )
+            or str(event_row["command_id"]) in (
+                operation_receipt_command_id(operation_id, OperationReceiptKind.APPLIED),
+                operation_receipt_command_id(operation_id, OperationReceiptKind.EFFECT_UNKNOWN),
+            )
+            or (
+                isinstance(saved_later_turn, str)
+                and saved_later_turn in (
+                    payload.get("turn_id"), payload.get("initial_turn_id"),
+                    event_row["aggregate_id"],
+                )
+            )
+        )
+
+    def current_nonturn_pair(intent_event):
+        if intent_event is None:
+            return None
+        if _stopped is not None and intent_event["event_id"] == _stopped.stop_intent_id:
+            return ("graceful_stop", None)
+        start_payload = _strict_canonical_json_loads(
+            str(intent_event["payload_json"]), name="domain consumption initial launch intent",
+        )
+        try:
+            start_op = OperationId(str(intent_event["command_id"]))
+        except ValueError:
+            return None
+        start_applied = _ohf_evidence_event(connection, operation_receipt_command_id(start_op, OperationReceiptKind.APPLIED))
+        if start_applied is None:
+            return None
+        applied_payload = _strict_canonical_json_loads(
+            str(start_applied["payload_json"]), name="domain consumption initial launch receipt",
+        )
+        expected_start = {
+            "schema_version": "mastermind.operator_harness_intent/v1",
+            "operation_kind": "start_session", "attempt_id": str(row["attempt_id"]),
+            "session_epoch_id": str(durable["session_epoch_id"]),
+            "process_generation_id": str(durable["process_generation_id"]),
+            "worker_id": str(row["worker_id"]), "provider_session_id": None,
+        }
+        expected_applied = {
+            "operation_kind": "start_session",
+            "provider_session_id": str(durable["provider_session_id"]),
+            "process_generation_id": str(durable["process_generation_id"]),
+        }
+        headers = all(
+            event["aggregate_type"] == "operator_operation"
+            and event["aggregate_id"] == start_op.command_id
+            and event["job_id"] == str(row["job_id"])
+            and event["attempt_id"] == str(row["attempt_id"])
+            and event["worker_id"] == str(row["worker_id"])
+            and event["quota_class"] == str(row["quota_class"])
+            and event["actor"] == "supervisor"
+            for event in (intent_event, start_applied)
+        )
+        if (
+            not headers or intent_event["event_type"] != OperationReceiptKind.INTENT.value
+            or start_applied["event_type"] != OperationReceiptKind.APPLIED.value
+            or _ohf_evidence_event(connection, operation_receipt_command_id(start_op, OperationReceiptKind.EFFECT_UNKNOWN)) is not None
+        ):
+            return None
+        def require_unique_nonturn_inventory():
+            # An unvalidated command/header/kind cannot hide a receipt
+            # which independently claims this operation or its paired
+            # canonical receipt identities.
+            operation_aliases = (
+                start_op.command_id,
+                operation_receipt_command_id(start_op, OperationReceiptKind.APPLIED),
+                operation_receipt_command_id(start_op, OperationReceiptKind.EFFECT_UNKNOWN),
+            )
+            affiliated = []
+            for evidence in connection.execute(
+                "SELECT * FROM events WHERE event_type IN (?,?,?)",
+                (OperationReceiptKind.INTENT.value, OperationReceiptKind.APPLIED.value,
+                 OperationReceiptKind.EFFECT_UNKNOWN.value),
+            ):
+                try:
+                    body = json.loads(str(evidence["payload_json"]))
+                except (json.JSONDecodeError, TypeError):
+                    body = None
+                # This pass only reconciles identity. The complete
+                # INTENT/receipt census below validates canonical JSON;
+                # malformed affiliated headers still count here.
+                claims = (
+                    evidence["aggregate_id"], evidence["command_id"],
+                    body.get("operation_id") if isinstance(body, dict) else None,
+                    body.get("initial_operation_id") if isinstance(body, dict) else None,
+                    body.get("intent_command_id") if isinstance(body, dict) else None,
+                    body.get("applied_command_id") if isinstance(body, dict) else None,
+                )
+                if any(identity in operation_aliases for identity in claims):
+                    affiliated.append(evidence["event_id"])
+            if sorted(affiliated) != sorted((intent_event["event_id"], start_applied["event_id"])):
+                raise StateConflict(
+                    "domain consumption nonturn operation evidence is contradictory or unknown"
+                )
+
+        if start_payload == expected_start and applied_payload == expected_applied:
+            require_unique_nonturn_inventory()
+            return ("start_session", None)
+        if not isinstance(start_payload, dict) or not isinstance(applied_payload, dict):
+            return None
+        sequence = start_payload.get("expected_checkpoint_sequence")
+        if type(sequence) is not int or not 0 < sequence <= int(row["checkpoint_sequence"]):
+            return None
+        expected_checkpoint = {
+            "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+            "attempt_id": str(row["attempt_id"]), "worker_id": str(row["worker_id"]),
+            "session_epoch_id": str(durable["session_epoch_id"]),
+            "process_generation_id": str(durable["process_generation_id"]),
+            "provider_session_id": str(durable["provider_session_id"]),
+            "expected_checkpoint_sequence": sequence,
+        }
+        expected_checkpoint_applied = {
+            "schema_version": OHF_CHECKPOINT_OPERATION_SCHEMA_VERSION,
+            "process_generation_id": str(durable["process_generation_id"]),
+            "checkpoint_sequence": sequence,
+            "provider_mutated_state": applied_payload.get("provider_mutated_state"),
+        }
+        checkpoint_count = connection.execute(
+            """SELECT COUNT(*) FROM events WHERE event_type='JOB_CHECKPOINTED'
+               AND aggregate_type='job' AND aggregate_id=? AND job_id=? AND attempt_id=?
+               AND worker_id=? AND quota_class=? AND CASE WHEN json_valid(payload_json)
+                   THEN json_extract(payload_json,'$.checkpoint_sequence') END = ?""",
+            (row["job_id"], row["job_id"], row["attempt_id"], row["worker_id"], row["quota_class"], sequence),
+        ).fetchone()[0]
+        if (
+            start_payload == expected_checkpoint and applied_payload == expected_checkpoint_applied
+            and type(applied_payload.get("provider_mutated_state")) is bool and checkpoint_count == 1
+        ):
+            require_unique_nonturn_inventory()
+            return ("checkpoint", sequence)
+        return None
+
+    current_start_count = 0
+    checkpoint_sequences = set()
+    for prior in connection.execute(
+        """
+        SELECT * FROM events
+        WHERE event_type=?
+          AND command_id<>?
+        """,
+        (
+            OperationReceiptKind.INTENT.value,
+            operation_id.command_id,
+        ),
+    ):
+        try:
+            payload = _strict_canonical_json_loads(
+                str(prior["payload_json"]),
+                name="domain consumption initial",
+            )
+        except StateConflict as exc:
+            raise StateConflict(
+                "domain consumption initial BEGIN_TURN is foreign"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise StateConflict(
+                "domain consumption initial BEGIN_TURN is foreign"
+            )
+        initial_claim = claims_initial_context(prior, payload)
+        later_claim = claims_later_operation(prior, payload)
+        operation_kind = payload.get("operation_kind")
+        interrupt_claim = operation_kind == "interrupt_turn"
+        known_nonturn = current_nonturn_pair(prior) if initial_claim and not later_claim else None
+        if known_nonturn is not None:
+            if known_nonturn[0] == "start_session":
+                current_start_count += 1
+            elif known_nonturn[0] == "graceful_stop":
+                continue
+            elif known_nonturn[1] in checkpoint_sequences:
+                raise StateConflict("domain consumption checkpoint evidence is not unique")
+            else:
+                checkpoint_sequences.add(known_nonturn[1])
+            continue
+        if not initial_claim and not later_claim:
+            continue
+        if interrupt_claim and (initial_claim or later_claim):
+            raise StateConflict("domain consumption evidence was interrupted")
+        if prior["event_type"] == OperationReceiptKind.INTENT.value:
+            if later_claim and str(prior["command_id"]) != (
+                operation_id.command_id
+            ):
+                later_intents.append((prior, payload))
+            if (
+                initial_claim
+                and str(prior["command_id"])
+                != operation_id.command_id
+            ):
+                initial_intents.append((prior, payload))
+    if current_start_count != 1:
+        raise StateConflict("domain consumption initial launch evidence is not unique")
+    if len(initial_intents) != 1:
+        if later_intents:
+            raise StateConflict(
+                "domain consumption later operation has foreign INTENT"
+            )
+        raise StateConflict(
+            "domain consumption requires exactly one completed "
+            "initial BEGIN_TURN"
+        )
+    initial_event, initial_payload = initial_intents[0]
+    initial_turn_id = str(plan_seal["turn_id"])
+    expected_initial_payload = {
+        "schema_version": "mastermind.operator_harness_turn_intent/v1",
+        "operation_kind": OperationKind.BEGIN_TURN.value,
+        "attempt_id": str(row["attempt_id"]),
+        "session_epoch_id": str(durable["session_epoch_id"]),
+        "process_generation_id": str(durable["process_generation_id"]),
+        "worker_id": str(row["worker_id"]),
+        "provider_session_id": str(durable["provider_session_id"]),
+        "turn_id": str(initial_payload.get("turn_id", "")),
+    }
+    if (
+        initial_event["aggregate_id"] != initial_event["command_id"]
+        or initial_event["aggregate_type"] != "operator_operation"
+        or initial_event["event_type"]
+        != OperationReceiptKind.INTENT.value
+        or initial_event["attempt_id"] != str(row["attempt_id"])
+        or initial_event["job_id"] != str(row["job_id"])
+        or initial_event["quota_class"] != str(row["quota_class"])
+        or initial_event["actor"] != "supervisor"
+        or initial_event["worker_id"] != str(row["worker_id"])
+        or initial_payload.get("turn_id") != initial_turn_id
+        or not str(initial_payload.get("turn_id", "")).strip()
+        or initial_payload != expected_initial_payload
+        or not initial_payload.get("provider_session_id")
+    ):
+        raise StateConflict(
+            "domain consumption initial BEGIN_TURN identity drifted"
+        )
+    try:
+        initial_op = OperationId(str(initial_event["command_id"]))
+    except ValueError as exc:
+        raise StateConflict("domain consumption initial BEGIN_TURN identity drifted") from exc
+    initial_command = str(initial_op.command_id)
+    initial_receipt_query = """
+        SELECT * FROM events
+        WHERE event_type IN (?,?)
+    """
+    for receipt in connection.execute(
+        initial_receipt_query,
+        (
+            OperationReceiptKind.APPLIED.value,
+            OperationReceiptKind.EFFECT_UNKNOWN.value,
+        ),
+    ):
+        receipt_payload = _strict_canonical_json_loads(
+            str(receipt["payload_json"]),
+            name="domain consumption turn receipt",
+        )
+        if not isinstance(receipt_payload, dict):
+            raise StateConflict(
+                "domain consumption turn receipt is malformed"
+            )
+        later_claim = claims_later_operation(receipt, receipt_payload)
+        initial_claim = (
+            str(receipt["command_id"]) in (
+                operation_receipt_command_id(initial_op, OperationReceiptKind.APPLIED),
+                operation_receipt_command_id(initial_op, OperationReceiptKind.EFFECT_UNKNOWN),
+            )
+            or str(receipt["aggregate_id"]) == initial_command
+            or receipt_payload.get("operation_id") == initial_command
+            or receipt_payload.get("turn_id") == initial_turn_id
+            or (
+                not later_claim and claims_initial_context(receipt, receipt_payload)
+                and not (
+                    receipt["event_type"] == OperationReceiptKind.APPLIED.value
+                    and str(receipt["aggregate_id"]).startswith("ohf-op:")
+                    and str(receipt["command_id"]) == operation_receipt_command_id(
+                        OperationId(str(receipt["aggregate_id"])), OperationReceiptKind.APPLIED
+                    )
+                    and current_nonturn_pair(_ohf_evidence_event(connection, str(receipt["aggregate_id"]))) is not None
+                )
+            )
+        )
+        if initial_claim:
+            if receipt["event_type"] == OperationReceiptKind.APPLIED.value:
+                initial_applieds.append((receipt, receipt_payload))
+            else:
+                initial_unknowns.append((receipt, receipt_payload))
+        if later_claim:
+            if receipt["event_type"] == OperationReceiptKind.APPLIED.value:
+                later_applieds.append((receipt, receipt_payload))
+            else:
+                later_unknowns.append((receipt, receipt_payload))
+        if (
+            receipt_payload.get("operation_kind") == "interrupt_turn"
+            and (
+                claims_initial_context(receipt, receipt_payload)
+                or claims_later_operation(receipt, receipt_payload)
+            )
+        ):
+            raise StateConflict(
+                "domain consumption evidence was interrupted"
+            )
+    if len(initial_applieds) != 1:
+        raise StateConflict(
+            "domain consumption initial BEGIN_TURN is unacknowledged"
+        )
+    initial_applied, initial_applied_payload = initial_applieds[0]
+    expected_applied_payload = {
+        "schema_version": (
+            "mastermind.operator_harness_turn_applied/v1"
+        ),
+        "operation_kind": OperationKind.BEGIN_TURN.value,
+        "attempt_id": str(row["attempt_id"]),
+        "session_epoch_id": str(durable["session_epoch_id"]),
+        "process_generation_id": str(durable["process_generation_id"]),
+        "turn_id": str(initial_payload["turn_id"]),
+        "provider_native_turn_id": str(
+            plan_seal["provider_native_turn_id"]
+        ),
+        "acknowledged": True,
+    }
+    if (
+        initial_applied["command_id"]
+        != operation_receipt_command_id(initial_op, OperationReceiptKind.APPLIED)
+        or initial_applied["aggregate_type"] != "operator_operation"
+        or initial_applied["aggregate_id"] != str(initial_op.command_id)
+        or initial_applied["event_type"]
+        != OperationReceiptKind.APPLIED.value
+        or initial_applied["attempt_id"] != str(row["attempt_id"])
+        or initial_applied["job_id"] != str(row["job_id"])
+        or initial_applied["worker_id"] != str(row["worker_id"])
+        or initial_applied["quota_class"] != str(row["quota_class"])
+        or initial_applied["actor"] != "supervisor"
+        or initial_applied_payload != expected_applied_payload
+        or not expected_applied_payload["provider_native_turn_id"]
+    ):
+        raise StateConflict(
+            "domain consumption initial BEGIN_TURN acknowledgment drifted"
+        )
+    if initial_unknowns:
+        raise StateConflict(
+            "domain consumption initial BEGIN_TURN has EFFECT_UNKNOWN"
+        )
+    for initial_candidate in connection.execute(
+        """
+        SELECT * FROM events
+        WHERE event_type='OHF_CANDIDATE_RESULT_RECORDED'
+        """
+    ):
+        candidate_payload = _strict_canonical_json_loads(
+            str(initial_candidate["payload_json"]),
+            name="domain consumption initial candidate",
+        )
+        candidate_turn_ref = (
+            candidate_payload.get("turn")
+            if isinstance(candidate_payload, dict)
+            else None
+        )
+        if not isinstance(candidate_payload, dict):
+            raise StateConflict(
+                "domain consumption initial candidate is malformed"
+            )
+        if evidence_turn is not None and (
+            candidate_turn_ref == _ohf_jsonable(evidence_turn)
+            and initial_candidate["command_id"] == f"ohf-candidate:{evidence_turn.turn_id}"
+            and initial_candidate["aggregate_type"] == "operator_turn"
+            and initial_candidate["aggregate_id"] == evidence_turn.turn_id
+            and initial_candidate["job_id"] == row["job_id"]
+            and initial_candidate["attempt_id"] == row["attempt_id"]
+            and initial_candidate["worker_id"] == row["worker_id"]
+            and initial_candidate["quota_class"] == row["quota_class"]
+            and initial_candidate["actor"] == "supervisor"
+            and set(candidate_payload) == {"schema_version", "turn", "candidate", "events", "cursor"}
+            and candidate_payload.get("schema_version") == OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
+        ):
+            continue
+        if (
+            claims_initial_context(initial_candidate, candidate_payload)
+            or initial_candidate["command_id"] == plan_seal["candidate_event_command_id"]
+            or initial_candidate["aggregate_id"] == initial_turn_id
+            or (
+                isinstance(candidate_turn_ref, dict)
+                and candidate_turn_ref.get("turn_id")
+                == initial_turn_id
+            )
+        ):
+            initial_candidates.append(
+                (initial_candidate, candidate_payload)
+            )
+    if later_intents:
+        raise StateConflict(
+            "domain consumption later operation has foreign INTENT"
+        )
+    if len(initial_candidates) != 1:
+        raise StateConflict(
+            "domain consumption initial BEGIN_TURN candidate missing"
+        )
+    initial_candidate, candidate_payload = initial_candidates[0]
+    candidate_turn = candidate_payload.get("turn")
+    if (
+        initial_candidate["aggregate_type"] != "operator_turn"
+        or initial_candidate["aggregate_id"] != initial_turn_id
+        or initial_candidate["command_id"]
+        != f"ohf-candidate:{initial_payload['turn_id']}"
+        or initial_candidate["attempt_id"] != str(row["attempt_id"])
+        or initial_candidate["job_id"] != str(row["job_id"])
+        or initial_candidate["worker_id"] != str(row["worker_id"])
+        or initial_candidate["quota_class"] != str(row["quota_class"])
+        or initial_candidate["actor"] != "supervisor"
+        or not isinstance(candidate_payload, dict)
+        or set(candidate_payload) != {
+            "schema_version", "turn", "candidate", "events", "cursor",
+        }
+        or candidate_turn
+        != {
+            "attempt_id": str(row["attempt_id"]),
+            "session_epoch_id": str(durable["session_epoch_id"]),
+            "process_generation_id": str(durable["process_generation_id"]),
+            "turn_id": str(initial_payload["turn_id"]),
+        }
+        or candidate_payload.get("schema_version")
+        != OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
+        or initial_candidate["command_id"]
+        != plan_seal["candidate_event_command_id"]
+        or orchestration_digest(candidate_payload)
+        != plan_seal["candidate_event_digest"]
+        or initial_payload["turn_id"] != plan_seal["turn_id"]
+        or candidate_turn
+        != {
+            "attempt_id": plan_seal["attempt_id"],
+            "session_epoch_id": plan_seal["session_epoch_id"],
+            "process_generation_id": plan_seal[
+                "process_generation_id"
+            ],
+            "turn_id": plan_seal["turn_id"],
+        }
+    ):
+        raise StateConflict(
+            "domain consumption initial candidate evidence drifted"
+        )
+    # 8. No APPLIED / EFFECT_UNKNOWN for THIS later operation.
+    if evidence_turn is None and later_applieds:
+        raise StateConflict(
+            "domain consumption later operation already APPLIED"
+        )
+    if evidence_turn is not None and later_applieds:
+        if len(later_applieds) != 1:
+            raise StateConflict("domain evidence later APPLIED is not unique")
+        applied, body = later_applieds[0]
+        native_turn = body.get("provider_native_turn_id")
+        if (
+            applied["command_id"] != operation_receipt_command_id(operation_id, OperationReceiptKind.APPLIED)
+            or applied["aggregate_type"] != "operator_operation"
+            or applied["aggregate_id"] != operation_id.command_id
+            or applied["job_id"] != row["job_id"]
+            or applied["attempt_id"] != row["attempt_id"]
+            or applied["worker_id"] != row["worker_id"]
+            or applied["quota_class"] != row["quota_class"]
+            or applied["actor"] != "supervisor"
+            or type(native_turn) is not str or not native_turn.strip()
+            or body != {
+                "schema_version": "mastermind.operator_harness_turn_applied/v1",
+                "operation_kind": OperationKind.BEGIN_TURN.value,
+                "attempt_id": evidence_turn.attempt_id,
+                "session_epoch_id": evidence_turn.session_epoch_id,
+                "process_generation_id": evidence_turn.process_generation_id,
+                "turn_id": evidence_turn.turn_id,
+                "provider_native_turn_id": native_turn,
+                "acknowledged": True,
+            }
+        ):
+            raise StateConflict("domain evidence later APPLIED provenance drifted")
+    if later_unknowns:
+        raise StateConflict(
+            "domain consumption later operation has EFFECT_UNKNOWN"
+        )
+    if evidence_turn is not None:
+        # The evidence phase cannot authorize a provider call. Require
+        # the exact one already committed boundary before any APPLIED
+        # or candidate effect; independent aliases still count.
+        dispatches = []
+        dispatch_id = f"{operation_id.command_id}:dispatch"
+        for event in connection.execute(
+            "SELECT * FROM events WHERE event_type='OHF_PROVIDER_DISPATCH_COMMITTED'"
+        ):
+            body = _strict_canonical_json_loads(str(event["payload_json"]), name="domain evidence dispatch")
+            if event["command_id"] == dispatch_id or event["aggregate_id"] == operation_id.command_id or (
+                isinstance(body, dict) and body.get("operation_id") == operation_id.command_id
+            ):
+                dispatches.append((event, body))
+        if len(dispatches) != 1:
+            raise StateConflict("domain evidence requires one committed later dispatch")
+        dispatch, body = dispatches[0]
+        if (
+            dispatch["command_id"] != dispatch_id
+            or dispatch["aggregate_type"] != "operator_operation"
+            or dispatch["aggregate_id"] != operation_id.command_id
+            or dispatch["job_id"] != row["job_id"]
+            or dispatch["attempt_id"] != row["attempt_id"]
+            or dispatch["worker_id"] != row["worker_id"]
+            or dispatch["quota_class"] != row["quota_class"]
+            or dispatch["actor"] != "supervisor"
+            or body != {
+                "schema_version": "mastermind.operator_harness_provider_dispatch/v1",
+                "operation_kind": OperationKind.BEGIN_TURN.value,
+            }
+        ):
+            raise StateConflict("domain evidence committed dispatch provenance drifted")
+    # 9. Validate the complete root coo_provider_charges inventory
+    #    against authoritative rows: each charge binds to its
+    #    unique event and to actual Attempt / job / worker / quota /
+    #    hierarchy / reservation_digest.  31 ORDINARY max + 1 FINAL
+    #    max with total 32.
+    ordinary = 0
+    finals = 0
+    charge_rows = connection.execute(
+        "SELECT * FROM coo_provider_charges ORDER BY event_id"
+    ).fetchall()
+    # Match every charge Event that claims this root through its
+    # authoritative Job, aggregate or payload. Do not filter on actor
+    # or aggregate_type: those fields are identities to validate, and
+    # a forged/orphan Event cannot disappear from the census.
+    charge_events = connection.execute(
+        """
+        SELECT * FROM events
+        WHERE event_type IN (?,?) ORDER BY event_id
+        """,
+        (
+            "COO_PROVIDER_CHARGE_RECORDED",
+            "COO_DOMAIN_CONSUMPTION_CHARGED",
+        ),
+    ).fetchall()
+    # Affiliation is independent of the claimed aggregate type and
+    # root field. Follow all durable identity links before filtering;
+    # then validate the selected rows with the closed v6 contract.
+    def charge_claimed_roots(record, payload):
+        identities = [record["aggregate_id"]] if "aggregate_id" in record.keys() else []
+        for name in ("job_id", "attempt_id", "turn_id", "operation_id"):
+            if name in record.keys():
+                identities.append(record[name])
+        for name in (
+            "root_job_id", "job_id", "domain_job_id", "attempt_id",
+            "domain_attempt_id", "session_epoch_id", "process_generation_id", "turn_id", "operation_id",
+        ):
+            identities.append(payload.get(name))
+        roots = set()
+        explicit_root = payload.get("root_job_id")
+        if isinstance(explicit_root, str):
+            roots.add(explicit_root)
+        for identity in identities:
+            if not isinstance(identity, str) or not identity:
+                continue
+            for linked in connection.execute(
+                """SELECT root_job_id FROM jobs WHERE job_id=?
+                   UNION SELECT j.root_job_id FROM attempts a
+                       JOIN jobs j ON j.job_id=a.job_id WHERE a.attempt_id=?
+                   UNION SELECT j.root_job_id FROM harness_session_epochs e
+                       JOIN attempts a ON a.attempt_id=e.attempt_id
+                       JOIN jobs j ON j.job_id=a.job_id WHERE e.session_epoch_id=?
+                   UNION SELECT j.root_job_id FROM process_generations g
+                       JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                       JOIN attempts a ON a.attempt_id=e.attempt_id
+                       JOIN jobs j ON j.job_id=a.job_id WHERE g.process_generation_id=?""",
+                (identity, identity, identity, identity),
+            ):
+                roots.add(str(linked["root_job_id"]))
+        # TurnRefs and operation aggregates affiliate through existing
+        # immutable intent/applied/candidate Events even before a ledger
+        # charge exists. Do not trust the charge's root or aggregate tag.
+        for identity in identities:
+            if not isinstance(identity, str) or not identity:
+                continue
+            linked_events = connection.execute(
+                """SELECT e.job_id,e.attempt_id FROM events e
+                   WHERE e.command_id=? OR e.aggregate_id=?
+                     OR CASE WHEN json_valid(e.payload_json) THEN
+                         json_extract(e.payload_json,'$.turn_id') END = ?
+                     OR CASE WHEN json_valid(e.payload_json) THEN
+                         json_extract(e.payload_json,'$.turn.turn_id') END = ?""",
+                (identity, identity, identity, identity),
+            ).fetchall()
+            for linked in linked_events:
+                for linked_root in connection.execute(
+                    """SELECT root_job_id FROM jobs WHERE job_id=?
+                       UNION SELECT j.root_job_id FROM attempts a
+                           JOIN jobs j ON j.job_id=a.job_id WHERE a.attempt_id=?""",
+                    (linked["job_id"], linked["attempt_id"]),
+                ):
+                    roots.add(str(linked_root["root_job_id"]))
+        operation = payload.get("operation_id")
+        if isinstance(operation, str):
+            for linked in connection.execute(
+                """SELECT j.root_job_id FROM events e JOIN jobs j
+                       ON j.job_id=e.job_id WHERE e.command_id=?
+                   UNION SELECT j.root_job_id FROM events e
+                       JOIN attempts a ON a.attempt_id=e.attempt_id
+                       JOIN jobs j ON j.job_id=a.job_id WHERE e.command_id=?""",
+                (operation, operation),
+            ):
+                roots.add(str(linked["root_job_id"]))
+        return roots
+
+    ledger_roots = {
+        str(charge["charge_id"]): charge_claimed_roots(charge, dict(charge))
+        for charge in charge_rows
+    }
+    event_roots = {}
+    for charge_event in charge_events:
+        charge_payload = _strict_canonical_json_loads(
+            str(charge_event["payload_json"]),
+            name="domain consumption charge event payload",
+        )
+        if not isinstance(charge_payload, dict):
+            raise StateConflict("domain consumption charge evidence is unclassifiable")
+        roots = charge_claimed_roots(charge_event, charge_payload)
+        for charge in charge_rows:
+            if (
+                charge["event_id"] == charge_event["event_id"]
+                or charge["charge_id"] == charge_payload.get("charge_id")
+                or charge["operation_id"] == charge_payload.get("operation_id")
+                or charge["turn_id"] == charge_payload.get("turn_id")
+            ):
+                roots.update(ledger_roots[str(charge["charge_id"])])
+        if not roots or not connection.execute(
+            "SELECT 1 FROM jobs WHERE depth=0 AND job_id IN ("
+            + ",".join("?" for _ in roots) + ") LIMIT 1", tuple(roots),
+        ).fetchone():
+            raise StateConflict("domain consumption charge evidence is unclassifiable")
+        event_roots[int(charge_event["event_id"])] = roots
+    selected_charges = []
+    for charge in charge_rows:
+        roots = ledger_roots[str(charge["charge_id"])] | event_roots.get(int(charge["event_id"]), set())
+        if str(root_row["job_id"]) in roots:
+            if roots != {str(root_row["job_id"])}:
+                raise StateConflict("domain consumption charge lineage conflicts")
+            selected_charges.append(charge)
+    charge_rows = selected_charges
+    charged_event_ids = {int(charge["event_id"]) for charge in charge_rows}
+    affiliated_event_ids = set()
+    for event_id, roots in event_roots.items():
+        if str(root_row["job_id"]) in roots:
+            if roots != {str(root_row["job_id"])}:
+                raise StateConflict("domain consumption charge lineage conflicts")
+            affiliated_event_ids.add(event_id)
+    if affiliated_event_ids != charged_event_ids:
+        raise StateConflict("domain consumption found an orphan COO provider charge Event")
+    for charge in charge_rows:
+        effect = str(charge["effect_class"])
+        if effect == "ORDINARY":
+            ordinary += 1
+        elif effect == "FINAL":
+            finals += 1
+        else:
+            raise StateConflict(
+                f"domain consumption found unknown charge effect {effect!r}"
+            )
+        if charge["root_job_id"] != str(root_row["job_id"]):
+            raise StateConflict(
+                "domain consumption charge root lineage drifted"
+            )
+        if charge["reservation_identity"] != reservation_digest:
+            raise StateConflict(
+                "domain consumption charge reservation_identity drifted"
+            )
+        charge_event = connection.execute(
+            "SELECT * FROM events WHERE event_id=?",
+            (int(charge["event_id"]),),
+        ).fetchone()
+        if (
+            charge_event is None
+            or str(charge_event["event_type"]) != (
+                "COO_DOMAIN_CONSUMPTION_CHARGED"
+                if effect == "FINAL"
+                else "COO_PROVIDER_CHARGE_RECORDED"
+            )
+            or str(charge_event["aggregate_type"]) != "job"
+            or str(charge_event["aggregate_id"]) != str(charge["job_id"])
+            or str(charge_event["actor"]) != "coo"
+            or str(charge_event["job_id"]) != str(charge["job_id"])
+            or str(charge_event["attempt_id"]) != str(charge["attempt_id"])
+            or str(charge_event["worker_id"]) != str(charge["worker_id"])
+        ):
+            raise StateConflict(
+                "domain consumption charge event binding drifted"
+            )
+        attempt_row = connection.execute(
+            "SELECT * FROM attempts WHERE attempt_id=?",
+            (str(charge["attempt_id"]),),
+        ).fetchone()
+        if (
+            attempt_row is None
+            or str(attempt_row["attempt_id"]) != str(charge["attempt_id"])
+            or str(attempt_row["job_id"]) != str(charge["job_id"])
+            or str(attempt_row["worker_id"]) != str(charge["worker_id"])
+            or str(attempt_row["quota_class"]) != str(charge_event["quota_class"])
+        ):
+            raise StateConflict(
+                "domain consumption charge attempt lineage drifted"
+            )
+        charge_payload = _strict_canonical_json_loads(
+            str(charge_event["payload_json"]),
+            name="domain consumption charge event payload",
+        )
+        charge_job = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?",
+            (str(charge["job_id"]),),
+        ).fetchone()
+        if (
+            not isinstance(charge_payload, dict)
+            or set(charge_payload) != {
+                "charge_id", "root_job_id", "operation_id",
+                "effect_class", "turn_id", "job_id", "attempt_id",
+            "worker_id", "reservation_identity",
+        } | (
+            {
+                "domain_job_id", "domain_attempt_id",
+                "session_epoch_id", "process_generation_id",
+                "consumption_projection_digest",
+            }
+            if effect == "FINAL"
+            else set()
+        )
+            or charge_job is None
+            or charge_job["root_job_id"] != str(charge["root_job_id"])
+            or not (
+                (
+                    charge_job["job_id"] == job_row["job_id"]
+                    and charge_job["parent_job_id"] == root_row["job_id"]
+                    and int(charge_job["depth"]) == 1
+                    and charge_job["orchestration_role"] == "plan"
+                )
+                or (
+                    effect == "ORDINARY"
+                    and charge_job["parent_job_id"] == job_row["job_id"]
+                    and int(charge_job["depth"]) == 2
+                    and charge_job["orchestration_role"]
+                    in {"work", "repair", "review"}
+                )
+            )
+            or str(charge_payload.get("charge_id")) != str(charge["charge_id"])
+            or str(charge_payload.get("root_job_id"))
+            != str(charge["root_job_id"])
+            or str(charge_payload.get("job_id")) != str(charge["job_id"])
+            or str(charge_payload.get("attempt_id"))
+            != str(charge["attempt_id"])
+            or str(charge_payload.get("worker_id"))
+            != str(charge["worker_id"])
+            or str(charge_payload.get("operation_id"))
+            != str(charge["operation_id"])
+            or str(charge_payload.get("effect_class"))
+            != str(charge["effect_class"])
+            or str(charge_payload.get("turn_id")) != str(charge["turn_id"])
+            or str(charge_payload.get("reservation_identity"))
+            != str(charge["reservation_identity"])
+            or (effect == "FINAL" and (
+                str(charge_payload.get("domain_job_id"))
+                != str(charge["job_id"])
+                or str(charge_payload.get("domain_attempt_id"))
+                != str(charge["attempt_id"])
+            ))
+        ):
+            raise StateConflict(
+                "domain consumption charge event payload drifted"
+            )
+    if ordinary > 31 or finals > 1 or ordinary + finals > 32:
+        raise StateConflict(
+            "domain consumption charge ceiling is exhausted"
+        )
+    if finals == 1:
+        # Single FINAL slot already spent; this caller must be the
+        # exact same operation identity or the API refuses.
+        existing_final = connection.execute(
+            """
+            SELECT c.* FROM coo_provider_charges c
+            WHERE c.root_job_id=? AND c.effect_class='FINAL'
+            """,
+            (str(root_row["job_id"]),),
+        ).fetchone()
+        assert existing_final is not None  # finals count asserted above
+        existing_final_event = connection.execute(
+            "SELECT * FROM events WHERE event_id=?",
+            (int(existing_final["event_id"]),),
+        ).fetchone()
+        assert existing_final_event is not None
+        if (
+            str(existing_final["operation_id"])
+            != operation_id.command_id
+        ):
+            raise StateConflict(
+                "domain consumption final slot already spent"
+            )
+    # 10. Deterministic charge_id derived from exact operation identity.
+    charge_id = hashlib.sha256(
+        ("coo-domain-consumption:" + operation_id.command_id)
+        .encode("utf-8")
+    ).hexdigest()
+    turn_id = evidence_turn.turn_id if evidence_turn is not None else f"ohf-coo-consumption-turn-{uuid4().hex}"
+    # 11. Exact replay: same operation, same refs, same digest -
+    #     validate the existing FINAL ledger / Event and BEGIN_TURN
+    #     INTENT, then return the identical TurnRef with zero
+    #     mutations.
+    existing_intent = _ohf_evidence_event(connection, operation_id.command_id)
+    if existing_intent is not None:
+        payload = _strict_canonical_json_loads(
+            str(existing_intent["payload_json"]),
+            name="domain consumption replay intent",
+        )
+        expected_intent_payload = {
+            "schema_version": (
+                "mastermind.operator_harness_turn_intent/v1"
+            ),
+            "operation_kind": OperationKind.BEGIN_TURN.value,
+            "attempt_id": str(row["attempt_id"]),
+            "session_epoch_id": str(durable["session_epoch_id"]),
+            "process_generation_id": str(durable["process_generation_id"]),
+            "worker_id": str(row["worker_id"]),
+            "provider_session_id": str(durable["provider_session_id"]),
+            "turn_id": str(payload.get("turn_id", turn_id)),
+        }
+        if (
+            existing_intent["event_type"]
+            != OperationReceiptKind.INTENT.value
+            or existing_intent["aggregate_type"] != "operator_operation"
+            or existing_intent["command_id"] != operation_id.command_id
+            or existing_intent["aggregate_id"] != operation_id.command_id
+            or existing_intent["job_id"] != str(row["job_id"])
+            or not isinstance(payload.get("turn_id"), str)
+            or not payload["turn_id"]
+            or existing_intent["attempt_id"] != str(row["attempt_id"])
+            or existing_intent["worker_id"] != str(row["worker_id"])
+            or existing_intent["quota_class"] != str(row["quota_class"])
+            or existing_intent["actor"] != "supervisor"
+            or payload != expected_intent_payload
+        ):
+            raise StateConflict(
+                "domain consumption replay intent drifted"
+            )
+        existing_final = connection.execute(
+            """
+            SELECT * FROM coo_provider_charges
+            WHERE root_job_id=? AND effect_class='FINAL'
+            """,
+            (str(root_row["job_id"]),),
+        ).fetchall()
+        if len(existing_final) != 1:
+            raise StateConflict(
+                "domain consumption replay FINAL charge row is not unique"
+            )
+        existing_final = existing_final[0]
+        if existing_final is None:
+            raise StateConflict(
+                "domain consumption replay lost FINAL charge row"
+            )
+        existing_final_event = connection.execute(
+            "SELECT * FROM events WHERE event_id=?",
+            (int(existing_final["event_id"]),),
+        ).fetchone()
+        if existing_final_event is None:
+            raise StateConflict(
+                "domain consumption replay lost FINAL charge event"
+            )
+        replay_charge_payload = {
+            "charge_id": str(charge_id),
+            "root_job_id": str(root_row["job_id"]),
+            "job_id": str(job_row["job_id"]),
+            "attempt_id": str(row["attempt_id"]),
+            "worker_id": str(row["worker_id"]),
+            "domain_job_id": str(job_row["job_id"]),
+            "domain_attempt_id": str(row["attempt_id"]),
+            "operation_id": operation_id.command_id,
+            "effect_class": "FINAL",
+            "turn_id": str(payload["turn_id"]),
+            "reservation_identity": reservation_digest,
+            "session_epoch_id": str(durable["session_epoch_id"]),
+            "process_generation_id": str(durable["process_generation_id"]),
+            "consumption_projection_digest": current_projection_digest,
+        }
+        observed_payload = _strict_canonical_json_loads(
+            str(existing_final_event["payload_json"]),
+            name="domain consumption replay FINAL payload",
+        )
+        if (
+            str(existing_final["charge_id"]) != str(charge_id)
+            or str(existing_final["operation_id"])
+            != operation_id.command_id
+            or str(existing_final["turn_id"]) != str(payload["turn_id"])
+            or str(existing_final["root_job_id"]) != str(root_row["job_id"])
+            or str(existing_final["job_id"]) != str(job_row["job_id"])
+            or str(existing_final["attempt_id"])
+            != str(row["attempt_id"])
+            or str(existing_final["worker_id"]) != str(row["worker_id"])
+            or observed_payload != replay_charge_payload
+        ):
+            raise StateConflict(
+                "domain consumption replay FINAL ledger drifted"
+            )
+        return TurnRef(
+            str(payload["turn_id"]),
+            str(durable["session_epoch_id"]),
+            str(durable["process_generation_id"]),
+            str(row["attempt_id"]),
+        )
+    if evidence_turn is not None:
+        raise StateConflict("domain evidence cannot create a fresh reservation")
+    # 12. Fresh reservation: derive TurnRef, append FINAL charge
+    #    Event + row, then append the v1 BEGIN_TURN INTENT,
+    #    atomically.  The transaction wrapper rolls back every
+    #    append if any later insert fails.
+    turn = TurnRef(
+        turn_id,
+        str(durable["session_epoch_id"]),
+        str(durable["process_generation_id"]),
+        str(row["attempt_id"]),
+    )
+    final_payload = {
+        "charge_id": str(charge_id),
+        "root_job_id": str(root_row["job_id"]),
+        "job_id": str(job_row["job_id"]),
+        "attempt_id": str(row["attempt_id"]),
+        "worker_id": str(row["worker_id"]),
+        "domain_job_id": str(job_row["job_id"]),
+        "domain_attempt_id": str(row["attempt_id"]),
+        "operation_id": operation_id.command_id,
+        "effect_class": "FINAL",
+        "turn_id": turn.turn_id,
+        "reservation_identity": reservation_digest,
+        "session_epoch_id": str(durable["session_epoch_id"]),
+        "process_generation_id": str(durable["process_generation_id"]),
+        "consumption_projection_digest": current_projection_digest,
+    }
+    store.append_event(
+        connection,
+        aggregate_type="job",
+        aggregate_id=str(job_row["job_id"]),
+        event_type="COO_DOMAIN_CONSUMPTION_CHARGED",
+        actor="coo",
+        job_id=str(job_row["job_id"]),
+        attempt_id=str(row["attempt_id"]),
+        worker_id=str(row["worker_id"]),
+        quota_class=str(row["quota_class"]),
+        payload=final_payload,
+    )
+    final_event_id = int(
+        connection.execute("SELECT MAX(event_id) FROM events").fetchone()[0]
+    )
+    connection.execute(
+        """
+        INSERT INTO coo_provider_charges(
+          charge_id,root_job_id,job_id,attempt_id,worker_id,
+          operation_id,effect_class,turn_id,reservation_identity,
+          event_id,created_at_ms
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            str(charge_id),
+            str(root_row["job_id"]),
+            str(job_row["job_id"]),
+            str(row["attempt_id"]),
+            str(row["worker_id"]),
+            operation_id.command_id,
+            "FINAL",
+            turn.turn_id,
+            reservation_digest,
+            final_event_id,
+            timestamp,
+        ),
+    )
+    OperatorHarnessRegistry(store)._receipt(
+        connection,
+        op=operation_id,
+        kind=OperationReceiptKind.INTENT,
+        row=row,
+        payload={
+            "schema_version": (
+                "mastermind.operator_harness_turn_intent/v1"
+            ),
+            "operation_kind": OperationKind.BEGIN_TURN.value,
+            "attempt_id": str(row["attempt_id"]),
+            "session_epoch_id": str(durable["session_epoch_id"]),
+            "process_generation_id": str(durable["process_generation_id"]),
+            "worker_id": str(row["worker_id"]),
+            "provider_session_id": str(durable["provider_session_id"]),
+            "turn_id": turn.turn_id,
+        },
+    )
+    return turn
 
 
 class OperatorHarnessRegistry:
@@ -17927,6 +21740,12 @@ class OperatorHarnessRegistry:
                     str(existing_admission["payload_json"]),
                     name="orchestration work admission replay",
                 )
+                root_row = connection.execute(
+                    "SELECT 1 FROM jobs WHERE job_id=?", (row["job_id"],)
+                ).fetchone()
+                if root_row is None:
+                    raise StateConflict("orchestration work admission lost its root")
+                expected_policy_sha = _attempt_root_policy_sha(connection, row)
                 supplied = (
                     principal_observation.to_dict()
                     if isinstance(principal_observation, OperatorPrincipalObservation)
@@ -17942,6 +21761,7 @@ class OperatorHarnessRegistry:
                     or existing_admission["worker_id"] != row["worker_id"]
                     or existing_payload.get("principal_observation") != supplied
                     or existing_payload.get("observed_attestation_digest") != digest
+                    or existing_payload.get("policy_sha") != expected_policy_sha
                 ):
                     raise StateConflict("TX-4 admission replay semantic target drifted")
                 return digest
@@ -18117,7 +21937,7 @@ class OperatorHarnessRegistry:
                     "execution_principal_snapshot_digest": stable_digest,
                     "placement_snapshot_digest": str(row["placement_snapshot_digest"]),
                     "effective_grant_digest": str(row["effective_grant_digest"]),
-                    "policy_sha": CooCyclePolicy.load().policy_sha256,
+                    "policy_sha": _attempt_root_policy_sha(connection, row),
                     "launch_decision": LaunchDecision.ALLOW.value,
                 }
                 self.store.append_event(
@@ -18164,6 +21984,7 @@ class OperatorHarnessRegistry:
         *,
         row: sqlite3.Row,
         generation_id: str,
+        allow_domain_plan_seal: bool = False,
     ) -> dict[str, Any] | None:
         """Recompute the additive OHF active-work predicate for direct writes."""
 
@@ -18209,11 +22030,16 @@ class OperatorHarnessRegistry:
             (row["attempt_id"],),
         ).fetchall()
         interactive = _interactive_tx5_admitted(job)
+        domain_plan = (
+            allow_domain_plan_seal
+            and row["status"] == AttemptStatus.CHECKPOINTED.value
+            and _coo_domain_admitted(job)
+        )
         if (
             current is None
             or len(admissions) != 1
             or len(decisions) != 1
-            or (seals and not interactive)
+            or (seals and not (interactive or domain_plan))
         ):
             raise StateConflict("orchestration generation is not active-work admitted")
         admission_event = admissions[0]
@@ -18273,7 +22099,8 @@ class OperatorHarnessRegistry:
             or admission.get("placement_snapshot_digest")
             != row["placement_snapshot_digest"]
             or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or admission.get("policy_sha")
+            != _attempt_root_policy_sha(connection, row)
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {
@@ -18527,6 +22354,230 @@ class OperatorHarnessRegistry:
             )
         return turn
 
+    def reserve_domain_consumption_turn(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        expected_consumption_projection_digest: str,
+    ) -> TurnRef:
+        """Reserve FINAL once; APPLIED/UNKNOWN operations remain nonretryable."""
+
+        return self._domain_consumption_turn(
+            generation=generation,
+            operation_id=operation_id,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+            expected_consumption_projection_digest=expected_consumption_projection_digest,
+        )
+
+    def _domain_consumption_turn(
+        self,
+        *,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+        expected_consumption_projection_digest: str,
+        connection: sqlite3.Connection | None = None,
+        evidence_turn: TurnRef | None = None,
+    ) -> TurnRef:
+        """Atomic ledger-validated reservation for the domain actor's later turn.
+
+        This is the sole later-turn consumption surface for the COO domain
+        profile: it binds the *exact* current CHECKPOINTED domain Attempt /
+        OHF G1 / leased writer / ALLOW attestation / v2 root + domain
+        admission, re-validates the immutable root provider budget and the
+        settled reviewed-consumption projection digest, demands exactly one
+        completed initial ``begin_turn`` (INTENT + APPLIED + candidate) for
+        the same epoch/generation/Attempt with no EFFECT_UNKNOWN, then
+        derives a fresh ``TurnRef`` and atomically appends the FINAL charge
+        event, inserts the immutable FINAL ``coo_provider_charges`` row, and
+        appends the v1 ``begin_turn`` INTENT the supervisor will
+        acknowledge — all inside a single transaction.  An exact replay of
+        the same command/refs/digest validates the existing INTENT and
+        FINAL charge event/row and returns the identical ``TurnRef`` with
+        zero mutations; any later APPLIED/EFFECT_UNKNOWN for this command
+        is nonretryable.  No Attempt / epoch / generation / claim / worker
+        or writer transfer is performed; the G2 / recovery branch is
+        intentionally out of scope (require same initial current
+        generation 1).
+        """
+
+        if (connection is None) != (evidence_turn is None):
+            raise StateConflict("domain evidence requires its existing transaction")
+        if not isinstance(lease_token, str) or not lease_token:
+            raise StateConflict("domain consumption lease_token is required")
+        if (
+            not isinstance(expected_consumption_projection_digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", expected_consumption_projection_digest)
+            is None
+        ):
+            raise StateConflict(
+                "domain consumption projection digest must be a 64-char hex"
+            )
+        with (
+            self.store.transaction() if connection is None else nullcontext(connection)
+        ) as connection:
+            timestamp = self.store.now_ms()
+            # 1. Resolve the exact leased Attempt first, then bind its current
+            # G1 through the same ownership and active-work guards used by
+            # ordinary TX-5 and candidate evidence.
+            provisional = connection.execute(
+                """
+                SELECT e.attempt_id,e.epoch_number
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if provisional is None:
+                raise StateConflict(
+                    "domain consumption requires authoritative owned OHF generation"
+                )
+            row = self._leased(
+                connection,
+                attempt_id=str(provisional["attempt_id"]),
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.CHECKPOINTED},
+            )
+            durable = self._owned_generation(
+                connection,
+                leased=row,
+                epoch=SessionEpochRef(
+                    generation.session_epoch_id,
+                    str(row["attempt_id"]),
+                    str(row["worker_id"]),
+                    int(provisional["epoch_number"]),
+                ),
+                generation=generation,
+                require_current=True,
+                require_writer=True,
+            )
+            owned_job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+            if owned_job is None or _authorize_job_row(owned_job).policy_sha256 != row["authority_policy_hash"]:
+                raise StateConflict("domain consumption current authority pin moved")
+            self._require_active_orchestration_generation(
+                connection,
+                row=row,
+                generation_id=generation.process_generation_id,
+                allow_domain_plan_seal=True,
+            )
+            plan_seal = _validated_domain_active_plan_seal(
+                connection,
+                attempt_row=row,
+                job_row=connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+                ).fetchone(),
+            )
+            if (
+                int(durable["generation_number"]) != 1
+                or durable["epoch_number"] != 1
+                or durable["provider_session_id"]
+                != durable["epoch_session"]
+                or not durable["provider_session_id"]
+            ):
+                raise StateConflict(
+                    "domain consumption requires sole-owned current initial G1"
+                )
+            # CCTX0 already bounds the root tree; this later reservation
+            # consumes the same finite lease/effect authority without a new
+            # generation or writer.
+            if evidence_turn is None:
+                timestamp = _finite_fresh_effect(
+                    self.store, connection, str(row["job_id"])
+                )
+            else:
+                _finite_existing_effect(self.store, connection, str(row["job_id"]))
+                timestamp = self.store.now_ms()
+            if timestamp >= int(row["lease_expires_at_ms"]):
+                raise StateConflict("finite reservation current lease has expired")
+            durable = connection.execute(
+                """
+                SELECT g.process_generation_id,g.session_epoch_id,g.generation_number,
+                       g.worker_id,g.executive_writer_held,
+                       e.attempt_id,e.epoch_number,e.state,e.provider_session_id
+                FROM process_generations g
+                JOIN harness_session_epochs e
+                  ON e.session_epoch_id=g.session_epoch_id
+                WHERE g.process_generation_id=?
+                """,
+                (generation.process_generation_id,),
+            ).fetchone()
+            if durable is None:
+                raise StateConflict(
+                    "domain consumption requires authoritative owned OHF generation"
+                )
+            return _domain_consumption_ledger_material(
+                connection, store=self.store, row=row, durable=durable, plan_seal=plan_seal,
+                operation_id=operation_id, expected_consumption_projection_digest=expected_consumption_projection_digest,
+                evidence_turn=evidence_turn, timestamp=timestamp,
+            )
+
+    def _domain_consumption_evidence_admitted(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        row: sqlite3.Row,
+        turn: TurnRef,
+        operation_id: OperationId,
+        fence_generation: int,
+        lease_token: str,
+    ) -> bool:
+        """Read-only validation of the reserved/committed FINAL evidence phase."""
+
+        job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+        if (
+            job is None or row["status"] != AttemptStatus.CHECKPOINTED.value
+            or job["orchestration_role"] != "plan"
+            or connection.execute(
+                "SELECT 1 FROM events WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?",
+                (row["attempt_id"],),
+            ).fetchone() is None
+        ):
+            return False
+        if not _coo_domain_admitted(job):
+            return False
+        charge_events = connection.execute(
+            """SELECT e.payload_json FROM coo_provider_charges c
+               JOIN events e ON e.event_id=c.event_id
+               WHERE c.root_job_id=? AND c.effect_class='FINAL'
+                 AND c.operation_id=?""",
+            (job["root_job_id"], operation_id.command_id),
+        ).fetchall()
+        if len(charge_events) != 1:
+            raise StateConflict("domain evidence requires exact reserved FINAL charge")
+        payload = _strict_canonical_json_loads(str(charge_events[0]["payload_json"]), name="domain evidence FINAL charge")
+        if not isinstance(payload, dict):
+            raise StateConflict("domain evidence FINAL charge is malformed")
+        generation = connection.execute(
+            "SELECT * FROM process_generations WHERE process_generation_id=?",
+            (turn.process_generation_id,),
+        ).fetchone()
+        if generation is None:
+            raise StateConflict("domain evidence generation is absent")
+        validated = self._domain_consumption_turn(
+            generation=ProcessGenerationRef(
+                turn.process_generation_id, turn.session_epoch_id,
+                int(generation["generation_number"]), str(generation["worker_id"]),
+            ),
+            operation_id=operation_id,
+            fence_generation=fence_generation,
+            lease_token=lease_token,
+            expected_consumption_projection_digest=payload.get("consumption_projection_digest"),
+            connection=connection,
+            evidence_turn=turn,
+        )
+        if validated != turn:
+            raise StateConflict("domain evidence reserved turn identity drifted")
+        return True
+
     def acknowledge_turn(
         self,
         *,
@@ -18587,11 +22638,22 @@ class OperatorHarnessRegistry:
                 or not durable["executive_writer_held"]
             ):
                 raise StateConflict("TX-5 target mismatch")
+            domain_evidence = self._domain_consumption_evidence_admitted(
+                connection, row=row, turn=turn, operation_id=operation_id,
+                fence_generation=fence_generation, lease_token=lease_token,
+            )
             self._require_active_orchestration_generation(
                 connection,
                 row=row,
                 generation_id=turn.process_generation_id,
+                allow_domain_plan_seal=domain_evidence,
             )
+            if domain_evidence and (
+                observation is None or observation.acknowledged is not True
+                or type(observation.provider_native_turn_id) is not str
+                or not observation.provider_native_turn_id.strip()
+            ):
+                raise StateConflict("domain evidence requires acknowledged native turn")
             applied_payload = {
                 "schema_version": "mastermind.operator_harness_turn_applied/v1",
                 "operation_kind": OperationKind.BEGIN_TURN.value,
@@ -18746,7 +22808,7 @@ class OperatorHarnessRegistry:
             != attempt_row["execution_principal_snapshot_digest"]
             or seal["placement_snapshot_digest"]
             != attempt_row["placement_snapshot_digest"]
-            or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _attempt_root_policy_sha(connection, attempt_row)
         ):
             raise StateConflict(
                 "interactive active plan seal does not match its durable identity"
@@ -18917,11 +22979,6 @@ class OperatorHarnessRegistry:
                 timestamp=timestamp,
                 statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
             )
-            self._require_active_orchestration_generation(
-                connection,
-                row=row,
-                generation_id=turn.process_generation_id,
-            )
             generation = connection.execute(
                 """
                 SELECT 1 FROM process_generations
@@ -18964,6 +23021,15 @@ class OperatorHarnessRegistry:
             ):
                 raise StateConflict("candidate TX-5 INTENT provenance mismatch")
             operation = OperationId(str(intent["command_id"]))
+            self._require_active_orchestration_generation(
+                connection,
+                row=row,
+                generation_id=turn.process_generation_id,
+                allow_domain_plan_seal=self._domain_consumption_evidence_admitted(
+                    connection, row=row, turn=turn, operation_id=operation,
+                    fence_generation=fence_generation, lease_token=lease_token,
+                ),
+            )
             applied = self._event(
                 connection,
                 operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
@@ -19161,7 +23227,7 @@ class OperatorHarnessRegistry:
                 ),
                 "placement_snapshot_digest": str(row["placement_snapshot_digest"]),
                 "effective_grant_digest": str(row["effective_grant_digest"]),
-                "policy_sha": CooCyclePolicy.load().policy_sha256,
+                "policy_sha": admission["policy_sha"],
             }
             existing = self._event(connection, command_id)
             if existing is not None:
@@ -19401,6 +23467,13 @@ class OperatorHarnessRegistry:
             )
             if self._event(connection, applied_id) is not None:
                 return
+            job = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)).fetchone()
+            domain_stop = kind == "graceful_stop" and job is not None and _coo_domain_admitted(job)
+            if domain_stop and (
+                    type(observation) is not ReconcileObservation
+                    or type(observation.observed_process.pid) is not int
+                    or type(observation.observed_process.pgid) is not int):
+                raise StateConflict("domain stop requires exact integer process identity")
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
             release = kind == "graceful_stop"
             connection.execute(
@@ -19418,6 +23491,19 @@ class OperatorHarnessRegistry:
                     generation.process_generation_id,
                 ),
             )
+            if domain_stop:
+                self.store.append_event(
+                    connection, aggregate_type="process_generation",
+                    aggregate_id=generation.process_generation_id,
+                    event_type="OHF_RECONCILE_OBSERVED", actor="supervisor",
+                    job_id=str(row["job_id"]), attempt_id=str(row["attempt_id"]),
+                    worker_id=str(row["worker_id"]), quota_class=str(row["quota_class"]),
+                    command_id=operation_id.command_id + ":observation",
+                    payload={"schema_version": OHF_RECONCILE_OBSERVATION_SCHEMA_VERSION,
+                             "process_generation_id": generation.process_generation_id,
+                             "observation": _ohf_jsonable(observation)},
+                    timestamp_ms=timestamp,
+                )
             self._receipt(
                 connection,
                 op=operation_id,
@@ -20061,7 +24147,7 @@ class OperatorHarnessRegistry:
             or admission.get("placement_snapshot_digest")
             != row["placement_snapshot_digest"]
             or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or admission.get("policy_sha") != _attempt_root_policy_sha(connection, row)
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {

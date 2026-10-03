@@ -30,6 +30,7 @@ from control_plane.executive_backup import (
     verify_backup,
     verify_restore_drill,
 )
+from control_plane.executive_backup import upgrade_v5_to_v6
 from control_plane.executive_runtime import Runtime
 
 
@@ -450,9 +451,13 @@ def test_frozen_schema_digests_match_test_only_v3_v4_and_v5_references():
         3: executive_backup._reference_normalized_schema_digest_for_tests(3),
         4: executive_backup._reference_normalized_schema_digest_for_tests(4),
         5: executive_backup._reference_normalized_schema_digest_for_tests(5),
+        6: executive_backup._reference_normalized_schema_digest_for_tests(6),
     }
     assert executive_backup._NORMALIZED_SCHEMA_DIGESTS[5] == (
         executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST
+    )
+    assert executive_backup._NORMALIZED_SCHEMA_DIGESTS[6] == (
+        executive_runtime._NORMALIZED_V6_SCHEMA_DIGEST
     )
     assert executive_backup._NORMALIZED_SCHEMA_DIGESTS[4] == (
         "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
@@ -1226,12 +1231,17 @@ def test_upgrade_rejects_unproven_release_and_cli_is_directly_runnable(tmp_path)
     assert sorted(item.name for item in database.parent.iterdir()) == [database.name]
 
 
-def test_default_v5_online_backup_and_drill_succeed(tmp_path):
-    runtime, _lease_token = _runtime_with_claim(tmp_path / "runtime")
-
-    receipt = create_online_backup(runtime.store, tmp_path / "backups")
-    verified = verify_backup(receipt.database_path, receipt.manifest_path)
-    drill = verify_restore_drill(receipt.database_path, receipt.manifest_path)
+def test_historical_v5_offline_backup_and_drill_succeed(tmp_path, monkeypatch):
+    release_sha = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    database = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    executive_backup.upgrade_v4_to_v5(
+        database, tmp_path / "backups", release_sha=release_sha
+    )
+    receipt = executive_backup.create_offline_backup(
+        database, tmp_path / "v5-backup", expected_schema_version=5
+    )
+    verified = verify_backup(receipt.database_path, receipt.manifest_path, expected_schema_version=5)
+    drill = verify_restore_drill(receipt.database_path, receipt.manifest_path, expected_schema_version=5)
 
     assert verified.normalized_schema_digest == (
         executive_backup._NORMALIZED_SCHEMA_DIGESTS[5]
@@ -1239,6 +1249,21 @@ def test_default_v5_online_backup_and_drill_succeed(tmp_path):
     assert [item.version for item in verified.migrations] == [1, 2, 3, 4, 5]
     assert drill.runtime_schema_version == 5
     assert drill.migration_versions == (1, 2, 3, 4, 5)
+
+
+def test_default_v6_online_backup_and_drill_succeed(tmp_path):
+    runtime, _lease_token = _runtime_with_claim(tmp_path / "runtime")
+
+    receipt = create_online_backup(runtime.store, tmp_path / "backups")
+    verified = verify_backup(receipt.database_path, receipt.manifest_path)
+    drill = verify_restore_drill(receipt.database_path, receipt.manifest_path)
+
+    assert verified.normalized_schema_digest == (
+        executive_backup._NORMALIZED_SCHEMA_DIGESTS[6]
+    )
+    assert [item.version for item in verified.migrations] == [1, 2, 3, 4, 5, 6]
+    assert drill.runtime_schema_version == 6
+    assert drill.migration_versions == (1, 2, 3, 4, 5, 6)
 
 
 def test_exact_v4_offline_backup_drill_and_full_v4_projection_roundtrip(tmp_path):
@@ -1368,12 +1393,7 @@ def test_explicit_v4_to_v5_upgrade_preserves_populated_v4_content(
     assert completion["full_v4_content_equal"] is True
     assert completion["release_sha"] == release_sha
 
-    from control_plane.executive_runtime import RuntimeStore
-
-    upgraded_store = RuntimeStore(
-        tmp_path, create=False, existing_writable=True, database_path=database
-    )
-    with upgraded_store.read() as connection:
+    with executive_backup._readonly_database(database) as connection:
         assert connection.execute(
             "SELECT MAX(version) FROM schema_migrations"
         ).fetchone()[0] == 5
@@ -1401,11 +1421,7 @@ def test_v4_to_v5_after_v3_to_v4_preserves_prior_transition_receipts(
     } == prior
     assert second.pre_full_v4_content_digest == second.post_full_v4_content_digest
     verify_backup(database, expected_schema_version=5)
-    from control_plane.executive_runtime import RuntimeStore
-
-    with RuntimeStore(
-        tmp_path, create=False, existing_writable=True, database_path=database
-    ).read() as connection:
+    with executive_backup._readonly_database(database) as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM events WHERE event_type='OHF_RESTORE_INVALIDATED'"
         ).fetchone()[0] == 1
@@ -1751,7 +1767,7 @@ def test_restore_drill_uses_an_isolated_copy_and_leaves_live_state_unchanged(tmp
     assert drill.database_sha256 == receipt.database_sha256
     assert drill.integrity_check == "ok"
     assert drill.foreign_key_check == "ok"
-    assert drill.migration_versions == (1, 2, 3, 4, 5)
+    assert drill.migration_versions == (1, 2, 3, 4, 5, 6)
     assert _logical_state(runtime) == before
 
 

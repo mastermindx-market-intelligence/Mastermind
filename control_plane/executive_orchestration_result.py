@@ -23,6 +23,8 @@ PLAN_SCHEMA_V1 = "mastermind.execution_plan/v1"
 PLAN_SCHEMA_V2 = "mastermind.execution_plan/v2"
 PLAN_SCHEMA_V3 = "mastermind.execution_plan/v3"
 PLAN_SCHEMA_V4 = "mastermind.execution_plan/v4"
+DOMAIN_CONSUMPTION_SCHEMA = "mastermind.executive_coo_domain_consumption/v1"
+DOMAIN_CONSUMPTION_PROJECTION_SCHEMA = "mastermind.executive_coo_domain_consumption_projection/v1"
 MAX_CANONICAL_RESULT_BYTES = 8_388_608
 ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -975,7 +977,406 @@ GOLDEN_ROLE_SCHEMA_DIGESTS = {
 }
 
 
+def domain_consumption_schema(
+    *,
+    expected_root_job_id: str,
+    expected_domain_job_id: str,
+    expected_domain_attempt_id: str,
+    expected_projection_digest: str,
+) -> dict[str, Any]:
+    """Return the closed executable envelope schema for domain consumption.
+
+    This validates syntax only; owner Runtime must supply observed provenance later.
+    """
+    expected_root_job_id = _identifier(
+        expected_root_job_id, name="expected_root_job_id"
+    )
+    expected_domain_job_id = _identifier(
+        expected_domain_job_id, name="expected_domain_job_id"
+    )
+    expected_domain_attempt_id = _identifier(
+        expected_domain_attempt_id, name="expected_domain_attempt_id"
+    )
+    expected_projection_digest = _digest(
+        expected_projection_digest, name="expected_projection_digest"
+    )
+    envelope = _schema_object(
+        {
+            "schema_version": {"const": DOMAIN_CONSUMPTION_SCHEMA},
+            "root_job_id": {"const": expected_root_job_id},
+            "domain_job_id": {"const": expected_domain_job_id},
+            "domain_attempt_id": {"const": expected_domain_attempt_id},
+            "consumption_projection_digest": {"const": expected_projection_digest},
+            "consumed_result": _schema_string(minimum=1, maximum=MAX_CANONICAL_RESULT_BYTES),
+        }
+    )
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        **envelope,
+    }
+
+
+def validate_domain_consumption(
+    value: Any,
+    *,
+    expected_root_job_id: str,
+    expected_domain_job_id: str,
+    expected_domain_attempt_id: str,
+    expected_projection_digest: str,
+) -> dict[str, Any]:
+    """Validate a domain consumption observation with strict closed schema.
+
+    Validates syntax only; owner Runtime must supply observed provenance later.
+    Raises OrchestrationResultError on any mismatch.
+    """
+    expected_root_job_id = _identifier(
+        expected_root_job_id, name="expected_root_job_id"
+    )
+    expected_domain_job_id = _identifier(
+        expected_domain_job_id, name="expected_domain_job_id"
+    )
+    expected_domain_attempt_id = _identifier(
+        expected_domain_attempt_id, name="expected_domain_attempt_id"
+    )
+    expected_projection_digest = _digest(
+        expected_projection_digest, name="expected_projection_digest"
+    )
+    if not isinstance(value, Mapping):
+        raise OrchestrationResultError("domain consumption must be a mapping")
+    expected_keys = {
+        "schema_version",
+        "root_job_id",
+        "domain_job_id",
+        "domain_attempt_id",
+        "consumption_projection_digest",
+        "consumed_result",
+    }
+    if set(value) != expected_keys:
+        raise OrchestrationResultError("domain consumption does not match its closed schema")
+    if value["schema_version"] != DOMAIN_CONSUMPTION_SCHEMA:
+        raise OrchestrationResultError("unsupported domain consumption schema")
+    actual_root_job_id = _identifier(value["root_job_id"], name="root_job_id")
+    actual_domain_job_id = _identifier(value["domain_job_id"], name="domain_job_id")
+    actual_domain_attempt_id = _identifier(
+        value["domain_attempt_id"], name="domain_attempt_id"
+    )
+    actual_projection_digest = _digest(
+        value["consumption_projection_digest"], name="consumption_projection_digest"
+    )
+    if actual_root_job_id != expected_root_job_id:
+        raise OrchestrationResultError("domain consumption root_job_id mismatch")
+    if actual_domain_job_id != expected_domain_job_id:
+        raise OrchestrationResultError("domain consumption domain_job_id mismatch")
+    if actual_domain_attempt_id != expected_domain_attempt_id:
+        raise OrchestrationResultError("domain consumption domain_attempt_id mismatch")
+    if actual_projection_digest != expected_projection_digest:
+        raise OrchestrationResultError("domain consumption projection_digest mismatch")
+    consumed_result = value["consumed_result"]
+    if not isinstance(consumed_result, str):
+        raise OrchestrationResultError("domain consumption consumed_result must be a string")
+    if not consumed_result:
+        raise OrchestrationResultError("domain consumption consumed_result must be non-empty")
+    try:
+        encoded_consumed = consumed_result.encode("utf-8")
+    except UnicodeEncodeError:
+        raise OrchestrationResultError("domain consumption consumed_result is not UTF-8")
+    if len(consumed_result) > MAX_CANONICAL_RESULT_BYTES or len(encoded_consumed) > MAX_CANONICAL_RESULT_BYTES:
+        raise OrchestrationResultError(
+            "domain consumption canonical result exceeds 8 MiB"
+        )
+    result = {
+        "schema_version": DOMAIN_CONSUMPTION_SCHEMA,
+        "root_job_id": expected_root_job_id,
+        "domain_job_id": expected_domain_job_id,
+        "domain_attempt_id": expected_domain_attempt_id,
+        "consumption_projection_digest": expected_projection_digest,
+        "consumed_result": consumed_result,
+    }
+    if len(canonical_bytes(result)) > MAX_CANONICAL_RESULT_BYTES:
+        raise OrchestrationResultError(
+            "domain consumption canonical result exceeds 8 MiB"
+        )
+    if evidence_contains_secret(result) or redact_evidence(result) != result:
+        raise OrchestrationResultError(
+            "domain consumption contains redaction-triggering sensitive material"
+        )
+    return result
+
+
+def parse_and_validate_domain_consumption(
+    text: str,
+    *,
+    expected_root_job_id: str,
+    expected_domain_job_id: str,
+    expected_domain_attempt_id: str,
+    expected_projection_digest: str,
+) -> dict[str, Any]:
+    """Parse and validate a domain consumption observation from canonical JSON text."""
+    parsed = parse_canonical_json(text)
+    validated = validate_domain_consumption(
+        parsed,
+        expected_root_job_id=expected_root_job_id,
+        expected_domain_job_id=expected_domain_job_id,
+        expected_domain_attempt_id=expected_domain_attempt_id,
+        expected_projection_digest=expected_projection_digest,
+    )
+    if canonical_bytes(validated) != text.encode("utf-8"):
+        raise OrchestrationResultError(
+            "validated domain consumption did not round-trip byte-for-byte"
+        )
+    return validated
+
+
+def domain_consumption_envelope_schema(
+    *,
+    expected_job_id: str,
+    expected_run_id: str,
+    expected_worker_id: str,
+    expected_root_job_id: str,
+    expected_domain_job_id: str,
+    expected_domain_attempt_id: str,
+    expected_projection_digest: str,
+) -> dict[str, Any]:
+    """Return the closed executable envelope schema for domain consumption.
+
+    The outer envelope closes over the full orchestration result shape with
+    role='plan' and a role_result that is the domain consumption body.
+    Expected job MUST equal expected domain_job; expected run MUST equal
+    expected domain_attempt.  The outer wire has no root field — root identity
+    lives in role_result.root_job_id.
+    """
+    _identifier(expected_job_id, name="expected_job_id")
+    _identifier(expected_run_id, name="expected_run_id")
+    _identifier(expected_worker_id, name="expected_worker_id")
+    _identifier(expected_root_job_id, name="expected_root_job_id")
+    _identifier(expected_domain_job_id, name="expected_domain_job_id")
+    _identifier(expected_domain_attempt_id, name="expected_domain_attempt_id")
+    _digest(expected_projection_digest, name="expected_projection_digest")
+    if expected_job_id != expected_domain_job_id:
+        raise OrchestrationResultError("expected_job_id must equal expected_domain_job_id")
+    if expected_run_id != expected_domain_attempt_id:
+        raise OrchestrationResultError("expected_run_id must equal expected_domain_attempt_id")
+
+    inner = _schema_object(
+        {
+            "schema_version": {"const": DOMAIN_CONSUMPTION_SCHEMA},
+            "root_job_id": {"const": expected_root_job_id},
+            "domain_job_id": {"const": expected_domain_job_id},
+            "domain_attempt_id": {"const": expected_domain_attempt_id},
+            "consumption_projection_digest": {"const": expected_projection_digest},
+            "consumed_result": _schema_string(
+                minimum=1, maximum=MAX_CANONICAL_RESULT_BYTES
+            ),
+        }
+    )
+    envelope = _schema_object(
+        {
+            "schema_version": {"const": RESULT_SCHEMA},
+            "job_id": {"const": expected_job_id},
+            "run_id": {"const": expected_run_id},
+            "worker_id": {"const": expected_worker_id},
+            "role": {"const": "plan"},
+            "status": {"const": "COMPLETED"},
+            "role_result": inner,
+            "summary": _schema_string(),
+            "current_state": _schema_string(),
+            "next_actions": _schema_array(_schema_string(), maximum=16, unique=True),
+            "errors": _schema_array(_schema_string(), maximum=16, unique=True),
+            "validations": {"type": "array", "maxItems": 0},
+        }
+    )
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        **envelope,
+    }
+
+
+def validate_domain_consumption_envelope(
+    value: Any,
+    *,
+    expected_job_id: str,
+    expected_run_id: str,
+    expected_worker_id: str,
+    expected_root_job_id: str,
+    expected_domain_job_id: str,
+    expected_domain_attempt_id: str,
+    expected_projection_digest: str,
+) -> dict[str, Any]:
+    """Validate a domain consumption envelope with strict closed schema.
+
+    Validates the outer orchestration result envelope where role_result is
+    the domain consumption body.  Expected job MUST equal expected domain_job;
+    expected run MUST equal expected domain_attempt.  All seven expectations
+    are validated via existing typed helpers before equality checks.
+    Raises OrchestrationResultError on any mismatch.
+    """
+    # Validate all expectations are well-formed first
+    _identifier(expected_job_id, name="expected_job_id")
+    _identifier(expected_run_id, name="expected_run_id")
+    _identifier(expected_worker_id, name="expected_worker_id")
+    _identifier(expected_root_job_id, name="expected_root_job_id")
+    _identifier(expected_domain_job_id, name="expected_domain_job_id")
+    _identifier(expected_domain_attempt_id, name="expected_domain_attempt_id")
+    _digest(expected_projection_digest, name="expected_projection_digest")
+
+    if expected_job_id != expected_domain_job_id:
+        raise OrchestrationResultError("expected_job_id must equal expected_domain_job_id")
+    if expected_run_id != expected_domain_attempt_id:
+        raise OrchestrationResultError("expected_run_id must equal expected_domain_attempt_id")
+
+    raw = _closed(value, name="domain consumption envelope", keys=_ENVELOPE_KEYS)
+    if raw["schema_version"] != RESULT_SCHEMA:
+        raise OrchestrationResultError("unsupported orchestration result schema")
+    if raw["role"] != "plan":
+        raise OrchestrationResultError("domain consumption envelope requires role=plan")
+    if raw["status"] != "COMPLETED" or raw["validations"] != []:
+        raise OrchestrationResultError(
+            "completed result requires status=COMPLETED and validations=[]"
+        )
+
+    # Validate actual outer identities against expectations
+    actual_job_id = _identifier(raw["job_id"], name="job_id")
+    actual_run_id = _identifier(raw["run_id"], name="run_id")
+    actual_worker_id = _identifier(raw["worker_id"], name="worker_id")
+    if actual_job_id != expected_job_id:
+        raise OrchestrationResultError("outer job_id mismatch")
+    if actual_run_id != expected_run_id:
+        raise OrchestrationResultError("outer run_id mismatch")
+    if actual_worker_id != expected_worker_id:
+        raise OrchestrationResultError("outer worker_id mismatch")
+
+    # Validate inner domain consumption body
+    inner_raw = _closed(
+        raw["role_result"],
+        name="role_result",
+        keys={
+            "schema_version",
+            "root_job_id",
+            "domain_job_id",
+            "domain_attempt_id",
+            "consumption_projection_digest",
+            "consumed_result",
+        },
+    )
+    if inner_raw["schema_version"] != DOMAIN_CONSUMPTION_SCHEMA:
+        raise OrchestrationResultError("unsupported domain consumption schema")
+
+    actual_root_job_id = _identifier(inner_raw["root_job_id"], name="root_job_id")
+    actual_domain_job_id = _identifier(inner_raw["domain_job_id"], name="domain_job_id")
+    actual_domain_attempt_id = _identifier(
+        inner_raw["domain_attempt_id"], name="domain_attempt_id"
+    )
+    actual_projection_digest = _digest(
+        inner_raw["consumption_projection_digest"], name="consumption_projection_digest"
+    )
+
+    if actual_root_job_id != expected_root_job_id:
+        raise OrchestrationResultError("domain consumption root_job_id mismatch")
+    if actual_domain_job_id != expected_domain_job_id:
+        raise OrchestrationResultError("domain consumption domain_job_id mismatch")
+    if actual_domain_attempt_id != expected_domain_attempt_id:
+        raise OrchestrationResultError("domain consumption domain_attempt_id mismatch")
+    if actual_projection_digest != expected_projection_digest:
+        raise OrchestrationResultError("domain consumption projection_digest mismatch")
+
+    consumed_result = inner_raw["consumed_result"]
+    if not isinstance(consumed_result, str):
+        raise OrchestrationResultError("domain consumption consumed_result must be a string")
+    if not consumed_result:
+        raise OrchestrationResultError("domain consumption consumed_result must be non-empty")
+    try:
+        consumed_result.encode("utf-8")
+    except UnicodeEncodeError:
+        raise OrchestrationResultError("domain consumption consumed_result is not UTF-8")
+
+    # Validate outer arrays
+    errors = [
+        _text(item, name=f"errors[{index}]")
+        for index, item in enumerate(
+            _array(raw["errors"], name="errors", maximum=16)
+        )
+    ]
+    if len(errors) != len(set(errors)):
+        raise OrchestrationResultError("errors contains a duplicate item")
+
+    next_actions = [
+        _text(item, name=f"next_actions[{index}]")
+        for index, item in enumerate(
+            _array(raw["next_actions"], name="next_actions", maximum=16)
+        )
+    ]
+    if len(next_actions) != len(set(next_actions)):
+        raise OrchestrationResultError("next_actions contains a duplicate item")
+
+    result = {
+        "schema_version": RESULT_SCHEMA,
+        "job_id": expected_job_id,
+        "run_id": expected_run_id,
+        "worker_id": expected_worker_id,
+        "role": "plan",
+        "status": "COMPLETED",
+        "role_result": {
+            "schema_version": DOMAIN_CONSUMPTION_SCHEMA,
+            "root_job_id": expected_root_job_id,
+            "domain_job_id": expected_domain_job_id,
+            "domain_attempt_id": expected_domain_attempt_id,
+            "consumption_projection_digest": expected_projection_digest,
+            "consumed_result": consumed_result,
+        },
+        "summary": _text(raw["summary"], name="summary"),
+        "current_state": _text(raw["current_state"], name="current_state"),
+        "next_actions": next_actions,
+        "errors": errors,
+        "validations": [],
+    }
+
+    # Enforce byte limit on complete canonical body, not character count
+    encoded = canonical_bytes(result)
+    if len(encoded) > MAX_CANONICAL_RESULT_BYTES:
+        raise OrchestrationResultError("canonical result exceeds 8 MiB")
+
+    # Refuse secret material without mutation
+    if evidence_contains_secret(result) or redact_evidence(result) != result:
+        raise OrchestrationResultError(
+            "result contains redaction-triggering sensitive material"
+        )
+
+    return result
+
+
+def parse_and_validate_domain_consumption_envelope(
+    text: str,
+    *,
+    expected_job_id: str,
+    expected_run_id: str,
+    expected_worker_id: str,
+    expected_root_job_id: str,
+    expected_domain_job_id: str,
+    expected_domain_attempt_id: str,
+    expected_projection_digest: str,
+) -> dict[str, Any]:
+    """Parse and validate a domain consumption envelope from canonical JSON text."""
+    parsed = parse_canonical_json(text)
+    validated = validate_domain_consumption_envelope(
+        parsed,
+        expected_job_id=expected_job_id,
+        expected_run_id=expected_run_id,
+        expected_worker_id=expected_worker_id,
+        expected_root_job_id=expected_root_job_id,
+        expected_domain_job_id=expected_domain_job_id,
+        expected_domain_attempt_id=expected_domain_attempt_id,
+        expected_projection_digest=expected_projection_digest,
+    )
+    if canonical_bytes(validated) != text.encode("utf-8"):
+        raise OrchestrationResultError(
+            "validated domain consumption envelope did not round-trip byte-for-byte"
+        )
+    return validated
+
+
 __all__ = [
+    "DOMAIN_CONSUMPTION_SCHEMA",
+    "DOMAIN_CONSUMPTION_PROJECTION_SCHEMA",
     "GOLDEN_ROLE_SCHEMA_DIGESTS",
     "MAX_CANONICAL_RESULT_BYTES",
     "OrchestrationResultError",
@@ -990,9 +1391,15 @@ __all__ = [
     "RawRoleResultObservation",
     "canonical_bytes",
     "canonical_digest",
+    "domain_consumption_envelope_schema",
+    "domain_consumption_schema",
     "orchestration_result_schema",
+    "parse_and_validate_domain_consumption",
+    "parse_and_validate_domain_consumption_envelope",
     "parse_and_validate_envelope",
     "parse_canonical_json",
     "role_schema_digest",
+    "validate_domain_consumption",
+    "validate_domain_consumption_envelope",
     "validate_envelope",
 ]

@@ -9,6 +9,7 @@ one supplied ``AttemptLease``; it never calls a provider or mutates Job status.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from control_plane.executive_runtime import (
     AttemptLease, AttemptStatus, Runtime, StateConflict,
@@ -215,6 +216,28 @@ class ExecutiveOperatorHarnessPort:
             lease_token=self.lease_token,
         )
 
+    def begin_operator_domain_consumption_turn(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        *,
+        expected_consumption_projection_digest: str,
+    ) -> TurnRef:
+        self._require_attempt(attempt_id)
+        epoch, stored = self.runtime.operator_harness.generation_refs(
+            generation.process_generation_id
+        )
+        if stored != generation or epoch.attempt_id != attempt_id:
+            raise StateConflict("domain consumption generation belongs to another identity")
+        return self.runtime.operator_harness.reserve_domain_consumption_turn(
+            generation=generation,
+            operation_id=operation_id,
+            fence_generation=self.fence_generation,
+            lease_token=self.lease_token,
+            expected_consumption_projection_digest=expected_consumption_projection_digest,
+        )
+
     def apply_operator_turn(
         self,
         attempt_id: str,
@@ -287,6 +310,52 @@ class ExecutiveOperatorHarnessPort:
         self.runtime.operator_harness.seal_orchestration_role_result(
             turn=turn,
             observation=observation,
+            fence_generation=self.fence_generation,
+            lease_token=self.lease_token,
+        )
+
+    def seal_operator_domain_consumption(
+        self,
+        attempt_id: str,
+        turn: TurnRef,
+        observation: RawRoleResultObservation,
+    ) -> dict[str, Any]:
+        """Narrow bridge to ``JobRegistry.seal_cycle_domain_consumption``.
+
+        The port only resolves the actual leased domain Job to its root and
+        forwards the exact deterministic
+        ``coo-cycle:<root>:domain-consumption-seal:<attempt>:<turn>`` command
+        with the bound AttemptLease fence/lease token and the typed raw
+        observation.  Runtime alone revalidates the current domain, principal,
+        host, whole pins, writer, full FINAL/INTENT/dispatch/APPLIED/candidate
+        / current reviewed bodies and root inventory.  No duplicate plan seal,
+        no new credit, no completion, no stop/release, no token exposure and
+        no homemade authority predicate.
+        """
+        self._require_attempt(attempt_id)
+        if type(turn) is not TurnRef:
+            raise StateConflict(
+                "domain consumption seal requires typed later TurnRef"
+            )
+        if turn.attempt_id != attempt_id:
+            raise StateConflict(
+                "domain consumption TurnRef attempt is outside the lease"
+            )
+        job = self.runtime.jobs.get_job(self.lease.attempt.job_id)
+        if job is None:
+            raise StateConflict("domain consumption seal lost its domain Job")
+        root_token = str(job.root_job_id or "").strip()
+        if not root_token:
+            raise StateConflict("domain Job has no root")
+        return self.runtime.jobs.seal_cycle_domain_consumption(
+            root_token,
+            domain_attempt_id=attempt_id,
+            observation=observation,
+            command_id=(
+                f"coo-cycle:{root_token}:domain-consumption-seal:"
+                f"{turn.attempt_id}:{turn.turn_id}"
+            ),
+            turn=turn,
             fence_generation=self.fence_generation,
             lease_token=self.lease_token,
         )

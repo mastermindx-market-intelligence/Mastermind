@@ -194,6 +194,43 @@ def _expected_binding_id(attempt_id: str, epoch_id: str) -> str:
     return "bind-" + hashlib.sha256(f"{attempt_id}:{epoch_id}".encode("utf-8")).hexdigest()[:40]
 
 
+def _quote_identifier(name: str) -> str:
+    """Quote an identifier safely for embedding in a SQL statement."""
+
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _full_table_snapshot(connection, table: str) -> tuple:
+    """Deterministic full-row snapshot for a table — both WITH and WITHOUT ROWID.
+
+    ``ORDER BY rowid`` is not legal on a WITHOUT ROWID table.  Order by every
+    declared column instead, so SQLite handles NULL/blob/mixed-type ordering
+    rather than Python tuple comparison.  The column list comes from
+    ``PRAGMA table_info``, which is the only authoritative source of column
+    order. SQLite supplies the comparison rules for every stored value.
+    """
+
+    quoted_table = _quote_identifier(table)
+    columns = tuple(
+        str(info["name"])
+        for info in connection.execute(f"PRAGMA table_info({quoted_table})")
+    )
+    if not columns:
+        return tuple(
+            tuple(row)
+            for row in connection.execute(f"SELECT * FROM {quoted_table}")
+        )
+    order_clause = " ORDER BY " + ",".join(
+        f"{_quote_identifier(column)}" for column in columns
+    )
+    return tuple(
+        tuple(row)
+        for row in connection.execute(
+            f"SELECT * FROM {quoted_table}{order_clause}"
+        )
+    )
+
+
 def _sqlite_snapshot(runtime: Runtime):
     with runtime.store.read() as connection:
         tables = tuple(
@@ -211,11 +248,72 @@ def _sqlite_snapshot(runtime: Runtime):
         contents = tuple(
             (
                 table,
-                tuple(tuple(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY rowid")),
+                _full_table_snapshot(connection, table),
             )
             for table in tables
         )
     return schema, contents
+
+
+def test_full_snapshot_covers_populated_without_rowid_ledger_stably(tmp_path):
+    """A populated WITHOUT ROWID table is read in full, stably, and mutation is visible."""
+    runtime = Runtime.at(tmp_path)
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            """
+            CREATE TABLE ledger_capture (
+                ledger_id TEXT NOT NULL PRIMARY KEY,
+                ordinal INTEGER NOT NULL,
+                payload BLOB,
+                note TEXT
+            ) WITHOUT ROWID
+            """
+        )
+        connection.execute(
+            "INSERT INTO ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-1", 1, b"\x00\x01\x02", "first"),
+        )
+        connection.execute(
+            "INSERT INTO ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-2", 2, None, "second"),
+        )
+        connection.execute(
+            "INSERT INTO ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-3", 3, b"\xff", "third"),
+        )
+
+    schema_before, contents_before = _sqlite_snapshot(runtime)
+    ledger_rows = next(
+        rows for table, rows in contents_before if table == "ledger_capture"
+    )
+    assert ledger_rows, "WITHOUT ROWID table came back empty"
+    assert any(row[0] == "row-1" for row in ledger_rows)
+    assert any(row[0] == "row-2" for row in ledger_rows)
+    assert any(row[0] == "row-3" for row in ledger_rows)
+    blob_value = next(
+        row[2] for row in ledger_rows if row[0] == "row-3"
+    )
+    assert blob_value == b"\xff"
+    null_value = next(
+        row[2] for row in ledger_rows if row[0] == "row-2"
+    )
+    assert null_value is None
+
+    schema_again, contents_again = _sqlite_snapshot(runtime)
+    assert (schema_before, contents_before) == (schema_again, contents_again)
+
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "INSERT INTO ledger_capture VALUES (?, ?, ?, ?)",
+            ("row-4", 4, b"\x01", "fourth"),
+        )
+
+    _, contents_after_mutation = _sqlite_snapshot(runtime)
+    ledger_after = next(
+        rows for table, rows in contents_after_mutation if table == "ledger_capture"
+    )
+    assert len(ledger_after) == len(ledger_rows) + 1
+    assert any(row[0] == "row-4" for row in ledger_after)
 
 
 def test_projects_exact_current_admitted_ohf_binding_without_a_write(tmp_path):

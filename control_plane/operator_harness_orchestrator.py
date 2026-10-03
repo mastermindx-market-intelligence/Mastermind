@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
-from typing import Callable, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 from control_plane.operator_harness_contract import (
     CandidateResult,
@@ -77,6 +77,11 @@ class OperatorStartRefused(OperatorLaunchRefused):
 class RuntimePort(Protocol):
     """Narrow adapter over Executive TX APIs; not a second lifecycle contract."""
 
+    @property
+    def attempt_id(self) -> str:
+        """Exact Attempt bound by this port; no receipt or provider authority."""
+        ...
+
     def seal_operator_attempt(
         self, attempt_id: str, requested: RequestedExecutionProfile
     ) -> None: ...
@@ -116,6 +121,15 @@ class RuntimePort(Protocol):
         operation_id: OperationId,
     ) -> TurnRef: ...
 
+    def begin_operator_domain_consumption_turn(
+        self,
+        attempt_id: str,
+        generation: ProcessGenerationRef,
+        operation_id: OperationId,
+        *,
+        expected_consumption_projection_digest: str,
+    ) -> TurnRef: ...
+
     def apply_operator_turn(
         self,
         attempt_id: str,
@@ -146,6 +160,13 @@ class RuntimePort(Protocol):
         turn: TurnRef,
         observation: RawRoleResultObservation,
     ) -> None: ...
+
+    def seal_operator_domain_consumption(
+        self,
+        attempt_id: str,
+        turn: TurnRef,
+        observation: RawRoleResultObservation,
+    ) -> dict[str, Any]: ...
 
     def begin_operator_generation_operation(
         self,
@@ -702,6 +723,302 @@ class OperatorHarnessOrchestrator:
             events=tuple(events),
             cursor=next_cursor,
             candidate=candidate,
+        )
+
+    def run_domain_consumption_turn(
+        self,
+        session: OperatorSessionReceipt,
+        *,
+        operation_id: OperationId,
+        expected_consumption_projection_digest: str,
+        cursor: EventCursor | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> OperatorTurnReceipt:
+        """Dedicated FINAL-only domain consumption turn.
+
+        Mirrors :meth:`run_turn` but goes through the dedicated
+        ``begin_operator_domain_consumption_turn`` RuntimePort bridge so the
+        current Runtime's FINAL-only domain consumption reservation is the
+        sole authority for the same Attempt / epoch / generation / writer /
+        ALLOW launch / current-domain admission and / consumption projection
+        digest.  No ordinary ``begin_operator_turn``, no fresh Attempt /
+        epoch / session / writer, no root grant, no second ordinary
+        orchestration plan seal, no ``seal_operator_role_result`` /
+        complete-Job path.
+        """
+
+        self._assert_replayable(operation_id)
+        bounded_timeout = float(timeout_seconds)
+        if (
+            not math.isfinite(bounded_timeout)
+            or bounded_timeout <= 0
+            or bounded_timeout > 300.0
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "turn timeout must be finite and within (0, 300] seconds"
+            )
+        if session.launch.decision is not LaunchDecision.ALLOW:
+            raise OperatorLaunchRefused(
+                "domain consumption turn refused by observed launch comparison: "
+                + session.launch.decision.value
+            )
+        if not isinstance(expected_consumption_projection_digest, str) or len(
+            expected_consumption_projection_digest
+        ) != 64 or any(
+            char not in "0123456789abcdef" for char in expected_consumption_projection_digest
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "domain consumption projection digest must be a 64-char hex"
+            )
+        if (
+            session.epoch.attempt_id != session.attempt_id
+            or session.epoch.session_epoch_id != session.generation.session_epoch_id
+            or session.epoch.worker_id != session.generation.worker_id
+            or (cursor is not None and (
+                cursor.attempt_id != session.attempt_id
+                or cursor.session_epoch_id != session.epoch.session_epoch_id
+                or cursor.process_generation_id != session.generation.process_generation_id
+            ))
+        ):
+            raise OperatorHarnessOrchestrationError("domain consumption session/cursor identity mismatch")
+        turn = self.runtime.begin_operator_domain_consumption_turn(
+            session.attempt_id,
+            session.generation,
+            operation_id,
+            expected_consumption_projection_digest=expected_consumption_projection_digest,
+        )
+        if cursor is not None and cursor.turn_id not in {None, turn.turn_id}:
+            raise OperatorHarnessOrchestrationError("domain consumption cursor turn mismatch")
+        current = EventCursor(
+            attempt_id=session.attempt_id,
+            session_epoch_id=session.epoch.session_epoch_id,
+            process_generation_id=session.generation.process_generation_id,
+            local_sequence=0 if cursor is None else cursor.local_sequence,
+            turn_id=turn.turn_id,
+            provider_replay_cursor=None if cursor is None else cursor.provider_replay_cursor,
+        )
+        self.runtime.extend_operator_lease(session.attempt_id, 90)
+        if not self.runtime.commit_operator_provider_dispatch(
+            session.attempt_id, operation_id, "begin_turn"
+        ):
+            self._effect_unknown.add(operation_id.command_id)
+            raise OperatorEffectUnknown("turn dispatch was previously committed")
+        try:
+            started = self.adapter.begin_turn(
+                operation_id=operation_id,
+                turn=turn,
+                generation=session.generation,
+                launch=session.launch,
+            )
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="begin_turn",
+                error=exc,
+            )
+            raise OperatorEffectUnknown(
+                "begin_turn external effect is unknown"
+            ) from exc
+        if not started.acknowledged:
+            exc = OperatorEffectUnknown("provider did not acknowledge begin_turn")
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="begin_turn_ack",
+                error=exc,
+            )
+            raise OperatorEffectUnknown(
+                "provider did not acknowledge begin_turn"
+            ) from exc
+        try:
+            self.runtime.apply_operator_turn(session.attempt_id, operation_id, started)
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="bind_turn_result",
+                error=exc,
+            )
+            raise OperatorEffectUnknown("turn result could not be bound") from exc
+
+        self.runtime.extend_operator_lease(
+            session.attempt_id, int(math.ceil(bounded_timeout)) + 30
+        )
+        try:
+            events, next_cursor = self.adapter.read_events(
+                current, timeout_seconds=bounded_timeout
+            )
+            candidate = self.adapter.collect_candidate_result(turn)
+            if candidate.complete_job_permitted:
+                raise OperatorHarnessOrchestrationError(
+                    "adapter candidate attempted to claim Executive completion"
+                )
+            self.runtime.finish_operator_candidate(
+                session.attempt_id, turn, candidate, events, next_cursor
+            )
+        except Exception as exc:
+            self._mark_effect_unknown(
+                attempt_id=session.attempt_id,
+                operation_id=operation_id,
+                phase="collect_turn_result",
+                error=exc,
+            )
+            raise OperatorEffectUnknown("turn result effect is unknown") from exc
+        return OperatorTurnReceipt(
+            attempt_id=session.attempt_id,
+            turn=turn,
+            start=started,
+            events=tuple(events),
+            cursor=next_cursor,
+            candidate=candidate,
+        )
+
+    def seal_domain_consumption_result(
+        self,
+        session: OperatorSessionReceipt,
+        turn_receipt: OperatorTurnReceipt,
+    ) -> dict[str, Any]:
+        """Typed evidence consumer for one already-dispatched domain-consumption turn.
+
+        This method is a pure evidence consumer, **not** a provider dispatch.
+        It must not call ``_assert_replayable`` (which would reject the REQUIRED
+        existing APPLIED turn) and it must not replay ``begin_turn``.  The
+        supplied ``OperatorTurnReceipt`` is the one already produced by
+        ``run_domain_consumption_turn`` and committed by the durable Runtime.
+
+        Replay-safe: re-observing the same cached raw result on a fresh
+        orchestrator returns the identical immutable Runtime receipt without
+        any ``begin_turn`` / new FINAL credit / durable mutation.  A failed
+        local seal never resets APPLIED / UNKNOWN evidence or retries the
+        provider.  Runtime, not this orchestrator, owns the closed validation
+        that revalidates durable native / candidate / FINAL evidence before
+        sealing.
+        """
+
+        if type(session) is not OperatorSessionReceipt:
+            raise OperatorHarnessOrchestrationError(
+                "supplied session is not a typed OperatorSessionReceipt"
+            )
+        if type(turn_receipt) is not OperatorTurnReceipt:
+            raise OperatorHarnessOrchestrationError(
+                "supplied turn receipt is not a typed OperatorTurnReceipt"
+            )
+        if any(type(getattr(owner, field, None)) is not expected for owner, field, expected in (
+            (session, "epoch", SessionEpochRef),
+            (session, "generation", ProcessGenerationRef),
+            (session, "observation", SessionStartObservation),
+            (session, "observed", ObservedHarnessAttestation),
+            (session, "launch", LaunchComparison),
+            (session.launch, "requested", RequestedExecutionProfile),
+            (session.launch, "observed", ObservedHarnessAttestation),
+            (turn_receipt, "turn", TurnRef),
+            (turn_receipt, "start", TurnStartObservation),
+            (turn_receipt, "cursor", EventCursor),
+            (turn_receipt, "candidate", CandidateResult),
+        )):
+            raise OperatorHarnessOrchestrationError("domain consumption receipt contains untyped identity")
+        bound_attempt = getattr(self.runtime, "attempt_id", None)
+        if (type(bound_attempt) is not str or not bound_attempt
+                or bound_attempt != bound_attempt.strip()
+                or type(session.attempt_id) is not str
+                or session.attempt_id != bound_attempt):
+            raise OperatorHarnessOrchestrationError("domain consumption session is outside the bound RuntimePort Attempt")
+        identities = (
+            session.epoch.attempt_id, session.epoch.session_epoch_id, session.epoch.worker_id,
+            session.generation.process_generation_id, session.generation.session_epoch_id,
+            session.generation.worker_id, session.launch.requested.worker_id,
+            turn_receipt.attempt_id, turn_receipt.turn.attempt_id, turn_receipt.turn.turn_id,
+            turn_receipt.turn.session_epoch_id, turn_receipt.turn.process_generation_id,
+            turn_receipt.cursor.attempt_id, turn_receipt.cursor.session_epoch_id,
+            turn_receipt.cursor.process_generation_id, turn_receipt.cursor.turn_id,
+            turn_receipt.candidate.attempt_id, turn_receipt.candidate.session_epoch_id,
+            turn_receipt.candidate.process_generation_id,
+        )
+        if (any(type(value) is not str or not value or value != value.strip() for value in identities)
+                or type(session.epoch.epoch_number) is not int or session.epoch.epoch_number != 1
+                or type(session.generation.generation_number) is not int
+                or session.generation.generation_number != 1):
+            raise OperatorHarnessOrchestrationError("domain consumption receipt identity is not canonical initial G1")
+        if session.launch.decision is not LaunchDecision.ALLOW:
+            raise OperatorLaunchRefused(
+                "domain consumption seal refused by observed launch comparison: "
+                + session.launch.decision.value
+            )
+        if (
+            session.attempt_id != turn_receipt.attempt_id
+            or turn_receipt.attempt_id != turn_receipt.turn.attempt_id
+            or session.epoch.attempt_id != session.attempt_id
+            or session.generation.process_generation_id
+            != turn_receipt.turn.process_generation_id
+            or session.epoch.session_epoch_id != turn_receipt.turn.session_epoch_id
+            or session.generation.session_epoch_id
+            != turn_receipt.turn.session_epoch_id
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "domain consumption session/receipt identity mismatch"
+            )
+        if session.launch != compare_launch(session.launch.requested, session.observed):
+            raise OperatorHarnessOrchestrationError("domain consumption launch comparison is not derivable")
+        turn = turn_receipt.turn
+        if (
+            session.epoch.worker_id != session.generation.worker_id
+            or session.generation.worker_id != session.launch.requested.worker_id
+            or turn_receipt.start.acknowledged is not True
+            or not isinstance(turn_receipt.start.provider_native_turn_id, str)
+            or not turn_receipt.start.provider_native_turn_id.strip()
+            or type(turn_receipt.cursor.local_sequence) is not int
+            or turn_receipt.cursor.local_sequence < 0
+            or turn_receipt.cursor.attempt_id != turn.attempt_id
+            or turn_receipt.cursor.session_epoch_id != turn.session_epoch_id
+            or turn_receipt.cursor.process_generation_id != turn.process_generation_id
+            or turn_receipt.cursor.turn_id != turn.turn_id
+            or turn_receipt.candidate.attempt_id != turn.attempt_id
+            or turn_receipt.candidate.session_epoch_id != turn.session_epoch_id
+            or turn_receipt.candidate.process_generation_id != turn.process_generation_id
+            or turn_receipt.candidate.complete_job_permitted is not False
+            or type(turn_receipt.events) is not tuple
+            or any(type(event) is not NormalizedEvent or (
+                event.attempt_id, event.session_epoch_id, event.process_generation_id
+            ) != (turn.attempt_id, turn.session_epoch_id, turn.process_generation_id)
+                or event.turn_id not in {None, turn.turn_id}
+                for event in turn_receipt.events)
+        ):
+            raise OperatorHarnessOrchestrationError("domain consumption session/receipt identity mismatch")
+        supplied_provider_session = session.observation.provider_session_id
+        if (type(supplied_provider_session) is not str or not supplied_provider_session
+                or supplied_provider_session != supplied_provider_session.strip()):
+            raise OperatorHarnessOrchestrationError(
+                "supplied session has no provider session"
+            )
+        if not isinstance(self.adapter, RawRoleResultAdapter):
+            raise OperatorHarnessOrchestrationError(
+                "orchestration adapter lacks the raw role-result extension"
+            )
+        raw_observation = self.adapter.observe_raw_role_result(turn_receipt.turn)
+        if type(raw_observation) is not RawRoleResultObservation:
+            raise OperatorHarnessOrchestrationError(
+                "orchestration adapter returned untyped raw role-result"
+            )
+        if raw_observation.provider_session_id != supplied_provider_session:
+            raise OperatorHarnessOrchestrationError(
+                "raw observation provider session does not match supplied session"
+            )
+        if (
+            raw_observation.attempt_id != turn_receipt.turn.attempt_id
+            or raw_observation.session_epoch_id
+            != turn_receipt.turn.session_epoch_id
+            or raw_observation.process_generation_id
+            != turn_receipt.turn.process_generation_id
+            or raw_observation.turn_id != turn_receipt.turn.turn_id
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "raw observation identity is outside the supplied turn"
+            )
+        if raw_observation.provider_native_turn_id != turn_receipt.start.provider_native_turn_id:
+            raise OperatorHarnessOrchestrationError("raw observation native identity differs from supplied receipt")
+        return self.runtime.seal_operator_domain_consumption(
+            session.attempt_id, turn_receipt.turn, raw_observation
         )
 
     def graceful_stop(

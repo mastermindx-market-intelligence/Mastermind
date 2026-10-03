@@ -1187,7 +1187,7 @@ def test_drifted_context_pins_refuse_fresh_work(tmp_path, monkeypatch):
         "CooCyclePolicy",
         _SyntheticCooPolicy,
     )
-    refuse_handoff(drifted_store("coo"), "COO plan admission identity/digest is invalid")
+    refuse_handoff(drifted_store("coo"), "finite current COO policy pin differs")
     monkeypatch.undo()
 
 

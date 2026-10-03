@@ -12,6 +12,9 @@ import json
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
+from control_plane.executive_agent_capabilities import (
+    COO_DOMAIN_EXECUTION_PROFILE,
+)
 from control_plane.executive_authority import (
     AuthorityPolicyError,
     ExecutiveAuthorityPolicy,
@@ -37,6 +40,7 @@ from control_plane.executive_runtime import (
     _current_orchestration_tree_material,
     _current_orchestration_tree_material_for_dispatch,
     _review_attempt_is_independent,
+    _admitted_coo_policy,
     _validated_aggregation_handoff,
     _validated_plan_admission,
     _validated_role_completion_material,
@@ -202,6 +206,28 @@ class CooCycle:
             and job.supersedes_job_id is None
         )
 
+    @staticmethod
+    def _is_admitted_coo_domain(job: Job, root_id: str) -> bool:
+        """Identify the admitted depth-1 COO-domain child by positive evidence.
+
+        A flat planner shares the plan role but lacks the canonical domain
+        execution profile, delegation digest, and current Attempt.  The
+        Runtime projection remains the authority before any dispatch.
+        """
+
+        constraints = job.constraints
+        if not isinstance(constraints, Mapping):
+            return False
+        if job.parent_job_id != root_id or job.root_job_id != root_id:
+            return False
+        if job.depth != 1 or job.orchestration_role != "plan":
+            return False
+        if constraints.get("execution_profile_id") != COO_DOMAIN_EXECUTION_PROFILE:
+            return False
+        return bool(
+            constraints.get("delegation_scope_digest") and job.current_attempt_id
+        )
+
     def _active_attempt_is_current_and_live(self, job: Job) -> bool:
         """Fail closed unless Runtime still owns an exact unexpired active Attempt."""
 
@@ -286,7 +312,7 @@ class CooCycle:
         return True
 
     def _dispatch_queued(
-        self, root_id: str, selected: Job
+        self, root_id: str, selected: Job, *, policy_sha: str
     ) -> CooCycleOutcome | None:
         command = (
             f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
@@ -316,7 +342,10 @@ class CooCycle:
                 )
             if self._uses_inert_dispatcher:
                 return self._block(
-                    root_id, selected.job_id, "exact_dispatch_unavailable"
+                    root_id,
+                    selected.job_id,
+                    "exact_dispatch_unavailable",
+                    policy_sha=policy_sha,
                 )
             return None
         return self._outcome(
@@ -330,6 +359,7 @@ class CooCycle:
         reason: str,
         *,
         evidence: dict[str, Any] | None = None,
+        policy_sha: str | None = None,
     ) -> CooCycleOutcome:
         if reason not in COO_CYCLE_BLOCK_REASONS:
             reason = "state_conflict"
@@ -340,7 +370,7 @@ class CooCycle:
             reason=reason,
             command_id=command,
             evidence=evidence,
-            policy_sha=EXPECTED_POLICY_SHA256,
+            policy_sha=policy_sha,
         )
         return self._outcome(root, "BLOCKED", selected, command, receipt)
 
@@ -761,13 +791,55 @@ class CooCycle:
             )
 
         try:
-            policy = CooCyclePolicy.load()
-        except CooCyclePolicyError as exc:
+            with self.runtime.store.read() as connection:
+                root_row = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (root_id,)
+                ).fetchone()
+                if root_row is None:
+                    raise StateConflict("root job is absent")
+                admitted_event = connection.execute(
+                    """
+                    SELECT payload_json FROM events
+                    WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?
+                    ORDER BY event_id
+                    """,
+                    (root_id,),
+                ).fetchall()
+                if len(admitted_event) == 0:
+                    post_admission_child = connection.execute(
+                        """
+                        SELECT 1 FROM jobs
+                        WHERE root_job_id=? AND orchestration_role <> 'plan'
+                          AND job_id<>? LIMIT 1
+                        """,
+                        (root_id, root_id),
+                    ).fetchone()
+                    if post_admission_child is not None:
+                        raise StateConflict(
+                            "admitted COO root lost its plan admission"
+                        )
+                    policy = CooCyclePolicy.load()
+                elif len(admitted_event) != 1:
+                    raise StateConflict(
+                        "COO cycle requires exactly one root plan admission"
+                    )
+                else:
+                    admission_payload = json.loads(
+                        str(admitted_event[0]["payload_json"])
+                    )
+                    if not isinstance(admission_payload, dict):
+                        raise StateConflict(
+                            "COO plan admission is not the closed wire"
+                        )
+                    policy = _admitted_coo_policy(admission_payload)
+                policy_sha = policy.policy_sha256
+        except (StateConflict, CooCyclePolicyError) as exc:
             return self._block(
                 root_id,
                 root_id,
                 "invalid_policy",
                 evidence={"error_type": type(exc).__name__},
+                policy_sha=EXPECTED_POLICY_SHA256,
             )
 
         existing_block = self.runtime.jobs.validated_cycle_block(root_id)
@@ -878,11 +950,28 @@ class CooCycle:
             planner = children[0]
             planner_provenance = planner.orchestration_provenance
             interactive_profile_id = planner.constraints.get("execution_profile_id")
-            expected_create_command = (
-                f"coo-cycle:{root_id}:create-interactive:0"
-                if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE
-                else f"coo-cycle:{root_id}:create-planner:0"
+            domain_profile_id = planner.constraints.get("execution_profile_id")
+            root_operator_profile_id = root.constraints.get(
+                "operator_execution_profile_id"
             )
+            if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE:
+                expected_create_command = (
+                    f"coo-cycle:{root_id}:create-interactive:0"
+                )
+            elif domain_profile_id == COO_DOMAIN_EXECUTION_PROFILE:
+                expected_create_command = (
+                    f"coo-cycle:{root_id}:create-domain:0"
+                )
+            else:
+                expected_create_command = (
+                    f"coo-cycle:{root_id}:create-planner:0"
+                )
+            if (
+                domain_profile_id == COO_DOMAIN_EXECUTION_PROFILE
+            ) != (
+                root_operator_profile_id == COO_DOMAIN_EXECUTION_PROFILE
+            ):
+                return self._block(root_id, planner.job_id, "lineage_invalid")
             if (
                 planner.orchestration_role != "plan"
                 or planner.parent_job_id != root_id
@@ -937,7 +1026,7 @@ class CooCycle:
                     root_id,
                     selected_job_id=selected.job_id,
                     expectation=expectation,
-                    policy_sha=EXPECTED_POLICY_SHA256,
+                    policy_sha=policy.policy_sha256,
                 )
             except StateConflict as exc:
                 return self._outcome(
@@ -1188,6 +1277,25 @@ class CooCycle:
 
         # 5. Create exactly the sole planner.
         if not children and not admission_events:
+            operator_profile_id = root.constraints.get(
+                "operator_execution_profile_id"
+            )
+            if operator_profile_id == COO_DOMAIN_EXECUTION_PROFILE:
+                domain_command_id = f"coo-cycle:{root_id}:create-domain:0"
+                try:
+                    domain = self.runtime.jobs.create_cycle_domain(
+                        root_id,
+                        command_id=domain_command_id,
+                    )
+                except StateConflict as exc:
+                    return self._block(root_id, root_id, _classify_invalid(exc))
+                return self._outcome(
+                    root_id,
+                    "DOMAIN_CREATED",
+                    domain.job_id,
+                    domain_command_id,
+                    domain,
+                )
             try:
                 planner = self.runtime.jobs.create_cycle_planner(
                     root_id,
@@ -1206,7 +1314,10 @@ class CooCycle:
         # 6. Service one bounded ready sibling only when every active child is
         # exact, lease-live, read-only work from the same sealed plan.  Any stale
         # Attempt, review/repair activity, write authority, or source-custody risk
-        # preserves reconciliation-first behavior.
+        # preserves reconciliation-first behavior.  An admitted depth-1 COO
+        # domain (CHECKPOINTED, waiting for consumption) is positively
+        # identified by root/parent/profile/delegation evidence and is filtered
+        # out before the readiness probe so it never poisons the sibling check.
         active = sorted(
             [
                 job
@@ -1219,25 +1330,36 @@ class CooCycle:
             [job for job in children if job.status == JobStatus.QUEUED],
             key=lambda job: _job_sort_key(job, ordinals),
         )
+        work_active = [
+            job for job in active if not self._is_admitted_coo_domain(job, root_id)
+        ]
         if (
-            active
+            work_active
             and queued
             and plan_body is not None
-            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
-            and self._ready_frontier_open(active, queued, current_by_step)
+            and plan_body["schema_version"] in {
+                "mastermind.execution_plan/v3",
+                "mastermind.execution_plan/v4",
+            }
+            and self._ready_frontier_open(work_active, queued, current_by_step)
         ):
             for candidate in queued:
-                if not self._ready_frontier_candidate(candidate, active):
+                if not self._ready_frontier_candidate(candidate, work_active):
                     continue
-                outcome = self._dispatch_queued(root_id, candidate)
+                outcome = self._dispatch_queued(
+                    root_id, candidate, policy_sha=policy.policy_sha256
+                )
                 if outcome is not None:
                     return outcome
 
         # 7. Reconcile an active exact dispatch before any coupled/new work.
         # Replaying the original command resumes or returns the same Attempt;
         # it never claims a replacement or another Job.
-        if active:
-            selected = active[0]
+        non_plan_active = [
+            job for job in active if not self._is_admitted_coo_domain(job, root_id)
+        ]
+        if non_plan_active:
+            selected = non_plan_active[0]
             if selected.attempt_count < 1 or not selected.current_attempt_id:
                 return self._block(root_id, selected.job_id, "state_conflict")
             allowed, decision = self._finite_incumbent_allowed(gate, root_id, selected)
@@ -1263,7 +1385,9 @@ class CooCycle:
         if queued:
             unavailable: list[str] = []
             for candidate in queued:
-                outcome = self._dispatch_queued(root_id, candidate)
+                outcome = self._dispatch_queued(
+                    root_id, candidate, policy_sha=policy.policy_sha256
+                )
                 if outcome is not None:
                     return outcome
                 unavailable.append(candidate.job_id)
@@ -1291,7 +1415,10 @@ class CooCycle:
             if len(planners) != 1 or len(children) != 1:
                 return self._block(root_id, root_id, "unexpected_pre_admission_child")
             planner = planners[0]
-            if planner.status == JobStatus.COMPLETED and planner.current_attempt_id:
+            if (
+                planner.status in {JobStatus.COMPLETED, JobStatus.CHECKPOINTED}
+                and planner.current_attempt_id
+            ):
                 command = f"coo-cycle:{root_id}:admit-plan:{planner.current_attempt_id}"
                 try:
                     members = self.runtime.jobs.admit_cycle_plan(root_id, command_id=command)
@@ -1318,12 +1445,78 @@ class CooCycle:
                 if current_job.status == JobStatus.COMPLETED and not reviews:
                     missing.append(current_job)
             if missing:
-                target = sorted(missing, key=lambda job: _job_sort_key(job, ordinals))[0]
+                target = sorted(missing, key=lambda job: _job_sort_key(job, ordinals))[
+                    0
+                ]
                 command = f"coo-cycle:{root_id}:create-review:{target.job_id}:1"
                 review = self.runtime.jobs.create_cycle_review(
                     root_id, target.job_id, command_id=command
                 )
                 return self._outcome(root_id, "REVIEW_CREATED", review.job_id, command, review)
+
+        # 10b. Dispatch the settled depth-1 domain through its canonical
+        # projection once every reviewed current revision is closed.  The
+        # projection independently proves the domain and reviewed material;
+        # its digest binds the dispatch receipt to that exact material.
+        # Runtime conflicts surface rather than becoming NO_ACTION.
+        domain_candidate: Job | None = None
+        for job in children:
+            if not self._is_admitted_coo_domain(job, root_id):
+                continue
+            if job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}:
+                domain_candidate = job
+                break
+        if (
+            admission is not None
+            and domain_candidate is not None
+            and domain_candidate.current_attempt_id
+        ):
+            projection = self.runtime.jobs.project_cycle_domain_consumption(
+                root_id,
+                domain_attempt_id=str(domain_candidate.current_attempt_id),
+            )
+            allowed, decision = self._finite_incumbent_allowed(
+                gate, root_id, domain_candidate
+            )
+            decisions_for_outcome: list[FiniteReservationDecision] = []
+            if decision is not None:
+                decisions_for_outcome.append(decision)
+            if not allowed:
+                assert gate is not None
+                return self._finite_outcome(
+                    root_id,
+                    policy.policy_sha256,
+                    gate,
+                    decisions_for_outcome,
+                    settled=None,
+                )
+            command = (
+                f"coo-cycle:{root_id}:dispatch:{domain_candidate.job_id}:attempt:"
+                f"{domain_candidate.attempt_count}"
+            )
+            receipt = self.dispatcher(domain_candidate.job_id, command)
+            if receipt is None:
+                raise StateConflict(
+                    "domain consumption dispatch returned no reconcilable outcome"
+                )
+            if hasattr(receipt, "to_dict"):
+                receipt_dict = receipt.to_dict()
+            elif dataclasses.is_dataclass(receipt):
+                receipt_dict = dataclasses.asdict(receipt)
+            elif isinstance(receipt, Mapping):
+                receipt_dict = dict(receipt)
+            else:
+                receipt_dict = {"value": receipt}
+            receipt_dict["consumption_projection_digest"] = str(
+                projection["consumption_projection_digest"]
+            )
+            return self._outcome(
+                root_id,
+                "DISPATCHED",
+                domain_candidate.job_id,
+                command,
+                receipt_dict,
+            )
 
         # 11. Derived approvals flow directly to the immutable handoff mutation.
         if admission is not None and not handoff_events:

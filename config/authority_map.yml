@@ -69,17 +69,21 @@ executive_worker_policy:
 # PHASE 1F-C COO RUN-ONCE POLICY
 # --------------------------------
 # Closed, reviewed operational bounds for the inert deterministic COO cycle.
-# Runtime code accepts this exact block only. There is no environment, CLI, or
-# database override, and changing any value requires a new policy review.
+# Runtime code accepts this exact current-v2 block only. Existing v1 roots may
+# explicitly pin the preserved v1 payload/digest through the version-selection
+# API. There is no environment, CLI, or database override; changing any value
+# requires a new policy review.
 coo_cycle_policy:
-  schema_version: 1
+  schema_version: 2
   max_fan_out_per_parent: 8
-  max_depth: 1
+  max_depth: 2
   max_repair_rounds: 2
   max_review_attempts_per_job: 2
   max_children_total: 16
   max_attempts_per_orchestration_job: 2
   review_job_attempt_limit: 1
+  max_provider_work_units_per_root: 32
+  reserved_domain_consumption_units: 1
   allowed_child_cost_classes: [default, small]
 
 # FLAGS

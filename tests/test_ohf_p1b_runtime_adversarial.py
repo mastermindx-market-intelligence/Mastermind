@@ -378,6 +378,21 @@ def test_cctx0_stale_checkpoint_intent_is_refused_without_sequence_advance(tmp_p
     assert attempt is not None and attempt.checkpoint_sequence == 1
 
 
+_COO_PROVIDER_CHARGES_COLUMNS = (
+    "charge_id",
+    "root_job_id",
+    "job_id",
+    "attempt_id",
+    "worker_id",
+    "operation_id",
+    "effect_class",
+    "turn_id",
+    "reservation_identity",
+    "event_id",
+    "created_at_ms",
+)
+
+
 def test_cctx0_checkpoint_adds_no_durable_schema(tmp_path):
     from control_plane.executive_backup import _LEGACY_TABLE_COLUMNS
     from control_plane.executive_backup import _V4_ATTEMPT_COLUMNS
@@ -392,10 +407,13 @@ def test_cctx0_checkpoint_adds_no_durable_schema(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        expected_tables = set(frozen) | {"schema_migrations"}
+        expected_tables = set(frozen) | {
+            "schema_migrations",
+            "coo_provider_charges",
+        }
         assert tables == expected_tables, (
-            "Fresh installs must not add durable tables outside the frozen legacy "
-            "registry and schema_migrations."
+            "Fresh installs must carry the frozen legacy registry, "
+            "schema_migrations, and the v6 coo_provider_charges ledger."
         )
         for table in ("attempts", "jobs"):
             columns = tuple(
@@ -407,7 +425,18 @@ def test_cctx0_checkpoint_adds_no_durable_schema(tmp_path):
             else:
                 expected = set(frozen[table]) | set(_V4_JOB_COLUMNS)
             assert set(columns) == expected
+        coo_columns = tuple(
+            str(row["name"])
+            for row in connection.execute(
+                'PRAGMA table_info("coo_provider_charges")'
+            )
+        )
+        assert coo_columns == _COO_PROVIDER_CHARGES_COLUMNS, (
+            "The v6 coo_provider_charges columns must remain the closed "
+            "eleven-tuple declared by migration 6."
+        )
         assert "cctx0_checkpoint" not in tables
+
 
 
 def test_cctx0_checkpoint_protocol_fence_is_frozen() -> None:

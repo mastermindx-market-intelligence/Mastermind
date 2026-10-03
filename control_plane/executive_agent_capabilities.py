@@ -18,6 +18,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -250,6 +251,23 @@ COMPANY_CONSULTATION_ENABLED_TOOLS = (
     "company.reply",
     "company.consultation",
 )
+COO_DOMAIN_EXECUTION_PROFILE = "operator.coo.domain.readonly.v1"
+COO_DOMAIN_PROFILE_SHAPE = MappingProxyType({
+    "enabled": False,
+    "execution_surface": "codex-app-server",
+    "auth_realm": "dedicated-worker-account",
+    "sandbox_policy": "read-only",
+    "approval_policy": "never",
+    "network_policy": "disabled",
+    "write_capable": False,
+    "native_helper_policy": "disabled",
+    "native_helper": None,
+    "skills": (),
+    "mcp_servers": (),
+    "resources": (),
+    "plugins": (),
+    "forbidden": (),
+})
 _PROFILE_KEYS = frozenset(
     {
         "enabled",
@@ -1583,6 +1601,44 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot inherit browser resource authority"
                 )
+            if profile_id == COO_DOMAIN_EXECUTION_PROFILE:
+                # R15 source-contract amendment: domain ``enabled`` is a strict
+                # explicit Boolean activation toggle (already enforced at the
+                # generic loader guard above). Every other field in the
+                # COO_DOMAIN_PROFILE_SHAPE must remain exact, which keeps the
+                # bounded read-only authority ceiling (no write, no network,
+                # helpers disabled, no skills/MCP/resources/plugins grants)
+                # in force for both disabled and enabled domain instances.
+                for key, expected in COO_DOMAIN_PROFILE_SHAPE.items():
+                    if key == "enabled":
+                        continue
+                    actual = value.get(key)
+                    if isinstance(expected, tuple):
+                        if actual != list(expected):
+                            raise CapabilityPolicyError(
+                                f"profile {profile_id!r} COO domain field "
+                                f"{key!r} drifted from exact read-only source shape"
+                            )
+                    elif actual != expected:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} COO domain field "
+                            f"{key!r} drifted from exact read-only source shape"
+                        )
+                # R16 amendment: the V3 shape above does not name V4
+                # ``skill_capabilities`` and therefore cannot pin it.  The
+                # COO domain ceiling is empty effective skills in BOTH enabled
+                # states, so any nonempty V4 skill_capabilities list (single
+                # grant or the full combined list) must be refused at load.
+                # The ordinary V4 grant path for non-domain profiles is
+                # untouched and continues to resolve all reviewed packages.
+                if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+                    raw_skill_caps = value.get("skill_capabilities")
+                    if not isinstance(raw_skill_caps, list) or len(raw_skill_caps) != 0:
+                        raise CapabilityPolicyError(
+                            f"profile {profile_id!r} COO domain ceiling forbids "
+                            "nonempty V4 skill_capabilities; the read-only "
+                            "authority ceiling is empty in both enabled states"
+                        )
             if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
                 skill_capability_ids = _identities(
                     value.get("skill_capabilities"),
@@ -1772,15 +1828,17 @@ class ExecutionCapabilityRegistry:
             policy_version=policy_version,
             lifecycle_authority="executive_os",
             production_armed=False,
-            mcp_servers=mcp_registry,
-            resources=resource_registry,
-            capability_packages=capability_packages,
-            profiles=profiles,
+            mcp_servers=MappingProxyType(mcp_registry),
+            resources=MappingProxyType(resource_registry),
+            capability_packages=MappingProxyType(capability_packages),
+            profiles=MappingProxyType(profiles),
             policy_digest=_digest(normalized_policy),
             source_path=source,
         )
 
-    def resolve(self, profile_id: str) -> ExecutionCapabilityProfile:
+    def resolve(
+        self, profile_id: str
+    ) -> ExecutionCapabilityProfile:
         token = _identifier(profile_id, field="profile_id")
         try:
             profile = self.profiles[token]
@@ -1790,8 +1848,24 @@ class ExecutionCapabilityRegistry:
             raise CapabilityPolicyError(f"execution capability profile {token!r} is disabled")
         return profile
 
+    def validate_disabled_profile_shape(self, profile_id: str) -> None:
+        """Validate source metadata without creating dispatch permission."""
+
+        try:
+            profile = self.profiles[_identifier(profile_id, field="profile_id")]
+        except KeyError as exc:
+            raise CapabilityPolicyError(
+                f"unknown execution capability profile {profile_id!r}"
+            ) from exc
+        if profile.enabled:
+            raise CapabilityPolicyError(
+                f"execution capability profile {profile_id!r} is not disabled"
+            )
+
 
 __all__ = [
+    "COO_DOMAIN_EXECUTION_PROFILE",
+    "COO_DOMAIN_PROFILE_SHAPE",
     "CAPABILITY_POLICY_SCHEMA",
     "CAPABILITY_POLICY_SCHEMA_V3",
     "CAPABILITY_POLICY_SCHEMA_V4",

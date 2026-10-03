@@ -80,10 +80,48 @@ def test_checked_in_policy_has_exact_phase1b_allow_set_and_mandatory_denies():
     assert policy.allowed.isdisjoint(policy.denied)
 
 
-def test_checked_in_coo_policy_is_the_exact_closed_nine_field_contract():
+def test_checked_in_coo_policy_is_the_exact_closed_v2_eleven_field_contract():
+    """Phase 1F-C v2 closed contract: 9 v1 scalars + schema_version=2 + max_depth=2
+    + max_provider_work_units_per_root + reserved_domain_consumption_units.
+    v1 pins remain loadable through load_pinned_coo_cycle_policy(version=1)."""
     policy = CooCyclePolicy.load(_POLICY_PATH)
 
+    assert policy.schema_version == 2
     assert policy.to_dict() == {
+        "schema_version": 2,
+        "max_fan_out_per_parent": 8,
+        "max_depth": 2,
+        "max_repair_rounds": 2,
+        "max_review_attempts_per_job": 2,
+        "max_children_total": 16,
+        "max_attempts_per_orchestration_job": 2,
+        "review_job_attempt_limit": 1,
+        "max_provider_work_units_per_root": 32,
+        "reserved_domain_consumption_units": 1,
+        "allowed_child_cost_classes": ["default", "small"],
+    }
+    assert policy.max_provider_work_units_per_root == 32
+    assert policy.reserved_domain_consumption_units == 1
+    assert policy.reserved_step_slots(review_required=False) == 1
+    assert policy.reserved_step_slots(review_required=True) == 9
+    assert policy.reserved_children_total((False,) * 8) == 9
+    assert policy.reserved_children_total((True,)) == 10
+    with pytest.raises(CooCyclePolicyError, match="capacity"):
+        policy.reserved_children_total((True, True))
+
+
+def test_checked_in_v1_coo_policy_pin_remains_loadable_through_pinned_api():
+    """v1 closed contract is reachable through the explicit pin-selection API only."""
+    from control_plane.executive_coo_policy import (
+        EXPECTED_V1_POLICY_SHA256,
+        load_pinned_coo_cycle_policy,
+    )
+
+    pinned = load_pinned_coo_cycle_policy(
+        1, policy_sha256=EXPECTED_V1_POLICY_SHA256, path=_POLICY_PATH
+    )
+    assert pinned.schema_version == 1
+    assert pinned.to_dict() == {
         "schema_version": 1,
         "max_fan_out_per_parent": 8,
         "max_depth": 1,
@@ -94,12 +132,6 @@ def test_checked_in_coo_policy_is_the_exact_closed_nine_field_contract():
         "review_job_attempt_limit": 1,
         "allowed_child_cost_classes": ["default", "small"],
     }
-    assert policy.reserved_step_slots(review_required=False) == 1
-    assert policy.reserved_step_slots(review_required=True) == 9
-    assert policy.reserved_children_total((False,) * 8) == 9
-    assert policy.reserved_children_total((True,)) == 10
-    with pytest.raises(CooCyclePolicyError, match="capacity"):
-        policy.reserved_children_total((True, True))
 
 
 def test_coo_policy_hashes_closed_value_and_complete_reviewed_source():
@@ -112,18 +144,21 @@ def test_coo_policy_hashes_closed_value_and_complete_reviewed_source():
 @pytest.mark.parametrize(
     "replacement",
     [
-        "  max_depth: 2",
+        # widen max_depth past the v2 closed value (proves actual mutation)
+        "  max_depth: 5",
         "  max_children_total: 17",
         "  allowed_child_cost_classes: [small, default]",
         "  allowed_child_cost_classes: [default, small, frontier]",
         "  unknown_bound: 1",
-        "  max_depth: 1\n  max_depth: 1",
+        # duplicate v2 max_depth field on a fresh YAML line
+        "  max_depth: 2\n  max_depth: 2",
     ],
 )
 def test_coo_policy_drift_duplicate_and_unknown_field_fail_closed(tmp_path, replacement):
     raw = _POLICY_PATH.read_text(encoding="utf-8")
     if replacement.startswith("  max_depth:"):
-        raw = raw.replace("  max_depth: 1", replacement, 1)
+        # v2 source needle is "  max_depth: 2"
+        raw = raw.replace("  max_depth: 2", replacement, 1)
     elif replacement.startswith("  max_children_total:"):
         raw = raw.replace("  max_children_total: 16", replacement, 1)
     elif replacement.startswith("  allowed_child_cost_classes:"):

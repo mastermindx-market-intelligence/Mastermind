@@ -17,6 +17,11 @@ import control_plane.executive_coo_cycle as executive_coo_cycle
 import control_plane.ceo_intent as ceo_intent
 import control_plane.executive_runtime as executive_runtime
 from control_plane import executive_placement_selection as placement_selection
+from control_plane.executive_coo_policy import (
+    CooCyclePolicyError,
+    EXPECTED_POLICY_SHA256,
+    EXPECTED_V1_POLICY_SHA256,
+)
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.ceo_intent import (
     CeoIntentError,
@@ -124,6 +129,34 @@ def _register(runtime: Runtime, worker_id: str = "worker-1") -> None:
             }
         },
     )
+
+
+def _db_path(base: Path) -> Path:
+    matches = sorted((Path(base) / "data").rglob("*.sqlite3"))
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
+def _corrupt_event_payload_for_test(
+    base: Path, event_id: int, payload_json: str
+) -> None:
+    """Simulate one supplied durable Event corruption, restoring exact DDL."""
+
+    connection = sqlite3.connect(_db_path(base))
+    trigger_sql = connection.execute(
+        """
+        SELECT sql FROM sqlite_master
+        WHERE type='trigger' AND name='events_are_immutable_update'
+        """
+    ).fetchone()[0]
+    connection.execute("DROP TRIGGER events_are_immutable_update")
+    connection.execute(
+        "UPDATE events SET payload_json=? WHERE event_id=?",
+        (payload_json, event_id),
+    )
+    connection.execute(trigger_sql)
+    connection.commit()
+    connection.close()
 
 
 def _register_placement_union(runtime: Runtime) -> None:
@@ -726,10 +759,11 @@ def test_fresh_schema_v4_has_exact_additive_columns_and_migration(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(attempts)")
         ]
 
-    assert [tuple(row) for row in migrations][-2:] == [
+    assert [tuple(row) for row in migrations][-3:-1] == [
         (4, "executive_phase1fc_orchestration_contract"),
         (5, "executive_finite_drive_arm_contract"),
     ]
+    assert tuple(migrations[-1]) == (6, "executive_coo_provider_charge_identity")
     assert job_columns[-8:] == [
         "orchestration_role",
         "orchestration_provenance_json",
@@ -2783,11 +2817,15 @@ def _cycle_through_completed_work(
     *,
     intent_id: str,
     review_workers: list[str],
+    business_impact: str = "material",
+    admission_policy_version: int = 2,
 ):
     runtime = Runtime.at(tmp_path)
     _register(runtime, "worker-a")
     _register(runtime, "worker-b")
-    receipt = submit_intent(runtime, _v2_intent(intent_id=intent_id))
+    receipt = submit_intent(
+        runtime, _v2_intent(intent_id=intent_id, business_impact=business_impact)
+    )
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
     dispatches: list[OrchestrationDispatchOutcome] = []
@@ -2809,33 +2847,72 @@ def _cycle_through_completed_work(
         dispatches.append(outcome)
         return outcome
 
-    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
-    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
-    assert cycle.run_once(root.job_id).action == "DISPATCHED"
-    planner = dispatches[-1]
-    plan_body = {
-        "schema_version": "mastermind.execution_plan/v1",
-        "root_job_id": root.job_id,
-        "plan_attempt_id": planner.attempt.attempt_id,
-        "steps": [
-            {
-                "ordinal": 0,
-                "step_id": "step-1",
-                "objective": "Perform one bounded read-only task.",
-                "business_impact": "routine",
-                "review_required": True,
-                "requested_authorities": ["READ"],
-                "allowed_write_paths": [],
-                "validation_ids": [],
-                "attempt_limit": 1,
-                "cost_class": "small",
-            }
-        ],
-    }
-    _complete_ohf_role(runtime, planner, plan_body, identity_seed=3201)
-    admission = cycle.run_once(root.job_id)
-    assert admission.action == "PLAN_ADMITTED"
-    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    original_cycle_load = executive_coo_cycle.CooCyclePolicy.load
+    original_runtime_load = executive_runtime.CooCyclePolicy.load
+    historical_v1 = admission_policy_version == 1
+    if historical_v1:
+
+        def _pinned_v1(cls, path=None):
+            return executive_runtime.load_pinned_coo_cycle_policy(
+                1,
+                policy_sha256=EXPECTED_V1_POLICY_SHA256,
+            )
+
+        executive_coo_cycle.CooCyclePolicy.load = classmethod(_pinned_v1)
+        executive_runtime.CooCyclePolicy.load = classmethod(_pinned_v1)
+    try:
+        cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+        # Create the planner child under the temporary loader (reviewed v1 or
+        # current v2). This call must not claim an Attempt.
+        assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+        # Claim the planner Attempt under that same loader so the completed
+        # plan can be admitted against the intended pin.
+        assert cycle.run_once(root.job_id).action == "DISPATCHED"
+        planner = dispatches[-1]
+        plan_body = {
+            "schema_version": "mastermind.execution_plan/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "steps": [
+                {
+                    "ordinal": 0,
+                    "step_id": "step-1",
+                    "objective": "Perform one bounded read-only task.",
+                    "business_impact": "routine",
+                    "review_required": True,
+                    "requested_authorities": ["READ"],
+                    "allowed_write_paths": [],
+                    "validation_ids": [],
+                    "attempt_limit": 1,
+                    "cost_class": "small",
+                }
+            ],
+        }
+        _complete_ohf_role(runtime, planner, plan_body, identity_seed=3201)
+        if historical_v1:
+            # Admit while reviewed v1 is still loaded so COO_PLAN_ADMITTED
+            # pins EXPECTED_V1_POLICY_SHA256. Later work/review runs after
+            # the classmethod is restored to canonical v2.
+            runtime.jobs.admit_cycle_plan(
+                root.job_id,
+                command_id=(
+                    f"coo-cycle:{root.job_id}:admit-plan:"
+                    f"{planner.attempt.attempt_id}"
+                ),
+            )
+    finally:
+        executive_coo_cycle.CooCyclePolicy.load = original_cycle_load
+        executive_runtime.CooCyclePolicy.load = original_runtime_load
+    if historical_v1:
+        # Plan is already admitted under reviewed v1. The next cycle step is
+        # the work claim, which must run under restored canonical v2.
+        work_dispatched = cycle.run_once(root.job_id)
+        assert work_dispatched.action == "DISPATCHED"
+    else:
+        admission = cycle.run_once(root.job_id)
+        assert admission.action == "PLAN_ADMITTED"
+        work_dispatched = cycle.run_once(root.job_id)
+        assert work_dispatched.action == "DISPATCHED"
     work = dispatches[-1]
     work_body = {
         "schema_version": "mastermind.work_result/v1",
@@ -3670,29 +3747,43 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
-    # The controller-only authority changes the reviewed policy SHA; the
-    # acceptance producer binds that SHA into orchestration grants, so only
-    # derived digest goldens move while all non-digest behavior remains fixed.
+    # Reviewed-v2 golden + controller-only authority changes.
+    # Canonical v2 (d426 review) sets EXPECTED_POLICY_SHA256
+    # (schema_version=2, 908273f1c5ebdc45f6141aaf1b3e2f4d7a65f675ba6070493fc90178947a0da8),
+    # which is bound into every effective grant and therefore every
+    # grant/event/acceptance digest that embeds policy identity.
+    # The protected 7aa2 review introduced a controller-only authority
+    # change that propagates into the same derived digest goldens, so only
+    # the 64-character digest literals shift while every non-digest
+    # behavioral assertion (cycle/exhaustion/tx9 actions and reasons,
+    # dispatch_boundary/tx9/bounded_exhaustion acceptance_digests) stays
+    # fixed. All 73 changed leaves are 64-character hexadecimal digests
+    # whose paths live in ALLOWED-DIGEST-PATHS.json; the two unchanged
+    # allowed paths are /policy_sha (canonical v2 identity, pinned to
+    # EXPECTED_POLICY_SHA256 on both sides) and /cycle/replay_outcome_digest
+    # (does not embed the policy pin).
+    assert receipt["policy_sha"] == EXPECTED_POLICY_SHA256
+    assert receipt["policy_sha"] != EXPECTED_V1_POLICY_SHA256
     assert receipt["receipt_digest"] == (
-        "06599ec9b4843a33e6325799620dcd6b37b425a96c5f9bb4fd49f2f09c108c36"
+        "10fe5ae9a67d9749fa87384fd0e65b8a7005fb2062535c0cbb14b3a63967083a"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
     )
     assert receipt["dispatch_crash_replay"]["acceptance_digest"] == (
-        "38e42503ea5426cbf82684f6704ae1989d46de6fe5bd10cbeec650bac45fb551"
+        "8e668a1a2618cdd015175f0ad3406905d250f45a66b07cf28a2dc55b66656493"
     )
     assert receipt["happy_path"]["acceptance_digest"] == (
-        "7a9c987d722816502bf1c5a9254872328aaca01db0a52937ae1822b9e5622ee7"
+        "27268732398f1d0ebc0ef38aaafea268016ab1ee51af0627ab00a09e97826480"
     )
     assert receipt["repair_path"]["acceptance_digest"] == (
-        "cfa81f98c2b8cf30f5eda5a4a98276a1fadc7e6e9dcaa65573f312753f5b7c3f"
+        "b09d9c893c5dc8b2bbca35f1ae32401e8049605f5532d90b0ac6b693e167ba7a"
     )
     assert receipt["void_replacement"]["acceptance_digest"] == (
-        "63b4f2a845884aef0ecbde055236b85cf06ea2dcec1cf4332ebed88d3dc28051"
+        "23ab571f892441603460a0a303383f1e3a35317e2e17e967d8054f58ca8dee5b"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
-        "88ab6c7621304c174d9f2e0ac43a98d8d71bfa4fdb45528fda802700bf640e66"
+        "e193dd4aee86b5a44f77f33a2ddfcee52b31704b2be258d974ef28564e618b3f"
     )
     assert receipt["tx9"]["acceptance_digest"] == (
         "9a43476a06fb3ecc4351b96d5646c7b0e521fd30092c3882bc5e8d4532825585"
@@ -4247,7 +4338,7 @@ def test_fph0_v3_refuses_caller_union_collision(
 
 
 def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
-    assert executive_runtime.SCHEMA_VERSION == 5
+    assert executive_runtime.SCHEMA_VERSION == 6
     assert executive_runtime.V3_HOST_EXECUTION_BINDING_KEYS == (
         executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS
         | {"work_placement_union"}
@@ -6818,3 +6909,714 @@ def test_legacy_unarmed_incumbent_still_dispatches_and_is_never_gated(tmp_path):
     assert reads[0][0] == root.job_id
     assert reads[0][1] == dispatch.attempt.attempt_id
     assert reads[0][2].already_issued is True
+
+
+def test_admitted_v1_policy_survives_current_v2_claim_and_review_replay(tmp_path):
+    """A historical v1 pin survives current-v2 work/review/aggregation replay."""
+    runtime, cycle, dispatches, root, planner, work, work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-R3D-HISTORICAL-V1",
+            # worker-b is independent of the work claim (worker-a), so one
+            # approve qualifies without a void-replacement review.
+            review_workers=["worker-b", "worker-a"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    # Helper restored CooCyclePolicy.load to canonical v2 before returning.
+    # Work was claimed and sealed after that restore; its attempt-bound
+    # admission/seal still carry the reviewed v1 COO pin. Effective-grant
+    # policy_sha is the authority-map pin, not the COO cycle pin.
+    assert executive_runtime.CooCyclePolicy.load().policy_sha256 == (
+        EXPECTED_POLICY_SHA256
+    )
+    assert work_seal["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    with runtime.store.read() as connection:
+        plan_admission = json.loads(
+            connection.execute(
+                "SELECT payload_json FROM events "
+                "WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+                (root.job_id,),
+            ).fetchone()[0]
+        )
+        work_admission = json.loads(
+            connection.execute(
+                "SELECT payload_json FROM events "
+                "WHERE event_type='ORCHESTRATION_WORK_ADMITTED' "
+                "AND attempt_id=?",
+                (work.attempt.attempt_id,),
+            ).fetchone()[0]
+        )
+    assert plan_admission["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    assert work_admission["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    grant = work.attempt.effective_grant
+    assert grant is not None
+    assert grant["policy_sha"] == work.attempt.authority_policy_hash
+    assert grant["policy_sha"] != EXPECTED_V1_POLICY_SHA256
+    assert grant["policy_sha"] != EXPECTED_POLICY_SHA256
+
+    # Create the independent review, then claim it; each run_once has one
+    # purpose and must not skip the other.
+    review_created = cycle.run_once(root.job_id)
+    assert review_created.action == "REVIEW_CREATED"
+    review_dispatched = cycle.run_once(root.job_id)
+    assert review_dispatched.action == "DISPATCHED"
+    review_dispatch = dispatches[-1]
+
+    work_job = runtime.jobs.get_job(work.attempt.job_id)
+    review_body = _review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=str(work_job.plan_digest),
+        target_job_id=work.attempt.job_id,
+        target_attempt_id=work.attempt.attempt_id,
+        target_result_digest=work_seal["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-1",
+    )
+    review_seal, _review_terminal = _complete_ohf_role(
+        runtime, review_dispatch, review_body, identity_seed=8103
+    )
+    assert review_seal["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    assert cycle.run_once(root.job_id).action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+    assert handoff["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    assert handoff["plan_digest"] == str(work_job.plan_digest)
+    aggregation_dispatched = cycle.run_once(root.job_id)
+    assert aggregation_dispatched.action == "DISPATCHED"
+    aggregation = dispatches[-1]
+    assert aggregation.attempt.job_id == root.job_id
+    aggregation_grant = aggregation.attempt.effective_grant
+    assert aggregation_grant is not None
+    assert aggregation_grant["policy_sha"] == aggregation.attempt.authority_policy_hash
+
+
+def test_cycle_admission_policy_corruption_persists_reviewed_policy_block(tmp_path):
+    """A corrupted admitted pin uses the ordinary invalid_policy block write.
+
+    Finite-halt is the zero-write invalid-policy path
+    (``test_finite_halt_refuses_zero_write_when_current_policy_is_malformed``).
+    An unarmed root with a durable but unknown ``COO_PLAN_ADMITTED`` pin
+    follows ``test_run_once_cycle_persists_reviewed_policy_digest_when_policy_is_invalid``:
+    no dispatcher claim, one ``COO_CYCLE_BLOCKED`` Event, reviewed-v2 digest.
+    True zero-write on this post-admission corruption is not the declared
+    ordinary-invalid-policy contract and is not implemented here.
+    """
+    runtime = Runtime.at(tmp_path)
+    _register(runtime, "worker-a")
+    receipt = submit_intent(runtime, _v2_intent(intent_id="CEO-R3D-BAD-POLICY-PIN"))
+    root = runtime.jobs.get_job(receipt["job_id"])
+    assert root is not None
+    planner = runtime.jobs.create_cycle_planner(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a",
+    )
+    assert isinstance(dispatch, OrchestrationDispatchOutcome)
+    _complete_ohf_role(
+        runtime,
+        dispatch,
+        {
+            "schema_version": "mastermind.execution_plan/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": dispatch.attempt.attempt_id,
+            "steps": [
+                {
+                    "ordinal": 0,
+                    "step_id": "step-0",
+                    "objective": "No policy-corrupt dispatch is permitted.",
+                    "business_impact": "routine",
+                    "review_required": False,
+                    "requested_authorities": ["READ"],
+                    "allowed_write_paths": [],
+                    "validation_ids": [],
+                    "attempt_limit": 1,
+                    "cost_class": "small",
+                }
+            ],
+        },
+        identity_seed=8201,
+    )
+    runtime.jobs.admit_cycle_plan(
+        root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}",
+    )
+    with runtime.store.read() as connection:
+        event = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+            (root.job_id,),
+        ).fetchone()
+        admission = json.loads(event["payload_json"])
+        admission["policy_sha"] = "c" * 64
+    _corrupt_event_payload_for_test(
+        tmp_path,
+        int(event["event_id"]),
+        json.dumps(admission, sort_keys=True, separators=(",", ":")),
+    )
+    before = _table_counts(runtime)
+    calls: list[str] = []
+
+    def dispatcher(job_id: str, command_id: str):
+        calls.append(command_id)
+        raise AssertionError("invalid policy pin must never dispatch")
+
+    assert [
+        event
+        for event in runtime.events.list_events(job_id=root.job_id)
+        if event.event_type == "COO_CYCLE_BLOCKED"
+    ] == []
+
+    outcome = CooCycle(runtime, dispatcher=dispatcher).run_once(root.job_id)
+    assert outcome.action == "BLOCKED"
+    assert outcome.receipt["reason"] == "invalid_policy"
+    assert outcome.receipt["policy_sha"] == EXPECTED_POLICY_SHA256
+    assert outcome.receipt["policy_sha"] != "c" * 64
+    assert calls == []
+    blocked_events = [
+        event
+        for event in runtime.events.list_events(job_id=root.job_id)
+        if event.event_type == "COO_CYCLE_BLOCKED"
+    ]
+    assert len(blocked_events) == 1
+    after = _table_counts(runtime)
+    assert after["jobs"] == before["jobs"]
+    assert after["attempts"] == before["attempts"]
+    assert after["workers"] == before["workers"]
+    assert after["events"] == before["events"] + 1
+
+
+def _duplicate_root_plan_admission_for_test(runtime: Runtime, root_job_id: str) -> None:
+    """Insert a second valid COO_PLAN_ADMITTED row for the same root.
+
+    The schema unique index ``events_one_coo_plan_admission_per_root`` is
+    dropped only for this fixture so Runtime still has to refuse duplicates
+    itself rather than silently ``fetchone``.
+    """
+
+    with sqlite3.connect(str(runtime.store.path)) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("DROP INDEX events_one_coo_plan_admission_per_root")
+        row = dict(
+            connection.execute(
+                "SELECT * FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+                (root_job_id,),
+            ).fetchone()
+        )
+        row.pop("event_id")
+        row["sequence"] = 9999
+        row["command_id"] = f"{row['command_id']}:duplicate"
+        columns = sorted(row)
+        connection.execute(
+            f"INSERT INTO events ({','.join(columns)}) "
+            f"VALUES ({','.join('?' * len(columns))})",
+            tuple(row[column] for column in columns),
+        )
+
+
+@pytest.mark.parametrize(
+    "admission_policy_version,supplied_policy_sha,root_policy_sha",
+    [
+        (1, EXPECTED_POLICY_SHA256, EXPECTED_V1_POLICY_SHA256),
+        (2, EXPECTED_V1_POLICY_SHA256, EXPECTED_POLICY_SHA256),
+    ],
+)
+def test_block_cycle_refuses_known_foreign_policy_on_valid_admission(
+    tmp_path,
+    admission_policy_version,
+    supplied_policy_sha,
+    root_policy_sha,
+):
+    """A caller-supplied known-but-different hash cannot override a valid root pin."""
+    runtime, _cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id=f"CEO-R3F-FOREIGN-{admission_policy_version}",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=admission_policy_version,
+        )
+    )
+    assert supplied_policy_sha != root_policy_sha
+    selected = work.attempt.job_id
+    before = _table_counts(runtime)
+    with pytest.raises(StateConflict, match="differs from the root policy"):
+        runtime.jobs.block_cycle(
+            root.job_id,
+            selected_job_id=selected,
+            reason="state_conflict",
+            command_id=f"coo-cycle:{root.job_id}:block:state_conflict:{selected}",
+            policy_sha=supplied_policy_sha,
+        )
+    assert _table_counts(runtime) == before
+    with pytest.raises(StateConflict, match="differs from the root policy"):
+        runtime.jobs.block_cycle(
+            root.job_id,
+            selected_job_id=selected,
+            reason="invalid_policy",
+            command_id=f"coo-cycle:{root.job_id}:block:invalid_policy:{selected}",
+            policy_sha=supplied_policy_sha,
+        )
+    assert _table_counts(runtime) == before
+
+
+def test_historical_cycle_block_default_preserves_admitted_v1_pin(tmp_path):
+    """CooCycle._block default must not promote a valid historical v1 pin to v2."""
+    runtime, cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-R3F-CYCLE-DEFAULT-V1",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    assert executive_runtime.CooCyclePolicy.load().policy_sha256 == (
+        EXPECTED_POLICY_SHA256
+    )
+    selected = work.attempt.job_id
+    before = _table_counts(runtime)
+    outcome = cycle._block(root.job_id, selected, "state_conflict")
+    assert outcome.action == "BLOCKED"
+    assert outcome.receipt["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    assert outcome.receipt["policy_sha"] != EXPECTED_POLICY_SHA256
+    after = _table_counts(runtime)
+    assert after["jobs"] == before["jobs"]
+    assert after["attempts"] == before["attempts"]
+    assert after["workers"] == before["workers"]
+    assert after["events"] == before["events"] + 1
+
+
+def test_exact_historical_pin_block_replay_is_idempotent(tmp_path):
+    """An exact admitted pin replays the same block without a second write."""
+    runtime, _cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-R3F-EXACT-PIN-REPLAY",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    selected = work.attempt.job_id
+    command = f"coo-cycle:{root.job_id}:block:state_conflict:{selected}"
+    first = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="state_conflict",
+        command_id=command,
+        policy_sha=EXPECTED_V1_POLICY_SHA256,
+    )
+    assert first["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    after_first = _table_counts(runtime)
+    second = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="state_conflict",
+        command_id=command,
+        policy_sha=EXPECTED_V1_POLICY_SHA256,
+    )
+    assert second == first
+    none_default = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="state_conflict",
+        command_id=command,
+        policy_sha=None,
+    )
+    assert none_default == first
+    assert _table_counts(runtime) == after_first
+
+
+@pytest.mark.parametrize("admission_policy_version", [1, 2])
+def test_duplicate_root_admissions_refuse_block_and_dispatch_without_mutation(
+    tmp_path, admission_policy_version
+):
+    """Two durable admissions refuse; neither block write nor dispatch occurs."""
+    runtime, cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id=f"CEO-R3F-DUP-ADMIT-{admission_policy_version}",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=admission_policy_version,
+        )
+    )
+    _duplicate_root_plan_admission_for_test(runtime, root.job_id)
+    selected = work.attempt.job_id
+    before = _table_counts(runtime)
+    with pytest.raises(
+        StateConflict, match="unique root orchestration events"
+    ):
+        runtime.jobs.block_cycle(
+            root.job_id,
+            selected_job_id=selected,
+            reason="state_conflict",
+            command_id=f"coo-cycle:{root.job_id}:block:state_conflict:{selected}",
+            policy_sha=None,
+        )
+    assert _table_counts(runtime) == before
+
+    calls: list[str] = []
+
+    def dispatcher(job_id: str, command_id: str):
+        calls.append(command_id)
+        raise AssertionError("duplicate admissions must never dispatch")
+
+    cycle.dispatcher = dispatcher
+    with pytest.raises(StateConflict):
+        cycle.run_once(root.job_id)
+    assert calls == []
+    assert _table_counts(runtime) == before
+
+
+def _corrupt_root_admission_policy_for_test(
+    runtime: Runtime,
+    tmp_path: Path,
+    root_job_id: str,
+) -> str:
+    """Corrupt only the admitted policy pin in an isolated temporary DB."""
+
+    with runtime.store.read() as connection:
+        event = connection.execute(
+            "SELECT event_id,payload_json FROM events "
+            "WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+            (root_job_id,),
+        ).fetchone()
+    assert event is not None
+    admission = json.loads(str(event["payload_json"]))
+    original_policy_sha = str(admission["policy_sha"])
+    admission["policy_sha"] = "c" * 64
+    _corrupt_event_payload_for_test(
+        tmp_path,
+        int(event["event_id"]),
+        json.dumps(admission, sort_keys=True, separators=(",", ":")),
+    )
+    return original_policy_sha
+
+
+def test_block_cycle_unknown_admission_refuses_state_conflict(tmp_path):
+    """Unknown admission cannot launder an ordinary block to current policy."""
+    runtime, _cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-R3G-UNKNOWN-ADMISSION-BLOCK",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    original_policy_sha = _corrupt_root_admission_policy_for_test(
+        runtime, tmp_path, root.job_id
+    )
+    selected = work.attempt.job_id
+    before = _table_counts(runtime)
+    with pytest.raises(
+        StateConflict, match="admission policy is unknown or corrupt"
+    ):
+        runtime.jobs.block_cycle(
+            root.job_id,
+            selected_job_id=selected,
+            reason="state_conflict",
+            command_id=f"coo-cycle:{root.job_id}:block:state_conflict:{selected}",
+            policy_sha=None,
+        )
+    assert _table_counts(runtime) == before
+
+    with pytest.raises(
+        StateConflict, match="differs from the root policy"
+    ):
+        runtime.jobs.block_cycle(
+            root.job_id,
+            selected_job_id=selected,
+            reason="invalid_policy",
+            command_id=f"coo-cycle:{root.job_id}:block:invalid_policy:{selected}",
+            policy_sha=original_policy_sha,
+        )
+    assert _table_counts(runtime) == before
+
+    diagnostic = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="invalid_policy",
+        command_id=f"coo-cycle:{root.job_id}:block:invalid_policy:{selected}",
+    )
+    assert diagnostic["policy_sha"] == EXPECTED_POLICY_SHA256
+    assert _table_counts(runtime)["events"] == before["events"] + 1
+
+
+def test_replay_refuses_historical_and_forged_blocks_after_admission_corruption(
+    tmp_path,
+):
+    """Known policy recognition is not proof of a valid admitted root."""
+    runtime, _cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="CEO-R3G-CORRUPT-REPLAY",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    selected = work.attempt.job_id
+    command = f"coo-cycle:{root.job_id}:block:state_conflict:{selected}"
+    with runtime.store.read() as connection:
+        admission_event = connection.execute(
+            "SELECT payload_json FROM events "
+            "WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+            (root.job_id,),
+        ).fetchone()
+    assert admission_event is not None
+    original_policy_sha = str(
+        json.loads(str(admission_event["payload_json"]))["policy_sha"]
+    )
+    original_admission = json.loads(str(admission_event["payload_json"]))
+    original_handoff = {"handoff_digest": None}
+    original_block = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="state_conflict",
+        command_id=command,
+        policy_sha=original_policy_sha,
+    )
+    assert original_block["policy_sha"] == EXPECTED_V1_POLICY_SHA256
+    _corrupt_root_admission_policy_for_test(runtime, tmp_path, root.job_id)
+    payload = {
+        "schema_version": "mastermind.coo_cycle_block/v1",
+        "root_job_id": root.job_id,
+        "selected_job_id": selected,
+        "reason": "state_conflict",
+        "policy_sha": original_policy_sha,
+        "plan_digest": original_admission["plan_digest"],
+        "handoff_digest": original_handoff["handoff_digest"],
+        "evidence": {},
+        "evidence_digest": executive_runtime.orchestration_digest({}),
+        "command_id": command,
+    }
+    forged_payload = dict(payload)
+    forged_payload["policy_sha"] = EXPECTED_POLICY_SHA256
+    forged_json = json.dumps(forged_payload, sort_keys=True, separators=(",", ":"))
+    with sqlite3.connect(str(_db_path(tmp_path))) as connection:
+        connection.row_factory = sqlite3.Row
+        block_event = connection.execute(
+            "SELECT event_id,attempt_id FROM events WHERE command_id=?", (command,)
+        ).fetchone()
+        assert block_event is not None
+        trigger_sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' "
+            "AND name='events_are_immutable_update'"
+        ).fetchone()[0]
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=?, attempt_id=? WHERE event_id=?",
+            (
+                forged_json,
+                work.attempt.attempt_id,
+                int(block_event["event_id"]),
+            ),
+        )
+        connection.execute(trigger_sql)
+    before = _table_counts(runtime)
+    with pytest.raises(StateConflict, match="plan/handoff pin drifted"):
+        runtime.jobs.validated_cycle_block(root.job_id)
+
+    with pytest.raises(
+        StateConflict, match="admission policy is unknown or corrupt"
+    ):
+        runtime.jobs.block_cycle(
+            root.job_id,
+            selected_job_id=selected,
+            reason="state_conflict",
+            command_id=command,
+        )
+    assert _table_counts(runtime) == before
+
+
+# ---------------------------------------------------------------------------
+# R3J F1 regression: invalid_policy exception branch must still compare
+# plan_digest and handoff_digest — a tampered or post-write-drifted block
+# must be refused even when policy_sha is valid.
+# Regressions from R3I F1 (T1c, T2b, T3b).
+# ---------------------------------------------------------------------------
+
+
+def test_r3j_t1c_forged_digests_on_legitimate_diagnostic_replay_refuses(tmp_path):
+    """Tampering plan_digest/handoff_digest in an otherwise-valid diagnostic
+    block is refused on replay even though policy_sha matches EXPECTED_POLICY_SHA256.
+
+    T1c in R3I probe series.
+    """
+    runtime, cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="R3J-T1C-FORGED",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    selected = work.attempt.job_id
+    command = f"coo-cycle:{root.job_id}:block:invalid_policy:{selected}"
+
+    # Corrupt admission pin, then write a legitimate diagnostic.
+    _corrupt_root_admission_policy_for_test(runtime, tmp_path, root.job_id)
+    before = _table_counts(runtime)
+    receipt = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="invalid_policy",
+        command_id=command,
+        policy_sha=None,
+    )
+    assert receipt["reason"] == "invalid_policy"
+    assert receipt["policy_sha"] == EXPECTED_POLICY_SHA256
+    assert _table_counts(runtime)["events"] == before["events"] + 1
+
+    # Replay before tampering — must succeed.
+    accepted = runtime.jobs.validated_cycle_block(root.job_id)
+    assert accepted is not None
+
+    # Forge plan_digest and handoff_digest in the durable block.
+    with runtime.store.read() as conn:
+        block_row = conn.execute(
+            "SELECT event_id, payload_json FROM events WHERE command_id=?",
+            (command,),
+        ).fetchone()
+    forged = json.loads(str(block_row["payload_json"]))
+    forged["plan_digest"] = "f" * 64
+    forged["handoff_digest"] = "e" * 64
+    _corrupt_event_payload_for_test(
+        tmp_path,
+        int(block_row["event_id"]),
+        json.dumps(forged, sort_keys=True, separators=(",", ":")),
+    )
+
+    # Replay after tampering — must refuse.
+    with pytest.raises(StateConflict, match="plan/handoff pin drifted"):
+        runtime.jobs.validated_cycle_block(root.job_id)
+
+
+def test_r3j_t2b_forged_reason_flip_diagnostic_replay_refuses(tmp_path):
+    """Re-writing an ordinary state_conflict block into an invalid_policy
+    diagnostic with a valid policy_sha but forged plan/handoff digests is refused.
+
+    T2b in R3I probe series.
+    """
+    runtime, cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="R3J-T2B-FLIP",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    selected = work.attempt.job_id
+    ordinary_cmd = f"coo-cycle:{root.job_id}:block:state_conflict:{selected}"
+
+    # Write a legitimate ordinary block.
+    before = _table_counts(runtime)
+    first = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="state_conflict",
+        command_id=ordinary_cmd,
+        policy_sha=EXPECTED_V1_POLICY_SHA256,
+    )
+    assert first["reason"] == "state_conflict"
+    assert _table_counts(runtime)["events"] == before["events"] + 1
+
+    # Corrupt admission pin so the exception branch becomes reachable.
+    _corrupt_root_admission_policy_for_test(runtime, tmp_path, root.job_id)
+
+    # Flip reason to invalid_policy and forge digests in the durable row.
+    with runtime.store.read() as conn:
+        block_row = conn.execute(
+            "SELECT event_id, payload_json FROM events WHERE command_id=?",
+            (ordinary_cmd,),
+        ).fetchone()
+    forged = json.loads(str(block_row["payload_json"]))
+    forged["reason"] = "invalid_policy"
+    forged["policy_sha"] = EXPECTED_POLICY_SHA256
+    forged["plan_digest"] = "f" * 64
+    forged["handoff_digest"] = "e" * 64
+    forged["command_id"] = (
+        f"coo-cycle:{root.job_id}:block:invalid_policy:{selected}"
+    )
+    forged_json = json.dumps(forged, sort_keys=True, separators=(",", ":"))
+    diagnostic_cmd = f"coo-cycle:{root.job_id}:block:invalid_policy:{selected}"
+    # Inline tamper: update payload_json AND command_id in one statement.
+    connection = sqlite3.connect(_db_path(tmp_path))
+    trigger_sql = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' "
+        "AND name='events_are_immutable_update'"
+    ).fetchone()[0]
+    connection.execute("DROP TRIGGER events_are_immutable_update")
+    connection.execute(
+        "UPDATE events SET payload_json=?, command_id=? WHERE event_id=?",
+        (forged_json, diagnostic_cmd, int(block_row["event_id"])),
+    )
+    connection.execute(trigger_sql)
+    connection.commit()
+    connection.close()
+
+    # Replay the forged diagnostic — the now-consistent command identity reaches
+    # the intended exception-branch plan/handoff pin guard.
+    with pytest.raises(StateConflict, match="plan/handoff pin drifted"):
+        runtime.jobs.validated_cycle_block(root.job_id)
+
+
+def test_r3j_t3b_admission_drift_on_exception_branch_refuses(tmp_path):
+    """When an admission's plan_digest drifts after a diagnostic is written,
+    the exception branch refuses the stale diagnostic replay.
+
+    T3b in R3I probe series — the admission-side drift probe.
+    """
+    runtime, cycle, _dispatches, root, _planner, work, _work_seal = (
+        _cycle_through_completed_work(
+            tmp_path,
+            intent_id="R3J-T3B-DRIFT",
+            review_workers=["worker-b"],
+            business_impact="routine",
+            admission_policy_version=1,
+        )
+    )
+    selected = work.attempt.job_id
+
+    # Corrupt admission pin and write a legitimate diagnostic.
+    _corrupt_root_admission_policy_for_test(runtime, tmp_path, root.job_id)
+    before = _table_counts(runtime)
+    receipt = runtime.jobs.block_cycle(
+        root.job_id,
+        selected_job_id=selected,
+        reason="invalid_policy",
+        command_id=f"coo-cycle:{root.job_id}:block:invalid_policy:{selected}",
+        policy_sha=None,
+    )
+    assert receipt["reason"] == "invalid_policy"
+    assert _table_counts(runtime)["events"] == before["events"] + 1
+
+    # Drift only the admission's plan_digest (not the diagnostic block itself).
+    with runtime.store.read() as conn:
+        admission_row = conn.execute(
+            "SELECT event_id, payload_json FROM events "
+            "WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?",
+            (root.job_id,),
+        ).fetchone()
+    drifted = json.loads(str(admission_row["payload_json"]))
+    drifted["plan_digest"] = "d" * 64
+    _corrupt_event_payload_for_test(
+        tmp_path,
+        int(admission_row["event_id"]),
+        json.dumps(drifted, sort_keys=True, separators=(",", ":")),
+    )
+
+    # Replay with drifted admission — must refuse.
+    with pytest.raises(StateConflict, match="plan/handoff pin drifted"):
+        runtime.jobs.validated_cycle_block(root.job_id)
