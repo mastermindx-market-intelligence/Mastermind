@@ -15,8 +15,9 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import inspect
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -305,6 +306,56 @@ def _row(
     )
 
 
+SnapshotProvider = Callable[[], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
+Clock = Callable[[], datetime]
+
+
+class ControlRoomRuntimeCapabilityReadPort:
+    """Read C evidence from one already-composed Control Room snapshot.
+
+    This port never calls Studio Direct, CAP1 producers, a shell, or a runtime
+    observer. Missing injected evidence stays UNKNOWN until an existing owner
+    supplies a newer accepted Control Room snapshot.
+    """
+
+    def __init__(
+        self,
+        snapshot_provider: SnapshotProvider,
+        *,
+        clock: Clock,
+        stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
+    ) -> None:
+        if not callable(snapshot_provider) or not callable(clock):
+            raise TypeError("snapshot_provider and clock are required")
+        if type(stale_after_seconds) is not int or stale_after_seconds < 0:
+            raise ValueError("stale_after_seconds must be a non-negative integer")
+        self._provider = snapshot_provider
+        self._clock = clock
+        self._stale = stale_after_seconds
+
+    async def read(self) -> RuntimeCapabilityEvidence:
+        try:
+            value = self._provider()
+            if inspect.isawaitable(value):
+                value = await value
+        except Exception as exc:
+            raise RuntimeCapabilityProjectionError(
+                "Control Room capability snapshot unavailable"
+            ) from exc
+        if not isinstance(value, Mapping):
+            raise RuntimeCapabilityProjectionError(
+                "Control Room capability snapshot must be an object"
+            )
+        return project_runtime_capability_evidence(
+            {
+                "control_room": value,
+                RUNTIME_CAPABILITY_FIELD: value.get(RUNTIME_CAPABILITY_FIELD),
+            },
+            now=self._clock(),
+            stale_after_seconds=self._stale,
+        )
+
+
 def project_runtime_capability_evidence(
     state: Mapping[str, Any] | object,
     *,
@@ -427,6 +478,7 @@ __all__ = [
     "DEFAULT_STALE_AFTER_SECONDS",
     "MAX_CONTROL_ROOM_PAIRING_SKEW_SECONDS",
     "RUNTIME_CAPABILITY_FIELD",
+    "ControlRoomRuntimeCapabilityReadPort",
     "RuntimeCapabilityEvidence",
     "RuntimeCapabilityProjectionError",
     "RuntimeCapabilityRecord",

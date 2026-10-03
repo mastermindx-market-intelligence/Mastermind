@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ import pytest
 
 from control_plane import chairman_control_room
 from integrations.mastermind_steward_app.runtime_capability_evidence import (
+    ControlRoomRuntimeCapabilityReadPort,
     RuntimeCapabilityProjectionError,
     project_runtime_capability_evidence,
 )
@@ -329,6 +331,45 @@ def test_partial_observation_stays_partial_or_unknown_per_subcapability():
     assert rows["studio_direct_file_read"].proof_state.value == "BUILT_NOT_PROVEN"
     assert rows["studio_direct_terminal_read_probe"].availability.value == "UNKNOWN"
     assert "OBSERVATION_PARTIAL" in rows["studio_direct_terminal_read_probe"].issues
+
+
+def test_control_room_read_port_consumes_injected_status_without_refreshing_owner():
+    status = project_studio_direct_read_capabilities(
+        parse_studio_direct_read_observation(_raw())
+    )
+    room = dict(_control_room())
+    room["runtime_capability_status"] = status.to_dict()
+    calls = 0
+
+    def snapshot():
+        nonlocal calls
+        calls += 1
+        return room
+
+    port = ControlRoomRuntimeCapabilityReadPort(
+        snapshot,
+        clock=lambda: datetime(2026, 10, 3, 7, 10, 0, tzinfo=timezone.utc),
+    )
+    evidence = asyncio.run(port.read())
+
+    assert calls == 1
+    assert evidence.freshness == "FRESH"
+    assert len(evidence.records) == 3
+    assert {record.canonical_owner for record in evidence.records} == {"studio-direct"}
+
+
+def test_control_room_read_port_preserves_missing_evidence_as_unknown():
+    room = dict(_control_room())
+    port = ControlRoomRuntimeCapabilityReadPort(
+        lambda: room,
+        clock=lambda: datetime(2026, 10, 3, 7, 10, 0, tzinfo=timezone.utc),
+    )
+
+    evidence = asyncio.run(port.read())
+
+    assert evidence.freshness == "UNKNOWN"
+    assert evidence.records == ()
+    assert evidence.issues == ("RUNTIME_CAPABILITY_SOURCE_MISSING",)
 
 
 def test_control_room_and_capability_epochs_must_be_composed_close_together():
