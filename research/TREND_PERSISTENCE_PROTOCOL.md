@@ -103,3 +103,47 @@ The build should compose with existing owners rather than create a parallel rese
 ### What not to build
 
 Do not create a second outcome ledger, second market-regime engine, second theme authority, or a monolithic opaque “persistence score” now. The viable product is a **research-tested evidence family that plugs into Mastermind's existing PIT → prediction → outcome → calibration loop**. Its first useful output is explanatory/advisory: distinguish a high-return name whose gains persist cleanly from one whose identical trailing return is mostly churn and giveback, then prove whether that distinction forecasts continuation or drawdown.
+
+
+## Master plan v1 — authority ladder and system contract
+
+The mature system is a **Persistence Evidence Family**, not a second forecasting/control plane.
+
+Canonical outputs stay separate and horizon-specific: continuation probability; expected benchmark/sector-relative return rank; trend-break hazard; forward path risk / maximum adverse excursion; group confirmation; exhaustion/runway state; coverage, reliability and provenance. No opaque composite score is permitted until component outputs have independent OOS evidence.
+
+### Canonical horizon ontology
+
+Use trading-session horizons consistently: **5d** tactical reset/deterioration; **20d** emerging continuation; **60d** core medium-horizon persistence; **120d** structural trend quality; **252d** long-cycle context/momentum baseline. Feature snapshots, forward labels, calibration and shadow policies must share this ontology.
+
+### Advancement ladder
+
+1. **DESCRIPTIVE** — mathematically correct PIT features with property/leakage tests.
+2. **RESEARCH_PREDICTIVE** — incremental evidence after momentum and required controls.
+3. **CALIBRATED_PROFILE** — walk-forward probabilities/risk estimates with coverage/reliability.
+4. **SHADOW_ADVISORY** — namespaced snapshots recorded through existing signal/prediction owners.
+5. **CANDIDATE_BINDING** — isolated shadow policies with costs, capacity and failure-mode evidence.
+6. **PRODUCTION** — only after explicit promotion/review; live portfolio owners retain sizing/gating authority.
+
+Promotion is family-specific. A feature that improves forward drawdown but not return ranking advances only as a risk-quality feature. A null after momentum conditioning is preserved as a null.
+
+### Statistical integrity requirements
+
+Primary inference uses date-level cross-sectional statistics. Overlapping forward windows require HAC/Newey-West or block-bootstrap uncertainty; strict non-overlap thinning remains a robustness check. Walk-forward folds require an embargo at least as long as the longest forward label used across a fold boundary.
+
+Every candidate family must be tested for momentum rediscovery; low-volatility/beta/size/sector confounding; PIT membership and taxonomy leakage; universe drift and delisting/survivorship effects; one-era/sector/theme and mega-cap concentration; multiple-testing burden using the existing frozen judges; and realistic execution lag, turnover, costs and capacity.
+
+### Data admission
+
+**Available now:** sanitized deep+delisted closes, PIT S&P 1500 membership, SPY, sector ETF/rotation measurements, current GICS/basket identities, prediction/outcome/shadow infrastructure.
+
+**Do not fabricate:** historical fine-grained theme membership, individual-stock institutional flow, or analyst-revision persistence. Those families remain blocked until canonical PIT histories exist. Current basket/theme membership should begin append-only effective-dated capture prospectively rather than being projected backward.
+
+### Integration boundary
+
+Validated persistence snapshots may later attach to brain.signal_history / prediction records as namespaced evidence. Realized grading stays with brain.outcome_ledger / existing prediction and shadow-book owners. brain.rotation_tensor remains the rotation/group measurement owner. Entry-quality logic remains separate: persistence answers **whether leadership is durable**; entry discipline answers **whether now is an acceptable initiation price**.
+
+### Immediate build frontier
+
+PR #1155 remains the single implementation carrier. Sequence: (1) repair path-efficiency mathematics and invariant/leakage tests; (2) move historical research onto loop.factor_experiment's sanitized deep+delisted PIT substrate; (3) partial rank IC conditional on momentum, then HAC/block-bootstrap inference, monotonic bins, forward-MDD discrimination and walk-forward baseline-vs-augmented comparisons; (4) PIT-safe GICS/sector group persistence and stock×group interactions; (5) only surviving families proceed to advisory snapshots and isolated shadow policies.
+
+Live trading behavior, sizing and hard gates remain unchanged throughout these stages.
