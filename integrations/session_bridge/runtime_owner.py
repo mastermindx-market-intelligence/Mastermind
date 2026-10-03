@@ -234,10 +234,84 @@ class RuntimeFabricTargetProjector:
         return matches[0]
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeCodexTarget:
+    """Native view of one incumbent fabric target; owns no discovery or state."""
+
+    fabric: RuntimeFabricTarget
+
+    @property
+    def target_ref(self) -> str:
+        return "codex:" + self.fabric.target_ref.removeprefix("fabric_attempt:")
+
+    def reply_binding(self):
+        return dataclasses.replace(
+            self.fabric.reply_binding(), target_ref=self.target_ref
+        )
+
+    def public_projection(self) -> dict[str, Any]:
+        return {
+            "target_ref": self.target_ref,
+            "kind": "codex",
+            "generation": self.fabric.generation,
+            "addressable": True,
+            "continuation_operation_key": self.reply_binding().continuation_operation_key,
+        }
+
+
+class RuntimeCodexTargetProjector:
+    """Fail-closed Codex/COO view over the existing Runtime projector."""
+
+    def __init__(
+        self, base: RuntimeFabricTargetProjector, *,
+        owner_configured: Callable[[], bool] | None = None,
+    ) -> None:
+        if not isinstance(base, RuntimeFabricTargetProjector):
+            raise TypeError("the incumbent Runtime projector is required")
+        if owner_configured is not None and not callable(owner_configured):
+            raise TypeError("native owner capability must be callable")
+        self._base = base
+        self._owner_configured = owner_configured
+
+    def _enabled(self) -> bool:
+        try:
+            return self._owner_configured is not None and self._owner_configured() is True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _eligible(target: RuntimeFabricTarget) -> bool:
+        return (
+            target.epoch.harness_provider == "openai-codex"
+            and target.epoch.harness_owner_seat == "coo"
+        )
+
+    def project(self) -> list[dict[str, Any]]:
+        if not self._enabled():
+            return []
+        values = [
+            RuntimeCodexTarget(target).public_projection()
+            for target in self._base.list_targets() if self._eligible(target)
+        ]
+        return values if self._enabled() else []
+
+    def resolve(self, target_ref: str) -> RuntimeCodexTarget:
+        if (
+            not self._enabled()
+            or not isinstance(target_ref, str)
+            or re.fullmatch(r"codex:[0-9a-f]{64}", target_ref) is None
+        ):
+            raise BridgeError("native_target_stale", "native Codex target is no longer current")
+        target = self._base.resolve("fabric_attempt:" + target_ref.removeprefix("codex:"))
+        if not self._eligible(target) or not self._enabled():
+            raise BridgeError("native_target_stale", "native Codex target is no longer current")
+        return RuntimeCodexTarget(target)
+
+
 class RuntimeExecutiveReplyBindingResolver:
     """Recompute from incumbent Runtime/source/Wake owners on every lookup."""
 
-    def __init__(self, projector: RuntimeFabricTargetProjector):
+    def __init__(self, projector: RuntimeFabricTargetProjector | RuntimeCodexTargetProjector):
         self._projector = projector
 
     def resolve(self, target_ref: str):
@@ -245,6 +319,8 @@ class RuntimeExecutiveReplyBindingResolver:
 
 
 __all__ = [
+    "RuntimeCodexTarget",
+    "RuntimeCodexTargetProjector",
     "RuntimeFabricTarget",
     "RuntimeExecutiveReplyBindingResolver",
     "RuntimeFabricTargetProjector",

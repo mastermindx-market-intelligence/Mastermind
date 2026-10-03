@@ -183,21 +183,27 @@ def private_ingress_owner(provider: InstalledSessionBridgeProvider) -> SessionBr
 
 
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
-                                 summon_handler: Callable | None = None):
+                                 summon_handler: Callable | None = None,
+                                 codex_owner_configured: Callable[[], bool] | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
     kinds stay absent until their actual host-owned session adapters are bound.
     """
-    from .runtime_owner import RuntimeFabricTargetProjector, RuntimeExecutiveReplyBindingResolver
+    from .runtime_owner import (RuntimeFabricTargetProjector, RuntimeCodexTargetProjector,
+                                RuntimeExecutiveReplyBindingResolver)
     from .dialogue_reply import AgentDialogueContinueWriter
     from .native_backends import CanonicalReplyCoordinator, CanonicalTargetReader, ExactTargetRouter
 
     projector = RuntimeFabricTargetProjector(runtime)
     writer = AgentDialogueContinueWriter(
         RuntimeExecutiveReplyBindingResolver(projector), socket_path=dialogue_socket_path)
+    codex = RuntimeCodexTargetProjector(
+        projector, owner_configured=codex_owner_configured)
+    codex_writer = AgentDialogueContinueWriter(
+        RuntimeExecutiveReplyBindingResolver(codex), socket_path=dialogue_socket_path)
     reader = CanonicalTargetReader(
-        fabric_reader=projector.project, codex_reader=lambda: [], claude_reader=lambda: [])
+        fabric_reader=projector.project, codex_reader=codex.project, claude_reader=lambda: [])
 
     def unavailable(*_):
         raise BridgeError("backend_unavailable", "installed native session owner is unavailable")
@@ -207,8 +213,10 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     # cannot inject a raw provider prompt or launch another worker.
     coordinator = CanonicalReplyCoordinator(
         reply_writer=writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
+    codex_coordinator = CanonicalReplyCoordinator(
+        reply_writer=codex_writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
     router = ExactTargetRouter(
-        fabric_reply=coordinator, codex_reply=unavailable, claude_reply=unavailable)
+        fabric_reply=coordinator, codex_reply=codex_coordinator, claude_reply=unavailable)
 
     def targets(principal, kind):
         values = reader(kind)

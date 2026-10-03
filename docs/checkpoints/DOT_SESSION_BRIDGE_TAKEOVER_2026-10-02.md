@@ -581,3 +581,39 @@ CONSULT and native acceptance remain open. A queued admission is not execution.
 Required CI37119605779 at d0a51966 found four deterministic failures: two stale SUMMON fixtures and two architecture checks exposing a control-plane import of the integration. The fixed private schema/error/result and nominal ingress-owner contract now live in `common/session_bridge_private_contract.py`; business/principal validation and provider composition remain integration-owned. The service checks the exact neutral owner, validates before handler entry, and rechecks App binding/state/arm immediately before and after the effect. Six real ingress cases prove invalid owner/validator/arguments and pre-effect binding rotation cause zero handler calls. Post-effect uncertainty and one-response behavior remain covered. The architecture assertions were preserved unchanged.
 
 503 owning bridge/profile/composition/architecture tests passed; independent source review passed. Native attention and provider consumption remain unproved. The separate installed recovery is #1187 (exact source Git trust plus explicit bounded company device-auth deadline revalidation); its local campaigns passed 968 unique owning tests, protected release is pending. No new worker Job or full COO arm has been performed by this CI repair.
+
+
+## Native Codex incumbent-owner view — 2026-10-03
+
+The prior published head 7ce1fb165fd77e70cd524e137bf023af18436e74 passed full
+repository CI37123029755. This increment adds a stateless Codex/COO view of the
+same RuntimeFabricTargetProjector, preserving every current-writer/carrier fact
+and changing only the target reference and its derived continuation key. It adds
+no registry, scheduler, provider process, direct Wake call, or transport.
+
+Production composition checks the normalized WakeRetryPolicy, a serving Executive
+dialogue-observation listener, and the existing A2 owner's exact current-release
+root-owned W3C plist. The callback is rechecked around target projection/resolution;
+the canonical writer re-resolves before send. Missing configuration hides Codex
+targets. Configuration is not A2 process liveness. Canonical CONTINUE receipts
+retain attention UNAVAILABLE; duplicate reconciliation never initiates attention.
+The existing asynchronous A2 observation -> Executive Dialogue/Wake -> OHF path
+remains the only native attention owner.
+
+Independent deep-Sol review found and fixed an initial typed-policy mismatch:
+load_control_config normalizes the JSON dictionary to WakeRetryPolicy. The
+regression now traverses that actual loader and the real installed service factory.
+Final review PASS. The owning Session Bridge, A2 enrollment, installed composition,
+Executive service and W3C campaign passed 489 cases. Evidence:
+1112-codex-owning-20261003.xml under the existing exact-session-interconnect evidence
+directory. Tests cover four capability combinations, listener shutdown, provider/
+seat/generation drift, before-send gate revocation with zero writes, one canonical
+CONTINUE and duplicate suppression. Provider/Slack effects remain fixtures.
+
+Host audit: A2 principal exists but relay token/config/plist/service are absent.
+Current source implements the observation listener and A2 consumer; an old
+SPEC_ONLY plan is not evidence they are missing. Enrollment needs the actual
+dedicated Slack bot identity and native no-echo credential entry; no credential
+was read, moved, replaced or requested in chat. No live Codex attention, ACK,
+CONSULT, native desktop consumption or original-parent RETURN is claimed.
+MISSION_COMPLETE remains false; root retains the assigned recovery.

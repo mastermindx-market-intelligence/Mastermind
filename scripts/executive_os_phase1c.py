@@ -1991,9 +1991,22 @@ def _service_from_config(
                         raise BridgeError("authority_refused", "Executive submit scopes are required")
                     return await adapter(arguments)
 
+                def codex_owner_configured():
+                    from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
+                    # Configuration and serving listener are necessary capability
+                    # gates. A carrier receipt still proves no native attention.
+                    observation = getattr(service, "_dialogue_observation_server", None)
+                    return (
+                        raw.get("dialogue_bridge_armed") is True
+                        and getattr(raw.get("dialogue_wake_retry_policy"), "armed", False) is True
+                        and observation is not None
+                        and observation.is_serving()
+                        and w3c_plist_configured(release_sha=config.proof_base_sha)
+                    )
+
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
-                    summon_handler=summon)
+                    summon_handler=summon, codex_owner_configured=codex_owner_configured)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
