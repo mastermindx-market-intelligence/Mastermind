@@ -265,3 +265,32 @@ def test_inline_reconcile_callbacks_cannot_overrun_the_deadline(monkeypatch, pha
         finally:
             monkeypatch.setattr(loop, "time", real_time)
     asyncio.run(exercise())
+
+
+
+def test_concurrent_reconciliation_has_distinct_rpc_ids_but_one_canonical_message():
+    async def exercise():
+        rpc = Rpc(); await client(rpc).deliver_wake(**args())
+        pending, request_ids = set(), []
+        release = asyncio.Event()
+        async def multiplexed(frame):
+            request_id = frame["id"]; request_ids.append(request_id)
+            if request_id in pending:
+                release.set()
+                raise ValueError("duplicate in-flight RPC request identity")
+            pending.add(request_id)
+            if len(pending) == 2: release.set()
+            try:
+                await asyncio.wait_for(release.wait(), 1)
+                return await rpc(frame)
+            finally:
+                pending.remove(request_id)
+        fields = args(); fields.pop("instruction")
+        results = await asyncio.gather(client(multiplexed).reconcile_wake(**fields),
+                    client(multiplexed).reconcile_wake(**fields), return_exceptions=True)
+        assert len(set(request_ids)) == 2, "concurrent queue reads reused one RPC identity"
+        assert all(not isinstance(result, BaseException) and result.accepted and not result.delivered
+                   for result in results), results
+        assert len(rpc.rows) == 1 and rpc.rows[0]["clientUserMessageId"] == NUDGE
+        assert sum(f["method"] == "thread/queue/add" for f in rpc.calls) == 1
+    asyncio.run(exercise())

@@ -22,7 +22,7 @@ import math
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from control_plane.session_targets import RuntimeBinding
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError, _NUDGE_ID_RE
@@ -142,7 +142,9 @@ class CodexQueuedWakeClient:
             if instruction != CODEX_WAKE_INSTRUCTION:
                 raise ValueError("queued Wake instruction is not canonical")
             expected_input = self._input(nudge_id, ids)
-            request_id = nudge_id + ":queue-add"
+            # Transport correlation is per invocation; durable message identity stays
+            # nudge_id. Concurrent readers must not collide in the host RPC map.
+            request_id = nudge_id + ":queue-add:" + uuid4().hex
             deadline = asyncio.get_running_loop().time() + self._timeout
             async with asyncio.timeout_at(deadline):
                 await self._guard_current(nudge_id, ids)
@@ -180,7 +182,7 @@ class CodexQueuedWakeClient:
                 for page in range(self._max_pages):
                     await self._guard_current(nudge_id, ids)
                     self._before_deadline(deadline)
-                    request_id = nudge_id + ":queue-list:" + str(page)
+                    request_id = nudge_id + ":queue-list:" + str(page) + ":" + uuid4().hex
                     params = {"threadId": native_handle, "limit": self._page_size}
                     if cursor is not None:
                         params["cursor"] = cursor
