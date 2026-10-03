@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import ops.executive_os.install_source_policy as source_policy
 from ops.executive_os.install_source_policy import (
     InstallSourcePolicyError,
     validate_install_source,
@@ -191,3 +192,56 @@ def test_installer_exposes_explicit_frozen_mode_without_reusing_historical_sourc
     assert "--protected-master-sha" in install
     assert '"$SCRIPT_DIR/install_source_policy.py"' in install
     assert "refs/remotes/origin/master" not in install
+
+
+def test_git_uses_exact_command_scoped_safe_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(source_policy.subprocess, "run", fake_run)
+    result = source_policy._git(repo, "rev-parse", "HEAD")
+
+    trusted = str(repo.resolve())
+    assert result.stdout == "ok\n"
+    assert calls == [[
+        "/usr/bin/git", "--no-optional-locks",
+        "-c", f"safe.directory={trusted}",
+        "-C", trusted, "rev-parse", "HEAD",
+    ]]
+
+
+def test_git_refuses_symlink_alias_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo, target_is_directory=True)
+    monkeypatch.setattr(
+        source_policy.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("Git must not spawn for an alias"),
+    )
+    with pytest.raises(InstallSourcePolicyError, match="path is unsafe"):
+        source_policy._git(alias, "rev-parse", "HEAD")
+
+
+def test_git_refuses_wildcard_safe_directory_value_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo*"
+    repo.mkdir()
+    monkeypatch.setattr(
+        source_policy.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("Git must not spawn for wildcard trust"),
+    )
+    with pytest.raises(InstallSourcePolicyError, match="path is unsafe"):
+        source_policy._git(repo, "rev-parse", "HEAD")
