@@ -46,6 +46,7 @@ CODEX_CODE_MODE_HOST_TEMP=""
 CODEX_CODE_MODE_HOST_BACKUP=""
 CODEX_CODE_MODE_HOST_ACTION=""
 CODEX_VERSION="0.159.2"
+ADMIN_CHECKOUT_TEMP=""
 CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 
 usage() {
@@ -857,6 +858,20 @@ if ! /usr/bin/id -Gn "$OPERATOR_USER" | /usr/bin/tr ' ' '\n' | /usr/bin/grep -qx
 fi
 OPERATOR_UID="$(/usr/bin/id -u "$OPERATOR_USER")"
 
+# Source Git is intentionally evaluated as the reviewed operator, not root.
+# This avoids persistent root Git trust configuration while preserving Git's
+# ownership fence against an operator-owned checkout. The environment is
+# scrubbed so global/system Git configuration cannot widen the source read.
+run_operator_source() {
+  /usr/bin/sudo -n -u "$OPERATOR_USER" /usr/bin/env -i \
+    PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+    HOME=/var/empty \
+    LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 \
+    "$@"
+}
+
 SOURCE_POLICY="$SCRIPT_DIR/install_source_policy.py"
 [ -f "$SOURCE_POLICY" ] && [ ! -L "$SOURCE_POLICY" ] || {
   /bin/echo "installer source policy helper is unavailable or unsafe" >&2
@@ -874,12 +889,13 @@ if [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "1" ]; then
 elif [ -n "$PROTECTED_MASTER_SHA" ]; then
   SOURCE_POLICY_ARGS+=(--protected-master-sha "$PROTECTED_MASTER_SHA")
 fi
-"$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/install_source_policy.py" \
+run_operator_source "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/install_source_policy.py" \
   "${SOURCE_POLICY_ARGS[@]}" >/dev/null || {
     /bin/echo "source checkout failed the reviewed Executive install policy" >&2
     exit 65
   }
-TREE_SHA="$(/usr/bin/git -C "$SOURCE_REPO" rev-parse "$EXPECTED_SHA^{tree}")"
+TREE_SHA="$(run_operator_source /usr/bin/git -C "$SOURCE_REPO" \
+  rev-parse "$EXPECTED_SHA^{tree}")"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 RUNTIME_ROOT="/var/db/mastermind-executive"
@@ -1027,6 +1043,10 @@ leave_installed_services_stopped() {
   if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
     /bin/rm -rf -- "$STAGING"
   fi
+  if [ -n "${ADMIN_CHECKOUT_TEMP:-}" ] && [ -d "$ADMIN_CHECKOUT_TEMP" ]; then
+    /bin/rm -rf -- "$ADMIN_CHECKOUT_TEMP"
+    ADMIN_CHECKOUT_TEMP=""
+  fi
 }
 prepare_codex_code_mode_host || exit 65
 trap leave_installed_services_stopped EXIT
@@ -1048,7 +1068,8 @@ wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 if [ ! -d "$RELEASE_ROOT" ]; then
   STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | /usr/bin/tar -xf - -C "$STAGING"
+  run_operator_source /usr/bin/git -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" \
+    | /usr/bin/tar -xf - -C "$STAGING"
   /usr/sbin/chown -R root:wheel "$STAGING"
   /bin/chmod -R go-w "$STAGING"
   # mktemp creates the staging root as 0700. Both non-root service UIDs need
@@ -1119,9 +1140,30 @@ esac
 
 ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
 if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
-  /usr/bin/git clone --no-hardlinks --no-checkout "$SOURCE_REPO" "$ADMIN_CHECKOUT"
-  /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
-  /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
+  if [ -e "$ADMIN_CHECKOUT" ]; then
+    [ -d "$ADMIN_CHECKOUT" ] && [ -z "$(/bin/ls -A "$ADMIN_CHECKOUT")" ] || {
+      /bin/echo "administrative checkout path exists without a usable Git checkout" >&2
+      exit 65
+    }
+    /bin/rmdir "$ADMIN_CHECKOUT"
+  fi
+  ADMIN_CHECKOUT_TEMP="$(
+    run_operator_source /usr/bin/mktemp -d \
+      "/private/tmp/mastermind-admin-checkout.$EXPECTED_SHA.XXXXXX"
+  )"
+  [ -n "$ADMIN_CHECKOUT_TEMP" ] && [ -d "$ADMIN_CHECKOUT_TEMP" ] || {
+    /bin/echo "could not create the operator-owned administrative checkout staging directory" >&2
+    exit 65
+  }
+  run_operator_source /usr/bin/git clone --no-hardlinks --no-checkout \
+    "$SOURCE_REPO" "$ADMIN_CHECKOUT_TEMP/checkout"
+  run_operator_source /usr/bin/git -C "$ADMIN_CHECKOUT_TEMP/checkout" \
+    checkout --detach "$EXPECTED_SHA"
+  run_operator_source /usr/bin/git -C "$ADMIN_CHECKOUT_TEMP/checkout" remote remove origin
+  /usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT_TEMP/checkout"
+  /bin/mv "$ADMIN_CHECKOUT_TEMP/checkout" "$ADMIN_CHECKOUT"
+  /bin/rmdir "$ADMIN_CHECKOUT_TEMP"
+  ADMIN_CHECKOUT_TEMP=""
 fi
 # Pack the administrative checkout, ALWAYS -- not only when it was just
 # created.  Every job clones this repository with `git clone --local
