@@ -205,6 +205,7 @@ class CodexQueuedWakeClient:
                     cursor = result["nextCursor"]
                     if cursor is None:
                         if matched:
+                            self._before_deadline(deadline)
                             return self._accepted(native_handle, nudge_id)
                         raise ValueError("absence cannot distinguish consumed from never submitted")
                     if not _token(cursor) or cursor in seen_cursors:

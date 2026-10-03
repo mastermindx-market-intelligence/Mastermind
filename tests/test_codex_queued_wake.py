@@ -294,3 +294,68 @@ def test_concurrent_reconciliation_has_distinct_rpc_ids_but_one_canonical_messag
         assert len(rpc.rows) == 1 and rpc.rows[0]["clientUserMessageId"] == NUDGE
         assert sum(f["method"] == "thread/queue/add" for f in rpc.calls) == 1
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("elapsed", [0.5, 1.0, 2.0])
+@pytest.mark.parametrize("match_on_previous_page", [False, True])
+def test_final_page_scan_must_finish_before_reconciliation_deadline(
+    monkeypatch, elapsed, match_on_previous_page
+):
+    async def exercise():
+        # Existing queue insertion succeeds but its response is lost. Recovery
+        # must stay read-only even if validating the last page uses the budget.
+        rpc = Rpc()
+        rpc.failure = TimeoutError("simulated response loss after queue insertion")
+        with pytest.raises(WakeEffectUnknownError):
+            await client(rpc).deliver_wake(**args())
+        rpc.failure = None
+        original_row = copy.deepcopy(rpc.rows[0])
+        final_row = copy.deepcopy(original_row)
+        if match_on_previous_page:
+            final_row.update(id="unrelated-final-row", clientUserMessageId="unrelated")
+            rpc.pages = [
+                dict(data=[original_row], nextCursor="page-2"),
+                dict(data=[final_row], nextCursor=None),
+            ]
+        loop = asyncio.get_running_loop()
+        real_time = loop.time
+        clock = [100.0]
+        scanned = []
+        original_validate = api().CodexQueuedWakeClient._row
+
+        def validate_and_advance(row):
+            result = original_validate(row)
+            if row["id"] == final_row["id"]:
+                scanned.append(row["id"])
+                clock[0] += elapsed
+            return result
+
+        monkeypatch.setattr(loop, "time", lambda: clock[0])
+        monkeypatch.setattr(
+            api().CodexQueuedWakeClient, "_row", staticmethod(validate_and_advance)
+        )
+        fields = args()
+        fields.pop("instruction")
+        result, unresolved = None, False
+        try:
+            try:
+                result = await client(rpc, timeout_seconds=1).reconcile_wake(**fields)
+            except WakeEffectUnknownError:
+                unresolved = True
+        finally:
+            monkeypatch.setattr(loop, "time", real_time)
+        assert scanned == [final_row["id"]]
+        assert rpc.rows == [original_row]
+        assert rpc.rows[0]["clientUserMessageId"] == NUDGE
+        assert [frame["method"] for frame in rpc.calls] == [
+            "thread/queue/add", *(["thread/queue/list"] * (2 if match_on_previous_page else 1))
+        ]
+        if elapsed >= 1.0:
+            assert unresolved, "ACCEPTED escaped after final-page scan exhausted the deadline"
+            assert result is None
+        else:
+            assert not unresolved
+            assert result.accepted and not result.delivered
+            assert result.target_ack_projection is None
+
+    asyncio.run(exercise())
