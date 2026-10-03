@@ -1015,13 +1015,11 @@ def test_privileged_source_cleanliness_checks_do_not_refresh_worktree_index() ->
     ) in source_policy
     assert '"status",\n        "--porcelain=v1",\n        "--untracked-files=normal",' in source_policy
     assert "--refresh" not in source_policy
-    assert (
-        '"/usr/bin/git",\n'
-        '                "--no-optional-locks",\n'
-        '                "-C",\n'
-        '                self.source_repository,\n'
-        '                "status",'
-    ) in acceptance
+    assert "return validate_acceptance_source(" in acceptance
+    assert "source_repo=self.source_repository," in acceptance
+    assert "expected_sha=self.expected_sha," in acceptance
+    assert "tree_sha = self._source_tree_sha()" in acceptance
+    assert '"/usr/bin/git"' not in acceptance
 
 
 def test_canary_activation_uses_bounded_control_command_not_signal() -> None:

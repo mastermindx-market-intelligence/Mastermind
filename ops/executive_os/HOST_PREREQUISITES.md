@@ -922,6 +922,34 @@ Recovery removes only the stale transaction marker. It never removes a receipt,
 changes a credential, or authorizes another canary. A reserved or uncertain
 receipt remains blocked; it is never treated as a terminal provider failure.
 
+For an unchanged **company device-auth** credential whose explicitly approved
+revalidation deadline has expired or has 30 minutes or less remaining, the same
+`executive.worker_auth.verify_ready` action accepts
+`--renew-device-revalidation-sha256 SHA256`. This is an explicit new operational
+revalidation under a current authorized acceptance assignment, never an automatic
+extension of a token expiry or a deadline-only edit. Supply the SHA256 of the
+exact prior **passing** receipt and a newly approved deadline more than 30 and
+no more than 60 minutes ahead. A still-live window with more than 30 minutes
+remaining must be reused; it cannot be renewed early.
+
+Renewal requires full equality of the current credential and binary identities
+with the prior passing receipt, including device numbers. It admits only the
+fixed company device-auth principal and workspace policy. Reservations,
+nonpassing/unknown receipts, changed credentials/binaries, personal slots,
+service-account tokens and personal access tokens refuse. It is mutually
+exclusive with terminal-adverse requalification and ordinary readiness refresh.
+
+This explicit renewal uses the existing readiness transaction lock, exact
+preimage digest/lstat comparison, immutable superseded-receipt archive and
+sticky canary reservation. A fresh identity probe must retain the same provider
+policy, exactly one new canary must pass, and the post-canary identity must still
+match before a new passing receipt can bind the new deadline. No logout,
+credential replacement, deletion or copying occurs. The old passing receipt
+remains evidence; it never becomes current readiness by changing its deadline.
+Retain one request ID and use the existing same-ID status/reconciliation path
+after transport loss. The predecessor digest is a concurrency fence, not a
+source of renewal authority.
+
 For the reviewed Codex **0.147.0 to 0.159.2** upgrade only, the existing
 `executive.worker_auth.verify_ready` broker action also accepts the explicit
 `--requalify-terminal-adverse-sha256 SHA256` option. This is a new bounded

@@ -790,11 +790,77 @@ def validate_terminal_predecessor_document(
             raise ReadinessError("requalification_component_timestamp_conflict")
 
 
+def validate_revalidation_predecessor_document(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    """Validate prior company device-auth PASS evidence without renewing it."""
+    if (expected_kind != "device-auth"
+            or workspace_binding_class != COMPANY_WORKSPACE_BINDING_CLASS
+            or (worker_uid, worker_gid) != (WORKER_UID, WORKER_GID)):
+        raise ReadinessError("revalidation_requires_company_device_auth")
+    validate_receipt_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid, allow_expired_readiness=True,
+    )
+    identity = _safe_identity(value["provider_identity"])
+    if (identity["refusal"] is not None
+            or identity["workspace_binding_class"] != workspace_binding_class):
+        raise ReadinessError("revalidation_provider_identity_conflict")
+
+
+def classify_device_revalidation(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    new_credential_expires_at: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    """Explicit bounded renewal requires new proof, never deadline-only reuse."""
+    validate_revalidation_predecessor_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+    current = datetime.now(UTC)
+    prior = _timestamp(value["credential_expires_at"], code="credential_expiry_malformed")
+    deadline = _timestamp(new_credential_expires_at, code="credential_expiry_malformed")
+    if prior > current + MIN_ACCEPTANCE_MARGIN:
+        raise ReadinessError("revalidation_not_due")
+    if not (current + MIN_ACCEPTANCE_MARGIN < deadline <= current + MAX_REQUALIFICATION_HORIZON
+            and deadline > prior):
+        raise ReadinessError("revalidation_deadline_out_of_bounds")
+
+
+def _device_revalidation_preimage(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return _explicit_requalification_preimage(
+        args, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_digest=args.renew_device_revalidation_sha256,
+        classifier=classify_device_revalidation,
+    )
+
+
 def _terminal_requalification_preimage(
     args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
     binary_identity: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    expected_digest = args.requalify_terminal_adverse_sha256
+    return _explicit_requalification_preimage(
+        args, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_digest=args.requalify_terminal_adverse_sha256,
+        classifier=classify_terminal_requalification,
+    )
+
+
+def _explicit_requalification_preimage(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any], expected_digest: str, classifier: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(expected_digest, str) or SHA256_RE.fullmatch(expected_digest) is None:
         raise ReadinessError("requalification_receipt_digest_malformed")
     expected_uid, expected_gid, expected_mode = receipt_storage_contract(
@@ -819,7 +885,7 @@ def _terminal_requalification_preimage(
             args.receipt, expected_uid=expected_uid, expected_gid=expected_gid,
             expected_mode=expected_mode) != first):
         raise ReadinessError("requalification_receipt_changed")
-    classify_terminal_requalification(
+    classifier(
         document, auth_identity=auth_identity, binary_identity=binary_identity,
         expected_kind=args.expected_kind, workspace_binding_class=args.workspace_binding_class,
         new_credential_expires_at=args.credential_expires_at,
@@ -1371,7 +1437,9 @@ def _parser() -> argparse.ArgumentParser:
     reuse.add_argument("--credential-expires-at", required=True)
     reuse.add_argument("--worker-uid", type=int, default=WORKER_UID)
     reuse.add_argument("--worker-gid", type=int, default=WORKER_GID)
-    reuse.add_argument("--requalify-terminal-adverse-sha256")
+    reuse_replacement = reuse.add_mutually_exclusive_group()
+    reuse_replacement.add_argument("--requalify-terminal-adverse-sha256")
+    reuse_replacement.add_argument("--renew-device-revalidation-sha256")
     reserve = sub.add_parser("reserve")
     reserve.add_argument("--receipt", type=Path, default=RECEIPT_PATH)
     reserve.add_argument("--auth", type=Path, default=AUTH_PATH)
@@ -1384,6 +1452,7 @@ def _parser() -> argparse.ArgumentParser:
     reserve.add_argument("--worker-gid", type=int, default=WORKER_GID)
     replacement = reserve.add_mutually_exclusive_group()
     replacement.add_argument("--requalify-terminal-adverse-sha256")
+    replacement.add_argument("--renew-device-revalidation-sha256")
     replacement.add_argument(
         "--refresh-expired",
         action="store_true",
@@ -1513,6 +1582,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         if args.command == "reuse":
+            if args.renew_device_revalidation_sha256 is not None:
+                _device_revalidation_preimage(
+                    args, auth_identity=current_auth_identity(
+                        args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                    ), binary_identity=current_binary_identity(args.binary),
+                )
+                return 6
             if args.requalify_terminal_adverse_sha256 is not None:
                 _terminal_requalification_preimage(
                     args, auth_identity=current_auth_identity(
@@ -1574,8 +1650,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 worker_gid=args.worker_gid,
             )
             binary_identity = current_binary_identity(args.binary)
-            if args.requalify_terminal_adverse_sha256 is not None:
-                document, receipt_identity = _terminal_requalification_preimage(
+            if (args.requalify_terminal_adverse_sha256 is not None
+                    or args.renew_device_revalidation_sha256 is not None):
+                preimage = (_device_revalidation_preimage
+                            if args.renew_device_revalidation_sha256 is not None
+                            else _terminal_requalification_preimage)
+                document, receipt_identity = preimage(
                     args, auth_identity=auth_identity, binary_identity=binary_identity,
                 )
                 fresh = _safe_identity(identity_payload)
@@ -1601,7 +1681,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 refresh_expired_receipt(
                     args.receipt, receipt, expected_identity=receipt_identity,
                     workspace_binding_class=args.workspace_binding_class, worker_gid=args.worker_gid,
-                    expected_receipt_sha256=args.requalify_terminal_adverse_sha256,
+                    expected_receipt_sha256=(args.requalify_terminal_adverse_sha256
+                                             or args.renew_device_revalidation_sha256),
                 )
                 return 0
             if args.refresh_expired:

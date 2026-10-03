@@ -50,6 +50,7 @@ _EFFECT_ONLY_FLAGS = (
     ("--workspace-binding-class", "workspace_binding_class"),
     ("--credential-expires-at", "credential_expires_at"),
     ("--requalify-terminal-adverse-sha256", "requalify_terminal_adverse_sha256"),
+    ("--renew-device-revalidation-sha256", "renew_device_revalidation_sha256"),
 )
 
 
@@ -62,6 +63,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace-binding-class")
     parser.add_argument("--credential-expires-at")
     parser.add_argument("--requalify-terminal-adverse-sha256")
+    parser.add_argument("--renew-device-revalidation-sha256")
     return parser
 
 
@@ -78,6 +80,8 @@ def build_request(argv: Sequence[str]) -> dict[str, object]:
         values["credential_expires_at"] = args.credential_expires_at
     if args.requalify_terminal_adverse_sha256 is not None:
         values["requalify_terminal_adverse_sha256"] = args.requalify_terminal_adverse_sha256
+    if args.renew_device_revalidation_sha256 is not None:
+        values["renew_device_revalidation_sha256"] = args.renew_device_revalidation_sha256
     raw = {
         "schema": REQUEST_SCHEMA,
         "request_id": args.request_id or f"req-{uuid.uuid4().hex}",

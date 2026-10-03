@@ -120,6 +120,22 @@ def _require_checkout(
         )
 
 
+def validate_acceptance_source(*, source_repo: Path, expected_sha: str) -> str:
+    """Return the tree of one clean exact protected source for host acceptance.
+
+    Acceptance shares the installer's command-scoped ownership exception; it
+    does not gain the separate frozen-ancestor install mode or persistent trust.
+    """
+    validate_install_source(
+        source_repo=source_repo,
+        expected_sha=expected_sha,
+        protected_master_sha=None,
+        allow_frozen_accepted_ancestor=False,
+    )
+    tree = _git(source_repo, "rev-parse", f"{expected_sha}^{{tree}}").stdout.strip()
+    return _require_sha(tree, "source tree SHA")
+
+
 def validate_install_source(
     *,
     source_repo: Path,

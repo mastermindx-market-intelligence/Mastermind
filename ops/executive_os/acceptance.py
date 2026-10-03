@@ -32,6 +32,10 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from ops.executive_os.install_source_policy import (
+    InstallSourcePolicyError,
+    validate_acceptance_source,
+)
 from ops.executive_os.a2_agent_relay_enrollment import (
     RELAY_GID as AGENT_RELAY_GID,
     RELAY_GROUP as AGENT_RELAY_GROUP,
@@ -993,7 +997,7 @@ def _prepare_acceptance_receipt_root(
 class Acceptance:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.source_repository = args.source_repo.resolve(strict=True)
+        self.source_repository = args.source_repo
         self.expected_sha = args.expected_sha
         self.operator_user = args.operator_user
         self.python = Path(sys.executable).resolve(strict=True)
@@ -1509,6 +1513,15 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         return workspace, run_dir
 
+    def _source_tree_sha(self) -> str:
+        try:
+            return validate_acceptance_source(
+                source_repo=self.source_repository,
+                expected_sha=self.expected_sha,
+            )
+        except InstallSourcePolicyError as exc:
+            raise AcceptanceError(str(exc)) from exc
+
     def validate_install(self) -> None:
         if os.geteuid() != 0 or sys.platform != "darwin":
             raise AcceptanceError("real host acceptance requires root on macOS")
@@ -1625,44 +1638,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             agent_relay_present=agent_relay_present,
         )
 
-        head = _run(
-            ["/usr/bin/git", "-C", self.source_repository, "rev-parse", "HEAD"],
-            label="source HEAD",
-        ).stdout.decode().strip()
-        remote = _run(
-            [
-                "/usr/bin/git",
-                "-C",
-                self.source_repository,
-                "rev-parse",
-                "refs/remotes/origin/master",
-            ],
-            label="origin/master",
-        ).stdout.decode().strip()
-        dirty = _run(
-            [
-                "/usr/bin/git",
-                "--no-optional-locks",
-                "-C",
-                self.source_repository,
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=normal",
-            ],
-            label="source cleanliness",
-        ).stdout
-        if head != self.expected_sha or remote != self.expected_sha or dirty:
-            raise AcceptanceError("source is not a clean checkout of exact origin/master")
-        tree_sha = _run(
-            [
-                "/usr/bin/git",
-                "-C",
-                self.source_repository,
-                "rev-parse",
-                f"{self.expected_sha}^{{tree}}",
-            ],
-            label="source tree identity",
-        ).stdout.decode().strip()
+        tree_sha = self._source_tree_sha()
         _run(
             [
                 self.python,

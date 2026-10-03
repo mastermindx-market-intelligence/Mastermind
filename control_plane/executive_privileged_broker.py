@@ -186,6 +186,7 @@ class ReconcileNotAppliedRequest:
     credential_expires_at: str
     # Derived from the target digest, never a new wire claim.
     requalify_terminal_adverse_sha256: str | None = None
+    renew_device_revalidation_sha256: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -216,6 +217,9 @@ def _reconciliation_target(raw: Mapping[str, Any]):
     if args["expected_credential_kind"] == "device-auth":
         variants.append({
             **args, "requalify_terminal_adverse_sha256": raw.get("readiness_receipt_sha256"),
+        })
+        variants.append({
+            **args, "renew_device_revalidation_sha256": raw.get("readiness_receipt_sha256"),
         })
     matches = []
     for candidate in variants:
@@ -273,6 +277,7 @@ def validate_reconcile_not_applied_request(
         workspace_binding_class=args["workspace_binding_class"],
         credential_expires_at=args["credential_expires_at"],
         requalify_terminal_adverse_sha256=args.get("requalify_terminal_adverse_sha256"),
+        renew_device_revalidation_sha256=args.get("renew_device_revalidation_sha256"),
     )
 
 
@@ -1294,16 +1299,21 @@ class PrivilegedActionBroker:
         if evidence["readiness_receipt_sha256"] != request.readiness_receipt_sha256:
             raise BrokerTrustError("provider readiness receipt changed after target request")
         document = evidence["readiness_document"]
-        if request.requalify_terminal_adverse_sha256 is not None:
+        if (request.requalify_terminal_adverse_sha256 is not None
+                or request.renew_device_revalidation_sha256 is not None):
             from ops.executive_os.provider_readiness import (
                 ReadinessError, validate_terminal_predecessor_document,
+                validate_revalidation_predecessor_document,
             )
+            predecessor_validator = (validate_revalidation_predecessor_document
+                                     if request.renew_device_revalidation_sha256 is not None
+                                     else validate_terminal_predecessor_document)
             if (not isinstance(document, Mapping)
                     or not isinstance(evidence["current_auth_identity"], Mapping)
                     or not isinstance(evidence["current_binary_identity"], Mapping)):
                 raise BrokerTrustError("terminal predecessor evidence is incomplete")
             try:
-                validate_terminal_predecessor_document(
+                predecessor_validator(
                     document, auth_identity=evidence["current_auth_identity"],
                     binary_identity=evidence["current_binary_identity"],
                     expected_kind=request.expected_credential_kind,
@@ -1311,7 +1321,7 @@ class PrivilegedActionBroker:
                 )
             except (ReadinessError, OSError) as exc:
                 raise BrokerTrustError("terminal predecessor identity continuity is unproven") from exc
-            # Exact unchanged pre-marker adverse bytes prove this request never
+            # Exact unchanged pre-marker predecessor bytes prove this request never
             # installed its reservation, even if deadlines happen to coincide.
         else:
             if (
