@@ -14,7 +14,7 @@ import pytest
 from common.company_consultation_host_contract import encode_request
 from control_plane.executive_runtime import ActiveMcpCapabilityBindingFacts, StateConflict
 from control_plane.operator_harness_contract import CapabilityIdentity, ObservedCapabilityIdentity
-from integrations.mastermind_company_mcp import host as module
+from integrations import company_consultation_host as module
 from integrations import company_consultation_dispatch as dispatch_module
 from tests import test_company_inbox_iac1 as fixtures
 from tests.test_company_consultation_target_resolution import (

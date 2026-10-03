@@ -28,7 +28,7 @@ def test_real_company_stdio_advertises_exact_catalog_and_preserves_refusal(tmp_p
     launcher.write_text(
         "import asyncio,sys\n"
         f"sys.path.insert(0, {str(root)!r})\n"
-        "from integrations.mastermind_company_mcp.server import run_company_consultation_stdio\n"
+        "from integrations.company_consultation_host_transport import run_company_consultation_stdio\n"
         f"asyncio.run(run_company_consultation_stdio(socket_path={socket_path!r}, "
         "server_uid=450, timeout_seconds=1.0))\n"
     )
@@ -67,10 +67,11 @@ def test_real_company_stdio_advertises_exact_catalog_and_preserves_refusal(tmp_p
 
 def test_stdio_rejects_invalid_host_binding_before_opening_stdio(monkeypatch):
     from integrations.mastermind_company_mcp import server
+    from integrations.company_consultation_host_transport import run_company_consultation_stdio
 
     def forbidden():
         raise AssertionError("invalid binding must not open the MCP stream")
     monkeypatch.setattr(server, "stdio_server", forbidden)
     with pytest.raises(ValueError, match="invalid Company host binding"):
-        asyncio.run(server.run_company_consultation_stdio(
+        asyncio.run(run_company_consultation_stdio(
             socket_path="relative.sock", server_uid=450))

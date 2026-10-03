@@ -13,7 +13,7 @@ from common.company_consultation_host_contract import (
     HOST_REQUEST_SCHEMA, MAX_REQUEST_BYTES, HostFrameError,
     decode_request, encode_request, encode_json_frame,
 )
-from integrations.mastermind_company_mcp import stdio_transport as transport
+from integrations import company_consultation_host_transport as transport
 from integrations.mastermind_company_mcp.consultation import _result
 
 

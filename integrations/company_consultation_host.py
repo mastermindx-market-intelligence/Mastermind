@@ -37,7 +37,7 @@ from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST, CompanyConsultationGateway,
     CompanyConsultationToolError, _error, validate_company_consultation_tool_arguments,
 )
-from integrations.mastermind_company_mcp.host_authorization import (
+from integrations.company_consultation_host_authorization import (
     COMPANY_MCP_CONFIG_NAME, CompanyCallerAuthority,
 )
 from integrations.session_bridge.runtime_owner import RuntimeFabricTarget, RuntimeFabricTargetProjector

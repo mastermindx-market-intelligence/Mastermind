@@ -142,3 +142,13 @@ class UnixCompanyConsultationGateway:
                 writer.close()
                 with contextlib.suppress(Exception, asyncio.CancelledError):
                     await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
+
+
+async def run_company_consultation_stdio(
+    *, socket_path: str, server_uid: int, timeout_seconds: float = 30.0,
+) -> None:
+    """Compose the installed Unix binding outside the pure SDK package."""
+    gateway = UnixCompanyConsultationGateway(
+        socket_path=socket_path, server_uid=server_uid, timeout_seconds=timeout_seconds)
+    from integrations.mastermind_company_mcp.server import run_company_consultation_stdio as run
+    await run(gateway)

@@ -108,23 +108,8 @@ def build_company_consultation_mcp_server(gateway: Any) -> Server:
 
 
 
-async def run_company_consultation_stdio(
-    *, socket_path: str, server_uid: int, timeout_seconds: float = 30.0,
-) -> None:
-    """Run the four-tool SDK frontend with an installed host binding.
-
-    The launcher supplies the fixed socket/UID. No environment variable, tool
-    argument, identity selector, or user-facing CLI changes this binding. This
-    function does not install or activate the corresponding host listener.
-    """
-    from integrations.mastermind_company_mcp.stdio_transport import (
-        UnixCompanyConsultationGateway,
-    )
-
-    gateway = UnixCompanyConsultationGateway(
-        socket_path=socket_path, server_uid=server_uid,
-        timeout_seconds=timeout_seconds,
-    )
+async def run_company_consultation_stdio(gateway: Any) -> None:
+    """Run the four-tool SDK frontend using its externally composed gateway."""
     server = build_company_consultation_mcp_server(gateway)
     async with stdio_server() as (reader, writer):
         await server.run(reader, writer, initialization_options(server))

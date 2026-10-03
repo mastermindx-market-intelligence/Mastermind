@@ -588,7 +588,7 @@ def test_production_composition_cannot_grant_an_arbitrary_resolver():
             name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
             if name != carrier_name:
                 continue
-            assert relative.as_posix() == "integrations/mastermind_company_mcp/host.py"
+            assert relative.as_posix() == "integrations/company_consultation_host.py"
             compositions += 1
             targets = [kw.value for kw in node.keywords if kw.arg == "targets"]
             assert len(targets) == 1, (str(relative), node.lineno)

@@ -12,7 +12,7 @@ from control_plane.executive_runtime import (
     ActiveMcpCapabilityBindingFacts, ActiveOperatorBindingFacts, Runtime, StateConflict,
 )
 from control_plane.operator_harness_contract import CapabilityIdentity, ObservedCapabilityIdentity
-from integrations.mastermind_company_mcp import host_authorization as host
+from integrations import company_consultation_host_authorization as host
 
 
 @pytest.fixture
