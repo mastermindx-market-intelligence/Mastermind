@@ -10,7 +10,7 @@
           "truthy and asynchronous host decisions cannot authorize anything"
         ],
         "killed": true,
-        "log_sha256": "d7029499cc8c3846c85561c5144e1bb96bdebbbedcada08adb26490f508c668e",
+        "log_sha256": "461f11deec0947a17a96f8d6ac8081a5d8ac62a8f4b02c78b63f55f988d7fada",
         "mutant_sha256": "346de9a8134d784246b054c43f808b5902129a8b234594365d943448d3d7d187",
         "passed": 15,
         "tests": 18
@@ -22,7 +22,7 @@
           "matches exact source grant and filters ungranted tools"
         ],
         "killed": true,
-        "log_sha256": "45dabc853aea053477113ebefa564c156f39c8a445efcdb3b6b5fd87d7762705",
+        "log_sha256": "28c9d22d399c4c31f25d33c88a8354f53720bb185969f92c15a379d7993e7c08",
         "mutant_sha256": "cd6ef10a3c66050c4e4fc9e659b35a28e297bd1178208e668d6334c5ce35a1c1",
         "passed": 16,
         "tests": 18
@@ -37,7 +37,7 @@
           "refuses changed output schema"
         ],
         "killed": true,
-        "log_sha256": "37dc4897b07f10cc6a9654be1f1e12d5a076157c22d2d22fd14a3d06acee8561",
+        "log_sha256": "5d8758bb2d7a994e17a4439a7be53cef65eed5cd79b0d9ffe134666987146ccb",
         "mutant_sha256": "146d6a83658cbdd8cff4fa5875ac96a3db0001442c78c1870e4cf8f5149ace8d",
         "passed": 13,
         "tests": 18
@@ -49,7 +49,7 @@
           "exact target must match before startup"
         ],
         "killed": true,
-        "log_sha256": "d74602f3026a7454adf7ecb060530890ec20e6043d3fdd7eacefc31512429731",
+        "log_sha256": "f272aa43bb0c68a894273a2fddd54b690ed68a12315c0c6c9335e162e3b94513",
         "mutant_sha256": "0e4d586dc1eb73a5b9553a0d3ddac6ec2a351e8e6b3d5b059eefd7c275ad4a39",
         "passed": 16,
         "tests": 18
@@ -57,18 +57,18 @@
     },
     "native_artifact_scenarios": {
       "missing-tool": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21681,
-          21684
+          60856,
+          60942
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21681,
-          21684,
-          21688,
-          21689
+          60856,
+          60942,
+          61067,
+          61126
         ],
         "inputs_unchanged": true,
         "log_sha256": "d4ea9487f9fce1f6d328257d4313ce61ea24f58e7b193f6b22c5a808983d7d10",
@@ -78,7 +78,7 @@
           "startup"
         ],
         "preflightObserved": false,
-        "projection_sha256": "995d348bf6fb442d7939386f37325a9f8465004ee42d9858af576dc74dde4846",
+        "projection_sha256": "d16683385fe2e9f1103437b70060a903ea15035baebe908edb97d6ee641a0d83",
         "read_calls": 0,
         "refusal": {
           "code": null,
@@ -106,7 +106,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-kftbAj",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-AJ1VB4",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -117,18 +117,18 @@
         "success": true
       },
       "normal": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21544,
-          21546
+          59204,
+          59263
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21544,
-          21546,
-          21548,
-          21549
+          59204,
+          59263,
+          59419,
+          59478
         ],
         "inputs_unchanged": true,
         "log_sha256": "3a3acf5ee2d67e74c8188d348b5a15c4fb979def1f2bd58dce3add5d3776a954",
@@ -141,7 +141,7 @@
           "dispatch"
         ],
         "preflightObserved": false,
-        "projection_sha256": "ccdb48d49bd02b8c6bb70d02815527a690b76909992047511535be75618f2d22",
+        "projection_sha256": "4ae08203a9c386376e847d5997e5ae68dbcad7737dba41a84d9e113171325b42",
         "read_calls": 1,
         "scenario": "normal",
         "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
@@ -164,7 +164,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-zlma1K",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-yZJd83",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -176,42 +176,42 @@
         "workload": {
           "read": {
             "file": "memo.txt",
-            "nonce": "0e77b96e-5180-49da-86e8-e6cf52de1393",
-            "pid": 21549,
-            "sha256": "cb0938cc1baae9456437b5efb133564a685fb23e6388a9dd0e9becf295feb83e",
-            "text": "grant\nneedle 0e77b96e-5180-49da-86e8-e6cf52de1393\n"
+            "nonce": "c2f09054-5ee1-46ec-9ef7-e011d1f9ff12",
+            "pid": 59478,
+            "sha256": "5d7fc0a36029f22ab78506e33e12b853b724a195738c08769ed3d2b56f5a9786",
+            "text": "grant\nneedle c2f09054-5ee1-46ec-9ef7-e011d1f9ff12\n"
           },
           "search": {
             "matches": [
               {
                 "file": "memo.txt",
                 "line": 2,
-                "text": "needle 0e77b96e-5180-49da-86e8-e6cf52de1393"
+                "text": "needle c2f09054-5ee1-46ec-9ef7-e011d1f9ff12"
               },
               {
                 "file": "signals.txt",
                 "line": 1,
-                "text": "needle 0e77b96e-5180-49da-86e8-e6cf52de1393"
+                "text": "needle c2f09054-5ee1-46ec-9ef7-e011d1f9ff12"
               }
             ],
-            "nonce": "0e77b96e-5180-49da-86e8-e6cf52de1393",
-            "pid": 21549
+            "nonce": "c2f09054-5ee1-46ec-9ef7-e011d1f9ff12",
+            "pid": 59478
           }
         }
       },
       "revoked": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21554,
-          21555
+          59642,
+          59704
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21554,
-          21555,
-          21558,
-          21560
+          59642,
+          59704,
+          59801,
+          59859
         ],
         "inputs_unchanged": true,
         "log_sha256": "cf298af693abff6c043df296eff2e02a999fb566f0942120da03105da5d25a1a",
@@ -224,7 +224,7 @@
           "dispatch"
         ],
         "preflightObserved": false,
-        "projection_sha256": "fec254afc7b650ff6c1134538b7b24fcd3befc8c72c1b7f8eb757ee529059103",
+        "projection_sha256": "8c2abbb050e03e16664c283ffd205f32d2356ec4d5e9d90235b6e4ae5f6c820e",
         "read_calls": 1,
         "scenario": "revoked",
         "scope": "Synthetic existing Python grant types/digest -> compiled DSH profile -> actual MCP process; no production admission",
@@ -247,7 +247,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-05SJOr",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-FR7yTg",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -259,26 +259,26 @@
         "workload": {
           "read": {
             "file": "memo.txt",
-            "nonce": "b24ae8cc-364c-495e-8f88-8289f6c47c74",
-            "pid": 21560,
-            "sha256": "805bbcc029c3d8f0b33adbf01543f433ccb6a24776e596de3c6f8d6762dcc45b",
-            "text": "grant\nneedle b24ae8cc-364c-495e-8f88-8289f6c47c74\n"
+            "nonce": "53a93352-e9ca-499f-80d4-e4568aade5e2",
+            "pid": 59859,
+            "sha256": "7acefc6654518b545aa2bcb259bda96bf1043af10c5dd2c7bd276c2480d1c22f",
+            "text": "grant\nneedle 53a93352-e9ca-499f-80d4-e4568aade5e2\n"
           }
         }
       },
       "schema-drift": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21567,
-          21572
+          60031,
+          60091
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21567,
-          21572,
-          21584,
-          21592
+          60031,
+          60091,
+          60209,
+          60260
         ],
         "inputs_unchanged": true,
         "log_sha256": "f645fe119630fa84e677ef05611103c70157914412844ed8cace4165e0970f4e",
@@ -288,7 +288,7 @@
           "startup"
         ],
         "preflightObserved": false,
-        "projection_sha256": "15023df4b3305e8efd24dc1ff00b6dab9aa096b5e9713b5a8ccff0e5916d61b7",
+        "projection_sha256": "1ac85237ea4b1e696c19ee9983795dc0cda0aec974045e982385d4b932050075",
         "read_calls": 0,
         "refusal": {
           "code": null,
@@ -316,7 +316,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-fhgEIa",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-kYe2GE",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -327,16 +327,16 @@
         "success": true
       },
       "source-mismatch": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21652,
-          21664
+          60664,
+          60715
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21652,
-          21664
+          60664,
+          60715
         ],
         "inputs_unchanged": true,
         "log_sha256": "7234db156ed989964b42bfd6b5aeb2f062bc14f56e730ee531519c23b94b8879",
@@ -345,7 +345,7 @@
           "startup"
         ],
         "preflightObserved": false,
-        "projection_sha256": "eeb73aae65ace7de6156113777bb92435ca6e0a1c6c460100bdea6aa544e32a9",
+        "projection_sha256": "da6dd0f38e660671f341fe9aa2b8b394a622bdee5ff874819cfbf2bcae779bf2",
         "read_calls": 0,
         "refusal": {
           "code": "DSH_MCP_GRANT_REFUSED",
@@ -373,7 +373,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-RW2339",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-vx25P7",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -384,16 +384,16 @@
         "success": true
       },
       "startup-revoked": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21772,
-          21774
+          61710,
+          61790
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21772,
-          21774
+          61710,
+          61790
         ],
         "inputs_unchanged": true,
         "log_sha256": "f1d4ecdebff1057fe6ca01d3bc566ab9790a1da297b3a56f38f1263ae1df57ce",
@@ -403,7 +403,7 @@
           "startup"
         ],
         "preflightObserved": true,
-        "projection_sha256": "e182d995d84b35e26924bf70be0e10e4ba245340c4935fd134f54107542195cd",
+        "projection_sha256": "264b56ba93edd2d10ebb535ba63fb2511286ee313a99df0d8b3606d6fd18d62a",
         "read_calls": 0,
         "refusal": {
           "code": "DSH_MCP_GRANT_REFUSED",
@@ -431,7 +431,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-ksorEI",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-Bt5B38",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -442,23 +442,23 @@
         "success": true
       },
       "target-mismatch": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21604,
-          21614
+          60379,
+          60444
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21604,
-          21614
+          60379,
+          60444
         ],
         "inputs_unchanged": true,
         "log_sha256": "a247b43b89c151a3223bbe241a3f9e570bf0f7b52d5faa6f6db28688ebb76b45",
         "model_requests": 0,
         "phases": [],
         "preflightObserved": false,
-        "projection_sha256": "99f6927fdd4c389b4af9a7e5dc2e35daaf7c36e1fc6f370b09c4e6fed44363fb",
+        "projection_sha256": "f25736554e76065797bd2dae46de8990491f4275dd1a96db94e5b9edc0687d38",
         "read_calls": 0,
         "refusal": {
           "code": "DSH_MCP_GRANT_REFUSED",
@@ -486,7 +486,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-A2Fnjc",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-5SRt4L",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -497,18 +497,18 @@
         "success": true
       },
       "wrong-version": {
-        "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+        "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
         "discovery_pids": [
-          21709,
-          21720
+          61251,
+          61346
         ],
         "exit_code": 0,
         "fixture_children_absent": true,
         "fixture_pids": [
-          21709,
-          21720,
-          21741,
-          21749
+          61251,
+          61346,
+          61503,
+          61566
         ],
         "inputs_unchanged": true,
         "log_sha256": "d3eec1a932d17a8afa12d227bc99300c8a3ca5e62c9bd03b36152eede29eab74",
@@ -518,7 +518,7 @@
           "startup"
         ],
         "preflightObserved": false,
-        "projection_sha256": "10209ef0fa8da8cc1aacd5bd76777ba498500186e1fd4ecc8f411457c1be32d1",
+        "projection_sha256": "7bf6082217c6dea4e7b38ce75abdf49a762ee59334957e180a7f0bd03b0b7d16",
         "read_calls": 0,
         "refusal": {
           "code": null,
@@ -546,7 +546,7 @@
           "target": {
             "args": [
               "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs",
-              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-OU3xKN",
+              "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/native-grant-JjIr8y",
               "normal"
             ],
             "command": "/opt/homebrew/Cellar/node/26.5.0/bin/node",
@@ -559,14 +559,14 @@
     },
     "python_projection": {
       "exit_code": 0,
-      "log_sha256": "c00d95960ee24f4aa195fe80e0a5f25b768b43ff2a93979389cbbf30f973034d",
+      "log_sha256": "9ff733b70e67bc7323bb631dcb4ffe4d9c7024021b47771f7a41754617455db7",
       "passed": 11,
       "tests": 11
     },
     "runtime_projection": {
       "exit_code": 0,
       "failed_cases": [],
-      "log_sha256": "00e3e0fcdccb3e1d8e09290df322e002e7b5816ccf93b54bac178062495f5a9d",
+      "log_sha256": "230bc527474c7c758e93fc41583f1a5ee10992ec27bd25e0e0f2587282dfa41d",
       "passed": 18,
       "tests": 18
     },
@@ -578,7 +578,7 @@
     "runtime_started": false,
     "source_files": 14
   },
-  "generated_at": "2026-10-02T03:32:07.880948+00:00",
+  "generated_at": "2026-10-03T10:23:51.843516+00:00",
   "independent_review": "NOT_PERFORMED",
   "input_sha256": {
     "../../../control_plane/dsh_mcp_client_projection.py": "1ec4d4343dbcaa44ecb2b0191587269e99dd217260d035108081fd601447e1fa",
@@ -588,7 +588,8 @@
     "../../../integrations/acp_worker/dsh_tool_profile.mjs": "3fb96c8cde4e3b85dbca888b7d986480f535f3707821d19ec0885a08ef79e59c",
     "../../../tests/fixtures/dsh_mcp_grant_projection.py": "3db4cf8fef2db97dd7fc77a8092e3b54fa14476abd7eb79eed4c3dffc8397fa8",
     "../../../tests/test_dsh_mcp_client_projection.py": "ebf34b7f5254eb4e57161e3eb614edd4f700c43072b50993c1cdbb84956476a0",
-    "build-profile.mjs": "7ddf16f0cb57fbb354e032ab3097294503c5cc909f80fcdb9f779562e614324b",
+    "agent-loop-manifest.json": "27421db09a4edb15ce357ffd7795888bb485a98a88a202e76a5f2d27015f86d2",
+    "build-profile.mjs": "bc1236523d458a7ea553f53a8d156852e79674f5944ee2600f82ea6a327e9a57",
     "donor-manifest.json": "badec9f979d283f8c508c83b8072f6f6de308a394a57afcbc1bb17daa0047192",
     "grant-admission.test.mjs": "476dc8dd7e33eed0822a904b7723b2eb0559bd61fce081f93447d7e92fded66e",
     "mcp-admission.test.mjs": "b2a507738f38a833f237b2cf1b718882f2515962644208425e049e2e8c0407ce",
@@ -603,11 +604,12 @@
     "package.json": "3ba0a43261b30f31583a359c16aaa3a90e24e74d1229a5aa40679e6ca149e530",
     "prepare_mcp.py": "4e6c5b5a4a7f0a2e9eb5002efb16624c84467f36955ac2ccc26133b95d183184",
     "profile-startup.test.mjs": "d33d96c65fbe480438319f994fc9cebb2337cdb0070c9c28b80e2ccdf96f0679",
+    "shared-tools-closure.test.mjs": "1e20f1abcd68e035d75f36c484d020a5c73ba48819861cbee9b35a6b0bca00b5",
     "stdio-fixture-server.mjs": "7e947f424918be0764aee1e3f7e449849b9ccb9bba0fa540447c7e6c0b9e0d58",
     "strict-dispatch-binding.patch": "9852126790e5305ef0fe6b0b81336b85c3a0b888cb0969b1fd4a8a0a9de97aa9",
     "tsconfig.mcp.json": "a12bb6b96171409d82854d1e6f4d10fb9ec1640941032ffa7f68a641b2b52f6c",
-    "verify_mcp.py": "f5e0f4dbffb3317c77f421c668b552120cc8fdf141f73b6a82d799b0230bbc43",
-    "vitest.mcp.config.mjs": "0966dae260c8c320381c36c5dd6af5f9bc626bb1d6459655abb9d9b02f14db1a"
+    "verify_mcp.py": "d91bfab5007027ab77b4fa8ca4c6b8f4657840d32b09da747346bb8e4e073439",
+    "vitest.mcp.config.mjs": "cbf0a84fb2c98186648d0f8ffa45b15e70e711c5535f2e7a57f4224885c4c0a9"
   },
   "installed": false,
   "mcp_supply": {
@@ -669,8 +671,8 @@
       "log_sha256": "2571499f4a902945ae391396552bebf56fbbd50dd2e8fed214908bb063a7f539",
       "mutant_sha256": "b30dcd38fa6c2d4adb75f4d4a11512fd62ae628e62295da6ddb805ddb09aadf3",
       "passed": 29,
-      "report_sha256": "cfd48afbe910000a586059b0b7f073242d4bea1a5a7db245587cf67b87b95b7a",
-      "seconds": 1.897,
+      "report_sha256": "d34f2ec2c3ccf13e89226ecd9e81b375ab61119c50606ed75be5d740afc8d44f",
+      "seconds": 2.534,
       "stderr_empty": true,
       "tests": 32
     },
@@ -721,8 +723,8 @@
       "log_sha256": "c5752cd538de9a583100ad6b55da5bfe2361b925557c4c1e6508cabf4155e19b",
       "mutant_sha256": "a291bc888d54e022e6adeee051b6519f12715ff3dda8969f1c4c9d7b31d1f7b2",
       "passed": 27,
-      "report_sha256": "d5631da8ba78c982d766698614348146be4abd0bafae7fe6434ec38acb053879",
-      "seconds": 0.948,
+      "report_sha256": "0a8feadda6e631b4e85ece1d3424bb3fe0adcf146b1c068b2970a90339cfe116",
+      "seconds": 25.438,
       "stderr_empty": true,
       "tests": 32
     },
@@ -773,8 +775,8 @@
       "log_sha256": "e5b3dea08b2e69d112ace974d0bfcc968dbad056c6ffd1d43b97473a8c4add88",
       "mutant_sha256": "1d3e3006ee9637a924a085e2cbf6851cec98cbeeecc0fc194a957109f246f32b",
       "passed": 27,
-      "report_sha256": "7f277c3a15f92554174fbb8a05aecb8d074eb2960ed3fe974daa16bc01bae7de",
-      "seconds": 0.911,
+      "report_sha256": "4b51de8dee53fdc6f0f5bcce28ff43cffc53188f0f77aac524d56784d6c51d77",
+      "seconds": 2.499,
       "stderr_empty": true,
       "tests": 32
     },
@@ -826,19 +828,25 @@
       "log_sha256": "fd19eb186471bd36c2fb986591822192cc17b54d2948c01b307c2d1a442cfe16",
       "mutant_sha256": "e3ab861c002909128d7bcd143eec8ce351c2da0179ed448bfc265c245a76841e",
       "passed": 26,
-      "report_sha256": "a45cbe1d499e47874018d34b1b7e5ecd5d4d2456741abee5494c27dd22eaf74d",
-      "seconds": 0.933,
+      "report_sha256": "ace104c56198c513361e346db8faebe533b28a93fb922f3e47e6c4e12caaf467",
+      "seconds": 6.217,
       "stderr_empty": true,
       "tests": 32
     }
   },
   "native_artifact": {
     "build": {
-      "artifact": "profile-build-vU4KFR/index.mjs",
-      "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+      "agent_loop": {
+        "integrity": "sha512-01JWFfTcne/44tqfGLAOH0KkMicq6VVFBV1YjQbO9vj6Q0SmcHsPObm11fP0opEZIqEmdUN5wwS6LAzCjViDlg==",
+        "manifest_sha256": "27421db09a4edb15ce357ffd7795888bb485a98a88a202e76a5f2d27015f86d2",
+        "package": "@deepseek-ai/dsh-agent-loop",
+        "version": "0.2.0-rc.1"
+      },
+      "artifact": "profile-build-nqJpHV/index.mjs",
+      "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
       "compiler": "8.3.1",
       "files": {
-        "index.mjs": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4"
+        "index.mjs": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c"
       },
       "input_sha256": {
         "../../../integrations/acp_worker/dsh_dispatch_preflight.mjs": "9d828fa84a4215c465edccb2fe06e9695350c4d2eda583055837e351613f20ad",
@@ -859,7 +867,11 @@
         ".cache/mcp-donor/server-context.ts": "02ca9fe759891788572385a00f0cc7b6e92d6e98e103c1d00dd99ccec0d6319a",
         ".cache/mcp-donor/tools.ts": "82556c9d36cb3b6b92f593e6d476db92dd33983176954cf48cea5d0d164e7e82",
         ".cache/mcp-donor/transport.ts": "70e9d99f1fb99e734407b9884c618f676cbcd5809db37b49326cbb8e8a285e8f",
-        "build-profile.mjs": "7ddf16f0cb57fbb354e032ab3097294503c5cc909f80fcdb9f779562e614324b",
+        "agent-loop-manifest.json": "27421db09a4edb15ce357ffd7795888bb485a98a88a202e76a5f2d27015f86d2",
+        "build-profile.mjs": "bc1236523d458a7ea553f53a8d156852e79674f5944ee2600f82ea6a327e9a57",
+        "node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js": "00c4814d63f3d1e2754eb09144832d19b30499d6ea444730473f740b587948c2",
+        "node_modules/@deepseek-ai/dsh-agent-loop/lib/types/index.d.ts": "906f202b859b11f7b0a399d8c4921c47384dd6177c990d59b8a93026a9875e8e",
+        "node_modules/@deepseek-ai/dsh-agent-loop/package.json": "e7ecfbef09d7dfd50be40d70a32ca87b1ee43ac3cefdfeb050468c7f0e31b0ea",
         "package-lock.json": "56c3f8fabcb8ac055c772a36a7cad15bae6d4ebf90b40e2bcecc19f8fb73fd98"
       },
       "installed": false,
@@ -870,28 +882,28 @@
     },
     "build_run": {
       "exit_code": 0,
-      "log_sha256": "41197a7f2e4505a18f5bde272f7e6980f88a241f13b27b7bac46a2908e97ad7f",
+      "log_sha256": "eaa5a5457653dd81aa31d4b0afdbf97a4b517b40a435777f06a5ffee6918faa0",
       "stderr_empty": true
     },
     "rebuild_run": {
       "exit_code": 0,
-      "log_sha256": "c8aa6aab226b6fe771a8c73d50a5ccba29541e6372d64e9dfc041be8883b18ce",
+      "log_sha256": "bf34298c9a2cbac5d1fdd3e5725382135ce753317263b9c188e1dc1585f11cbd",
       "stderr_empty": true
     },
     "repeat_build_identical": true,
     "scenarios": {
       "disabled-core": {
         "exit_code": 0,
-        "log_sha256": "746bb7028ffd4e17bdfadfcf65d9c52d5c3efcbb9af64499f380864bb3e692a9",
+        "log_sha256": "ed31ad4cff481c99c0430bb214b044f967524e1588b387411e779b6e81cfe74d",
         "observation": {
-          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
           "fixture_children_absent": true,
           "fixture_pids": [],
           "inputs_unchanged": true,
           "model_requests": 0,
           "node": "v26.5.0",
-          "nonce": "314ce219-00ca-45fc-8f40-56ae28301ade",
-          "parent_pid": 21520,
+          "nonce": "e6ba7076-c95b-421b-b758-2de313f2d2c2",
+          "parent_pid": 57925,
           "read_calls": 0,
           "refusal": {
             "code": "DSH_DISPATCH_PREFLIGHT_REFUSED",
@@ -903,24 +915,24 @@
           "search_calls": 0,
           "success": true
         },
-        "receipt_sha256": "9a6d860ecadaf3efe7ead72ce3e91c0559a9c3503ae9b6fc256092452c56a8f8",
+        "receipt_sha256": "c9398518f8037e99ab41a8fa2992124c50d166b7f4facf92194370028e6408e1",
         "stderr_empty": true
       },
       "normal": {
         "exit_code": 0,
-        "log_sha256": "04e749dd96382132ea813b457dcb79cefb83595f0c11ff742eca6a1de9239234",
+        "log_sha256": "ace3ab44bdc7a0c41de285b37e915d5f47799de06f31741610ac1f0f566acdea",
         "observation": {
-          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
           "fixture_children_absent": true,
           "fixture_pids": [
-            21517,
-            21518
+            57778,
+            57838
           ],
           "inputs_unchanged": true,
           "model_requests": 0,
           "node": "v26.5.0",
-          "nonce": "4c62147d-c435-48ae-916a-e4629bfb6862",
-          "parent_pid": 21516,
+          "nonce": "6f766f77-e22c-44ab-82ca-bfdb53079af9",
+          "parent_pid": 57678,
           "read_calls": 1,
           "scenario": "normal",
           "scope": "Built artifact in plain Node; synthetic MCP workload, not Executive/ACP admission",
@@ -929,44 +941,44 @@
           "workload": {
             "read": {
               "file": "memo.txt",
-              "nonce": "4c62147d-c435-48ae-916a-e4629bfb6862",
-              "pid": 21518,
-              "sha256": "88918c22c00ef6baa34c57dd7b063d97390dc8e8772047d906eb9ec2f505452a",
-              "text": "artifact\nneedle 4c62147d-c435-48ae-916a-e4629bfb6862\n"
+              "nonce": "6f766f77-e22c-44ab-82ca-bfdb53079af9",
+              "pid": 57838,
+              "sha256": "700e7f785159891f8e8224e3cc61ad4f9f4effe75e44a9d673c704c66837f503",
+              "text": "artifact\nneedle 6f766f77-e22c-44ab-82ca-bfdb53079af9\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle 4c62147d-c435-48ae-916a-e4629bfb6862"
+                  "text": "needle 6f766f77-e22c-44ab-82ca-bfdb53079af9"
                 },
                 {
                   "file": "signals.txt",
                   "line": 1,
-                  "text": "needle 4c62147d-c435-48ae-916a-e4629bfb6862"
+                  "text": "needle 6f766f77-e22c-44ab-82ca-bfdb53079af9"
                 }
               ],
-              "nonce": "4c62147d-c435-48ae-916a-e4629bfb6862",
-              "pid": 21518
+              "nonce": "6f766f77-e22c-44ab-82ca-bfdb53079af9",
+              "pid": 57838
             }
           }
         },
-        "receipt_sha256": "12fd7492a414e2cce958e851b5ce84d0daff6158b30b734ed6ecb82a44187d91",
+        "receipt_sha256": "dcef9055832bbf966e23df0344e249d688ae2b0633d5a5be73493087e453c011",
         "stderr_empty": true
       },
       "pre-aborted": {
         "exit_code": 0,
-        "log_sha256": "01650c8bcaffc202f82262274bb4bdf03454bfc2717a2dd38823878180a96360",
+        "log_sha256": "df4e36dace3c2dd6c2fdc24dd0777933519a3b6168634bf4660edc2eb4297bbf",
         "observation": {
-          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
           "fixture_children_absent": true,
           "fixture_pids": [],
           "inputs_unchanged": true,
           "model_requests": 0,
           "node": "v26.5.0",
-          "nonce": "2dd8b3b9-f2f2-4e43-9f2c-17023586e14c",
-          "parent_pid": 21530,
+          "nonce": "a6055b5b-5c9d-441e-988a-7256cead75b0",
+          "parent_pid": 58243,
           "read_calls": 0,
           "refusal": {
             "code": 20,
@@ -978,24 +990,24 @@
           "search_calls": 0,
           "success": true
         },
-        "receipt_sha256": "a3cbfd027687fc6d9cecc76581e6d4623dc83733d55f4d178b4271d0084a872a",
+        "receipt_sha256": "321017d79fd6087c436dba1dd3dc46bb21a88e5e18fb62c9b80568bb38244ebf",
         "stderr_empty": true
       },
       "startup-refused": {
         "exit_code": 0,
-        "log_sha256": "1870349819da6261f030a0091887f6d84813ba963f20f2287aa27d552a0aa3d3",
+        "log_sha256": "821bde191c92185e3b21db5d93cdd6d7bb13960cece44c7c7c072402148a276f",
         "observation": {
-          "artifact_sha256": "c98434fbb1c175dbe3ee96daf95a0c88d41518f735c5458a6eb6d93479be5cc4",
+          "artifact_sha256": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
           "fixture_children_absent": true,
           "fixture_pids": [
-            21526,
-            21529
+            58086,
+            58147
           ],
           "inputs_unchanged": true,
           "model_requests": 0,
           "node": "v26.5.0",
-          "nonce": "c111d610-036e-4f8c-a5e0-06ffef7214eb",
-          "parent_pid": 21523,
+          "nonce": "a0f3f9b0-c9d4-4426-bf4b-8e01d76d56c1",
+          "parent_pid": 58016,
           "read_calls": 0,
           "refusal": {
             "code": null,
@@ -1007,11 +1019,16 @@
           "search_calls": 0,
           "success": true
         },
-        "receipt_sha256": "cb46c8999ccee0fb955f51b14d70947e75a1ea9ea3c0f63bc3f22f8b37f6318d",
+        "receipt_sha256": "78366f82adbdc6778ce9b10ad6537cb5a4f4f1bf20981f081211d39f200a2627",
         "stderr_empty": true
       }
     },
-    "scope": "Actual built module imported by plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP"
+    "scope": "Actual built module imports patched ToolRuntime and selected AgentLoop from one bundle; plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP",
+    "shared_scheduler": {
+      "exit_code": 0,
+      "log_sha256": "48c31f94c2339309b55916b8d625ae7475a5cfab3a746f26f3c3cb92e119dd51",
+      "stderr_empty": true
+    }
   },
   "network_transport": "OFFICIAL_IN_MEMORY_MCP_AND_REAL_LOCAL_STDIO",
   "node": "v26.5.0",
@@ -1031,12 +1048,12 @@
       "result": {
         "content": [
           {
-            "text": "34fac119-a020-4741-8d96-58ee1d5e0660",
+            "text": "fc7a094d-3837-44b9-88b0-76908d62be35",
             "type": "text"
           }
         ]
       },
-      "sourceNonce": "34fac119-a020-4741-8d96-58ee1d5e0660"
+      "sourceNonce": "fc7a094d-3837-44b9-88b0-76908d62be35"
     },
     {
       "calls": 1,
@@ -1048,7 +1065,7 @@
   "platform": "Darwin",
   "preparation": {
     "exit_code": 0,
-    "log_sha256": "1bd25ee3aa19a07c3c99f888c35070d58bd2674273a0baf8d0fe2fd6c0c878bc",
+    "log_sha256": "c90e1a854b98ad84a43f1a7883d0324eb2df770d9b49cad1aa5b5acdd1445fb0",
     "passed": 6,
     "tests": 6
   },
@@ -1086,66 +1103,66 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fFhl9m",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fFhl9m/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p/home",
               "nodeOptions": null,
-              "nonce": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0",
-              "pid": 22149
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88027
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fFhl9m",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fFhl9m/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p/home",
               "nodeOptions": null,
-              "nonce": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0",
-              "pid": 22150
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0",
-              "pid": 22150
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097
             },
             {
               "event": "search",
-              "nonce": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0",
-              "pid": 22150,
-              "query": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0"
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097,
+              "query": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68"
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0",
+          "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fFhl9m",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-tp5p2p",
           "strict": true,
           "workloadEvidence": {
             "read": {
               "file": "memo.txt",
-              "nonce": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0",
-              "pid": 22150,
-              "sha256": "0481691a09e8a00d392dddb8cb8eb968d6650eaf378581b963d6e0160b937201",
-              "text": "Research fixture\nneedle 7bf432fb-c897-4c62-b94b-17e0bff3a8b0\n"
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097,
+              "sha256": "d7db56c226d8486c3aeb6896c864e00c6e91771fcedc22eb03d36018682925d4",
+              "text": "Research fixture\nneedle 5f03ad5c-12fc-4e0a-ab75-934d9a9cae68\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle 7bf432fb-c897-4c62-b94b-17e0bff3a8b0"
+                  "text": "needle 5f03ad5c-12fc-4e0a-ab75-934d9a9cae68"
                 },
                 {
                   "file": "signals.txt",
                   "line": 3,
-                  "text": "needle 7bf432fb-c897-4c62-b94b-17e0bff3a8b0"
+                  "text": "needle 5f03ad5c-12fc-4e0a-ab75-934d9a9cae68"
                 }
               ],
-              "nonce": "7bf432fb-c897-4c62-b94b-17e0bff3a8b0",
-              "pid": 22150
+              "nonce": "5f03ad5c-12fc-4e0a-ab75-934d9a9cae68",
+              "pid": 88097
             }
           }
         },
@@ -1155,30 +1172,30 @@
           "events": [
             {
               "ambient": "fixture-ambient",
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-YGyXR4",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-YGyXR4/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd/home",
               "nodeOptions": null,
-              "nonce": "7aa2acb7-43f9-42dc-8b68-7b37f9b6714b",
-              "pid": 22153
+              "nonce": "47aeeb11-5487-4a65-bfed-abf407f4e189",
+              "pid": 88190
             },
             {
               "ambient": "fixture-ambient",
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-YGyXR4",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-YGyXR4/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd/home",
               "nodeOptions": null,
-              "nonce": "7aa2acb7-43f9-42dc-8b68-7b37f9b6714b",
-              "pid": 22154
+              "nonce": "47aeeb11-5487-4a65-bfed-abf407f4e189",
+              "pid": 88257
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "7aa2acb7-43f9-42dc-8b68-7b37f9b6714b",
+          "nonce": "47aeeb11-5487-4a65-bfed-abf407f4e189",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-YGyXR4",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-aFxzGd",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1188,30 +1205,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-1lks9V",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-1lks9V/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR/home",
               "nodeOptions": "--no-warnings",
-              "nonce": "6c372089-99e3-4007-a994-5fe06a87c362",
-              "pid": 22159
+              "nonce": "63b1cfc4-a46c-4d89-a0db-1723bbf87ccc",
+              "pid": 88358
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-1lks9V",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-1lks9V/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR/home",
               "nodeOptions": "--no-warnings",
-              "nonce": "6c372089-99e3-4007-a994-5fe06a87c362",
-              "pid": 22173
+              "nonce": "63b1cfc4-a46c-4d89-a0db-1723bbf87ccc",
+              "pid": 88383
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "6c372089-99e3-4007-a994-5fe06a87c362",
+          "nonce": "63b1cfc4-a46c-4d89-a0db-1723bbf87ccc",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-1lks9V",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-pn07ZR",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1221,30 +1238,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ulfJZf",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ulfJZf/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf/home",
               "nodeOptions": null,
-              "nonce": "82762518-ffdc-4151-8ece-c159f390800c",
-              "pid": 22174
+              "nonce": "d77a1d08-6d2b-47a6-b90c-fc0817bf3407",
+              "pid": 88390
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ulfJZf",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ulfJZf/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf/home",
               "nodeOptions": null,
-              "nonce": "82762518-ffdc-4151-8ece-c159f390800c",
-              "pid": 22175
+              "nonce": "d77a1d08-6d2b-47a6-b90c-fc0817bf3407",
+              "pid": 88394
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "82762518-ffdc-4151-8ece-c159f390800c",
+          "nonce": "d77a1d08-6d2b-47a6-b90c-fc0817bf3407",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ulfJZf",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-C6ipAf",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1254,36 +1271,36 @@
           "events": [
             {
               "ambient": "fixture-ambient",
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-MKR7gz",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-MKR7gz/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN/home",
               "nodeOptions": null,
-              "nonce": "306e3e9c-8de0-43cc-9c1a-2434282b6b71",
-              "pid": 22177
+              "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
+              "pid": 88452
             },
             {
               "ambient": "fixture-ambient",
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-MKR7gz",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-MKR7gz/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN/home",
               "nodeOptions": null,
-              "nonce": "306e3e9c-8de0-43cc-9c1a-2434282b6b71",
-              "pid": 22179
+              "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
+              "pid": 88524
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "306e3e9c-8de0-43cc-9c1a-2434282b6b71",
-              "pid": 22179
+              "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
+              "pid": 88524
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "306e3e9c-8de0-43cc-9c1a-2434282b6b71",
+          "nonce": "f327dd5c-827b-47d9-9337-e3b3288e794f",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-MKR7gz",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-Rjf2WN",
           "strict": false,
           "workloadEvidence": {}
         },
@@ -1293,30 +1310,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-hTI3jE",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-hTI3jE/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh/home",
               "nodeOptions": null,
-              "nonce": "a6c20fb2-151c-402e-b14d-cbdbe0393de1",
-              "pid": 22180
+              "nonce": "56014001-c5b7-4633-a9e8-61aa68f16ed4",
+              "pid": 88618
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-hTI3jE",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-hTI3jE/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh/home",
               "nodeOptions": null,
-              "nonce": "a6c20fb2-151c-402e-b14d-cbdbe0393de1",
-              "pid": 22181
+              "nonce": "56014001-c5b7-4633-a9e8-61aa68f16ed4",
+              "pid": 88674
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "a6c20fb2-151c-402e-b14d-cbdbe0393de1",
+          "nonce": "56014001-c5b7-4633-a9e8-61aa68f16ed4",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-hTI3jE",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-jT6BCh",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1326,30 +1343,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fakHRG",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fakHRG/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5/home",
               "nodeOptions": null,
-              "nonce": "3ef87705-47c3-421d-8514-0f9f6e681849",
-              "pid": 22182
+              "nonce": "6b81833e-dd93-4c3b-995d-f1dd31c7114a",
+              "pid": 88736
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fakHRG",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fakHRG/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5/home",
               "nodeOptions": null,
-              "nonce": "3ef87705-47c3-421d-8514-0f9f6e681849",
-              "pid": 22187
+              "nonce": "6b81833e-dd93-4c3b-995d-f1dd31c7114a",
+              "pid": 88790
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "3ef87705-47c3-421d-8514-0f9f6e681849",
+          "nonce": "6b81833e-dd93-4c3b-995d-f1dd31c7114a",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-fakHRG",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-6tTTZ5",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1359,30 +1376,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-A74LiD",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-A74LiD/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt/home",
               "nodeOptions": null,
-              "nonce": "74adfa5d-c8d1-4f22-ae62-9cd811022b55",
-              "pid": 22197
+              "nonce": "72651610-7144-4b5c-8ee5-7354944e906e",
+              "pid": 88865
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-A74LiD",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-A74LiD/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt/home",
               "nodeOptions": null,
-              "nonce": "74adfa5d-c8d1-4f22-ae62-9cd811022b55",
-              "pid": 22207
+              "nonce": "72651610-7144-4b5c-8ee5-7354944e906e",
+              "pid": 88933
             }
           ],
           "inputsUnchanged": true,
           "mode": "reject-list",
-          "nonce": "74adfa5d-c8d1-4f22-ae62-9cd811022b55",
+          "nonce": "72651610-7144-4b5c-8ee5-7354944e906e",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-A74LiD",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qulrAt",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1392,36 +1409,36 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-D1fpyk",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-D1fpyk/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0/home",
               "nodeOptions": null,
-              "nonce": "02e518ca-6860-4d73-95e5-cf1b6e4d7d7c",
-              "pid": 22218
+              "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
+              "pid": 88999
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-D1fpyk",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-D1fpyk/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0/home",
               "nodeOptions": null,
-              "nonce": "02e518ca-6860-4d73-95e5-cf1b6e4d7d7c",
-              "pid": 22227
+              "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
+              "pid": 89062
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "02e518ca-6860-4d73-95e5-cf1b6e4d7d7c",
-              "pid": 22227
+              "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
+              "pid": 89062
             }
           ],
           "inputsUnchanged": true,
           "mode": "lost-reply",
-          "nonce": "02e518ca-6860-4d73-95e5-cf1b6e4d7d7c",
+          "nonce": "da4b477d-a96b-4bbf-90b3-26c7ff87ff0f",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-D1fpyk",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-eRxvz0",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1431,41 +1448,41 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LUeF0H",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LUeF0H/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD/home",
               "nodeOptions": null,
-              "nonce": "6a7e85cb-a9ab-49ed-a246-c7bc21047c8d",
-              "pid": 22234
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89151
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LUeF0H",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LUeF0H/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD/home",
               "nodeOptions": null,
-              "nonce": "6a7e85cb-a9ab-49ed-a246-c7bc21047c8d",
-              "pid": 22238
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89222
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "6a7e85cb-a9ab-49ed-a246-c7bc21047c8d",
-              "pid": 22238
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89222
             },
             {
               "event": "cancelled",
-              "nonce": "6a7e85cb-a9ab-49ed-a246-c7bc21047c8d",
-              "pid": 22238
+              "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
+              "pid": 89222
             }
           ],
           "inputsUnchanged": true,
           "mode": "wait-cancel",
-          "nonce": "6a7e85cb-a9ab-49ed-a246-c7bc21047c8d",
+          "nonce": "6dce3bff-800f-46f2-8574-d6f75952dea3",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LUeF0H",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-az5SoD",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1475,30 +1492,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oVziZJ",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oVziZJ/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE/home",
               "nodeOptions": null,
-              "nonce": "9d11d7bb-0f36-4472-919c-755b5616364b",
-              "pid": 22245
+              "nonce": "e1b0afa6-8f0c-48d4-a255-174049690157",
+              "pid": 89320
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oVziZJ",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oVziZJ/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE/home",
               "nodeOptions": null,
-              "nonce": "9d11d7bb-0f36-4472-919c-755b5616364b",
-              "pid": 22254
+              "nonce": "e1b0afa6-8f0c-48d4-a255-174049690157",
+              "pid": 89379
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "9d11d7bb-0f36-4472-919c-755b5616364b",
+          "nonce": "e1b0afa6-8f0c-48d4-a255-174049690157",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-oVziZJ",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-sEdMGE",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1508,44 +1525,44 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-yeEkTc",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-yeEkTc/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up/home",
               "nodeOptions": null,
-              "nonce": "2c7d9f85-c763-4da8-94a8-2069bf46a05c",
-              "pid": 22260
+              "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
+              "pid": 89441
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-yeEkTc",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-yeEkTc/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up/home",
               "nodeOptions": null,
-              "nonce": "2c7d9f85-c763-4da8-94a8-2069bf46a05c",
-              "pid": 22261
+              "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
+              "pid": 89492
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "2c7d9f85-c763-4da8-94a8-2069bf46a05c",
-              "pid": 22261
+              "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
+              "pid": 89492
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "2c7d9f85-c763-4da8-94a8-2069bf46a05c",
+          "nonce": "86a98dbb-244e-46b7-a171-113e4a9f8024",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-yeEkTc",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-VoS4up",
           "strict": true,
           "workloadEvidence": {}
         }
       ],
-      "observations_sha256": "6a047779260725ccb3815097eb03a0ed4a9595a9c047aa6d772db1a8383d7b61",
+      "observations_sha256": "aae8e12ac4d9f7219164fdef0627c90c293def5b538838cbdc10b626f10f939f",
       "passed": 10,
-      "report_sha256": "49b331e23547bae08ca36a8b4089d406aec92c6d3003eccfabbc7e81749bbf99",
-      "seconds": 3.669,
+      "report_sha256": "0bd1829f0d47cf401823a90f437896d4b17c94c93a4ff4cb4217946930faf1b7",
+      "seconds": 4.631,
       "stderr_empty": true,
       "tests": 12
     },
@@ -1575,66 +1592,66 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-zV2aAr",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-zV2aAr/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN/home",
               "nodeOptions": null,
-              "nonce": "e52aa927-f7ef-4f11-8dec-9c52214c4c70",
-              "pid": 21846
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85658
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-zV2aAr",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-zV2aAr/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN/home",
               "nodeOptions": null,
-              "nonce": "e52aa927-f7ef-4f11-8dec-9c52214c4c70",
-              "pid": 21848
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "e52aa927-f7ef-4f11-8dec-9c52214c4c70",
-              "pid": 21848
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722
             },
             {
               "event": "search",
-              "nonce": "e52aa927-f7ef-4f11-8dec-9c52214c4c70",
-              "pid": 21848,
-              "query": "e52aa927-f7ef-4f11-8dec-9c52214c4c70"
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722,
+              "query": "4f535bf7-d702-4127-ad42-b5c34fc4f3de"
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "e52aa927-f7ef-4f11-8dec-9c52214c4c70",
+          "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-zV2aAr",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-gKoPBN",
           "strict": true,
           "workloadEvidence": {
             "read": {
               "file": "memo.txt",
-              "nonce": "e52aa927-f7ef-4f11-8dec-9c52214c4c70",
-              "pid": 21848,
-              "sha256": "19b13f6a7babf139f4a8a780a05c763b6a7522f6b520cef118ecbf74aae2b5ab",
-              "text": "Research fixture\nneedle e52aa927-f7ef-4f11-8dec-9c52214c4c70\n"
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722,
+              "sha256": "40cfb571087af5316ff4b01f7408e0c2b3afc920d3ce482085efa4eeb1b7916d",
+              "text": "Research fixture\nneedle 4f535bf7-d702-4127-ad42-b5c34fc4f3de\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle e52aa927-f7ef-4f11-8dec-9c52214c4c70"
+                  "text": "needle 4f535bf7-d702-4127-ad42-b5c34fc4f3de"
                 },
                 {
                   "file": "signals.txt",
                   "line": 3,
-                  "text": "needle e52aa927-f7ef-4f11-8dec-9c52214c4c70"
+                  "text": "needle 4f535bf7-d702-4127-ad42-b5c34fc4f3de"
                 }
               ],
-              "nonce": "e52aa927-f7ef-4f11-8dec-9c52214c4c70",
-              "pid": 21848
+              "nonce": "4f535bf7-d702-4127-ad42-b5c34fc4f3de",
+              "pid": 85722
             }
           }
         },
@@ -1644,30 +1661,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-NzSVCO",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-NzSVCO/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk/home",
               "nodeOptions": null,
-              "nonce": "d27e8ba2-b29c-4dd8-acb0-f30905245665",
-              "pid": 21851
+              "nonce": "925203c8-42be-47c6-a7fe-e5c650095a15",
+              "pid": 85818
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-NzSVCO",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-NzSVCO/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk/home",
               "nodeOptions": null,
-              "nonce": "d27e8ba2-b29c-4dd8-acb0-f30905245665",
-              "pid": 21859
+              "nonce": "925203c8-42be-47c6-a7fe-e5c650095a15",
+              "pid": 85858
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "d27e8ba2-b29c-4dd8-acb0-f30905245665",
+          "nonce": "925203c8-42be-47c6-a7fe-e5c650095a15",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-NzSVCO",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-OQo4jk",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1677,30 +1694,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qvA8uA",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qvA8uA/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R/home",
               "nodeOptions": null,
-              "nonce": "d5bb57e2-8c58-4ee0-866d-2796a1a4b645",
-              "pid": 21865
+              "nonce": "44f3be5d-2c9f-40e4-9a85-0eb219dc3b25",
+              "pid": 85908
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qvA8uA",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qvA8uA/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R/home",
               "nodeOptions": null,
-              "nonce": "d5bb57e2-8c58-4ee0-866d-2796a1a4b645",
-              "pid": 21872
+              "nonce": "44f3be5d-2c9f-40e4-9a85-0eb219dc3b25",
+              "pid": 85961
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "d5bb57e2-8c58-4ee0-866d-2796a1a4b645",
+          "nonce": "44f3be5d-2c9f-40e4-9a85-0eb219dc3b25",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qvA8uA",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-O8ga9R",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1710,30 +1727,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-F09yki",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-F09yki/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7/home",
               "nodeOptions": null,
-              "nonce": "9817fb67-80e7-4f3c-a8a8-fbd7c9d50d6c",
-              "pid": 21885
+              "nonce": "06cccd2d-1774-45c8-b5d4-8e3664eea6cb",
+              "pid": 86020
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-F09yki",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-F09yki/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7/home",
               "nodeOptions": null,
-              "nonce": "9817fb67-80e7-4f3c-a8a8-fbd7c9d50d6c",
-              "pid": 21903
+              "nonce": "06cccd2d-1774-45c8-b5d4-8e3664eea6cb",
+              "pid": 86088
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "9817fb67-80e7-4f3c-a8a8-fbd7c9d50d6c",
+          "nonce": "06cccd2d-1774-45c8-b5d4-8e3664eea6cb",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-F09yki",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-JHcaj7",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1743,36 +1760,36 @@
           "events": [
             {
               "ambient": "fixture-ambient",
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ITbxrR",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ITbxrR/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq/home",
               "nodeOptions": null,
-              "nonce": "101fc008-ff83-4cd6-9260-e24c57d582c0",
-              "pid": 21925
+              "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
+              "pid": 86159
             },
             {
               "ambient": "fixture-ambient",
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ITbxrR",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ITbxrR/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq/home",
               "nodeOptions": null,
-              "nonce": "101fc008-ff83-4cd6-9260-e24c57d582c0",
-              "pid": 21939
+              "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
+              "pid": 86211
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "101fc008-ff83-4cd6-9260-e24c57d582c0",
-              "pid": 21939
+              "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
+              "pid": 86211
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "101fc008-ff83-4cd6-9260-e24c57d582c0",
+          "nonce": "e7707804-7591-4a52-92dd-0eb4763a112a",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-ITbxrR",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-5ucMfq",
           "strict": false,
           "workloadEvidence": {}
         },
@@ -1782,30 +1799,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-2VGyyJ",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-2VGyyJ/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV/home",
               "nodeOptions": null,
-              "nonce": "b4964660-49f3-482b-8200-d7303f29eebf",
-              "pid": 21947
+              "nonce": "a63a6198-1bb3-4714-8179-a18971315b19",
+              "pid": 86282
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-2VGyyJ",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-2VGyyJ/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV/home",
               "nodeOptions": null,
-              "nonce": "b4964660-49f3-482b-8200-d7303f29eebf",
-              "pid": 21961
+              "nonce": "a63a6198-1bb3-4714-8179-a18971315b19",
+              "pid": 86336
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "b4964660-49f3-482b-8200-d7303f29eebf",
+          "nonce": "a63a6198-1bb3-4714-8179-a18971315b19",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-2VGyyJ",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-P8PVSV",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1815,30 +1832,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9W8LZ0",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9W8LZ0/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS/home",
               "nodeOptions": null,
-              "nonce": "a32a33ca-f370-469e-b68c-3a533cba1e0b",
-              "pid": 21975
+              "nonce": "9af36df2-d51a-4617-8d9b-7551dd1db445",
+              "pid": 86394
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9W8LZ0",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9W8LZ0/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS/home",
               "nodeOptions": null,
-              "nonce": "a32a33ca-f370-469e-b68c-3a533cba1e0b",
-              "pid": 21984
+              "nonce": "9af36df2-d51a-4617-8d9b-7551dd1db445",
+              "pid": 86452
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "a32a33ca-f370-469e-b68c-3a533cba1e0b",
+          "nonce": "9af36df2-d51a-4617-8d9b-7551dd1db445",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9W8LZ0",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-cdbqXS",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1848,30 +1865,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-4NzdnP",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-4NzdnP/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7/home",
               "nodeOptions": null,
-              "nonce": "036ce464-084a-4056-bedd-7ddc28240b8b",
-              "pid": 22008
+              "nonce": "f56ea83f-55e1-4ea8-a0c8-eea8bad65be3",
+              "pid": 86516
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-4NzdnP",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-4NzdnP/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7/home",
               "nodeOptions": null,
-              "nonce": "036ce464-084a-4056-bedd-7ddc28240b8b",
-              "pid": 22024
+              "nonce": "f56ea83f-55e1-4ea8-a0c8-eea8bad65be3",
+              "pid": 86575
             }
           ],
           "inputsUnchanged": true,
           "mode": "reject-list",
-          "nonce": "036ce464-084a-4056-bedd-7ddc28240b8b",
+          "nonce": "f56ea83f-55e1-4ea8-a0c8-eea8bad65be3",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-4NzdnP",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-3iQrG7",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1881,36 +1898,36 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mg8tGR",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mg8tGR/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF/home",
               "nodeOptions": null,
-              "nonce": "5b1f2c40-871f-4bc1-96a5-c8e819b4c519",
-              "pid": 22036
+              "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
+              "pid": 86640
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mg8tGR",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mg8tGR/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF/home",
               "nodeOptions": null,
-              "nonce": "5b1f2c40-871f-4bc1-96a5-c8e819b4c519",
-              "pid": 22046
+              "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
+              "pid": 86698
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "5b1f2c40-871f-4bc1-96a5-c8e819b4c519",
-              "pid": 22046
+              "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
+              "pid": 86698
             }
           ],
           "inputsUnchanged": true,
           "mode": "lost-reply",
-          "nonce": "5b1f2c40-871f-4bc1-96a5-c8e819b4c519",
+          "nonce": "621e513a-86f8-49b2-ab13-0acadde12f59",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mg8tGR",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-mSiLSF",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1920,41 +1937,41 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-WXNDbB",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-WXNDbB/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm/home",
               "nodeOptions": null,
-              "nonce": "dde082d4-2ad3-44cd-86de-34ec9fdd3a40",
-              "pid": 22068
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86778
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-WXNDbB",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-WXNDbB/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm/home",
               "nodeOptions": null,
-              "nonce": "dde082d4-2ad3-44cd-86de-34ec9fdd3a40",
-              "pid": 22087
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86832
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "dde082d4-2ad3-44cd-86de-34ec9fdd3a40",
-              "pid": 22087
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86832
             },
             {
               "event": "cancelled",
-              "nonce": "dde082d4-2ad3-44cd-86de-34ec9fdd3a40",
-              "pid": 22087
+              "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
+              "pid": 86832
             }
           ],
           "inputsUnchanged": true,
           "mode": "wait-cancel",
-          "nonce": "dde082d4-2ad3-44cd-86de-34ec9fdd3a40",
+          "nonce": "b55e4ef0-33e9-425b-8f95-cbec5fece685",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-WXNDbB",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-LzVCYm",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1964,30 +1981,30 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9MZWVa",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9MZWVa/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0/home",
               "nodeOptions": null,
-              "nonce": "35bdcd20-d085-40b5-98d3-9a52e056b204",
-              "pid": 22104
+              "nonce": "4a5142d0-9e43-4e2b-a1c6-7c995f133833",
+              "pid": 86908
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9MZWVa",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9MZWVa/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0/home",
               "nodeOptions": null,
-              "nonce": "35bdcd20-d085-40b5-98d3-9a52e056b204",
-              "pid": 22113
+              "nonce": "4a5142d0-9e43-4e2b-a1c6-7c995f133833",
+              "pid": 86961
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "35bdcd20-d085-40b5-98d3-9a52e056b204",
+          "nonce": "4a5142d0-9e43-4e2b-a1c6-7c995f133833",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-9MZWVa",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-CnhfJ0",
           "strict": true,
           "workloadEvidence": {}
         },
@@ -1997,44 +2014,44 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qy53ww",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qy53ww/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U/home",
               "nodeOptions": null,
-              "nonce": "c8b63f63-0527-499b-87e6-2fec838f7618",
-              "pid": 22117
+              "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
+              "pid": 87027
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qy53ww",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U",
               "event": "start",
               "explicit": "fixture-explicit",
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qy53ww/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U/home",
               "nodeOptions": null,
-              "nonce": "c8b63f63-0527-499b-87e6-2fec838f7618",
-              "pid": 22120
+              "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
+              "pid": 87084
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "c8b63f63-0527-499b-87e6-2fec838f7618",
-              "pid": 22120
+              "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
+              "pid": 87084
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "c8b63f63-0527-499b-87e6-2fec838f7618",
+          "nonce": "4266e972-c1d5-4713-9ff0-d7e1e88d24db",
           "preflightVerified": true,
-          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-qy53ww",
+          "root": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/stdio-KcOv3U",
           "strict": true,
           "workloadEvidence": {}
         }
       ],
-      "observations_sha256": "0249c48cbfffddc282a24b6194219e36cd3064f7915623ecfe7fbe9c54a4cbff",
+      "observations_sha256": "a85092efeee7bb0cb649b65e768b303dfdda446e858192781cc31ee4f44d7bd5",
       "passed": 12,
-      "report_sha256": "dc9ef7b999d5a1e4f28471bcb54e7f06107ef8b9f09984fd554552af4756db29",
-      "seconds": 3.629,
+      "report_sha256": "11fc0cc4bebb4236ac668fe3d7ef5cf6488daeeb54b5dea372bfb82481cb9fce",
+      "seconds": 5.55,
       "stderr_empty": true,
       "tests": 12
     },
@@ -2085,8 +2102,8 @@
       "failed_cases": [],
       "log_sha256": "9f393e69c33f1e9a1b50c6d8c412df7f2d41a26a3df2f20d7503c23a3671fa5c",
       "passed": 32,
-      "report_sha256": "40a3337722f56d6714d673d5003fb127882f45f794767f677238642c1b3c1431",
-      "seconds": 1.008,
+      "report_sha256": "cf685921cf859ee944739ba495335c0cb389a3c1ed705048de2c125e20573128",
+      "seconds": 1.242,
       "stderr_empty": true,
       "tests": 32
     },
@@ -2159,8 +2176,8 @@
       ],
       "log_sha256": "5862bd1eb21b809b078688edcef8ad1d3f62c13777ad031df7b1037c7fc8ea2c",
       "passed": 3,
-      "report_sha256": "acd44ce93f9d65803776505a78a4efa18cea7b8cb0f1944b4ae6d85e0bcef2f6",
-      "seconds": 1.956,
+      "report_sha256": "adfeca96b1d895486e5cdaeb40537769eedab82b332f434e70c8559b57448331",
+      "seconds": 2.715,
       "stderr_empty": true,
       "tests": 32
     }
@@ -2298,8 +2315,8 @@
       "failed_cases": [],
       "log_sha256": "3b36b7291c2d7ec995404baf7ba0f4e49cfddd0b4182cfe81c8817a555b7a02e",
       "passed": 121,
-      "report_sha256": "8d3f2ed017ebf06f688831a01d425e511b19c792b3e5f37b3e9db58c4da9b60e",
-      "seconds": 3.587,
+      "report_sha256": "c934b1e885a6904a904bd0e6dc56083a35743ed0b6146df191807ffc805c7808",
+      "seconds": 5.962,
       "stderr_empty": true,
       "tests": 121
     },
@@ -2431,8 +2448,8 @@
       "failed_cases": [],
       "log_sha256": "a77d8b1109901a64c8e6d60e6372a6829d46cc5e2a34457f46858e596a9576e8",
       "passed": 121,
-      "report_sha256": "dd50a1c9c7a9f9d3907825488422a987c9531d489b7021410fa0bb6de9eb3f68",
-      "seconds": 3.655,
+      "report_sha256": "b7549d01910e9ac63bcd8263c7f9c2ffb73d635fa7d48f6e6de330c513d84255",
+      "seconds": 4.352,
       "stderr_empty": true,
       "tests": 121
     }
@@ -2469,37 +2486,37 @@
           "public admitted plugin activates the real read path with only selected tools"
         ],
         "fixture_pids": [
-          21131,
-          21138,
-          21146,
-          21150,
-          21151,
-          21152,
-          21155,
-          21156,
-          21158,
-          21159,
-          21162,
-          21163,
-          21164,
-          21165,
-          21166,
-          21167,
-          21168,
-          21171,
-          21172,
-          21173,
-          21174,
-          21176
+          41433,
+          41509,
+          41603,
+          41653,
+          41703,
+          41753,
+          41815,
+          41870,
+          41939,
+          41994,
+          42087,
+          42165,
+          42279,
+          42340,
+          42485,
+          42540,
+          42625,
+          42674,
+          42770,
+          42825,
+          42881,
+          42936
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "9b2b224866c866d67fe302fe66221cd0ce3eb2489549262d5f6010d69a419533",
         "mutant_sha256": "1ea7b40144e05be69277f3d4110b709badadebec312ebc462fc4f3d734da2e6a",
-        "observations_sha256": "e79427ebe3f648df5b28d1f2190a69164ebe9e42968ec30866c3ede547218148",
+        "observations_sha256": "4e7dc92c4f9face0878b27139bfe38f8808a21c26dcf3eb197c7fbd1c57482e0",
         "passed": 16,
-        "report_sha256": "fbae12e23609b94b0e723d2d7a70a53728c49c6262230f73b8b582315f6afeda",
-        "seconds": 3.287,
+        "report_sha256": "783a7197c0ff8963102e0d075fd925292252d256af296b4bf472e4afd69b4998",
+        "seconds": 4.657,
         "stderr_empty": true,
         "tests": 19,
         "useful_workload": {
@@ -2507,67 +2524,67 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-XscZjE",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-XscZjE/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z/home",
               "nodeOptions": null,
-              "nonce": "32edf999-7fa9-4830-bb67-8a6109d1bbd9",
-              "pid": 21164
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42279
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-XscZjE",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-XscZjE/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-uwOl7z/home",
               "nodeOptions": null,
-              "nonce": "32edf999-7fa9-4830-bb67-8a6109d1bbd9",
-              "pid": 21165
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "32edf999-7fa9-4830-bb67-8a6109d1bbd9",
-              "pid": 21165
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340
             },
             {
               "event": "search",
-              "nonce": "32edf999-7fa9-4830-bb67-8a6109d1bbd9",
-              "pid": 21165,
-              "query": "32edf999-7fa9-4830-bb67-8a6109d1bbd9"
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340,
+              "query": "8b23da35-45af-4b15-90d8-473a8df425dc"
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "32edf999-7fa9-4830-bb67-8a6109d1bbd9",
+          "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
           "pids": [
-            21164,
-            21165
+            42279,
+            42340
           ],
           "workload": {
             "read": {
               "file": "memo.txt",
-              "nonce": "32edf999-7fa9-4830-bb67-8a6109d1bbd9",
-              "pid": 21165,
-              "sha256": "68648903afe795a94a1e950b7c33aaa20dea15e4e3b750ce2566920e839b2d7a",
-              "text": "profile\nneedle 32edf999-7fa9-4830-bb67-8a6109d1bbd9\n"
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340,
+              "sha256": "8cb7aba77f462a44a48b0b6c767a6cb93f6c47daf8e124ff80e2be6c730799e6",
+              "text": "profile\nneedle 8b23da35-45af-4b15-90d8-473a8df425dc\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle 32edf999-7fa9-4830-bb67-8a6109d1bbd9"
+                  "text": "needle 8b23da35-45af-4b15-90d8-473a8df425dc"
                 },
                 {
                   "file": "signals.txt",
                   "line": 2,
-                  "text": "needle 32edf999-7fa9-4830-bb67-8a6109d1bbd9"
+                  "text": "needle 8b23da35-45af-4b15-90d8-473a8df425dc"
                 }
               ],
-              "nonce": "32edf999-7fa9-4830-bb67-8a6109d1bbd9",
-              "pid": 21165
+              "nonce": "8b23da35-45af-4b15-90d8-473a8df425dc",
+              "pid": 42340
             }
           }
         }
@@ -2603,45 +2620,45 @@
           "Mastermind runtime profile snapshots startup config before asynchronous preflight"
         ],
         "fixture_pids": [
-          21184,
-          21186,
-          21188,
-          21190,
-          21192,
-          21193,
-          21195,
-          21197,
-          21201,
-          21209,
-          21217,
-          21223,
-          21240,
-          21258,
-          21263,
-          21272,
-          21279,
-          21282,
-          21283,
-          21284,
-          21286,
-          21300,
-          21311,
-          21313,
-          21314,
-          21315,
-          21322,
-          21332,
-          21333,
-          21334
+          43651,
+          43717,
+          43873,
+          43934,
+          43994,
+          44051,
+          44119,
+          44182,
+          44238,
+          44302,
+          44431,
+          44489,
+          44716,
+          44770,
+          44907,
+          44964,
+          45037,
+          45110,
+          45175,
+          45230,
+          45303,
+          45361,
+          45444,
+          45483,
+          45528,
+          45568,
+          45616,
+          45663,
+          45722,
+          45785
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "70e0e9650d258716bc4780162c3196a8183367e225a9067e3ddeebf66870f98a",
         "mutant_sha256": "47e5d7c1c32ffef85c6bf773f7cd28bfa5bc6ae3dde1c2c1b4838e66cd7c150e",
-        "observations_sha256": "4a26618a53265aaf96c6fe7ae51184d7d531e77fe35f04e0cb0dbebb7d796682",
+        "observations_sha256": "a96ed8a0e1b53baa2ce8198199e0c73b92daeb3e72ad1d9549402a05326df7a6",
         "passed": 15,
-        "report_sha256": "e3bc92c61ddf403e5db3ac99cb8aca366fa1860608ddb548f0ce570378d21bbd",
-        "seconds": 4.268,
+        "report_sha256": "bae99b12eb46231ad5235d328c07ace98eec8508a61492d536daeac102744f42",
+        "seconds": 6.787,
         "stderr_empty": true,
         "tests": 19,
         "useful_workload": {
@@ -2649,67 +2666,67 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-a72faQ",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-a72faQ/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx/home",
               "nodeOptions": null,
-              "nonce": "2e0e0a64-5c1b-454e-abd3-9239c6673adc",
-              "pid": 21240
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44716
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-a72faQ",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-a72faQ/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-ngIQvx/home",
               "nodeOptions": null,
-              "nonce": "2e0e0a64-5c1b-454e-abd3-9239c6673adc",
-              "pid": 21258
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "2e0e0a64-5c1b-454e-abd3-9239c6673adc",
-              "pid": 21258
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770
             },
             {
               "event": "search",
-              "nonce": "2e0e0a64-5c1b-454e-abd3-9239c6673adc",
-              "pid": 21258,
-              "query": "2e0e0a64-5c1b-454e-abd3-9239c6673adc"
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770,
+              "query": "77abf849-6de7-4f97-a273-df22f22061af"
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "2e0e0a64-5c1b-454e-abd3-9239c6673adc",
+          "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
           "pids": [
-            21240,
-            21258
+            44716,
+            44770
           ],
           "workload": {
             "read": {
               "file": "memo.txt",
-              "nonce": "2e0e0a64-5c1b-454e-abd3-9239c6673adc",
-              "pid": 21258,
-              "sha256": "9304b3081d3f81b25f2e7b0d3ac708e1d551cde435405d1e04569aecb1a884dd",
-              "text": "profile\nneedle 2e0e0a64-5c1b-454e-abd3-9239c6673adc\n"
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770,
+              "sha256": "ac22586b8664508923ec0cf030bf6e1ffc15960e7306b14e5c9bc891a1465461",
+              "text": "profile\nneedle 77abf849-6de7-4f97-a273-df22f22061af\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle 2e0e0a64-5c1b-454e-abd3-9239c6673adc"
+                  "text": "needle 77abf849-6de7-4f97-a273-df22f22061af"
                 },
                 {
                   "file": "signals.txt",
                   "line": 2,
-                  "text": "needle 2e0e0a64-5c1b-454e-abd3-9239c6673adc"
+                  "text": "needle 77abf849-6de7-4f97-a273-df22f22061af"
                 }
               ],
-              "nonce": "2e0e0a64-5c1b-454e-abd3-9239c6673adc",
-              "pid": 21258
+              "nonce": "77abf849-6de7-4f97-a273-df22f22061af",
+              "pid": 44770
             }
           }
         }
@@ -2744,45 +2761,45 @@
           "admitted plugin refuses permissive startup before process creation"
         ],
         "fixture_pids": [
-          21006,
-          21011,
-          21015,
-          21026,
-          21027,
-          21028,
-          21044,
-          21046,
-          21049,
-          21050,
-          21051,
-          21059,
-          21063,
-          21068,
-          21071,
-          21074,
-          21078,
-          21079,
-          21080,
-          21081,
-          21082,
-          21083,
-          21084,
-          21086,
-          21087,
-          21089,
-          21095,
-          21096,
-          21100,
-          21104
+          38555,
+          38663,
+          38756,
+          38785,
+          38866,
+          38936,
+          39028,
+          39115,
+          39216,
+          39308,
+          39399,
+          39475,
+          39575,
+          39656,
+          39741,
+          39799,
+          39865,
+          39924,
+          40021,
+          40075,
+          40206,
+          40265,
+          40352,
+          40409,
+          40473,
+          40517,
+          40582,
+          40636,
+          40703,
+          40760
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "6f7e829db88b7d5a9a9e5711ccb64db8af67b66ac0a3384c547d01e345d40101",
         "mutant_sha256": "f39a76eaea8c8e9dc90a0b1acac249dfcbe43515dc0a6b696b6a96d9cbbe2752",
-        "observations_sha256": "9a60ee320280ac471e632d87bc994ada393ad904caae744dbf125a35ec8ec5f9",
+        "observations_sha256": "797e09e9c1452ed9f633063f424aef321f88aea06c3afa06b51409c9f0ebc80b",
         "passed": 16,
-        "report_sha256": "5f5d7d55af3979a6c8db4f9d100b5d8299cab29ca4091aa1f019c506b8d149c1",
-        "seconds": 4.349,
+        "report_sha256": "974e97215b59025659a48b8c88b05641737c83a3cee30bf159a150923ff451c6",
+        "seconds": 5.226,
         "stderr_empty": true,
         "tests": 19,
         "useful_workload": {
@@ -2790,67 +2807,67 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-OGmBjk",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-OGmBjk/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS/home",
               "nodeOptions": null,
-              "nonce": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375",
-              "pid": 21080
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40021
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-OGmBjk",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-OGmBjk/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-Wri0MS/home",
               "nodeOptions": null,
-              "nonce": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375",
-              "pid": 21081
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375",
-              "pid": 21081
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075
             },
             {
               "event": "search",
-              "nonce": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375",
-              "pid": 21081,
-              "query": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375"
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075,
+              "query": "3354d57f-b49e-43a0-bf03-e705700e808b"
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375",
+          "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
           "pids": [
-            21080,
-            21081
+            40021,
+            40075
           ],
           "workload": {
             "read": {
               "file": "memo.txt",
-              "nonce": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375",
-              "pid": 21081,
-              "sha256": "57f477e32b10ecc1755fb97398043c9b2071733ad65c5bb831fc1f7d9b2af925",
-              "text": "profile\nneedle c3b014a0-9bf2-4c18-bb2a-fdc3bff63375\n"
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075,
+              "sha256": "74572d6d66e891472ba5df950738f85954518272b474b03f3ea09466ceb53e63",
+              "text": "profile\nneedle 3354d57f-b49e-43a0-bf03-e705700e808b\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle c3b014a0-9bf2-4c18-bb2a-fdc3bff63375"
+                  "text": "needle 3354d57f-b49e-43a0-bf03-e705700e808b"
                 },
                 {
                   "file": "signals.txt",
                   "line": 2,
-                  "text": "needle c3b014a0-9bf2-4c18-bb2a-fdc3bff63375"
+                  "text": "needle 3354d57f-b49e-43a0-bf03-e705700e808b"
                 }
               ],
-              "nonce": "c3b014a0-9bf2-4c18-bb2a-fdc3bff63375",
-              "pid": 21081
+              "nonce": "3354d57f-b49e-43a0-bf03-e705700e808b",
+              "pid": 40075
             }
           }
         }
@@ -2883,39 +2900,39 @@
           "Mastermind runtime profile snapshots startup config before asynchronous preflight"
         ],
         "fixture_pids": [
-          21378,
-          21394,
-          21423,
-          21426,
-          21430,
-          21432,
-          21433,
-          21435,
-          21436,
-          21437,
-          21438,
-          21439,
-          21440,
-          21441,
-          21448,
-          21455,
-          21460,
-          21466,
-          21473,
-          21480,
-          21485,
-          21502,
-          21509,
-          21510
+          53560,
+          53883,
+          53995,
+          54054,
+          54132,
+          54189,
+          54258,
+          54308,
+          54368,
+          54421,
+          54503,
+          54565,
+          54760,
+          54848,
+          54988,
+          55043,
+          55390,
+          55468,
+          55561,
+          55629,
+          55717,
+          55774,
+          55831,
+          55885
         ],
         "inputs_unchanged": true,
         "killed": true,
         "log_sha256": "397ac039f9cad6794a8ebbaca63fe01d7c8169760a74b8ffb0703f750243bdfa",
         "mutant_sha256": "883c203101f5a939f734a4bfe358d35b908cf00b25d7b4abcd193655cf1a20ea",
-        "observations_sha256": "6687c2d99070efd46e25289ef3f3fa84e17d3c796e10a8e4ec1b1c9d69ac94e2",
+        "observations_sha256": "492f7967ef4ef56267913c5f03585f122644f48a0e8c3644de6398275e6897b2",
         "passed": 18,
-        "report_sha256": "61deaea9bc06f90f026478e10831ee3c96d22ad78275b224df0091cca263f976",
-        "seconds": 3.59,
+        "report_sha256": "837c0470e22135e52b9304f066b466ce276f0db4207d08bcf37e733b311127ad",
+        "seconds": 23.145,
         "stderr_empty": true,
         "tests": 19,
         "useful_workload": {
@@ -2923,67 +2940,67 @@
           "events": [
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-c1qaRS",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-c1qaRS/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT/home",
               "nodeOptions": null,
-              "nonce": "730b3a30-157b-4443-9b29-766defd71e19",
-              "pid": 21440
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54760
             },
             {
               "ambient": null,
-              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-c1qaRS",
+              "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT",
               "event": "start",
               "explicit": null,
-              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-c1qaRS/home",
+              "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-hbTLjT/home",
               "nodeOptions": null,
-              "nonce": "730b3a30-157b-4443-9b29-766defd71e19",
-              "pid": 21441
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848
             },
             {
               "event": "read",
               "file": "memo.txt",
-              "nonce": "730b3a30-157b-4443-9b29-766defd71e19",
-              "pid": 21441
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848
             },
             {
               "event": "search",
-              "nonce": "730b3a30-157b-4443-9b29-766defd71e19",
-              "pid": 21441,
-              "query": "730b3a30-157b-4443-9b29-766defd71e19"
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848,
+              "query": "af560f0b-08c5-4a2a-9d53-6cb9527194ff"
             }
           ],
           "inputsUnchanged": true,
           "mode": "normal",
-          "nonce": "730b3a30-157b-4443-9b29-766defd71e19",
+          "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
           "pids": [
-            21440,
-            21441
+            54760,
+            54848
           ],
           "workload": {
             "read": {
               "file": "memo.txt",
-              "nonce": "730b3a30-157b-4443-9b29-766defd71e19",
-              "pid": 21441,
-              "sha256": "64b7f13632905880571b282dc3a187398722f2d68be91c6e037655b5746e8bf7",
-              "text": "profile\nneedle 730b3a30-157b-4443-9b29-766defd71e19\n"
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848,
+              "sha256": "b6250d2d6853295afb7c0405e95eb279e485e92d63acd3c6372552a7afebcdc1",
+              "text": "profile\nneedle af560f0b-08c5-4a2a-9d53-6cb9527194ff\n"
             },
             "search": {
               "matches": [
                 {
                   "file": "memo.txt",
                   "line": 2,
-                  "text": "needle 730b3a30-157b-4443-9b29-766defd71e19"
+                  "text": "needle af560f0b-08c5-4a2a-9d53-6cb9527194ff"
                 },
                 {
                   "file": "signals.txt",
                   "line": 2,
-                  "text": "needle 730b3a30-157b-4443-9b29-766defd71e19"
+                  "text": "needle af560f0b-08c5-4a2a-9d53-6cb9527194ff"
                 }
               ],
-              "nonce": "730b3a30-157b-4443-9b29-766defd71e19",
-              "pid": 21441
+              "nonce": "af560f0b-08c5-4a2a-9d53-6cb9527194ff",
+              "pid": 54848
             }
           }
         }
@@ -3015,37 +3032,37 @@
       "exit_code": 0,
       "failed_cases": [],
       "fixture_pids": [
-        20857,
-        20859,
-        20861,
-        20862,
-        20865,
-        20866,
-        20868,
-        20870,
-        20872,
-        20874,
-        20878,
-        20880,
-        20881,
-        20883,
-        20886,
-        20897,
-        20907,
-        20919,
-        20927,
-        20935,
-        20944,
-        20951,
-        20958,
-        20962
+        36165,
+        36238,
+        36365,
+        36435,
+        36493,
+        36551,
+        36632,
+        36695,
+        36745,
+        36815,
+        36895,
+        36957,
+        37062,
+        37145,
+        37259,
+        37317,
+        37422,
+        37474,
+        37540,
+        37591,
+        37674,
+        37727,
+        37814,
+        37881
       ],
       "inputs_unchanged": true,
       "log_sha256": "d65ef89ab495de2c5137b0e95733ed1281c92d62466a748d1194c8a44f762d97",
-      "observations_sha256": "78fddf0233703dffd86cfc244160b0606ace4a1f3fe27156ecfa00b1846b1780",
+      "observations_sha256": "d99d67248d0d553983078cfd9130930b7042941efc1ad8be9e1e61a6a1d92649",
       "passed": 19,
-      "report_sha256": "d37c0fb103a968123e4fc2ad2c253ccb6304e96b492ca7d2984647913556883a",
-      "seconds": 3.618,
+      "report_sha256": "01486346dae98b98d650683a4f792614bd7384dbd51f0ea11b2c207275e5475c",
+      "seconds": 4.349,
       "stderr_empty": true,
       "tests": 19,
       "useful_workload": {
@@ -3053,67 +3070,67 @@
         "events": [
           {
             "ambient": null,
-            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-pUf0gC",
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl",
             "event": "start",
             "explicit": null,
-            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-pUf0gC/home",
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl/home",
             "nodeOptions": null,
-            "nonce": "00c25084-5532-4722-ac9a-42028f6779d1",
-            "pid": 20881
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37062
           },
           {
             "ambient": null,
-            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-pUf0gC",
+            "cwd": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl",
             "event": "start",
             "explicit": null,
-            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-pUf0gC/home",
+            "home": "/Volumes/Mastermind/agent-workspaces/web/deepseek-os-foundation-support-20260929-sol-001/experiments/harness_convergence/dispatch_binding/.cache/profile-EYQQSl/home",
             "nodeOptions": null,
-            "nonce": "00c25084-5532-4722-ac9a-42028f6779d1",
-            "pid": 20883
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145
           },
           {
             "event": "read",
             "file": "memo.txt",
-            "nonce": "00c25084-5532-4722-ac9a-42028f6779d1",
-            "pid": 20883
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145
           },
           {
             "event": "search",
-            "nonce": "00c25084-5532-4722-ac9a-42028f6779d1",
-            "pid": 20883,
-            "query": "00c25084-5532-4722-ac9a-42028f6779d1"
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145,
+            "query": "38c0d3eb-2509-4d5d-8555-884223566e7a"
           }
         ],
         "inputsUnchanged": true,
         "mode": "normal",
-        "nonce": "00c25084-5532-4722-ac9a-42028f6779d1",
+        "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
         "pids": [
-          20881,
-          20883
+          37062,
+          37145
         ],
         "workload": {
           "read": {
             "file": "memo.txt",
-            "nonce": "00c25084-5532-4722-ac9a-42028f6779d1",
-            "pid": 20883,
-            "sha256": "5e857e5aa2b7050d57e880fa134a13f109537b0b70b167499b802d291adb3713",
-            "text": "profile\nneedle 00c25084-5532-4722-ac9a-42028f6779d1\n"
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145,
+            "sha256": "8ad7a97e75f195a85b22f80b30c580cc7c78e0ea7e8679aa45c9c7fe909a8996",
+            "text": "profile\nneedle 38c0d3eb-2509-4d5d-8555-884223566e7a\n"
           },
           "search": {
             "matches": [
               {
                 "file": "memo.txt",
                 "line": 2,
-                "text": "needle 00c25084-5532-4722-ac9a-42028f6779d1"
+                "text": "needle 38c0d3eb-2509-4d5d-8555-884223566e7a"
               },
               {
                 "file": "signals.txt",
                 "line": 2,
-                "text": "needle 00c25084-5532-4722-ac9a-42028f6779d1"
+                "text": "needle 38c0d3eb-2509-4d5d-8555-884223566e7a"
               }
             ],
-            "nonce": "00c25084-5532-4722-ac9a-42028f6779d1",
-            "pid": 20883
+            "nonce": "38c0d3eb-2509-4d5d-8555-884223566e7a",
+            "pid": 37145
           }
         }
       }

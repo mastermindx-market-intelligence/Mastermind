@@ -4,7 +4,10 @@ const mode = process.env.MMX_MCP_SOURCE ?? 'donor'
 if (!['donor', 'pristine', 'mutant'].includes(mode)) throw new Error('Unknown MCP source')
 const root = name => fileURLToPath(new URL(name, import.meta.url))
 const source = root(`./.cache/mcp-${mode}/`)
+const run = process.env.MMX_MCP_TEST_RUN ?? 'manual'
+if (!/^[A-Za-z0-9._-]{1,96}$/.test(run)) throw new Error('Invalid MCP test run identity')
 export default defineConfig({
+  cacheDir: root(`./.cache/vite-${run}/`),
   resolve: { alias: [
     { find: 'mmx-worker-profile', replacement: process.env.MMX_PROFILE_SOURCE === 'mutant'
       ? root('./.cache/profile-mutant/dsh_tool_profile.mjs')

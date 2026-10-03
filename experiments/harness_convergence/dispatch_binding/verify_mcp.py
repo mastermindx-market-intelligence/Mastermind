@@ -60,7 +60,8 @@ def suite(name: str, source: str, expected: set[str], upstream: bool = False, st
          '--reporter=json', f'--outputFile={destination}'], cwd=ROOT,
         env={**ENV, 'MMX_MCP_SOURCE': source, 'MMX_MCP_UPSTREAM': '1' if upstream else '0',
              'MMX_MCP_STDIO': '1' if stdio else '0',
-             'MMX_MCP_PROFILE': '1' if profile else '0', 'MMX_PROFILE_SOURCE': profile_source},
+             'MMX_MCP_PROFILE': '1' if profile else '0', 'MMX_PROFILE_SOURCE': profile_source,
+             'MMX_MCP_TEST_RUN': name},
         capture_output=True, text=True, timeout=60, check=False,
     )
     output = result.stdout + result.stderr
@@ -289,6 +290,9 @@ def native_artifact_checks() -> dict:
     second = artifact_node('profile-artifact-rebuild', ['build-profile.mjs'])
     built = json.loads((CACHE / 'profile-build-result.json').read_text())
     assert before['files'] == built['files'] and before['input_sha256'] == built['input_sha256']
+    shared_scheduler = artifact_node(
+        'shared-tools-closure', ['--test', 'shared-tools-closure.test.mjs']
+    )
     for name, expected in built['input_sha256'].items():
         assert digest((ROOT / name).read_bytes()) == expected, name
     path = Path(built['artifact'])
@@ -311,8 +315,9 @@ def native_artifact_checks() -> dict:
                 raise AssertionError(f'Native artifact fixture remains: {pid}')
         results[scenario] = {**run, 'receipt_sha256': digest(raw), 'observation': observed}
     return {'build': built, 'build_run': first, 'rebuild_run': second,
+            'shared_scheduler': shared_scheduler,
             'repeat_build_identical': True, 'scenarios': results,
-            'scope': 'Actual built module imported by plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP'}
+            'scope': 'Actual built module imports patched ToolRuntime and selected AgentLoop from one bundle; plain Node, no Vitest alias/loader; test-local external dependencies, not installed ACP'}
 
 
 GRANT_MUTATIONS = {
@@ -434,7 +439,8 @@ def main() -> dict:
         'mcp-context-boundary.test.mjs', 'mcp-stdio.test.mjs', 'stdio-fixture-server.mjs',
         'prepare_mcp.py', 'verify_mcp.py', 'vitest.mcp.config.mjs', 'tsconfig.mcp.json',
         'mcp-preparation.test.py',
-        'profile-startup.test.mjs', 'build-profile.mjs', 'native-profile-canary.mjs',
+        'profile-startup.test.mjs', 'build-profile.mjs', 'agent-loop-manifest.json',
+        'shared-tools-closure.test.mjs', 'native-profile-canary.mjs',
         '../../../integrations/acp_worker/dsh_tool_profile.mjs',
         '../../../integrations/acp_worker/dsh_dispatch_preflight.mjs',
         '../../../integrations/acp_worker/dsh_mcp_grant.mjs',

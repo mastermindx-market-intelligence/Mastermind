@@ -335,9 +335,22 @@ preserved inside that expanded set, not an additional 93 cases.
 
 `build-profile.mjs` qualifies a TEST-LOCAL artifact using the already-locked
 Vite builder with config/env discovery disabled. It validates source/patch/lock
-inputs, builds the actual Mastermind profile and patched core/MCP modules into
-one module, and retains its output/input digests. Two builds must produce
+inputs, builds the actual Mastermind profile, patched core/MCP modules, and the
+selected `@deepseek-ai/dsh-agent-loop` into **one physical dependency closure**,
+and retains its output/input digests. The AgentLoop package archive identity and
+exact package/entry/type bytes are pinned by `agent-loop-manifest.json` in
+addition to the existing package-lock integrity. Two builds must produce
 identical output hashes. This is not a new release installer or deploy path.
+
+The single closure is load-bearing. A previously self-contained profile bundle
+and a separately imported AgentLoop each instantiated the upstream
+`TOOL_RUNTIME_SCHEDULER` unique symbol, so the first real scheduled ACP tool
+could not find `prepare` even though standalone profile calls passed. The
+`shared-tools-closure.test.mjs` regression drives a real AgentLoop turn through
+the real scheduler, commits the tool result, and requires the tool body to run
+exactly once. The historical split artifact fails that journey with zero body
+calls; the integrated artifact passes without reflecting, copying, or
+monkeypatching the private symbol.
 
 `native-profile-canary.mjs` then imports that compiled module in ordinary Node,
 without Vitest aliases or a test-runner module loader. Four scenarios qualify a
