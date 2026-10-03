@@ -312,3 +312,43 @@ def test_lost_commit_response_is_reconciled_from_canonical_acceptance(tmp_path, 
         assert len(provider.reads) == 1 and len(provider.adds) == 1
         assert phases(repo, pairs[0]).count(LedgerPhase.ACCEPTED) == 1
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("alias", [" nudge_id", "nudge_id ", "\tnudge_id"])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("contradictory", [False, True])
+@pytest.mark.parametrize("count", [1, 2])
+def test_noncanonical_receipt_keys_cannot_alias_original_nudge(
+    tmp_path, alias, reverse, contradictory, count
+):
+    """Different raw keys must never become one ambiguous correlation."""
+    async def exercise():
+        repo, pairs, binding, provider, original = await pending(tmp_path, count)
+        before = [phases(repo, pair) for pair in pairs]
+        expected = ("nudge_id", original.nudge_id)
+        disguised = (alias, "NUDGE-" + "f" * 32 if contradictory else original.nudge_id)
+        details = (expected, disguised) if reverse else (disguised, expected)
+        provider.change = lambda receipt: dataclasses.replace(receipt, details=details)
+        result = await recover()(repo, pairs, nudge_id=original.nudge_id,
+                                 dispatcher=provider, binding=binding)
+        assert result.state is api.PersistedNudgeState.RECONCILIATION_REQUIRED
+        assert [phases(repo, pair) for pair in pairs] == before
+        assert len(provider.adds) == 1 and len(provider.reads) == 1
+        assert all(LedgerPhase.ACCEPTED not in phases(repo, pair) for pair in pairs)
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_canonical_distinct_receipt_keys_keep_valid_acceptance(tmp_path, reverse):
+    async def exercise():
+        repo, pairs, binding, provider, original = await pending(tmp_path, 2)
+        expected = ("nudge_id", original.nudge_id)
+        other = ("policy_version", "fixture-v1")
+        details = (expected, other) if reverse else (other, expected)
+        provider.change = lambda receipt: dataclasses.replace(receipt, details=details)
+        result = await recover()(repo, pairs, nudge_id=original.nudge_id,
+                                 dispatcher=provider, binding=binding)
+        assert result.state is api.PersistedNudgeState.ACCEPTED
+        assert all(phases(repo, pair).count(LedgerPhase.ACCEPTED) == 1 for pair in pairs)
+        assert len(provider.adds) == 1 and len(provider.reads) == 1
+    asyncio.run(exercise())

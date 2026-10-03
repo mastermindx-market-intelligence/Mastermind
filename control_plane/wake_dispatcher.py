@@ -1206,7 +1206,10 @@ async def reconcile_persisted_nudge(
         # Legacy receipt authentication tolerates missing correlation. An
         # uncertain-operation closure must require one exact correlation value.
         keys = [key for key, _value in raw_receipt.details]
-        if (len(keys) != len(set(keys))
+        # Refuse noncanonical spellings before legacy normalization can merge
+        # distinct raw keys into duplicate operation correlations.
+        if (any(type(key) is not str or key not in ALLOWED_DETAIL_KEYS for key in keys)
+                or len(keys) != len(set(keys))
                 or dict(raw_receipt.details).get("nudge_id") != nudge_id):
             return unresolved
         receipt = authenticate_transport_receipt(raw_receipt, expected_nudge_id=nudge_id)
