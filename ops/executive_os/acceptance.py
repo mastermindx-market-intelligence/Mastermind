@@ -317,6 +317,34 @@ def _canonical_canary_paths(config: Mapping[str, Any]) -> dict[str, Path]:
     }
 
 
+def _configured_assignment_root(path: Path) -> Path:
+    """Resolve a trusted configured root, including the macOS /var alias."""
+    try:
+        if not path.is_absolute():
+            raise ValueError("relative configured root")
+        canonical = path.resolve(strict=True)
+        if not canonical.is_dir():
+            raise ValueError("configured root is not a directory")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise AcceptanceError("configured assignment root is unavailable") from exc
+    return canonical
+
+
+def _canonical_durable_path(raw: str) -> Path:
+    """Require producer evidence to be canonical; never repair its spelling."""
+    path = Path(raw)
+    try:
+        if (
+            not path.is_absolute()
+            or raw != os.fspath(path)
+            or path.resolve(strict=True) != path
+        ):
+            raise ValueError("noncanonical durable path")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise AcceptanceError("durable assignment paths escaped their configured roots") from exc
+    return path
+
+
 def _durable_assignment_paths(
     job: Mapping[str, Any],
     attempt: Mapping[str, Any],
@@ -341,15 +369,34 @@ def _durable_assignment_paths(
         or not isinstance(result_raw, str)
     ):
         raise AcceptanceError("durable assignment identity is incomplete")
-    workspace = Path(workspace_raw)
-    run_dir = Path(result_raw).parent.parent
+    workspace_root = _configured_assignment_root(workspace_root)
+    run_root = _configured_assignment_root(run_root)
+    workspace = _canonical_durable_path(workspace_raw)
+    result = Path(result_raw)
+    run_dir = result.parent.parent
     if (
-        not workspace.is_absolute()
-        or workspace.parent != workspace_root
+        workspace.parent != workspace_root
+        or result_raw != os.fspath(result)
         or run_dir != run_root / attempt_id
-        or Path(result_raw) != run_dir / "output" / "result.json"
+        or result != run_dir / "output" / "result.json"
+        or not workspace.is_dir()
+        or not run_dir.is_dir()
+        or not result.parent.is_dir()
+        or attempt.get("status") not in {"COMPLETED", "LOST"}
     ):
         raise AcceptanceError("durable assignment paths escaped their configured roots")
+    _canonical_durable_path(os.fspath(run_dir))
+    _canonical_durable_path(os.fspath(result.parent))
+    try:
+        result_info = result.lstat()
+    except FileNotFoundError as exc:
+        # LOST preserves the admitted path, not a provider's completed output.
+        if attempt["status"] != "LOST":
+            raise AcceptanceError("completed assignment result is missing") from exc
+    else:
+        if not stat.S_ISREG(result_info.st_mode) or result_info.st_nlink != 1:
+            raise AcceptanceError("assignment result is not a single regular file")
+        _canonical_durable_path(result_raw)
     return workspace, run_dir
 
 
@@ -1468,12 +1515,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         attempt_id = str(attempt["attempt_id"])
         expected_seal = (
-            Path(self.config["receipts_root"])
+            _configured_assignment_root(Path(self.config["receipts_root"]))
             / attempt_id
             / "assignment-seal-receipt.json"
         )
-        if seal_path is not None and Path(seal_path) != expected_seal:
+        if seal_path is not None and seal_path != os.fspath(expected_seal):
             raise AcceptanceError("assignment seal receipt path drifted")
+        _canonical_durable_path(os.fspath(expected_seal))
         info = expected_seal.lstat()
         if (
             stat.S_ISLNK(info.st_mode)
@@ -2420,9 +2468,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             or not isinstance(rotation.get("receipt_path"), str)
         ):
             raise AcceptanceError("workspace rotation evidence is incomplete")
-        archive_path = Path(rotation["archive_path"])
+        archive_path = _canonical_durable_path(rotation["archive_path"])
         expected_archive = (
-            Path(self.config["proof_workspace_root"])
+            _configured_assignment_root(Path(self.config["proof_workspace_root"]))
             / ".lost-attempts"
             / job_id
             / interrupted_attempt_id
