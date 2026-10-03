@@ -12,7 +12,7 @@ from typing import Any
 
 PRIVATE_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge.v1"
 PRIVATE_RESULT_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge_result.v1"
-SESSION_TOOLS = ("session_targets", "session_send", "session_summon")
+SESSION_TOOLS = ("session_targets", "session_send", "session_summon", "session_reply_read")
 MODIFYING_TOOLS = ("session_send", "session_summon")
 
 
