@@ -151,6 +151,30 @@ cannot show that.
 
 No number in §10 changed. What is claimed from them did.
 
+### Fifth review: the B2 design, before its run
+
+A fifth read-only review, by a different reviewer, attacked the B2 pre-registration and
+instrument as first frozen (commit `b20e5f63`). It worked on simulated data only, before any
+real run. Its verdict: **fail**. No real B2 run was made under that freeze. The design was
+changed and frozen again (`research/TREND_PERSISTENCE_PREREG_B2.md` §12 lists what changed and
+what did not).
+
+| # | Finding | Severity | Disposition |
+| --- | --- | --- | --- |
+| B1 | The gate that asks whether a test says more than volatility (K5) compared each test with the largest of ten simulated run means, one test at a time. With one simulated run left out, every `clustered_leverage_jumps` run was given the label. | blocker | K5 now considers all 29 tests together. Per simulated specification, 100 runs give the largest leave-one-out standardised excess over the 29 tests; a real test must exceed the 95th of those for both specifications. On 100 further runs of each specification the rule gave the label to 0 and 4. |
+| M1 | V2's significance rule (Bartlett kernel, normal reference) rejected a true zero 4.8% and 6.8% of the time at a stated 2.5%, at 20 and 60 sessions. B2's gates used it. | major | Every gating p-value in B2 now comes from an equal-weighted cosine variance with a Student t reference. On centred simulated series it rejects 2.2% to 3.4% at a stated 2.5%. V2's t is still printed beside it. V2's own result is not rescored; B2 prints V2's statistic under both rules. |
+| M2 | The simulated reference was not tied to the code that produced it, and the frozen design left out constants a result depends on. | major | The reference stores one hash over the four modules a result depends on. The instrument refuses real data if that hash, the reference's file hash, the pre-registration's hash or the design constants differ. |
+| M3 | The one-run guard could be passed by naming another output file, and a crash left no record. | major | One fixed result path. An attempt record is written before real prices are read. A second attempt needs a stated reason, which is kept in the result. An uncommitted tree is refused. |
+| m1 | p-values were rounded to four decimals before gating. | minor | Not rounded. |
+| m2 | The V2 holdout result was read without checking its hash. | minor | Pinned. |
+| m3 | The label "path information" claimed more than the test shows. | minor | The label is `beyond_simulated_volatility`. B2 §8 says what it does not prove. |
+| m4 | The calibration gate (W4) passes in almost every simulated run. | minor | Stated in B2 §7: 115 of 120. It is not evidence for the family. |
+| m5 | K4's floor is applied to a statistic that a strong control has already shrunk. | minor | Stated in B2 §7. K5 is the higher bar for 28 of the 29 tests. |
+| m6 | B2 §6 described an order of operations the code did not follow. | minor | Text corrected. |
+| m7 | The simulated calendar has more test dates than the real one, so its spread is about 2% narrow. | minor | The simulated spread is scaled to the real number of dates. |
+| m8 | The reference stored only run means. | minor | It stores each run's p-values and test dates, the size table and the K5 table. |
+| m9 | Gaps in the tests. | minor | Tests added for each change above. |
+
 ## 5. Substrate: what the universe actually is
 
 Members by the membership file, and how many have a price, on the first session of the
@@ -348,6 +372,11 @@ These are small effects. The largest mean IC is 0.056. One survivor is there by 
   result was seen, in answer to the fourth review (§4). It scores simulated prices only: no
   real label is read, and the holdout was not run again.
 - **V2 §3 misstates the fallback names** (N5, §4): 34 names, not about 50.
+- **B2 was frozen twice before any real run.** The first freeze (B2 sha256 `75bf31d8…7972b`,
+  commit `b20e5f63`) failed the fifth review (§4). The second changes the significance test
+  and the volatility gate and adds the code pin and the attempt record. No model was fitted on
+  real data and nothing of B2's second question was computed on a date from 2022 onward
+  between the two.
 - **More price-only work on 2022 onward** was done for revision 2, by the author and by the
   second and third reviews: printed-against-adjusted price comparisons, floor counts under each rule,
   eligible and complete-case counts per formation date, large-move and split checks. No
@@ -420,6 +449,25 @@ python3 -m research.trend_persistence_null \
 
 `--real-closes` is optional. It reads prices before 2022 only, to print the real volatility
 facts next to the simulated ones.
+
+The B2 simulated reference. Simulated prices; about 15 minutes on 20 cores:
+
+```
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 \
+python3 -m research.trend_persistence_walkforward --reference --jobs 20 \
+    --out research/data/trend_persistence_b2_reference.json
+```
+
+Two builds on the same machine gave identical runs.
+
+The B2 run. It takes no output path and writes
+`research/data/trend_persistence_b2_result.json`. It refuses to run while that file exists, so
+it can be made once. It is not to be run for any other purpose.
+
+```
+python3 -m research.trend_persistence_walkforward \
+    --breadth-dir <breadth> --store-dir <massive_stock_day>
+```
 
 ## 10. V2 — holdout result
 

@@ -19,10 +19,13 @@ Advisory research only. Nothing here ranks, sizes or gates anything.
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import math
 import os
+import re
+import subprocess
 from typing import Any, Mapping
 
 import numpy as np
@@ -32,13 +35,20 @@ from numpy.lib.stride_tricks import sliding_window_view
 from research import trend_persistence_null as null
 from research import trend_persistence_panel as tpp
 
-SCHEMA = 1
+SCHEMA = 2
 PREREG_FILE = "TREND_PERSISTENCE_PREREG_B2.md"
-PREREG_SHA256: str | None = "75bf31d8f052c77ddf72f873a553580307803b207277359698e25c6d4f17972b"
+PREREG_SHA256: str | None = "79764bf5f9bf18c6ce8a6161fa221188dc1a5859fe82d715711fecb7bb0380aa"
 REFERENCE_FILE = os.path.join("data", "trend_persistence_b2_reference.json")
-REFERENCE_SHA256: str | None = "cdada6c4008ca5ad3939ff3e958f84fa7c0604ce02fb4f983de4276397febcd9"
+REFERENCE_SHA256: str | None = "e2caf7e88db91b9494a248c64f410bfed357ad203777c1af82aca7ce21a920f3"
 HOLDOUT_RESULT_FILE = os.path.join("data", "trend_persistence_v2_holdout.json")
+HOLDOUT_RESULT_SHA256 = "ff928d6c22168b4a674f63a319efd45d984f0b2a9c4095bfda8790cb6dceff41"
+RESULT_FILE = os.path.join("data", "trend_persistence_b2_result.json")     # the one real result
+ATTEMPT_FILE = os.path.join("data", "trend_persistence_b2_attempt.json")   # written before real data
 V2_PANEL_SHA256 = tpp.HOLDOUT_PANEL_SHA256["v2"]
+# The code a result depends on. The simulated reference records its hash; the real run refuses
+# to compare against a reference that other code produced.
+CODE_FILES = ("trend_persistence_walkforward.py", "trend_persistence_panel.py",
+              "trend_persistence_null.py", "trend_persistence_substrate.py")
 
 DESIGN = "v2"                          # panel, eligibility, controls and label come from V2
 ENDPOINT = "forward_max_drawdown"
@@ -60,6 +70,10 @@ LOGIT_MAX_ITER = 60
 LOGIT_TOL = 1e-8
 GRAM_CHUNK = 1 << 18
 
+# One-sided test of a per-date mean: equal-weighted cosine variance, Student t reference.
+EWC_SCALE = 0.4                        # cosine terms: 0.4 n^(2/3) …
+EWC_MIN_DF = 4                         # … capped at n // (2 x label overlap), never under this
+
 P_ONE_SIDED = 0.025                    # W1: 0.05 split over the two gated horizons
 BLOCK_AGREE_MIN = 4                    # W2
 CAPTURE_MIN = 0.010                    # W3: one percentage point of capture
@@ -67,6 +81,7 @@ SLOPE_RANGE = (0.80, 1.25)             # W4
 Q2_P_ONE_SIDED = 0.05                  # K2
 Q2_BH_ALPHA = 0.10                     # K3
 Q2_IC_FLOOR = 0.005                    # K4
+K5_ALPHA = 0.05                        # K5: share of simulated runs allowed any label
 REPRODUCTION_TOL = 1e-9                # V2's holdout means must come back to this
 
 # Added price-only volatility descriptors, known at the formation date.
@@ -117,7 +132,9 @@ WINDOW_VOL_BINS = 20                   # equal-count bins of the label window's 
 
 # The simulated reference: volatility only, no drift, no return autocorrelation.
 SIM_SPECS = ("clustered_leverage", "clustered_leverage_jumps")
-SIM_SEEDS = tuple(null.SEEDS)
+SIM_SEEDS = tuple(range(11, 111))      # Q2 on every seed
+SIM_Q1_SEEDS = tuple(range(11, 31))    # Q1 as well on these
+SIM_CHECK_SEEDS = tuple(range(111, 211))   # Q2 again, on runs that set no threshold
 SIM_NAMES = 1500
 SIM_START, SIM_SESSIONS = "2012-01-02", 3770        # ends 2026-06-12: reaches the last block
 SIM_MODELS = ("B0", "B1", "B2", "A")
@@ -152,11 +169,31 @@ def frozen_design() -> dict[str, Any]:
         "gates": {"w1_p_one_sided": P_ONE_SIDED, "w2_blocks_positive": BLOCK_AGREE_MIN,
                   "w3_capture_min": CAPTURE_MIN, "w4_slope_range": list(SLOPE_RANGE),
                   "k2_p_one_sided": Q2_P_ONE_SIDED, "k3_bh_alpha": Q2_BH_ALPHA,
-                  "k4_ic_floor": Q2_IC_FLOOR},
+                  "k4_ic_floor": Q2_IC_FLOOR,
+                  "k5": {"alpha": K5_ALPHA, "family": "all confirmed tests",
+                         "statistic": "largest standardised excess, leave-one-out",
+                         "spread": "sd * sqrt(simulated dates / dates)",
+                         "against": "each simulated specification"}},
+        "inference": {"variance": "equal-weighted cosine", "reference": "student t",
+                      "scale": EWC_SCALE, "min_df": EWC_MIN_DF,
+                      "cap": "n // (2 * ceil(horizon / step))"},
+        "fit": {"logit_max_iter": LOGIT_MAX_ITER, "logit_tol": LOGIT_TOL,
+                "gram_chunk": GRAM_CHUNK},
+        "reproduction_tol": REPRODUCTION_TOL,
         "q2_series": list(Q2_SERIES), "q2_gated": Q2_GATED, "window_vol_bins": WINDOW_VOL_BINS,
-        "simulated": {"specs": list(SIM_SPECS), "seeds": list(SIM_SEEDS), "names": SIM_NAMES,
+        "q2_controls": {
+            "v2": "controls; residual ranked again",
+            "controls_sq": "controls + squares",
+            "descriptors": "controls + descriptors + squares",
+            "oracle": "controls + squares + label-window volatility (rank + bins)",
+            "descriptors_oracle": "controls + descriptors + squares + label-window volatility",
+        },
+        "simulated": {"specs": list(SIM_SPECS), "seeds": list(SIM_SEEDS),
+                      "q1_seeds": list(SIM_Q1_SEEDS), "check_seeds": list(SIM_CHECK_SEEDS),
+                      "names": SIM_NAMES,
                       "start": SIM_START, "sessions": SIM_SESSIONS, "models": list(SIM_MODELS)},
-        "v2_panel_sha256": V2_PANEL_SHA256,
+        "v2_panel_sha256": V2_PANEL_SHA256, "holdout_result_sha256": HOLDOUT_RESULT_SHA256,
+        "result_file": RESULT_FILE, "attempt_file": ATTEMPT_FILE, "code_files": list(CODE_FILES),
     }
 
 
@@ -183,8 +220,23 @@ def pinned_prereg() -> str:
     return PREREG_SHA256
 
 
+_PIN_LINE = re.compile(rb"^(PREREG_SHA256|REFERENCE_SHA256): str \| None = .*$", re.M)
+
+
+def code_sha256() -> str:
+    """One hash over the modules a result depends on, with this module's two pin lines blanked."""
+    digest = hashlib.sha256()
+    for name in CODE_FILES:
+        with open(os.path.join(_HERE, name), "rb") as fh:
+            body = fh.read()
+        if name == CODE_FILES[0]:
+            body = _PIN_LINE.sub(rb"\1 = <pin>", body)
+        digest.update(name.encode() + b"\0" + body + b"\0")
+    return digest.hexdigest()
+
+
 def pinned_reference() -> dict[str, Any]:
-    """The committed simulated reference, after proving it still matches its pin."""
+    """The committed simulated reference, after proving it still matches its pin and this code."""
     if not REFERENCE_SHA256:
         raise tpp.PreregDrift("B2 has no pinned simulated reference yet; real data is not scored")
     path = os.path.join(_HERE, REFERENCE_FILE)
@@ -196,7 +248,29 @@ def pinned_reference() -> dict[str, Any]:
         ref = json.load(fh)
     if ref.get("prereg_sha256") != PREREG_SHA256 or ref.get("design") != frozen_design():
         raise tpp.PreregDrift("the simulated reference was produced under a different design")
+    if ref.get("code_sha256") != code_sha256():
+        raise tpp.PreregDrift("the simulated reference was produced by different code")
     return ref
+
+
+def pinned_holdout_result() -> dict[str, Any]:
+    """V2's committed holdout result, after proving the file is the one this design names."""
+    path = os.path.join(_HERE, HOLDOUT_RESULT_FILE)
+    on_disk = _sha256(path)
+    if on_disk != HOLDOUT_RESULT_SHA256:
+        raise tpp.PreregDrift(f"{HOLDOUT_RESULT_FILE} hashes to {str(on_disk)[:12]}…, "
+                              f"pinned {HOLDOUT_RESULT_SHA256[:12]}…")
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def dev_signs(holdout_result: Mapping[str, Any]) -> dict[str, int]:
+    """The development sign of each confirmed test; they must be the 29 the design names."""
+    signs = {k: int(st["dev_sign"]) for k, st in holdout_result["tests"].items()
+             if st.get("confirmed_holdout")}
+    if sorted(signs) != sorted(confirmed_keys()):
+        raise tpp.PreregDrift("the confirmed tests are not the 29 the pre-registration names")
+    return signs
 
 
 # ---- price-only inputs ----------------------------------------------------------------------
@@ -596,22 +670,104 @@ def score_blocks(data: dict, horizon: int, blocks, models=MODELS,
             "all_mdd": np.asarray(all_mdd, float), "blocks": info}
 
 
-def _series(V, s: np.ndarray, horizon: int, step: int) -> dict[str, Any]:
-    """Mean of a per-date series, its HAC t under V2's lag rule, and the one-sided p above zero."""
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction of the incomplete beta function (modified Lentz)."""
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c, d = 1.0, 1.0 - qab * x / qap
+    d = 1.0 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 500):
+        m2 = 2 * m
+        for aa in (m * (b - m) * x / ((qam + m2) * (a + m2)),
+                   -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))):
+            d = 1.0 + aa * d
+            d = 1.0 / (d if abs(d) > tiny else tiny)
+            c = 1.0 + aa / c
+            c = c if abs(c) > tiny else tiny
+            h *= d * c
+        if abs(d * c - 1.0) < 1e-15:
+            break
+    return h
+
+
+def _betainc(a: float, b: float, x: float) -> float:
+    """Regularised incomplete beta function I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    front = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+                     + a * math.log(x) + b * math.log1p(-x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return front * _betacf(a, b, x) / a
+    return 1.0 - front * _betacf(b, a, 1.0 - x) / b
+
+
+def student_t_sf(t: float, df: int) -> float:
+    """P(T > t) for Student's t with ``df`` degrees of freedom."""
+    half = 0.5 * _betainc(0.5 * df, 0.5, df / (df + t * t))
+    return half if t >= 0 else 1.0 - half
+
+
+def ewc_df(n: int, horizon: int, step: int) -> int:
+    """Cosine terms for ``n`` dates whose labels each span ``horizon / step`` formation dates."""
+    overlap = max(1, math.ceil(horizon / step))
+    return max(EWC_MIN_DF, min(int(EWC_SCALE * n ** (2.0 / 3.0)), n // (2 * overlap)))
+
+
+def ewc_test(s: np.ndarray, horizon: int, step: int) -> tuple[float | None, int, float | None]:
+    """t, degrees of freedom and P(T > t) for the mean of a per-date series.
+
+    The long-run variance is the mean of the first ``df`` squared cosine transforms of the
+    series, and t is referred to Student's t with ``df`` degrees of freedom. V2's Bartlett rule
+    with a normal reference rejects a true mean of zero about twice as often as stated when
+    labels overlap (pre-registration §7); this test holds its stated size there.
+    """
+    n = len(s)
+    df = ewc_df(n, horizon, step)
+    grid = (np.arange(1, n + 1) - 0.5) / n
+    lam = math.sqrt(2.0 / n) * (np.cos(np.pi * np.outer(np.arange(1, df + 1), grid)) @ s)
+    omega = float((lam ** 2).mean())
+    if not omega > 0:
+        return None, df, None
+    t = math.sqrt(n) * float(s.mean()) / math.sqrt(omega)
+    return t, df, student_t_sf(t, df)
+
+
+def _bartlett_t(s: np.ndarray, lags: int) -> float | None:
+    """V2's statistic (Bartlett kernel), unrounded. Reported beside the test; gates nothing."""
+    n = len(s)
+    d = s - s.mean()
+    var = float(d @ d) / n
+    lags = min(int(lags), n - 1)
+    for j in range(1, lags + 1):
+        var += 2.0 * (1.0 - j / (lags + 1)) * float(d[j:] @ d[:-j]) / n
+    return float(s.mean()) / math.sqrt(var / n) if var > 0 else None
+
+
+def _series(s: np.ndarray, horizon: int, step: int) -> dict[str, Any]:
+    """Mean of a per-date series and its one-sided test above zero."""
     s = np.asarray(s, float)
     s = s[np.isfinite(s)]
-    out = {"n_dates": int(len(s)), "mean": None, "t_hac": None, "p_hac": None,
-           "p_one_sided": None, "hac_lags": None}
+    out = {"n_dates": int(len(s)), "mean": None, "t": None, "df": None, "p_one_sided": None,
+           "t_v2_rule": None}
     if len(s) < tpp.MIN_DATES_FOR_MEAN:
         return out
-    nw = V.newey_west_tstat(pd.Series(s), lags=max(4, 2 * math.ceil(horizon / step)))
-    mean = float(s.mean())
-    one = None
-    if nw["p"] is not None and np.isfinite(nw["p"]):
-        one = nw["p"] / 2 if mean > 0 else 1 - nw["p"] / 2
-    out.update({"mean": mean, "t_hac": nw["t"], "p_hac": nw["p"], "p_one_sided": one,
-                "hac_lags": nw["lags"]})
+    t, df, p = ewc_test(s, horizon, step)
+    out.update({"mean": float(s.mean()), "t": t, "df": df, "p_one_sided": p,
+                "t_v2_rule": _bartlett_t(s, max(4, 2 * math.ceil(horizon / step)))})
     return out
+
+
+def _bh_reject(p: Mapping[str, float], alpha: float) -> set[str]:
+    """Benjamini–Hochberg step-up: the keys rejected at false discovery rate ``alpha``."""
+    order = sorted(p, key=lambda k: (p[k], k))
+    last = 0
+    for i, k in enumerate(order, 1):
+        if p[k] <= alpha * i / len(order):
+            last = i
+    return set(order[:last])
 
 
 def _calibration(p: np.ndarray, e: np.ndarray) -> dict[str, Any]:
@@ -628,12 +784,12 @@ def _calibration(p: np.ndarray, e: np.ndarray) -> dict[str, Any]:
     return {"n": int(len(p)), "intercept": float(b[0]), "slope": float(b[1]), "bins": bins}
 
 
-def summarise(V, scored: dict, horizon: int, step: int, block_names, pairs=PAIRS) -> dict[str, Any]:
+def summarise(scored: dict, horizon: int, step: int, block_names, pairs=PAIRS) -> dict[str, Any]:
     per, block = scored["per_date"], scored["block"]
     models = {}
     for m, d in per.items():
         models[m] = {
-            "ic": _series(V, d["ic"], horizon, step),
+            "ic": _series(d["ic"], horizon, step),
             "capture_mean": float(np.nanmean(d["capture"])) if len(d["capture"]) else None,
             "brier_mean": float(np.nanmean(d["brier"])) if len(d["brier"]) else None,
             "flagged_mean_drawdown": (float(np.nanmean(d["flag_mdd"]))
@@ -650,13 +806,13 @@ def summarise(V, scored: dict, horizon: int, step: int, block_names, pairs=PAIRS
             sel = block == name
             by_block[name] = float(d_ic[sel].mean()) if bool(sel.any()) else None
         out_pairs[f"{a}_vs_{b}"] = {
-            "d_ic": _series(V, d_ic, horizon, step),
+            "d_ic": _series(d_ic, horizon, step),
             "d_ic_by_block": by_block,
-            "d_ic_audited": _series(V, per[a]["ic_audited"] - per[b]["ic_audited"], horizon, step),
-            "d_capture": _series(V, per[a]["capture"] - per[b]["capture"], horizon, step),
+            "d_ic_audited": _series(per[a]["ic_audited"] - per[b]["ic_audited"], horizon, step),
+            "d_capture": _series(per[a]["capture"] - per[b]["capture"], horizon, step),
             # baseline minus augmented: positive means the augmented model scores better
-            "d_brier": _series(V, per[b]["brier"] - per[a]["brier"], horizon, step),
-            "d_flagged_drawdown": _series(V, per[a]["flag_mdd"] - per[b]["flag_mdd"],
+            "d_brier": _series(per[b]["brier"] - per[a]["brier"], horizon, step),
+            "d_flagged_drawdown": _series(per[a]["flag_mdd"] - per[b]["flag_mdd"],
                                           horizon, step),
         }
     return {"n_dates": int(len(scored["dates"])), "blocks": scored["blocks"],
@@ -686,12 +842,12 @@ def apply_gates(h: dict) -> dict[str, Any]:
 
 
 # ---- Q2: what kind of information -----------------------------------------------------------
-def summarise_q2(V, data: dict, horizon: int, step: int) -> dict[str, Any]:
-    """Per confirmed feature at one horizon: each Q2 series' mean and HAC t over the test dates."""
+def summarise_q2(data: dict, horizon: int, step: int) -> dict[str, Any]:
+    """Per confirmed feature at one horizon: each Q2 series' mean and test over the test dates."""
     out = {}
     for j, f in enumerate(data["features"]):
         out[f"{f}|{horizon}|{ENDPOINT}"] = {
-            k: _series(V, data["q2"][k][:, j], horizon, step) for k in Q2_SERIES}
+            k: _series(data["q2"][k][:, j], horizon, step) for k in Q2_SERIES}
     return out
 
 
@@ -718,32 +874,139 @@ def simulated_ranges(reference: dict) -> dict[str, dict[str, list]]:
     return {key: {k: [min(v), max(v)] for k, v in st.items()} for key, st in out.items()}
 
 
-def apply_q2_gates(V, q2: dict, signs: Mapping[str, int], ranges: Mapping[str, Any]) -> None:
-    """K1–K5 per confirmed test: does it carry more than volatility?"""
-    one_sided: dict[str, float] = {}
-    for key, st in q2.items():
-        s = st[Q2_GATED]
-        if s["mean"] is None or s["p_hac"] is None:
-            one_sided[key] = 1.0
-            continue
-        same = float(np.sign(s["mean"])) == float(signs[key])
-        one_sided[key] = s["p_hac"] / 2.0 if same else 1.0 - s["p_hac"] / 2.0
-    bh = V.benjamini_hochberg(one_sided, alpha=Q2_BH_ALPHA)
+def _signed_p(p_upper: float | None, sign: int) -> float:
+    """The one-sided p in the development direction, from the p above zero."""
+    if p_upper is None:
+        return 1.0
+    return p_upper if sign > 0 else 1.0 - p_upper
+
+
+def k5_reference(runs: list, signs: Mapping[str, int]) -> dict[str, Any]:
+    """Per simulated specification: what a volatility-only market leaves in every test at once.
+
+    For each test the runs give a mean and a spread of the volatility-controlled statistic,
+    signed like development. A run's standardised excess over the others is taken test by
+    test, leaving that run out of the mean and spread; its largest excess over the 29 tests is
+    one draw of what a volatility-only market's best-looking test shows. The threshold is the
+    value that 1 - ``K5_ALPHA`` of those draws stay under.
+    """
+    keys = confirmed_keys()
+    sg = np.array([signs[k] for k in keys], float)
+    S, stats = {}, {}
+    for spec in SIM_SPECS:
+        rows = [[r["q2"][k][Q2_GATED] for k in keys] for r in runs if r["spec"] == spec]
+        if len(rows) < 20:
+            raise ValueError(f"{spec}: {len(rows)} simulated runs cannot set a threshold")
+        S[spec] = x = np.asarray(rows, float) * sg
+        n = len(x)
+        dates = {json.dumps(r["q2_dates"], sort_keys=True) for r in runs if r["spec"] == spec}
+        if len(dates) != 1:
+            raise ValueError(f"{spec}: simulated runs differ in their test dates")
+        mean_loo = (x.sum(axis=0) - x) / (n - 1)
+        var_loo = ((x ** 2).sum(axis=0) - x ** 2 - (n - 1) * mean_loo ** 2) / (n - 2)
+        z_loo = (x - mean_loo) / np.sqrt(var_loo)
+        largest = z_loo.max(axis=1)
+        stats[spec] = {
+            "n_runs": n, "z_loo": z_loo, "n_dates": json.loads(dates.pop()),
+            "threshold": float(np.sort(largest)[math.ceil((1.0 - K5_ALPHA) * n) - 1]),
+            "mean": x.mean(axis=0), "sd": x.std(axis=0, ddof=1), "largest": largest,
+        }
+    p_signed = {spec: np.array([[_signed_p((r.get("q2_p") or {}).get(k), signs[k]) for k in keys]
+                                for r in runs if r["spec"] == spec]) for spec in SIM_SPECS}
+    out = {}
+    for spec, st in stats.items():
+        above = st["z_loo"] > st["threshold"]                 # against its own specification
+        for other, ot in stats.items():
+            if other != spec:
+                above &= (S[spec] - ot["mean"]) / ot["sd"] > ot["threshold"]
+        gated = np.array([int(k.split("|")[1]) in GATE_HORIZONS for k in keys])
+        rest = np.zeros_like(above)                           # K1 to K4 on the run's own series
+        for i in range(st["n_runs"]):
+            p = dict(zip(keys, p_signed[spec][i]))
+            reject = _bh_reject(p, Q2_BH_ALPHA)
+            rest[i] = [S[spec][i, j] > 0 and p[k] <= Q2_P_ONE_SIDED and k in reject
+                       and abs(S[spec][i, j]) >= Q2_IC_FLOOR for j, k in enumerate(keys)]
+        out[spec] = {
+            "n_runs": st["n_runs"], "threshold": st["threshold"], "n_dates": st["n_dates"],
+            "signed_mean": dict(zip(keys, st["mean"].tolist())),
+            "sd": dict(zip(keys, st["sd"].tolist())),
+            "largest_excess": st["largest"].tolist(),
+            # the share of this specification's runs that would be given any label
+            "false_label": {
+                "k5_any_test": float(above.any(axis=1).mean()),
+                "k5_gated_horizons": float(above[:, gated].any(axis=1).mean()),
+                "all_gates_any_test": float((above & rest).any(axis=1).mean()),
+                "all_gates_gated_horizons": float((above & rest)[:, gated].any(axis=1).mean()),
+            },
+        }
+    return out
+
+
+def apply_q2_gates(q2: dict, signs: Mapping[str, int], k5: Mapping[str, Any]) -> None:
+    """K1–K5 per confirmed test: is anything left that the simulated markets do not leave?
+
+    A mean over fewer dates spreads more. The simulated spread is taken to the series' own
+    number of dates, ``sd * sqrt(simulated dates / dates)``, before the excess is formed.
+    """
+    one_sided = {key: _signed_p(st[Q2_GATED]["p_one_sided"], int(signs[key]))
+                 for key, st in q2.items()}
+    reject = _bh_reject(one_sided, Q2_BH_ALPHA)
     for key, st in q2.items():
         s, sign = st[Q2_GATED], int(signs[key])
-        lo, hi = ranges[key][Q2_GATED]
-        top = max(sign * lo, sign * hi)                       # the range, signed like development
         signed = None if s["mean"] is None else sign * s["mean"]
+        excess = {}
+        for spec, ref in k5.items():
+            sim_dates = (ref.get("n_dates") or {}).get(key.split("|")[1])
+            scale = math.sqrt(sim_dates / s["n_dates"]) if sim_dates and s.get("n_dates") else 1.0
+            sd = ref["sd"][key] * scale
+            z = None if signed is None else (signed - ref["signed_mean"][key]) / sd
+            excess[spec] = {"z": z, "threshold": ref["threshold"],
+                            "simulated_mean": ref["signed_mean"][key], "simulated_sd": sd,
+                            "simulated_dates": sim_dates, "sd_scale": scale}
         gates = {
             "k1_same_sign": signed is not None and signed > 0,
             "k2_one_sided_p": one_sided[key] <= Q2_P_ONE_SIDED,
-            "k3_bh_fdr": bool(bh.get(key, {}).get("reject")),
+            "k3_bh_fdr": key in reject,
             "k4_ic_floor": s["mean"] is not None and abs(s["mean"]) >= Q2_IC_FLOOR,
-            "k5_above_simulated": signed is not None and signed > top,
+            "k5_above_simulated": bool(excess) and all(
+                e["z"] is not None and e["z"] > e["threshold"] for e in excess.values()),
         }
-        st.update({"dev_sign": sign, "p_one_sided": one_sided[key],
-                   "simulated_range": {k: list(v) for k, v in ranges[key].items()},
-                   "gates": gates, "more_than_volatility": all(gates.values())})
+        st.update({"dev_sign": sign, "p_signed": one_sided[key], "simulated": excess,
+                   "gates": gates, "beyond_simulated_volatility": all(gates.values())})
+
+
+def k5_check(runs: list, signs: Mapping[str, int], k5: Mapping[str, Any]) -> dict[str, Any]:
+    """Runs that set no threshold, put through the gates real data goes through.
+
+    The thresholds make at most ``K5_ALPHA`` of the runs they were set on pass K5. This is the
+    share of fresh runs that pass, which nothing forces.
+    """
+    out = {}
+    for spec in SIM_SPECS:
+        rows = []
+        for r in (r for r in runs if r["spec"] == spec):
+            q2 = {k: {Q2_GATED: {"mean": st[Q2_GATED], "p_one_sided": r["q2_p"][k],
+                                 "n_dates": r["q2_dates"][k.split("|")[1]]}}
+                  for k, st in r["q2"].items()}
+            apply_q2_gates(q2, signs, k5)
+            rows.append({
+                "seed": r["seed"],
+                "k5": sorted(k for k, st in q2.items() if st["gates"]["k5_above_simulated"]),
+                "beyond": sorted(k for k, st in q2.items() if st["beyond_simulated_volatility"]),
+                "largest_excess": {sp: max(st["simulated"][sp]["z"] for st in q2.values())
+                                   for sp in k5},
+            })
+        if not rows:
+            continue
+
+        def share(field, gated_only=False):
+            return float(np.mean([any(not gated_only or int(k.split("|")[1]) in GATE_HORIZONS
+                                      for k in row[field]) for row in rows]))
+        out[spec] = {"n_runs": len(rows), "runs": rows,
+                     "k5_any_test": share("k5"), "k5_gated_horizons": share("k5", True),
+                     "all_gates_any_test": share("beyond"),
+                     "all_gates_gated_horizons": share("beyond", True)}
+    return out
 
 
 def decide(horizons: dict, q2: dict) -> dict[str, Any]:
@@ -751,9 +1014,10 @@ def decide(horizons: dict, q2: dict) -> dict[str, Any]:
     gates = {h: horizons[str(h)]["gates"] for h in GATE_HORIZONS if str(h) in horizons}
     passed = [h for h, g in gates.items() if g["passed"]]
     beyond = {h: sorted(k for k, st in q2.items()
-                        if int(k.split("|")[1]) == h and st.get("more_than_volatility"))
+                        if int(k.split("|")[1]) == h and st.get("beyond_simulated_volatility"))
               for h in HORIZONS}
-    kind = {str(h): ("path_information" if beyond[h] else "volatility_type") for h in passed}
+    kind = {str(h): ("beyond_simulated_volatility" if beyond[h] else "volatility_type")
+            for h in passed}
     if passed:
         outcome = "eligible_calibrated_profile"
     elif any(g["w1"] and g["w2"] and g["w3"] for g in gates.values()):
@@ -763,48 +1027,62 @@ def decide(horizons: dict, q2: dict) -> dict[str, Any]:
     else:
         outcome = "no_model_value"
     return {"outcome": outcome, "horizons": passed, "kind": kind,
-            "more_than_volatility": {str(h): v for h, v in beyond.items()},
+            "beyond_simulated_volatility": {str(h): v for h, v in beyond.items()},
             "advances": outcome == "eligible_calibrated_profile",
             "family_stops_at_wave_b": outcome in ("detectable_immaterial", "no_model_value")}
 
 
 # ---- the measurement ------------------------------------------------------------------------
-def measure(V, panel: dict, inputs: dict, *, models=MODELS, early: bool = True,
-            holdout_result: dict | None = None) -> dict[str, Any]:
-    """Q2 then Q1 on one panel. With ``holdout_result`` the V2 statistic must reproduce first."""
+def measure(panel: dict, inputs: dict, *, models=MODELS, early: bool = True, q1: bool = True,
+            holdout_result: dict | None = None, keep_series: bool = False) -> dict[str, Any]:
+    """Q2 and Q1 on one panel. With ``holdout_result``, nothing is returned unless V2's own
+    statistic reproduces."""
     tpp._check_panel(panel, tpp.design_of(DESIGN))
     data, q2 = {}, {}
+    series: dict[str, dict] = {"q2": {}, "d_ic": {}}
     for h in HORIZONS:
         data[h] = assemble(panel, inputs, h)
         if data[h]["n_dates"]:
-            q2.update(summarise_q2(V, data[h], h, panel["step"]))
+            q2.update(summarise_q2(data[h], h, panel["step"]))
+            if keep_series:
+                for j, f in enumerate(data[h]["features"]):
+                    series["q2"][f"{f}|{h}|{ENDPOINT}"] = np.array(data[h]["q2"][Q2_GATED][:, j])
+        if not q1:
+            data[h] = None
     if holdout_result is not None:
         check_reproduction(q2, holdout_result)
     pairs = tuple(p for p in PAIRS if p[0] in models and p[1] in models)
     horizons, early_out = {}, {}
-    for h in HORIZONS:
+    for h in HORIZONS if q1 else ():
         if not data[h]["n_dates"]:
             continue
-        s = summarise(V, score_blocks(data[h], h, BLOCKS, models=models), h, panel["step"],
-                      [b[0] for b in BLOCKS], pairs)
+        scored = score_blocks(data[h], h, BLOCKS, models=models)
+        s = summarise(scored, h, panel["step"], [b[0] for b in BLOCKS], pairs)
         s["gates"] = apply_gates(s)
         horizons[str(h)] = s
+        if keep_series:
+            a, b = GATED_PAIR
+            series["d_ic"][str(h)] = scored["per_date"][a]["ic"] - scored["per_date"][b]["ic"]
         if early:
             early_out[str(h)] = summarise(
-                V, score_blocks(data[h], h, EARLY_BLOCKS, models=EARLY_MODELS, sample="is_dev"),
+                score_blocks(data[h], h, EARLY_BLOCKS, models=EARLY_MODELS, sample="is_dev"),
                 h, panel["step"], [b[0] for b in EARLY_BLOCKS],
                 tuple(p for p in PAIRS if p[0] in EARLY_MODELS and p[1] in EARLY_MODELS))
         data[h] = None                                        # free the stacked matrix
-    return {"horizons": horizons, "early": early_out, "q2": q2}
+    out = {"horizons": horizons, "early": early_out, "q2": q2}
+    if keep_series:
+        out["series"] = series
+    return out
 
 
 # ---- simulated reference --------------------------------------------------------------------
-def reference_run(spec: str, seed: int, *, n_names: int = SIM_NAMES,
-                  n_sessions: int = SIM_SESSIONS, start: str = SIM_START) -> dict[str, Any]:
-    """Q1 and Q2 on one simulated panel. Takes a specification and a seed, never prices."""
+def reference_run(spec: str, seed: int, *, q1: bool = True, keep_series: bool = False,
+                  n_names: int = SIM_NAMES, n_sessions: int = SIM_SESSIONS,
+                  start: str = SIM_START) -> dict[str, Any]:
+    """Q2, and Q1 when asked, on one simulated panel. Takes a specification and a seed, never
+    prices."""
     if spec not in null.SPECS:
         raise ValueError(f"unknown specification {spec!r}")
-    V = tpp._judges()
     closes = null.simulate(int(seed), spec, n_names=n_names, n_sessions=n_sessions, start=start)
     names = [c for c in closes.columns if c != "SPY"]
     mem = pd.DataFrame({"ticker": names, "start_date": closes.index[0],
@@ -812,45 +1090,127 @@ def reference_run(spec: str, seed: int, *, n_names: int = SIM_NAMES,
     printed = pd.DataFrame(np.nan, index=closes.index, columns=names)
     observed = closes[names].notna()
     panel = tpp.build_panel(closes, mem, observed=observed, printed=printed)
-    m = measure(V, panel, price_inputs(panel, closes, observed), models=SIM_MODELS, early=False)
-    q1 = {}
+    m = measure(panel, price_inputs(panel, closes, observed), models=SIM_MODELS, early=False,
+                q1=q1, keep_series=keep_series)
+    out_q1 = {}
     for h, s in m["horizons"].items():
         pair = s["pairs"][f"{GATED_PAIR[0]}_vs_{GATED_PAIR[1]}"]
-        q1[h] = {
+        out_q1[h] = {
             "n_dates": s["n_dates"], "gates": s["gates"],
-            "d_ic": pair["d_ic"]["mean"], "d_ic_t": pair["d_ic"]["t_hac"],
+            "d_ic": pair["d_ic"]["mean"], "d_ic_t": pair["d_ic"]["t"],
+            "d_ic_p": pair["d_ic"]["p_one_sided"],
             "d_capture": pair["d_capture"]["mean"], "d_brier": pair["d_brier"]["mean"],
             "models": {k: {"ic": v["ic"]["mean"], "capture": v["capture_mean"],
                            "brier": v["brier_mean"], "slope": v["calibration"]["slope"]}
                        for k, v in s["models"].items()},
         }
-    return {"spec": spec, "seed": int(seed), "q1": q1,
-            "q2": {key: {k: st[k]["mean"] for k in Q2_SERIES} for key, st in m["q2"].items()}}
+    out = {"spec": spec, "seed": int(seed), "q1": out_q1,
+           "q2": {key: {k: st[k]["mean"] for k in Q2_SERIES} for key, st in m["q2"].items()},
+           "q2_p": {key: st[Q2_GATED]["p_one_sided"] for key, st in m["q2"].items()},
+           "q2_dates": {str(h): next((st[Q2_GATED]["n_dates"] for key, st in m["q2"].items()
+                                      if int(key.split("|")[1]) == h), 0) for h in HORIZONS}}
+    if keep_series:
+        out["_series"] = m["series"]
+    return out
 
 
 def _reference_job(job):
-    return reference_run(*job)
+    spec, seed, q1 = job
+    return reference_run(spec, seed, q1=q1, keep_series=True)
 
 
-def build_reference(*, specs=SIM_SPECS, seeds=SIM_SEEDS, jobs: int = 1) -> dict[str, Any]:
+def _rejects(s: np.ndarray, horizon: int, step: int) -> dict[str, bool]:
+    """Whether a centred series is rejected: by the test at both levels, and by V2's rule."""
+    s = s[np.isfinite(s)]
+    p = ewc_test(s, horizon, step)[2]
+    t_v2 = _bartlett_t(s, max(4, 2 * math.ceil(horizon / step)))
+    p_v2 = None if t_v2 is None else 0.5 * math.erfc(t_v2 / math.sqrt(2.0))
+    return {"at_0.05": p is not None and p <= 0.05, "at_0.025": p is not None and p <= 0.025,
+            "v2_rule_at_0.05": p_v2 is not None and p_v2 <= 0.05,
+            "v2_rule_at_0.025": p_v2 is not None and p_v2 <= 0.025}
+
+
+def simulated_size(runs: list, signs: Mapping[str, int]) -> dict[str, Any]:
+    """How often the one-sided test rejects on simulated series whose true mean is zero.
+
+    Each run's series is centred at the mean of the other runs of its specification, so it
+    keeps its own serial dependence. ``q2`` is the volatility-controlled statistic of every
+    confirmed test on every run: its true mean is the same in every run, so the centred series
+    has none left to find and the rejection rate is the test's size. ``d_ic`` is the gated
+    pair's rank-correlation difference on the runs that carry Q1. It is not a size: each run
+    fits its own models, whose true difference differs from run to run, so some of those
+    rejections are right. It is kept so that the two can be told apart.
+    """
+    step = tpp.FORMATION_STEP
+
+    def rates(cells: dict[str, list]) -> dict[str, Any]:
+        return {h: {"cells": len(v)} | {k: float(np.mean([c[k] for c in v])) for k in v[0]}
+                for h, v in cells.items()}
+
+    out: dict[str, Any] = {"q2": {}, "d_ic": {}}
+    for spec in SIM_SPECS:
+        rs = [r for r in runs if r["spec"] == spec]
+        cells: dict[str, list] = {}
+        for key in confirmed_keys():
+            h = int(key.split("|")[1])
+            means = np.array([np.nanmean(r["_series"]["q2"][key]) for r in rs])
+            for r, own in zip(rs, means):
+                centre = (means.sum() - own) / (len(rs) - 1)
+                cells.setdefault(str(h), []).append(
+                    _rejects(signs[key] * (r["_series"]["q2"][key] - centre), h, step))
+        out["q2"][spec] = rates(cells)
+        cells = {}
+        full = [r for r in rs if r["_series"]["d_ic"]]
+        for h in HORIZONS if len(full) > 1 else ():
+            means = np.array([np.nanmean(r["_series"]["d_ic"][str(h)]) for r in full])
+            for r, own in zip(full, means):
+                centre = (means.sum() - own) / (len(full) - 1)
+                cells.setdefault(str(h), []).append(
+                    _rejects(r["_series"]["d_ic"][str(h)] - centre, h, step))
+        out["d_ic"][spec] = rates(cells)
+    return out
+
+
+def build_reference(*, specs=SIM_SPECS, seeds=SIM_SEEDS, q1_seeds=SIM_Q1_SEEDS,
+                    check_seeds=SIM_CHECK_SEEDS, jobs: int = 1) -> dict[str, Any]:
     """The simulated reference: every specification and seed, by the code that scores real data."""
     pin = pinned_prereg()
-    todo = [(s, int(k)) for s in specs for k in seeds]
+    signs = dev_signs(pinned_holdout_result())
+    todo = [(s, int(k), int(k) in q1_seeds) for s in specs for k in seeds]
+    todo += [(s, int(k), False) for s in specs for k in check_seeds]
     if jobs > 1:
         from concurrent.futures import ProcessPoolExecutor
         with ProcessPoolExecutor(max_workers=jobs) as pool:
-            runs = list(pool.map(_reference_job, todo))
+            done = list(pool.map(_reference_job, todo))
     else:
-        runs = [reference_run(*job) for job in todo]
+        done = [_reference_job(job) for job in todo]
+    runs, fresh = done[:len(specs) * len(seeds)], done[len(specs) * len(seeds):]
+    size = simulated_size(runs, signs)
+    for r in done:
+        del r["_series"]
     out = {"schema": SCHEMA, "design_id": "b2", "kind": "simulated_reference",
-           "prereg_sha256": pin, "design": frozen_design(), "runs": runs}
+           "prereg_sha256": pin, "code_sha256": code_sha256(), "design": frozen_design(),
+           "runs": runs, "size": size, "k5": k5_reference(runs, signs)}
+    out["k5_check"] = k5_check(fresh, signs, out["k5"])
     out["q2_ranges"] = simulated_ranges(out)
     q1: dict[str, dict[str, list]] = {}
-    for r in runs:
+    full = [r for r in runs if r["q1"]]
+    for r in full:
         for h, s in r["q1"].items():
             for k in ("d_ic", "d_capture", "d_brier"):
                 q1.setdefault(h, {}).setdefault(k, []).append(s[k])
     out["q1_ranges"] = {h: {k: [min(v), max(v)] for k, v in d.items()} for h, d in q1.items()}
+    gated = [str(h) for h in GATE_HORIZONS]
+    out["q1_gates"] = {
+        "runs": len(full),
+        "w1_and_w2_at_a_gated_horizon": sum(
+            any(r["q1"][h]["gates"]["w1"] and r["q1"][h]["gates"]["w2"] for h in gated)
+            for r in full),
+        "w3_at_any_horizon": sum(any(g["gates"]["w3"] for g in r["q1"].values()) for r in full),
+        "w4_run_horizons": sum(g["gates"]["w4"] for r in full for g in r["q1"].values()),
+        "passed_at_a_gated_horizon": sum(
+            any(r["q1"][h]["gates"]["passed"] for h in gated) for r in full),
+    }
     return out
 
 
@@ -874,21 +1234,21 @@ def q1_vs_simulated(horizons: dict, ranges: Mapping[str, Any] | None) -> dict[st
 def compare(panel: dict, inputs: dict, holdout_result: dict, reference: dict) -> dict[str, Any]:
     """The pre-registered comparison on one panel, against a simulated reference."""
     pin = pinned_prereg()
-    try:
-        V = tpp._judges()
-    except Exception as exc:                                  # engine not importable
-        return {"schema": SCHEMA, "status": "unavailable", "error": str(exc)}
-    signs = {k: int(st["dev_sign"]) for k, st in holdout_result["tests"].items()
-             if st.get("confirmed_holdout")}
-    if sorted(signs) != sorted(confirmed_keys()):
-        raise tpp.PreregDrift("the confirmed tests are not the 29 the pre-registration names")
-    m = measure(V, panel, inputs, models=MODELS, early=True, holdout_result=holdout_result)
-    apply_q2_gates(V, m["q2"], signs, simulated_ranges(reference))
+    signs = dev_signs(holdout_result)
+    m = measure(panel, inputs, models=MODELS, early=True, holdout_result=holdout_result)
+    apply_q2_gates(m["q2"], signs, reference["k5"])
     return {
         "schema": SCHEMA, "status": "scored", "design_id": "b2", "prereg_sha256": pin,
         "panel_sha256": panel.get("digest"), "design": frozen_design(),
         "horizons": m["horizons"], "early": m["early"], "q2": m["q2"],
         "q1_vs_simulated": q1_vs_simulated(m["horizons"], reference.get("q1_ranges")),
+        "simulated": {
+            "size": reference.get("size"), "q1_gates": reference.get("q1_gates"),
+            "k5": {spec: {"threshold": v["threshold"], "n_runs": v["n_runs"],
+                          "false_label": v["false_label"]}
+                   for spec, v in reference["k5"].items()},
+            "k5_check": {spec: {k: x for k, x in v.items() if k != "runs"}
+                         for spec, v in (reference.get("k5_check") or {}).items()}},
         "decision": decide(m["horizons"], m["q2"]),
     }
 
@@ -904,20 +1264,59 @@ def _load_real(breadth_dir, store_dir):
     return panel, price_inputs(panel, closes, observed), provenance
 
 
+def _git_state() -> dict[str, Any]:
+    """The commit the instrument runs from, and whether anything but the attempt record differs."""
+    def git(*args):
+        return subprocess.run(["git", "-C", _HERE, *args], capture_output=True, text=True,
+                              check=True).stdout
+    dirty = [ln for ln in git("status", "--porcelain").splitlines()
+             if not ln.endswith(os.path.basename(ATTEMPT_FILE))]
+    return {"head": git("rev-parse", "HEAD").strip(), "clean": not dirty}
+
+
 def run(*, breadth_dir: str | None = None, store_dir: str | None = None,
-        out_path: str | None = None) -> dict[str, Any]:
-    """The one run on V2's repaired panel. Refuses any other panel and any second run."""
+        retry_reason: str | None = None) -> dict[str, Any]:
+    """The one run on V2's repaired panel, written to its one fixed path.
+
+    Refuses any other panel, any code or reference but the pinned ones, an uncommitted tree,
+    and a second run. An attempt is recorded before real data is read; if it fails, another
+    needs a stated reason, which is kept in the result.
+    """
     pinned_prereg()                                           # fail before loading anything
     reference = pinned_reference()
-    if out_path and os.path.exists(out_path):
-        raise tpp.HoldoutLocked(f"{out_path} exists: B2 has been run and is not run again")
-    with open(os.path.join(_HERE, HOLDOUT_RESULT_FILE)) as fh:
-        holdout_result = json.load(fh)
+    holdout_result = pinned_holdout_result()
+    result_path = os.path.join(_HERE, RESULT_FILE)
+    attempt_path = os.path.join(_HERE, ATTEMPT_FILE)
+    if os.path.exists(result_path):
+        raise tpp.HoldoutLocked(f"{RESULT_FILE} exists: B2 has been run and is not run again")
+    attempts = []
+    if os.path.exists(attempt_path):
+        with open(attempt_path) as fh:
+            attempts = json.load(fh)["attempts"]
+        if not (retry_reason and retry_reason.strip()):
+            raise tpp.HoldoutLocked(
+                f"{ATTEMPT_FILE} records an attempt that left no result; another attempt needs "
+                "a stated reason and is reported as a deviation")
+    git = _git_state()
+    if not git["clean"]:
+        raise tpp.PreregDrift("the tree has uncommitted changes; B2 runs from a commit")
+    attempts.append({
+        "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "git_head": git["head"], "code_sha256": reference["code_sha256"],
+        "prereg_sha256": PREREG_SHA256, "reference_sha256": REFERENCE_SHA256,
+        "retry_reason": retry_reason.strip() if retry_reason else None})
+    with open(attempt_path, "w") as fh:
+        json.dump({"attempts": attempts}, fh, indent=1)
     panel, inputs, provenance = _load_real(breadth_dir, store_dir)
     out = compare(panel, inputs, holdout_result, reference)
     out.update({"universe": "sp1500_pit", "universe_names": len(panel["names"]),
                 "provenance": provenance, "panel_design": DESIGN,
-                "reference_sha256": REFERENCE_SHA256})
+                "reference_sha256": REFERENCE_SHA256, "code_sha256": reference["code_sha256"],
+                "holdout_result_sha256": HOLDOUT_RESULT_SHA256, "git_head": git["head"],
+                "attempts": attempts})
+    with open(result_path + ".tmp", "w") as fh:
+        json.dump(out, fh, indent=1, sort_keys=True, default=str)
+    os.replace(result_path + ".tmp", result_path)
     return out
 
 
@@ -931,18 +1330,26 @@ def main(argv=None) -> int:
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--breadth-dir")
     ap.add_argument("--store-dir")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="for --reference and --coverage; the real run has a fixed path")
+    ap.add_argument("--retry-reason", help="why an earlier attempt left no result")
     args = ap.parse_args(argv)
-    if args.reference:
-        out = build_reference(jobs=args.jobs)
-    elif args.coverage:
-        panel, inputs, _ = _load_real(args.breadth_dir, args.store_dir)
-        out = {"kind": "coverage", "panel_sha256": panel["digest"],
-               "coverage": coverage(panel, inputs)}
+    if args.reference or args.coverage:
+        if not args.out:
+            ap.error("--out is required with --reference and --coverage")
+        if args.reference:
+            out = build_reference(jobs=args.jobs)
+        else:
+            panel, inputs, _ = _load_real(args.breadth_dir, args.store_dir)
+            out = {"kind": "coverage", "panel_sha256": panel["digest"],
+                   "coverage": coverage(panel, inputs)}
+        with open(args.out, "w") as fh:
+            json.dump(out, fh, sort_keys=True, separators=(",", ":"))
+            fh.write("\n")
     else:
-        out = run(breadth_dir=args.breadth_dir, store_dir=args.store_dir, out_path=args.out)
-    with open(args.out, "w") as fh:
-        json.dump(out, fh, indent=1, sort_keys=True, default=str)
+        if args.out:
+            ap.error("the real run writes to its fixed path; --out is not accepted")
+        out = run(breadth_dir=args.breadth_dir, store_dir=args.store_dir,
+                  retry_reason=args.retry_reason)
     print(json.dumps({"kind": out.get("kind", "b2"), "status": out.get("status"),
                       "decision": out.get("decision"), "coverage": out.get("coverage")},
                      default=str), flush=True)
