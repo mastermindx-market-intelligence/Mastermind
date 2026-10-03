@@ -40,6 +40,7 @@ _ACTIONS = (
     "executive.worker_auth.verify_only",
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
+    "executive.vps.deploy_mastermind",
 )
 _STATUS_ACTION = "status"
 _SLOT_IDS = ("codex-01", "codex-pro-01", "codex-pro-02", "codex-pro-03")
@@ -49,6 +50,7 @@ _EFFECT_ONLY_FLAGS = (
     ("--expected-credential-kind", "expected_credential_kind"),
     ("--workspace-binding-class", "workspace_binding_class"),
     ("--credential-expires-at", "credential_expires_at"),
+    ("--commit-sha", "commit_sha"),
 )
 
 
@@ -60,6 +62,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-credential-kind", choices=_CREDENTIAL_KINDS)
     parser.add_argument("--workspace-binding-class")
     parser.add_argument("--credential-expires-at")
+    parser.add_argument("--commit-sha")
     return parser
 
 
@@ -74,6 +77,8 @@ def build_request(argv: Sequence[str]) -> dict[str, object]:
         values["workspace_binding_class"] = args.workspace_binding_class
     if args.credential_expires_at is not None:
         values["credential_expires_at"] = args.credential_expires_at
+    if args.commit_sha is not None:
+        values["commit_sha"] = args.commit_sha
     raw = {
         "schema": REQUEST_SCHEMA,
         "request_id": args.request_id or f"req-{uuid.uuid4().hex}",

@@ -32,6 +32,7 @@ BOXHOST="${MASTERMIND_VPS_HOST:-root@146.190.142.17}"
 DPATH="${MASTERMIND_VPS_PATH:-/opt/mastermind}"
 LIVE_DATA_PATH="${MASTERMIND_VPS_LIVE_DATA_PATH:-/opt/mastermind-live-data}"
 KEY="${MASTERMIND_VPS_KEY:-/Users/chriswong/.ssh/macro_dashboard_deploy_v2}"
+KNOWN_HOSTS="${MASTERMIND_VPS_KNOWN_HOSTS:-}"
 SVC="${MASTERMIND_VPS_SERVICE:-mastermind.service}"
 HEALTH="${MASTERMIND_VPS_HEALTH:-http://127.0.0.1:8001/health}"
 
@@ -39,9 +40,17 @@ if [[ ! -f "$KEY" ]]; then
   log "deploy failed: SSH key is missing at $KEY"
   exit 1
 fi
+if [[ -n "$KNOWN_HOSTS" && ! -f "$KNOWN_HOSTS" ]]; then
+  log "deploy failed: SSH known_hosts is missing at $KNOWN_HOSTS"
+  exit 1
+fi
 
-SSH=(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20)
-RSYNC_SSH="ssh -i $KEY -o BatchMode=yes -o ConnectTimeout=20"
+SSH=(ssh -i "$KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20)
+if [[ -n "$KNOWN_HOSTS" ]]; then
+  SSH+=(-o "UserKnownHostsFile=$KNOWN_HOSTS" -o StrictHostKeyChecking=yes)
+fi
+printf -v RSYNC_SSH '%q ' "${SSH[@]}"
+RSYNC_SSH="${RSYNC_SSH% }"
 
 # HTTP 200 alone is insufficient for a reasoning service: a stale environment could boot cleanly
 # while silently reverting every nightly portfolio to a direct Claude backend, or an old process

@@ -21,6 +21,7 @@ from ops.executive_os.provider_worker_slots import all_slots, get_slot
 REQUEST_SCHEMA = "mastermind.executive_privileged_action_request.v1"
 STATUS_REQUEST_SCHEMA = "mastermind.executive_privileged_action_status_request.v1"
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
+_HEX40_RE = re.compile(r"^[0-9a-f]{40}$")
 _UTC_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 _REQUEST_KEYS = frozenset({"schema", "request_id", "action", "args"})
 _STATUS_REQUEST_KEYS = frozenset({"schema", "request_id"})
@@ -49,7 +50,14 @@ HOST_POLICY_ACTIONS = frozenset(
         "executive.host.prepare_secondary_power_policy",
     }
 )
-PRIVILEGED_ACTIONS = SERVICE_ACTIONS | WORKER_AUTH_ACTIONS | HOST_POLICY_ACTIONS
+DEPLOY_ACTIONS = frozenset(
+    {
+        "executive.vps.deploy_mastermind",
+    }
+)
+PRIVILEGED_ACTIONS = (
+    SERVICE_ACTIONS | WORKER_AUTH_ACTIONS | HOST_POLICY_ACTIONS | DEPLOY_ACTIONS
+)
 ACTION_EFFECT_CLASS = {
     "executive.services.start": "SERVICE_CONTROL",
     "executive.services.stop": "SERVICE_CONTROL",
@@ -60,9 +68,11 @@ ACTION_EFFECT_CLASS = {
     "executive.worker_auth.verify_ready": "CREDENTIAL_ADMIN_READINESS",
     "executive.worker_auth.recover_transaction": "CREDENTIAL_ADMIN_RECOVERY",
     "executive.host.prepare_secondary_power_policy": "HOST_POWER_POLICY",
+    "executive.vps.deploy_mastermind": "PRODUCTION_DEPLOY",
 }
 ACTION_EFFECT_UNKNOWN_EXIT_CODE = {
     "executive.host.prepare_secondary_power_policy": 75,
+    "executive.vps.deploy_mastermind": 75,
 }
 
 
@@ -148,6 +158,14 @@ def _validate_optional_slot_args(args: Mapping[str, Any]) -> tuple[tuple[str, st
     return (("slot_id", _validate_slot_id(args["slot_id"])),)
 
 
+def _validate_deploy_args(args: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    _require_exact_keys(args, frozenset({"commit_sha"}), "deploy arguments")
+    commit_sha = _require_string(args["commit_sha"], "commit_sha")
+    if _HEX40_RE.fullmatch(commit_sha) is None:
+        raise PrivilegedActionError("commit_sha must be exactly 40 lowercase hex characters")
+    return (("commit_sha", commit_sha),)
+
+
 def _validate_verify_ready_args(args: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
     keys = frozenset(args)
     slot_keys = frozenset({"slot_id", "credential_expires_at"})
@@ -215,6 +233,8 @@ def validate_request(raw: Mapping[str, Any]) -> ValidatedPrivilegedAction:
         if args:
             raise PrivilegedActionError("host policy action arguments must be empty")
         validated_args = ()
+    elif action in DEPLOY_ACTIONS:
+        validated_args = _validate_deploy_args(args)
     elif action == "executive.worker_auth.verify_ready":
         validated_args = _validate_verify_ready_args(args)
     else:
@@ -258,6 +278,13 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
             "-S",
             "-B",
             str(root / "ops/executive_os/secondary_host_power_policy.py"),
+        )
+    if request.action in DEPLOY_ACTIONS:
+        return (
+            "/bin/bash",
+            str(root / "ops/executive_os/deploy-mastermind-vps.sh"),
+            "--commit-sha",
+            args["commit_sha"],
         )
 
     argv: list[str] = [

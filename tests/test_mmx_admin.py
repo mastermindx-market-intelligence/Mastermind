@@ -68,6 +68,25 @@ def test_service_action_cannot_accept_arbitrary_command_or_path() -> None:
         build_request(["executive.services.start", "--command", "/bin/sh"])
 
 
+def test_client_builds_closed_vps_deploy_request() -> None:
+    sha = "a" * 40
+    request = build_request(
+        [
+            "executive.vps.deploy_mastermind",
+            "--commit-sha",
+            sha,
+            "--request-id",
+            "req-vps-deploy-001",
+        ]
+    )
+    assert request == {
+        "schema": REQUEST_SCHEMA,
+        "request_id": "req-vps-deploy-001",
+        "action": "executive.vps.deploy_mastermind",
+        "args": {"commit_sha": sha},
+    }
+
+
 def test_unknown_action_refuses_in_argparse() -> None:
     with pytest.raises(SystemExit):
         build_request(["shell", "--request-id", "req-bad-001"])
@@ -156,6 +175,11 @@ def test_status_requires_explicit_request_id_and_never_generates_one() -> None:
             "status",
             "--request-id", "req-001",
             "--credential-expires-at", "2026-09-14T00:00:00Z",
+        ],
+        [
+            "status",
+            "--request-id", "req-001",
+            "--commit-sha", "a" * 40,
         ],
     ],
 )

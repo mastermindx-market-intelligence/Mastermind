@@ -72,6 +72,8 @@ def test_trusted_effect_paths_cover_every_root_actuator() -> None:
         "ops/executive_os/service-control.sh",
         "ops/executive_os/provision-worker-auth.sh",
         "ops/executive_os/secondary_host_power_policy.py",
+        "ops/executive_os/deploy-mastermind-vps.sh",
+        "scripts/deploy_code_to_vps.sh",
     )
 
 
@@ -104,6 +106,45 @@ def test_power_policy_action_uses_existing_receipt_and_replay_owner(tmp_path: Pa
     argv = executor.calls[0][0]
     assert argv[:4] == ("/usr/bin/python3", "-I", "-S", "-B")
     assert argv[4].endswith("/ops/executive_os/secondary_host_power_policy.py")
+
+
+def test_vps_deploy_uses_broker_receipt_and_replay_owner(tmp_path: Path) -> None:
+    executor = FakeExecutor(stdout=b"DEPLOYED " + b"a" * 40 + b"\n")
+    broker = _broker(tmp_path, executor)
+    args = {"commit_sha": "a" * 40}
+
+    first = broker.handle(
+        _raw("executive.vps.deploy_mastermind", "req-deploy-001", args),
+        peer_uid=501,
+    )
+    second = broker.handle(
+        _raw("executive.vps.deploy_mastermind", "req-deploy-001", args),
+        peer_uid=501,
+    )
+
+    assert first == second
+    assert first["effect_class"] == "PRODUCTION_DEPLOY"
+    assert first["outcome"] == "SUCCEEDED"
+    assert len(executor.calls) == 1
+    argv = executor.calls[0][0]
+    assert argv[-2:] == ("--commit-sha", "a" * 40)
+    assert argv[1].endswith("/ops/executive_os/deploy-mastermind-vps.sh")
+
+
+def test_vps_deploy_exit_75_preserves_effect_unknown(tmp_path: Path) -> None:
+    executor = FakeExecutor(returncode=75, stderr=b"final production effect is uncertain\n")
+    broker = _broker(tmp_path, executor)
+    args = {"commit_sha": "a" * 40}
+
+    with pytest.raises(EffectUnknownError):
+        broker.handle(
+            _raw("executive.vps.deploy_mastermind", "req-deploy-unknown", args),
+            peer_uid=501,
+        )
+
+    assert len(executor.calls) == 1
+    assert broker.inflight_path("req-deploy-unknown").is_file()
+    assert not broker.receipt_path("req-deploy-unknown").exists()
 
 
 def test_success_persists_terminal_receipt_and_replays_without_second_spawn(tmp_path: Path) -> None:

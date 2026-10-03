@@ -1437,6 +1437,17 @@ MMX_ADMIN_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.mmx-admin.XXXXXX")"
 /bin/chmod 0555 "$MMX_ADMIN_TEMP"
 /bin/mv -f "$MMX_ADMIN_TEMP" "$MMX_ADMIN"
 
+# Stable forced-command SSH relay. It receives no argv from sshd; the reviewed
+# release script parses SSH_ORIGINAL_COMMAND into preflight/status/deploy only.
+MMX_VPS_RELEASE_RELAY="$SYSTEM_ROOT/bin/mmx-vps-release-relay"
+MMX_VPS_RELEASE_RELAY_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.mmx-vps-release-relay.XXXXXX")"
+/usr/bin/printf '%s\n' '#!/bin/bash' 'set -eu' \
+  "exec /bin/bash \"$RELEASE_ROOT/ops/executive_os/mini-vps-release-relay.sh\" \"\$@\"" \
+  >"$MMX_VPS_RELEASE_RELAY_TEMP"
+/usr/sbin/chown root:wheel "$MMX_VPS_RELEASE_RELAY_TEMP"
+/bin/chmod 0555 "$MMX_VPS_RELEASE_RELAY_TEMP"
+/bin/mv -f "$MMX_VPS_RELEASE_RELAY_TEMP" "$MMX_VPS_RELEASE_RELAY"
+
 if [ -e "$CONTROL_SENTINEL_FILE" ] || [ -L "$CONTROL_SENTINEL_FILE" ]; then
   [ -f "$CONTROL_SENTINEL_FILE" ] && [ ! -L "$CONTROL_SENTINEL_FILE" ] \
     && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$CONTROL_SENTINEL_FILE")" = "0:$CONTROL_GID:440" ] || {
