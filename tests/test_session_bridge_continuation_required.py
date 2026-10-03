@@ -3,6 +3,11 @@ from __future__ import annotations
 import dataclasses
 import pytest
 
+from control_plane.sol_action_target import (
+    ActionTargetReason,
+    ActionTargetState,
+    SolActionTargetResolution,
+)
 from integrations.session_bridge.continuation_required import (
     ContinuationProjectionError,
     TrustedTurnDisposition,
@@ -10,12 +15,31 @@ from integrations.session_bridge.continuation_required import (
 )
 
 
+def _target(**overrides):
+    value = dict(
+        schema="mastermind.sol_action_target.v1",
+        state=ActionTargetState.RESOLVED,
+        reason=ActionTargetReason.EXACT_RUNTIME_BINDING,
+        root_job_id="JOB-001",
+        target_seat="ceo",
+        session_alias="EXECUTIVE-CEO-A",
+        binding_id="bind-current-0001",
+        binding_generation=7,
+        reasoning_surface="chatgpt-sol",
+        action_authoritative=True,
+        observer_only=False,
+        evidence_digest="a" * 64,
+    )
+    value.update(overrides)
+    return SolActionTargetResolution(**value)
+
+
 def _state(**overrides):
     value = dict(
         operation_key="op-current-001",
         carrier_ref="carrier:root:001",
         target_ref="chatgpt:target:001",
-        target_generation="gen-7",
+        target_generation="EXECUTIVE-CEO-A:bind-current-0001:7:chatgpt-sol",
         mission_revision="mission-rev-12",
         authorization_ref="auth-current-12",
         mission_complete=False,
@@ -33,12 +57,18 @@ def _state(**overrides):
     return TrustedTurnDisposition(**value)
 
 
-def test_incomplete_healthy_exact_session_requires_continuation():
-    result = project_continuation_requirement(_state())
+def _project(state=None, target=None):
+    return project_continuation_requirement(
+        state or _state(), action_target=target or _target()
+    )
+
+
+def test_incomplete_healthy_exact_authoritative_session_requires_continuation():
+    result = _project()
     assert result.required is True
     assert result.reason == "continuation_required"
     assert result.target_ref == "chatgpt:target:001"
-    assert result.target_generation == "gen-7"
+    assert result.action_target_evidence_digest == "a" * 64
 
 
 @pytest.mark.parametrize(
@@ -55,8 +85,8 @@ def test_incomplete_healthy_exact_session_requires_continuation():
         ({"exact_next_action_ref": None}, "next_action_missing"),
     ],
 )
-def test_fail_closed_boundaries_never_require_continuation(changes, reason):
-    result = project_continuation_requirement(_state(**changes))
+def test_turn_boundaries_never_require_continuation(changes, reason):
+    result = _project(_state(**changes))
     assert result.required is False
     assert result.reason == reason
 
@@ -73,28 +103,63 @@ def test_fail_closed_boundaries_never_require_continuation(changes, reason):
     ],
 )
 def test_every_lawful_stop_disposition_holds(disposition):
-    result = project_continuation_requirement(
-        _state(finalization_disposition=disposition)
-    )
+    result = _project(_state(finalization_disposition=disposition))
     assert result.required is False
     assert result.reason == "lawful_stop_disposition"
 
 
-def test_identical_free_form_prose_cannot_affect_projection():
-    # There is intentionally no text/next_step/model field in the trusted projection.
+def test_model_prose_cannot_affect_projection():
     fields = {field.name for field in dataclasses.fields(TrustedTurnDisposition)}
     assert fields.isdisjoint({"text", "next_step", "assistant_text", "model_claim"})
 
 
 def test_missing_or_unknown_disposition_evidence_is_not_positive_absence():
-    assert project_continuation_requirement(
-        _state(disposition_evidence_complete=False)
-    ).required is False
+    assert _project(_state(disposition_evidence_complete=False)).required is False
     with pytest.raises(ContinuationProjectionError):
         _state(finalization_disposition="MORE_WORK_EXISTS")
 
 
+@pytest.mark.parametrize(
+    ("target", "reason"),
+    [
+        (_target(state=ActionTargetState.UNKNOWN,
+                 reason=ActionTargetReason.BINDING_EVIDENCE_UNKNOWN,
+                 action_authoritative=False), "action_target_unresolved"),
+        (_target(action_authoritative=False, observer_only=True,
+                 reason=ActionTargetReason.ACTOR_OBSERVER_ONLY),
+         "actor_not_action_authoritative"),
+        (_target(binding_id=None), "action_target_incomplete"),
+    ],
+)
+def test_canonical_action_target_must_be_exact_and_authoritative(target, reason):
+    result = _project(target=target)
+    assert result.required is False
+    assert result.reason == reason
+
+
+def test_runtime_binding_generation_drift_holds():
+    result = _project(_state(
+        target_generation="EXECUTIVE-CEO-A:bind-current-0001:8:chatgpt-sol"
+    ))
+    assert result.required is False
+    assert result.reason == "action_target_generation_mismatch"
+
+
+def test_surface_or_binding_identity_drift_holds():
+    for target in (
+        _target(binding_id="bind-current-0002"),
+        _target(reasoning_surface="codex"),
+        _target(session_alias="EXECUTIVE-CEO-B"),
+    ):
+        assert _project(target=target).required is False
+
+
 def test_projection_has_no_send_retry_wake_or_provider_surface():
-    result = project_continuation_requirement(_state())
+    result = _project()
     for forbidden in ("send", "retry", "wake", "dispatch", "provider"):
         assert not hasattr(result, forbidden)
+
+
+def test_raw_dict_cannot_impersonate_action_target():
+    with pytest.raises(ContinuationProjectionError):
+        project_continuation_requirement(_state(), action_target={})  # type: ignore[arg-type]

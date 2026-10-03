@@ -1,13 +1,19 @@
 """Trusted, effect-free projection for anti-premature-finalization continuation.
 
 This module owns no lifecycle state, target registry, scheduler, retry policy, wake
-transport, or dialogue write. A trusted host may project whether the existing
-exact-session CONTINUE owner is eligible to act. Model prose is never authority.
+transport, dialogue write, or action authority. It composes a host-owned turn
+disposition with the existing canonical Sol action-target resolution. Model prose
+is never authority.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+
+from control_plane.sol_action_target import (
+    ActionTargetState,
+    SolActionTargetResolution,
+)
 
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _STOP_DISPOSITIONS = frozenset({
@@ -32,7 +38,7 @@ def _ref(value: object, field: str) -> str:
 
 @dataclass(frozen=True)
 class TrustedTurnDisposition:
-    """Host-bound current state used only to decide whether CONTINUE is eligible."""
+    """Current host-owned turn facts; not an authority token or lifecycle record."""
 
     operation_key: str
     carrier_ref: str
@@ -80,46 +86,107 @@ class ContinuationRequirement:
     target_ref: str
     target_generation: str
     exact_next_action_ref: str | None
+    action_target_evidence_digest: str | None = None
 
 
-def project_continuation_requirement(
-    state: TrustedTurnDisposition,
-) -> ContinuationRequirement:
-    """Project eligibility for one existing canonical CONTINUE, without sending it."""
-    if not isinstance(state, TrustedTurnDisposition):
-        raise ContinuationProjectionError("invalid_trusted_turn_disposition")
-
-    reason = "continuation_required"
-    required = True
-    if state.mission_complete:
-        required, reason = False, "mission_complete"
-    elif state.user_stop:
-        required, reason = False, "user_stop"
-    elif state.denial_active:
-        required, reason = False, "denial_active"
-    elif state.unresolved_modifying_effect:
-        required, reason = False, "effect_unknown"
-    elif state.prior_continue_effect_unresolved:
-        required, reason = False, "continue_effect_unresolved"
-    elif not state.disposition_evidence_complete:
-        required, reason = False, "disposition_evidence_incomplete"
-    elif state.finalization_disposition is not None:
-        required, reason = False, "lawful_stop_disposition"
-    elif not state.target_addressable:
-        required, reason = False, "target_not_addressable"
-    elif not state.authorization_current:
-        required, reason = False, "authorization_stale"
-    elif state.exact_next_action_ref is None:
-        required, reason = False, "next_action_missing"
-
+def _held(state: TrustedTurnDisposition, reason: str) -> ContinuationRequirement:
     return ContinuationRequirement(
-        required=required,
+        required=False,
         reason=reason,
         operation_key=state.operation_key,
         carrier_ref=state.carrier_ref,
         target_ref=state.target_ref,
         target_generation=state.target_generation,
         exact_next_action_ref=state.exact_next_action_ref,
+    )
+
+
+def _project_turn_facts(
+    state: TrustedTurnDisposition,
+) -> ContinuationRequirement:
+    """Evaluate only turn/finalization facts; never infer action authority."""
+    if state.mission_complete:
+        return _held(state, "mission_complete")
+    if state.user_stop:
+        return _held(state, "user_stop")
+    if state.denial_active:
+        return _held(state, "denial_active")
+    if state.unresolved_modifying_effect:
+        return _held(state, "effect_unknown")
+    if state.prior_continue_effect_unresolved:
+        return _held(state, "continue_effect_unresolved")
+    if not state.disposition_evidence_complete:
+        return _held(state, "disposition_evidence_incomplete")
+    if state.finalization_disposition is not None:
+        return _held(state, "lawful_stop_disposition")
+    if not state.target_addressable:
+        return _held(state, "target_not_addressable")
+    if not state.authorization_current:
+        return _held(state, "authorization_stale")
+    if state.exact_next_action_ref is None:
+        return _held(state, "next_action_missing")
+    return ContinuationRequirement(
+        required=True,
+        reason="turn_continuation_candidate",
+        operation_key=state.operation_key,
+        carrier_ref=state.carrier_ref,
+        target_ref=state.target_ref,
+        target_generation=state.target_generation,
+        exact_next_action_ref=state.exact_next_action_ref,
+    )
+
+
+def project_continuation_requirement(
+    state: TrustedTurnDisposition,
+    *,
+    action_target: SolActionTargetResolution,
+) -> ContinuationRequirement:
+    """Project eligibility for one existing canonical CONTINUE, without sending it.
+
+    A positive result requires both the trusted turn facts and a fresh resolution
+    from the existing sol_action_target owner proving the current actor is the
+    exact action-authoritative CEO binding. The resolution remains evidence, not a
+    reusable authorization token; an effect owner must re-resolve at action time.
+    """
+    if not isinstance(state, TrustedTurnDisposition):
+        raise ContinuationProjectionError("invalid_trusted_turn_disposition")
+    if not isinstance(action_target, SolActionTargetResolution):
+        raise ContinuationProjectionError("invalid_action_target_resolution")
+
+    turn = _project_turn_facts(state)
+    if not turn.required:
+        return turn
+
+    if action_target.state is not ActionTargetState.RESOLVED:
+        return _held(state, "action_target_unresolved")
+    if action_target.action_authoritative is not True:
+        return _held(state, "actor_not_action_authoritative")
+    if (
+        action_target.session_alias is None
+        or action_target.binding_id is None
+        or action_target.binding_generation is None
+        or action_target.reasoning_surface is None
+    ):
+        return _held(state, "action_target_incomplete")
+
+    expected_generation = (
+        f"{action_target.session_alias}:"
+        f"{action_target.binding_id}:"
+        f"{action_target.binding_generation}:"
+        f"{action_target.reasoning_surface}"
+    )
+    if state.target_generation != expected_generation:
+        return _held(state, "action_target_generation_mismatch")
+
+    return ContinuationRequirement(
+        required=True,
+        reason="continuation_required",
+        operation_key=state.operation_key,
+        carrier_ref=state.carrier_ref,
+        target_ref=state.target_ref,
+        target_generation=state.target_generation,
+        exact_next_action_ref=state.exact_next_action_ref,
+        action_target_evidence_digest=action_target.evidence_digest,
     )
 
 
