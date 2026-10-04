@@ -113,6 +113,13 @@ import {
   fleetStatusToolResult,
   resolveFleetStatusConfig,
 } from './fleet-status.mjs';
+import {
+  FLEET_BACKEND_TOOL_NAMES,
+  STUDIO_SELECT_HOST_TOOL,
+  createFleetRouter,
+  fleetRouteToolResult,
+  resolveFleetRoutingConfig,
+} from './fleet-routing.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
 export const GATEWAY_VERSION = '0.1.10';
@@ -393,6 +400,7 @@ export function resolveConfig(partial = {}) {
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
+  cfg.fleetRouting = resolveFleetRoutingConfig(cfg.fleetRouting);
   cfg.toolAllowlist = resolveToolAllowlist(cfg.toolAllowlist);
 
   return cfg;
