@@ -76,7 +76,7 @@ FLEET_FABRIC_TIMEOUT_MS = 8_000
 # CLI adapters. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
 TAILNET_GATEWAY_NAME = "tailnet-gateway.mjs"
-TAILNET_FABRIC_ACCOUNTS = frozenset(("fabric-read", "fabric-design"))
+TAILNET_FABRIC_ACCOUNTS = frozenset(("fabric-read", "fabric-design", "fleet-host"))
 
 ACCOUNT_LABEL_MAX = 64
 ACCOUNT_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,63})?$")
@@ -555,12 +555,12 @@ def _validate_tailnet_public_url(account: str, value: str | None) -> str | None:
     if account not in TAILNET_FABRIC_ACCOUNTS:
         if value not in (None, ""):
             raise SystemExit(
-                "--public-url is reserved for --account fabric-read|fabric-design"
+                "--public-url is reserved for --account fabric-read|fabric-design|fleet-host"
             )
         return None
     if not isinstance(value, str) or not value:
         raise SystemExit(
-            "--account fabric-read|fabric-design requires "
+            "--account fabric-read|fabric-design|fleet-host requires "
             "--public-url https://<host>.ts.net"
         )
     try:
