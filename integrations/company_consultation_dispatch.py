@@ -109,11 +109,12 @@ REFUSAL_CODES = frozenset(
 # Body-over-budget threshold for the dispatcher-emitted read result.
 _BODY_BUDGET_BYTES = 60_000
 
-# Production packet carriage is intentionally declared UNAVAILABLE here.
+# The concrete Company host composes the canonical packet carrier in source.
+# No installed listener/grant or live acceptance is established by that source.
 # The owner is the existing dialogue carrier lineage (issues #611, #719,
 # #738). This dispatcher never reads bodies from a dictionary, transcript
 # store or mailbox table — only from the injected ``ConsultationPacketCarrier``.
-PRODUCTION_PACKET_CARRIAGE = "UNAVAILABLE"
+PRODUCTION_PACKET_CARRIAGE = "BUILT_NOT_INSTALLED"
 
 # Fixed default response budget used when the ``InvocationContext`` does not
 # override it. Closed shape; ``max_payload_bytes`` is the cap enforced on the
@@ -1094,7 +1095,7 @@ class RuntimeConsultationDispatcher:
     after the runtime admitted the corresponding event. The
     ``invocations`` source is the only allowed source of identity for
     ``company.consult``. Production packet carriage is declared
-    ``UNAVAILABLE``; see ``PRODUCTION_PACKET_CARRIAGE``.
+    ``BUILT_NOT_INSTALLED``; see ``PRODUCTION_PACKET_CARRIAGE``.
     """
 
     _ALLOWED_TOOLS = frozenset(
@@ -1110,6 +1111,7 @@ class RuntimeConsultationDispatcher:
         recipients: RecipientResolver,
         packets: ConsultationPacketCarrier,
         invocations: InvocationContextSource,
+        before_effect: Callable[[str], None] | None = None,
         _clock: ClockFn | None = None,
         _wake_repository: WakeLedgerRepository | None = None,
     ) -> None:
@@ -1119,6 +1121,9 @@ class RuntimeConsultationDispatcher:
             _wake_repository = WakeLedgerRepository(runtime)
         if not isinstance(_wake_repository, WakeLedgerRepository):
             raise TypeError("_wake_repository must be WakeLedgerRepository")
+        if before_effect is not None and not callable(before_effect):
+            raise TypeError("before_effect must be callable")
+        self._before_effect = before_effect
         self._wake_repository = _wake_repository
         self.runtime = runtime
         self.repository_root = Path(repository_root).resolve()
@@ -1130,6 +1135,13 @@ class RuntimeConsultationDispatcher:
         self._consultations = ConsultationRuntime(
             runtime, repository_root=self.repository_root, _clock=self._clock
         )
+
+    def _guard_effect(self, phase: str) -> None:
+        # The host owns connected-caller authority; Runtime still owns every
+        # durable transition. Compatibility callers without a host fence retain
+        # the existing Runtime checks. Installed Company composition supplies it.
+        if self._before_effect is not None:
+            self._before_effect(phase)
 
     async def __call__(
         self, tool_name: str, request: Mapping[str, Any]
@@ -1147,7 +1159,9 @@ class RuntimeConsultationDispatcher:
 
     # -- explicit authenticated consumption seam (NOT reachable via __call__) --
 
-    async def consume_answer(self, consultation_ref: str) -> dict[str, Any]:
+    async def consume_answer(
+        self, consultation_ref: str, *, native_delivery_command_id: str | None = None,
+    ) -> dict[str, Any]:
         """Append one exact ``CONSUMED_BY_REQUESTER`` event for the requester.
 
         This is the only Python seam that appends ``CONSUMED_BY_REQUESTER``
@@ -1207,10 +1221,12 @@ class RuntimeConsultationDispatcher:
                 detail="carrier ANSWER frame does not match admitted event",
             )
         try:
+            self._guard_effect('CONSUMED_BY_REQUESTER')
             result = self._consultations.consumed_by_requester(
                 answer_frame,
                 requester_attempt_id=self.caller.attempt_id,
                 observed_at=self._clock(),
+                native_delivery_command_id=native_delivery_command_id,
             )
         except (StateConflict, ConsultationConflict) as exc:
             raise ConsultationRefusal(
@@ -1558,6 +1574,7 @@ class RuntimeConsultationDispatcher:
 
         def _append_intent() -> Any:
             try:
+                self._guard_effect('INTENT')
                 return self._consultations.intent(
                     question_frame,
                     requester_attempt_id=self.caller.attempt_id,
@@ -1863,6 +1880,7 @@ class RuntimeConsultationDispatcher:
             }
 
         try:
+            self._guard_effect('QUESTION_WAKE')
             repository.append_record(
                 requested_record(obligation), obligation=obligation
             )
@@ -2193,6 +2211,7 @@ class RuntimeConsultationDispatcher:
         async def _commit_answer_after_ready() -> None:
             nonlocal runtime_refusal
             try:
+                self._guard_effect('ANSWER_AVAILABLE')
                 result = self._consultations.answer_available(
                     answer_frame, observed_at=self._clock()
                 )
@@ -2506,6 +2525,7 @@ class RuntimeConsultationDispatcher:
 
         obligation_id = projection.obligation.obligation_id
         try:
+            self._guard_effect('ANSWER_WAKE')
             extension.persist_requested_if_current(self._consultations)
         except ConsultationConflict as exc:
             present = _wake_request_readback(

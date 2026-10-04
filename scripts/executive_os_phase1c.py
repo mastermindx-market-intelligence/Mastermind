@@ -211,6 +211,7 @@ _CONFIG_OPTIONAL = frozenset(
     {
         "content_observer",
         "content_observer_profile_path",
+        "company_consultation",
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
@@ -737,6 +738,36 @@ def _bind_exact_worker_target_source(raw, attestation, *, _producer_capability, 
                                    capability=_producer_capability)
 
 
+_CANONICAL_COMPANY_CONSULTATION_SOCKET = "/var/run/mastermind-executive/company-consultation.sock"
+_COMPANY_CONSULTATION_SOCKET_NAME = "CompanyConsultation"
+
+
+def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, Any] | None:
+    """One closed optional host binding, shared by loader, installer and factory."""
+    value = config.get("company_consultation")
+    if "company_consultation" not in config:
+        return None
+    if (type(value) is not dict
+            or set(value) != {"armed", "socket_path", "launchd_socket_name"}
+            or type(value["armed"]) is not bool
+            or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
+            or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
+        raise ServiceError("Company consultation control binding is invalid")
+    if not value["armed"]:
+        return None
+    for key in ("control_uid", "worker_uid", "worker_gid"):
+        if type(config.get(key)) is not int or config[key] <= 0:
+            raise ServiceError("Company consultation requires fixed service identities")
+    if config["worker_uid"] == config["control_uid"]:
+        raise ServiceError("Company consultation requires a distinct worker principal")
+    return {
+        "SockPathName": _CANONICAL_COMPANY_CONSULTATION_SOCKET,
+        "SockType": "stream", "SockPassive": True,
+        "SockPathOwner": config["control_uid"], "SockPathGroup": config["worker_gid"],
+        "SockPathMode": 0o660,
+    }
+
+
 def load_control_config(
     path: str | Path, *, enforce_current_uid: bool = True
 ) -> dict[str, Any]:
@@ -771,6 +802,7 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    company_consultation_launchd_entry(config)
     arm = config.get("privileged_readiness_armed", False)
     broker_socket = config.get("privileged_broker_socket_path")
     if type(arm) is not bool:
@@ -2065,6 +2097,26 @@ def _service_from_config(
             ),
             "dialogue_observation_activated_socket": observation_listener,
         }
+    company_binding = None
+    company_socket = company_consultation_launchd_entry(raw)
+    if company_socket is not None:
+        from control_plane.executive_service import CompanyConsultationBinding
+        from integrations.company_consultation_host import CompanyConsultationHost
+        from ops.executive_os.a2_agent_relay_enrollment import SLACK_WORKSPACE_ID, SLACK_CHANNEL_ID
+
+        company_repository = Path(raw["proof_source_repository"])
+        company_worker_uid = int(raw["worker_uid"])
+        def company_host_factory(runtime):
+            return CompanyConsultationHost(
+                runtime=runtime, repository_root=company_repository,
+                worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID)
+        company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
+        activated_listeners.append(company_listener)
+        company_binding = CompanyConsultationBinding(
+            socket_path=Path(company_socket["SockPathName"]), worker_uid=company_worker_uid,
+            group_gid=int(raw["worker_gid"]), host_factory=company_host_factory,
+            activated_socket=company_listener)
     if config.terminal_return_socket_path is not None:
         for activated_listener in activated_listeners:
             getsockname = getattr(activated_listener, "getsockname", None)
@@ -2104,6 +2156,7 @@ def _service_from_config(
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
         workspace_control_room=workspace_control_room,
+        company_consultation_binding=company_binding,
         **ceo_ingress_kwargs,
         **dialogue_observation_kwargs,
         **terminal_return_kwargs,
