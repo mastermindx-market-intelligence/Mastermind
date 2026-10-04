@@ -358,8 +358,19 @@ class RuntimeSessionReturn:
             if not value["target_ref"].startswith("codex:"):
                 raise ValueError("native Codex owner is required")
             target, binding = self._target(value["target_ref"])
-            if (binding.continuation_operation_key != operation_key
-                    or _digest(dataclasses.asdict(binding)) != value["binding_sha256"]
+            # The existing Relay emits a new Wake for this CONTINUE. Its
+            # physical source advances the same target's predecessor to the
+            # request key; that causal advance must not revoke the reply.
+            # Reconstruct only the original predecessor, then compare every
+            # other frozen binding field. A later/unrelated leaf is not this
+            # request and cannot authorize a stale native reply.
+            original_binding = dataclasses.replace(
+                binding, reply_to_message_key=value["predecessor_message_key"]
+            )
+            if (binding.reply_to_message_key not in {
+                        value["predecessor_message_key"], value["request_message_key"]}
+                    or original_binding.continuation_operation_key != operation_key
+                    or _digest(dataclasses.asdict(original_binding)) != value["binding_sha256"]
                     or target.generation != value["target_generation"]):
                 raise ValueError("native carrier binding changed")
             generation = value["generation"]

@@ -93,7 +93,7 @@ def bind(s, principal=None, args=None):
                                 s.args if args is None else args)
 
 
-def populate(s):
+def populate(s, before_reply=None):
     ref = bind(s)
     context = AgentDialogueContinueWriter._context(s.binding)
     request = AgentDialogueContinueWriter._message(
@@ -102,6 +102,8 @@ def populate(s):
         context=context, instruction=s.args["instruction"], stop_condition=s.args["stop_condition"],
         operation_key=s.args["operation_key"])
     s.service.items = [{"message":request,"primary_ts":"1788000001.123456"}]
+    if before_reply is not None:
+        before_reply(request)
     receipt = asyncio.run(NativeReplyWriter(s.owner, native_session_id=NATIVE,
         socket_path=Path("/private/tmp/runtime-return.sock"), service_call=s.service)({
             "operation_key":s.args["operation_key"], "in_reply_to":request["message_key"],
@@ -275,22 +277,23 @@ def advanced_identity(s, **changes):
     from control_plane.wake_events import mint_obligation_id
     old = s.target.physical.identity
     candidate = old.candidate.to_dict()
-    parent = "d" * 64
+    parent = changes.get("parent_fingerprint", "d" * 64)
     observation = DialogueSourceObservation(
         workspace_id=changes.get("workspace_id", old.workspace_id),
         channel_id=changes.get("channel_id", old.channel_id),
         thread_ts=changes.get("thread_ts", old.thread_ts),
-        predecessor_message_key="asd-progress-002",
-        predecessor_message_fingerprint="e" * 64)
+        predecessor_message_key=changes.get("predecessor_message_key", "asd-progress-002"),
+        predecessor_message_fingerprint=changes.get("predecessor_message_fingerprint", "e" * 64))
+    seat = changes.get("target_seat", old.target_seat)
     attention = attention_source_ref(parent_fingerprint=parent,
-        message_key=observation.predecessor_message_key, target_seat=old.target_seat)
+        message_key=observation.predecessor_message_key, target_seat=seat)
     logical = correlated_source_ref(attention_source_ref=attention,
         parent_fingerprint=parent, operation_key=old.operation_key, candidate=candidate)
     return PhysicalDialogueSourceIdentity.create(logical_source_ref=logical,
         obligation_id=mint_obligation_id(source_kind="agent_dialogue_attention",
             source_ref=logical, wake_kind="dialogue_turn_pending"),
         observation=observation, parent_fingerprint=parent, operation_key=old.operation_key,
-        target_seat=old.target_seat, candidate=candidate)
+        target_seat=seat, candidate=candidate)
 
 
 def test_real_wake_parent_can_advance_on_same_physical_thread(setup):
@@ -332,3 +335,72 @@ def test_missing_or_malformed_matching_wake_refuses(setup, monkeypatch, fault):
     monkeypatch.setattr(s.runtime.events, "list_events", events)
     with pytest.raises(BridgeError):
         read(s, ref)
+
+def use_real_physical_projection(s):
+    """Keep synthetic native admission; use real Runtime events and projector."""
+    from integrations.workspace_agent_runtime_binding import _read_physical_source
+    fabric = RuntimeFabricTargetProjector(
+        s.runtime,
+        identity_resolver=lambda job: SimpleNamespace(operation_key="exec-job-001"),
+        target_reader=lambda operation: s.epoch,
+        dialogue_source_reader=lambda root: source(),
+        physical_source_reader=lambda operation, job, attempt:
+            _read_physical_source(s.runtime, operation, job, attempt),
+    )
+    s.owner.fabric = fabric
+    s.owner.codex = RuntimeCodexTargetProjector(fabric, owner_configured=lambda: s.enabled[0])
+    targets = s.owner.codex.project()
+    assert len(targets) == 1
+    native = s.owner.codex.resolve(targets[0]["target_ref"])
+    s.target = native.fabric
+    s.binding = native.reply_binding()
+    s.args.update(target_ref=native.target_ref,
+                  operation_key=s.binding.continuation_operation_key)
+
+
+@pytest.mark.parametrize("fault", [
+    None, "later_leaf", "parent", "thread", "generation", "owner", "native",
+])
+def test_native_reply_survives_only_its_own_continue_wake(setup, fault):
+    s = setup
+    use_real_physical_projection(s)
+    original_target_ref = s.args["target_ref"]
+    original_operation = s.args["operation_key"]
+
+    def after_continue(request):
+        changes = dict(
+            parent_fingerprint=s.target.physical.identity.parent_fingerprint,
+            predecessor_message_key=request["message_key"],
+            predecessor_message_fingerprint=request["fingerprint"],
+            target_seat="coo",
+        )
+        if fault == "later_leaf":
+            changes["predecessor_message_key"] = "asd-later-continue"
+        elif fault == "parent":
+            changes["parent_fingerprint"] = "d" * 64
+        elif fault == "thread":
+            changes["thread_ts"] = "1788000009.123456"
+        seed_wake(s, advanced_identity(s, **changes))
+        if fault == "generation":
+            s.facts.generation_number += 1
+        elif fault == "owner":
+            s.enabled[0] = False
+        elif fault == "native":
+            s.facts.provider_session_id = "22222222-2222-4444-8888-999999999999"
+        if fault is None:
+            current = s.owner.codex.resolve(original_target_ref)
+            assert current.fabric.generation == s.target.generation
+            # Reproduce the real predecessor advance that formerly stranded
+            # the native writer even though its target/epoch did not move.
+            assert current.reply_binding().continuation_operation_key != original_operation
+            assert current.reply_binding().reply_to_message_key == request["message_key"]
+
+    if fault:
+        with pytest.raises(BridgeError):
+            populate(s, before_reply=after_continue)
+        assert not s.service.calls  # no native carrier send or unrelated read
+    else:
+        ref = populate(s, before_reply=after_continue)
+        assert s.service.items[1]["message"]["reply_to_message_key"] == s.service.items[0]["message"]["message_key"]
+        assert read(s, ref)["text"] == "The bounded finding is confirmed."
+        assert len([call for call in s.service.calls if call["operation"] == "send_message"]) == 1
