@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T18:46:03.969430+00:00",
+  "prepared_at": "2026-10-04T18:50:57.634549+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "2aa160624ad7d7effe9ba676741a14ae95233259124f43ea2b67d4cc49a76bad",
-      "bytes": 20923
+      "sha256": "3a2e6d4c52e141ae9e09cedfc8168d4ba099bb989dbd4f9d38d8867dc2f70ecd",
+      "bytes": 21279
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -60,8 +60,12 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "e873ff4a5ecd12187de4a279531f0367104599a1012801683d2a58545b4c86f2",
-      "bytes": 7725
+      "sha256": "cefc6d5fd38e9ceb8f0738096aa0c026357fc860cb60904008848cb3228f9516",
+      "bytes": 7959
+    },
+    "SEC_RIGHTS_PURPOSE_RECONCILIATION.md": {
+      "sha256": "5c06224673fee4eb6db4c8297cfe6442aaf8e0c78d08fdcc05d6d7d26f2336e3",
+      "bytes": 4245
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "365a4d978f6b505219792dff7b8018e11ecd46a4a6c712f38d3a6c0bdf6e912d",
@@ -76,12 +80,12 @@
       "bytes": 5609
     },
     "W0_ADMISSION_CANDIDATE.md": {
-      "sha256": "22867a3783d97337ff10724e793f0f91c8cda8685e204dacf0dd41346bc19485",
-      "bytes": 28939
+      "sha256": "f7fddcb1508b112d799609a2d2b46a84b10695077692c7a406159d48da1f50e2",
+      "bytes": 29128
     },
     "W1_IMPLEMENTATION_PACKET.md": {
-      "sha256": "c83d718e2bdb43c6b862922c944e57f816bf72f672549d31d60a78cf9d4fe4ad",
-      "bytes": 17415
+      "sha256": "9c61fcd33da4593c6b88f9ed37a50c00bb76a9a2c47282700e9c1d390161f425",
+      "bytes": 17738
     },
     "baseline_replay.py": {
       "sha256": "196732a08c42c2a76328295e3cffbe051b3618a6cff1975ea7d147a2870b4896",
@@ -158,6 +162,10 @@
     "evidence/READER_CI_ENTRY_TESTS.json": {
       "sha256": "b812d204537b9cd44552d7da6546c43f3872d76ce37e9946a68bc26870dcc0e9",
       "bytes": 1166
+    },
+    "evidence/SEC_RIGHTS_PURPOSE_RECONCILIATION.json": {
+      "sha256": "7e497101bed9024e15015377e4739aac439eb858904107bd551e7477a772f9b6",
+      "bytes": 1537
     },
     "evidence/SOURCE_BINDING_RED.json": {
       "sha256": "2a7baa6b6848b15dbd299070c9205633b94892e651834b9f74eadf61a134ed6b",
@@ -366,6 +374,10 @@
     "test_fif_lineage_post_merge_probe.py": {
       "sha256": "c5e675735d519ff833af5fc39ce304d7ad8f606da79a17e8d23187ebb3e94141",
       "bytes": 1453
+    },
+    "test_sec_rights_purpose_reconciliation.py": {
+      "sha256": "ea9dbcc9f7e43b9135dd846ceecbe41909c57c2b14f4a8124f6e35c5c9700660",
+      "bytes": 1785
     },
     "test_verified_baseline_reader.py": {
       "sha256": "4c4611e72b21c0ef4ccccfda0e7d07a51cde65c91c87bc083e655680b0ce40e5",

@@ -54,6 +54,8 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 `EQUAL_DURATION_COMPARISON_RESULT.md` documents the positive W1 development comparison that the current owner wire can actually support. `equal_duration_comparison.py` compares only adjacent equal-length generic duration cells from the same owner response/source revision and never upgrades FY labels into annual/YoY semantics. The exact result is `evidence/equal-duration-comparison/result.json`; `test_equal_duration_comparison.py` has 22 adversarial tests. Its actual entry point reuses `baseline_replay.owner_snapshot()` so FIF receipt/entity/hash/state invariants have one fixture-validation owner. The result remains context-only, unadmitted, unpublished, unregistered and non-emitted.
 
 
+`SEC_RIGHTS_PURPOSE_RECONCILIATION.md` separates favorable SEC EDGAR source-law reuse from still-missing I3 runtime/public purpose admission; its 5-test receipt prevents source-law terms from self-promoting a runtime rights profile.
+
 `FIF_LINEAGE_POST_MERGE_ADMISSION.md` records the merged FIF-3A4 dependency truth: post-lineage AAPL assets can resolve to `359241000000`, while an exact current-main hostile probe proves required lineage disclosure fields are not yet fully bound to the live ledger. Historical refusal and post-lineage disclosure-integrity hold are both preserved.
 
 

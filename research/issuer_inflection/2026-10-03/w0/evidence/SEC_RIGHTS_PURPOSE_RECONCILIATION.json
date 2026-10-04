@@ -1,0 +1,36 @@
+{
+  "schema": "issuer_inflection.sec_rights_purpose_reconciliation/v1",
+  "program": "issuer-inflection-intelligence",
+  "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
+  "macro_pin": "d4f32cfb3bc5d5041273294175ae1feba582e53b",
+  "source_rights_register": {
+    "path": "research/licenses/PROPHET_US_SOURCE_RIGHTS_REGISTER_2026-09-23.md",
+    "blob": "a9ee6f288bfb2716facd88dcf2c5135ca8125303",
+    "sec_edgar": {
+      "acquisition": "DETERMINED_FROM_PUBLISHED_TERMS_USER_FACING",
+      "processing": "DETERMINED_FROM_PUBLISHED_TERMS_USER_FACING",
+      "storage": "DETERMINED_FROM_PUBLISHED_TERMS_USER_FACING",
+      "model_use": "DETERMINED_FROM_PUBLISHED_TERMS_USER_FACING",
+      "user_redistribution": "DETERMINED_FROM_PUBLISHED_TERMS_USER_FACING_CITATION_TRADEMARK_LIMITED",
+      "remaining_source_caveat": "filing_specific_third_party_restriction"
+    }
+  },
+  "runtime_rights_registry": {
+    "path": "config/theme_sources.yml",
+    "blob": "e59ce0a9f98e34e45165545f21a84596c23a6de4",
+    "sec_edgar_row_present": false
+  },
+  "i3_purposes": {
+    "internal_use": "SOURCE_LAW_SUPPORTED_NOT_RUNTIME_BOUND",
+    "historical_research": "SOURCE_LAW_SUPPORTED_NOT_RUNTIME_BOUND",
+    "model_context": "SOURCE_LAW_SUPPORTED_NOT_RUNTIME_BOUND",
+    "public_display": "NOT_ADMITTED_RUNTIME"
+  },
+  "promotion": {
+    "rights_state": "not_admitted",
+    "product_publication_admitted": false,
+    "model_context_admitted": false,
+    "historical_research_runtime_admitted": false,
+    "copied_runtime_profile": false
+  }
+}
