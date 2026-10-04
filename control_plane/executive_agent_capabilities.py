@@ -43,6 +43,7 @@ from control_plane.operator_harness_contract import (
 # refuses.
 CAPABILITY_POLICY_SCHEMA_V3 = "mastermind.executive_agent_capabilities/v3"
 CAPABILITY_POLICY_SCHEMA_V4 = "mastermind.executive_agent_capabilities/v4"
+CAPABILITY_POLICY_SCHEMA_V5 = "mastermind.executive_agent_capabilities/v5"
 CAPABILITY_POLICY_SCHEMA = CAPABILITY_POLICY_SCHEMA_V3
 DEFAULT_CAPABILITY_POLICY_PATH = (
     Path(__file__).resolve().parent.parent
@@ -229,6 +230,26 @@ _RESOURCE_KEYS = frozenset(
         "runtime_manifest_path",
     }
 )
+_VALIDATION_RESOURCE_KEYS = frozenset(
+    {
+        "kind",
+        "recipes",
+        "image_digest",
+        "network",
+        "cpu_millis",
+        "memory_bytes",
+        "pids_limit",
+        "workspace_tmpfs_bytes",
+        "tmp_tmpfs_bytes",
+        "timeout_seconds",
+        "max_stdout_bytes",
+        "max_stderr_bytes",
+        "max_snapshot_files",
+        "max_snapshot_bytes",
+    }
+)
+_VALIDATION_RESOURCE_KIND = "codespace-devbox-sandbox-v1"
+_VALIDATION_RESOURCE_RECIPES = ("compileall",)
 _COMPANY_CONSULTATION_FORBIDDEN_AUTHORITY = (
     "write",
     "source",
@@ -269,6 +290,7 @@ _PROFILE_KEYS = frozenset(
     }
 )
 _PROFILE_KEYS_V4 = _PROFILE_KEYS | frozenset({"skill_capabilities"})
+_PROFILE_KEYS_V5 = _PROFILE_KEYS_V4 | frozenset({"validation_resource_grants"})
 _ROOT_KEYS_V3 = frozenset(
     {
         "schema_version",
@@ -282,6 +304,7 @@ _ROOT_KEYS_V3 = frozenset(
     }
 )
 _ROOT_KEYS_V4 = _ROOT_KEYS_V3 | frozenset({"capability_packages"})
+_ROOT_KEYS_V5 = _ROOT_KEYS_V4 | frozenset({"validation_resources"})
 _NATIVE_HELPER_KEYS = frozenset(
     {
         "mechanism",
@@ -383,6 +406,14 @@ def _digest_value(value: Any, *, field: str) -> str:
     if _DIGEST_RE.fullmatch(token) is None:
         raise CapabilityPolicyError(f"{field} must be a lowercase SHA-256 digest")
     return token
+
+
+def _bounded_int(value: Any, *, field: str, minimum: int, maximum: int) -> int:
+    if type(value) is not int or value < minimum or value > maximum:
+        raise CapabilityPolicyError(
+            f"{field} must be an integer from {minimum} through {maximum}"
+        )
+    return value
 
 
 def _https_url(value: Any, *, field: str) -> str:
@@ -608,6 +639,28 @@ class ResourceGrant:
     grant_digest: str
 
 
+@dataclasses.dataclass(frozen=True)
+class ValidationResourceGrant:
+    """Supervisor-private validation resource; never projected to the worker."""
+
+    resource_id: str
+    kind: str
+    recipes: tuple[str, ...]
+    image_digest: str
+    network: str
+    cpu_millis: int
+    memory_bytes: int
+    pids_limit: int
+    workspace_tmpfs_bytes: int
+    tmp_tmpfs_bytes: int
+    timeout_seconds: int
+    max_stdout_bytes: int
+    max_stderr_bytes: int
+    max_snapshot_files: int
+    max_snapshot_bytes: int
+    grant_digest: str
+
+
 _FEATURE_PROJECTION_KEYS = (
     "apps",
     "auth_elicitation",
@@ -777,6 +830,7 @@ class ExecutionCapabilityProfile:
     skill_grants: tuple[EffectiveSkillGrant, ...]
     mcp_server_grants: tuple[McpServerGrant, ...]
     resource_grants: tuple[ResourceGrant, ...]
+    validation_resource_grants: tuple[ValidationResourceGrant, ...]
     plugins: tuple[str, ...]
     forbidden: tuple[str, ...]
     profile_digest: str
@@ -890,7 +944,8 @@ class ExecutionCapabilityProfile:
                 or self.network_policy != "disabled"
                 or self.native_helper_policy is not NativeHelperPolicy.DISABLED
                 or self.skills or self.skill_grants or self.mcp_server_grants
-                or self.plugins or self.resource_grants):
+                or self.plugins or self.resource_grants
+                or self.validation_resource_grants):
             raise CapabilityPolicyError("Claude policy exceeds its unadmitted first profile")
         return {
             "tools": ["Read", "Glob", "Grep"],
@@ -1071,6 +1126,7 @@ class ExecutionCapabilityRegistry:
     production_armed: bool
     mcp_servers: Mapping[str, McpServerGrant]
     resources: Mapping[str, ResourceGrant]
+    validation_resources: Mapping[str, ValidationResourceGrant]
     capability_packages: Mapping[str, CapabilityPackageGeneration]
     profiles: Mapping[str, ExecutionCapabilityProfile]
     policy_digest: str
@@ -1102,6 +1158,8 @@ class ExecutionCapabilityRegistry:
             expected_root_keys = _ROOT_KEYS_V3
         elif schema_version == CAPABILITY_POLICY_SCHEMA_V4:
             expected_root_keys = _ROOT_KEYS_V4
+        elif schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+            expected_root_keys = _ROOT_KEYS_V5
         else:
             raise CapabilityPolicyError("capability policy schema_version is unsupported")
         if set(raw) != expected_root_keys:
@@ -1326,9 +1384,153 @@ class ExecutionCapabilityRegistry:
                 browser_revision="1237",
                 grant_digest=_digest(normalized_resource),
             )
+
+        validation_resource_registry: dict[str, ValidationResourceGrant] = {}
+        if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+            validation_resources_raw = raw.get("validation_resources")
+            if (
+                not isinstance(validation_resources_raw, dict)
+                or not validation_resources_raw
+                or len(validation_resources_raw) > 16
+            ):
+                raise CapabilityPolicyError(
+                    "V5 capability policy requires 1-16 validation resources"
+                )
+            for raw_id, value in validation_resources_raw.items():
+                resource_id = _identifier(raw_id, field="validation_resource_id")
+                if (
+                    not isinstance(value, dict)
+                    or set(value) != _VALIDATION_RESOURCE_KEYS
+                ):
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} fields drifted"
+                    )
+                if value.get("kind") != _VALIDATION_RESOURCE_KIND:
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} kind is unsupported"
+                    )
+                recipes = _identities(
+                    value.get("recipes"),
+                    field=f"validation_resources.{resource_id}.recipes",
+                    maximum=4,
+                )
+                if recipes != _VALIDATION_RESOURCE_RECIPES:
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} recipes are unsupported"
+                    )
+                image_digest = _digest_value(
+                    value.get("image_digest"),
+                    field=f"validation_resources.{resource_id}.image_digest",
+                )
+                if value.get("network") != "none":
+                    raise CapabilityPolicyError(
+                        f"validation resource {resource_id!r} network must be none"
+                    )
+                cpu_millis = _bounded_int(
+                    value.get("cpu_millis"),
+                    field=f"validation_resources.{resource_id}.cpu_millis",
+                    minimum=250,
+                    maximum=4000,
+                )
+                memory_bytes = _bounded_int(
+                    value.get("memory_bytes"),
+                    field=f"validation_resources.{resource_id}.memory_bytes",
+                    minimum=128 * 1024 * 1024,
+                    maximum=8 * 1024 * 1024 * 1024,
+                )
+                pids_limit = _bounded_int(
+                    value.get("pids_limit"),
+                    field=f"validation_resources.{resource_id}.pids_limit",
+                    minimum=16,
+                    maximum=512,
+                )
+                workspace_tmpfs_bytes = _bounded_int(
+                    value.get("workspace_tmpfs_bytes"),
+                    field=(
+                        f"validation_resources.{resource_id}."
+                        "workspace_tmpfs_bytes"
+                    ),
+                    minimum=16 * 1024 * 1024,
+                    maximum=4 * 1024 * 1024 * 1024,
+                )
+                tmp_tmpfs_bytes = _bounded_int(
+                    value.get("tmp_tmpfs_bytes"),
+                    field=f"validation_resources.{resource_id}.tmp_tmpfs_bytes",
+                    minimum=8 * 1024 * 1024,
+                    maximum=1024 * 1024 * 1024,
+                )
+                timeout_seconds = _bounded_int(
+                    value.get("timeout_seconds"),
+                    field=f"validation_resources.{resource_id}.timeout_seconds",
+                    minimum=1,
+                    maximum=900,
+                )
+                max_stdout_bytes = _bounded_int(
+                    value.get("max_stdout_bytes"),
+                    field=f"validation_resources.{resource_id}.max_stdout_bytes",
+                    minimum=1024,
+                    maximum=4 * 1024 * 1024,
+                )
+                max_stderr_bytes = _bounded_int(
+                    value.get("max_stderr_bytes"),
+                    field=f"validation_resources.{resource_id}.max_stderr_bytes",
+                    minimum=1024,
+                    maximum=1024 * 1024,
+                )
+                max_snapshot_files = _bounded_int(
+                    value.get("max_snapshot_files"),
+                    field=f"validation_resources.{resource_id}.max_snapshot_files",
+                    minimum=1,
+                    maximum=8192,
+                )
+                max_snapshot_bytes = _bounded_int(
+                    value.get("max_snapshot_bytes"),
+                    field=f"validation_resources.{resource_id}.max_snapshot_bytes",
+                    minimum=1024,
+                    maximum=256 * 1024 * 1024,
+                )
+                normalized_validation_resource = {
+                    "resource_id": resource_id,
+                    "kind": _VALIDATION_RESOURCE_KIND,
+                    "recipes": list(recipes),
+                    "image_digest": image_digest,
+                    "network": "none",
+                    "cpu_millis": cpu_millis,
+                    "memory_bytes": memory_bytes,
+                    "pids_limit": pids_limit,
+                    "workspace_tmpfs_bytes": workspace_tmpfs_bytes,
+                    "tmp_tmpfs_bytes": tmp_tmpfs_bytes,
+                    "timeout_seconds": timeout_seconds,
+                    "max_stdout_bytes": max_stdout_bytes,
+                    "max_stderr_bytes": max_stderr_bytes,
+                    "max_snapshot_files": max_snapshot_files,
+                    "max_snapshot_bytes": max_snapshot_bytes,
+                }
+                validation_resource_registry[resource_id] = ValidationResourceGrant(
+                    resource_id=resource_id,
+                    kind=_VALIDATION_RESOURCE_KIND,
+                    recipes=recipes,
+                    image_digest=image_digest,
+                    network="none",
+                    cpu_millis=cpu_millis,
+                    memory_bytes=memory_bytes,
+                    pids_limit=pids_limit,
+                    workspace_tmpfs_bytes=workspace_tmpfs_bytes,
+                    tmp_tmpfs_bytes=tmp_tmpfs_bytes,
+                    timeout_seconds=timeout_seconds,
+                    max_stdout_bytes=max_stdout_bytes,
+                    max_stderr_bytes=max_stderr_bytes,
+                    max_snapshot_files=max_snapshot_files,
+                    max_snapshot_bytes=max_snapshot_bytes,
+                    grant_digest=_digest(normalized_validation_resource),
+                )
+
         capability_packages: dict[str, CapabilityPackageGeneration] = {}
         skill_capability_index: dict[str, EffectiveSkillGrant] = {}
-        if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+        if schema_version in {
+            CAPABILITY_POLICY_SCHEMA_V4,
+            CAPABILITY_POLICY_SCHEMA_V5,
+        }:
             capability_packages_raw = raw.get("capability_packages")
             if not isinstance(capability_packages_raw, dict) or not (
                 _MIN_CAPABILITY_PACKAGES
@@ -1374,11 +1576,12 @@ class ExecutionCapabilityRegistry:
         profiles: dict[str, ExecutionCapabilityProfile] = {}
         for raw_id, value in profiles_raw.items():
             profile_id = _identifier(raw_id, field="profile_id")
-            expected_profile_keys = (
-                _PROFILE_KEYS_V4
-                if schema_version == CAPABILITY_POLICY_SCHEMA_V4
-                else _PROFILE_KEYS
-            )
+            if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+                expected_profile_keys = _PROFILE_KEYS_V5
+            elif schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+                expected_profile_keys = _PROFILE_KEYS_V4
+            else:
+                expected_profile_keys = _PROFILE_KEYS
             if not isinstance(value, dict) or set(value) != expected_profile_keys:
                 raise CapabilityPolicyError(
                     f"capability profile {profile_id!r} fields drifted"
@@ -1583,7 +1786,45 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot inherit browser resource authority"
                 )
-            if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+
+            if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+                validation_resource_ids = _identities(
+                    value.get("validation_resource_grants"),
+                    field=(
+                        f"profiles.{profile_id}.validation_resource_grants"
+                    ),
+                    maximum=4,
+                )
+                unknown_validation_resources = sorted(
+                    set(validation_resource_ids)
+                    - set(validation_resource_registry)
+                )
+                if unknown_validation_resources:
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} references unknown validation "
+                        "resources: "
+                        + ", ".join(unknown_validation_resources)
+                    )
+                resolved_validation_resources = tuple(
+                    validation_resource_registry[item]
+                    for item in validation_resource_ids
+                )
+                if (
+                    resolved_validation_resources
+                    and not is_sealed_worker_execution_surface(execution_surface)
+                ):
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} validation resources are "
+                        "supervisor-private sealed-worker grants"
+                    )
+            else:
+                validation_resource_ids = ()
+                resolved_validation_resources = ()
+
+            if schema_version in {
+                CAPABILITY_POLICY_SCHEMA_V4,
+                CAPABILITY_POLICY_SCHEMA_V5,
+            }:
                 skill_capability_ids = _identities(
                     value.get("skill_capabilities"),
                     field=f"profiles.{profile_id}.skill_capabilities",
@@ -1595,7 +1836,7 @@ class ExecutionCapabilityRegistry:
                 if skills:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} cannot combine skills with "
-                        "skill_capabilities; exact V4 company-Skill profiles "
+                        "skill_capabilities; exact V4/V5 company-Skill profiles "
                         "require skills=[]"
                     )
                 if is_sealed_worker_execution_surface(execution_surface):
@@ -1703,13 +1944,16 @@ class ExecutionCapabilityRegistry:
                 "plugins": list(plugins),
                 "forbidden": list(forbidden),
             }
-            if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+            if schema_version in {
+                CAPABILITY_POLICY_SCHEMA_V4,
+                CAPABILITY_POLICY_SCHEMA_V5,
+            }:
                 # Identity amendment §4.6: closure movement, an unrelated
                 # package-file change, or revocation must all be able to
                 # change this profile's digest, so the normalized projection
                 # binds each selected exact Skill's grant digest AND its
                 # owning package generation digest, in capability-ID order.
-                # This key is present in every V4 profile normalization
+                # This key is present in every V4/V5 profile normalization
                 # (empty list for grant-less profiles) and never in V3.
                 normalized["skill_capabilities"] = [
                     {
@@ -1720,6 +1964,14 @@ class ExecutionCapabilityRegistry:
                         ].package_generation_digest,
                     }
                     for grant in skill_grants
+                ]
+            if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+                normalized["validation_resource_grants"] = [
+                    {
+                        "resource_id": grant.resource_id,
+                        "grant_digest": grant.grant_digest,
+                    }
+                    for grant in resolved_validation_resources
                 ]
             profiles[profile_id] = ExecutionCapabilityProfile(
                 profile_id=profile_id,
@@ -1736,6 +1988,7 @@ class ExecutionCapabilityRegistry:
                 skill_grants=skill_grants,
                 mcp_server_grants=resolved_mcp,
                 resource_grants=resolved_resources,
+                validation_resource_grants=resolved_validation_resources,
                 plugins=plugins,
                 forbidden=forbidden,
                 profile_digest=_digest(normalized),
@@ -1762,10 +2015,20 @@ class ExecutionCapabilityRegistry:
                 for profile_id, profile in sorted(profiles.items())
             },
         }
-        if schema_version == CAPABILITY_POLICY_SCHEMA_V4:
+        if schema_version in {
+            CAPABILITY_POLICY_SCHEMA_V4,
+            CAPABILITY_POLICY_SCHEMA_V5,
+        }:
             normalized_policy["capability_packages"] = {
                 capability_id: generation.package_generation_digest
                 for capability_id, generation in sorted(capability_packages.items())
+            }
+        if schema_version == CAPABILITY_POLICY_SCHEMA_V5:
+            normalized_policy["validation_resources"] = {
+                resource_id: grant.grant_digest
+                for resource_id, grant in sorted(
+                    validation_resource_registry.items()
+                )
             }
         return cls(
             schema_version=schema_version,
@@ -1774,6 +2037,7 @@ class ExecutionCapabilityRegistry:
             production_armed=False,
             mcp_servers=mcp_registry,
             resources=resource_registry,
+            validation_resources=validation_resource_registry,
             capability_packages=capability_packages,
             profiles=profiles,
             policy_digest=_digest(normalized_policy),
@@ -1795,6 +2059,7 @@ __all__ = [
     "CAPABILITY_POLICY_SCHEMA",
     "CAPABILITY_POLICY_SCHEMA_V3",
     "CAPABILITY_POLICY_SCHEMA_V4",
+    "CAPABILITY_POLICY_SCHEMA_V5",
     "DEFAULT_CAPABILITY_POLICY_PATH",
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
     "CapabilityPolicyError",
@@ -1804,6 +2069,7 @@ __all__ = [
     "McpServerGrant",
     "NativeHelperGrant",
     "ResourceGrant",
+    "ValidationResourceGrant",
     "app_server_security_config_digest",
     "app_server_security_config_projection",
     "build_company_consultation_grant_profile",
