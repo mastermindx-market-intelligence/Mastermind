@@ -59,6 +59,28 @@ def _safe_regular(path: Path) -> os.stat_result:
     return info
 
 
+def _canonical_path(target: str) -> Path:
+    if target == "mcp":
+        return Path("/Library/LaunchDaemons/com.mastermind.executive.mcp.plist")
+    return Path.home() / "Library/LaunchAgents/com.mastermind.executive.tunnel.plist"
+
+
+def _require_installed_path(path: Path, target: str) -> None:
+    expected = _canonical_path(target)
+    _require(path == expected, f"plist must be the canonical installed {target} path")
+    info = _safe_regular(path)
+    mode = stat.S_IMODE(info.st_mode)
+    if target == "mcp":
+        _require(info.st_uid == 0 and info.st_gid == 0, "MCP plist owner must be root:wheel")
+        _require(mode == 0o644, "MCP plist mode must be 0644")
+    else:
+        _require(
+            info.st_uid == os.geteuid() and info.st_gid == os.getegid(),
+            "tunnel plist owner must match the invoking user",
+        )
+        _require(mode == 0o600, "tunnel plist mode must be 0600")
+
+
 def load_and_validate(path: Path, target: str) -> dict[str, Any]:
     spec = SPECS[target]
     _safe_regular(path)
@@ -245,6 +267,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
+    _require_installed_path(args.plist, args.target)
     value = load_and_validate(args.plist, args.target)
     if not args.apply:
         print("HARDENED" if is_hardened(value) else "DRIFT")
