@@ -162,6 +162,42 @@ pressure is impossible. Keep host-capacity, memory/swap and disk-headroom
 admission with their existing owners; do not duplicate them inside this
 recovery runbook.
 
+### Unprovable execution-host quarantine
+
+If a host's execution runtime, active-marker directory, or other required
+pre-effect evidence cannot be read within the bounded recovery probe, do not
+write that runtime and do not infer that the host is idle.
+
+Use the incumbent placement registry to remove only the execution eligibility
+that depends on the unprovable surface when that registry already models roles
+separately. Preserve unrelated duties such as CI or data service. Apply the
+hold to healthy dispatch origins with compare-and-swap/readback rather than
+copying an entire host registry between machines that may have legitimate
+host-local differences.
+
+The hold may be released only after the affected host can again prove all of:
+
+1. its active execution census;
+2. the exact required runtime identity or a reviewed installation of it;
+3. the normal host admission/readiness gates; and
+4. routing eligibility after the role is deliberately restored.
+
+A timeout reading the affected host never authorizes an alternate carrier,
+blind runtime overwrite, or whole-host decommission.
+
+### Deployment is not durable publication
+
+A runtime hash read back on live hosts proves those deployed bytes only. It
+does not prove that an immutable support release, source repository, installer,
+or other durable publication owner contains the same bytes.
+
+Before claiming a runtime hardening durable, separately verify the incumbent
+publication artifact and its exact file digest. If the publication mechanism or
+digest ceremony cannot be recovered, do not fabricate a new release identifier
+or reverse-engineer a guessed publication format. Preserve the verified live
+state, keep any stale-publication regression risk explicit, and return the
+publication step to its existing custody owner.
+
 ## Acceptance discipline
 
 A departure/readiness claim for an externally managed home Mac is valid only
