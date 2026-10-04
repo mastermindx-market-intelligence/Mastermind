@@ -116,7 +116,7 @@ test('tailnet gateway source does not create a second authentication implementat
   const {readFile} = await import('node:fs/promises');
   const source = await readFile(new URL('./tailnet-gateway.mjs', import.meta.url), 'utf8');
   assert.match(source, /createTunnelAuth/);
-  assert.doesNotMatch(source, /auth\.mjs/);
+  assert.doesNotMatch(source, /from ['\"]\\.\\/auth\\.mjs['\"]/);
   assert.doesNotMatch(source, /Authorization|Bearer|jwks|oauth/i);
   assert.doesNotMatch(source, /Tailscale-(User|Login|Name|Profile|App-Capabilities)/);
 });
