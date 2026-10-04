@@ -537,6 +537,43 @@ class CeoIngressReadGateway:
         # Each request owns and closes its socket. No local state to drain.
         return None
 
+    @staticmethod
+    def _read_failure(response: CeoIngressResponse) -> tuple[str, str]:
+        """Classify one read boundary without exposing backend text or arm state."""
+        code = "backend_unavailable"
+        message = "Executive reader returned an invalid response."
+        unanswered = (
+            response.ok is None and response.result is None and response.error is None
+        )
+        if response.transport == TRANSPORT_NOT_SENT and unanswered:
+            message = "Executive reader request was not sent."
+        elif response.transport == TRANSPORT_SENT_UNKNOWN and unanswered:
+            message = (
+                "A trustworthy Executive reader response was unavailable "
+                "after the read request was attempted."
+            )
+        elif (
+            response.transport == TRANSPORT_SENT_OK and response.ok is False
+            and response.result is None and isinstance(response.error, dict)
+            and isinstance(response.error.get("code"), str)
+            and response.error["code"] in ceo_ingress.ERROR_CODES
+        ):
+            upstream_code = response.error["code"]
+            if upstream_code in {"ingress_unavailable", "backend_unavailable"}:
+                message = "Executive reader is unavailable in the installed backend."
+            else:
+                code = "backend_refused"
+                if upstream_code in {
+                    "peer_denied", "peer_credentials_unavailable", "authority_refused",
+                }:
+                    message = "Executive reader permission was refused by the installed backend."
+                else:
+                    message = "Executive reader request was refused by the installed backend."
+        return code, (
+            message + " Read-only describes this read operation; submission and "
+            "execution readiness were not observed."
+        )
+
     async def call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         from datetime import datetime, timezone
         from integrations.executive_mcp.schemas import (
@@ -555,7 +592,7 @@ class CeoIngressReadGateway:
                     and isinstance(result, dict) and result.get("schema") == RESULT_SCHEMA
                     and result.get("tool") == name and type(result.get("ok")) is bool):
                 return result
-            raise GatewayError("backend_unavailable", "installed Executive reader is unavailable")
+            raise GatewayError(*self._read_failure(response))
         except GatewayError as exc:
             return error_envelope(
                 name, mode=ServerMode.READONLY,
