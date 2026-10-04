@@ -9,7 +9,7 @@ Contracts:
   * Explicit stopped-service upgrade accepts only exact known v1 installs and preserves runtime state
   * Account labels are already-lowercase, <=64, no silent aliasing
   * Port 45017 is reserved; source/node/backend must be absolute
-  * Config omits publicUrl, keeps 5h idle/64 sessions, and enables bounded typed Git
+  * Config omits publicUrl, keeps bounded private-session limits, and enables bounded typed Git
 All mutations stay inside temp fixtures; subprocess is mocked.
 """
 from __future__ import annotations
@@ -612,6 +612,9 @@ class TestBuildConfig(unittest.TestCase):
             launcher.parent.mkdir(parents=True)
             launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             launcher.chmod(0o700)
+            fabric_launcher = home / ".local" / "bin" / "pool"
+            fabric_launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fabric_launcher.chmod(0o700)
             node = _make_node(Path(raw))
             backend = _make_backend(Path(raw))
             config = svc._build_config(
@@ -625,6 +628,9 @@ class TestBuildConfig(unittest.TestCase):
                     "launcherPath": str(launcher),
                     "launcherSha256": svc._sha256_file(launcher),
                     "timeoutMs": 15_000,
+                    "fabricLauncherPath": str(fabric_launcher),
+                    "fabricLauncherSha256": svc._sha256_file(fabric_launcher),
+                    "fabricTimeoutMs": 8_000,
                 },
             )
 
