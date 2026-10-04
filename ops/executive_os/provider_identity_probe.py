@@ -56,21 +56,25 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
 
 
 SCHEMA_VERSION = "mastermind.executive_provider_identity/v1"
-PINNED_CODEX_VERSION = "0.147.0"
+PINNED_CODEX_VERSION = "0.159.2"
 WORKER_USER = "_mastermind_worker"
 WORKER_GROUP = "_mastermind_worker"
 PROVIDER_HOME = Path("/var/db/mastermind-executive/workers/codex-01/provider-home")
 INSTALLED_CODEX_BINARY = Path(
-    "/Library/Application Support/MastermindExecutive/bin/codex-0.147.0"
+    "/Library/Application Support/MastermindExecutive/bin/codex-0.159.2"
 )
-PINNED_CODEX_SHA256 = "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+PINNED_CODEX_SHA256 = "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 PINNED_CODEX_TEAM_ID = "2DC432GLL2"
 WORKSPACE_BINDING_CLASS = COMPANY_WORKSPACE_BINDING_CLASS
 WORKER_UID = 451
 WORKER_GID = 451
-# These strings are the complete stderr contract in the pinned Codex 0.147.0
+# These strings are the complete stderr contract in the pinned Codex 0.159.2
 # ``run_login_status`` implementation.  API-key status contains a redacted key
 # fragment and every unreviewed/future string is deliberately rejected.
+_ARG0_CLEANUP_WARNING = (
+    b"WARNING: failed to clean up stale arg0 temp dirs: Permission denied (os error 13)\n"
+)
+
 LOGIN_STATUS_AUTH_MODE = {
     b"Logged in using access token\n": "agentIdentity",
     b"Logged in using personal access token\n": "personalAccessToken",
@@ -264,7 +268,10 @@ def classify_login_status(*, returncode: int, stderr: bytes) -> str | None:
 
     if returncode != 0:
         return None
-    return LOGIN_STATUS_AUTH_MODE.get(stderr)
+    payload = bytes(stderr)
+    if payload.startswith(_ARG0_CLEANUP_WARNING):
+        payload = payload[len(_ARG0_CLEANUP_WARNING):]
+    return LOGIN_STATUS_AUTH_MODE.get(payload)
 
 
 def config_has_no_forced_auth_policy(value: Mapping[str, Any] | None) -> bool:

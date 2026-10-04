@@ -377,10 +377,12 @@ def main(argv=None):
     from integrations.executive_mcp.server import (
         build_executive_mcp_app, build_personal_read_mcp_app,
         build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app, build_web_ceo_v2_with_coo_mcp_app,
+        build_web_ceo_sessions_mcp_app,
         build_release_control_mcp_app, build_web_ceo_release_mcp_app,
     )
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
     from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
     from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import (
@@ -429,13 +431,38 @@ def main(argv=None):
         elif profile == WEB_CEO_V3_PROFILE:
             from integrations.mosyle_mdm.client import MosyleInventoryClient
             from integrations.mosyle_mdm.credential import FileMosyleCredentialSource
+            from integrations.session_bridge.installed import InstalledSessionBridgeClient
+
             mdm_reader = MosyleInventoryClient(
                 FileMosyleCredentialSource(
                     expected_uid=os.geteuid(), expected_gid=os.getegid()
                 )
             )
+            session_client = InstalledSessionBridgeClient(
+                settings.ceo_ingress_socket_path
+            )
             app = build_web_ceo_v3_mcp_app(
-                settings, audit_sink=sink, mdm_reader=mdm_reader, **mounts
+                settings,
+                audit_sink=sink,
+                mdm_reader=mdm_reader,
+                session_target_projector=session_client.targets,
+                session_reply_handler=session_client.send,
+                session_summon_handler=session_client.summon,
+                **mounts,
+            )
+        elif profile == WEB_CEO_SESSIONS_PROFILE:
+            from integrations.session_bridge.installed import InstalledSessionBridgeClient
+
+            session_client = InstalledSessionBridgeClient(
+                settings.ceo_ingress_socket_path
+            )
+            app = build_web_ceo_sessions_mcp_app(
+                settings,
+                audit_sink=sink,
+                session_target_projector=session_client.targets,
+                session_reply_handler=session_client.send,
+                session_summon_handler=session_client.summon,
+                **mounts,
             )
         elif profile == WEB_CEO_V2_PROFILE:
             coo_settings = build_installed_coo_settings(raw, source, args.config, settings)

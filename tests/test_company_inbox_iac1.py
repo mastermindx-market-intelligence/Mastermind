@@ -7760,16 +7760,35 @@ _P1_PRODUCTION_PATHS = (
     "integrations/slack_agent_dialogue/slack_web_api.py",
     "integrations/slack_agent_dialogue/turn_observer.py",
     "integrations/company_consultation_dispatch.py",
+    # P1-R1 production modules. They did not exist at the protected base, so
+    # every top-level symbol in them is "new" and faces the full incumbent
+    # forbidden surface rather than a weaker per-module subset.
+    "integrations/company_consultation_targets.py",
+    "integrations/company_consultation_target_resolution.py",
 )
 
 
 def _p1_base_source(path: str) -> str:
+    root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
         ["git", "show", f"{_P1_PROTECTED_BASE}:{path}"],
-        check=True,
         capture_output=True,
         text=True,
+        cwd=root,
     )
+    if result.returncode != 0:
+        # Absent at the base is legitimate for a module P1-R1 added. Prove that
+        # is the actual reason: a `git show` that fails for any other cause must
+        # break the guard loudly instead of reading as an empty base.
+        probe = subprocess.run(
+            ["git", "cat-file", "-e", f"{_P1_PROTECTED_BASE}:{path}"],
+            capture_output=True,
+            cwd=root,
+        )
+        assert probe.returncode != 0, (
+            "git show failed for a path that exists at the protected base", path
+        )
+        return ""
     return result.stdout
 
 

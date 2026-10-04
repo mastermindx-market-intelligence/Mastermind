@@ -68,3 +68,26 @@ verified=true
 ```
 
 No model prompt, provider message, account mutation, or Executive worker-binary change was made by the canary.
+
+## Outcome and interruption semantics
+
+The existing seven-field OpenOutcome response remains the interface. As defined
+by the shared navigation contract, `verified=true` proves native session
+existence plus an accepted handoff. It does not prove visible app state,
+execution ownership, a model turn, or a completed mission.
+
+`failure_kind=effect_unknown` means the handoff command was invoked but its
+successful completion could not be established. The app may already have opened:
+inspect the original bound session before retrying. An explicitly observed
+process-start failure remains `runner_error`. Missing or malformed receipts,
+truncated output, timeouts and lost responses do not prove non-delivery.
+Neither the adapter nor the browser automatically repeats a handoff. The normal
+button retains an accessible inline uncertainty/failure message rather than
+refreshing it away; a lost HTTP response is also displayed as unknown.
+
+The PTY runner retains only its bounded output prefix while draining the child.
+Post-exit draining uses the same deadline as normal capture. On timeout/error it
+signals its own private process group and uses two bounded reap waits. Its
+`process_reaped` fact covers the direct child only; it is not proof of Desktop
+termination or of no navigation effect. Invalid timeout/output bounds refuse
+before opening a PTY. This does not change the ordinary non-PTY runner.

@@ -219,7 +219,7 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("create_artboard", self.client.calls)
 
     def test_current_safe_tool_classes(self):
-        for name in ["list_files", "find_nodes", "get_tokens",
+        for name in ["find_nodes", "get_tokens",
                      "list_comment_threads", "get_comment_thread",
                      "list_comment_thread_authors"]:
             self.assertIn(name, b.READ_TOOLS)
@@ -227,12 +227,45 @@ class CoreTests(unittest.TestCase):
                      "set_comment_thread_status"]:
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
-                     "export_combined_pdf", "rename_pages"]:
+                     "export_combined_pdf", "rename_pages", "list_files",
+                     "list_resources", "rename_resource"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
         self.assertEqual(
             b.SUPPORTED_CATALOG_SHA256,
-            "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+            "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
         )
+
+    def test_reviewed_full_catalog_fixture_and_descriptor_mutations_fail_closed(self):
+        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "ac18857_full_catalog.json"
+        catalog = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(b.digest(catalog), b.SUPPORTED_CATALOG_SHA256)
+        self.assertIn("write_html", catalog)
+        self.assertIn("rename_pages", catalog)
+        self.assertNotIn("list_files", catalog)
+
+        class CatalogFake(Fake):
+            def __init__(self, value):
+                super().__init__()
+                self.value = value
+                self.server = {"name": "paper-desktop", "version": "0.5.14"}
+            def catalog(self):
+                return copy.deepcopy(self.value)
+
+        for tool_name in ("write_html", "rename_pages"):
+            with self.subTest(tool_name=tool_name):
+                mutated = copy.deepcopy(catalog)
+                mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
+                self.assertNotEqual(b.digest(mutated), b.SUPPORTED_CATALOG_SHA256)
+                client = CatalogFake(mutated)
+                with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                    self.call(
+                        client=client,
+                        expected_snapshot=b.digest(client.info),
+                        arguments={"fileId": "file-fixture"},
+                        _server_pin=b.SUPPORTED_SERVER,
+                        _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
+                    )
+                self.assertNotIn("create_artboard", client.calls)
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}
