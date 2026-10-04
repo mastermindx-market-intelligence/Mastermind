@@ -471,7 +471,7 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     'gateway generation must be an ephemeral random UUID, not a host-derived identifier',
   );
-  assert.equal(payload.gatewayVersion, '0.1.8');
+  assert.equal(payload.gatewayVersion, '0.1.10');
 });
 
 test('configured studio_fleet_status lists and returns the bounded public projection', async () => {
@@ -565,7 +565,7 @@ test('configured studio_fleet_status lists and returns the bounded public projec
     { timeout: 5000 },
   );
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v2');
   assert.equal(result.structuredContent.state, 'DEGRADED');
   assert.equal(result.structuredContent.accountCount, 2);
   assert.equal(result.structuredContent.readyCount, 1);
