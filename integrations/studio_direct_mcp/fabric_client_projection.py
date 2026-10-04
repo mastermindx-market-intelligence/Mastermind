@@ -11,6 +11,7 @@ import argparse
 import dataclasses
 import json
 import re
+from http.client import HTTPS_PORT
 from urllib.parse import urlsplit
 
 SERVER_NAME = "mastermindStudio"
@@ -69,7 +70,7 @@ def _endpoint(value: object, expected_path: str) -> str:
         or not isinstance(host, str)
         or not host.endswith(".ts.net")
         or len(host) <= len(".ts.net")
-        or port not in (None, 443)
+        or port not in (None, HTTPS_PORT)
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query
@@ -80,8 +81,8 @@ def _endpoint(value: object, expected_path: str) -> str:
             f"Studio fabric URL must be exact HTTPS tailnet path {expected_path}"
         )
     canonical = f"https://{host}"
-    if port == 443 and parsed.netloc.endswith(":443"):
-        canonical += ":443"
+    if port == HTTPS_PORT and parsed.netloc.endswith(f":{HTTPS_PORT}"):
+        canonical += f":{HTTPS_PORT}"
     return canonical + expected_path
 
 
