@@ -455,3 +455,205 @@ commission. `MISSION_COMPLETE: true` for canonical adoption and this route
 redesign extension; the broader frontend implementation/release mission is not
 claimed complete. No autonomous background execution, watcher or runtime
 lifecycle transition was created.
+
+
+## 2026-10-04 — Daily-flow hardening and builder contract
+
+### Commission and outcome
+
+The Chairman asked for the next Atelier pass to make Mastermind OS simple,
+robust and useful for daily work, and to explain the mockup's connected flow
+in both repository files and Paper page-note artboards. The previously approved
+Noir Atelier direction remains canonical. This commission hardened the behavior
+and handoff around that visual system; it did not create a competing theme.
+
+The bounded Paper outcome is complete: six connected workflow/state artboards,
+six refined desktop/mobile screen pairs, and four guide/directory entry points.
+The full builder contract is
+[docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md](../docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md).
+That specification is the detailed continuation input; this section records
+what changed and the proof boundary.
+
+### Source-grounded product interpretation
+
+The governing and product-source inspection used protected master
+`a2646f458f9ff41ddcedd89b338be4a4349e6cd6`, compatible Skillpack 1.0.1 /
+bootstrap 1. It read the operating-surface convergence design, Chairman
+cognition and executive chat hierarchy laws, decision-first control-room
+design, charter/strategic intent, and the current frontend/native/service
+contracts. The builder specification links the exact primary source files
+and distinguishes observed source facts, approved design requirements, and
+capabilities that remain absent.
+
+The daily product job is to give the Chairman orientation, the few judgments
+that require the Chairman, and direct access to the accountable owner and
+next result. Routine decomposition, allocation, review and follow-through
+remain with Meta-CEO and the team inside their authority. Technical session
+state and operator tooling belong in contextual details, not in the primary
+daily attention queue.
+
+The inspected protected app remains read-only. It supports bounded Programs,
+Mission v3 with the v2 fallback, exact Result reads, and the current
+server-permitted conversation window. It does not establish full history,
+ordinary message send, project creation, Inbox decision commands or execution
+resume. The README's older Mission/native-route summary was reconciled to the
+inspected source and explicitly pinned; no implementation file was changed.
+
+PR #1046 was read at
+`089a745b9aa4a4f2ec615827912f547f3884d744`; PR #1150 was read at
+`37d02586eeb97d92e6fb9ed6dbc7cd142dd6449c`. Both remained open/draft at
+that observation. Those candidate references do not supply released capability
+to this design. Existing command, review, custody and installed-proof gates
+remain controlling; SEND/STOP are not enabled by a mockup.
+
+### Connected Paper guide
+
+Exact file: `01M3NRCX55B452A12819WNE1RH`, **Mastermind OS**.
+
+New page:
+[13 · Daily Experience · Flow + Builder Notes](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0),
+page ID `p-E-0`.
+
+| Board | Exact ID | Builder purpose |
+| --- | --- | --- |
+| UX00 | `PBO-0` | daily loop, five destinations, durable objects, owner and route map |
+| UX01 | `PBP-0` | complete-empty, partial-known, historical and unprojected Today states |
+| UX02 | `PBQ-0` | direction to accountable owner, project draft/review/create, return path |
+| UX03 | `PAY-0` | exact decision packet, one final action, recorded/checking/changed branches |
+| UX04 | `PAZ-0` | project scope, evidence detour, draft retention, session change, access and recovery |
+| UX05 | `PBR-0` | implemented versus target capability, owner boundaries, first vertical slice and proof |
+
+All six boards are 1600 × 1120. UX00/UX01 occupy the first row, UX02/UX05
+the second, and UX03/UX04 the third, with 80 px horizontal gaps and 130 px
+vertical gaps. These are editable flow storyboards and notes. The current
+accepted Paper catalog exposes no prototype-link operation, so working
+click-through behavior is not claimed.
+
+The directory `A2Q-0`, canonical index AT00 `KSB-0`, earlier builder guide
+MC90 `A8Q-0`, and chat contract CH91 `KDN-0` now point to the new guide
+and full repository specification. Their added entries are `Q1P-0`,
+`Q9I-0`, `Q4E-0`, and `Q4K-0`, respectively.
+
+Another session was extending the canonical route family concurrently.
+Those route boards and owner contracts were preserved. Their observed
+AT21 mobile and AT22–AT24 directory identities are recorded as a bounded,
+unreviewed concurrent-reference snapshot in the spec. AT00's growing index
+was moved to x=0, y=-2080, giving it a clear upper row and resolving its
+observed collision with the Inbox row. Its existing route entries were
+retained. No other writer's route boards were repositioned.
+
+### Refined route screens
+
+| Route pair | Desktop / mobile | Concrete refinement |
+| --- | --- | --- |
+| AT01 Today | `LNV-0` / `N27-0` | one known decision with partial-briefing qualification; compact owner-held next results; source detail; same-office continuation |
+| AT08 Meta-CEO | `L9V-0` / `MNS-0` | company context, accountable Project Sol and next result; one ordinary Send specimen; reserved decision separate |
+| AT03 Project overview | `MHD-0` / `N29-0` | focused project navigation; less-used destinations under More; explicit project conversation context |
+| AT14 New project | `N8N-0` / `NBB-0` | clear Review project progression; removed redundant draft action; one final creation review defined in UX02 |
+| CH0 / CH4 Welcome | `JB4-0` / `K3D-0` | Meta-CEO/company recipient; understandable conversation options; empty send stays disabled |
+| AT15 Session Estate | `NKM-0` / `NPO-0` | review state reconciled with its row; optional Inspect next turn; command capability remains unproven |
+
+The Today example now says “1 known decision · Partial briefing.” The number
+describes the known set, not a complete total. Routine team progress is compact
+and attributable. The desktop original sculpture remains 270 × 180 with its
+3:2 ratio; redundant mobile art is hidden in the editable subtree so the
+decision and source qualification fit before the safe area.
+
+The Meta-CEO screen no longer adds a review ceremony to an ordinary message.
+Its editable Send example specifies target qualified behavior; the accompanying
+capability note preserves today's read-only baseline. New conversation and
+starter prompts produce a draft, not an unsolicited send, project or execution.
+
+Project creation follows name and intended outcome, one review of name/outcome/
+scope, one Create project action when supported, and the exact resulting project
+record. Creating that record does not implicitly launch work.
+
+### Flow and recovery rules made explicit
+
+- Today may show an all-clear only when both attention and decision coverage
+  are current, complete and empty. A partial briefing keeps known items and
+  withholds a total. Historical data is dated; an unprojected feed is not zero.
+- Company direction belongs to the durable Meta-CEO office. Project
+  conversations retain their Project Sol and exact project context.
+  Continuing or opening a conversation is navigation, not work execution.
+- Only complete owner-qualified reserved decision packets can reach a final
+  decision action. Routine team review is not promoted into Chairman Inbox.
+- UX03 uses AT20's exact illustrative `DEC-R20-001`, Plan v18, generation 7.
+  Hold is selected; Promote after proof is deferred; Promote now remains
+  unavailable. It does not invent a new option or silently revise the packet.
+- A qualified decision has one final Record decision action and a clear result.
+  Changed-before-submit requires reviewing the current packet; an unknown
+  after-dispatch result continues checking the original operation.
+- Pending and unknown outcomes never become automatic resends. Recovery stays
+  attached to the original request, scope, recipient, generation and carrier.
+  A missing status record does not by itself prove that nothing happened.
+- Evidence detours preserve the originating selection, reading anchor, focus
+  and permitted draft. Access changes clear protected content. Draft retention
+  is promised only through an approved existing persistence path or honestly
+  described open-view retention; no plaintext localStorage, offline or
+  cross-device autosave capability is invented.
+- Return, review, acceptance and release remain distinct. A confirmation
+  records the exact allowed effect and the natural return destination.
+- Five primary destinations stay stable; project Plan/Work/Evidence and
+  advanced sessions, resources, journal and tools remain contextual.
+
+The spec includes the route/action-node map, transition guards and preserved
+state, source-owner map, keyboard/mobile expectations, 12 illustrative fixtures,
+and 15 implementation acceptance scenarios. It specifies product behavior to
+build and prove; those scenarios have not been run against an implemented app.
+
+### Verification and corrections
+
+Actual Paper screenshots and inline-style JSX were inspected for the changed
+route screens and new guide boards. Independent bounded reviews covered the
+daily source semantics, Today pair, Meta-CEO compositions, decision/recovery
+notes, guide footers and the final mobile project/session states.
+
+Repairs resolved a desktop office composer fit issue, project-versus-company
+recipient confusion in recovery, the decision option mismatch, mobile navigation
+density, redundant review/draft actions, a contradictory session review label,
+and the index's canvas collision. The final inspected compositions had no
+identified clipping or overlapping actions in this scope. Mobile controls,
+source qualification and the final session row remained clear of the safe area.
+
+The final directory-note renders and guide footer/mobile fit checks were
+accepted. All owned working indicators were explicitly released, including
+the two agents' Today and decision/recovery boards. This is visual and semantic
+design verification, not keyboard, screen-reader, enlarged-text, network-fault,
+runtime or installed-product acceptance.
+
+### Effect and durable handoff
+
+The direct Mastermind Paper app was the sole Paper modifying carrier, with
+exact-file reads, current target-scoped guards and unique operation IDs.
+Catalog identity remained
+`ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`.
+Disjoint concurrent work remained permitted and intact. Every dispatched
+modifying operation in this commission has an applied receipt and observed
+result; no modifying effect remains unknown. No browser fallback, target
+switch, provider action, worker runtime or outgoing message was used.
+
+The full specification was created in commit
+`72d84e4f02fbfb3a5cc613c619c85f9405bc9cd5`, then its bounded concurrent
+route references were reconciled in
+`ae8022bfceea5e28ba706b9b05b3033cf5273f28`. The README update is
+`cf818fe133b1c0cd9bdd1f60dbe90a6369010e4b`.
+They remain on the existing documentation branch
+`sol/noir-qualification-20260926` under draft PR #1010. The README's exact
+readback matched the authored content; final spec/record readback is part of
+this close-out. The historical component/P-series and original-operation
+custody notes above remain unchanged and are not cleared by this commission.
+
+**Next builder slice:** implement qualified Today → exact project → permitted
+conversation/evidence → return with context preserved, using existing bounded
+reads first. Prove source coverage, selection/auth invalidation, mobile fit and
+focus/return behavior. Add ordinary messages, reserved decisions and project
+creation separately only when their owner capability and source/release gates
+are qualified. Consume the existing design and contract rather than recreating
+the screens or adding a second orchestration/state plane.
+
+`FINALIZATION_CLASSIFICATION: PROVEN_OUTCOME` for the bounded Paper daily-flow
+design and builder-handoff commission. `MISSION_COMPLETE: true` for that
+commission. Frontend implementation, working prototype links, merge,
+deployment and daily product acceptance remain unclaimed. No autonomous
+background execution or runtime lifecycle transition was created.
