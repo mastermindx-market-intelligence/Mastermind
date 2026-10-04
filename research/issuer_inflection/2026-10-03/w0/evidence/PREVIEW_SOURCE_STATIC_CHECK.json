@@ -1,32 +1,38 @@
 {
-  "kind": "preview_source_static_syntax_only",
-  "source_before_change": "46b8e32942df90402f941c297f721e333e64e35e",
-  "recorded_at": "2026-10-04T02:48:11.002100+00:00",
-  "completed_at": "2026-10-04T02:48:11.044259+00:00",
-  "source_sha256": {
-    "build_fixture_preview.py": "090e687b4ac929037b6f95a2b6a8f1d3b41967a0001cb92ab9f1054ab8a2fe83",
-    "fixture_preview.css": "065c780c2eaade6acc496221ed83bdfaf3d2f65449ade42e5d5d77bdb052acbb",
-    "fixture_preview.js": "a9769d2564d9f224f8c237dfe209832c421308f8d50cd6560506e697d7fb1bdc"
-  },
-  "python_ast_parse": "PASS",
-  "javascript_syntax_check": "PASS",
-  "preview_module_imported": false,
-  "build_preview_called": false,
-  "html_generated": false,
   "browser_launched": false,
   "browser_tested": false,
+  "build_preview_called": false,
+  "completed_at": "2026-10-04T02:48:11.044259+00:00",
+  "css_newline_only_reformat": {
+    "browser_execution_after_reformat": false,
+    "current_sha256": "76242dcae13b97be4738a9d901b3004764294465cdda1a8a955e7e0414f84c4d",
+    "non_newline_byte_sequence_unchanged": true,
+    "previous_sha256": "065c780c2eaade6acc496221ed83bdfaf3d2f65449ade42e5d5d77bdb052acbb"
+  },
   "css_or_visual_quality_verified": false,
-  "product_admitted": false,
-  "source_admitted": false,
-  "trial_registered": false,
-  "production_proof": false,
   "execution_hold": {
     "action": "build_preview and create first offline HTML/method output directory",
+    "alternate_carrier_used": false,
     "dispatch": "blocked before execution; no process receipt",
-    "reported_message": "This tool call was blocked by OpenAI because we couldn't determine the safety status of the request.",
     "effect": "EFFECT_NONE for the blocked call; previously created source is preserved",
-    "retry_performed": false,
-    "alternate_carrier_used": false
+    "reported_message": "This tool call was blocked by OpenAI because we couldn't determine the safety status of the request.",
+    "retry_performed": false
   },
+  "html_generated": false,
+  "javascript_syntax_check": "PASS",
+  "kind": "preview_source_static_syntax_only",
+  "preview_module_imported": false,
+  "product_admitted": false,
+  "production_proof": false,
+  "python_ast_parse": "PASS",
+  "recorded_at": "2026-10-04T02:48:11.002100+00:00",
+  "source_admitted": false,
+  "source_before_change": "46b8e32942df90402f941c297f721e333e64e35e",
+  "source_sha256": {
+    "build_fixture_preview.py": "090e687b4ac929037b6f95a2b6a8f1d3b41967a0001cb92ab9f1054ab8a2fe83",
+    "fixture_preview.css": "76242dcae13b97be4738a9d901b3004764294465cdda1a8a955e7e0414f84c4d",
+    "fixture_preview.js": "a9769d2564d9f224f8c237dfe209832c421308f8d50cd6560506e697d7fb1bdc"
+  },
+  "trial_registered": false,
   "verification_boundary": "Only syntax inspection of the previously created files. No import, evaluation, fixture loading, rendering or substitute execution of the blocked build."
 }
