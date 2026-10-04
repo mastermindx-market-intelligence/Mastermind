@@ -576,8 +576,10 @@ def test_start_agent_relay_is_idempotent_when_already_running(tmp_path: Path) ->
     assert not any("bootstrap" in call or "kickstart" in call for call in log)
 
 
-def test_stop_agent_relay_stops_only_fixed_agent_relay(tmp_path: Path) -> None:
-    plan = _stop_ok(AGENT_RELAY_LABEL)
+def test_stop_agent_relay_stops_only_fixed_registered_relay(tmp_path: Path) -> None:
+    plan = [
+        (f"print system/{AGENT_RELAY_LABEL}", 0, "state = running", ""),
+    ] + _stop_ok(AGENT_RELAY_LABEL)
 
     code, out, err, log, remaining, *_ = _run(
         tmp_path, "stop-agent-relay", plan
@@ -594,13 +596,12 @@ def test_stop_agent_relay_stops_only_fixed_agent_relay(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("action", ["start-agent-relay", "stop-agent-relay"])
-def test_agent_relay_lifecycle_refuses_missing_plist_before_launchctl(
-    tmp_path: Path, action: str,
+def test_start_agent_relay_refuses_missing_plist_before_launchctl(
+    tmp_path: Path,
 ) -> None:
     code, _out, err, log, remaining, *_ = _run(
         tmp_path,
-        action,
+        "start-agent-relay",
         [],
         remove_agent_relay_plist=True,
     )
@@ -609,6 +610,44 @@ def test_agent_relay_lifecycle_refuses_missing_plist_before_launchctl(
     assert "missing or unsafe launchd plist" in err
     assert remaining == ""
     assert log == []
+
+
+def test_stop_agent_relay_refuses_absent_service_before_disable(tmp_path: Path) -> None:
+    plan = [
+        (f"print system/{AGENT_RELAY_LABEL}", 113, "", "absent"),
+    ]
+
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code != 0
+    assert "must be registered before stop" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert not any(
+        call.startswith(("disable ", "bootout ")) for call in log
+    )
+
+
+def test_stop_agent_relay_can_quiesce_registered_service_if_plist_is_lost(
+    tmp_path: Path,
+) -> None:
+    plan = [
+        (f"print system/{AGENT_RELAY_LABEL}", 0, "state = running", ""),
+    ] + _stop_ok(AGENT_RELAY_LABEL)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path,
+        "stop-agent-relay",
+        plan,
+        remove_agent_relay_plist=True,
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=absent" in out
 
 
 def test_stop_readside_stops_control_then_relay_and_preserves_mcp_worker_backup(
