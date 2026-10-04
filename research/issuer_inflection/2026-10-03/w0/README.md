@@ -48,6 +48,8 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 
 `CORPUS_PRESELECTION_CANDIDATE.md` freezes a 30-issuer metadata-only candidate universe and deterministic split/reserve law before any holdout body or outcome inspection. `CORPUS_IDENTITY_QUALIFICATION.md` then verifies all 30 exact issuer/security IDs, active/resolved state and SEC CIKs against the current unchanged Data OS identity snapshots; its hermetic suite has 10 checks. The source-controlled proxy selector has 4 additional tests and reproduces the exact 30-name sequence from the pinned industry map; current proxy membership is discovery-only and never certifies historical beta eligibility. No filing/event/transcript body or outcome was read and no event/revision ID was assigned. Source/event eligibility, rights and actual registry write/readback remain mandatory.
 
+`CORPUS_EVENT_IDENTITY_GATE.md` then checks the current committed Earnings/SEC metadata substrate. The owner filing-key contract requires exact `(CIK, accession)` with zero date tolerance, while the durable `earnings_8k_dates.parquet` is still a legacy store without accession despite upgraded collector code. The six-test gate records exact role coverage and keeps every corpus event/source-revision identity unassigned until the existing owner publishes an accession-complete metadata cut.
+
 
 ## Equal-duration descriptive comparison
 

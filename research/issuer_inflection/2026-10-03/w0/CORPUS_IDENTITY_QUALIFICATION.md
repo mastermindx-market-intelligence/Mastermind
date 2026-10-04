@@ -71,13 +71,16 @@ For beta candidates, the existing source owner may next bind exact eligible hist
 
 ## Canonical event-identity gate remains open
 
-The existing Earnings source law fixes one EDGAR filing identity to the exact pair `(CIK, accession)` and sets date tolerance to zero. It explicitly says a filing-date join cannot prove source availability and would collapse amendments incorrectly.
+The owner identity law is now current and exact: `engine/earnings_release/filing_key.py` uses only `(CIK, accession)` with `JOIN_DATE_TOLERANCE_DAYS=0`. Current collector code also knows how to capture accession, form and report date. But the **committed dataset has not caught up to that code contract**.
 
-Two existing internal metadata stores were inspected only for interface fitness:
+`CORPUS_EVENT_IDENTITY_GATE.md` / `evidence/CORPUS_EVENT_IDENTITY_GATE.json` records the exact current state at Macro `d4f32cfb3bc5d5041273294175ae1feba582e53b`:
 
-- `data/edgar/earnings_8k_dates.parquet` has broad historical Item 2.02 coverage but its schema is only `ticker, cik, filing_date, acceptance_datetime, items`; it carries **no accession**. It therefore cannot produce the canonical filing key required for I3 selection.
-- `data/edgar/material_8k_events.parquet` carries accessions, but the successful bounded beta-candidate check found zero Item 2.02 rows for all 12 beta candidates. That is a limitation of this material-event plane, **not evidence that the issuers have no earnings filings**, and it is not a reason to substitute another event.
+- `data/edgar/earnings_8k_dates.parquet` blob `e1fdf2c9717b02a98f6fe7cfab7e88e51bf912d6`, SHA-256 `3076d611cda61455ea65c8aaf7bcebcc37c341330c4b37048ce89ecc79bd2ae4`;
+- 98,975 rows / 1,314 tickers; latest filing metadata `2026-07-02`;
+- columns remain only `ticker, cik, filing_date, acceptance_datetime, items`; **no accession**;
+- beta candidates: 11/12 present, `CFG` missing; prospective candidates: 12/12 historically present; reserves: 5/6 present, `EL` missing;
+- no alternate committed accession-bearing Earnings wire/filing-key dataset was found under `data/**`.
 
-A later attempt to combine the two planes for further diagnosis was platform-blocked before execution and was not retried through another carrier. No date/fuzzy join, synthetic accession, exhibit-body fetch, or event assignment was performed.
+This is metadata coverage, not event qualification. A historical date/acceptance row cannot be converted into `(CIK, accession)`, and a prospective candidate's historical rows can never become its future temporal holdout event. No filing body or outcome was read.
 
-The next lawful event qualification must use the existing Earnings/SEC owner seam that exposes canonical accession plus source clock before body inspection. Until that owner metadata is available, every row keeps `event_id=null` and `source_revision_id=null`.
+The next lawful event qualification requires the existing Earnings/SEC owner to publish/read-back an accession-complete immutable metadata cut through its upgraded seam before body inspection. Historical beta assignment separately owes event-date PIT membership + event-time business-family qualification. Until then every row keeps `event_id=null`, `source_revision_id=null`, and event/source qualification false.
