@@ -174,7 +174,8 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
 - XH-2 delta (5978459390, 09:19:32Z): #1241 review PASS/BUILT_NOT_PROVEN (review 5405203412 by `mastermindx-2`; the request to `mastermindx-3` superseded); protected auto-merge enrolled; merge-group head 28be2ce2 active; "Do not duplicate/re-enroll while GitHub owns this queue." Hosted CI 37190137610 SUCCESS; disposable integration #1191 3a3dae6b + #1241 → 232 PASS (5978391820).
 - #1191: head 76438086 (09:27Z); HARD CONVERGENCE RE-STEER by `mastermindx-2` (5978362582: "finish the Executive backend faster; stop expanding breadth while release blockers remain"); repair-shape map (5978414397) and exact edit anchors (5978467920) for the incumbent writer; the three blockers unchanged at 3a3dae6b. Not this seat's carrier.
 - Seat lane in XH-1…XH-5: none executable (writer: #1191 incumbent; queue: GitHub; release/host-prep/activation: host owner; token + Apps SDK refresh: human/UI; canary: Web CEO V3 + Control). Seat holds integration judgment / final acceptance at the XH-5 outcome and the return packet.
-- NEXT: Agent OS batch amendment (P4 arm state; P5 XH chain + human gates; #1227 superseded; #1241 queue; DSC enrollment-plist ↔ validate_plist compatibility) as one Macro PR, sweeper-owned. Then quiet; watcher watch16.
+- Agent OS batch amendment DELIVERED: Macro PR #8433 (branch claude/ssd-executive-autonomy-v1-closure-agentos-xh-20261004, head 5fd2db2e; label merge-on-green; validate 1504 records / 0 errors): WS P4 arm state, P5 XH chain + human gates, next_action, 2 landmines, 2 do_not_redo lines; new DSC:A2-ENROLLMENT-PLIST-IS-ACCEPTED-BY-SERVICE-CONTROL-VALIDATE-PLIST. Sweeper owns the merge interval; this seat owns the outcome (MERGED check on the next watcher cycle, no polling).
+- Then quiet; watcher watch16 (b332mduno).
 
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
@@ -219,7 +220,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
-- 09:40Z: CEO-submit ARMED on a2646f45 by the host owner (seat-verified from ceo-submit-state-v1.json: transaction autonomy-f236038098b1, digest 4c27e71c…; harness DISARMED). #1241 PASS + merge queue 28be2ce2. XH-1…XH-5 plan on #1143. Human gates: Slack token ceremony; Apps SDK refresh. Nothing owed by this seat. Next: Agent OS batch amendment; watcher watch16.
+- 09:40Z: CEO-submit ARMED on a2646f45 by the host owner (seat-verified from ceo-submit-state-v1.json: transaction autonomy-f236038098b1, digest 4c27e71c…; harness DISARMED). #1241 PASS + merge queue 28be2ce2. XH-1…XH-5 plan on #1143. Human gates: Slack token ceremony; Apps SDK refresh. Nothing owed by this seat. Agent OS amendment = Macro PR #8433 (merge-on-green; confirm MERGED next cycle). Watcher watch16.
 - 09:00Z: #1241 integration read posted (5978317957; no blocking finding; review owned by mastermindx-3). QUIET. Watcher watch15. Wakes: edge on #1143/#811/#1241/master(mission paths); ruling naming this seat; Remote Control toggle (human).
 - 08:55Z: #1227 CLOSED unmerged (superseded by #1191 3149fe6f; review criteria adopted there as blocker 1). Reviewing #1241 (successor activation carrier; independent review requested, unowned). Watcher watch14 (#1241 replaces #1227).
 - 07:53Z: #1227 independent review posted (CHANGES_REQUESTED; D8 docstring red reproduced, documentation-only fix named). Owed: re-review on the new #1227 head. Watcher watch13 (adds #1227). Wakes: watch13 edge; ruling naming this seat; Remote Control toggle (human).
