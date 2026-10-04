@@ -83,7 +83,7 @@ def test_no_descriptor_preserves_normal_acceptance(monkeypatch):
 
 @pytest.mark.parametrize("fault", ["missing","failed","foreign_descriptor","foreign_summary","extra"])
 def test_carry_receipt_requires_exact_descriptor_and_summary(monkeypatch,fault):
-    descriptor={"root_job_id":"JOB-preserved"}
+    descriptor={"schema_version":m.SCHEMA,"root_job_id":"JOB-preserved"}
     receipt=dict(schema_version=m.SCHEMA,passed=True,baseline_preserved=True,
                  descriptor_sha256=m.digest(descriptor),acceptance_summary_sha256="b"*64)
     monkeypatch.setattr(m,"descriptor_for",lambda sha:descriptor)

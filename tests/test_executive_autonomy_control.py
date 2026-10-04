@@ -8935,7 +8935,7 @@ def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkey
     raw=b"existing full acceptance receipt"
     monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))
     monkeypatch.setattr(control,"validate_acceptance_document",lambda *args,**kwargs:None)
-    descriptor=dict(root_job_id="JOB-preserved")
+    descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id="JOB-preserved")
     monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
     receipt=dict(schema_version=maintenance.SCHEMA,passed=carry_passed,baseline_preserved=True,
         descriptor_sha256=maintenance.digest(descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest())

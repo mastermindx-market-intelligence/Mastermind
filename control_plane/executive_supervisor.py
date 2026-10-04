@@ -34,6 +34,7 @@ from uuid import uuid4
 from control_plane.worker_execution_contract import (
     LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CollectionReceipt,
+    OrchestrationLaunchSpec,
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
@@ -392,13 +393,6 @@ class ActiveRun:
     recovered_presence: ProcessPresence | None = dataclasses.field(
         default=None, repr=False
     )
-
-
-@dataclasses.dataclass(frozen=True)
-class OrchestrationLaunchSpec(WorkerLaunchSpec):
-    """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
-
-    effective_grant_digest: str = ""
 
 
 @dataclasses.dataclass(frozen=True)

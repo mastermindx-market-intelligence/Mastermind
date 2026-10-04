@@ -5850,9 +5850,16 @@ class ExecutiveControlService:
                     JobStatus.RUNNING,
                     JobStatus.CHECKPOINTED,
                 }:
-                    raise StateConflict(
-                        f"job {job_id} cannot cycle-dispatch from {job.status.value}"
+                    # Resolve only an already-terminal command-bound ambiguity.
+                    # No supervisor, placement selection, lease replay or provider
+                    # start is involved, including after a service restart.
+                    terminal = runtime.attempts.terminal_cycle_dispatch_outcome(
+                        job_id, command_id=command_id
                     )
+                    await self._project_terminal_return(
+                        job_id, expected_attempt_id=terminal.attempt.attempt_id
+                    )
+                    return terminal
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
                 if (

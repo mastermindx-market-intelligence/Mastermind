@@ -5,13 +5,13 @@ The normal host acceptance requires an empty runtime. Do not run
 The opt-in maintenance owner instead preserves that runtime while the existing
 acceptance executes its complete current-release proof.
 
-This route is bounded to one untouched strict-v2 queued root and one exact
+The v1 route is bounded to one untouched strict-v2 queued root and one exact
 requeued harmless proof whose latest Attempt is LOST with verified process
 absence and whose unheld quota is ERROR. It does not dispatch the predecessor
 proof, rewrite or resubmit the queued root, create another scheduler, or arm
 the service.
 
-## Preparation and proof
+## V1 preparation and proof
 
 Use the ordinary source/review/release gates. With all control arms false and
 both Executive services stopped, run the reviewed successor's
@@ -49,10 +49,45 @@ acceptance with preservation PASS creates `carry-forward.json`. The normal
 arming owner additionally requires that exact receipt whenever a maintenance
 descriptor exists. A partial run cannot pass the arm gate.
 
+## V2: preserve a failed terminal dispatch across another release
+
+A successor of an already accepted maintenance release may instead preserve
+one queued strict-v2 root with exactly one direct FAILED planner and one FAILED
+Attempt. The existing Runtime owner must validate its exact unresolved dispatch
+marker and terminal claim. Provider/process identities and native harness
+history must be absent; the existing control-owned assignment seal must prove
+worker access revoked, a passing UID absence sweep, and unchanged directory
+identity. All Attempts must be terminal and all quotas unheld. The proof quota
+must already be AVAILABLE.
+
+Use the same preparation owner with predecessor, successor and root selectors,
+plus `--carry-terminal-dispatch`; omit both recovery selectors. The predecessor
+is the installed release. The root may retain an older base: the owner derives
+that base from the predecessor's validated descriptor, acceptance summary and
+PASS carry receipt, and seals all three digests. Callers cannot choose a frozen
+base. The predecessor summary supplies the completed fixed proof template.
+
+V2 grants no predecessor quota recovery. Acceptance revalidates the entire
+semantic descriptor and original snapshot before creating its one-run marker,
+skips the predecessor recovery RPC, and permits only the fresh interrupted
+proof's recovery receipt. All existing rows, events and artifacts remain exact.
+The normal installer, Gate B, readiness, acceptance summary and carry receipt
+remain required. Neither preparation nor acceptance resolves the mission's
+pending marker or dispatches its failed planner.
+
+After successor PASS and normal arming, the existing COO's first cycle observes
+the terminal claim through the read-only Runtime owner and records its exact
+reconciliation. It selects no provider or supervisor, obtains no lease, and
+creates no Attempt. The next cycle records the ordinary adverse-plan block;
+normal selection then skips that root. Preserve both events and the failed
+history. Any new acceptance operation uses a new explicit commission/intent
+referencing the failed operation and the current host binding. It must not
+resubmit the old intent or increase its immutable attempt limit.
+
 ## Continuing the preserved root
 
 After the normal arming ceremony, only the descriptor's exact root may retain
-its predecessor source revision. Its admission Event, immutable Job identity,
+its qualified original source revision (transitively derived for v2). Its admission Event, immutable Job identity,
 model, profile, policy, routing, and harness identity must match.
 
 CEO-submit admits while the operator harness is closed. Full arming later
