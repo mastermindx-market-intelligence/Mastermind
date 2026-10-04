@@ -648,6 +648,7 @@ function handleStudioPing(session) {
     monotonicDurationMs: 0,
     gatewayVersion: GATEWAY_VERSION,
     sessionId: session ? session.id : null,
+    selectedHostRef: session?.selectedHostRef ?? null,
     concurrency: limiter ? {
       scope: session?.owner ? 'account-backend' : 'session-backend',
       active: limiter.active,
@@ -985,6 +986,82 @@ class GatewaySession {
     this.backendToolContracts.set(tool.name, tool.inputSchema ?? null);
   }
 
+  async ensureBackendToolContracts(signal) {
+    if (this.backendToolContracts.size > 0) return;
+    const backend = await this.ensureBackend();
+    const result = await backend.client.listTools(
+      {},
+      { timeout: this.cfg.requestTimeoutMs, signal },
+    );
+    for (const tool of sanitizeToolList(result.tools)) this.rememberBackendToolContract(tool);
+    if (this.backendToolContracts.size === 0) {
+      throw new Error('FLEET_ROUTE_LOCAL_CONTRACT_UNAVAILABLE');
+    }
+  }
+
+  async selectFleetHost(args, signal) {
+    if (!this.fleetRouter) {
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_ROUTING_NOT_CONFIGURED',
+      }, true);
+    }
+    const hostRef = args?.hostRef;
+    if (this.selectedHostRef !== null) {
+      if (this.selectedHostRef === hostRef) {
+        return fleetRouteToolResult({
+          schema: 'mastermind.studio_fleet_route_binding.v1',
+          status: 'BOUND',
+          effect_state: 'NOT_APPLIED',
+          hostRef,
+          reused: true,
+        });
+      }
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_SESSION_ALREADY_BOUND',
+        hostRef: this.selectedHostRef,
+      }, true);
+    }
+    if (this.backendToolCalls > 0) {
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_BIND_AFTER_BACKEND_USE_REFUSED',
+      }, true);
+    }
+    try {
+      await this.ensureBackendToolContracts(signal);
+      const receipt = await this.fleetRouter.preflight(
+        hostRef,
+        this.backendToolContracts,
+        { signal },
+      );
+      this.selectedHostRef = receipt.hostRef;
+      this.touch();
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'BOUND',
+        effect_state: 'NOT_APPLIED',
+        hostRef: receipt.hostRef,
+        toolCount: receipt.toolCount,
+        reused: false,
+      });
+    } catch {
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_ROUTE_PREFLIGHT_REFUSED',
+      }, true);
+    }
+  }
+
   isReclaimSafeTool(name) {
     if (typeof name !== 'string' || name.length === 0) return false;
     if (isInteractiveToolName(name)) return false;
@@ -1102,6 +1179,7 @@ class GatewaySession {
           signal: extra?.signal,
         });
         const tools = sanitizeToolList(result.tools);
+        for (const tool of tools) session.rememberBackendToolContract(tool);
         const backendNames = new Set(tools.map((tool) => tool.name));
         for (const localTool of localTools) {
           if (backendNames.has(localTool.name)) {
