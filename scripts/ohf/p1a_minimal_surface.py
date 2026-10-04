@@ -176,7 +176,7 @@ def run_minimal_surface(
     evidence: dict[str, Any] = {
         "schema_version": SCHEMA,
         "backend": lab.backend,
-        "codex_version": "codex-cli 0.147.0",
+        "codex_version": "codex-cli 0.159.2",
         "apps_disable_setting": "features.apps=false",
         "bundled_skills_disable_setting": "skills.bundled.enabled=false",
         "auth_isolation": {

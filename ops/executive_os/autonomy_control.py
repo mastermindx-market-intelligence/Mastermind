@@ -62,6 +62,7 @@ from control_plane.executive_autonomy import (
 from ops.executive_os import release_manifest
 from ops.executive_os import git_handoff_preflight
 from ops.executive_os import provider_readiness
+from ops.executive_os import provider_worker_slots
 from scripts import executive_os_phase1c_control_wrapper as control_wrapper
 
 
@@ -2307,7 +2308,15 @@ class ProductionArmHost(ProductionStatusHost):
                 gid=control_group.gr_gid,
             )
             validate_acceptance_document(summary, expected_sha=expected_sha)
-            return hashlib.sha256(raw).hexdigest()
+            from ops.executive_os.acceptance_maintenance import (
+                MaintenanceError, validate_carry_receipt,
+            )
+            summary_digest = hashlib.sha256(raw).hexdigest()
+            try:
+                validate_carry_receipt(expected_sha, summary_digest)
+            except (MaintenanceError, OSError, ValueError) as exc:
+                raise ArmAdmissionError("acceptance_receipt_invalid") from exc
+            return summary_digest
         except ArmAdmissionError:
             raise
         except (HostControlError, KeyError, OSError) as exc:
@@ -2470,29 +2479,53 @@ class ProductionArmHost(ProductionStatusHost):
             raise ArmAdmissionError("services_not_stopped")
 
     def require_service_uids_quiescent(self) -> None:
+        # Reuse the worker owner's saved/real/effective UID projection and exact
+        # Apple launchd attribution. Process names and argv never grant an
+        # exception. This gate observes only; it never sweeps or signals.
+        from control_plane.executive_ambient_process import (
+            AmbientClassification, AmbientProcessIdentity, DarwinDistnotedClassifier,
+        )
+        from control_plane.executive_worker_broker import _ps_pids_for_uid
+
         try:
-            identities = (
-                pwd.getpwnam(CONTROL_USER).pw_uid,
-                pwd.getpwnam("_mastermind_worker").pw_uid,
-            )
-        except KeyError as exc:
-            raise ArmAdmissionError("service_uid_process_unknown") from exc
-        for uid in identities:
-            try:
-                completed = subprocess.run(
-                    ["/usr/bin/pgrep", "-U", str(uid)],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=5,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                raise ArmAdmissionError("service_uid_process_unknown") from exc
-            if completed.returncode == 0 and completed.stdout.strip():
-                raise ArmAdmissionError("service_uid_process_live")
-            if completed.returncode not in {0, 1}:
+            control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
+            worker = provider_worker_slots.get_slot("codex-01")
+            worker_uid = pwd.getpwnam(worker.worker_user).pw_uid
+            if worker_uid != worker.worker_uid:
                 raise ArmAdmissionError("service_uid_process_unknown")
+        except (KeyError, provider_worker_slots.SlotCatalogError) as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        for uid in (control_uid, worker_uid):
+            try:
+                before = _ps_pids_for_uid(uid)
+                if not before:
+                    continue
+                # The reviewed ambient exception belongs only to the dedicated
+                # worker principal. Control must remain entirely absent.
+                if uid != worker_uid:
+                    raise ArmAdmissionError("service_uid_process_live")
+                classifier = DarwinDistnotedClassifier()
+                ambient = classifier.classify(worker_uid=uid)
+                if type(ambient) is not AmbientClassification or ambient.status == "failed_closed":
+                    raise ArmAdmissionError("service_uid_process_unknown")
+                if ambient.status != "attested" or len(ambient.identities) != 1:
+                    raise ArmAdmissionError("service_uid_process_live")
+                identity = ambient.identities[0]
+                if type(identity) is not AmbientProcessIdentity or identity.codesign_verified is not True:
+                    raise ArmAdmissionError("service_uid_process_unknown")
+                if (identity.uid != uid or identity.pid <= 1
+                        or identity.launchd_reported_pid != identity.pid
+                        or before != (identity.pid,)):
+                    raise ArmAdmissionError("service_uid_process_live")
+                # Process creation, exit, PID replacement or attribution drift
+                # during the read cannot inherit the earlier observation.
+                if (_ps_pids_for_uid(uid) != before
+                        or classifier.classify(worker_uid=uid) != ambient):
+                    raise ArmAdmissionError("service_uid_process_unknown")
+            except ArmAdmissionError:
+                raise
+            except Exception as exc:
+                raise ArmAdmissionError("service_uid_process_unknown") from exc
 
     def require_transaction_absent(self) -> None:
         if AUTONOMY_TRANSACTION.exists() or AUTONOMY_TRANSACTION.is_symlink():
@@ -4101,7 +4134,17 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         result = value["result"]
         if result.get("service_state") != "AWAITING_CANARY":
             return False
-        if result.get("socket") != os.fspath(CONTROL_SOCKET):
+        # The service resolves its host-owned socket declaration (on macOS,
+        # /var/run is /private/var/run). Admit only these two fixed spellings;
+        # never resolve an arbitrary path supplied in the status response.
+        try:
+            canonical_control_socket = CONTROL_SOCKET.resolve(strict=False)
+        except (OSError, RuntimeError):
+            return False
+        if result.get("socket") not in (
+            os.fspath(CONTROL_SOCKET),
+            os.fspath(canonical_control_socket),
+        ):
             return False
         status_pid = result.get("pid")
         if (

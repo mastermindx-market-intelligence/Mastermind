@@ -70,8 +70,29 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
-_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server", CLAUDE_OPERATOR_EXECUTION_SURFACE})
+_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+})
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
+_ADAPTER_EXECUTION_SURFACES = {
+    "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
+    "claude-code": frozenset({"claude-code"}),
+}
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+
+
+def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
+    """Return whether one reviewed adapter owns the declared execution surface."""
+
+    adapter = str(adapter_id or "").strip().lower()
+    surface = str(execution_surface or "").strip().lower()
+    return surface in _ADAPTER_EXECUTION_SURFACES.get(adapter, frozenset())
+
+
+def is_sealed_worker_execution_surface(execution_surface: str) -> bool:
+    """Return whether the surface is a foreground sealed worker process."""
+
+    return str(execution_surface or "").strip().lower() in _SEALED_WORKER_EXECUTION_SURFACES
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
 _NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
@@ -400,6 +421,14 @@ _BASE_APP_SERVER_OVERRIDES = (
     "features.mcp_2026_07_28=false",
     "features.multi_agent=false",
     "features.multi_agent_v2=false",
+    "features.browser_use_external=false",
+    "features.browser_use_full_cdp_access=false",
+    "features.daemon_auto_start=false",
+    "features.shell_snapshot=false",
+    "features.shell_snapshot_v2=false",
+    "features.skill_mcp_dependency_install=false",
+    "features.skill_search=false",
+    "features.workspace_dependencies=false",
 )
 
 
@@ -1526,12 +1555,12 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} both requires and forbids: {', '.join(collision)}"
                 )
-            if execution_surface == "codex-exec" and (
+            if is_sealed_worker_execution_surface(execution_surface) and (
                 mcp_server_ids or resource_ids or plugins
             ):
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant MCP/plugins or resources "
-                    "to sealed codex-exec"
+                    f"to sealed worker execution surface {execution_surface!r}"
                 )
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
             if is_browser_profile:
@@ -1569,10 +1598,10 @@ class ExecutionCapabilityRegistry:
                         "skill_capabilities; exact V4 company-Skill profiles "
                         "require skills=[]"
                     )
-                if execution_surface == "codex-exec":
+                if is_sealed_worker_execution_surface(execution_surface):
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} cannot grant skill_capabilities "
-                        "to sealed codex-exec"
+                        f"to sealed worker execution surface {execution_surface!r}"
                     )
                 if write_capable:
                     raise CapabilityPolicyError(

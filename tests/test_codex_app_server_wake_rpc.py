@@ -117,12 +117,18 @@ class FakeOwnedAppServerClient:
         params: Mapping[str, Any] | None = None,
         *,
         timeout: float = 60.0,
+        before_send=None,
     ) -> dict[str, Any]:
         self.calls.append((method, dict(params or {})))
         if method == "thread/read":
+            assert before_send is None
             return {"thread": {"id": NATIVE_HANDLE}}
         if method != "turn/start":
             raise AssertionError(f"second-writer/cold-resume method attempted: {method}")
+        if before_send is not None:
+            queued = list(self.queued_notifications)
+            self.queued_notifications.clear()
+            before_send(1, queued)
         if self.fail_request:
             raise RuntimeError("turn/start transport lost")
         return {"turn": {"id": self.turn_id}}
@@ -198,6 +204,9 @@ def _owned_adapter(
     adapter = object.__new__(codex_adapter.CodexOperatorAdapter)
     adapter.worker_id = GENERATION.worker_id
     adapter.workspace_root = Path("/tmp/mastermind-w3a-owned-workspace")
+    # This unit helper bypasses __init__; mirror the real constructor's
+    # default so guarded ordinary turns exercise the production send seam.
+    adapter.skill_canary_binding = None
     adapter.process_identity_observer = lambda _pid: observed_process
     requested = SimpleNamespace(approval_policy="never")
     attestation = SimpleNamespace(effective_config_digest="d" * 64)

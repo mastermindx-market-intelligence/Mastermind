@@ -890,6 +890,10 @@ class WorkspaceIdentity:
     gid: int
 
 
+# Closed resource identity shared by admission policy and the provider adapter.
+CHATGPT_GUI_RESOURCE_ID = "chatgpt-desktop-gui-v1"
+
+
 @dataclass(frozen=True)
 class CapabilityIdentity:
     """Requested capability identity at the strongest truthful precision."""

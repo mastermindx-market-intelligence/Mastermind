@@ -68,17 +68,28 @@ stop_one() {
   /bin/launchctl disable "system/$label"
   # A nonzero bootout alone cannot prove absence or failure; read back.
   /bin/launchctl bootout "system/$label" >/dev/null 2>&1 || true
-  local after_status=0
-  /bin/launchctl print "system/$label" >/dev/null 2>&1 || after_status=$?
-  if [ "$after_status" -eq 113 ]; then
-    /bin/echo "service=$label state=absent"
-    return 0
-  fi
-  if [ "$after_status" -eq 0 ]; then
-    /bin/echo "service still registered after stop: $label" >&2
-  else
-    /bin/echo "service registration state unknown after stop: $label (launchctl print exit $after_status)" >&2
-  fi
+  # launchd acknowledges bootout before the service has fully disappeared.
+  # Observe for at most 30 sleeps; never repeat disable or bootout.
+  local after_status check
+  for ((check = 0; check <= 30; check++)); do
+    after_status=0
+    /bin/launchctl print "system/$label" >/dev/null 2>&1 || after_status=$?
+    if [ "$after_status" -eq 113 ]; then
+      /bin/echo "service=$label state=absent"
+      return 0
+    fi
+    case "$after_status" in
+      0) ;;
+      *)
+        /bin/echo "service registration state unknown after stop: $label (launchctl print exit $after_status)" >&2
+        return 1
+        ;;
+    esac
+    if [ "$check" -lt 30 ]; then
+      /bin/sleep 1
+    fi
+  done
+  /bin/echo "service still registered after stop wait: $label" >&2
   return 1
 }
 
