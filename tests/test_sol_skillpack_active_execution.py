@@ -407,6 +407,7 @@ def test_checkpointed_continuation_rejects_clean_phase_or_wait_as_exit_coupon():
     ):
         assert phrase in text
     assert "A specific chunk boundary or observed continuity risk" not in text
+    assert "a specific chunk boundary alone is no longer sufficient" in text
 
 
 def test_more_work_exists_continues_across_task_and_phase_boundaries():

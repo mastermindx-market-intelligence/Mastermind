@@ -47,7 +47,7 @@ FORWARD EXECUTION + BLOCKERS
 20. Block the affected lane, not the mission. WAITING_EXTERNAL/review/CI/messages are lane-local; advance independent safe scope. One failed path is not universal unavailability.
 21. Missing Fabric alone is not a blocker. Execute bounded work with lawful tools/custody, no STARTed worker, and no conflicting/EFFECT_UNKNOWN operation.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector, or fresh chat. Do not hand back routine work. A needed critical-path switch is a valid boundary; request it promptly.
-23. Sessions are not daemons. Ending to wait requires proven STARTED/RUNNING durable execution + lawful return; review requests/messages/CI triggers are not that. No duplicate runners/queues or unchanged polling.
+23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 
 CONTEXT + RECOVERY
 24. Minimal frontier: mission; authority; refs/SHA; last effects; DO_NOT_REDO; EFFECT_UNKNOWN; blockers; children/returns; next action; mode/capability evidence. No history replay.

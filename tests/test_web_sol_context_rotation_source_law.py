@@ -458,6 +458,7 @@ def _sr_f0_semantic_guard_errors(*, law: str, skill: str, active: str) -> list[s
     errors: list[str] = []
     norm_law = " ".join(law.split())
     norm_skill = " ".join(skill.split())
+    norm_active = " ".join(active.split())
     suspected = _section_text(skill, "### `ROTATION_SUSPECTED`", "### `ROTATION_REQUIRED`")
     phase = _section_text(
         active,
@@ -474,6 +475,8 @@ def _sr_f0_semantic_guard_errors(*, law: str, skill: str, active: str) -> list[s
         errors.append("pressure-only-turn-boundary")
     if "surface remains healthy, **start that next phase in the same turn**" not in phase:
         errors.append("healthy-phase-continuation")
+    if "a specific chunk boundary alone is no longer sufficient" not in norm_active:
+        errors.append("chunk-boundary-not-stop")
     return errors
 
 
@@ -529,6 +532,14 @@ def test_semantic_mutation_guard_rejects_threshold_and_healthy_phase_reversal() 
         law=law, skill=skill, active=bad_active
     )
 
+    bad_chunk_gate = active.replace(
+        "a specific chunk boundary alone is no longer sufficient",
+        "a specific chunk boundary alone is sufficient",
+    )
+    assert "chunk-boundary-not-stop" in _sr_f0_semantic_guard_errors(
+        law=law, skill=skill, active=bad_chunk_gate
+    )
+
 
 def test_rotation_law_persistence_frontier_uses_cause_based_disposition_mapping() -> None:
     law = " ".join(_read(LAW_PATH).split())
@@ -560,7 +571,8 @@ def test_cross_phase_continuation_is_projected_into_session_reliability_and_kern
     for phrase in (
         "After any task/phase completes, verify/save it, reassess the mission",
         "WAITING_EXTERNAL/review/CI/messages are lane-local",
-        "Ending to wait requires proven STARTED/RUNNING durable execution + lawful return",
+        "`DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return",
+        "Other Step-8 stops still apply",
         "A clean phase boundary is not a stop",
         "MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains",
         "task/phase/checkpoint completion alone never qualifies",
