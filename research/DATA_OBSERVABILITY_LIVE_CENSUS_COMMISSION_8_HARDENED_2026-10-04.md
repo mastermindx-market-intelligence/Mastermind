@@ -1180,7 +1180,6 @@ https://github.com/bitol-io/open-data-contract-standard/blob/main/docs/README.md
 
 DataHub:
 https://docs.datahub.com/docs/managed-datahub/observe/data-contract
-https://docs.datahub.com/docs/faq
 https://github.com/datahub-project/datahub
 
 OpenMetadata:
