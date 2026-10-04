@@ -21,17 +21,33 @@ Macro source `37122b69fffa98cb160022c4831df0338ef3e7e3`:
 - Identity: `ISS:US-XNAS-AAPL`, canonical Data OS security/issuer masters; do not independently derive it from CIK or ticker.
 - Frozen accessions: `0000320193-25-000079` and `0000320193-26-000020`. Do not expand the provider's frozen accession tuple or monkey-patch the registry.
 - Owner fixture delivery remains exactly `committed_golden_fixture`, `attested=false`, `production_issuer_service=false`; context-only.
-- Positive **input pair**: revenue durations `2023-10-01..2024-09-28` and `2024-09-29..2025-09-27` from the same A1 filing revision. Actual values `391035000000` and `416161000000`, USD. Fiscal metadata reported unknown remains unknown; source annual columns and owner comparator acceptance are required before claiming the relationship admitted.
+- Positive **input pair**: revenue durations `2023-10-01..2024-09-28` and `2024-09-29..2025-09-27`, labels FY2024/FY2025, from the same A1 filing revision. Actual values `391035000000` and `416161000000`, USD. The owner response types both as generic `duration`, not `PeriodKind.ANNUAL`; `fiscal_year`, `fiscal_year_weeks`, and `calendar_kind` remain unknown/null while `inferred_week_count=52` for both. Do not let the FY labels self-authorize annual comparability.
 - Positive owner response SHA-256: `a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af`.
 - Negative input: `total_assets`, instant `2025-09-27`, latest-known query at source cutoff `2026-08-01T00:00:00Z`, recorded cutoff `2026-08-23T12:00:00Z`. Exact owner reason: `unlinked source vintages require an explicit typed revision lineage`.
 - Negative owner response SHA-256: `aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21`.
+- Full requests, owner outputs, real reconstruction timestamps and method-before-execution hash are retained in `evidence/`. This is not historical emission or prediction registration.
+
+### Positive-pair technical evidence matrix — still unadmitted
+
+| Comparator prerequisite | Exact observed evidence | Status |
+|---|---|---|
+| Canonical issuer / metric | Same AAPL owner identity; `metric.revenue/v1` | satisfied |
+| Mapping / concept | Same `mapping.revenue/v1`, mapping digest `ef978677...`, concept `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` | satisfied |
+| Unit / scope | Same USD semantic unit; no denominator; empty explicit/typed dimensions | satisfied |
+| Revision basis | FIF query arithmetic defines the basis as `(source, accession, document_id, source_body_sha256)`; both cells match `sec-edgar`, accession `0000320193-25-000079`, document `sec_document_d23a...`, body `548ae597...` | satisfied technically |
+| Duration geometry | Adjacent non-overlapping durations; each infers 52 weeks | satisfied technically |
+| Reported precision | Both selected facts carry `decimals=-6`, inline scale 6 | matched; owner precision/display interpretation still required |
+| Typed fiscal meaning | Owner cells are generic `duration`; fiscal year/calendar metadata are unknown/null | **not admitted** |
+| Public/model-use rights | FIF response exposes no `rights`/`rights_profile` | **missing** |
+| Production source | `committed_golden_fixture`, `attested=false`, `production_issuer_service=false` | **development only** |
+
+This matrix narrows the FIF return: revision basis, unit, metric, source and raw duration geometry are no longer open questions. The owner must still bind the two duration cells to an accepted comparable-period/precision rule, and a separate source-rights decision must authorize the intended consumer purpose. Until both are returned, the exact-rational arithmetic remains review-only and `comparison_admitted=false`.
 
 ### FIF lineage consumption boundary
 
 Current merged/tested FIF-3A3 responses used by this packet do not carry an accepted cross-filing lineage bridge, so the assets case above remains the canonical W1 refusal. The incumbent #7518 candidate shows the intended future owner seam without granting its unmerged implementation: when FIF has actually applied cutoff-visible lineage evidence, `execute_financial_query` adds a top-level `lineage` disclosure to the existing `fundamental_forensics.financial_query_response/v1` envelope. The disclosure is schema `fundamental_forensics.financial_query_lineage/v1`, relation `xbrl_confirmation`, explicitly `is_reported_revision=false`, and leaves the existing receipt/query hash unchanged when absent.
 
 I3 must therefore consume lineage only through an owner-issued financial-query response. It must not import `engine.fundamental_forensics.lineage_evidence`, derive confirmation receipts itself, or reinterpret `xbrl_confirmation` as an amendment/restatement/correction. Absence of the owner disclosure cannot be repaired by I3; the existing not-evaluable reason propagates unchanged. A future accepted positive owner response can be referenced as supporting cross-filing evidence only after the FIF owner returns the admitted revision/source/cutoff and the response bytes are captured under the current program method.
-- Full requests, owner outputs, real reconstruction timestamps and method-before-execution hash are retained in `evidence/`. This is not historical emission or prediction registration.
 
 The same-filing period pair is not a prior-cutoff state reconstruction by itself. W1 must additionally exercise the distinct source/system cutoffs before SEC acceptance and before fixture admission, then at eligibility, and preserve unaffected baseline variables throughout.
 
