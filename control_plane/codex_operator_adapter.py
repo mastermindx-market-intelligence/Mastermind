@@ -2979,13 +2979,23 @@ class CodexOperatorAdapter:
         if not isinstance(params_value, Mapping):
             return False
         completed_turn = params_value.get("turn")
-        return bool(
-            completion.get("method") == _ATTENTION_COMPLETION_METHOD
-            and str(params_value.get("threadId") or "").strip()
-            == provider_session_id
-            and isinstance(completed_turn, Mapping)
-            and str(completed_turn.get("id") or "").strip() == native_turn_id
-        )
+        if (
+            completion.get("method") != _ATTENTION_COMPLETION_METHOD
+            or str(params_value.get("threadId") or "").strip()
+            != provider_session_id
+            or not isinstance(completed_turn, Mapping)
+            or str(completed_turn.get("id") or "").strip() != native_turn_id
+        ):
+            return False
+        if "threadId" in completed_turn:
+            inner_thread_id = completed_turn.get("threadId")
+            if (
+                not isinstance(inner_thread_id, str)
+                or not inner_thread_id.strip()
+                or inner_thread_id.strip() != provider_session_id
+            ):
+                return False
+        return True
 
     def _terminal_attention_observation(
         self,
