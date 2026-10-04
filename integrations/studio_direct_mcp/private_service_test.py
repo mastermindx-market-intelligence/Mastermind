@@ -188,6 +188,7 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         source=str(source),
         node=str(node),
         backend=str(backend),
+        public_url=None,
     )
 
 
