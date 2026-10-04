@@ -488,3 +488,20 @@ Executive admission/claim records when those are applicable.
 > implementation or research quality. Escalate worker capability when evidence requires it. Use a
 > metered reasoning surface only under its separate complete bounded exception receipt. Fable, Pro
 > mode, and metered cognition are not defaults.**
+
+## 12. Capacity-conserving heterogeneous orchestration
+
+For native Codex/Claude orchestration, nested delegation and mixed-provider worker routing, also
+apply [the capacity-conserving orchestration amendment](EXECUTIVE_FABRIC_CAPACITY_ORCHESTRATION_AMENDMENT.md)
+from the same accepted protected source commit. Branch and PR versions remain review candidates.
+
+That amendment extends the role map to qualified Sol/Opus/GLM/Grok domain orchestration and
+GLM Flash/MiniMax/Qwen bounded workers, while preserving this addendum's complexity, frontier-witness,
+cognition-route, Fable and metered-budget gates. It requires one conserved root budget, complete
+account/model/host/ancestry/window constraints, protected completion capacity, and exact native
+parent/child return evidence. Local agent counts and forecast resets are not live admission.
+
+The existing Model Router, Provider Control, Capacity and Executive owners remain authoritative.
+No new queue, quota ledger, principal, account entitlement or permission follows from this policy.
+Source acceptance, actual procedure loading, installed selection and native execution qualification
+must each be proven separately; this reference alone does not arm a default-off runtime.

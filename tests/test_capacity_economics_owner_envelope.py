@@ -21,6 +21,7 @@ TIERS = (
 SCOPE = CapacityProjectionScope(
     root_operation_ref="root.mission", operation_ref="child.build",
     quota_domain_ref="glm.account.a", workload_ref="cohort.routine.v1",
+    host_ref="host.worker.1", review_pool_ref="review.cohort.1",
     quota_window_refs=("glm.a.five_hour.epoch1", "glm.a.week.epoch3"),
     ancestor_operation_refs=("domain.engineering",),
 )
@@ -50,8 +51,8 @@ def bound(kind, scope, ref, remaining):
 
 def envelope():
     refs = {"provider": "glm", "account": SCOPE.quota_domain_ref, "model": "glm.flash",
-            "host": "host.worker.1", "root": SCOPE.root_operation_ref,
-            "operation": SCOPE.operation_ref, "review": "review.cohort.1"}
+            "host": SCOPE.host_ref, "root": SCOPE.root_operation_ref,
+            "operation": SCOPE.operation_ref, "review": SCOPE.review_pool_ref}
     constraints = [bound("concurrency", key, ref, 10) for key, ref in refs.items()]
     constraints += [bound("starts", "root", SCOPE.root_operation_ref, 30),
                     bound("starts", "operation", SCOPE.operation_ref, 25)]
@@ -66,6 +67,7 @@ def envelope():
         "option_id": "glm.a.flash", "provider": "glm", "model_alias": "glm.flash",
         "root_operation_ref": SCOPE.root_operation_ref, "operation_ref": SCOPE.operation_ref,
         "quota_domain_ref": SCOPE.quota_domain_ref, "workload_ref": SCOPE.workload_ref,
+        "host_ref": SCOPE.host_ref, "review_pool_ref": SCOPE.review_pool_ref,
         "constraints": constraints,
     }
 
@@ -157,7 +159,7 @@ def test_remaining_must_be_nonnegative_integer_or_explicit_unknown(bad):
         project(doc)
 
 
-@pytest.mark.parametrize("key", ["option_id", "provider", "model_alias", "root_operation_ref", "operation_ref", "quota_domain_ref", "workload_ref"])
+@pytest.mark.parametrize("key", ["option_id", "provider", "model_alias", "root_operation_ref", "operation_ref", "quota_domain_ref", "workload_ref", "host_ref", "review_pool_ref"])
 def test_candidate_account_operation_and_workload_binding_cannot_be_transplanted(key):
     doc = envelope()
     doc[key] = "foreign.scope"
@@ -347,3 +349,35 @@ def test_existing_v1_projection_is_explicitly_preserved_not_silently_relabelled(
     assert hint["schema"] == "mastermind.capacity_economics_projection/v1"
     assert "capacity_scope" not in hint
     assert hint["suggested_parallelism"] == 20
+
+
+@pytest.mark.parametrize("category", ["host", "review"])
+def test_host_and_review_capacity_cannot_be_transplanted_from_another_pool(category):
+    doc = envelope()
+    row = next(row for row in doc["constraints"] if row["scope"] == category)
+    row["scope_ref"] = "foreign.free.pool"
+    with pytest.raises(CapacityEconomicsProjectionError, match="binding mismatch"):
+        project(doc)
+
+
+def test_owner_can_replace_retired_windows_without_retaining_an_obsolete_weekly_limit():
+    # A plan change is an owner-proven scope revision, not a model-created reset.
+    scope = dataclasses.replace(SCOPE, quota_window_refs=("glm.a.month.epoch4",))
+    doc = envelope()
+    doc["constraints"] = [row for row in doc["constraints"] if row["scope"] != "quota_window"]
+    doc["constraints"].append(bound("starts", "quota_window", scope.quota_window_refs[0], 3))
+    result = project(doc, scope=scope)
+    assert result.estimated_startable_jobs == result.suggested_parallelism == 3
+    with pytest.raises(CapacityEconomicsProjectionError, match="window set"):
+        project(doc)  # The old independently supplied scope still refuses the new epoch.
+
+
+def test_root_projection_has_no_intermediate_ancestor_but_retains_root_and_operation_budgets():
+    scope = dataclasses.replace(SCOPE, operation_ref=SCOPE.root_operation_ref, ancestor_operation_refs=())
+    doc = envelope()
+    doc["operation_ref"] = scope.operation_ref
+    doc["constraints"] = [row for row in doc["constraints"] if row["scope"] != "ancestor"]
+    for row in doc["constraints"]:
+        if row["scope"] == "operation":
+            row["scope_ref"] = scope.operation_ref
+    assert project(doc, scope=scope).suggested_parallelism == 10

@@ -224,7 +224,7 @@ _CONCURRENCY_SCOPES = frozenset({"provider", "account", "model", "host", "root",
 _ENVELOPE_FIELDS = frozenset({
     "schema", "observation_ref", "observed_at", "valid_until", "option_id",
     "provider", "model_alias", "root_operation_ref", "operation_ref",
-    "quota_domain_ref", "workload_ref", "constraints",
+    "quota_domain_ref", "workload_ref", "host_ref", "review_pool_ref", "constraints",
 })
 _BOUND_FIELDS = frozenset({"kind", "scope", "scope_ref", "remaining", "evidence_ref"})
 
@@ -252,11 +252,13 @@ class CapacityProjectionScope:
     operation_ref: str
     quota_domain_ref: str
     workload_ref: str
+    host_ref: str
+    review_pool_ref: str
     quota_window_refs: tuple[str, ...]
     ancestor_operation_refs: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        for field in ("root_operation_ref", "operation_ref", "quota_domain_ref", "workload_ref"):
+        for field in ("root_operation_ref", "operation_ref", "quota_domain_ref", "workload_ref", "host_ref", "review_pool_ref"):
             _token(getattr(self, field), field=field)
         _reference_tuple(self.quota_window_refs, field="quota_window_refs", minimum=1, maximum=32)
         _reference_tuple(self.ancestor_operation_refs, field="ancestor_operation_refs", minimum=0, maximum=16)
@@ -329,6 +331,8 @@ def _owner_bounds(
         "provider": preference.provider,
         "account": scope.quota_domain_ref,
         "model": preference.model_alias,
+        "host": scope.host_ref,
+        "review": scope.review_pool_ref,
         "root": scope.root_operation_ref,
         "operation": scope.operation_ref,
     }
@@ -414,6 +418,8 @@ def project_capacity_bounded_preference(
         "operation_ref": scope.operation_ref,
         "quota_domain_ref": scope.quota_domain_ref,
         "workload_ref": scope.workload_ref,
+        "host_ref": scope.host_ref,
+        "review_pool_ref": scope.review_pool_ref,
     }
     if any(capacity_envelope[key] != value for key, value in expected.items()):
         raise CapacityEconomicsProjectionError("capacity envelope scope binding mismatch")

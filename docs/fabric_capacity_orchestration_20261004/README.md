@@ -1,55 +1,51 @@
 # Fabric capacity and orchestration upgrade
 
-Operation: `fabric-capacity-orchestration-upgrade-20261004-sol-001`
+Operation: `fabric-capacity-orchestration-upgrade-20261004-sol-001`.
+Source carrier: Mastermind PR #1247, branch `sol/web-fabric-capacity-orchestration-upgrade-20261004-sol-001`.
+Protected baseline: `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`; skillpack `mastermind.sol_skillpack.v1` 1.0.1, bootstrap major 1.
 
-Status: source implementation commission, not a production activation or a replacement principal. Protected baseline: `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`; skillpack `mastermind.sol_skillpack.v1` 1.0.1, bootstrap major 1. Current Chairman assignment is to improve economical native orchestration, bounded multilevel delegation, capacity-aware model routing, quality, and useful throughput.
+Status: source implementation and routing-law amendment for review. Not a production activation, a replacement principal or proof of native orchestration acceptance. The Chairman's 2026-10-04 assignment is economical native orchestration, bounded multilevel delegation, concurrency/quota-aware routing, higher accepted quality and useful throughput.
 
-## Completion contract
+## Source outcome
 
-An accepted native Codex or Claude parent can discover the existing Fabric capability, submit a bounded child through the existing Executive owner, receive the same child's durable result, and continue its original session. Parent/domain/leaf/reviewer identities and attenuation remain canonical. Routine work uses the least-scarce qualified worker; frontier work requires a real judgment witness. Dispatch respects shared provider/account/model concurrency, quota windows, host pressure, root/ancestor budgets, and acceptance/review capacity. Source tests alone do not meet this completion contract.
+The existing economics projection now offers an additive, preview-only capacity envelope. It binds account/model, root/operation/ancestors, workload, host, reviewer pool and every applicable quota window; separates parallel headroom from cumulative starts; and refuses stale, incomplete, malformed or transplanted evidence. It preserves the first lawful Model Router tier and mandatory claim-time revalidation. No new scheduler, quota calculator, lease or permission plane was added.
 
-## Owners and collision boundary
+The focused suite passed **127 tests**, including 500 seeded budget/monotonicity cases. Seven scalar/input regressions were reproduced against the exact protected baseline; two host/reviewer transplantation defects were reproduced against the first source candidate and repaired. Full-repository CI, independent review and live integration are separate gates.
 
-- Executive OS owns lifecycle, admission, claims, hierarchy, effects, cancellation and native return. Agent OS owns durable organizational continuity. GitHub owns implementation and review evidence; Slack is transport.
-- Model Router owns suitability. Shared AI Provider Control owns quota normalization and native-unit economics. Capacity consumes their evidence; no new queue, quota ledger, retry service, identity system, credential manager or scheduler is proposed.
-- Existing hierarchy carrier: Mastermind #1041. Existing native-harness/Fable integration intake: #600. Existing attended-bundle seam: #1013. Existing Studio/native client projection: #1217. Claude capability hardening: #1240. These are dependency/intake references, not proof of present worker liveness, transferred custody or authorization to edit another carrier.
-- This operation's independent source seam is `control_plane/capacity_economics_projection.py` and its tests, plus this reviewable amendment package. It does not modify the incumbent hierarchy/runtime, Studio projection, installed provider profiles or live broker.
+The routing addendum gains only Section 12, linking the new [orchestration amendment](../EXECUTIVE_FABRIC_CAPACITY_ORCHESTRATION_AMENDMENT.md). All pre-existing routing-law bytes were preserved and verified. Branch copies are proposals; source acceptance does not prove sessions loaded or installed them.
 
-## Verified census
+Read [NATIVE_INTEGRATION.md](NATIVE_INTEGRATION.md) for the exact producer/caller contract, current native-client/provider findings, incumbent work packages and staged acceptance. Read [VERIFICATION.md](VERIFICATION.md) for commands, hashes and evidence limits.
 
-1. The protected routing addendum and `research/SUBAGENT_FABRIC_ROUTING_AUDIT_2026-09-26.md` already separate C0-C3 complexity, business impact, execution risk, ambiguity and topology. Generic subagent topology must not elevate the model. Do not rebuild this classification or claim it is new.
-2. `config/subscription_provider_profiles.v1.json` maps GLM routine/fast/subagent to GLM-5.3-Flash and hard to GLM-5.3; Alibaba routine/fast/subagent to qwen3.8-flash and hard to qwen3.8-max; MiniMax classes to MiniMax-M3. These source profiles remain `autonomous_allowed=false` and require provider-realm and capacity admission. Catalog presence is not activation or a verified entitlement.
-3. The protected economics projection validates the first lawful Model Router tier and preview-only authority, but accepts only aggregate estimated starts/parallelism. It does not bind those hints to a fresh account/model/root/host/window envelope.
-4. Read-only native-host census found the installed `pool` wrapper selecting the existing Meta-CEO B kit, not a new Executive implementation. Its broker is a single SQLite/file-lock owner. Its inspected model-cap logic is GLM-specific. Its inspected `_plan_pool` computes `grant_now` from aggregate pool/free/fair-share counts without a model parameter. Its wait estimate uses remaining lease TTL; this is not evidence of actual job completion or future available quota.
-5. Selected installed configuration values observed on 2026-10-04: three GLM accounts each have account cap 10, full-model cap 5 and Flash-model cap 20; three Alibaba accounts each have cap 7; MiniMax cap 7. These are configured ceilings only. No current free-capacity, quota-remaining, provider entitlement, key independence or permission claim follows. In particular, Flash 20 does not override an account cap of 10.
-6. A managed source workspace was acquired once through `mmx-workspace` at the protected baseline. Receipt: APPLIED, lane web, operation above, branch `sol/web-fabric-capacity-orchestration-upgrade-20261004-sol-001`. No live workers were spawned or modified. Studio publication-status precheck returned REFUSED / NOT_APPLIED; a later native-host inspection request was platform-blocked. Those exact requests are not replayed. Native installation/publication qualification remains held. Independent GitHub source changes are review candidates, not host activation.
+## Verified census and decisive gaps
 
-## Implementation sequence
+1. Existing protected routing law and `research/SUBAGENT_FABRIC_ROUTING_AUDIT_2026-09-26.md` already separate complexity, ambiguity, impact and topology. This operation extends those rules rather than rebuilding them.
+2. The protected `config/subscription_provider_profiles.v1.json` selects GLM-5.3-Flash for routine/fast/subagent work, GLM-5.3 for hard work, qwen3.8-flash/max by class and MiniMax-M3. These profiles remain `autonomous_allowed=false` and require realm and capacity admission. Catalog presence is not activation or entitlement.
+3. The inspected native `pool` wrapper selects the existing Meta-CEO B kit. Its SQLite/file-lock broker applies GLM model caps at acquisition, but `_plan_pool` has no model parameter and estimates fan-out from aggregate pool/fair-share headroom. Its wait estimate uses remaining lease TTL, which is not completion or future-quota proof. No live broker was edited.
+4. Selected configured ceilings observed on 2026-10-04: three GLM accounts, each account10/full-model5/Flash-model20; three Alibaba accounts each7; MiniMax7. These are not current free capacity, authoritative entitlements, independent quota domains or permission to pool identities. Account10 can constrain Flash20.
+5. Current public Alibaba plan evidence changed the research assumptions: the Personal plan no longer has its former weekly window, and its permitted usage/device scope cannot be inferred from local account configuration. Exact subscribed plans and current remaining limits were not read. Sources and native-version caveats are in NATIVE_INTEGRATION.md.
 
-### A. Independent capacity projection hardening
+## Ownership and collision boundary
 
-Extend the existing preview-only projection, not Provider Control's quota arithmetic. Consume explicit owner-produced job-equivalent ceilings for shared account/model/provider concurrency, host capacity, root/ancestor starts and all limiting quota windows. Separate concurrency from cumulative start budgets. Bind provider/model, quota domain and operation scope; require fresh observations. Unknown, malformed, stale, contradictory or exhausted required evidence cannot produce a positive new projection. Future forecasts cannot replenish current starts. Preserve the v1 API and require claim-time canonical revalidation. Add adversarial and boundary tests using the GLM account/model counterexample and constrained weekly quota.
+Executive OS owns runtime, admission, claims, hierarchy, cancellation and native returns. Agent OS owns durable organizational continuity. Model Router owns suitability; Shared AI Provider Control owns quota normalization/economics; Capacity consumes that evidence. GitHub owns source/review/CI; Slack remains transport.
 
-### B. Reviewable orchestration amendment
+Existing integration intake is #600 (native/Fable parity), #1041 (bounded COO hierarchy), #1217 (Studio/native projection), with #1013 attended bundles and #1240 Claude capability hardening as related dependencies. The current #1041 head was observed at `b3816bb75fa328ec6df1f92a77e8377016efdc8e`; its body cites older test evidence that is not asserted for that head. #600 remains a draft plan. No incumbent worker liveness, custody transfer or deployment is inferred.
 
-Specify root-budget conservation across nested orchestrators, protected review/repair/return capacity, exact task-fit model selection, concurrency-aware ready frontiers, bounded escalation, idempotent child submission and unknown-effect reconciliation. More concurrency is useful only when accepted-result throughput improves; no universal fixed frontier/worker ratio or invented plan limit.
+This operation owns only the economics projection/test seam, the appended routing-law reference and amendment, and this documentation. It does not edit incumbent hierarchy/service/native-projection implementation files, create a competing Fable, or replace the installed broker.
 
-### C. Incumbent-owner integration
+## Program completion contract
 
-Deliver exact source/evidence intake to #600/#1041/#1217 rather than launching a competing Fable or editing their active files. Native entrypoints must consume the same existing admission and return path. Reconcile the manual broker with Provider Control/Executive owners before any deployment. A local shell command, MCP visibility, or configured model alias is not a successful governed spawn.
+An admitted native Codex or Claude parent must discover the existing Fabric capability, submit bounded descendants through the existing Executive owner, receive their durable reviewed results and continue the original session. All descendants share conserved root/provider/host/quota budgets, including repair/review/return obligations. Economic workers handle qualified bounded labor; frontier models handle evidenced judgment. Publication, installation, model/account selection, native start, terminal completion and parent acceptance require distinct proof.
 
-### D. Qualification and rollout
+Acceptance order: shadow complete owner envelopes -> one admitted leaf -> one admitted domain with independent review -> bounded mixed-provider parallel wave -> failure/recovery cases -> measured production ramp. Current source tests alone do not satisfy this contract.
 
-Run shadow replays, then one admitted leaf, then one admitted domain with independent review, then a bounded mixed-provider wave. Prove process start, exact model/realm, root budget charges, concurrent claims, durable terminal observation, artifact integrity, independent review and parent consumption. Test provider 429/reset changes, shared keys, stale observations, unknown stop, lost response, duplicate submit and exhausted weekly quota. Installation, account selection and production adoption each need separate receipts. Retain rollback and incumbent worker ownership; never restart active workers to refresh projections.
+## Effect and recovery record
 
-## Decision mathematics and acceptance
+Confirmed native effect: one managed source workspace acquisition, APPLIED, operation above, lane web, baseline above. Workspace: `/Volumes/Mastermind/agent-workspaces/web/fabric-capacity-orchestration-upgrade-20261004-sol-001`. It was observed clean at baseline; no source edits, commit or push were performed in that native workspace, and it has not been released.
 
-For one candidate, immediate parallelism cannot exceed the minimum of owner-proven free concurrency, ready independent work, permitted root fan-out, and review/return processing capacity. Cumulative new starts cannot exceed the minimum of owner-produced quota-window and root-budget start bounds after outstanding obligations are accounted for. Limits in different native units must be normalized by their owner for the exact task cohort, not added or treated as interchangeable tokens. Predicted reset/lease expiry is scheduling information, never present admission.
+The Studio typed publication-status precheck returned `REFUSED / NOT_APPLIED / TYPED_GIT_PRECHECK_REFUSED`. A separate subsequent native inspection request was platform-blocked. Neither request was replayed or repackaged. Native installation/publication qualification remains held. Independent GitHub source publication does not obtain those denied host effects.
 
-Quality gates precede economic ranking. Compare qualified candidates within the first lawful suitability tier using accepted results, repair/escalation cost, elapsed time, native depletion and reviewer independence. Record initial classification and post-result calibration separately. A cheap failed result plus frontier repair may cost more than a qualified stronger worker; equally, a critical deterministic change need not use a frontier builder when independent verification can establish correctness.
+Confirmed GitHub effects are the source commits and PR in this operation. No worker dispatch, provider call, quota mutation, auth change, watcher, runtime arming, merge, installation or production throughput improvement is claimed. Current runtime mode is not independently attested; no quota or turn-duration assumption was used.
 
-## Continuation / effect record
+DO_NOT_REDO: broad repository/host census; existing C0-C3 classification work; incumbent hierarchy implementation; unchanged focused tests without a relevant source/evidence change; held native requests. Preserve original effects and incumbent return obligations.
 
-Confirmed effects: one managed workspace acquisition; this source carrier only. DO_NOT_REDO: broad repository/host census, existing C0-C3 calibration, incumbent hierarchy implementation, native-host requests held above. No worker dispatch, quota modification, authentication change, new watcher, provider activation, protected-law adoption, merge or deployment is claimed.
-
-Next action: implement and test the bounded owner-envelope projection in the stated independent source seam, then complete the amendment and exact incumbent integration intake. Source evidence must be saved before any native action. Current runtime mode is not independently attested; no quota or time-limit assumption is used.
+Next source action: independent review and exact-head CI, then attach fixed-candidate intake to #1041/#600/#1217. Their runtime owners must join current observations, qualify atomic claims and demonstrate actual native parent consumption. A posted intake or review request is not acknowledgment, dispatch or worker start. Record those receipts in the existing PR conversation rather than creating a second queue or watcher.
