@@ -60,6 +60,41 @@ bindings retain the old restricted tools. Unknown binding versions or unqualifie
 relationships fail closed before send. A role-correct principal call should remain in the existing
 Company MCP, not a Claude-only service.
 
+## Current staged implementation — H6-A before H6-B
+
+Current protected Mastermind now includes the independently approved/merged #1191 interconnect
+repairs: original-parent continuation provenance, a durable pre-COMMIT effect fence, exact
+post-effect reconciliation and one Company carrier-composition seam. Those owners remain the
+transport/effect substrate; H6 does not rebuild them.
+
+The current #1240 successor source adds **H6-A only** inside
+`company_dialogue_runtime_binding.py`:
+
+- a trusted `CooPrincipalDialogueCaller` consumes the existing
+  `PrincipalAdmissionContext`, current capability-profile digest, reasoning surface,
+  `NewEffectGate`, accountable seat and owed seat;
+- `resolve_company_dialogue_principal_binding` joins that principal to one exact current
+  subordinate Job/Attempt, parent fingerprint, commission, operation/session identity, thread,
+  reply target, Company Dialogue attestation, target execution profile and RuntimeBinding
+  generation;
+- only an OPEN current new-effect gate with COO accountability/turn may resolve;
+- root-as-target, stale/inactive child, wrong mission/root, effect-fenced principal, reserved turn,
+  malformed reply target and lost Company attestation fail closed;
+- the returned evidence digest changes with principal authority/profile, reply target or child
+  RuntimeBinding generation.
+
+H6-A is deliberately **inert**. It does not extend the neutral V2 actor/message validator, change
+the Company MCP tool schema, send Slack, arm Wake or mutate Runtime. Its returned binding carries
+`RULING / CONTINUE / STOP` as the intended successor message family, but the current worker-only
+`CompanyDialogueGateway` still rejects that binding as `BINDING_UNAVAILABLE`. This refusal is an
+explicit regression test and is the safety fence between H6-A and H6-B.
+
+**H6-B** is a separate reviewed compatibility unit. Only after H1 supplies an exact admitted
+principal/profile generation may H6-B synchronize the neutral principal actor/message contract,
+principal-only Company MCP tool surface, gateway binding validation, Relay authorization, current
+carrier fresh-read, effect reconciliation, Wake applicability and provider/profile schema
+attestation. The existing worker tool catalog and worker actor semantics remain unchanged.
+
 ## Message operation and effect reconciliation
 
 The existing gateway resolves bound context for each call and keeps the generated message key for
@@ -126,7 +161,11 @@ requires a real complete principal → counterpart → return → continuation �
 same Executive/Agent OS mission identity, no Chairman message shuttling and no duplicate
 wake/job/session effects. A worker-only reporting loop or successful Slack post is insufficient.
 
-Ready source work: role-aware contract tests, adapter/binding design and owner-reviewed fixtures.
-Held until acceptance: neutral COO ruling semantics, live bound-carrier permission, exact native
-Wake target and Macro source publication authority. These are engineering gates under existing
-owners, not permission to invent a Claude inbox, thread registry or wake daemon.
+Current source candidate: H6-A pure principal/child binding plus adversarial tests. It is
+BUILT_NOT_PROVEN and intentionally unusable by the current worker-only gateway.
+
+Held for H6-B: neutral principal actor/message validation, principal-only Company MCP schema/tool
+exposure, live carrier fresh-read and send permission, exact Wake applicability, H1 native
+profile/schema admission and Macro source publication authority. These are engineering gates under
+existing owners, not permission to invent a Claude inbox, thread registry or wake daemon. H6 is
+not complete until the real reciprocal CONTINUE/STOP canary satisfies the original DONE WHEN.

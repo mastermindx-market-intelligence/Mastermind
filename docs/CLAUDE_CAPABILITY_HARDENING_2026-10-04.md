@@ -197,3 +197,43 @@ and H3 package contract, while H4 root and H6 scoped-ruling contracts proceed th
 existing owners after current custody is resolved. The remaining planning-file holds require a
 legitimate recovery condition, not another carrier/account/mode. Publication, exact-head CI,
 independent review, installation, selection, authentication and native acceptance remain distinct.
+
+
+## Current-base implementation checkpoint — H2/H3/H6-A
+
+Protected Mastermind was re-pinned to `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`, the
+merge that brought #1191's approved interconnect/effect-recovery substrate into protected master.
+The candidate branch then integrated that protected head before repairing H2 and building H6-A.
+It now contains protected #1191 plus the published H3 plugin and current H2 parity work.
+
+Hosted CI on H3 head `ffa0a496b66060010fa5ec8ce10d286cf20283a4` correctly failed because
+protected master added `operator.appserver.interactive.company-mcp.v1` after the parity manifest
+was authored. The guard refused the stale inventory rather than silently inheriting that capability.
+Current repair commit `b651df0a870df93b52648c84e0ebd635a3e9def1` explicitly classifies the
+new Company-MCP profile as **deferred** on CLI, Agent SDK, Desktop-local and inline-subagent. It is
+disabled and Codex App Server-specific; no Claude Company-MCP authority is auto-projected.
+
+H6-A is now a source candidate inside the existing Company Dialogue RuntimeBinding owner. It adds
+no message transport or tool. A trusted `CooPrincipalDialogueCaller` consumes the existing
+`PrincipalAdmissionContext`, capability-profile digest, current effect gate and COO turn facts.
+The resolver joins those to one exact live subordinate Job/Attempt, parent/commission identity,
+thread, reply target, Company Dialogue attestation, target execution profile and RuntimeBinding
+generation. Effect-fenced, reserved-turn, stale/inactive, wrong-root/workstream and malformed
+reply-target cases refuse. The resulting principal binding remains intentionally unusable by the
+current worker-facing Company MCP gateway, which returns `BINDING_UNAVAILABLE`; H6-B is therefore
+still required before any ruling can be sent.
+
+Current combined source validation across H2, H3, H6-A and the merged #1191 dialogue/effect substrate:
+**624 passed, three skipped**. The three skips are unchanged optional `mcp` import cases in
+`test_mastermind_company_mcp.py`; no dependency was installed and they are not claimed proven.
+Standalone Claude projection parity reports 10 canonical profiles, four configuration-supported
+pairs, 18 deferred and 18 unsupported, with production/native/catalog attestation all false.
+The design verifier remains `PASS_WITH_EXPLICIT_HOLDS`; its 80 acceptance scenarios are still
+`NOT_RUN`.
+
+#1191 is now merged after independent approval and exact-head CI. #1041 remains a separate active
+Draft owner for the deeper COO hierarchy/domain/CooCycle mechanics and must be reconciled rather than
+duplicated. #955 remains held on its OAuth issuer-consistency defect. H7's exact detailed-file write
+hold remains unchanged.
+
+**PROJECT_COMPLETE: false. H6-A: BUILT_NOT_PROVEN. H6-B/NATIVE_ACCEPTANCE: not proven.**
