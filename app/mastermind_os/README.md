@@ -118,6 +118,9 @@ in the Mastermind OS file `01M3NRCX55B452A12819WNE1RH`:
   scoped filtering, and source/access recovery.
 - **AT05/AT05M `L0Z-0` / `MNM-0`** and **AT06/AT06M `L3N-0` / `MNN-0`**
   define Knowledge and Search with qualified coverage and exact source destinations.
+- **AT02/AT02M `M4J-0` / `N28-0`** define project finding within the shown
+  scope, an exact project destination and same-list return. UX12 supplies the
+  filtered example and the distinct empty, limited, unavailable and unresolved states.
 - **AT07/AT07M `L6N-0` / `MNO-0`** now focus Sources/access on the actual
   reading task. **SA01/SA01M `T0U-0` / `T0V-0`** show the exact evidence read,
   partial content, separate freshness/clocks, bounded recheck and retained origin.
@@ -156,7 +159,7 @@ qualified separately from app adoption and installation; the specification
 preserves the original census and dated candidate observations.
 
 [Paper page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0)
-connects the route family through twelve editable workflow notes:
+connects the route family through thirteen editable workflow notes:
 
 - UX00 `PBO-0`: daily loop, roles and directory.
 - UX01 `PBP-0`: complete, partial, historical and unprojected Today states.
@@ -170,6 +173,7 @@ connects the route family through twelve editable workflow notes:
 - UX09 `SXU-0`: explicit excerpt/source-label insertion, draft/Undo states and source details.
 - UX10 `T7J-0`: Sources/access, independent read facts, exact evidence recheck and outcomes.
 - UX11 `T7K-0`: partial access, configured sign-in, pending/cancel state, protected-data clearing and actual return.
+- UX12 `T9B-0`: Projects Find/Clear, limited and empty states, exact opening and retained list position.
 
 The daily product shows what needs the Chairman's judgment and what the team
 owns. Meta-CEO remains one durable company office; project conversations retain
@@ -203,11 +207,20 @@ draft. Access loss clears protected content immediately; late reads cannot
 restore it. Preferences stays secondary to the current reading task. Current
 Connections is a Mission relationship view, not a source-inventory API.
 
+For everyday project finding, use AT02/AT02M and UX12. Find filters only admitted
+project titles or references. Clear removes the query, keeps the status facet
+and restores input focus. Counts describe shown rows; a no-match is different
+from an empty source, limited coverage or a failed read. Open uses the selected
+row's exact qualified project/root binding, and return restores the query,
+facet, selected row, position and actual focus. Active/Archived needs an owner-
+defined classification; local Find and richer return remain design requirements
+at the inspected protected source. New project is a separate creation-gated draft.
+
 The specification includes actual Paper action anchors, source-owner mappings,
 transition and recovery matrices, illustrative fixtures and fifteen
 implementation acceptance scenarios, extended for directory identity, message
 stages, source reading/reuse, draft revision, bounded evidence recheck, partial
-access, cancellation, IME and actual focus restoration. These scenarios and their
+access, cancellation, project filtering/return, IME and actual focus restoration. These scenarios and their
 extensions remain required and unexecuted by the design continuation.
 The current protected app remains a
 read-only consumer; general Search/Knowledge/source reuse, message send, project
