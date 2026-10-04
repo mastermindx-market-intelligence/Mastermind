@@ -637,6 +637,47 @@ Do not aggregate these into a 0-100 health score. A stale-but-complete dataset, 
 
 ---
 
+## Anomaly detection
+
+P0 anomaly detection should remain deterministic and inspectable:
+
+- fixed SLO breaches;
+- rolling median/MAD or robust z-score for row count, coverage and latency;
+- calendar-aware cadence deviations;
+- change-point flags only when enough clean history exists;
+- separate seasonal baselines for session/day/week effects where required.
+
+An anomaly is an observation, not a health verdict by itself. The contract determines severity. ML anomaly detection is P2 and must beat these deterministic baselines on false-positive/false-negative and operator-value metrics before promotion.
+
+## Legitimate LLM use
+
+Cheap LLMs may:
+
+- summarize a deterministic incident bundle for an owner;
+- explain which contract dimensions failed in plain language;
+- draft a ticket or operator handoff from cited receipts;
+- classify unstructured documentation into candidate metadata fields for human review;
+- produce a bounded daily digest of already-resolved health facts.
+
+Frontier LLMs may:
+
+- investigate a complex multi-repository incident after deterministic health has identified the affected assets;
+- propose competing root-cause hypotheses across lineage, schema, correction and consumer receipts;
+- reconcile ambiguous historical documentation during an audit;
+- review a proposed contract/schema change for hidden blast radius.
+
+Neither cheap nor frontier models may:
+
+- set health state;
+- set rights state;
+- invent missing timestamps or coverage denominators;
+- decide that a blind probe is healthy;
+- override an owner-native contract;
+- create portfolio/ranking/sizing authority;
+- silently repair or replay a failed producer.
+
+Every LLM output remains advisory and must cite the deterministic receipts it used.
+
 # G. Mastermind integration map
 
 | Producer / owner | Canonical owner-native artifact | Federation role | Consumer |
