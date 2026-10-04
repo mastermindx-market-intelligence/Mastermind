@@ -18,9 +18,9 @@ from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCO
 from control_plane.executive_runtime import Runtime
 from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.principal_projection import NeutralPrincipalProjection
-from integrations.slack_agent_dialogue.contract_v2 import validate_message_v2
+from integrations.slack_agent_dialogue.contract_v2 import validate_message_v2, validate_parent_v2
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
-from integrations.slack_agent_dialogue.service import CONTROL_VERSION_V2, call_service
+from integrations.slack_agent_dialogue.service import CONTROL_VERSION_V2, RELAY_PARENT_ATTESTATION, call_service
 from integrations.workspace_agent_runtime_binding import _read_current_target, _read_dialogue_source
 from control_plane.wake_ledger import LedgerPhase, wake_record_from_event
 from .dialogue_reply import AgentDialogueContinueWriter
@@ -354,7 +354,7 @@ class RuntimeSessionReturn:
         self._same_thread(value)
         return event, value, facts
 
-    def _same_thread(self, value):
+    def _same_thread(self, value, *, parent_fingerprint=None):
         # Parent messages may advance on this thread. No second physical thread
         # may be substituted; every matching Wake source is validated by its owner.
         events = self.runtime.events.list_events(job_id=value["job_id"], attempt_id=value["attempt_id"])
@@ -371,6 +371,8 @@ class RuntimeSessionReturn:
             physical, obligation = record.physical_source, record.obligation
             if (physical is None or obligation is None
                     or {k:getattr(physical,k) for k in ("workspace_id","channel_id","thread_ts")} != value["carrier"]
+                    or (parent_fingerprint is not None
+                        and physical.parent_fingerprint != parent_fingerprint)
                     or physical.candidate.root_job_id != value["root_job_id"]
                     or physical.candidate.job_id != value["job_id"]
                     or physical.candidate.attempt_id != value["attempt_id"]
@@ -381,6 +383,76 @@ class RuntimeSessionReturn:
             found = True
         if not found:
             raise ValueError("original physical carrier absent")
+
+    @staticmethod
+    def _continuation_messages(value, result):
+        if (result.get("thread_ts") != value["thread_ts"]
+                or result.get("historical_messages") != []
+                or type(result.get("mutated_count")) is not int
+                or result["mutated_count"] != 0
+                or not isinstance(result.get("messages"), list)
+                or len(result["messages"]) > 256):
+            raise ValueError("carrier changed")
+        messages = [validate_message_v2(item["message"]) for item in result["messages"]]
+        requests = [m for m in messages if m["message_key"] == value["request_message_key"]]
+        if (len(requests) != 1 or requests[0]["message_type"] != "CONTINUE"
+                or requests[0]["reply_to_message_key"] != value["predecessor_message_key"]
+                or requests[0]["actor_ref"] != {
+                    "kind": "executive_surface", "seat": "ceo", "reasoning_surface": "chatgpt"}
+                or requests[0]["body"].get("scope_change") is not False
+                or _digest({k: requests[0]["body"][k] for k in ("instruction", "stop_condition")})
+                   != value["input_sha256"]):
+            raise ValueError("original request unavailable")
+        if any(requests[0][k] != value["context"][k] for k in (
+                "applies_to", "work_ref", "commission_ref", "session_ref")):
+            raise ValueError("original request context changed")
+        return messages, requests[0]
+
+    async def _read_bound_parent(self, value):
+        response = await self.service_call(self.socket_path, {
+            "version": CONTROL_VERSION_V2, "operation": "read_bound_parent",
+            "args": {"context": value["context"], "thread_ts": value["thread_ts"]}})
+        if not isinstance(response, dict) or response.get("ok") is not True:
+            raise ValueError("canonical parent unavailable")
+        result = response["result"]
+        if (type(result) is not dict
+                or set(result) != {"attestation", "thread_ts", "parent"}
+                or result["attestation"] != RELAY_PARENT_ATTESTATION
+                or result["thread_ts"] != value["thread_ts"]):
+            raise ValueError("canonical parent binding changed")
+        parent = validate_parent_v2(result["parent"])
+        if any(parent[k] != value["context"][k] for k in (
+                "work_ref", "commission_ref", "session_ref", "operation_key", "watch_mode")):
+            raise ValueError("canonical parent context changed")
+        return parent
+
+    async def read_continuation_source(self, *, read_ref):
+        """Internal read for the root publisher; never a grant or public endpoint.
+
+        The immutable event already binds the authenticated original caller.
+        Publication separately requires the existing root transaction owner.
+        """
+        try:
+            event, value, _ = self._request(read_ref)
+            parent = await self._read_bound_parent(value)
+            self._same_thread(value, parent_fingerprint=parent["fingerprint"])
+            response = await self.service_call(self.socket_path, {
+                "version": CONTROL_VERSION_V2, "operation": "read_thread",
+                "args": {"context": value["context"], "thread_ts": value["thread_ts"]}})
+            if not isinstance(response, dict) or response.get("ok") is not True:
+                raise ValueError("canonical continuation unavailable")
+            _, message = self._continuation_messages(value, response["result"])
+            if await self._read_bound_parent(value) != parent:
+                raise ValueError("canonical parent changed during read")
+            after, _, _ = self._request(read_ref)
+            if after.to_dict() != event.to_dict():
+                raise ValueError("original authorization changed")
+            self._same_thread(value, parent_fingerprint=parent["fingerprint"])
+            return {"event": event.to_dict(), "request": value,
+                    "parent": parent, "message": message}
+        except Exception:
+            raise BridgeError("source_unavailable",
+                              "authorized canonical continuation is unavailable") from None
 
     async def resolve_read(self, *, principal, read_ref):
         try:
@@ -393,24 +465,7 @@ class RuntimeSessionReturn:
                 "args": {"context": value["context"], "thread_ts": value["thread_ts"]}})
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("carrier unavailable")
-            result = response["result"]
-            if (result.get("thread_ts") != value["thread_ts"]
-                    or result.get("historical_messages") != []
-                    or type(result.get("mutated_count")) is not int
-                    or result["mutated_count"] != 0
-                    or not isinstance(result.get("messages"), list)
-                    or len(result["messages"]) > 256):
-                raise ValueError("carrier changed")
-            messages = [validate_message_v2(item["message"]) for item in result["messages"]]
-            requests = [m for m in messages if m["message_key"] == value["request_message_key"]]
-            if (len(requests) != 1 or requests[0]["message_type"] != "CONTINUE"
-                    or requests[0]["reply_to_message_key"] != value["predecessor_message_key"]
-                    or requests[0]["actor_ref"] != {
-                        "kind": "executive_surface", "seat": "ceo", "reasoning_surface": "chatgpt"}
-                    or requests[0]["body"].get("scope_change") is not False
-                    or _digest({k: requests[0]["body"][k] for k in ("instruction", "stop_condition")})
-                       != value["input_sha256"]):
-                raise ValueError("original request unavailable")
+            messages, request = self._continuation_messages(value, response["result"])
             expected_reply_key = "asd-native-reply-" + hashlib.sha256(
                 ("mastermind.session_bridge.native_reply.v1\n" + value["operation_key"]).encode()
             ).hexdigest()[:40]
@@ -423,7 +478,7 @@ class RuntimeSessionReturn:
             if (reply["message_type"] != "PROGRESS" or reply["body"].get("stage") != "message_reply"
                     or any(reply[k] != value["context"][k] for k in (
                         "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))
-                    or any(requests[0][k] != value["context"][k] for k in (
+                    or any(request[k] != value["context"][k] for k in (
                         "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError("reply context changed")
             after, after_value, _ = self._request(read_ref)

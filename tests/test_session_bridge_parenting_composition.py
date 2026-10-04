@@ -4,6 +4,8 @@ Slack/provider effects and the native reply producer are fixture boundaries.
 This does not prove installed native consumption or a live parent roundtrip.
 """
 import asyncio
+import copy
+import pytest
 import os
 from decimal import Decimal
 
@@ -27,7 +29,7 @@ from integrations.session_bridge.native_reply import NativeReplyWriter
 from integrations.session_bridge.runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
 from integrations.session_bridge.runtime_return import RuntimeSessionReturn
 from integrations.slack_agent_dialogue.contract_v2 import (
-    build_message_v2, render_message_v2, render_parent_v2,
+    build_message_v2, build_parent_v2, render_message_v2, render_parent_v2,
 )
 from integrations.slack_agent_dialogue.engine import DialogueEngine, DialoguePolicy, SlackMessage
 from integrations.slack_agent_dialogue.engine_v2 import DialogueEngineV2
@@ -69,8 +71,9 @@ def _material(f, message):
     return obligation, physical
 
 
+@pytest.mark.parametrize("source_fault", [None, "parent_during_read", "foreign_parent_attestation"])
 def test_session_send_real_w3c_persists_once_and_original_parent_reads(
-    tmp_path, short_socket_root, monkeypatch,
+    tmp_path, short_socket_root, monkeypatch, source_fault,
 ):
     f = _strict_dialogue_runtime(tmp_path, monkeypatch, provider_session_id=NATIVE)
     # NativeReplyReader binds its default clock at import, so refresh the exact
@@ -163,6 +166,33 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
                                       in_reply_to=request_key).context
             view = await relay.engine_v2.read_thread(thread_ts=THREAD, context=context)
             continuation = next(x.message for x in view.messages if x.message["message_key"] == request_key)
+            if source_fault:
+                from integrations.session_bridge.schemas import BridgeError
+                original_call = returns.service_call
+                parent_reads = 0
+                async def changing_carrier(path, frame):
+                    nonlocal parent_reads
+                    response = await original_call(path, frame)
+                    if frame["operation"] == "read_bound_parent":
+                        parent_reads += 1
+                        if source_fault == "foreign_parent_attestation":
+                            response["result"]["attestation"] = "foreign"
+                        elif parent_reads == 2:
+                            changed = copy.deepcopy(response["result"]["parent"])
+                            changed.pop("fingerprint")
+                            changed["created_at"] = "2026-09-03T00:59:00Z"
+                            response["result"]["parent"] = build_parent_v2(changed)
+                    return response
+                returns.service_call = changing_carrier
+                with pytest.raises(BridgeError, match="canonical continuation"):
+                    await returns.read_continuation_source(read_ref=event.payload["read_ref"])
+                assert client.post_call_count == 1
+                return
+            source = await returns.read_continuation_source(read_ref=event.payload["read_ref"])
+            assert source["parent"] == f.parent
+            assert source["message"] == continuation
+            assert source["event"] == event.to_dict()
+            assert client.post_call_count == 1  # the read introduced no send
             obligation, physical = _material(f, continuation)
             route = route_obligation(obligation, f.registry, binding=f.binding)
             grant = DialogueWakeCanaryActivationGrant(
