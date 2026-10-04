@@ -479,7 +479,7 @@ class TestRuntimeRoots(unittest.TestCase):
             self.assertEqual(roots["gateway"], roots["base"] / "private-tunnel-gateway.mjs")
 
     def test_fabric_gateways_are_tailnet_adapters(self):
-        for account in ("fabric-read", "fabric-design"):
+        for account in ("fabric-read", "fabric-design", "fleet-host"):
             with self.subTest(account=account), IsolatedHome(account) as (_, _, roots):
                 self.assertEqual(roots["gateway"].name, "tailnet-gateway.mjs")
                 self.assertEqual(
@@ -652,7 +652,7 @@ class TestBuildConfig(unittest.TestCase):
 
 class TestTailnetFabricConfig(unittest.TestCase):
     def test_both_fabric_routes_stage_with_tailnet_gateway_and_verify_exact_install(self):
-        for account, port in (("fabric-read", 45117), ("fabric-design", 45118)):
+        for account, port in (("fabric-read", 45117), ("fabric-design", 45118), ("fleet-host", 45120)):
             with self.subTest(account=account), tempfile.TemporaryDirectory() as raw:
                 tmp = Path(raw)
                 home = tmp / "home"
@@ -686,7 +686,7 @@ class TestTailnetFabricConfig(unittest.TestCase):
                 )
 
     def test_only_fabric_routes_may_bind_exact_tailnet_origin(self):
-        for account in ("fabric-read", "fabric-design"):
+        for account in ("fabric-read", "fabric-design", "fleet-host"):
             with self.subTest(account=account):
                 self.assertEqual(
                     svc._validate_tailnet_public_url(
@@ -711,7 +711,7 @@ class TestTailnetFabricConfig(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 svc._validate_tailnet_public_url("fabric-read", value)
         with self.assertRaisesRegex(
-            SystemExit, "reserved for --account fabric-read\\|fabric-design"
+            SystemExit, "reserved for --account fabric-read\\|fabric-design\\|fleet-host"
         ):
             svc._validate_tailnet_public_url(
                 "chatgpt1", "https://m2.example-tailnet.ts.net"
