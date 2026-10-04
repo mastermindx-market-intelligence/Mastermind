@@ -19,7 +19,7 @@ receipts, GitHub + Agent OS durable refs, zero Chairman message carriage. Return
 - GitHub issue #1143 `[ASTRA HANDOFF][PART 2/2] Exact-session interconnect` = live HOST carrier (install/acceptance/service-control/arm effects).
 - Carrier PRs: #811 #1145 #1041 #1157 #1166 #1169 #1204 #1218 #1219 #1178 #1176 #1175 (+adjacent #1150/#1046 #955 #908 #892 #1201).
 - LAST CONSUMED EDGE: #1143 comment 2026-10-04T02:51:53Z (mastermindx-3 `REQUEST_DIAGNOSIS` — external V3 1.4 reader `backend_unavailable`, diagnose before full fabric arm).
-- Slack ACK root ts: PENDING (see §8).
+- Slack ACK root: C0BSBM78V1N ts `1791083562.416539` (https://mastermindxgroup.slack.com/archives/C0BSBM78V1N/p1791083562416539), posted 2026-10-04T03:12Z. START not yet posted.
 
 ## 2 Wave plan
 | wave | lanes | gate (written before launch) | status |
@@ -41,10 +41,11 @@ PRE-MORTEM (W1–W4):
 | lane | owner/tier | owned files | worktree/branch | sentinel/artifact | budget | state | last verified (UTC, how) | watcher |
 |---|---|---|---|---|---|---|---|---|
 | C0 host diag+arm | #1143 incumbent host owner (effects), Sol C3 directs | host only | n/a | #1143 comments | n/a | RUNNING (not mine) | 02:51Z gh issue view | none (consume on cycle) |
-| L1 Phase-3 audit | Opus auditor READ_ONLY | none (read-only) | reads W + $S/pr*.diff | return packet | 1 turn | PLANNED | — | — |
-| L2 Phase-2 audit | Opus auditor READ_ONLY or pool review | none | reads W + $S/pr*.diff | return packet | 1 turn | PLANNED | — | — |
+| L1a #811/#1145 disposition | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none (read-only) | reads W + S/pr811|1145.diff | return packet (agent notification); packet copy S/L1a.md | 1 turn | LAUNCHING 03:2xZ | — | agent completion notification |
+| L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn | LAUNCHING 03:2xZ | — | agent completion notification |
+| L2 release/install train | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W/ops/executive_os + S/pr{1157,1166,1169,1204,1219,1178,1176,1175}.diff + S/issue1143.md | return packet; S/L2.md | 1 turn | LAUNCHING 03:2xZ | — | agent completion notification |
 | L3 seat records | Fable | this file; agentos handoff (Macro) | W branch | commits | — | RUNNING | now | — |
-| L4 #1218 gate | Fable shepherd (Ryan owns PR) | none | n/a | `test` check run 37171665089 | until concluded | RUNNING | 02:52Z gh pr view | TBD |
+| L4 #1218 gate | Ryan = incumbent writer/repairer; Fable shepherds | none | PR branch (Ryan) | new headRefOid on #1218 | custody tripwire 2026-10-04T04:45Z | WAITING_REPAIR (CI FAILED D8 03:01Z; C3 repair review 03:07Z) | 03:09Z gh api | S/watch_1218_1143.out (one process, polls #1218 head + #1143 comment count every 600 s, exits on first edge) |
 
 ## 4 Ledger
 DECIDED:
@@ -52,6 +53,8 @@ DECIDED:
 - #1143 host owner retains every host effect; Fable consumes receipts, never installs/arms/ingresses — 2026-10-04.
 - ARMED requires a successor release: #1218 proves 03f7ca04's arm gate refuses (distnoted under worker UID); fix is source-only → the next host cycle installs M' ⊇ #1218. Train composition = open RULING (L1/L2 feed it) — 2026-10-04.
 FACTS:
+- #1218 required CI run 37171665089 FAILED 03:01:49Z: tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults, scanner reports ['_mastermind_worker'] (added-line identity literal in ops/executive_os/autonomy_control.py:2491). Sol C3 review 03:07:23Z: preserve the canonical identity lookup block byte-for-byte and unpack it; no alias/exemption; commit, re-run node + arm/ambient cohort, new exact head, required CI (S/run37171665089.failed.log) — 2026-10-04.
+- merge-tree census vs master 84df2980 (S/merge_census.txt, 03:15Z): #811 CONFLICT only tests/test_executive_supervisor.py (control_plane/executive_supervisor.py auto-merges; 40 master commits since base); #1145 merge-base = 84df2980, clean (already rebased, 3 commits); #1041 clean (44 master commits since base; auto-merges on executive_agent_capabilities/executive_runtime/executive_service/test_runtime_binding_projection); #1157 #1166 #1169 #1204 #1218 #1219 clean; #1178 CONFLICT 5 files; #1176 CONFLICT install.sh; #1175 CONFLICT scripts/mmx_admin.py. Textual only; semantic checks = audits — 2026-10-04.
 - Installed/accepted release 03f7ca04 at `/Library/Application Support/MastermindExecutive/releases/03f7ca04…`; LaunchDaemons re-registered 2026-10-03 19:19 PDT, mcp plist 19:35 PDT (ls -la /Library/LaunchDaemons) — 2026-10-04.
 - `config/autonomy-state-v1.json`: DISARMED, txn autonomy-c0538bc69589, observed 02:26:15Z, acceptance_passed=false gate_b_passed=false provider_readiness_passed=false runtime_quiescent=false (cat) — 2026-10-04.
 - `config/ceo-submit-state-v1.json`: CEO_SUBMIT_DISARMED, ceo_submit_armed=false, coo_autonomy_armed=false, coo_operator_harness_armed=false, ceo_ingress_app_armed=true, projection bound to 7cff784b observed 2026-10-03T20:05Z (stale vs installed) — 2026-10-04.
@@ -65,7 +68,7 @@ OPEN:
 - Minimal reproducible install/upgrade/rollback/arm path and which of #1157/#1166/#1169/#1204/#1178/#1176/#1219 belong to the train — L2.
 - Acceptance scenario product task (bounded, low-risk, needs code+browser proof+decision boundary) — Fable, W2.
 - Capability status for browser/devserver worker resource and ASD DECISION_REQUEST path on current master — W2 check.
-NEXT: post ACK; launch L1/L2; arm watcher on #1218 `test`; seat-split note on #1143.
+NEXT: launch L1a/L1b/L2 audits; seat-split note on #1143; custody tripwire note on #1218; arm the #1218/#1143 edge watcher; post START in the Slack root thread once lanes are live; then consume audit returns → Phase-1 disposition table → train RULING.
 
 ## 5 Open rulings / holds
 - #1143 ownership: host effects = incumbent owner; CEO ingress/app = Sol C3. Fable = source estate / release train / acceptance integration. (To post.)
@@ -85,4 +88,4 @@ NEXT: post ACK; launch L1/L2; arm watcher on #1218 `test`; seat-split note on #1
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
-1. Post PICKUP_ACK in #agent-dispatch; record ts here. 2. Commission L1/L2 audits. 3. Watcher on #1218 run 37171665089. 4. Seat-split note on #1143.
+1. (done 03:12Z) PICKUP_ACK posted. 2. Commission L1a/L1b/L2 audits (native Opus, read-only). 3. Watcher on #1218 head + #1143 comments. 4. Seat-split note on #1143; tripwire note on #1218. 5. START post in the Slack root thread. 6. Consume audits → disposition table → RULING.
