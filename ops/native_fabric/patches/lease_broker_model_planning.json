@@ -1,0 +1,11 @@
+{
+  "schema": "mastermind.native_pool_patch_evidence/v1",
+  "source_name": "existing_native_pool/ext/lease_broker.py",
+  "before_sha256": "ff6fe4b949d6be7d985370d4629c407b5f6fe9ad638170224a55aa902d85d364",
+  "after_sha256": "f021556c2e1b20de359ac6bdcc4833c1dcaaf4dc9dbebecac19a4a8d350454bb",
+  "patch_sha256": "0dfd290a7c7e937605020309f95c507808bcb1e2aa243b5571426b4f0e647dcd",
+  "state": "SOURCE_CANDIDATE_NOT_INSTALLED",
+  "broker_lifecycle_changed": false,
+  "quota_arithmetic_added": false,
+  "live_lease_store_touched": false
+}
