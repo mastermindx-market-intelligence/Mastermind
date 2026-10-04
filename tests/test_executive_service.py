@@ -10771,3 +10771,71 @@ def test_maintenance_workspace_materializes_exact_frozen_root_once(tmp_path, sho
         finally:
             await service.close()
     asyncio.run(scenario())
+
+@pytest.mark.parametrize("fault", [
+    None, "parent", "root", "depth", "role", "provenance", "worktree", "branch",
+    "profile", "base", "quota", "binary", "native_to_closed",
+])
+def test_ceo_only_root_keeps_sealed_binding_after_same_release_arm(
+    tmp_path, short_socket_root, monkeypatch, fault
+):
+    from ops.executive_os import acceptance_maintenance as maintenance
+
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt = service._submit_service_intent(_coo_intent(service.config, "same-base"))
+            root = service.runtime.jobs.get_job(receipt["job_id"])
+            admitted = root.to_dict()
+            service.config = dataclasses.replace(
+                service.config, coo_autonomy_armed=True, coo_operator_harness_armed=True
+            )
+            service._coo_execution_binding = service._load_coo_execution_binding()
+            # Same-release roots cannot borrow the maintenance carry exception.
+            def no_maintenance(sha):
+                raise AssertionError("same-base root consulted maintenance evidence")
+            monkeypatch.setattr(maintenance, "descriptor_for", no_maintenance)
+            changes = {
+                "parent": {"parent_job_id": "JOB-other"},
+                "root": {"root_job_id": "JOB-other"},
+                "depth": {"depth": 1},
+                "role": {"orchestration_role": "plan"},
+                "provenance": {"orchestration_provenance": {
+                    **root.orchestration_provenance, "creator": "other"
+                }},
+                "worktree": {"worktree": None},
+                "branch": {"branch": None},
+                "profile": {"constraints": dict(root.constraints, execution_profile_digest="c"*64)},
+                "quota": {"constraints": dict(root.constraints, operator_eligible_quota_classes=["other"])},
+                "binary": {"constraints": dict(root.constraints, operator_harness_binary_digest="c"*64)},
+            }
+            if fault == "base":
+                # A base mismatch must still take the existing maintenance path.
+                monkeypatch.setattr(maintenance, "descriptor_for", lambda sha: None)
+                root = dataclasses.replace(root, constraints=dict(root.constraints, base_sha="c"*40))
+            elif fault == "native_to_closed":
+                root = dataclasses.replace(root, constraints=dict(root.constraints, operator_harness_armed=True))
+                service.config = dataclasses.replace(
+                    service.config, coo_autonomy_armed=False, coo_operator_harness_armed=False
+                )
+                service._coo_execution_binding = service._load_coo_execution_binding()
+            elif fault:
+                root = dataclasses.replace(root, **changes[fault])
+            if fault:
+                assert not service._is_bound_coo_root(root)
+                return
+            assert service._is_bound_coo_root(root)
+            assert service._coo_binding_for_root(root)["operator_harness_armed"] is False
+            planner = service.runtime.jobs.create_cycle_planner(
+                root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+            )
+            assert planner.constraints["execution_profile_id"] == root.constraints["execution_profile_id"]
+            assert planner.constraints["eligible_quota_classes"] == root.constraints["eligible_quota_classes"]
+            assert "harness_binary_digest" not in planner.constraints
+            assert "harness_version" not in planner.constraints
+            assert service._require_bound_coo_job(planner).job_id == root.job_id
+            assert service.runtime.jobs.get_job(root.job_id).to_dict() == admitted
+        finally:
+            await service.close()
+    asyncio.run(scenario())

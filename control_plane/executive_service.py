@@ -5846,6 +5846,18 @@ class ExecutiveControlService:
         raw = self._require_current_coo_binding()
         normalized = _normalise_constraints(raw)
         normalized["work_placement_union"] = _normalise_work_placement_union(raw["work_placement_union"])
+        # CEO-only intake freezes the closed harness into this root. A later
+        # host arm supplies capacity; it does not promote that admitted root
+        # into a native operator. Preserve only this one-way, same-base change
+        # after checking the complete remaining binding and strict root identity.
+        sealed = dict(normalized, operator_harness_armed=False)
+        if (
+            self._has_strict_coo_root_identity(root)
+            and normalized["operator_harness_armed"] is True
+            and root.constraints.get("operator_harness_armed") is False
+            and all(root.constraints.get(key) == value for key, value in sealed.items())
+        ):
+            return dict(raw, operator_harness_armed=False)
         try:
             effective = frozen_binding(root, normalized, self._require_runtime().store)
         except (MaintenanceError, OSError, ValueError) as exc:
@@ -5853,10 +5865,8 @@ class ExecutiveControlService:
         return dict(raw, base_sha=effective["base_sha"],
                     operator_harness_armed=effective["operator_harness_armed"])
 
-    def _is_bound_coo_root(self, root: Job) -> bool:
-        raw_binding = self._coo_binding_for_root(root)
-        binding = _normalise_constraints(raw_binding)
-        binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
+    @staticmethod
+    def _has_strict_coo_root_identity(root: Job) -> bool:
         provenance = root.orchestration_provenance
         return bool(
             root.parent_job_id is None
@@ -5872,7 +5882,14 @@ class ExecutiveControlService:
             and provenance.get("parent_job_id") is None
             and root.worktree is not None
             and root.branch is not None
-            and all(root.constraints.get(key) == value for key, value in binding.items())
+        )
+
+    def _is_bound_coo_root(self, root: Job) -> bool:
+        raw_binding = self._coo_binding_for_root(root)
+        binding = _normalise_constraints(raw_binding)
+        binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
+        return self._has_strict_coo_root_identity(root) and all(
+            root.constraints.get(key) == value for key, value in binding.items()
         )
 
     def _require_bound_coo_job(self, job: Job) -> Job:
