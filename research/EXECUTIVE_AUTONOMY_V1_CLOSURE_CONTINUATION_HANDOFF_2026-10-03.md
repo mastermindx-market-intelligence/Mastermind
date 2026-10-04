@@ -77,6 +77,17 @@ OPEN:
 - Acceptance-op product anchor: P0 PRODUCT_TRUST_COHERENCE; WS-MARKET-OS A2-A6 (dependency-eligible, 'one independently useful vertical at a time') and B1B-B6 are candidate pools; choose one bounded UI slice after L3 — Fable.
 NEXT: launch L1a/L1b/L2 audits; seat-split note on #1143; custody tripwire note on #1218; arm the #1218/#1143 edge watcher; post START in the Slack root thread once lanes are live; then consume audit returns → Phase-1 disposition table → train RULING.
 
+### 4d Cycle 05:21–05:27Z — carrier consumed, Macro records PR armed, §9 candidate refuted
+FACTS:
+- Macro PR #8410 (Agent OS WS/DEC/DSC): `ci-authority/codex/merge-queue-pilot` FAIL is the by-design inactive-base-context receipt (`.github/workflows/ci-authority.yml` header; `scripts/merge_on_green.py` `CI_AUTHORITY_INACTIVE_CONTEXT`, excluded from the sweeper verdict; identical FAIL on merged 8407/8396/8388/8387). Binding `ci-authority/main` PASS; ci-plan PASS; fence-pack PASS; ci-pack-0 + contract-delta PENDING at 05:21Z. `merge-on-green` applied 05:24:50Z → sweeper owns the interval; desktop CI monitor bound. Rung: CI (pending).
+- #1143 edge 05:17:34Z (26→27) = my own correction comment 5976841681 (05:13:14Z). No counterpart edge on #1143 after the last consumed edge 04:42:25Z. watch4 ARMED 05:17:59Z (1143=27, 811=cb8f1586:46, master=a2646f45).
+- Slack root-thread read (oldest 1791090788.888659) failed twice ~05:22Z (PreToolUse hook timeout, "host client may be unreachable"); connector status = connected. PARKED to the next cycle (06:30Z wake re-reads Slack). Last successful Slack read ≈05:15Z.
+- §9 PRODUCT TASK candidate REFUTED as a gap (O.13): master already renders EFFECT_UNKNOWN roots distinctly — `app/static/chairman_control/control_room.js` :1498 "Effect not confirmed", :1510/:1580 `is-danger`, :1611 "W3C EFFECT UNKNOWN", :1666 hold law; `control_plane/chairman_control_room.py` :1705-1706 sets `effect_state=effect_unknown`.
+- Replacement pool: WS-CHAIRMAN-CONTROL-ROOM (owner ceo-sol) open waves P0B/SC1 in_progress, ASD-A2/A3/A4 todo; ASD-A4 is gated ("only after P0B and ASD-A3 are independently accepted") → EXCLUDED as the acceptance slice. Next pool under verification: documented DEVIATIONS (Steward/spec mismatches) in `control_plane/autonomy_control_room_projection.py` — a bounded, reviewable, browser-visible slice with a genuine Sol decision boundary (spec vs Steward).
+OPEN:
+- Replacement acceptance product slice (bounded, low-risk, Control Room surface, code+review+B1 proof+decision boundary) — Fable, this cycle.
+NEXT: verify DEVIATIONS pool → write the replacement candidate into §9 (still NOT FROZEN; R1–R4 unchanged); consume watch4 / 06:30Z timer / Slack ruling; no host act.
+
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
 |---|---|---|---|---|
@@ -118,6 +129,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 05:27Z: Phase 4 still HELD on the coexistence ruling. Macro #8410 armed `merge-on-green` (sweeper → MERGED). §9 candidate refuted → select a replacement slice from the Control Room DEVIATIONS pool (verify first). Independent lanes unchanged: #811 tripwire 06:30Z; watch4; Slack re-read at the next cycle. No host act.
 - 05:15Z: Phase 4 HELD on the coexistence ruling (options a/b/c requested). Independent lanes: #811 tripwire 06:30Z (custody transfer + bounded pool lane if silent); Agent OS WS/DEC/DSC Macro PR; consume next watcher edge. No host act.
 1. (done 03:12Z) PICKUP_ACK posted. 2. Commission L1a/L1b/L2 audits (native Opus, read-only). 3. Watcher on #1218 head + #1143 comments. 4. Seat-split note on #1143; tripwire note on #1218. 5. START post in the Slack root thread. 6. Consume audits → disposition table → RULING.
 
@@ -125,7 +137,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 
 FREEZE PRECONDITIONS: (R1) the coexistence ruling (option a/b/c, §4c); (R2) written Sol/Chairman acceptance of the narrower equivalents N5/N7/N8/N11/N12/N14 below; (R3) host-owner receipts: CP-1 first normal arm on a2646f45 + S0' rehearsal (arm → COO reconciles JOB-003/event56 → disarm → arm → disarm), CP-5 B1 qualification canary (installed runtime digest + harmless canary receipt); (R4) #811 repaired, reviewed, merged and installed (train).
 
-PRODUCT TASK (candidate, to verify against control_plane/chairman_control_room.py before freeze): one bounded Chairman Control Room UI slice under P0 CHAIRMAN_COGNITION_AUTONOMY / WS:CHAIRMAN-CONTROL-ROOM — present EFFECT_UNKNOWN roots distinctly from blocked/terminal roots in the roots view. Why this surface: the only reviewed B1 devserver manifest is config/worker_browser_b1_control_room_devserver.json → scripts/chairman_control_room.py; a Macro/Terminal/Prophet slice has no manifest and would block step 7. It needs code, review, visible browser proof (1440×900 + 390×844 via B1) and a genuine decision boundary: whether an EFFECT_UNKNOWN root renders as Chairman-facing "attention required" or COO-facing "reconciling" — a product-semantics fork only Sol rules.
+PRODUCT TASK: **candidate #1 REFUTED 05:25Z** (EFFECT_UNKNOWN roots are already presented distinctly on master — see §4d). Surface constraint stands: the only reviewed B1 devserver manifest is config/worker_browser_b1_control_room_devserver.json → scripts/chairman_control_room.py, so the slice must live in the Chairman Control Room (P0 CHAIRMAN_COGNITION_AUTONOMY / WS:CHAIRMAN-CONTROL-ROOM, owner ceo-sol). ASD-A4 is EXCLUDED (gated on P0B + ASD-A3 acceptance). Candidate #2 under verification: resolve one documented DEVIATION (Steward/spec mismatch) in control_plane/autonomy_control_room_projection.py whose rendering is visible in the roots view — the decision boundary is which side wins (spec vs Steward), a product-semantics fork only Sol rules. Still needs code, independent review, B1 proof at 1440×900 + 390×844.
 
 ROOT: exactly one submit_ceo_intent by Sol, new linked operation_key (executive-os-autonomy-v1-acceptance-<date>-sol-001), Chairman outcome text given once (step 1), admitted in the order the ruling fixes. QUEUED only at admission.
 
