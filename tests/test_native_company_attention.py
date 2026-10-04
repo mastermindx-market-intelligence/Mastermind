@@ -133,6 +133,20 @@ def test_foreign_completion_does_not_publish_company_projection():
     assert sum(method == "turn/start" for method, _ in client.calls) == 1
 
 
+def test_conflicting_inner_thread_completion_does_not_publish_company_projection():
+    conflicting = completion()
+    conflicting["params"]["turn"]["threadId"] = "foreign-inner-thread"
+    adapter, state, client = subject([item(), conflicting])
+    first = deliver(adapter)
+    assert first.accepted and not first.delivered
+    assert first.company_read_projection is None
+    assert state.attention_inflight and len(client.notifications) == 2
+    client.notifications.append(completion())
+    reconciled = adapter._reconcile_late_attention_completion(state)
+    assert reconciled.delivered and reconciled.company_read_projection is not None
+    assert sum(method == "turn/start" for method, _ in client.calls) == 1
+
+
 def test_exact_attention_completion_keeps_receipt_before_foreign_completion():
     adapter, _, client = subject([item(), completion(threadId="foreign"), completion(), item()])
     observation = deliver(adapter)
