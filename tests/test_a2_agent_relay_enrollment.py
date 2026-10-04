@@ -104,7 +104,11 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
             for action in subparser._actions
             for option in getattr(action, "option_strings", ())
         }
-    assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "verify"}
+    assert set(parser._subparsers._group_actions[0].choices) == {
+        "enroll",
+        "prepare-disabled",
+        "verify",
+    }
     assert "--expected-bot-user-id" in options
     assert {"--token", "--workspace", "--channel", "--config", "--plist"}.isdisjoint(
         options
@@ -287,6 +291,43 @@ def test_production_main_allows_non_tty_verify_without_isatty(monkeypatch):
     assert verify_calls == [BOT]
     assert json.loads(stdout.getvalue()) == {
         "action": "verified",
+        "release_sha": "f" * 40,
+        "schema": "mastermind.a2_agent_relay_enrollment.v1",
+        "status": "PASS",
+    }
+
+
+def test_production_main_prepare_disabled_never_requires_tty_or_token(monkeypatch):
+    enrollment = _module()
+    stdout = io.StringIO()
+    prepare_calls: list[bool] = []
+    stdin = _NoTokenRead()
+
+    def fake_prepare_disabled():
+        prepare_calls.append(True)
+        return {"action": "prepared_disabled", "release_sha": "f" * 40}
+
+    monkeypatch.setattr(
+        enrollment.sys,
+        "argv",
+        ["a2_agent_relay_enrollment.py", "prepare-disabled"],
+    )
+    monkeypatch.setattr(enrollment.sys, "stdin", SimpleNamespace(buffer=stdin))
+    monkeypatch.setattr(enrollment.sys, "stdout", stdout)
+    monkeypatch.setattr(enrollment.os, "environ", {"SAFE": "1"})
+    monkeypatch.setattr(
+        enrollment.os,
+        "isatty",
+        lambda _descriptor: (_ for _ in ()).throw(
+            AssertionError("prepare-disabled must not inspect TTY state")
+        ),
+    )
+    monkeypatch.setattr(enrollment, "_prepare_disabled", fake_prepare_disabled)
+
+    assert enrollment.main() == 0
+    assert prepare_calls == [True]
+    assert json.loads(stdout.getvalue()) == {
+        "action": "prepared_disabled",
         "release_sha": "f" * 40,
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
         "status": "PASS",
@@ -1215,6 +1256,181 @@ def _install_canonical_host_gate_fakes(
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
     return library, support, system_root
+
+
+def _install_prepare_disabled_fakes(
+    monkeypatch,
+    enrollment,
+    tmp_path: Path,
+    *,
+    disabled: bool = False,
+    loaded: bool = False,
+):
+    config_parent = tmp_path / "config"
+    config_parent.mkdir(mode=0o755)
+    token_path = config_parent / "agent-relay.token"
+    config_path = config_parent / "agent-relay.json"
+    plist_path = tmp_path / "agent-relay.plist"
+    monkeypatch.setattr(enrollment, "TOKEN_PATH", token_path)
+    monkeypatch.setattr(enrollment, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(enrollment, "PLIST_PATH", plist_path)
+    monkeypatch.setattr(
+        enrollment, "_assert_host_identity_prepared", lambda: "d" * 40
+    )
+    monkeypatch.setattr(enrollment, "_assert_bound_config_current", lambda _binding: None)
+    state = {"disabled": disabled, "loaded": loaded}
+    monkeypatch.setattr(
+        enrollment.c1_enrollment,
+        "_launchd_loaded",
+        lambda _label: state["loaded"],
+    )
+    monkeypatch.setattr(
+        enrollment.c1_enrollment,
+        "_launchd_disabled",
+        lambda _label: state["disabled"],
+    )
+
+    def open_binding():
+        descriptor = os.open(config_parent, os.O_RDONLY | os.O_DIRECTORY)
+        info = os.fstat(descriptor)
+        return enrollment._BoundDirectory(  # noqa: SLF001
+            descriptor=descriptor,
+            device=info.st_dev,
+            inode=info.st_ino,
+            relay_gids=frozenset({os.getegid()}),
+        )
+
+    monkeypatch.setattr(enrollment, "_open_bound_config_directory", open_binding)
+    return state, (token_path, config_path, plist_path)
+
+
+def test_prepare_disabled_owns_only_exact_relay_disable_and_reads_back(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    state, paths = _install_prepare_disabled_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((list(argv), dict(kwargs)))
+        state["disabled"] = True
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(enrollment.subprocess, "run", fake_run)
+
+    receipt = enrollment._prepare_disabled()  # noqa: SLF001
+
+    assert receipt == {"action": "prepared_disabled", "release_sha": "d" * 40}
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == [
+        "/bin/launchctl",
+        "disable",
+        "system/com.mastermind.executive.agent-relay",
+    ]
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["timeout"] == 5
+    assert state == {"disabled": True, "loaded": False}
+    assert not any(path.exists() for path in paths)
+
+
+def test_prepare_disabled_is_idempotent_without_launchctl_when_already_disabled(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    _state, paths = _install_prepare_disabled_fakes(
+        monkeypatch, enrollment, tmp_path, disabled=True
+    )
+    monkeypatch.setattr(
+        enrollment.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("already-disabled host must not be mutated")
+        ),
+    )
+
+    assert enrollment._prepare_disabled() == {  # noqa: SLF001
+        "action": "already_disabled",
+        "release_sha": "d" * 40,
+    }
+    assert not any(path.exists() for path in paths)
+
+
+def test_prepare_disabled_refuses_loaded_or_enrolled_host_before_mutation(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    state, paths = _install_prepare_disabled_fakes(
+        monkeypatch, enrollment, tmp_path, loaded=True
+    )
+    calls: list[object] = []
+    monkeypatch.setattr(
+        enrollment.subprocess,
+        "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    with pytest.raises(
+        enrollment.A2EnrollmentError, match="A2_ENROLLMENT_HOST_REFUSED"
+    ):
+        enrollment._prepare_disabled()  # noqa: SLF001
+    assert calls == []
+
+    state["loaded"] = False
+    paths[0].write_bytes(b"preexisting")
+    with pytest.raises(
+        enrollment.A2EnrollmentError, match="A2_ENROLLMENT_EXISTING_REFUSED"
+    ):
+        enrollment._prepare_disabled()  # noqa: SLF001
+    assert calls == []
+
+
+def test_prepare_disabled_reconciles_lost_command_result_without_replay(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    state, paths = _install_prepare_disabled_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    calls: list[list[str]] = []
+
+    def lost_after_effect(argv, **_kwargs):
+        calls.append(list(argv))
+        state["disabled"] = True
+        raise subprocess.TimeoutExpired(argv, 5)
+
+    monkeypatch.setattr(enrollment.subprocess, "run", lost_after_effect)
+
+    assert enrollment._prepare_disabled() == {  # noqa: SLF001
+        "action": "prepared_disabled_recovered",
+        "release_sha": "d" * 40,
+    }
+    assert len(calls) == 1
+    assert not any(path.exists() for path in paths)
+
+
+def test_prepare_disabled_preserves_effect_unknown_when_readback_cannot_prove_state(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    _state, paths = _install_prepare_disabled_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    calls: list[list[str]] = []
+
+    def lost_unknown(argv, **_kwargs):
+        calls.append(list(argv))
+        raise subprocess.TimeoutExpired(argv, 5)
+
+    monkeypatch.setattr(enrollment.subprocess, "run", lost_unknown)
+
+    with pytest.raises(
+        enrollment.A2EnrollmentError, match="A2_ENROLLMENT_EFFECT_UNKNOWN"
+    ):
+        enrollment._prepare_disabled()  # noqa: SLF001
+    assert len(calls) == 1
+    assert not any(path.exists() for path in paths)
 
 
 def test_host_gate_refuses_intermediate_credential_symlink(monkeypatch, tmp_path: Path):
