@@ -175,3 +175,37 @@ def test_check_accepts_current_production_shapes(tmp_path: Path) -> None:
 
     assert mod.is_hardened(mod.load_and_validate(mcp_path, "mcp"))
     assert mod.is_hardened(mod.load_and_validate(tunnel_path, "tunnel"))
+
+
+def test_installed_tunnel_path_is_exact_and_user_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "com.mastermind.executive.tunnel.plist"
+    value = _tunnel(tmp_path)
+    value["KeepAlive"] = True
+    value["ThrottleInterval"] = 10
+    _write(path, value)
+    path.chmod(0o600)
+    monkeypatch.setattr(mod, "_canonical_path", lambda target: path)
+
+    mod._require_installed_path(path, "tunnel")
+
+    other = tmp_path / "lookalike.plist"
+    _write(other, value)
+    other.chmod(0o600)
+    with pytest.raises(
+        mod.NetworkLaunchdContractError, match="canonical installed tunnel path"
+    ):
+        mod._require_installed_path(other, "tunnel")
+
+
+def test_installed_tunnel_path_refuses_wrong_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "com.mastermind.executive.tunnel.plist"
+    _write(path, _tunnel(tmp_path))
+    path.chmod(0o644)
+    monkeypatch.setattr(mod, "_canonical_path", lambda target: path)
+
+    with pytest.raises(mod.NetworkLaunchdContractError, match="mode must be 0600"):
+        mod._require_installed_path(path, "tunnel")
