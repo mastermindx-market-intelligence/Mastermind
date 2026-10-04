@@ -41,8 +41,8 @@ PRE-MORTEM (W1–W4):
 | lane | owner/tier | owned files | worktree/branch | sentinel/artifact | budget | state | last verified (UTC, how) | watcher |
 |---|---|---|---|---|---|---|---|---|
 | C0 host diag+arm | #1143 incumbent host owner (effects), Sol C3 directs | host only | n/a | #1143 comments; Fable seat-split note = issuecomment-5976104646 | n/a | RUNNING (not mine) | 03:20Z gh issue view (no new edge) | S/watch_1218_1143.out |
-| L1a #811/#1145 disposition | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none (read-only) | reads W + S/pr811|1145.diff | return packet (agent notification); packet copy S/L1a.md | 1 turn (+1 nudge) | RUNNING; hit 12-turn harness cap 03:27Z mid-read → nudged once to continue | 03:27Z notification | agent completion notification |
-| L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn (+1 nudge) | RUNNING (launched 03:25Z) | — | agent completion notification |
+| L1a #811/#1145 disposition | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none (read-only) | reads W + S/pr811|1145.diff | return packet (agent notification); packet copy S/L1a.md | 1 turn (+1 nudge) | DELIVERED 03:58Z, ACCEPTED (PARTIAL: no git-history view; all 6 items answered) | 03:58Z return packet | — |
+| L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn (+1 nudge) | DELIVERED 03:50Z, ACCEPTED after seat spot-check (SCHEMA_VERSION 5→6, M2 v6 reservation, max_depth 1→2 all confirmed) | 03:55Z grep | — |
 | L2 release/install train | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W/ops/executive_os + S/pr{1157,1166,1169,1204,1219,1178,1176,1175}.diff + S/issue1143.md | return packet; S/L2.md | 1 turn (+1 nudge) | RUNNING; hit 12-turn harness cap 03:27Z at inventory stage → nudged once | 03:27Z notification | agent completion notification |
 | L3 seat records | Fable | this file; agentos handoff (Macro) | W branch | commits | — | RUNNING | now | — |
 | L3 Phase-5 readiness census | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W, MACRO agentos, S/packet.md, S/issue1143.md | return packet; S/L3.md | 1 turn (+1 nudge) | LAUNCHING 03:45Z | — | agent completion notification |
@@ -50,6 +50,7 @@ PRE-MORTEM (W1–W4):
 
 ## 4 Ledger
 DECIDED:
+- #1041 = should_close_unmerged; #811 = needs_current_base_repair (7-step spec posted on #811, custody tripwire 05:30Z); #1145 = still_required but V1.x-inert, not in the V1 train — 2026-10-04 ~04:00Z, from L1a/L1b packets + spot-checks.
 - START posted 03:19Z once Phase-1 audit lanes were live; host effects remain EFFECT_NONE from this seat — 2026-10-04.
 - Native Opus auditor agents are capped at 12 turns per run by the harness; a capped return is PARTIAL, continued by one nudge (O.10), never by a replacement agent on the same question — 2026-10-04.
 - Treat the pasted packet as deliberate DIRECT_TARGETED delivery; ACK once in #agent-dispatch; no second claim — 2026-10-04T02:4xZ.
@@ -74,7 +75,17 @@ OPEN:
 - Acceptance-op product anchor: P0 PRODUCT_TRUST_COHERENCE; WS-MARKET-OS A2-A6 (dependency-eligible, 'one independently useful vertical at a time') and B1B-B6 are candidate pools; choose one bounded UI slice after L3 — Fable.
 NEXT: launch L1a/L1b/L2 audits; seat-split note on #1143; custody tripwire note on #1218; arm the #1218/#1143 edge watcher; post START in the Slack root thread once lanes are live; then consume audit returns → Phase-1 disposition table → train RULING.
 
+## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
+| carrier | author | disposition | basis | train? |
+|---|---|---|---|---|
+| #811 immutable commission before launch | mastermindx-2 | needs_current_base_repair | master has no launch-time commission verification (executive_supervisor.py:1155-1204, :1548-1574); workspace CommissionDependencyPlan unwired; test-file conflict + restart-path interaction unproven; body evidence stale (base cfd3b996, 40 behind); no authority widening; one new credential-free HTTPS GET | YES if repaired in time (failure law: stale commission identity fails closed); else second cycle |
+| #1145 attempt-bound remote worker transport | mastermidx4 | still_required (V1.x-inert) | clean on 84df2980; wires master's AttemptBoundRemoteWorkerAdapter with no fallback; no behaviour without a host passing the source; multi-host is a V1 non-goal | NO (merge on its own gates; not a V1 proof) |
+| #1041 COO hierarchy admission + cycle scheduling | chriswong6031-creator | should_close_unmerged | fills no V1 gap; live-on-merge effects: SCHEMA_VERSION 5→6 (collides with master's reserved M2 v6), COO policy v2 max_depth 1→2, custody blocks dispatch/reconcile, second provider-charge ledger | NO |
+| #1157 / #1166 / #1169 / #1204 / #1219 / #1178 / #1176 / #1175 | — | PENDING L2 | | |
+| #1218 arm-gate ambient attestation | mastermindxryan | needs_current_base_repair (D8 literal; C3 review 03:07Z) | required CI failed; smallest repair specified | YES (anchor of the train) |
+
 ## 5 Open rulings / holds
+- PROVISIONAL TRAIN RULING (pending L2/L3): M' = 84df2980 + repaired #1218 + repaired #811 + L2-required install PRs. Fallback if #811's repair outruns the train: cycle 1 on {#1218 + L2-required} for ARMED_READY + disarm/re-arm proofs, cycle 2 adds #811 before the acceptance operation. Decide at the #811 custody tripwire (05:30Z).
 - #1143 ownership: host effects = incumbent owner; CEO ingress/app = Sol C3. Fable = source estate / release train / acceptance integration. (To post.)
 - Human gates: root/admin ceremony for install (host owner); ChatGPT app catalog rescan (Chairman/platform); Fable connector OAuth (Chairman).
 
