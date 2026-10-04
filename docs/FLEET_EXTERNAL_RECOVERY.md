@@ -27,8 +27,13 @@ Use only an already-approved gateway, target and recovery key.
   --gateway-host-key-alias "$GATEWAY_KNOWN_HOST_IDENTITY" \
   --target-host "$TARGET_LAN_HOST" \
   --target-user "$TARGET_USER" \
+  --target-host-key-alias "$TARGET_KNOWN_HOST_IDENTITY" \
   --identity-file "$HOME/.ssh/<existing-recovery-key>"
 ```
+
+The gateway and target host-key aliases are optional trust-coordinate
+overrides for cases where transport naming differs from the already-enrolled
+`known_hosts` identity. They never enroll or update a host key.
 
 The identity file must be a regular, non-symlink file directly under the
 operator's `~/.ssh`, owned by that operator, with no group/other permission
