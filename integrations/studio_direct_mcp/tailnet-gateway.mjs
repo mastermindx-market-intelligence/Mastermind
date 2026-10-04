@@ -20,6 +20,7 @@ import { resolve as resolvePath } from 'node:path';
 import { startGateway } from './gateway.mjs';
 import { createTunnelAuth, TUNNEL_CLIENT_ID, TUNNEL_SCOPE } from './private-tunnel-auth.mjs';
 import { installSignalHandlers, loadPrivateTunnelConfig } from './private-tunnel-gateway.mjs';
+import { FLEET_BACKEND_TOOL_NAMES } from './fleet-routing.mjs';
 
 export const TAILNET_PROFILES = Object.freeze({
   'fabric-read': Object.freeze([
@@ -37,6 +38,11 @@ export const TAILNET_PROFILES = Object.freeze({
     'paper_read',
     'paper_prepare',
     'paper_edit',
+  ]),
+  'fleet-host': Object.freeze([
+    'studio_ping',
+    'studio_output_page',
+    ...FLEET_BACKEND_TOOL_NAMES,
   ]),
 });
 export const REQUIRED_HOST = '127.0.0.1';
@@ -86,7 +92,7 @@ export function resolveTailnetGatewayConfig(partial = {}) {
     !Object.prototype.hasOwnProperty.call(TAILNET_PROFILES, accountLabel)
   ) {
     throw new TailnetGatewayConfigError(
-      'tailnet gateway accountLabel must be fabric-read or fabric-design');
+      'tailnet gateway accountLabel must be fabric-read, fabric-design, or fleet-host');
   }
   if (config.toolAllowlist !== undefined && config.toolAllowlist !== null) {
     throw new TailnetGatewayConfigError(
@@ -143,7 +149,7 @@ export async function main(argv = process.argv) {
   if (!configPath) {
     process.stderr.write(
       'usage: node tailnet-gateway.mjs <config.json>\n' +
-      'requires accountLabel=fabric-read|fabric-design, loopback bind, and https://*.ts.net publicUrl\n');
+      'requires accountLabel=fabric-read|fabric-design|fleet-host, loopback bind, and https://*.ts.net publicUrl\n');
     process.exitCode = 1;
     return null;
   }
