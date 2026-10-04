@@ -189,6 +189,8 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         node=str(node),
         backend=str(backend),
         public_url=None,
+        fleet_route=None,
+        clear_fleet_routes=False,
     )
 
 
@@ -626,6 +628,72 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("account", config["paperDesign"])
             self.assertNotIn("token", config["paperDesign"])
             self.assertNotIn("fleetStatus", config)
+            self.assertNotIn("fleetRouting", config)
+
+    def test_config_projects_only_validated_operator_fleet_routes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            node = _make_node(Path(raw))
+            backend = _make_backend(Path(raw))
+            routes = svc._validate_fleet_routes(
+                "test-account",
+                [
+                    "ubuntu1=https://ubuntu1.example-tailnet.ts.net/mcp",
+                    "mini4=https://mini4.example-tailnet.ts.net:443/mcp",
+                ],
+            )
+            config = svc._build_config(
+                "test-account", "127.0.0.1", 45018,
+                node, backend, home / "state", home,
+                fleet_routes=routes,
+            )
+            self.assertEqual(
+                config["fleetRouting"],
+                {
+                    "enabled": True,
+                    "requestTimeoutMs": 300_000,
+                    "routes": [
+                        {
+                            "hostRef": "mini4",
+                            "url": "https://mini4.example-tailnet.ts.net/mcp",
+                        },
+                        {
+                            "hostRef": "ubuntu1",
+                            "url": "https://ubuntu1.example-tailnet.ts.net/mcp",
+                        },
+                    ],
+                },
+            )
+            self.assertEqual(
+                svc._installed_fleet_routes(config, "test-account"),
+                routes,
+            )
+
+    def test_fleet_routes_refuse_nested_fabric_duplicates_and_non_tailnet_urls(self):
+        with self.assertRaisesRegex(SystemExit, "not allowed"):
+            svc._validate_fleet_routes(
+                "fleet-host",
+                ["mini4=https://mini4.example-tailnet.ts.net/mcp"],
+            )
+        with self.assertRaisesRegex(SystemExit, "unique"):
+            svc._validate_fleet_routes(
+                "test-account",
+                [
+                    "mini4=https://mini4.example-tailnet.ts.net/mcp",
+                    "mini4=https://ubuntu1.example-tailnet.ts.net/mcp",
+                ],
+            )
+        for value in (
+            "mini4=http://mini4.example-tailnet.ts.net/mcp",
+            "mini4=https://example.com/mcp",
+            "mini4=https://mini4.example-tailnet.ts.net/",
+            "mini4=https://mini4.example-tailnet.ts.net:8443/mcp",
+            "mini4=https://user:pass@mini4.example-tailnet.ts.net/mcp",
+            "mini4=https://mini4.example-tailnet.ts.net/mcp?x=1",
+        ):
+            with self.subTest(value=value), self.assertRaisesRegex(SystemExit, "exact HTTPS"):
+                svc._validate_fleet_routes("test-account", [value])
 
     def test_config_enrolls_hash_pinned_existing_fleet_status_owner(self):
         with tempfile.TemporaryDirectory() as raw:
