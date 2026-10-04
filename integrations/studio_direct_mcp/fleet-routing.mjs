@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 const HOST_REF = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const MAX_ROUTES = 32;
@@ -265,10 +266,17 @@ export function createFleetRouter(rawConfig, deps = {}) {
         { timeout: cfg.requestTimeoutMs, signal: options.signal },
       );
     } catch (error) {
-      // The route session may now be tainted or disconnected. Retire it rather
-      // than silently reusing it; a later frontend session must explicitly
-      // preflight a fresh remote MCP session on the same configured host.
-      await drop(hostRef);
+      const deterministic = [
+        ErrorCode.InvalidParams,
+        ErrorCode.MethodNotFound,
+        ErrorCode.InvalidRequest,
+      ].includes(error?.code);
+      if (!deterministic) {
+        // The route session may now be tainted or disconnected. Retire it rather
+        // than silently reusing it; a later frontend session must explicitly
+        // preflight a fresh remote MCP session on the same configured host.
+        await drop(hostRef);
+      }
       throw error;
     }
   }
