@@ -6,8 +6,9 @@ merge SHA ``431fb2b846b693c13fb6654901f0747e79f82534``).  Executive OS — this
 repository — is the EXECUTION plane.  This module is the one-way bridge between them.
 It projects a single deterministic packet the AI CEO seat boots from: what the company
 is trying to do, what is running, what is blocked, and what needs a ruling from Chris.
-Priority remains in the canonical Improvement Agenda; Agent OS readiness reaches it as
-an annotation rather than becoming a second queue in this packet.
+Company-level portfolio orientation remains in Strategic State. The Improvement Agenda
+continues to rank portfolio/intelligence self-improvement candidates inside its domain;
+Agent OS readiness reaches that queue as an annotation rather than becoming a second queue.
 
 Design laws
 -----------
@@ -883,6 +884,31 @@ def load_strategic_summary() -> tuple[dict[str, Any] | None, str | None]:
         "schema": state["schema"],
         "company_phase": state["company_phase"],
         "north_star": list(state["north_star"]),
+        "resource_policy": {
+            name: float(weight) for name, weight in state["resource_policy"].items()
+        },
+        "core_product_value_model": {
+            "products": list(state["core_product_value_model"]["products"]),
+            "dimensions": {
+                name: float(weight)
+                for name, weight in state["core_product_value_model"]["dimensions"].items()
+            },
+            "evidence_rule": " ".join(
+                str(state["core_product_value_model"]["evidence_rule"]).split()
+            ),
+            "production_readiness": list(
+                state["core_product_value_model"]["production_readiness"]
+            ),
+        },
+        "phase_gates": {
+            name: {
+                "purpose": " ".join(str(gate["purpose"]).split()),
+                "criteria": list(gate["criteria"]),
+                "on_pass": " ".join(str(gate["on_pass"]).split()),
+            }
+            for name, gate in state["phase_gates"].items()
+        },
+        "review_triggers": list(state["review_triggers"]),
         "p0": [
             {
                 "id": obj["id"],
@@ -912,9 +938,11 @@ def next_recommended_act(
     """The one thing the CEO should do next, by fixed precedence.
 
     Deterministic and explainable on purpose: the same packet always yields the same
-    act, and the rung that produced it is readable off the sentence.  Repairs outrank
-    rulings, rulings outrank unblocking; after those, the canonical Improvement Agenda
-    owns priority.  Legacy ``brief.unblocked`` data is deliberately ignored here.
+    act, and the rung that produced it is readable off the sentence. Repairs outrank
+    rulings, and rulings outrank unblocking. After those, the active Strategic State
+    portfolio owns company-level orientation; the Improvement Agenda remains a ranked
+    domain source for portfolio/intelligence self-improvement candidates. Legacy
+    ``brief.unblocked`` data is deliberately ignored here.
     """
     # 1. A company with no readable objective set cannot correctly prioritize anything
     #    else — every downstream judgment would be made against invented strategy.
@@ -950,8 +978,17 @@ def next_recommended_act(
             f"First: WS:{top.get('workstream', '?')} (blocked by: {by})"
         )
 
+    active = [
+        str(obj.get("id"))
+        for obj in (strategic.get("p0") or [])
+        if isinstance(obj, dict) and obj.get("status") == "active" and obj.get("id")
+    ]
+    focus = ", ".join(active) if active else "the declared active P0s"
     return (
-        "Consult the canonical Improvement Agenda for the highest-priority next work."
+        "Select the highest-leverage eligible work within the active company P0s "
+        f"({focus}), using the current resource policy and phase gates. "
+        "Use the Improvement Agenda only as the ranked domain source for "
+        "portfolio/intelligence self-improvement candidates."
     )
 
 
@@ -1142,11 +1179,33 @@ def render_packet(packet: dict[str, Any]) -> str:
     else:
         out.append(f"STRATEGY — {strategic.get('company_phase', '?')}")
         out.extend(_labeled("north star:", list(strategic.get("north_star") or [])))
-        for obj in strategic.get("p0") or []:
+        resources = strategic.get("resource_policy") or {}
+        out.extend(_labeled(
+            "resource bias:",
+            [f"{name} {float(weight):.0%}" for name, weight in resources.items()],
+        ))
+        value_model = strategic.get("core_product_value_model") or {}
+        out.extend(_labeled("core products:", list(value_model.get("products") or [])))
+        p0_rows = list(strategic.get("p0") or [])
+        active_p0 = [
+            obj for obj in p0_rows
+            if isinstance(obj, dict) and obj.get("status") == "active"
+        ]
+        for obj in active_p0:
             entry = (
                 f"P0 {obj.get('id', '?')} [{obj.get('status', '?')}] — "
                 f"{obj.get('objective', '')}"
             )
+            for i, segment in enumerate(_wrap(entry, _WIDTH - 5)):
+                out.append(("  " if i == 0 else "     ") + segment)
+        retired_count = sum(
+            1 for obj in p0_rows
+            if isinstance(obj, dict) and obj.get("status") == "retired"
+        )
+        if retired_count:
+            out.append(f"  ({retired_count} retired P0 identities preserved; not shown)")
+        for name, gate in (strategic.get("phase_gates") or {}).items():
+            entry = f"GATE {name} — {gate.get('purpose', '')}"
             for i, segment in enumerate(_wrap(entry, _WIDTH - 5)):
                 out.append(("  " if i == 0 else "     ") + segment)
     out.append("")
