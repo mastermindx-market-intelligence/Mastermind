@@ -1150,8 +1150,9 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
-          'studio_output_page reads retained output without repeating the original action. ' +
+          'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_select_host, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
+          'When fleet routing is configured, studio_select_host performs a one-way session binding before Desktop Commander tool use; it never performs automatic placement or retries. ' +
+          'studio_output_page reads retained output without repeating the original action and follows an established remote host binding when present. ' +
           'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
           'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +
           'Nested agent instructions, worker handoffs, and opaque/repackaged payloads are outside their declared scope. ' +
@@ -1265,9 +1266,32 @@ class GatewaySession {
       );
     }
 
+    if (this.fleetRouter && name === STUDIO_SELECT_HOST_TOOL.name) {
+      this.bumpTool(name);
+      const result = await this.selectFleetHost(request?.params?.arguments ?? {}, extra?.signal);
+      log(result.isError ? 'warn' : 'info', 'tool_call', {
+        sid: this.tag,
+        tool: name,
+        durationMs: Date.now() - started,
+        classification: result.isError ? CLASSIFICATION.TOOL_ERROR : CLASSIFICATION.OK,
+      });
+      return result;
+    }
+
     if (name === OUTPUT_PAGE_TOOL.name) {
       this.touch();
       this.bumpTool(name);
+      if (this.selectedHostRef) {
+        try {
+          return await this.fleetRouter.call(
+            this.selectedHostRef,
+            { name, arguments: request?.params?.arguments ?? {} },
+            { signal: extra?.signal },
+          );
+        } catch (err) {
+          return this.handleToolFailure(err, name, started);
+        }
+      }
       return this.outputPager.read(request?.params?.arguments ?? {});
     }
 
@@ -1301,6 +1325,15 @@ class GatewaySession {
     }
 
     if (this.paperDesigner && PAPER_DESIGN_TOOL_NAMES.has(name)) {
+      if (this.selectedHostRef) {
+        return paperToolResult({
+          schema: 'mastermind.paper_studio_host_binding.v1',
+          status: 'REFUSED',
+          effect_state: 'NOT_APPLIED',
+          code: 'PAPER_TOOL_REQUIRES_LOCAL_STUDIO_SESSION',
+          selected_host_ref: this.selectedHostRef,
+        }, true);
+      }
       return this.withBackendSlot(async () => {
         this.bumpTool(name);
         const result = await this.paperDesigner.call(name, request?.params?.arguments ?? {});
@@ -1316,6 +1349,18 @@ class GatewaySession {
         });
         return paperToolResult(result.value, result.isError);
       }, { kind: 'tools/call', tool: name, started });
+    }
+
+    if (this.gitPublisher && this.selectedHostRef &&
+        (name === STUDIO_GIT_PUBLISH_STATUS_TOOL.name ||
+         name === STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.name ||
+         name === STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.name)) {
+      return gitToolResult({
+        schema: 'mastermind.studio_git_tool_error.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'TYPED_GIT_REQUIRES_LOCAL_STUDIO_SESSION',
+      }, true);
     }
 
     if (this.gitPublisher &&
@@ -1354,7 +1399,7 @@ class GatewaySession {
 
     return this.withBackendSlot(async () => {
       this.bumpTool(name);
-      const backend = await this.ensureBackend();
+      this.backendToolCalls += 1;
 
       try {
         // Exactly one attempt. There is no retry loop anywhere in this file.
@@ -1369,11 +1414,21 @@ class GatewaySession {
             : {}),
           mastermind_remote_call_id: String(extra?.requestId),
         };
-        const result = await backend.client.callTool(
-          { name, arguments: request?.params?.arguments ?? {}, _meta: backendMeta },
-          undefined,
-          { timeout: this.cfg.requestTimeoutMs, signal: extra?.signal },
-        );
+        let result;
+        if (this.selectedHostRef) {
+          result = await this.fleetRouter.call(
+            this.selectedHostRef,
+            { name, arguments: request?.params?.arguments ?? {}, _meta: backendMeta },
+            { signal: extra?.signal },
+          );
+        } else {
+          const backend = await this.ensureBackend();
+          result = await backend.client.callTool(
+            { name, arguments: request?.params?.arguments ?? {}, _meta: backendMeta },
+            undefined,
+            { timeout: this.cfg.requestTimeoutMs, signal: extra?.signal },
+          );
+        }
         this.touch();
         const classification = result && result.isError === true
           ? CLASSIFICATION.TOOL_ERROR
