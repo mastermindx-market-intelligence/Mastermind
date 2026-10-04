@@ -1178,6 +1178,115 @@ class TestUpgrade(unittest.TestCase):
     def test_typed_git_install_upgrades_stopped_and_preserves_runtime_state(self):
         self._assert_historical_upgrade(typed_git=True)
 
+    def test_upgrade_preserves_existing_fleet_routes_when_not_redeclared(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            src = _make_source(tmp)
+            node = _make_node(tmp)
+            backend = _make_backend(tmp)
+            paper_sha = _seed_paper_runtime(home)
+            initial = _stage_args(src, node, backend)
+            initial.fleet_route = [
+                "mini4=https://mini4.example-tailnet.ts.net/mcp",
+            ]
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                _capture_stdout(lambda: svc.cmd_stage(initial))
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                upgraded_source = _make_upgrade_source(tmp)
+                _capture_stdout(
+                    lambda: svc.cmd_upgrade(
+                        _stage_args(upgraded_source, node, backend)
+                    )
+                )
+                config = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(
+                config["fleetRouting"]["routes"],
+                [{
+                    "hostRef": "mini4",
+                    "url": "https://mini4.example-tailnet.ts.net/mcp",
+                }],
+            )
+
+    def test_upgrade_replaces_or_clears_fleet_routes_only_when_explicit(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            src = _make_source(tmp)
+            node = _make_node(tmp)
+            backend = _make_backend(tmp)
+            paper_sha = _seed_paper_runtime(home)
+            initial = _stage_args(src, node, backend)
+            initial.fleet_route = [
+                "mini4=https://mini4.example-tailnet.ts.net/mcp",
+            ]
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                _capture_stdout(lambda: svc.cmd_stage(initial))
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+
+                upgraded_source = _make_upgrade_source(tmp)
+                replace = _stage_args(upgraded_source, node, backend)
+                replace.fleet_route = [
+                    "ubuntu1=https://ubuntu1.example-tailnet.ts.net/mcp",
+                ]
+                _capture_stdout(lambda: svc.cmd_upgrade(replace))
+                config = json.loads(roots["config"].read_text(encoding="utf-8"))
+                self.assertEqual(
+                    config["fleetRouting"]["routes"],
+                    [{
+                        "hostRef": "ubuntu1",
+                        "url": "https://ubuntu1.example-tailnet.ts.net/mcp",
+                    }],
+                )
+
+                second = tmp / "upgrade2-src"
+                second.mkdir()
+                for name in svc.STAGE_FILES:
+                    (second / name).write_text(
+                        f"// second upgraded {name} contents\n",
+                        encoding="utf-8",
+                    )
+                clear = _stage_args(second, node, backend)
+                clear.clear_fleet_routes = True
+                _capture_stdout(lambda: svc.cmd_upgrade(clear))
+                config = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertNotIn("fleetRouting", config)
+
+    def test_restage_refuses_fleet_route_change_without_upgrade(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            src = _make_source(tmp)
+            node = _make_node(tmp)
+            backend = _make_backend(tmp)
+            paper_sha = _seed_paper_runtime(home)
+            initial = _stage_args(src, node, backend)
+            initial.fleet_route = [
+                "mini4=https://mini4.example-tailnet.ts.net/mcp",
+            ]
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                _capture_stdout(lambda: svc.cmd_stage(initial))
+                changed = _stage_args(src, node, backend)
+                changed.fleet_route = [
+                    "ubuntu1=https://ubuntu1.example-tailnet.ts.net/mcp",
+                ]
+                with self.assertRaisesRegex(SystemExit, "use upgrade"):
+                    svc.cmd_stage(changed)
+
     def _assert_historical_upgrade(self, *, typed_git):
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
