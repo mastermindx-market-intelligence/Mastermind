@@ -114,15 +114,21 @@ def _identity_guard_source_path(path: str) -> bool:
         return True
     if parts[0] in {"docs", "research"} and Path(path).suffix == ".md":
         return False
-    if parts[:2] == ("research", "evidence") and Path(path).suffix == ".json":
+    if _identity_guard_evidence_json_path(path):
         return False
     return True
 
 
 def _identity_guard_evidence_json_path(path: str) -> bool:
     parts = Path(path).parts
-    return (not Path(path).is_absolute() and ".." not in parts
-            and parts[:2] == ("research", "evidence") and Path(path).suffix == ".json")
+    return (
+        not Path(path).is_absolute()
+        and ".." not in parts
+        and len(parts) >= 3
+        and parts[0] == "research"
+        and "evidence" in parts[1:-1]
+        and Path(path).suffix == ".json"
+    )
 
 
 def _scan_evidence_identity_literals(document: str) -> list[str]:
@@ -1986,6 +1992,9 @@ def test_d8_template_topology_and_protected_defaults():
     ("docs/runbooks/browser.md", False),
     ("research/browser-study.md", False),
     ("research/evidence/browser-native.json", False),
+    ("research/issuer_inflection/2026-10-03/w0/evidence/browser-native.json", False),
+    ("research/issuer_inflection/2026-10-03/w0/evidence/nested/browser-native.json", False),
+    ("research/issuer_inflection/2026-10-03/w0/evidence-lookalike/identity.json", True),
     ("scripts/new_account.py", True),
     ("control_plane/new_account.py", True),
     ("ops/executive_os/control.json.template", True),
@@ -2011,6 +2020,10 @@ def test_d8_identity_literal_positive_controls_remain_complete():
 @pytest.mark.parametrize("path,content,rejected", [
     ("docs/runbooks/browser.md", "HTTP 401; input length 936\n", False),
     ("research/evidence/browser.json", '{"char_count":936}\n', False),
+    ("research/issuer_inflection/2026-10-03/w0/evidence/metrics.json",
+     '{"owner_window_days":400,"char_count":936}\n', False),
+    ("research/issuer_inflection/2026-10-03/w0/evidence/identity.json",
+     '{"peer_uid":501}\n', True),
     ("scripts/identity.py", "peer_uid = 777\n", True),
     ("config/identity.json", '{"peer_uid":777}\n', True),
     ("ops/executive_os/identity.template", '{"peer_uid":459}\n', True),
