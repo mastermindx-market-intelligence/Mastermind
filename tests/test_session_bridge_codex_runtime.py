@@ -164,7 +164,7 @@ def test_installed_codex_send_uses_same_dialogue_writer_without_provider_attenti
         "evidence_refs": [], "requires_response": False, "created_at": "2026-09-30T19:00:00Z",
     })
     calls, committed = [], []
-    async def relay(path, request):
+    async def relay(path, request, *, before_write=None):
         calls.append(request)
         if request["operation"] == "read_thread":
             if revoke_on_read:
@@ -175,6 +175,8 @@ def test_installed_codex_send_uses_same_dialogue_writer_without_provider_attenti
             return {"ok": True, "result": {"thread_ts": binding.thread_ts, "messages": messages,
                     "historical_messages": [], "ineligible_count": 0, "mutated_count": 0}}
         assert request["operation"] == "send_message"
+        if before_write is not None:
+            await before_write()
         message = request["args"]["message"]
         committed.append(message)
         return {"ok": True, "result": {"action": "POSTED", "message_key": message["message_key"],
@@ -230,7 +232,7 @@ def test_installed_codex_send_uses_same_dialogue_writer_without_provider_attenti
 
 
 @pytest.mark.parametrize("bridge_armed,relay_w3c", [(False, False), (False, True), (True, False), (True, True)])
-def test_actual_factory_requires_both_owners_and_a_serving_listener(
+def test_actual_factory_projects_codex_from_w3c_owner_independent_of_wake_listener(
     tmp_path, short_socket_root, monkeypatch, bridge_armed, relay_w3c
 ):
     import json
@@ -290,10 +292,13 @@ def test_actual_factory_requires_both_owners_and_a_serving_listener(
 
             try:
                 assert len(await targets("fabric_attempt")) == 2
-                assert len(await targets("codex")) == (2 if bridge_armed and relay_w3c else 0)
+                # Session Bridge target/CONTINUE ownership is carrier-only. The
+                # W3C Agent Relay owner gates Codex addressability; Wake arming
+                # and the observation listener are a separate asynchronous owner.
+                assert len(await targets("codex")) == (2 if relay_w3c else 0)
                 listener.close()
                 await listener.wait_closed()
-                assert await targets("codex") == []
+                assert len(await targets("codex")) == (2 if relay_w3c else 0)
                 assert len(await targets("fabric_attempt")) == 2
             finally:
                 listener.close()
