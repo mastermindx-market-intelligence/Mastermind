@@ -72,6 +72,10 @@ API_RUN_READ_RE = re.compile(
     CMD_POS + r"gh\s+api\b[^;&|\n]*/actions/runs/(?P<id>\d+)\b",
     re.I,
 )
+REPO_ARG_RE = re.compile(
+    r"(?:^|\s)(?:-R|--repo)(?:=|\s+)(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)",
+    re.I,
+)
 
 
 def family(model: str) -> str:
@@ -131,7 +135,9 @@ def is_mastermind_scope(payload: dict[str, object]) -> bool:
     return False
 
 
-def _poll_key(command: str) -> str | None:
+def _poll_key(command: str, cwd: str) -> str | None:
+    repo_match = REPO_ARG_RE.search(command)
+    scope = repo_match.group("repo").lower() if repo_match else os.path.realpath(cwd)
     for label, regex in (
         ("pr", PR_READ_RE),
         ("run", RUN_READ_RE),
@@ -139,7 +145,7 @@ def _poll_key(command: str) -> str | None:
     ):
         match = regex.search(command)
         if match:
-            return f"{label}:{match.group('id')}"
+            return f"{label}:{scope}:{match.group('id')}"
     return None
 
 
@@ -228,7 +234,9 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
         )
 
     if not background and not watches and not loop_poll and not delayed_poll:
-        key = _poll_key(clean)
+        key = _poll_key(
+            clean, str(payload.get("cwd") or os.getcwd())
+        )
         if key:
             repeat = repeat_poll_reason(key)
             if repeat:

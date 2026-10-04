@@ -376,6 +376,19 @@ def test_guard_blocks_repeat_single_status_read_but_not_first(
     assert "continue another independent authorized project lane" in output["permissionDecisionReason"]
 
 
+def test_repeat_cooldown_is_repo_scoped_for_same_pr_number(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    macro = "gh pr checks 8413 -R mastermindx-market-intelligence/macro"
+    mastermind = "gh pr checks 8413 -R mastermindx-market-intelligence/Mastermind"
+
+    guard.guard_bash(_payload(mastermind_scope, macro), {"command": macro})
+    guard.guard_bash(_payload(mastermind_scope, mastermind), {"command": mastermind})
+
+    assert capsys.readouterr().out == ""
+
+
 def test_guard_is_inert_outside_mastermind_scope(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
