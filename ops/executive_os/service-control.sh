@@ -137,6 +137,21 @@ require_absent() {
   return 1
 }
 
+require_registered() {
+  local label="$1"
+  local status=0
+  /bin/launchctl print "system/$label" >/dev/null 2>&1 || status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$status" -eq 113 ]; then
+    /bin/echo "service must be registered before stop: $label" >&2
+  else
+    /bin/echo "service registration state unknown before stop: $label (launchctl print exit $status)" >&2
+  fi
+  return 1
+}
+
 ensure_running() {
   local label="$1"
   local plist="$2"
@@ -309,9 +324,10 @@ case "$1" in
     ;;
   stop-agent-relay)
     require_root
-    # Refuse an unenrolled host before mutating launchd disabled state. The
-    # pre-enrollment disabled override remains owned by A2 host preparation.
-    validate_plist "$AGENT_RELAY_PLIST"
+    # The pre-enrollment disabled override remains owned by A2 host
+    # preparation. This lifecycle command may mutate the override only for a
+    # service that launchd already proves is registered.
+    require_registered "$AGENT_RELAY_LABEL"
     stop_one "$AGENT_RELAY_LABEL"
     ;;
   status)
