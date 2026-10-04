@@ -43,7 +43,7 @@ class ControlTests(unittest.TestCase):
                 account = root / name
                 account.mkdir()
                 (account / 'manifest.json').write_text('{}')
-            for name in ('fabric-read', 'fabric-design'):
+            for name in ('fabric-read', 'fabric-design', 'fleet-host'):
                 account = root / name
                 account.mkdir()
                 (account / 'manifest.json').write_text('{}')
