@@ -2,6 +2,7 @@
 from dataclasses import replace
 from types import SimpleNamespace
 import inspect
+import signal
 
 import pytest
 
@@ -123,3 +124,123 @@ def test_worker_account_must_match_canonical_slot_uid(monkeypatch):
         pw_uid=450 if name == control.CONTROL_USER else 999))
     refused(host, 'service_uid_process_unknown')
     assert calls == []
+
+
+def test_control_uid_quiesce_signals_only_fixed_control_principal(monkeypatch):
+    state = {450: [101, 102], 451: [123]}
+    calls = []
+    monkeypatch.setattr(
+        control.pwd, "getpwnam",
+        lambda name: SimpleNamespace(pw_uid=450 if name == control.CONTROL_USER else 451),
+    )
+
+    def processes(uid):
+        calls.append(("processes", uid))
+        return tuple(state[uid])
+
+    def kill(pid, signum):
+        calls.append(("kill", pid, signum))
+        assert pid in state[450]
+        assert pid not in state[451]
+        state[450].remove(pid)
+
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", processes)
+    monkeypatch.setattr(control.os, "kill", kill)
+    monkeypatch.setattr(control.time, "sleep", lambda _seconds: None)
+
+    signalled = control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert signalled == (101, 102)
+    assert state == {450: [], 451: [123]}
+    assert not any(call[:2] == ("processes", 451) for call in calls)
+    assert [(pid, signum) for kind, pid, signum in calls if kind == "kill"] == [
+        (101, signal.SIGTERM),
+        (102, signal.SIGTERM),
+    ]
+
+
+def test_control_uid_quiesce_is_read_only_replay_when_already_empty(monkeypatch):
+    killed = []
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: ())
+    monkeypatch.setattr(control.os, "kill", lambda pid, signum: killed.append((pid, signum)))
+
+    assert control.ProductionArmHost().quiesce_control_uid_for_arm() == ()
+    assert killed == []
+
+
+def test_control_uid_quiesce_escalates_to_sigkill_and_proves_absence(monkeypatch):
+    live = [321]
+    signals = []
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: tuple(live))
+
+    def kill(pid, signum):
+        signals.append(signum)
+        if signum == signal.SIGKILL:
+            live.clear()
+
+    monkeypatch.setattr(control.os, "kill", kill)
+    monkeypatch.setattr(control.time, "sleep", lambda _seconds: None)
+
+    signalled = control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert signalled == (321,)
+    assert signal.SIGTERM in signals
+    assert signal.SIGKILL in signals
+    assert live == []
+
+
+def test_control_uid_quiesce_refuses_if_process_survives_both_signals(monkeypatch):
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: (456,))
+    monkeypatch.setattr(control.os, "kill", lambda _pid, _signum: None)
+    monkeypatch.setattr(control.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert error.value.code == "service_uid_process_live"
+
+
+def test_control_uid_quiesce_refuses_invalid_process_identity(monkeypatch):
+    monkeypatch.setattr(
+        control.pwd, "getpwnam", lambda _name: SimpleNamespace(pw_uid=450)
+    )
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: (0,))
+
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().quiesce_control_uid_for_arm()
+
+    assert error.value.code == "service_uid_process_unknown"
+
+
+def test_control_uid_quiesce_cli_has_no_selectable_target_or_signal():
+    parser = control._parser()
+    sha = "a" * 40
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "arm-quiesce-control-uid",
+                "--expected-sha",
+                sha,
+                "--uid",
+                "450",
+            ]
+        )
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "arm-quiesce-control-uid",
+                "--expected-sha",
+                sha,
+                "--signal",
+                "KILL",
+            ]
+        )
