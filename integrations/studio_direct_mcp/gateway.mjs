@@ -806,6 +806,8 @@ class BackendOwner {
     this.generation = randomUUID();
     this.outputPager = new TextOutputPager();
     this.outputToolSchemas = new Map();
+    this.backendToolContracts = new Map();
+    this.fleetRouter = cfg.fleetRouting ? createFleetRouter(cfg.fleetRouting) : null;
     this.state = 'idle';
     this.client = null;
     this.transport = null;
@@ -868,11 +870,13 @@ class BackendOwner {
     this.closing = true;
     this.outputPager.clear();
     this.outputToolSchemas.clear();
+    this.backendToolContracts.clear();
     this.state = 'broken';
     this.limiter.drain('Backend closed');
     this.closePromise = (async () => {
       try { await this.client?.close(); } catch {}
       try { await this.transport?.close(); } catch {}
+      try { await this.fleetRouter?.close?.(); } catch {}
       // A connecting child must finish cleanup before its owner is released.
       try { await this.connectPromise; } catch {}
       this.client = null;
@@ -902,6 +906,10 @@ class GatewaySession {
     this.owner = owner;
     this.outputPager = owner?.outputPager ?? new TextOutputPager();
     this.outputToolSchemas = owner?.outputToolSchemas ?? new Map();
+    this.backendToolContracts = owner?.backendToolContracts ?? new Map();
+    this.fleetRouter = owner?.fleetRouter ?? (cfg.fleetRouting ? createFleetRouter(cfg.fleetRouting) : null);
+    this.selectedHostRef = null;
+    this.backendToolCalls = 0;
     this.backendOpsInFlight = 0;
 
     this.createdAt = Date.now();
@@ -927,7 +935,11 @@ class GatewaySession {
     // Starts reclaim-safe. Any effectful or interactive admission flips this
     // permanently; catalog/read-only work does not.
     this.reclaimUnsafe = false;
-    this.readonlyToolNames = new Set([STUDIO_PING_TOOL.name, OUTPUT_PAGE_TOOL.name]);
+    this.readonlyToolNames = new Set([
+      STUDIO_PING_TOOL.name,
+      OUTPUT_PAGE_TOOL.name,
+      STUDIO_SELECT_HOST_TOOL.name,
+    ]);
 
     this.transport = null;
     this.server = null;
@@ -947,6 +959,7 @@ class GatewaySession {
   localTools() {
     const tools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
     if (this.fleetStatus) tools.push({ ...STUDIO_FLEET_STATUS_TOOL });
+    if (this.fleetRouter) tools.push({ ...STUDIO_SELECT_HOST_TOOL });
     if (this.gitPublisher) {
       tools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
     }
@@ -964,6 +977,12 @@ class GatewaySession {
     } else {
       this.readonlyToolNames.delete(tool.name);
     }
+  }
+
+  rememberBackendToolContract(tool) {
+    if (!tool || typeof tool.name !== 'string') return;
+    if (!FLEET_BACKEND_TOOL_NAMES.includes(tool.name)) return;
+    this.backendToolContracts.set(tool.name, tool.inputSchema ?? null);
   }
 
   isReclaimSafeTool(name) {
