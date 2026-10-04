@@ -100,10 +100,12 @@ def test_v3_is_additive_and_prior_snapshot_hashes_remain_frozen():
     )
     from integrations.executive_mcp import web_ceo_sessions as sessions
 
-    assert v3.WEB_CEO_V3_SERVER_VERSION == "1.4.0"
-    assert v3.web_ceo_v3_tool_names()[:-2] == sessions.web_ceo_sessions_tool_names()[:-1]
-    assert v3.web_ceo_v3_tool_names()[-2:] == (
+    assert v3.WEB_CEO_V3_SERVER_VERSION == "1.5.0"
+    assert sessions.WEB_CEO_SESSIONS_SERVER_VERSION == "1.4.0"
+    assert v3.web_ceo_v3_tool_names()[:-3] == sessions.web_ceo_sessions_tool_names()[:-1]
+    assert v3.web_ceo_v3_tool_names()[-3:] == (
         "executive_mdm",
+        "reconcile_ceo_request",
         "submit_ceo_intent",
     )
 
@@ -114,6 +116,7 @@ def test_v3_promotes_existing_session_bridge_tools_without_changing_session_prof
     assert v3.web_ceo_v3_tool_names() == (
         *sessions.web_ceo_sessions_tool_names()[:-1],
         "executive_mdm",
+        "reconcile_ceo_request",
         "submit_ceo_intent",
     )
     assert sessions.web_ceo_sessions_tool_names()[-4:] == (
@@ -205,7 +208,7 @@ def test_mdm_fleet_is_direct_sensor_read_not_ingress():
     )
     out = run(g.call("executive_mdm", {"view": "fleet"}))
     assert out["ok"] is True
-    assert out["server_version"] == "1.4.0"
+    assert out["server_version"] == "1.5.0"
     assert out["data"]["schema"] == "mastermind.mosyle_fleet_snapshot.v1"
     assert out["grounding"] == {
         "mdm": "mosyle_business",
@@ -252,7 +255,7 @@ def test_existing_executive_read_still_uses_ceo_ingress_and_is_v3_stamped():
     out = run(g.call("executive_state", {}))
     assert out["ok"] is True
     assert out["data"] == {"preserved": True}
-    assert out["server_version"] == "1.4.0"
+    assert out["server_version"] == "1.5.0"
     assert client.frames[0]["tool"] == "executive_state"
 
 
