@@ -24,3 +24,10 @@ Therefore, do not relabel a FIF receipt as earnings_history, smuggle I3 into leg
 The later Fabric read succeeded after the earlier Executive state failure. It exposed three bounded roots; the two queued roots inspected are unrelated Executive infrastructure tasks, not I3. One has no attempt; the other has a LOST historical attempt. The observed return path is disarmed and runtime release identity is null. Do not recover these unrelated jobs as I3, duplicate a LOST effect, select their Codex placements or arm services under this project.
 
 A bounded GitHub code search for `issuer-inflection` under Macro `agentos` returned zero results, with incomplete_results=false. That is a search-index/term-scoped result, not proof of all possible aliases or a current writer lease. No new canonical workstream was created on that basis. Astra retains workstream recovery at #1183 until an admitted Macro owner return resolves the exact record/custody.
+
+
+### RIGHTS_PURPOSE_SEPARATION_R2
+
+For every load-bearing source, public display, internal use, model context, and historical research are separate purposes. A display admission (including a future shared `sec_edgar` display row) does not by itself prove model-context or historical-research permission. The I3 composer must resolve owner-issued purpose decisions for every purpose it actually uses and intersect them across inputs; UNKNOWN/absent/refused purpose blocks that use. A public URL, successful source fetch, or existing owner display never upgrades another purpose.
+
+The current W0/W1 schema also fail-closes `materiality` to an empty array. No categorical materiality state is machine-readable until W5's incumbent owner supplies a closed, explicitly non-actionable vocabulary and a new admitted contract/version. Directive-looking strings such as BUY/SELL/OPEN_ENTRY/RANK_1 therefore cannot enter this candidate through materiality.

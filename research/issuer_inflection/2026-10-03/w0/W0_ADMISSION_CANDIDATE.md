@@ -147,3 +147,10 @@ W0 cannot close until: (a) canonical workstream/actual carrier recovery; (b) sou
 Current-delta correction: the event owner now emits `event_workspace_manifest.v3` with explicit `source_clock`, generation timestamps derived from row observations, whole-second ceiling rather than truncation, explicit UTC serialization under its existing naive-time convention, predecessor continuity and refusal of caller-supplied generation time. Preserve v1/v2 historical readability and consume v3 through the owner. Never map this generation timestamp to a new I3 wall-clock emission. The exact patch is retained in `evidence/event-workspace-delta.json`; source change is not automatically runtime adoption.
 
 Next independent action while admissions wait: finish reproducible source-native AAPL preflight, validate the capture capsule and compare exact owner dependencies with audit bytes. Next effect after admission: execute `W1_IMPLEMENTATION_PACKET.md` in the authorized Macro/Terminal source lanes, retaining the parent operation/carrier. All W2–W11 parent obligations remain in the original masterplan; no new roadmap is created here.
+
+
+### RIGHTS_PURPOSE_SEPARATION_R2
+
+For every load-bearing source, public display, internal use, model context, and historical research are separate purposes. A display admission (including a future shared `sec_edgar` display row) does not by itself prove model-context or historical-research permission. The I3 composer must resolve owner-issued purpose decisions for every purpose it actually uses and intersect them across inputs; UNKNOWN/absent/refused purpose blocks that use. A public URL, successful source fetch, or existing owner display never upgrades another purpose.
+
+The current W0/W1 schema also fail-closes `materiality` to an empty array. No categorical materiality state is machine-readable until W5's incumbent owner supplies a closed, explicitly non-actionable vocabulary and a new admitted contract/version. Directive-looking strings such as BUY/SELL/OPEN_ENTRY/RANK_1 therefore cannot enter this candidate through materiality.

@@ -4,7 +4,7 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T08:57:30.939951+00:00",
+  "prepared_at": "2026-10-04T09:07:15.891605+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
@@ -60,8 +60,8 @@
       "bytes": 7074
     },
     "SEMANTIC_ADMISSION.md": {
-      "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",
-      "bytes": 5932
+      "sha256": "365a4d978f6b505219792dff7b8018e11ecd46a4a6c712f38d3a6c0bdf6e912d",
+      "bytes": 6880
     },
     "TRIAL_OWNER_ADMISSION.md": {
       "sha256": "61fff5970a912ea0e0690fe4427323362ff94f9755442aef215245e5722e0a60",
@@ -72,12 +72,12 @@
       "bytes": 5609
     },
     "W0_ADMISSION_CANDIDATE.md": {
-      "sha256": "bb9a6c7bf848ac64841264c28ddf9fd92a12d25cb564a61b637e76e6fd594c0f",
-      "bytes": 27406
+      "sha256": "ef90abb73b9bf51145951f5f0190089c03fc47f6bba185632b5f470d4ff0d18c",
+      "bytes": 28354
     },
     "W1_IMPLEMENTATION_PACKET.md": {
-      "sha256": "0f119bfb4616129ad1bf4d12da9c9d10cdcfbfaaaa533964dd7cc6593f4499df",
-      "bytes": 16189
+      "sha256": "b98bbcff683d32f2bb5ac08b52a90a665b5e08d6d2debd8f45b0ddd423b9f1f4",
+      "bytes": 17137
     },
     "baseline_replay.py": {
       "sha256": "196732a08c42c2a76328295e3cffbe051b3618a6cff1975ea7d147a2870b4896",
@@ -316,8 +316,8 @@
       "bytes": 6452
     },
     "issuer_state_transition.candidate.schema.json": {
-      "sha256": "6247a5f696127629b0b2f9884f6feaee32c6fc6a8a340b15684542e13a1bc9e3",
-      "bytes": 29432
+      "sha256": "9d9931a439c0f639f8bbdeeef0f600834ec974036d834448627010fbb381fd33",
+      "bytes": 29654
     },
     "replay_owner_inputs.py": {
       "sha256": "ea7eb744ec43d5bc6adab029ae9f86562dc8eca6ede41c518e94ae9096aa1ee7",
@@ -336,8 +336,8 @@
       "bytes": 3289
     },
     "test_candidate_schema.py": {
-      "sha256": "4b2f00610d1f52fe2247446feef726bc4bb4714381fa0bb115582c3e07a22da1",
-      "bytes": 11733
+      "sha256": "46a31beadb495124e91dde83cdf519d20f563e72abb8d432356948842304d167",
+      "bytes": 12389
     },
     "test_comparator_policy.py": {
       "sha256": "439f12e17f3e366d73c61c74db3c120c4d05d5811a08f470ec2132b398c247ef",

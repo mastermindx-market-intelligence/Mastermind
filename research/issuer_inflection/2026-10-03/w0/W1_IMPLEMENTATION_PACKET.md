@@ -79,3 +79,10 @@ Forbidden edits: FIF query/raw-ledger/metric kernels, frozen AAPL fixture access
 Return exact operation/carrier and accepted receiver, source base/head and changed paths, input/definition/schema/capture hashes, actual test commands/results including failures, browser viewports/screens/evidence-to-source IDs, machine parity hash, independent review disposition, rights/authority checks and remaining owner blockers. Preserve unchanged baseline/missing fields, refusal wording and earlier method/exposure/correction records.
 
 Allowed completion label: **W1 DEVELOPMENT VERTICAL ACCEPTED**, only after all development gates actually pass. Disallowed labels from this packet alone: production-proven, broad issuer coverage, economic-classification validation, analyst-usefulness win, predictive edge or trading authority. Parent W2–W11 scope remains open and Astra advances the next permitted owner-bound task rather than treating W1 as mission completion.
+
+
+### RIGHTS_PURPOSE_SEPARATION_R2
+
+For every load-bearing source, public display, internal use, model context, and historical research are separate purposes. A display admission (including a future shared `sec_edgar` display row) does not by itself prove model-context or historical-research permission. The I3 composer must resolve owner-issued purpose decisions for every purpose it actually uses and intersect them across inputs; UNKNOWN/absent/refused purpose blocks that use. A public URL, successful source fetch, or existing owner display never upgrades another purpose.
+
+The current W0/W1 schema also fail-closes `materiality` to an empty array. No categorical materiality state is machine-readable until W5's incumbent owner supplies a closed, explicitly non-actionable vocabulary and a new admitted contract/version. Directive-looking strings such as BUY/SELL/OPEN_ENTRY/RANK_1 therefore cannot enter this candidate through materiality.

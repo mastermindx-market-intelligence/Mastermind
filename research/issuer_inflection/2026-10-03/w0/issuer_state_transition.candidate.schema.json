@@ -503,7 +503,8 @@
         "$ref": "#/$defs/Materiality"
       },
       "minItems": 0,
-      "maxItems": 40
+      "maxItems": 0,
+      "$comment": "W0/W1 fail-closed: materiality semantics are not owner-admitted. This candidate permits only an empty array; W5 requires an explicit later contract/version with owner-defined non-actionable vocabulary."
     },
     "correction": {
       "type": "object",

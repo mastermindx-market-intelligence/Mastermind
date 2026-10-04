@@ -165,6 +165,20 @@ class CandidateShapeTests(unittest.TestCase):
                 value = comparable_shape(); value['comparison']['relative_change_percent'] = display; self.invalid(value)
     def test_negative_zero_display_is_noncanonical(self) -> None:
         value = comparable_shape(); value['comparison']['relative_change_percent'] = '-0.00'; self.invalid(value)
+    def test_materiality_is_empty_only_until_owner_admission(self) -> None:
+        for category in ('BUY', 'SELL', 'OPEN_ENTRY', 'RANK_1', 'high_materiality'):
+            with self.subTest(category=category):
+                value = sample()
+                value['materiality'] = [{
+                    'definition_ref': owner_ref('materiality'),
+                    'component': 'TEST_ONLY_component',
+                    'measured_value': None,
+                    'unit_ref': None,
+                    'categorical_state': category,
+                    'explanation': 'TEST_ONLY not admitted',
+                }]
+                self.invalid(value)
+
     def test_shape_does_not_resolve_an_owner(self) -> None:
         # Deliberate proof of a required later semantic gate, not trusted data.
         value = comparable_shape(); self.valid(value)
