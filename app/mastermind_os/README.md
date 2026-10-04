@@ -113,6 +113,9 @@ in the Mastermind OS file `01M3NRCX55B452A12819WNE1RH`:
 - [Paper page 11 — Chat Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-C-0)
   remains the originating conversation family; **CH91 `KDN-0`** provides its
   detailed visual and interaction contract.
+- **CV01 `SD8-0` / CV01M `SI5-0`** on Page 12 define the Conversations
+  destination: the durable company office, exact permitted project conversations,
+  scoped filtering, and source/access recovery.
 
 Apply the ink and graphite surfaces, ivory reading hierarchy, champagne primary
 actions, original sculptural artwork and progressive disclosure consistently
@@ -136,9 +139,11 @@ verification record remains
 Read the [Daily Experience Builder Flow Specification](../../docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md)
 before wiring the mockups. It grounds the intended experience in protected
 product law and implementation source `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
+A continuation comparison through protected `28be2ce2d481fd542ec869344e178e5cec4d7d75`
+found no app-source delta; dated candidate observations remain separate in §18.2.
 
 [Paper page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0)
-connects the route family through six editable workflow notes:
+connects the route family through eight editable workflow notes:
 
 - UX00 `PBO-0`: daily loop, roles and directory.
 - UX01 `PBP-0`: complete, partial, historical and unprojected Today states.
@@ -146,6 +151,8 @@ connects the route family through six editable workflow notes:
 - UX03 `PAY-0`: exact decision, one final action and confirmed/uncertain outcomes.
 - UX04 `PAZ-0`: scoped drafts, evidence detours, session succession and access loss.
 - UX05 `PBR-0`: route/owner/capability boundaries and first build slice.
+- UX06 `SMO-0`: exact conversation selection, scoped filtering and empty/access states.
+- UX07 `SMP-0`: Options + Send, draft continuity, delivery stages and recovery.
 
 The daily product shows what needs the Chairman's judgment and what the team
 owns. Meta-CEO remains one durable company office; project conversations retain
@@ -153,9 +160,19 @@ their Project Sol and project scope. Ordinary supported messages do not require
 a blanket approval step. Work, decisions, receipts, acceptance and release keep
 their distinct canonical meanings.
 
+For the connected chat journey, start with UX06 and CV01/CV01M, then CH1/CH6,
+CH2 evidence and CH3 context, using UX07 for composition states. Evidence and
+context reads preserve the same scoped unsent draft. Submission, owner acceptance,
+recipient delivery and received reply remain distinct. A late receipt never erases
+a newer draft; unresolved delivery stays with its original operation. Inbox keeps
+routine team review with the project owner and opens the exact reserved decision
+packet directly. The specification records the actual control IDs and return rules.
+
 The specification includes actual Paper action anchors, source-owner mappings,
 transition and recovery matrices, twelve illustrative fixtures and fifteen
-implementation acceptance scenarios. The current protected app remains a
+implementation acceptance scenarios, with continuation checks for directory
+identity, message stages, draft revision, IME and actual focus restoration.
+The current protected app remains a
 read-only consumer; message send, project creation, decision recording, full
 history and execution continuation are target capabilities with separate owner
 and implementation gates. The #1046/#1150 draft custody and source-release
