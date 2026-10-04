@@ -1648,9 +1648,12 @@ class GatewaySession {
       return;
     }
 
-    // Per-session mode: output retention shares this backend lifetime.
+    // Per-session mode: output retention and any fleet router share this
+    // frontend lifetime. Shared-account routers are closed by BackendOwner.
     this.outputPager.clear();
     this.outputToolSchemas.clear();
+    this.backendToolContracts.clear();
+    try { await this.fleetRouter?.close?.(); } catch { /* bounded cleanup */ }
     this.closingBackend = true;
     const transport = this.backendTransport;
     const client = this.backendClient;
