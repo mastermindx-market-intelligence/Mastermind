@@ -39,6 +39,7 @@ def _spec(tmp_path: Path):
         target_host="worker.local",
         target_user="worker",
         identity_file=str(key),
+        target_host_key_alias="worker-trust",
         home=home,
     )
 
@@ -75,6 +76,7 @@ def test_commands_are_public_key_only_strict_and_fixed(tmp_path: Path) -> None:
     assert "HostKeyAlias=100.64.0.8" in gateway
 
     assert target[0] == "/usr/bin/ssh"
+    assert "HostKeyAlias=worker-trust" in target
     assert target[-1] == "/usr/bin/true"
     proxy = next(value for value in target if value.startswith("ProxyCommand="))
     assert "/usr/bin/ssh" in proxy
@@ -207,6 +209,7 @@ def test_unknown_failure_fails_closed_without_raw_stderr(tmp_path: Path) -> None
         ("target_host", "-oProxyCommand=bad"),
         ("target_user", "worker@evil"),
         ("gateway_host_key_alias", "alias with spaces"),
+        ("target_host_key_alias", "alias with spaces"),
     ],
 )
 def test_route_tokens_reject_shell_or_ssh_option_injection(
@@ -220,6 +223,7 @@ def test_route_tokens_reject_shell_or_ssh_option_injection(
         "gateway_host_key_alias": "100.64.0.8",
         "target_host": "worker.local",
         "target_user": "worker",
+        "target_host_key_alias": "worker-trust",
         "identity_file": str(key),
         "home": home,
     }
