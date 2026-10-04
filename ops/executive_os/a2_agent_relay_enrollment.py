@@ -19,6 +19,7 @@ import plistlib
 import pwd
 import re
 import stat
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -77,6 +78,7 @@ ERROR_CODES = frozenset(
         "A2_ENROLLMENT_CHANNEL_REFUSED",
         "A2_ENROLLMENT_COLLISION",
         "A2_ENROLLMENT_EXISTING_REFUSED",
+        "A2_ENROLLMENT_EFFECT_UNKNOWN",
         "A2_ENROLLMENT_HOST_REFUSED",
         "A2_ENROLLMENT_IDENTITY_REFUSED",
         "A2_ENROLLMENT_INPUT_REFUSED",
@@ -131,6 +133,7 @@ class _BoundCreatedFile:
 def build_parser() -> argparse.ArgumentParser:
     parser = _OpaqueParser(description="Enroll the private A2 Agent Relay")
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("prepare-disabled")
     for name in ("enroll", "verify"):
         child = commands.add_parser(name)
         child.add_argument("--expected-bot-user-id", required=True)
@@ -791,7 +794,9 @@ def _read_bound_exact(
             os.close(descriptor)
 
 
-def _assert_host_prepared() -> str:
+def _assert_host_identity_prepared() -> str:
+    """Prove the fixed A2 host identity without assuming launchd state."""
+
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
     try:
@@ -824,9 +829,90 @@ def _assert_host_prepared() -> str:
         )
     ):
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+    return release_sha
+
+
+def _assert_host_prepared() -> str:
+    release_sha = _assert_host_identity_prepared()
     _assert_disarmed()
     return release_sha
 
+
+def _pre_enrollment_artifacts_absent(binding: _BoundDirectory) -> None:
+    if (
+        _bound_path_present(binding, TOKEN_PATH.name)
+        or _bound_path_present(binding, CONFIG_PATH.name)
+        or _path_present(PLIST_PATH)
+    ):
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+
+
+def _prepare_disabled() -> dict[str, object]:
+    """Establish only the exact pre-enrollment launchd-disabled invariant.
+
+    This remains inside the existing A2 lifecycle owner. It never reads
+    credentials, writes enrollment files, loads or starts the Relay, or touches
+    another launchd label.
+    """
+
+    release_sha = _assert_host_identity_prepared()
+    binding = _open_bound_config_directory()
+    try:
+        _pre_enrollment_artifacts_absent(binding)
+        try:
+            loaded = c1_enrollment._launchd_loaded(RELAY_LABEL)  # noqa: SLF001
+            disabled = c1_enrollment._launchd_disabled(RELAY_LABEL)  # noqa: SLF001
+        except Exception:
+            raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED") from None
+        if loaded:
+            raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
+        if disabled:
+            _assert_bound_config_current(binding)
+            return {"action": "already_disabled", "release_sha": release_sha}
+
+        try:
+            completed = subprocess.run(
+                ["/bin/launchctl", "disable", f"system/{RELAY_LABEL}"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                check=False,
+                text=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            try:
+                _assert_disarmed()
+                _pre_enrollment_artifacts_absent(binding)
+                _assert_bound_config_current(binding)
+            except A2EnrollmentError:
+                raise A2EnrollmentError("A2_ENROLLMENT_EFFECT_UNKNOWN") from None
+            return {
+                "action": "prepared_disabled_recovered",
+                "release_sha": release_sha,
+            }
+
+        if completed.returncode != 0:
+            try:
+                _assert_disarmed()
+                _pre_enrollment_artifacts_absent(binding)
+                _assert_bound_config_current(binding)
+            except A2EnrollmentError:
+                raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+            return {
+                "action": "prepared_disabled_recovered",
+                "release_sha": release_sha,
+            }
+
+        try:
+            _assert_disarmed()
+            _pre_enrollment_artifacts_absent(binding)
+            _assert_bound_config_current(binding)
+        except A2EnrollmentError:
+            raise A2EnrollmentError("A2_ENROLLMENT_EFFECT_UNKNOWN") from None
+        return {"action": "prepared_disabled", "release_sha": release_sha}
+    finally:
+        os.close(binding.descriptor)
 
 def _read_exact(path: Path, *, uid: int, gid: int, mode: int) -> bytes:
     try:
@@ -1048,7 +1134,9 @@ def _run_invocation(
         args = build_parser().parse_args(list(argv))
         if require_native_tty and args.command == "enroll":
             _require_native_tty(stdin)
-        if args.command == "enroll":
+        if args.command == "prepare-disabled":
+            receipt = _prepare_disabled()
+        elif args.command == "enroll":
             enroll_kwargs = {
                 "bot_user_id": args.expected_bot_user_id,
                 "stdin": stdin,
