@@ -165,7 +165,7 @@ def test_bootstrap_refuses_symlink_config_root(monkeypatch, tmp_path):
     assert list(real.iterdir()) == []
 
 
-def test_bootstrap_rolls_back_its_exact_published_files_on_mid_publish_failure(
+def test_bootstrap_preserves_residual_state_on_mid_publish_failure(
     monkeypatch, tmp_path
 ):
     root = _prepare_root(monkeypatch, tmp_path)
@@ -180,10 +180,14 @@ def test_bootstrap_rolls_back_its_exact_published_files_on_mid_publish_failure(
         return real_publish(*args, **kwargs)
 
     monkeypatch.setattr(subject, "_rename_no_replace", fail_second_publish)
-    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_PUBLISH_FAILED$"):
+    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_EFFECT_UNKNOWN$"):
         subject.publish_initial_resident_plan(_v1_plan())
 
-    assert list(root.iterdir()) == []
+    names = {item.name for item in root.iterdir()}
+    destination_names = {path.name for path in _destinations(root)}
+    assert len(names) == 4
+    assert len(names & destination_names) == 1
+    assert sum(name.startswith(subject._TEMP_PREFIX) for name in names) == 3
 
 
 def test_bootstrap_refuses_exact_replay_instead_of_rotating_secret(monkeypatch, tmp_path):
@@ -240,22 +244,35 @@ def test_bootstrap_refuses_orphan_temp_as_unknown_prior_effect(monkeypatch, tmp_
     assert [item.name for item in root.iterdir()] == [orphan.name]
 
 
-def test_bootstrap_rolls_back_all_owned_finals_if_readback_fails(monkeypatch, tmp_path):
+def test_bootstrap_preserves_all_finals_if_readback_fails(monkeypatch, tmp_path):
     root = _prepare_root(monkeypatch, tmp_path)
     real_readback = subject._readback
+    real_unlink = subject.os.unlink
     calls = 0
+    failure_seen = False
+    post_failure_unlinks = []
 
     def fail_second_readback(*args, **kwargs):
-        nonlocal calls
+        nonlocal calls, failure_seen
         calls += 1
         if calls == 2:
+            failure_seen = True
             raise OSError("injected")
         return real_readback(*args, **kwargs)
 
+    def record_unlink(*args, **kwargs):
+        if failure_seen:
+            post_failure_unlinks.append(args[0] if args else None)
+        return real_unlink(*args, **kwargs)
+
     monkeypatch.setattr(subject, "_readback", fail_second_readback)
-    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_PUBLISH_FAILED$"):
+    monkeypatch.setattr(subject.os, "unlink", record_unlink)
+    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_EFFECT_UNKNOWN$"):
         subject.publish_initial_resident_plan(_v1_plan())
-    assert list(root.iterdir()) == []
+    assert post_failure_unlinks == []
+    assert {item.name for item in root.iterdir()} == {
+        path.name for path in _destinations(root)
+    }
 
 
 def test_bootstrap_refuses_canonical_v1_evidence_with_extra_field_even_when_plan_hashes_are_rebuilt(monkeypatch, tmp_path):
@@ -314,9 +331,33 @@ def test_bootstrap_refuses_inherited_acl_on_created_file(monkeypatch, tmp_path):
         return real_acl(descriptor, info)
 
     monkeypatch.setattr(subject, "_has_acl", acl_only_on_files)
-    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_PUBLISH_FAILED$"):
+    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_EFFECT_UNKNOWN$"):
         subject.publish_initial_resident_plan(_v1_plan())
-    assert list(root.iterdir()) == []
+    preserved = list(root.glob(".release-owner-bootstrap.*.tmp"))
+    assert len(preserved) == 1
+
+
+def test_bootstrap_close_failure_after_create_preserves_temp_and_reports_unknown(monkeypatch, tmp_path):
+    root = _prepare_root(monkeypatch, tmp_path)
+    real_close = subject.os.close
+    injected = False
+
+    def close_regular_then_fail(fd):
+        nonlocal injected
+        if not injected:
+            info = os.fstat(fd)
+            if stat.S_ISREG(info.st_mode):
+                injected = True
+                real_close(fd)
+                raise OSError("injected close failure")
+        return real_close(fd)
+
+    monkeypatch.setattr(subject.os, "close", close_regular_then_fail)
+    with pytest.raises(subject.BootstrapError, match="^BOOTSTRAP_EFFECT_UNKNOWN$"):
+        subject.publish_initial_resident_plan(_v1_plan())
+    assert injected is True
+    preserved = list(root.glob(".release-owner-bootstrap.*.tmp"))
+    assert len(preserved) == 1
 
 
 def test_bootstrap_preserves_substituted_final_and_reports_unknown(monkeypatch, tmp_path):
