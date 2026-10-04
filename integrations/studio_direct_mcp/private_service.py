@@ -1073,6 +1073,7 @@ def _write_install(
     previous_source: str | None = None,
     dependency_tree_hash: str | None = None,
     public_url: str | None = None,
+    fleet_routes: tuple[tuple[str, str], ...] = (),
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -1097,6 +1098,7 @@ def _write_install(
                 roots["state"],
                 user_root,
                 public_url=public_url,
+                fleet_routes=fleet_routes,
             ),
             indent=2,
             sort_keys=True,
@@ -1223,6 +1225,7 @@ def _verify_staged_install(
     if not isinstance(installed_config, dict) or installed_config.get("accountLabel") != account:
         raise SystemExit("not staged: config channel mismatch")
     _validate_tailnet_public_url(account, installed_config.get("publicUrl"))
+    _installed_fleet_routes(installed_config, account)
 
     if roots["plist"].is_symlink() or not roots["plist"].is_file():
         raise SystemExit("not staged: plist missing")
