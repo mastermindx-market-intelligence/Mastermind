@@ -19,7 +19,7 @@ receipts, GitHub + Agent OS durable refs, zero Chairman message carriage. Return
 - GitHub issue #1143 `[ASTRA HANDOFF][PART 2/2] Exact-session interconnect` = live HOST carrier (install/acceptance/service-control/arm effects).
 - Carrier PRs: #811 #1145 #1041 #1157 #1166 #1169 #1204 #1218 #1219 #1178 #1176 #1175 (+adjacent #1150/#1046 #955 #908 #892 #1201).
 - LAST CONSUMED EDGE: #1143 comment 2026-10-04T02:51:53Z (mastermindx-3 `REQUEST_DIAGNOSIS` — external V3 1.4 reader `backend_unavailable`, diagnose before full fabric arm).
-- Slack ACK root: C0BSBM78V1N ts `1791083562.416539` (https://mastermindxgroup.slack.com/archives/C0BSBM78V1N/p1791083562416539), posted 2026-10-04T03:12Z. START not yet posted.
+- Slack ACK root: C0BSBM78V1N ts `1791083562.416539` (https://mastermindxgroup.slack.com/archives/C0BSBM78V1N/p1791083562416539), posted 2026-10-04T03:12Z. START posted in-thread ts `1791083970.655569` at 03:19Z (https://mastermindxgroup.slack.com/archives/C0BSBM78V1N/p1791083970655569).
 
 ## 2 Wave plan
 | wave | lanes | gate (written before launch) | status |
@@ -40,15 +40,17 @@ PRE-MORTEM (W1–W4):
 ## 3 Lane matrix
 | lane | owner/tier | owned files | worktree/branch | sentinel/artifact | budget | state | last verified (UTC, how) | watcher |
 |---|---|---|---|---|---|---|---|---|
-| C0 host diag+arm | #1143 incumbent host owner (effects), Sol C3 directs | host only | n/a | #1143 comments | n/a | RUNNING (not mine) | 02:51Z gh issue view | none (consume on cycle) |
-| L1a #811/#1145 disposition | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none (read-only) | reads W + S/pr811|1145.diff | return packet (agent notification); packet copy S/L1a.md | 1 turn | LAUNCHING 03:2xZ | — | agent completion notification |
-| L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn | LAUNCHING 03:2xZ | — | agent completion notification |
-| L2 release/install train | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W/ops/executive_os + S/pr{1157,1166,1169,1204,1219,1178,1176,1175}.diff + S/issue1143.md | return packet; S/L2.md | 1 turn | LAUNCHING 03:2xZ | — | agent completion notification |
+| C0 host diag+arm | #1143 incumbent host owner (effects), Sol C3 directs | host only | n/a | #1143 comments; Fable seat-split note = issuecomment-5976104646 | n/a | RUNNING (not mine) | 03:20Z gh issue view (no new edge) | S/watch_1218_1143.out |
+| L1a #811/#1145 disposition | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none (read-only) | reads W + S/pr811|1145.diff | return packet (agent notification); packet copy S/L1a.md | 1 turn (+1 nudge) | RUNNING; hit 12-turn harness cap 03:27Z mid-read → nudged once to continue | 03:27Z notification | agent completion notification |
+| L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn (+1 nudge) | RUNNING (launched 03:25Z) | — | agent completion notification |
+| L2 release/install train | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W/ops/executive_os + S/pr{1157,1166,1169,1204,1219,1178,1176,1175}.diff + S/issue1143.md | return packet; S/L2.md | 1 turn (+1 nudge) | RUNNING; hit 12-turn harness cap 03:27Z at inventory stage → nudged once | 03:27Z notification | agent completion notification |
 | L3 seat records | Fable | this file; agentos handoff (Macro) | W branch | commits | — | RUNNING | now | — |
-| L4 #1218 gate | Ryan = incumbent writer/repairer; Fable shepherds | none | PR branch (Ryan) | new headRefOid on #1218 | custody tripwire 2026-10-04T04:45Z | WAITING_REPAIR (CI FAILED D8 03:01Z; C3 repair review 03:07Z) | 03:09Z gh api | S/watch_1218_1143.out (one process, polls #1218 head + #1143 comment count every 600 s, exits on first edge) |
+| L4 #1218 gate | Ryan = incumbent writer/repairer; Fable shepherds | none | PR branch (Ryan) | new headRefOid on #1218 | custody tripwire 2026-10-04T04:45Z (posted on #1218 as issuecomment-5976104841) | WAITING_REPAIR (CI FAILED D8 03:01Z; C3 repair review 03:07Z) | 03:09Z gh api | S/watch_1218_1143.out (one process, polls #1218 head + #1143 comment count every 600 s, exits on first edge) |
 
 ## 4 Ledger
 DECIDED:
+- START posted 03:19Z once Phase-1 audit lanes were live; host effects remain EFFECT_NONE from this seat — 2026-10-04.
+- Native Opus auditor agents are capped at 12 turns per run by the harness; a capped return is PARTIAL, continued by one nudge (O.10), never by a replacement agent on the same question — 2026-10-04.
 - Treat the pasted packet as deliberate DIRECT_TARGETED delivery; ACK once in #agent-dispatch; no second claim — 2026-10-04T02:4xZ.
 - #1143 host owner retains every host effect; Fable consumes receipts, never installs/arms/ingresses — 2026-10-04.
 - ARMED requires a successor release: #1218 proves 03f7ca04's arm gate refuses (distnoted under worker UID); fix is source-only → the next host cycle installs M' ⊇ #1218. Train composition = open RULING (L1/L2 feed it) — 2026-10-04.
@@ -75,6 +77,8 @@ NEXT: launch L1a/L1b/L2 audits; seat-split note on #1143; custody tripwire note 
 - Human gates: root/admin ceremony for install (host owner); ChatGPT app catalog rescan (Chairman/platform); Fable connector OAuth (Chairman).
 
 ## 6 Do-not-redo
+- PICKUP_ACK (ts 1791083562.416539) and START (ts 1791083970.655569) posted once in #agent-dispatch; seat-split note on #1143 and custody tripwire on #1218 posted once.
+- Chairman packet extracted verbatim to S/packet.md (scratchpad; 239 lines) — re-extract from the transcript only if S is lost.
 - 03f7ca04 install + formal acceptance PASS, v2 carry-forward (receipt 5975776425, #1143 02:27Z).
 - Post-PASS read-side restore (start-readside) and MCP 1.4.0 cutover (#1143 02:32Z / 02:37Z).
 - SUMMON→CooCycle→Attempt source composition probe (C3, probe-grounded.log).
