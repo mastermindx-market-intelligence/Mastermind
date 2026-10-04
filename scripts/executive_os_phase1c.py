@@ -1949,7 +1949,7 @@ def _service_from_config(
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
         session_factories = {}
-        if installed_profile == WEB_CEO_SESSIONS_PROFILE:
+        if installed_profile in {WEB_CEO_SESSIONS_PROFILE, WEB_CEO_V3_PROFILE}:
             from integrations.session_bridge.installed import build_runtime_session_bridge
             from integrations.session_bridge.native_backends import ExecutiveSummonAdapter
             from integrations.session_bridge.schemas import BridgeError
