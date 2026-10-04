@@ -13,6 +13,7 @@ from scripts import check_claude_projection_parity as checker
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = "operator.appserver.readonly.docs-mcp.v1"
+COMPANY_PROFILE = "operator.appserver.interactive.company-mcp.v1"
 
 
 @pytest.fixture
@@ -115,6 +116,22 @@ def test_deliberate_defer_is_supported_without_auto_adding_tools(manifest):
         "status": "deferred", "reason": "Exact new generation needs owner qualification.",
     }
     assert checker.validate_manifest(manifest, source_root=ROOT)["ok"] is True
+
+
+def test_new_company_mcp_profile_is_explicitly_deferred_for_every_claude_surface(manifest):
+    registry = ExecutionCapabilityRegistry.load(ROOT / checker.POLICY, source_root=ROOT)
+    profile = registry.profiles[COMPANY_PROFILE]
+    assert profile.enabled is False
+    assert profile.execution_surface == "codex-app-server"
+    assert profile.mcp_servers == ("company-consultation-mcp-v1",)
+    row = manifest["profiles"][COMPANY_PROFILE]
+    assert row["profile_digest"] == profile.profile_digest
+    assert row["package_generation_digests"] == {}
+    for surface in checker.SURFACES:
+        entry = row["surfaces"][surface]
+        assert entry["status"] == "deferred"
+        assert "separate reviewed profile/native binding qualification" in entry["reason"]
+        assert "projection" not in entry
 
 
 def test_deferral_cannot_retain_a_stale_projection(manifest):

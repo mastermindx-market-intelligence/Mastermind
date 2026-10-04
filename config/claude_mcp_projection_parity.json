@@ -4,6 +4,28 @@
   "policy_schema_version": "mastermind.executive_agent_capabilities/v3",
   "production_armed": false,
   "profiles": {
+    "operator.appserver.interactive.company-mcp.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "19ea30bee5e609a70cae37c511cb519f8b6cbc535546aafa9b595729a5c59530",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Current canonical Company-MCP profile is disabled and Codex App Server-specific; Claude support requires separate reviewed profile/native binding qualification.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Current canonical Company-MCP profile is disabled and Codex App Server-specific; Claude support requires separate reviewed profile/native binding qualification.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Current canonical Company-MCP profile is disabled and Codex App Server-specific; Claude support requires separate reviewed profile/native binding qualification.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Current canonical Company-MCP profile is disabled and Codex App Server-specific; Claude support requires separate reviewed profile/native binding qualification.",
+          "status": "deferred"
+        }
+      }
+    },
     "operator.appserver.interactive.v1": {
       "package_generation_digests": {},
       "profile_digest": "cd10fce1f53d01d1253e88fcf7850c0ab7928a2d9c7fc2340e3b8a1475fd324f",
