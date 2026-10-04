@@ -148,28 +148,6 @@ def _matches_owned(directory_fd: int, entry: _OwnedEntry) -> bool:
     )
 
 
-def _unlink_owned(directory_fd: int, entry: _OwnedEntry) -> bool:
-    """Unlink only the exact inode this bootstrap created."""
-    try:
-        info = os.stat(entry.name, dir_fd=directory_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    if not stat.S_ISREG(info.st_mode) or _identity(info) != (
-        entry.device,
-        entry.inode,
-    ):
-        return False
-    try:
-        os.unlink(entry.name, dir_fd=directory_fd)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        return False
-    return True
-
-
 def _canonical_document(raw: object, code: str) -> dict[str, Any]:
     if type(raw) is not bytes or not raw.endswith(b"\n") or b"\n" in raw[:-1]:
         raise _refuse(code)
@@ -412,7 +390,6 @@ def _make_temp(
     flags |= getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(temporary, flags, 0o600, dir_fd=directory_fd)
     created = _owned(temporary, os.fstat(fd))
-    complete = False
     try:
         _write_all(fd, data)
         inherited = os.fstat(fd)
@@ -433,16 +410,21 @@ def _make_temp(
             or _has_acl(fd, info)
         ):
             raise OSError("temporary postimage mismatch")
-        complete = True
-    finally:
+    except Exception as error:
+        # Once the directory entry exists there is no race-free conditional
+        # pathname unlink primitive. Preserve the residue for inspection and
+        # force the next invocation through the orphan-temp EFFECT_UNKNOWN gate.
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        raise BootstrapError("BOOTSTRAP_EFFECT_UNKNOWN") from error
+    try:
         os.close(fd)
-        if not complete:
-            if not _unlink_owned(directory_fd, created):
-                raise BootstrapError("BOOTSTRAP_EFFECT_UNKNOWN")
-            try:
-                os.fsync(directory_fd)
-            except OSError as error:
-                raise BootstrapError("BOOTSTRAP_EFFECT_UNKNOWN") from error
+    except OSError as error:
+        # A close failure after create/write is a material uncertain effect.
+        # Preserve the temp entry; never downgrade to ordinary publish failure.
+        raise BootstrapError("BOOTSTRAP_EFFECT_UNKNOWN") from error
     return created
 
 def _rename_no_replace(directory_fd: int, source: str, destination: str) -> None:
@@ -506,24 +488,6 @@ def _readback(
     finally:
         os.close(fd)
 
-def _cleanup(
-    directory_fd: int,
-    finals: list[_OwnedEntry],
-    temporaries: list[_OwnedEntry],
-) -> bool:
-    clean = True
-    for entry in reversed(finals):
-        if not _unlink_owned(directory_fd, entry):
-            clean = False
-    for entry in temporaries:
-        if not _unlink_owned(directory_fd, entry):
-            clean = False
-    try:
-        os.fsync(directory_fd)
-    except OSError:
-        clean = False
-    return clean
-
 def publish_initial_resident_plan(plan: PublicationPlan) -> BootstrapReceipt:
     """Publish one first disabled resident set, or fail without replacing state."""
     # Root is checked before observing the caller's plan by design.
@@ -564,9 +528,9 @@ def publish_initial_resident_plan(plan: PublicationPlan) -> BootstrapReceipt:
             try:
                 _rename_no_replace(directory_fd, temporary.name, name)
             except FileExistsError:
-                if not _cleanup(directory_fd, finals, temporaries):
-                    raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN") from None
-                raise _refuse("BOOTSTRAP_DESTINATION_OCCUPIED") from None
+                # Temps already exist. Preserve all residual entries instead of
+                # racing a pathname cleanup against concurrent privileged work.
+                raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN") from None
             final = _OwnedEntry(name, temporary.device, temporary.inode)
             finals.append(final)
             temporaries.remove(temporary)
@@ -578,10 +542,12 @@ def publish_initial_resident_plan(plan: PublicationPlan) -> BootstrapReceipt:
         os.fsync(directory_fd)
     except BootstrapError:
         raise
-    except Exception:
-        if not _cleanup(directory_fd, finals, temporaries):
-            raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN") from None
-        raise _refuse("BOOTSTRAP_PUBLISH_FAILED") from None
+    except Exception as error:
+        # Before the first create, ordinary failure is provably zero-effect.
+        # After any temp/final is tracked, preserve it and require reconciliation.
+        if temporaries or finals:
+            raise _refuse("BOOTSTRAP_EFFECT_UNKNOWN") from error
+        raise _refuse("BOOTSTRAP_PUBLISH_FAILED") from error
     finally:
         close_error = False
         for descriptor in reversed(ancestor_fds):
