@@ -237,10 +237,11 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
     removed = (
-        "tailnet-gateway.mjs", "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs"
+        "fleet-routing.mjs", "tailnet-gateway.mjs", "fleet-status.mjs",
+        "paper-design.mjs", "output-budget.mjs"
     ) if typed_git else (
-        "tailnet-gateway.mjs", "fleet-status.mjs", "paper-design.mjs",
-        "output-budget.mjs", "git-publish.mjs"
+        "fleet-routing.mjs", "tailnet-gateway.mjs", "fleet-status.mjs",
+        "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
     for name in removed:
         (roots["base"] / name).unlink()
@@ -272,6 +273,7 @@ class TestIdentity(unittest.TestCase):
                 "git-publish.mjs",
                 "paper-design.mjs",
                 "fleet-status.mjs",
+                "fleet-routing.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
                 "tailnet-gateway.mjs",
@@ -309,6 +311,12 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
+        router_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V6}
+        self.assertTrue(svc._valid_manifest({**base, "files": router_legacy}, "test-account", _label_for("test-account")))
+        self.assertNotIn("fleet-routing.mjs", svc.LEGACY_STAGE_FILES_V6)
+        self.assertIn("tailnet-gateway.mjs", svc.LEGACY_STAGE_FILES_V6)
+        tailnet_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V5}
+        self.assertTrue(svc._valid_manifest({**base, "files": tailnet_legacy}, "test-account", _label_for("test-account")))
         previous_current = {name: digest for name in svc.LEGACY_STAGE_FILES_V4}
         self.assertTrue(svc._valid_manifest({**base, "files": previous_current}, "test-account", _label_for("test-account")))
         immediate_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V3}
