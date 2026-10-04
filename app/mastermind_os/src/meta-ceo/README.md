@@ -2,8 +2,9 @@
 
 This composition implements Paper's Meta-CEO office (AT08/AT08M) inside the
 existing React product. DJ1/DJ1M and MC2/MC2M retain the behavior references.
-It is a source candidate. The incumbent shell does not import it yet; route,
-browser, native, authentication and production acceptance remain separate gates.
+It is now composed into the existing App Today route. All nine legacy routes remain
+reachable. Browser, native, authentication and production acceptance remain separate
+gates; the source candidate includes explicit unmerged dependency ancestry.
 
 ## Data boundary
 
@@ -27,7 +28,9 @@ five-key tuple and runtime observation; window association reuses the existing
 
 Delivery, pickup, START, effect, transport return, review and acceptance remain
 independent. A completed result is not a transport return or acceptance. Work
-remains `WORK_PENDING_CUSTODY` until the released Work adapter can be consumed.
+remains unadapted in this projection; the legacy Work route and its released source
+are retained in the integrated App. The existing `WORK_PENDING_CUSTODY` label is a
+projection gap, not a claim that the original source writer is still active.
 Direction, critical-path, journal and missing attention producers stay explicit
 gaps; the component never creates their facts from model prose.
 
@@ -70,9 +73,10 @@ counts, direction and approval facts are never copied into live values.
 global navigation remain with the incumbent shell. Display font fallbacks do not
 establish font-asset or pixel parity; real browser comparison is still required.
 
-## Host integration gaps
+## Remaining host integration gaps
 
-The current Programs host drops its source-observation envelope. Result keeps
+The optional Programs host companion now retains its source-observation envelope
+from the same raw acquisition, while the legacy method keeps its old return shape. Result keeps
 source digests but has no observation timestamp; auth display state is not a
 session identity. Keep missing provenance UNKNOWN or UNAVAILABLE. Do not invent
 revisions, timestamps or session bindings to make the component show CURRENT.
@@ -115,9 +119,9 @@ npm run build
 npm run build -- --mode native
 ```
 
-Before connecting the shell, reconcile the incumbent #1046 / #1150 Work and
-LAUNCH stack, #1132 host cancellation and #956 Work/Mission link. No source in
-those lanes is replaced here. After integration, render the actual product and
+The candidate preserves exact source ancestry from #1046 / #1150 Work and
+LAUNCH plus #1132 cancellation. Their protected landing gates remain independent.
+The unaccepted #956 Work/Mission link is not imported. Render the actual product and
 verify desktop, 390px, 320px, 200% text, keyboard/focus, all six source states,
 unknown effect, draft retention and auth invalidation. Installed authenticated
 owner data and the final Chairman journey are required for product acceptance.
@@ -144,11 +148,21 @@ hash. Tests use injected consumer fixtures under that same trust boundary, not l
 service attestation. No Mission/runtime receipt, generated_at field or UI clock is
 substituted for collection provenance; local observation time is labeled acquisition.
 
-Shared-source integration remains required: add an optional typed host observation read
-using the existing raw Programs acquisition once, under the existing before/after epoch
-checks, then call this companion decoder. App must select that method instead of also
-calling the legacy reader, retain its existing request-token/abort fencing, capture the
-context before acquisition, re-read context after completion, and commit an observed
-context/snapshot atomically. A discarded reply cannot replace a winner. Legacy hosts
-that only provide a bare Control Room remain unqualified for Office/Projects. No live
-host/App call to this companion is installed by this source-only component change.
+`MissionHost.readProgramsObservation` now performs the existing raw Programs read
+once with the same before/after auth-epoch checks, then uses the companion decoder.
+App selects it instead of the legacy reader, retains request-token/abort fencing,
+and feeds the result to `useOfficeProjection`. That hook performs no acquisitions.
+Both native transport gates accept a companion-only typed host. A changed Project
+waits for its own collection acquisition before starting the exact Mission read;
+reopening the same pair preserves its collection receipt without a duplicate read.
+
+The hook captures presentation context before each existing read and commits the
+accepted context/snapshot together. Discarded replies cannot replace a winner.
+Legacy hosts supplying only bare Control Room data remain unqualified for Office
+provenance. Result and Window snapshots are not yet fed into this hook.
+
+App auth invalidation synchronously clears Office snapshots, private inspection
+and draft state before passive reacquisition. Drafts remain ephemeral and scoped
+to auth, exact selection and supplied session/binding fields; the latter remain
+null when absent. Evidence and route detours do not destroy an unsent direction.
+This is source integration, not authenticated native acceptance.

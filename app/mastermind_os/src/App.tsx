@@ -5,6 +5,8 @@ import type {
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import {
   OperationController,
   type OperationKind,
@@ -1121,11 +1123,14 @@ export function App() {
     resultRequest = useRef(0),
     missionRequest = useRef(0),
     programRequest = useRef(0),
+    programSelection = useRef(selection),
     workRequest = useRef(0),
     missionSelectionState =
-      native && !window.MastermindMissionHost?.readPrograms
+      native && !window.MastermindMissionHost?.readPrograms && !window.MastermindMissionHost?.readProgramsObservation
         ? "NATIVE"
-        : index.state,
+        : selection?.workRef !== programSelection.current?.workRef || selection?.rootJobId !== programSelection.current?.rootJobId
+          ? "PENDING"
+          : index.state,
     selectionRefused =
       index.state === "AVAILABLE" &&
       !!selection &&
@@ -1135,6 +1140,7 @@ export function App() {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  const office = useOfficeProjection(authRevision, selection);
   const resultContext = useMemo(
     () => ({ selection, authRevision, missionV3 }),
     [selection, authRevision, missionV3],
@@ -1233,6 +1239,7 @@ export function App() {
         ) return;
         previousAuth.current = serialized;
         previousHostGeneration.current = generation;
+        office.invalidateAuth();
         commandSlot.current?.controller.invalidate();
         const pending = pendingCommand.current;
         if (pending) {
@@ -1393,7 +1400,11 @@ export function App() {
     let attached = true;
     const current = ++programRequest.current,
       controller = new AbortController();
-    if (native && !window.MastermindMissionHost?.readPrograms) {
+    // A changed selection must wait for its own collection read before the
+    // Mission effect can use the preceding selection's AVAILABLE index.
+    programSelection.current = selection;
+    const officeRead = office.beginPrograms();
+    if (native && !window.MastermindMissionHost?.readPrograms && !window.MastermindMissionHost?.readProgramsObservation) {
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -1418,7 +1429,8 @@ export function App() {
       };
     }
     const read = window.MastermindMissionHost?.readPrograms;
-    if (typeof read !== "function") {
+    const readObservation = window.MastermindMissionHost?.readProgramsObservation;
+    if (typeof read !== "function" && typeof readObservation !== "function") {
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -1435,10 +1447,18 @@ export function App() {
       reason: "SOURCE_READ_PENDING",
     });
     Promise.resolve()
-      .then(() => read({ signal: controller.signal }))
-      .then((raw) => {
-        if (attached && programRequest.current === current)
+      .then(async () => {
+        if (readObservation) {
+          const observation = await readObservation({ signal: controller.signal });
+          return { raw: observation.controlRoom, observation };
+        }
+        return { raw: await read!({ signal: controller.signal }), observation: null };
+      })
+      .then(({ raw, observation }) => {
+        if (attached && programRequest.current === current && !controller.signal.aborted) {
           setIndex(programsFromControlRoom(raw));
+          office.acceptPrograms(officeRead, observation);
+        }
       })
       .catch(() => {
         if (
@@ -1456,7 +1476,7 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [native, authRevision, authState?.acquisition]);
+  }, [native, authRevision, authState?.acquisition, selection?.workRef, selection?.rootJobId]);
   useEffect(() => {
     let attached = true;
     const current = ++workRequest.current;
@@ -1505,6 +1525,7 @@ export function App() {
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
+      office.clearSelection(next);
       selectionSeq.current += 1;
       commandSlot.current?.controller.invalidate();
       bumpInvalidation();
@@ -1529,6 +1550,7 @@ export function App() {
     let attached = true;
     const current = ++missionRequest.current,
       controller = new AbortController();
+    const officeRead = office.beginMission();
     if (
       native &&
       !window.MastermindMissionHost?.readMissionV3 &&
@@ -1609,6 +1631,7 @@ export function App() {
         if (!attached || missionRequest.current !== current) return;
         const v3 = readV3 ? decodeMissionv3(raw, selection) : null;
         const decoded = readV3 ? v3 : decodeMission(raw, selection);
+        office.acceptMission(officeRead, decoded);
         if (decoded) {
           if (v3) {
             // Existing presentation components consume the same observation's
@@ -1740,6 +1763,7 @@ export function App() {
           : notice,
     open = (w: string, r: string | null) => {
       if (r) {
+        office.clearSelection({ workRef: w, rootJobId: r });
         selectionSeq.current += 1;
         commandSlot.current?.controller.invalidate();
         bumpInvalidation();
@@ -2080,91 +2104,11 @@ export function App() {
   );
   let content: React.ReactNode;
   if (active === "Today")
-    content = (
-      <div className="today-view">
-        <section className="hero today-hero">
-          <div>
-            <span className="eyebrow">TODAY</span>
-            <h2>
-              {index.state === "PENDING"
-                ? "Reading the bounded company projection…"
-                : index.state === "AVAILABLE"
-                  ? index.programs.length
-                    ? `${index.programs.length} Programs are source-qualified.`
-                    : "No Programs were projected by this source."
-                  : "Current company movement is unavailable."}
-            </h2>
-            <p>
-              Only bounded source facts are shown here. Missing source coverage
-              never becomes an all-clear.
-            </p>
-          </div>
-          <State
-            value={
-              index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state
-            }
-          />
-        </section>
-        <div className="today-grid">
-          <section className="card">
-            <div className="section-title">
-              <div>
-                <h2>What is moving</h2>
-                <p className="muted">
-                  Program state and next action from the existing bounded
-                  Programs projection.
-                </p>
-              </div>
-            </div>
-            {index.state === "PENDING" ? (
-              <Empty>Reading the bounded Control Room projection…</Empty>
-            ) : index.programs.length ? (
-              <div className="programs today-programs">
-                {index.programs.slice(0, 5).map((p) => (
-                  <button
-                    key={p.workRef}
-                    disabled={!p.rootJobId}
-                    onClick={() => open(p.workRef, p.rootJobId)}
-                  >
-                    <b>{p.title || p.workRef}</b>
-                    <span>
-                      {label(p.state)} ·{" "}
-                      {display(p.nextAction, "No next action projected")}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : index.state === "AVAILABLE" ? (
-              <Empty>
-                No Programs were projected. This is not evidence of zero work.
-              </Empty>
-            ) : (
-              <Empty>
-                Program source unavailable. No current movement was inferred.
-              </Empty>
-            )}
-          </section>
-          <section className="card attention-card">
-            <div className="section-title">
-              <div>
-                <h2>Chairman attention</h2>
-                <p className="muted">
-                  Reserved-power decisions require their own qualified source.
-                </p>
-              </div>
-              <State value="NOT_PROJECTED" />
-            </div>
-            <p>
-              This frontend contract does not yet include a Chairman-decision
-              feed. Absence here is not evidence that zero decisions exist.
-            </p>
-            <button className="primary" onClick={() => setActive("Programs")}>
-              Open Programs
-            </button>
-          </section>
-        </div>
-      </div>
-    );
+    content = <>
+      <MetaCeoOffice key={JSON.stringify([authRevision, selection])}
+        projection={office.projection} draft={office.draft} onDraftChange={office.changeDraft} />
+      <button type="button" className="primary" onClick={() => setActive("Programs")}>Open Programs</button>
+    </>;
   else if (active === "Programs")
     content = (
       <section className="card">

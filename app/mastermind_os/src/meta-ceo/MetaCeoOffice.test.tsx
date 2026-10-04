@@ -20,6 +20,14 @@ function input(): OfficeInput {
 }
 
 describe("Daily Office consumer", () => {
+  it.each(["current", "stale", "unknown"] as const)("requires current owner receipts for Chairman attention: %s", freshness => {
+    const reads = input();
+    reads.mission!.value!.principal.owed_turn = { seat: "chairman", reason: "Reserved decision from owner.",
+      source_refs: [{ owner: "EXECUTIVE_OS", ref: "decision:one", observed_at: "2026-10-04T08:00:00Z", freshness }] };
+    render(<MetaCeoOffice projection={projectOffice(reads, context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
+    const attention = screen.getByRole("region", { name: freshness === "current" ? "The owner has requested Chairman attention." : "Chairman attention is not established." });
+    expect(attention.textContent.includes("Reserved decision from owner.")).toBe(freshness === "current");
+  });
   it("puts the qualified answer before movement and exposes missing producers", () => {
     render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
     expect(screen.getByRole("heading", { name: "Keep the whole company moving with intention." })).toBeTruthy();

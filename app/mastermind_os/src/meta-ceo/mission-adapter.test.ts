@@ -59,6 +59,7 @@ describe("Mission owner receipt to Office adapter", () => {
       getState: () => signed, subscribe: listener => { notify = listener; return () => {}; },
       signIn: async () => {}, signOut: async () => {},
       readPrograms: async () => ({}), readCurrentWindow: async () => ({}),
+      readWork: async () => ({}),
       readMission: async () => structuredClone(fixture),
     };
     const host = bindMissionHost(client);

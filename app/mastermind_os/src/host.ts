@@ -20,6 +20,7 @@ import {
   type ResultSelection,
 } from "./result";
 import { decodeWorkDocument, type WorkDocument } from "./work";
+import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
 import {
   completeOrchestratorCommandBinding,
   type OrchestratorCommandBinding,
@@ -81,6 +82,8 @@ export interface MissionHost {
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readPrograms?: ProgramRead;
+  /** Same fixed Programs acquisition, retaining its collection owner receipt. */
+  readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
   readCurrentWindow?: (request: {
@@ -133,6 +136,13 @@ export function bindMissionHost(
       const raw = await client.readPrograms({ signal });
       check(signal, started);
       return decodeProgramsEnvelope(raw);
+    },
+    async readProgramsObservation({ signal }) {
+      const started = epoch;
+      check(signal, started);
+      const raw = await client.readPrograms({ signal });
+      check(signal, started);
+      return decodeProgramsObservation(raw);
     },
     async readWork({ signal }) {
       const started = epoch;

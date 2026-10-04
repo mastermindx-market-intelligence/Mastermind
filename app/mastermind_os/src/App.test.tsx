@@ -459,18 +459,18 @@ describe("Executive OS convergence surfaces", () => {
     render(<App />);
     const attention = screen
       .getByRole("heading", {
-        name: "Chairman attention",
+        name: "Chairman attention is not established.",
         level: 2,
       })
       .closest("section");
     expect(attention).toBeTruthy();
     expect(
       within(attention!).getByText(
-        "Absence here is not evidence that zero decisions exist.",
+        "Missing attention data does not mean there are no decisions.",
         { exact: false },
       ),
     ).toBeTruthy();
-    expect(within(attention!).getByText("NOT PROJECTED")).toBeTruthy();
+    expect(within(attention!).queryByText("The owner has requested Chairman attention.")).toBeNull();
   });
 });
 

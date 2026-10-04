@@ -23,7 +23,9 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
   const mission = projection.mission.value;
   const current = projection.mission.source.state === "CURRENT";
   const needsChairman = current && mission?.principal.owed_turn?.seat === "chairman" &&
-    mission.principal.owed_turn.source_refs.length > 0;
+    mission.principal.owed_turn.source_refs.length > 0 &&
+    mission.principal.owed_turn.source_refs.every(ref =>
+      !!ref.owner && !!ref.ref && !!ref.observed_at && ref.freshness === "current");
   const title = mission?.program.title ?? mission?.program.work_ref;
   const unknownEffect = projection.receipts.effect === "EFFECT_UNKNOWN";
   const draftAssociated = draft.context.authGeneration === projection.context.authGeneration && sameTarget(draft.context, projection.context);
@@ -34,7 +36,7 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
   ] as const;
   const closePreview = () => { setPreview(null); previewButton.current?.focus(); };
 
-  return <main className="meta-ceo-office">
+  return <section className="meta-ceo-office" aria-label="Meta-CEO office">
     <header className="office-heading">
       <div><p className="office-eyebrow">One company. One office.</p>
         <h1>Keep the whole company <br />moving with intention.</h1>
@@ -152,5 +154,5 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
       <p>Inspecting this preview supplies no authorization. Submission requires the canonical command owner.</p>
       <button type="button" onClick={closePreview}>Close preview</button>
     </section>}
-  </main>;
+  </section>;
 }
