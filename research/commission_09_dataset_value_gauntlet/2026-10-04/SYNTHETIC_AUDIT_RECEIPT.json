@@ -1,0 +1,76 @@
+{
+  "kind": "research_only_synthetic_counterexamples",
+  "market_data_used": false,
+  "holdout_opened": false,
+  "production_effect": false,
+  "execution_environment": {
+    "python": "3.13.5",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3"
+  },
+  "source": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "commit": "e570025bf3921ac26c3bdcb06ad25303677f325d",
+    "path": "engine/validation.py",
+    "blob": "e9bbe0e77ae571b62a9f5b8b8e4e7a950c035399"
+  },
+  "method": "Direct evaluation of the exact inspected expressions on synthetic inputs, not importing or executing the complete repository module or test suite.",
+  "results": [
+    {
+      "id": "SYN-01",
+      "target": "backtest_core volatility warm-up",
+      "expression": "sigma = ret.rolling(vol_window).std(); sigma = sigma.fillna(sigma.median()).fillna(0.0)",
+      "vol_window": 4,
+      "prefix_prices": [
+        100.0,
+        101.0,
+        100.0,
+        101.0,
+        100.0,
+        101.0,
+        100.0,
+        101.0
+      ],
+      "appended_prices": [
+        150.0,
+        60.0,
+        180.0,
+        55.0,
+        170.0,
+        65.0,
+        190.0,
+        50.0
+      ],
+      "prefix_sigma_at_index_1": 0.011489841990803452,
+      "extended_sigma_at_same_index_1": 0.44432536067754225,
+      "eta": 0.1,
+      "fixed_participation": 0.01,
+      "prefix_impact_rate": 0.00011489841990803454,
+      "extended_impact_rate_same_early_bar": 0.004443253606775423,
+      "verdict": "FUTURE_SUFFIX_CHANGES_EARLY_COST_INPUT"
+    },
+    {
+      "id": "SYN-02",
+      "target": "_maxdd",
+      "returns": [
+        -0.2,
+        0.1
+      ],
+      "source_result": 0.0,
+      "initial_capital_inclusive_result": -0.19999999999999996,
+      "verdict": "FIRST_BAR_LOSS_OMITTED_FOR_STANDALONE_RETURN_PATH"
+    },
+    {
+      "id": "SYN-03",
+      "target": "vif",
+      "rows": 40,
+      "columns": "two identical nonconstant columns",
+      "source_result": [
+        0.24999999999999992,
+        0.24999999999999994
+      ],
+      "mathematical_vif": "infinite/undefined (perfect collinearity)",
+      "verdict": "PSEUDOINVERSE_DIAGONAL_IS_NOT_VIF_FOR_SINGULAR_DESIGN"
+    }
+  ]
+}
