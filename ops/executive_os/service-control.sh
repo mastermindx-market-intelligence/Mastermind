@@ -7,15 +7,17 @@ umask 077
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
 RELAY_LABEL="com.mastermind.executive.sol-state-relay"
+AGENT_RELAY_LABEL="com.mastermind.executive.agent-relay"
 MCP_LABEL="com.mastermind.executive.mcp"
 BACKUP_LABEL="com.mastermind.executive.backup"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
+AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|start-readside|stop-readside|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status}" >&2
   exit 64
 }
 
@@ -297,6 +299,20 @@ case "$1" in
     stop_one "$CONTROL_LABEL"
     stop_one "$RELAY_LABEL"
     readside_postflight
+    ;;
+  start-agent-relay)
+    require_root
+    # Enrollment/verification is a separate A2 owner. Activation accepts no
+    # caller-supplied label or plist and cannot manufacture enrollment state.
+    validate_plist "$AGENT_RELAY_PLIST"
+    ensure_running "$AGENT_RELAY_LABEL" "$AGENT_RELAY_PLIST"
+    ;;
+  stop-agent-relay)
+    require_root
+    # Refuse an unenrolled host before mutating launchd disabled state. The
+    # pre-enrollment disabled override remains owned by A2 host preparation.
+    validate_plist "$AGENT_RELAY_PLIST"
+    stop_one "$AGENT_RELAY_LABEL"
     ;;
   status)
     exec /bin/bash "$SCRIPT_DIR/status.sh"
