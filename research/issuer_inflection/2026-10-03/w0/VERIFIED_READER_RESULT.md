@@ -34,3 +34,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 research/issuer_inflection/2026-10-03/w0/test_
 ```
 
 The fixture reader does not make a real publisher, rights check, source signature, canonical trial/exposure writer, production canary or broad issuer service exist. Those original program gates remain outstanding.
+
+## Normal repository test entry
+
+`tests/test_i3_baseline_fixture_consumer.py` now invokes the three existing consumer suites under the normal repository test discovery path. Its three parametrized entries pass locally and execute the same 42 baseline, 15 source-binding and 26 reader tests; these are not three additional empirical issuer observations. This is one test-only path outside the research prefix, not a new engine or a modification to the protected-identity guard. `evidence/READER_CI_ENTRY_TESTS.json` binds the exact entrypoint hash and command/result. Hosted CI still must run the new candidate, and the diagnosed evidence-placement failure is not waived by this local result.
