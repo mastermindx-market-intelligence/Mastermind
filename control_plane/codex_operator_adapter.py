@@ -12,6 +12,13 @@ explicit non-default ``CODEX_HOME`` before a process may start.
 
 from __future__ import annotations
 
+from control_plane.native_company_receipt import project_company_read
+from integrations.mastermind_company_mcp.consultation import (
+    COMPANY_CONSULTATION_SERVER_IDENTITY,
+    COMPANY_CONSULTATION_SERVER_VERSION,
+    COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+)
+
 import hashlib
 import json
 import os
@@ -19,11 +26,16 @@ import pwd
 import re
 import stat
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from control_plane.executive_process_identity import (
+    _ProcessInstanceObservation,
+    _observe_process_instance,
+)
 from control_plane.executive_agent_capabilities import (
     ExecutionCapabilityProfile,
     NativeHelperGrant,
@@ -42,6 +54,7 @@ from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AdapterFailureClass,
     AttentionTurnObservation,
+    AttentionCompanyReadProjection,
     AuthIdentityConfidence,
     AuthRealmFact,
     CandidateResult,
@@ -316,6 +329,12 @@ def _default_base_sha(workspace: Path) -> str:
         ) from exc
 
 
+def _default_process_instance(pid: int) -> _ProcessInstanceObservation | None:
+    # Non-Darwin harnesses keep their historical evidence shape. CONSULT's
+    # Darwin host qualifier requires the execution pair and refuses its absence.
+    return _observe_process_instance(pid) if sys.platform == "darwin" else None
+
+
 def _default_process_identity(pid: int) -> ProcessIdentityObservation:
     try:
         pgid = os.getpgid(pid)
@@ -420,6 +439,7 @@ class _GenerationState:
     provider_session_tree_id: str
     process: ProcessIdentityObservation
     attestation: ObservedHarnessAttestation
+    process_instance: tuple[int, int] | None = None
     resource: Any | None = None
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
@@ -616,6 +636,7 @@ class CodexOperatorAdapter:
         turn_input_loader: TurnInputLoader | None = None,
         base_sha_resolver: BaseShaResolver = _default_base_sha,
         process_identity_observer: ProcessIdentityObserver = _default_process_identity,
+        process_instance_observer: Callable[[int], _ProcessInstanceObservation | None] = _default_process_instance,
         client_factory: ClientFactory = _default_client_factory,
         extra_env: Mapping[str, str] | None = None,
         skill_canary_binding: CodexSkillCanaryBinding | None = None,
@@ -676,6 +697,7 @@ class CodexOperatorAdapter:
         self.turn_input_loader = turn_input_loader
         self.base_sha_resolver = base_sha_resolver
         self.process_identity_observer = process_identity_observer
+        self.process_instance_observer = process_instance_observer
         self.client_factory = client_factory
         self.extra_env = dict(extra_env or {})
         self.skill_canary_binding = skill_canary_binding
@@ -1217,6 +1239,40 @@ class CodexOperatorAdapter:
         thread = result.get("thread")
         return str(thread.get("id") or "") if isinstance(thread, Mapping) else ""
 
+    def _process_instance(self, pid: int) -> tuple[int, int] | None:
+        try:
+            value = self.process_instance_observer(pid)
+            if value is None and sys.platform != "darwin":
+                return None
+            if (
+                not isinstance(value, _ProcessInstanceObservation)
+                or type(value.unique_id) is not int or value.unique_id <= 0
+                or type(value.pidversion) is not int or value.pidversion <= 0
+            ):
+                raise ValueError("execution identity unavailable")
+            return value.unique_id, value.pidversion
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity is not observable",
+                effect_unknown=True,
+            ) from exc
+
+    def _require_process_continuity(
+        self, process: ProcessIdentityObservation,
+        instance: tuple[int, int] | None,
+    ) -> None:
+        pid = int(process.pid or 0)
+        if (
+            self.process_identity_observer(pid) != process
+            or self._process_instance(pid) != instance
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity changed before admission",
+                effect_unknown=True,
+            )
+
     def _initialize_and_attest(
         self,
         client: AppServerClient,
@@ -1411,9 +1467,11 @@ class CodexOperatorAdapter:
                     "Codex App Server lacks its attested private process group",
                     effect_unknown=True,
                 )
+            process_instance = self._process_instance(client.pid)
             attestation = self._initialize_and_attest(
                 client, requested, launch_binary_digest, resource_binding
             )
+            self._require_process_continuity(process, process_instance)
             if _sha256_file(self.binary_path) != launch_binary_digest:
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
@@ -1508,6 +1566,7 @@ class CodexOperatorAdapter:
                     "thread/started did not confirm the provider session",
                     effect_unknown=True,
                 )
+            self._require_process_continuity(process, process_instance)
             # Drain (never bare-clear) so a skills/changed notification that
             # arrived during thread/start itself -- the other half of the
             # M7 fence -- is scanned rather than dropped as startup noise.
@@ -1535,6 +1594,7 @@ class CodexOperatorAdapter:
             provider_session_tree_id=provider_session_tree_id,
             process=process,
             attestation=attestation,
+            process_instance=process_instance,
             resource=(
                 resource_binding.resource if resource_binding is not None else None
             ),
@@ -2022,13 +2082,8 @@ class CodexOperatorAdapter:
         """Observe the exact launched PID's effective host identity."""
 
         state = self._state(generation)
-        process = self.process_identity_observer(int(state.process.pid or 0))
-        if process != state.process:
-            raise CodexAdapterError(
-                AdapterFailureClass.PROCESS_CRASH,
-                "launched process identity changed before admission",
-                effect_unknown=True,
-            )
+        process = state.process
+        self._require_process_continuity(process, state.process_instance)
         try:
             completed = subprocess.run(
                 ["ps", "-o", "uid=", "-p", str(process.pid)],
@@ -2046,13 +2101,17 @@ class CodexOperatorAdapter:
                 "launched process credentials are not observable",
                 effect_unknown=True,
             ) from exc
+        self._require_process_continuity(process, state.process_instance)
+        identity = {
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        }
+        if state.process_instance is not None:
+            identity.update(unique_id=state.process_instance[0], pidversion=state.process_instance[1])
         return OSProcessCredentialObservation(
-            process_identity={
-                "pid": process.pid,
-                "pgid": process.pgid,
-                "process_start_identity": process.process_start_identity,
-                "boot_id": process.boot_id,
-            },
+            process_identity=identity,
             os_principal_name=principal_name,
             os_principal_uid=uid,
         )
@@ -2160,6 +2219,27 @@ class CodexOperatorAdapter:
             ):
                 return index + 1
         return None
+
+    @staticmethod
+    def _company_read_server(state: _GenerationState) -> str | None:
+        """Select only the exact requested and observed Company MCP identity."""
+        required = [value for value in state.requested.capabilities.required
+                    if value.kind == "mcp_server"
+                    and value.mcp_server_identity == COMPANY_CONSULTATION_SERVER_IDENTITY]
+        if len(required) != 1:
+            return None
+        expected = required[0]
+        if (not expected.name or expected.mcp_server_version != COMPANY_CONSULTATION_SERVER_VERSION
+                or expected.tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+                or expected.mcp_auth_status != "unsupported"
+                or state.attestation.effective_mcp.count(expected.name) != 1):
+            return None
+        observed = [value for value in state.attestation.capabilities
+                    if value.kind == "mcp_server" and value.name == expected.name]
+        fields = ("mcp_server_identity", "mcp_server_version", "tool_schema_digest", "mcp_auth_status")
+        if len(observed) != 1 or any(getattr(observed[0], key) != getattr(expected, key) for key in fields):
+            return None
+        return expected.name
 
     def _ingest_turn_notifications(
         self,
@@ -2389,6 +2469,16 @@ class CodexOperatorAdapter:
                 and notification_thread != state.provider_session_id
             ):
                 native_subordinate_id = register_subordinate(notification_thread)
+
+            if method == "item/completed" and not completed and native_subordinate_id is None:
+                server = self._company_read_server(state)
+                if server is not None:
+                    receipt = project_company_read(
+                        params, server_name=server, thread_id=state.provider_session_id,
+                        turn_id=state.turns.get(turn.turn_id, ""),
+                    )
+                    if receipt is not None:
+                        safe_payload["company_read_receipt"] = receipt
 
             state.events.append(
                 NormalizedEvent(
@@ -2813,10 +2903,8 @@ class CodexOperatorAdapter:
             )
         state.attention_native_turn_id = native_turn_id
         try:
-            completion = state.client.wait_notification(
-                _ATTENTION_COMPLETION_METHOD,
-                timeout=float(timeout),
-            )
+            notifications = self._attention_notifications(state, timeout=float(timeout))
+            completion = notifications[-1]
         except JsonRpcError as exc:
             if str(exc).startswith(_ATTENTION_COMPLETION_TIMEOUT_PREFIX):
                 return AttentionTurnObservation(
@@ -2860,7 +2948,23 @@ class CodexOperatorAdapter:
             completion=completion,
             terminal_status=terminal_status,
             native_turn_id=native_turn_id,
+            preceding_notifications=notifications[:-1],
         )
+
+    def _attention_notifications(
+        self, state: _GenerationState, *, timeout: float,
+    ) -> list[dict[str, Any]]:
+        # Use the existing queue owner's atomic prefix operation. A drain after
+        # completion would mix late frames with the completed attention turn.
+        if self._company_read_server(state) is not None:
+            return state.client.wait_notifications_through(
+                _ATTENTION_COMPLETION_METHOD, timeout=timeout,
+                predicate=lambda value: self._matches_attention_completion(
+                    value, provider_session_id=state.provider_session_id,
+                    native_turn_id=state.attention_native_turn_id,
+                ),
+            )
+        return [state.client.wait_notification(_ATTENTION_COMPLETION_METHOD, timeout=timeout)]
 
     @staticmethod
     def _matches_attention_completion(
@@ -2883,13 +2987,14 @@ class CodexOperatorAdapter:
             and str(completed_turn.get("id") or "").strip() == native_turn_id
         )
 
-    @staticmethod
     def _terminal_attention_observation(
+        self,
         state: _GenerationState,
         *,
         completion: object,
         terminal_status: str,
         native_turn_id: str,
+        preceding_notifications: Sequence[Mapping[str, Any]] = (),
     ) -> AttentionTurnObservation:
         pending = state.attention_request
         if pending is None:
@@ -2926,6 +3031,34 @@ class CodexOperatorAdapter:
                 terminal_ack_trailer=True,
             )
         )
+        company = None
+        server = self._company_read_server(state)
+        receipts = []
+        if server is not None and len(preceding_notifications) <= 4096:
+            for notification in preceding_notifications:
+                if notification.get("method") == "item/completed":
+                    receipt = project_company_read(
+                        notification.get("params"), server_name=server,
+                        thread_id=state.provider_session_id, turn_id=native_turn_id,
+                    )
+                    if receipt is not None:
+                        receipts.append(receipt)
+            # A single exact read is bounded evidence. Ambiguous repeated reads
+            # never select a result by position or invent consumption credit.
+            if len(receipts) == 1:
+                receipt = receipts[0]
+                company = AttentionCompanyReadProjection(
+                    target_attempt_id=pending.attempt_id,
+                    process_generation_id=state.generation.process_generation_id,
+                    binding_id=pending.binding_id,
+                    binding_generation=pending.binding_generation,
+                    provider_session_id=state.provider_session_id,
+                    provider_native_turn_id=native_turn_id,
+                    nudge_id=pending.nudge_id,
+                    consultation_ref=receipt["consultation_ref"],
+                    result_sha256=receipt["result_sha256"],
+                    native_item_sha256=receipt["native_item_sha256"],
+                )
         return AttentionTurnObservation(
             process_generation_id=state.generation.process_generation_id,
             provider_session_id=state.provider_session_id,
@@ -2934,6 +3067,7 @@ class CodexOperatorAdapter:
             accepted=True,
             delivered=True,
             wake_ack_projection=wake_ack_projection,
+            company_read_projection=company,
         )
 
     def _reconcile_late_attention_completion(
@@ -2947,10 +3081,8 @@ class CodexOperatorAdapter:
             return None
         while True:
             try:
-                completion = state.client.wait_notification(
-                    _ATTENTION_COMPLETION_METHOD,
-                    timeout=0.0,
-                )
+                notifications = self._attention_notifications(state, timeout=0.0)
+                completion = notifications[-1]
             except Exception:
                 # Absence, transport loss, and malformed reader behavior are all
                 # fail-closed: none is evidence that the provider completed.
@@ -2967,6 +3099,7 @@ class CodexOperatorAdapter:
                         completion=completion,
                         terminal_status=terminal_status,
                         native_turn_id=native_turn_id,
+                        preceding_notifications=notifications[:-1],
                     )
 
     def read_events(

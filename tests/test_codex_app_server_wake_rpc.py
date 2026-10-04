@@ -208,8 +208,8 @@ def _owned_adapter(
     # default so guarded ordinary turns exercise the production send seam.
     adapter.skill_canary_binding = None
     adapter.process_identity_observer = lambda _pid: observed_process
-    requested = SimpleNamespace(approval_policy="never")
-    attestation = SimpleNamespace(effective_config_digest="d" * 64)
+    requested = SimpleNamespace(approval_policy="never", capabilities=SimpleNamespace(required=()))
+    attestation = SimpleNamespace(effective_config_digest="d" * 64, capabilities=(), effective_mcp=())
     adapter._active_workers = {
         adapter.worker_id: GENERATION.process_generation_id,
     }

@@ -176,6 +176,61 @@ def _consultation_intent_payload(
     }
 
 
+def consultation_requester_binding(
+    runtime: Runtime, attempt_id: str, *,
+    connection: sqlite3.Connection | None = None,
+) -> tuple[SessionTarget, RuntimeBinding]:
+    """Read the existing requester attention binding in one owner snapshot."""
+    if connection is None:
+        with runtime.store.read() as owned_connection:
+            return consultation_requester_binding(runtime, attempt_id, connection=owned_connection)
+    facts = runtime.current_harness_binding_source(
+        attempt_id, connection=connection
+    )
+    surface = reasoning_surface_for_provider(facts.provider)
+    if surface != "codex":
+        raise StateConflict(
+            "requester answer attention transport is unavailable"
+        )
+    target = SessionTarget(
+        session_alias="CONSULTATION-REQUESTER",
+        target_seat=facts.owner_seat,
+        reasoning_surface=surface,
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=True,
+    )
+    return target, project_runtime_binding(
+        runtime,
+        attempt_id,
+        target,
+        connection=connection,
+    )
+
+
+def consultation_recipient_target() -> SessionTarget:
+    return SessionTarget(
+        session_alias="CONSULTATION-RECIPIENT",
+        target_seat="coo",
+        reasoning_surface="codex",
+        wake_transport="codex-app-server",
+        allowed_transports=("codex-app-server",),
+        workstream=None,
+        target_enabled=True,
+    )
+
+
+def consultation_recipient_binding(
+    runtime: Runtime, attempt_id: str, *,
+    connection: sqlite3.Connection | None = None,
+) -> RuntimeBinding:
+    """Read the existing exact Codex/COO recipient attention binding."""
+    return project_runtime_binding(
+        runtime, attempt_id, consultation_recipient_target(), connection=connection,
+    )
+
+
 class ConsultationRuntime:
     """Own consultation facts without changing Job/Attempt lifecycle state."""
 
@@ -984,28 +1039,8 @@ class ConsultationRuntime:
         requester_attempt_id: str,
         connection: sqlite3.Connection,
     ) -> tuple[SessionTarget, RuntimeBinding]:
-        facts = self.runtime.current_harness_binding_source(
-            requester_attempt_id, connection=connection
-        )
-        surface = reasoning_surface_for_provider(facts.provider)
-        if surface != "codex":
-            raise StateConflict(
-                "requester answer attention transport is unavailable"
-            )
-        target = SessionTarget(
-            session_alias="CONSULTATION-REQUESTER",
-            target_seat=facts.owner_seat,
-            reasoning_surface=surface,
-            wake_transport="codex-app-server",
-            allowed_transports=("codex-app-server",),
-            workstream=None,
-            target_enabled=True,
-        )
-        return target, project_runtime_binding(
-            self.runtime,
-            requester_attempt_id,
-            target,
-            connection=connection,
+        return consultation_requester_binding(
+            self.runtime, requester_attempt_id, connection=connection,
         )
 
     def _require_current_recipient(
@@ -1021,9 +1056,8 @@ class ConsultationRuntime:
                 return self._require_current_recipient(
                     item, connection=owned_connection
                 )
-        target = self._recipient_target()
-        projected = project_runtime_binding(
-            self.runtime, actor["attempt_id"], target, connection=connection
+        projected = consultation_recipient_binding(
+            self.runtime, actor["attempt_id"], connection=connection,
         )
         if (
             projected.binding_id != binding["binding_id"]
@@ -1169,15 +1203,7 @@ class ConsultationRuntime:
         return row["root_job_id"]
 
     def _recipient_target(self) -> SessionTarget:
-        return SessionTarget(
-            session_alias="CONSULTATION-RECIPIENT",
-            target_seat="coo",
-            reasoning_surface="codex",
-            wake_transport="codex-app-server",
-            allowed_transports=("codex-app-server",),
-            workstream=None,
-            target_enabled=True,
-        )
+        return consultation_recipient_target()
 
     def _artifact_digest(self, item: Mapping[str, Any]) -> str:
         return hashlib.sha256(
