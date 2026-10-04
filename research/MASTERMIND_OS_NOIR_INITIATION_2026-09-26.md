@@ -796,3 +796,87 @@ apply only to this bounded Paper design and builder-handoff continuation.
 No app implementation, protected merge, installation, deployment, background
 execution, outgoing message or source-custody transfer was performed.
 <!-- DAILY_CONTINUATION_2026_10_04_END -->
+
+<!-- KNOWLEDGE_FLOW_2026_10_04_BEGIN -->
+
+## 4 October 2026 — Search, Knowledge and source-to-draft continuation
+
+**Status: reviewed design and documentation contribution with open product amendments and two unresolved Paper effects.** This section extends the completed conversation continuation above; it does not replace that historical evidence or inherit its mission-complete classification.
+
+The Chairman authorized continued project-wide Noir Atelier design and daily-use hardening. The bounded journey in this continuation is Search/Knowledge → exact permitted source → explicit excerpt insertion → the original scoped draft and return. It addresses the practical gap between finding useful work and continuing the right conversation without losing a thought.
+
+### Source grounding and capability boundary
+
+Protected source was read at `3ac05a00dacde2c06893f5f15082b703d2c04463`. The comparison from `28be2ce2d481fd542ec869344e178e5cec4d7d75` contains one commit and 12 backend/evidence/test files, with no app-source changes. The original app census remains intact. Current INDEX schema/bootstrap compatibility and applicable execution, routing, reliability and Paper workflow rules were recovered at the same pin.
+
+The new backend receipt's optional `work_ref` preserves original workstream provenance. It does not establish current Program/Mission association, execution, message delivery or new app capability. The committed disposable launch/recovery evidence and proposed, unadopted consumer version patch remain distinct from current candidate custody, installed producer qualification and original Mission acceptance. Contributor-time “needs merge” prose in that report is historical: the backend source is present at this protected pin. Full primary anchors are S26–S33 in the builder specification.
+
+The protected app still has bounded Mission Evidence and an exact five-key result reader, but no general Search/Knowledge collection, generic evidence-source reader, composer or Add-to-draft implementation. Enabled design specimens remain qualified target capabilities. This continuation changes no app implementation, auth/command host, Runtime, provider or installed service.
+
+### Applied Paper targets
+
+Exact file: `01M3NRCX55B452A12819WNE1RH`, Mastermind OS. The direct Mastermind Paper carrier used explicit file IDs without switching the unrelated foreground file. Current runtime admission was multi-writer with board/artboard/node-scoped coordination; disjoint advanced-operation work was preserved.
+
+| Target | Exact artboards | Applied design contribution |
+| --- | --- | --- |
+| AT06 / AT06M Search | `L3N-0` / `MNN-0`, page `p-D-0` | One query, four type filters, exact source/project/conversation destinations, selected source preview, incomplete-coverage disclosure and origin-preserving Close |
+| AT05 / AT05M Knowledge | `L0Z-0` / `MNM-0`, page `p-D-0` | Decisions, discoveries and artifacts use distinct meanings; exact decision/source destinations; review stage separated from source validity; partial coverage and Sources access |
+| KD01 / KD01M Source reader | `SPU-0` / `STU-0`, page `p-D-0` | New ivory reading surface with the original scoped draft, one explicit Add action, exact excerpt context and no-send explanation; mobile amendments below remain open |
+| UX08 | `SXT-0`, page `p-E-0` | Find/open/return, query and source states, metadata/content permission, actual origin, focus/IME and exact wiring |
+| UX09 | `SXU-0`, page `p-E-0` | Before/after draft specimen, visible source label, conditional Undo, repeated Add, changed source, missing draft capability and expanded mobile-source details specification |
+| Five existing entry points | AT00 `KSB-0`; UX00 `PBO-0`; directory `A2Q-0`; MC90 `A8Q-0`; CH91 `KDN-0` | Updated to UX00–UX09 and the source-reader family, retaining advanced-operation references |
+
+This is six product artboards created/refined and two new guide artboards. Page 13 now contains ten notes. Final page reads show 68 canonical artboards on Page 12, including the two known KD01 roots; no added-state product copy was identified. KD01 desktop is at x2150/y6800 and mobile at x3830/y6800. UX08 and UX09 occupy x0 and x1680 at y5000. Product sizes remain 1600 × 1040 and390 ×844; both new guides are1600 ×1120.
+
+Search filters are All, Projects, Conversations and Knowledge; the historical People filter is hidden. Both responsive views use the full Project Sol label. Knowledge mobile now has all four type filters and a44px Sources & access control. Its review-pack action opens KD01; its decision opens the exact AT20 packet. Terminal's discovery must retain Terminal's own source identity through the reader layout, never the fixed Mastermind OS example.
+
+### Connected daily-use contract
+
+The source-reading detour preserves **To Project Sol · About Mastermind OS · Topic Work visibility** and the original unsent draft **“What evidence is still missing?”**. Reading does not append, send, adopt a plan, record acceptance or change recipients.
+
+The exact excerpt is **“Source freshness still needs verification against the current source.”** The visible source label is **“Work visibility review pack · v2 · Mastermind OS · Freshness unverified”**. UX09 shows the resulting plaintext draft with the original question followed by that quote and source label. Its after-state remains unsent. Return leads to the original conversation with the augmented draft; returning through source details must not reload a fixture and erase the insertion.
+
+The builder contract preserves original route, query, type, permitted scope, exact result/source identity, reading anchor, scroll, actual focus and draft identity/revision. Back names the actual immediate origin, such as Search results or Knowledge. Close unwinds the actual reading stack. Missing origins get an honest permitted unavailable state, never a guessed project or newly created conversation.
+
+Repeated Add does not duplicate the same retained insertion. Undo is visible only when the existing draft owner can reverse the exact unchanged insertion under its approved revision policy; otherwise offer Edit draft and preserve newer typing. A changed source revision is shown before another insertion. Source metadata access, content access and composition support remain independent. Source time, observation time, revision, review stage, acceptance and release remain separate facts.
+
+A prior unknown Send stays attached to its original submitted snapshot and owner operation. Adding to the next draft does not retry or resolve it. No transcript, source cache, attachment registry, undo ledger, command queue or new persistence plane is introduced to imitate these designs.
+
+### Static review, corrections and open product amendments
+
+Screenshots, targeted trees, editable JSX/text and computed styles were inspected. The principal reviewed the final Search mobile, both Knowledge screens, both source readers, UX08/UX09 and the five changed guide entries. Independent read-only review checked Search, the reader pair and both new guides. Knowledge's scoped editor reviewed and released its own pair.
+
+Applied corrections include full Project Sol labels on mobile Search; mobile Knowledge filter parity and source-access recovery; a consistent exact excerpt/source label in the UX09 draft; and explicit existing-owner support for Undo. `T00-0` was visually rechecked and read back with the conditional-Undo wording. `SZO-0` was read back with the exact augmented draft. The new guides fit fully; UX00's complete ten-note list fits its existing1200px canvas, and the other changed index roots retain fit-content sizing.
+
+The following reader amendments remain **open**:
+
+1. KD01M must label the exact excerpt to add and show the full append source label before Add. The current source card also contains other explanatory text, so the insertion boundary needs clearer mobile treatment.
+2. KD01M Source details needs a reviewable expanded state. UX09 provides the details specimen and unavailable-clock/currentness rules.
+3. Final parent screenshot review found the KD01M status time/icons and Close label were not visibly legible although their nodes exist (`SVB-0`, `SV4-0`, `SX6-0` in `SUT-0`). Inspect their rendering and restore legible chrome before claiming mobile completion.
+4. KD02 added-state product variants were not observed or verified. Their intended state is documented by UX09's explanatory specimen, not a working product variant.
+
+These are static layout and semantic observations, not executed accessibility, keyboard/IME, enlarged-text,320px, network-fault, installed-app or live-message acceptance. The existing fifteen application scenarios are extended in §17.2; they remain required and unexecuted here.
+
+### Exact unresolved effects and do-not-redo boundary
+
+Accepted Paper catalog: `ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`. Token content hash observed: `fd2ed32e`. Each dispatched edit used the same direct carrier, explicit target and fresh basic-info guard. That guard is not a full document revision or concurrency lease.
+
+| Original operation | Observed response / readback | Current boundary |
+| --- | --- | --- |
+| `mm-knowledge-flow-added-state-shells-20261004-001` — duplicate `SPU-0` and `STU-0` | Non-JSON response began `McpServerE…`; the old parsing wrapper lost the full raw reply. Same-carrier basic/tree reads and the final canonical-page read show no identifiable new copies and68 artboards. | **EFFECT_UNKNOWN.** Freeze this duplication and overlapping source-reader targets. No verified KD02, replacement operation ID, replay or carrier change. Unchanged counts do not prove no effect. |
+| `mm-knowledge-guide-mobile-chrome-amendment-20261004-001` — text leaf `T0J-0` | Full raw response preserved: `McpServerError: Connection timed out.`, `isError:true`, `error_code:UNAVAILABLE`, `type:mcp_network_error`. Original-carrier node read still shows the prior “Show this full payload above Add; keep the original draft visible.” | **EFFECT_UNKNOWN.** Freeze this exact leaf amendment. Desired replacement was “Show full payload above Add; keep the draft visible. Make status and Close legible.” No retry/carrier change. The header finding is preserved in the repository even though the Paper note change is unconfirmed. |
+
+A bounded source diagnostic confirmed the protected Paper bridge exposes no operation-receipt lookup or persistent duplicate/retry ledger; `operation_id` is correlation, not exactly-once custody. Typed dispatch exceptions/upstream errors may have partial effects. Current source cannot reconstruct the lost original response from that label. Definitive original-carrier evidence is required to settle either unknown effect.
+
+The Paper workflow's same-operation rule requires the affected writes to remain paused while disjoint admitted targets continue. Disjoint UX08/UX09/index edits therefore proceeded; no alternate carrier or reconstructed KD02 was used to bypass the unknown duplication. The wrapper was improved locally to preserve raw responses before parsing; that improvement preserved the second timeout evidence.
+
+Owned working indicators were released through `mm-knowledge-flow-release-owned-indicators-20261004-001`, with `APPLIED_RESPONSE_OBSERVED`. The explicit release covered only the parent-owned Search/reader/guide/index roots; Knowledge's owner released its own pair. Indicator release does not clear either content-effect fence.
+
+### Saved handoff and next useful work
+
+The expanded builder specification is saved in commit `88357a5f8af3d2cb022f8ac9be45b036691676dc`; the final ten-guide README/amendment update is in `43d52a2c29eb281fa89ff5c861fdbe57e2eebbf3`, on `sol/noir-qualification-20260926` under draft PR #1010. The full local specification has SHA-256 `8db027ffbc84289a6ef1dcf42ddf14e2a912a9949728cb0b23508a54b5df3b6d`. Exact Git readback remains the closing verification.
+
+Read UX08 and UX09, then §11.2–11.6 for the source journey and the exact open-effect boundary. Reconcile the two original Paper operations if authoritative original evidence becomes available; then apply and review the mobile amendments and added-state product variant. Until then, preserve those target fences. The application builder's separate first slice remains the integrated, source-qualified Today/project/conversation/evidence/return journey, with the actual owner DTOs, access invalidation and the fifteen applicable acceptance scenarios.
+
+This continuation does not claim complete product UX, live interaction, source merge, installation, deployment, messaging, production acceptance or cleared effect custody. Its reviewed design and documentation contribution is durable; its remaining amendments and original-operation identities are concrete and recoverable.
+<!-- KNOWLEDGE_FLOW_2026_10_04_END -->
