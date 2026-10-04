@@ -118,6 +118,9 @@ in the Mastermind OS file `01M3NRCX55B452A12819WNE1RH`:
   scoped filtering, and source/access recovery.
 - **AT05/AT05M `L0Z-0` / `MNM-0`** and **AT06/AT06M `L3N-0` / `MNN-0`**
   define Knowledge and Search with qualified coverage and exact source destinations.
+- **AT07/AT07M `L6N-0` / `MNO-0`** now focus Sources/access on the actual
+  reading task. **SA01/SA01M `T0U-0` / `T0V-0`** show the exact evidence read,
+  partial content, separate freshness/clocks, bounded recheck and retained origin.
 - **KD01/KD01M `SPU-0` / `STU-0`** show the source reader and original scoped
   draft. UX09 specifies the added-draft state, conditional Undo, full mobile
   append payload and expanded source details. Mobile payload/details and visible
@@ -145,13 +148,15 @@ verification record remains
 Read the [Daily Experience Builder Flow Specification](../../docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md)
 before wiring the mockups. It grounds the intended experience in protected
 product law and implementation source `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
-Continuation comparisons through protected `3ac05a00dacde2c06893f5f15082b703d2c04463`
-found no app-source delta. The latest receipt-provenance/backend evidence is
+Continuation comparisons through protected `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`
+found no app-source delta. The latest bounded `3ac…5b` comparison covers one
+commit and 104 changed files, with no app or Paper-bridge changes. Separate
+Company-edge and receipt-provenance/backend evidence is
 qualified separately from app adoption and installation; the specification
 preserves the original census and dated candidate observations.
 
 [Paper page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0)
-connects the route family through ten editable workflow notes:
+connects the route family through twelve editable workflow notes:
 
 - UX00 `PBO-0`: daily loop, roles and directory.
 - UX01 `PBP-0`: complete, partial, historical and unprojected Today states.
@@ -163,6 +168,8 @@ connects the route family through ten editable workflow notes:
 - UX07 `SMP-0`: Options + Send, draft continuity, delivery stages and recovery.
 - UX08 `SXT-0`: Search/Knowledge, exact-source opening, coverage and return context.
 - UX09 `SXU-0`: explicit excerpt/source-label insertion, draft/Undo states and source details.
+- UX10 `T7J-0`: Sources/access, independent read facts, exact evidence recheck and outcomes.
+- UX11 `T7K-0`: partial access, configured sign-in, pending/cancel state, protected-data clearing and actual return.
 
 The daily product shows what needs the Chairman's judgment and what the team
 owns. Meta-CEO remains one durable company office; project conversations retain
@@ -187,10 +194,21 @@ partial coverage, repeated Add, missing draft support and permission loss have
 explicit states. Undo is shown only when the existing draft owner can reverse
 the exact unchanged insertion; otherwise the person edits the draft.
 
+For source recovery, follow UX10 from AT07 into SA01, with UX11 for access and
+return. A partial read keeps permitted metadata useful while the selected
+reference, missing clocks and unknown cause stay visible. Recheck runs only an
+existing, admitted owner read; it does not ping GitHub or reconnect a service.
+Back/Close restores the actual query, scope, selection, focus and eligible unsent
+draft. Access loss clears protected content immediately; late reads cannot
+restore it. Preferences stays secondary to the current reading task. Current
+Connections is a Mission relationship view, not a source-inventory API.
+
 The specification includes actual Paper action anchors, source-owner mappings,
 transition and recovery matrices, illustrative fixtures and fifteen
 implementation acceptance scenarios, extended for directory identity, message
-stages, source reading/reuse, draft revision, IME and actual focus restoration.
+stages, source reading/reuse, draft revision, bounded evidence recheck, partial
+access, cancellation, IME and actual focus restoration. These scenarios and their
+extensions remain required and unexecuted by the design continuation.
 The current protected app remains a
 read-only consumer; general Search/Knowledge/source reuse, message send, project
 creation, decision recording, full history and execution continuation are target capabilities with separate owner
