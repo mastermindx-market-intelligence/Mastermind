@@ -78,6 +78,14 @@ AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
 CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
 CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
+DIALOGUE_CANARY_OPERATIONS = frozenset({"DIALOGUE_WAKE_CANARY_PUBLISH"})
+CONTROL_ONLY_TRANSACTION_OPERATIONS = CEO_SUBMIT_OPERATIONS | DIALOGUE_CANARY_OPERATIONS
+_CANARY_RECEIPT_ARCHIVE = "prior-dialogue-canary-receipt.json"
+_CANARY_MANIFEST_FIELDS = frozenset({
+    "prior_canary_receipt_sha256", "target_canary_receipt_sha256",
+    "prior_canary_receipt_present",
+})
+
 _CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
 _CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
     r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled|true|false)$'
@@ -171,7 +179,7 @@ _ARM_ADMISSION_CODES = frozenset(
 )
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CEO_SUBMIT_OPERATIONS
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -701,6 +709,16 @@ def _parser() -> argparse.ArgumentParser:
     ceo_reconcile.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
+    canary_publish = sub.add_parser(
+        "dialogue-canary-publish", help="Publish one bounded, source-derived continuation grant."
+    )
+    canary_publish.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    canary_publish.add_argument("--read-ref", action=_StoreOnce, required=True)
+    canary_publish.add_argument("--validity-seconds", type=int, action=_StoreOnce, required=True)
+    canary_reconcile = sub.add_parser(
+        "dialogue-canary-reconcile", help="Restore one interrupted grant publication's exact preimages."
+    )
+    canary_reconcile.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
     return parser
 
 
@@ -1452,9 +1470,9 @@ def execute_disarm(
         return existing
     host.require_exact_install(expected_sha)
     transaction_id = host.new_transaction_id()
-    host.stop_services(expected_sha)
     try:
         prior_configs = host.begin_disarm(expected_sha, transaction_id)
+        host.stop_services(expected_sha)
     except Exception as exc:
         raise TransactionEffectUnknown() from exc
     transaction = TransactionContext(
@@ -2649,6 +2667,14 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256",
             "target_worker_sha256",
         }
+        if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
+            required |= _CANARY_MANIFEST_FIELDS
+            if (
+                type(value.get("prior_canary_receipt_present")) is not bool
+                or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                       for field in ("prior_canary_receipt_sha256", "target_canary_receipt_sha256"))
+            ):
+                raise TransactionEffectUnknown()
         keys = set(value)
         allowed_with_control_preimage = required | {_CONTROL_LAUNCHD_PREIMAGE_FIELD}
         if (
@@ -2677,7 +2703,7 @@ class ProductionTransactionHost(ProductionArmHost):
             or (
                 _CONTROL_LAUNCHD_PREIMAGE_FIELD in value
                 and (
-                    value.get("operation") not in CEO_SUBMIT_OPERATIONS
+                    value.get("operation") not in CONTROL_ONLY_TRANSACTION_OPERATIONS
                     or type(value.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)) is not bool
                 )
             )
@@ -2713,6 +2739,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = current[
                 _CONTROL_LAUNCHD_PREIMAGE_FIELD
             ]
+        if current is not None and operation in DIALOGUE_CANARY_OPERATIONS:
+            value.update({key: current[key] for key in _CANARY_MANIFEST_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -3345,9 +3373,13 @@ class ProductionTransactionHost(ProductionArmHost):
         self._remove_candidate(control_candidate)
         self._remove_candidate(worker_candidate)
         expected = {"transaction.json", "prior-control.json", "prior-worker.json"}
+        archives = list(self._archive_paths())
+        if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
+            expected.add(_CANARY_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)
         if set(os.listdir(AUTONOMY_TRANSACTION)) != expected:
             raise TransactionEffectUnknown()
-        for path in (*self._archive_paths(), self._manifest_path()):
+        for path in (*archives, self._manifest_path()):
             info = path.lstat()
             if (
                 stat.S_ISLNK(info.st_mode)
@@ -3395,7 +3427,8 @@ class ProductionTransactionHost(ProductionArmHost):
                 self._claim_transaction_owner()
             manifest = self._manifest()
             if (
-                manifest.get("transaction_id") != transaction_id
+                manifest.get("operation") not in {"ARM", "DISARM"}
+                or manifest.get("transaction_id") != transaction_id
                 or manifest.get("expected_sha") != expected_sha
             ):
                 raise TransactionEffectUnknown()
@@ -3665,7 +3698,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         )
         self._persist_phase(transaction, "CANDIDATES_WRITTEN")
 
-    def validate_candidates(self, transaction: TransactionContext) -> None:
+    def _read_validated_control_candidate(self, transaction: TransactionContext):
         release = SYSTEM_ROOT / "releases" / transaction.expected_sha
         control_candidate, _worker_candidate = self._candidate_paths(
             transaction.transaction_id
@@ -3673,7 +3706,6 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         control_home = RUNTIME_ROOT / "control" / "home"
         control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
         worker_gid = grp.getgrnam(WORKER_GROUP).gr_gid
-        expected_armed = self._manifest().get("operation") == "CEO_SUBMIT_ARM"
         self._run_fixed(
             [
                 "/usr/bin/sudo",
@@ -3707,6 +3739,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         worker_raw, _worker_info = _read_root_file(
             WORKER_CONFIG, modes=frozenset({0o440}), gid=worker_gid
         )
+        return candidate_control, candidate_raw, worker_raw
+
+    def validate_candidates(self, transaction: TransactionContext) -> None:
+        candidate_control, candidate_raw, worker_raw = self._read_validated_control_candidate(transaction)
+        expected_armed = self._manifest().get("operation") == "CEO_SUBMIT_ARM"
         if (
             sha256_bytes(candidate_raw) != transaction.candidates.control_sha256
             or candidate_control.get("ceo_submit_armed") is not expected_armed
@@ -3930,7 +3967,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             raise TransactionEffectUnknown()
         current = self._manifest()
         if (
-            current.get("operation") not in CEO_SUBMIT_OPERATIONS
+            current.get("operation") not in CONTROL_ONLY_TRANSACTION_OPERATIONS
             or current.get("transaction_id") != transaction.transaction_id
             or current.get("expected_sha") != transaction.expected_sha
         ):
@@ -4069,6 +4106,14 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
     def _ceo_admission_probe(
         self, expected_sha: str, expected_control_sha256: str
     ) -> bool:
+        return self._control_config_probe(
+            expected_sha, expected_control_sha256, required_state="AWAITING_CANARY"
+        )
+
+    def _control_config_probe(
+        self, expected_sha: str, expected_control_sha256: str, *,
+        required_state: str | None = None,
+    ) -> bool:
         """CEO-admission probe: fixed label + fixed socket + AWAITING_CANARY +
         wrapper-owned attestation validator.
 
@@ -4132,7 +4177,9 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         ):
             return False
         result = value["result"]
-        if result.get("service_state") != "AWAITING_CANARY":
+        if result.get("service_state") not in {"READY", "AWAITING_CANARY"}:
+            return False
+        if required_state is not None and result.get("service_state") != required_state:
             return False
         # The service resolves its host-owned socket declaration (on macOS,
         # /var/run is /private/var/run). Admit only these two fixed spellings;
@@ -4575,6 +4622,10 @@ def main(
     if args.command in CEO_SUBMIT_COMMANDS:
         ceo_host = ProductionCeoSubmitHost() if host is None else host
         return _run_ceo_submit_command(ceo_host, args, now=current)
+
+    if args.command in {"dialogue-canary-publish", "dialogue-canary-reconcile"}:
+        from ops.executive_os.dialogue_wake_canary_control import run_command
+        return run_command(args, host=host)
 
     transaction_host = ProductionTransactionHost() if host is None else host
     try:

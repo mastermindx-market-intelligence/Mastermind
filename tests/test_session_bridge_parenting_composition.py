@@ -205,6 +205,14 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
                 binding_id=f.binding.binding_id, binding_generation=f.binding.binding_generation,
                 process_generation_id=f.generation.process_generation_id, policy_digest=route.policy_digest,
                 valid_from_epoch_seconds=1700000000, expires_at_epoch_seconds=1700000600)
+            from integrations.session_bridge.canary_source import derive_canary_grant_proposal
+            proposal = await derive_canary_grant_proposal(
+                f.runtime, read_ref=event.payload["read_ref"], socket_path=relay_path,
+                installed_release_sha="a" * 40, validity_seconds=600,
+                now_provider=lambda: 1700000000,
+            )
+            assert proposal.grant == grant
+            assert proposal.read_ref == event.payload["read_ref"]
             operator = Operator()
             bridge = ExecutiveDialogueWakeBridge(
                 target_provider=None, retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
@@ -262,6 +270,14 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
                 "operation_key": args["operation_key"], "in_reply_to": request_key,
                 "text": "The exact bounded finding is confirmed.", "next_step": "Continue the parent task."})
             assert reply["parent_consumed"] is False
+            # Once the exact child has replied, the old CONTINUE must not
+            # authorize a fresh canary publication.
+            with pytest.raises(ValueError, match="not the current child attention"):
+                await derive_canary_grant_proposal(
+                    f.runtime, read_ref=event.payload["read_ref"], socket_path=relay_path,
+                    installed_release_sha="a" * 40, validity_seconds=600,
+                    now_provider=lambda: 1700000100,
+                )
             result = await call("session_reply_read", {"read_ref": sent["data"]["read_ref"]})
             assert result["ok"], result
             assert result["data"]["in_reply_to"] == request_key

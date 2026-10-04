@@ -1627,7 +1627,13 @@ def _service_from_config(
     coo_source: Any | None = None,
     claimed_operator_adapter_factory: Callable[..., Any] | None = None,
     remote_operator_binding_source: Callable[..., Any] | None = None,
+    dialogue_canary_profile: Any | None = None,
 ) -> ExecutiveControlService:
+    from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
+    if dialogue_canary_profile is None:
+        dialogue_canary_profile = DialogueWakeCanaryProfile(None)
+    if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
+        raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     if (claimed_operator_adapter_factory is not None
             and not callable(claimed_operator_adapter_factory)):
@@ -2112,16 +2118,9 @@ def _service_from_config(
 
                 def codex_owner_configured():
                     from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
-                    # Configuration and serving listener are necessary capability
-                    # gates. A carrier receipt still proves no native attention.
-                    observation = getattr(service, "_dialogue_observation_server", None)
-                    return (
-                        raw.get("dialogue_bridge_armed") is True
-                        and getattr(raw.get("dialogue_wake_retry_policy"), "armed", False) is True
-                        and observation is not None
-                        and observation.is_serving()
-                        and w3c_plist_configured(release_sha=config.proof_base_sha)
-                    )
+                    # Canonical CONTINUE is carrier-only. The current Runtime
+                    # projector proves native ownership; Wake arming is separate.
+                    return w3c_plist_configured(release_sha=config.proof_base_sha)
 
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
@@ -2140,7 +2139,8 @@ def _service_from_config(
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
-        and raw["dialogue_bridge_armed"] is True
+        and (raw["dialogue_bridge_armed"] is True
+             or dialogue_canary_profile.grant is not None)
     ):
         from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
 
@@ -2171,8 +2171,7 @@ def _service_from_config(
                 carrier_factory=_build_executive_dialogue_wake_carrier,
                 # An absent grant stays an explicit disarmed profile; it must
                 # never select the generic carrier path after grant removal.
-                canary_profile=DialogueWakeCanaryProfile(
-                    raw.get("dialogue_wake_canary_activation")),
+                canary_profile=dialogue_canary_profile,
                 installed_release_sha=config.proof_base_sha,
                 canary_now_epoch_seconds=lambda: int(time.time()),
             ),
@@ -2377,8 +2376,15 @@ async def _serve_from_config(config_path: Path) -> None:
     if validate_control_coo(raw):
         coo_source = CooInstalledSource.from_path(DEFAULT_INSTALL_PATH,
             Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
+    from ops.executive_os.dialogue_wake_canary_control import load_verified_profile
+    dialogue_canary_profile = load_verified_profile(
+        control_sha256=control_attestation["config_sha256"],
+        release_sha=raw["proof_base_sha"],
+        grant=raw.get("dialogue_wake_canary_activation"),
+    )
     service = _service_from_config(
         raw,
+        dialogue_canary_profile=dialogue_canary_profile,
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,

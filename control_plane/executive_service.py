@@ -242,6 +242,15 @@ class DialogueWakeResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class DialogueWakeTargetIdentity:
+    """Current native identity without an operator effect capability."""
+    registry: Any
+    runtime_binding: Any
+    target_attempt_id: str
+    process_generation_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class DialogueWakeTarget:
     """Executive-owned Stage-B1 resolution of one proposed Wake target."""
 
@@ -373,6 +382,168 @@ def _dialogue_target_bindings_for_root(
         if len(bindings) == 1:
             result[seat] = bindings[0]
     return result
+
+
+def derive_dialogue_wake_canary_current_facts(
+    runtime: Runtime, request: DialogueWakeRequest, resolved: DialogueWakeTarget,
+    base_route: Any, *, installed_release_sha: str, now_provider: Callable[[], int],
+) -> Any:
+    """One shared current Runtime snapshot for publisher and effect-time guard."""
+    from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryCurrentFacts
+    from control_plane.runtime_binding_projection import project_runtime_binding
+
+    with runtime.store.read() as connection:
+        reader = object.__new__(ExecutiveControlService)
+        source_facts = reader._runtime_dialogue_observation_facts(
+            runtime,
+            request.parent,
+            connection=connection,
+        )
+        source_response = reduce_dialogue_observation(
+            parent=request.parent,
+            thread_ts=request.thread_ts,
+            facts=source_facts,
+        )
+        if _dialogue_candidate_from_response(source_response) != request.candidate:
+            raise StateConflict("current canary source candidate disagrees")
+        source = runtime.current_harness_binding_source(
+            resolved.target_attempt_id,
+            connection=connection,
+        )
+        target = resolved.registry.get(resolved.runtime_binding.session_alias)
+        binding = project_runtime_binding(
+            runtime,
+            resolved.target_attempt_id,
+            target,
+            connection=connection,
+        )
+        rows = connection.execute(
+            """
+            SELECT g.process_generation_id
+            FROM process_generations AS g
+            JOIN harness_session_epochs AS e
+              ON e.session_epoch_id=g.session_epoch_id
+            WHERE e.attempt_id=? AND e.state='CURRENT'
+              AND g.executive_writer_held=1
+              AND g.ended_at_ms IS NULL
+              AND g.generation_number=?
+            """,
+            (resolved.target_attempt_id, binding.binding_generation),
+        ).fetchall()
+        if (
+            len(rows) != 1
+            or source.owner_seat != request.obligation.declared_target_seat
+            or binding != resolved.runtime_binding
+            or str(rows[0]["process_generation_id"])
+            != resolved.process_generation_id
+        ):
+            raise StateConflict("current canary writer identity disagrees")
+        facts = DialogueWakeCanaryCurrentFacts(
+            installed_release_sha=installed_release_sha,
+            operation_key=request.parent["operation_key"],
+            source_root_job_id=request.candidate.root_job_id,
+            source_job_id=request.candidate.job_id,
+            source_attempt_id=request.candidate.attempt_id,
+            source_worker_id=request.candidate.worker_id,
+            source_semantic_digest=request.candidate.evidence_digest,
+            obligation_id=request.obligation.obligation_id,
+            target_seat=source.owner_seat,
+            target_session_alias=binding.session_alias,
+            target_attempt_id=resolved.target_attempt_id,
+            binding_id=binding.binding_id,
+            binding_generation=binding.binding_generation,
+            process_generation_id=str(rows[0]["process_generation_id"]),
+            policy_digest=base_route.policy_digest,
+        )
+        # The Executive clock is deliberately the final observation made
+        # while this fresh read snapshot is still owned by the worker thread.
+        now = now_provider()
+    return facts, now
+
+
+def resolve_current_dialogue_wake_target(
+    runtime: Runtime, request: DialogueWakeRequest,
+) -> DialogueWakeTargetIdentity | None:
+    """Resolve current identity only; no operator capability or provider effect."""
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import load_session_targets
+
+    root_job_id = request.candidate.root_job_id
+    seat = request.obligation.declared_target_seat
+    resolved: list[DialogueWakeTargetIdentity] = []
+    with runtime.store.read() as connection:
+        registry = load_session_targets()
+        rows = connection.execute(
+            """
+            SELECT current_attempt_id
+            FROM jobs
+            WHERE root_job_id=?
+              AND current_attempt_id IS NOT NULL
+              AND status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
+            ORDER BY job_id
+            """,
+            (root_job_id,),
+        ).fetchall()
+        for row in rows:
+            attempt_id = str(row["current_attempt_id"] or "")
+            try:
+                source = runtime.current_harness_binding_source(
+                    attempt_id,
+                    connection=connection,
+                )
+                if source.owner_seat != seat:
+                    continue
+                seat_map = registry.root_job_bindings.get(root_job_id, {})
+                alias = seat_map.get(seat)
+                target = (
+                    registry.get(alias)
+                    if alias is not None
+                    else registry.resolve(seat)
+                )
+                if alias is None:
+                    root_bindings = {
+                        key: dict(value)
+                        for key, value in registry.root_job_bindings.items()
+                    }
+                    root_bindings[root_job_id] = {
+                        **root_bindings.get(root_job_id, {}),
+                        seat: target.session_alias,
+                    }
+                    registry = registry.with_root_job_bindings(root_bindings)
+                binding = project_runtime_binding(
+                    runtime,
+                    attempt_id,
+                    target,
+                    connection=connection,
+                )
+                generation_rows = connection.execute(
+                    """
+                    SELECT g.process_generation_id
+                    FROM process_generations AS g
+                    JOIN harness_session_epochs AS e
+                      ON e.session_epoch_id=g.session_epoch_id
+                    WHERE e.attempt_id=?
+                      AND e.state='CURRENT'
+                      AND g.executive_writer_held=1
+                      AND g.generation_number=?
+                    """,
+                    (attempt_id, binding.binding_generation),
+                ).fetchall()
+                if len(generation_rows) != 1:
+                    continue
+                resolved.append(
+                    DialogueWakeTargetIdentity(
+                        registry=registry,
+                        runtime_binding=binding,
+                        target_attempt_id=attempt_id,
+                        process_generation_id=str(
+                            generation_rows[0]["process_generation_id"]
+                        ),
+                    )
+                )
+            except Exception:
+                continue
+    return resolved[0] if len(resolved) == 1 else None
 
 
 class ExecutiveDialogueWakeBridge:
@@ -1047,73 +1218,11 @@ class ExecutiveDialogueWakeBridge:
             raise StateConflict("current canary source grant disagrees")
         now_provider = self._canary_now_epoch_seconds
         assert callable(now_provider)
-        with runtime.store.read() as connection:
-            reader = object.__new__(ExecutiveControlService)
-            source_facts = reader._runtime_dialogue_observation_facts(
-                runtime,
-                request.parent,
-                connection=connection,
-            )
-            source_response = reduce_dialogue_observation(
-                parent=request.parent,
-                thread_ts=request.thread_ts,
-                facts=source_facts,
-            )
-            if _dialogue_candidate_from_response(source_response) != request.candidate:
-                raise StateConflict("current canary source candidate disagrees")
-            source = runtime.current_harness_binding_source(
-                resolved.target_attempt_id,
-                connection=connection,
-            )
-            target = resolved.registry.get(resolved.runtime_binding.session_alias)
-            binding = project_runtime_binding(
-                runtime,
-                resolved.target_attempt_id,
-                target,
-                connection=connection,
-            )
-            rows = connection.execute(
-                """
-                SELECT g.process_generation_id
-                FROM process_generations AS g
-                JOIN harness_session_epochs AS e
-                  ON e.session_epoch_id=g.session_epoch_id
-                WHERE e.attempt_id=? AND e.state='CURRENT'
-                  AND g.executive_writer_held=1
-                  AND g.ended_at_ms IS NULL
-                  AND g.generation_number=?
-                """,
-                (resolved.target_attempt_id, binding.binding_generation),
-            ).fetchall()
-            if (
-                len(rows) != 1
-                or source.owner_seat != grant.target_seat
-                or binding != resolved.runtime_binding
-                or str(rows[0]["process_generation_id"])
-                != resolved.process_generation_id
-            ):
-                raise StateConflict("current canary writer identity disagrees")
-            facts = DialogueWakeCanaryCurrentFacts(
-                installed_release_sha=str(self._installed_release_sha),
-                operation_key=grant.operation_key,
-                source_root_job_id=request.candidate.root_job_id,
-                source_job_id=request.candidate.job_id,
-                source_attempt_id=request.candidate.attempt_id,
-                source_worker_id=request.candidate.worker_id,
-                source_semantic_digest=request.candidate.evidence_digest,
-                obligation_id=request.obligation.obligation_id,
-                target_seat=source.owner_seat,
-                target_session_alias=binding.session_alias,
-                target_attempt_id=resolved.target_attempt_id,
-                binding_id=binding.binding_id,
-                binding_generation=binding.binding_generation,
-                process_generation_id=str(rows[0]["process_generation_id"]),
-                policy_digest=base_route.policy_digest,
-            )
-            # The Executive clock is deliberately the final observation made
-            # while this fresh read snapshot is still owned by the worker thread.
-            now = now_provider()
-        return facts, now
+        return derive_dialogue_wake_canary_current_facts(
+            runtime, request, resolved, base_route,
+            installed_release_sha=str(self._installed_release_sha),
+            now_provider=now_provider,
+        )
 
     async def historical_only(
         self,
@@ -1172,93 +1281,19 @@ class ExecutiveDialogueWakeBridge:
         return DialogueWakeResult(state.value, reasons[state.value])
 
     def _resolve_current_target(
-        self,
-        runtime: Runtime,
-        request: DialogueWakeRequest,
+        self, runtime: Runtime, request: DialogueWakeRequest,
     ) -> DialogueWakeTarget | None:
-        from control_plane.runtime_binding_projection import project_runtime_binding
-        from control_plane.session_targets import load_session_targets
-
-        operator_adapter = self._operator_adapter
-        if not callable(getattr(operator_adapter, "deliver_attention", None)):
+        if not callable(getattr(self._operator_adapter, "deliver_attention", None)):
             return None
-        root_job_id = request.candidate.root_job_id
-        seat = request.obligation.declared_target_seat
-        resolved: list[DialogueWakeTarget] = []
-        with runtime.store.read() as connection:
-            registry = load_session_targets()
-            rows = connection.execute(
-                """
-                SELECT current_attempt_id
-                FROM jobs
-                WHERE root_job_id=?
-                  AND current_attempt_id IS NOT NULL
-                  AND status IN ('RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
-                ORDER BY job_id
-                """,
-                (root_job_id,),
-            ).fetchall()
-            for row in rows:
-                attempt_id = str(row["current_attempt_id"] or "")
-                try:
-                    source = runtime.current_harness_binding_source(
-                        attempt_id,
-                        connection=connection,
-                    )
-                    if source.owner_seat != seat:
-                        continue
-                    seat_map = registry.root_job_bindings.get(root_job_id, {})
-                    alias = seat_map.get(seat)
-                    target = (
-                        registry.get(alias)
-                        if alias is not None
-                        else registry.resolve(seat)
-                    )
-                    if alias is None:
-                        root_bindings = {
-                            key: dict(value)
-                            for key, value in registry.root_job_bindings.items()
-                        }
-                        root_bindings[root_job_id] = {
-                            **root_bindings.get(root_job_id, {}),
-                            seat: target.session_alias,
-                        }
-                        registry = registry.with_root_job_bindings(root_bindings)
-                    binding = project_runtime_binding(
-                        runtime,
-                        attempt_id,
-                        target,
-                        connection=connection,
-                    )
-                    generation_rows = connection.execute(
-                        """
-                        SELECT g.process_generation_id
-                        FROM process_generations AS g
-                        JOIN harness_session_epochs AS e
-                          ON e.session_epoch_id=g.session_epoch_id
-                        WHERE e.attempt_id=?
-                          AND e.state='CURRENT'
-                          AND g.executive_writer_held=1
-                          AND g.generation_number=?
-                        """,
-                        (attempt_id, binding.binding_generation),
-                    ).fetchall()
-                    if len(generation_rows) != 1:
-                        continue
-                    resolved.append(
-                        DialogueWakeTarget(
-                            registry=registry,
-                            runtime_binding=binding,
-                            target_attempt_id=attempt_id,
-                            process_generation_id=str(
-                                generation_rows[0]["process_generation_id"]
-                            ),
-                            operator_adapter=operator_adapter,
-                        )
-                    )
-                except Exception:
-                    continue
-        return resolved[0] if len(resolved) == 1 else None
+        identity = resolve_current_dialogue_wake_target(runtime, request)
+        if identity is None:
+            return None
+        return DialogueWakeTarget(
+            registry=identity.registry, runtime_binding=identity.runtime_binding,
+            target_attempt_id=identity.target_attempt_id,
+            process_generation_id=identity.process_generation_id,
+            operator_adapter=self._operator_adapter,
+        )
 
     async def __call__(
         self,

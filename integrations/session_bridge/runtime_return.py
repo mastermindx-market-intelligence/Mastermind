@@ -441,7 +441,7 @@ class RuntimeSessionReturn:
                 "args": {"context": value["context"], "thread_ts": value["thread_ts"]}})
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("canonical continuation unavailable")
-            _, message = self._continuation_messages(value, response["result"])
+            messages, message = self._continuation_messages(value, response["result"])
             if await self._read_bound_parent(value) != parent:
                 raise ValueError("canonical parent changed during read")
             after, _, _ = self._request(read_ref)
@@ -449,7 +449,7 @@ class RuntimeSessionReturn:
                 raise ValueError("original authorization changed")
             self._same_thread(value, parent_fingerprint=parent["fingerprint"])
             return {"event": event.to_dict(), "request": value,
-                    "parent": parent, "message": message}
+                    "parent": parent, "message": message, "messages": messages}
         except Exception:
             raise BridgeError("source_unavailable",
                               "authorized canonical continuation is unavailable") from None
