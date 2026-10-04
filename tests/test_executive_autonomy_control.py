@@ -8847,3 +8847,103 @@ def test_two_creators_admitted_before_publication_cannot_replace_winner(tmp_path
     result, _ = winner.result()
     assert result["ok"] is True
     assert result["transaction_id"] == manifest["transaction_id"]
+
+
+@pytest.mark.parametrize(
+    ("spelling", "accepted"),
+    [
+        ("declared", True),
+        ("canonical", True),
+        ("foreign_alias", False),
+        ("foreign_socket", False),
+        ("dot_alias", False),
+        ("relative", False),
+        ("missing", False),
+        ("list", False),
+        ("mapping", False),
+    ],
+)
+def test_ceo_admission_probe_owner_socket_spellings(
+    monkeypatch, tmp_path, spelling, accepted
+):
+    # Reproduce macOS's /var -> /private/var using real filesystem aliases.
+    canonical_parent = tmp_path / "private" / "var" / "run" / "mastermind-executive"
+    canonical_parent.mkdir(parents=True)
+    (tmp_path / "var").symlink_to(tmp_path / "private" / "var", target_is_directory=True)
+    declared = tmp_path / "var" / "run" / "mastermind-executive" / "control.sock"
+    canonical = declared.resolve(strict=False)
+    foreign_alias = tmp_path / "another-name.sock"
+    foreign_alias.symlink_to(canonical)
+    assert foreign_alias.resolve(strict=False) == canonical
+    monkeypatch.setattr(control, "CONTROL_SOCKET", declared)
+    reported = {
+        "declared": str(declared),
+        "canonical": str(canonical),
+        "foreign_alias": str(foreign_alias),
+        "foreign_socket": str(canonical.with_name("other.sock")),
+        "dot_alias": str(canonical.parent) + "/../mastermind-executive/control.sock",
+        "relative": "control.sock",
+        "missing": None,
+        "list": [str(canonical)],
+        "mapping": {"socket": str(canonical)},
+    }[spelling]
+    body = json.loads(_status_body())
+    body["result"]["socket"] = reported
+    calls = _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(),
+        status_body=json.dumps(body).encode(),
+    )
+    assert control.ProductionCeoSubmitHost()._ceo_admission_probe(
+        SHA, _CONFIG_DIGEST
+    ) is accepted
+    assert calls["inspector"].inspect_calls == ([_STATUS_PID] if accepted else [])
+
+
+def test_ceo_admission_probe_canonical_socket_still_requires_live_attestation(
+    monkeypatch, tmp_path
+):
+    canonical_parent = tmp_path / "private" / "var" / "run"
+    canonical_parent.mkdir(parents=True)
+    (tmp_path / "var").symlink_to(tmp_path / "private" / "var", target_is_directory=True)
+    declared = tmp_path / "var" / "run" / "control.sock"
+    monkeypatch.setattr(control, "CONTROL_SOCKET", declared)
+    calls = _drive_probe(
+        monkeypatch,
+        tmp_path=tmp_path,
+        attestation_doc=_good_attestation_doc(config_digest="0" * 64),
+        status_body=_status_body(socket_path=str(declared.resolve(strict=False))),
+    )
+    assert control.ProductionCeoSubmitHost()._ceo_admission_probe(
+        SHA, _CONFIG_DIGEST
+    ) is False
+    # The alias passed the path check and reached the unchanged live validator.
+    assert calls["inspector"].inspect_calls == [_STATUS_PID]
+
+
+@pytest.mark.parametrize("carry_passed",[True,False])
+def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkeypatch,carry_passed):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    root=tmp_path/"control/acceptance"/SHA
+    root.mkdir(parents=True)
+    root.chmod(0o700)
+    monkeypatch.setattr(control,"RUNTIME_ROOT",tmp_path)
+    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=os.getuid()))
+    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(control,"_has_acl",lambda path:False)
+    raw=b"existing full acceptance receipt"
+    monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))
+    monkeypatch.setattr(control,"validate_acceptance_document",lambda *args,**kwargs:None)
+    descriptor=dict(root_job_id="JOB-preserved")
+    monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+    receipt=dict(schema_version=maintenance.SCHEMA,passed=carry_passed,baseline_preserved=True,
+        descriptor_sha256=maintenance.digest(descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest())
+    monkeypatch.setattr(maintenance,"sealed_json",lambda path:receipt)
+    host=control.ProductionArmHost()
+    if carry_passed:
+        assert host.validate_acceptance(SHA)==hashlib.sha256(raw).hexdigest()
+    else:
+        with pytest.raises(control.ArmAdmissionError) as raised:
+            host.validate_acceptance(SHA)
+        assert raised.value.code=="acceptance_receipt_invalid"

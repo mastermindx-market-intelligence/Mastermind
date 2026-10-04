@@ -211,6 +211,7 @@ class LaunchAttestation:
     subscription_canary_observation_digest: str | None = None
     subscription_canary_binding_id: str | None = None
     subscription_canary_model: str | None = None
+    isolation_manifest_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +231,11 @@ class LaunchAttestation:
             "secret_canary_verdict": _jsonable(self.secret_canary_verdict),
             "launch_nonce": self.launch_nonce,
             "process_identity": dict(self.process_identity),
+            **(
+                {"isolation_manifest_sha256": self.isolation_manifest_sha256}
+                if self.isolation_manifest_sha256 is not None
+                else {}
+            ),
             **(
                 {
                     "subscription_canary_observation_digest": (

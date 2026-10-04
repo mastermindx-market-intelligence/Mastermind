@@ -1840,6 +1840,7 @@ class CeoIngressAppBinding:
     content_provider_factory: Callable[[Runtime], Any] | None = None
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
+    session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
     # Separate principal capability; the incumbent CEO armed bit grants none.
     # Existing launchers omit these fields, so this route is dormant by default.
@@ -1856,6 +1857,11 @@ class CeoIngressAppBinding:
             raise ValueError("App binding requires a grounding provider")
         if self.read_schema not in CEO_APP_READ_TOOLS_BY_SCHEMA:
             raise ValueError("App binding read schema is not an admitted profile")
+        if (
+            self.session_bridge_provider_factory is not None
+            and not callable(self.session_bridge_provider_factory)
+        ):
+            raise ValueError("Session Bridge requires a host provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -1879,6 +1885,8 @@ class ExecutiveControlService:
             Callable[[Runtime, SupervisorProtocol], OperatorSupervisorProtocol]
             | None
         ) = None,
+        proof_capacity_recovery_observer: Callable[[Any], Mapping[str, Any]] | None = None,
+        proof_capacity_recovery_worker_uid: int | None = None,
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         autonomy_guard: Callable[[], None] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
@@ -1920,6 +1928,15 @@ class ExecutiveControlService:
         self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
+        if (proof_capacity_recovery_observer is not None
+                and (not callable(proof_capacity_recovery_observer)
+                     or type(proof_capacity_recovery_worker_uid) is not int
+                     or proof_capacity_recovery_worker_uid <= 0)):
+            raise ValueError("proof recovery requires a fixed observer and worker UID")
+        if proof_capacity_recovery_observer is None and proof_capacity_recovery_worker_uid is not None:
+            raise ValueError("proof recovery UID requires its observer")
+        self._proof_capacity_recovery_observer = proof_capacity_recovery_observer
+        self._proof_capacity_recovery_worker_uid = proof_capacity_recovery_worker_uid
         self._operator_identity_verifier = operator_identity_verifier
         self._autonomy_guard = autonomy_guard
         if self.config.coo_autonomy_armed and not callable(self._autonomy_guard):
@@ -4404,6 +4421,83 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=(
                     MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
                 return
+            from common.session_bridge_private_contract import (
+                PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,
+                SessionBridgeIngressOwner, BridgeError, MODIFYING_TOOLS,
+                private_result as session_bridge_result,
+            )
+            if isinstance(parsed, Mapping) and parsed.get("schema") == SESSION_BRIDGE_PRIVATE_SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied", "Session Bridge requires the installed App peer"
+                    )
+                    return
+                factory = app_binding.session_bridge_provider_factory
+                if (
+                    not app_binding.armed
+                    or factory is None
+                    or self._closing
+                    or self._service_state not in {"READY", "AWAITING_CANARY"}
+                ):
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                try:
+                    provider = factory(self._require_runtime())
+                    if type(provider) is not SessionBridgeIngressOwner:
+                        raise ValueError("invalid Session Bridge provider")
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                # The integration owns semantic validation. Finish it before
+                # calling the effect handler; later failure may be committed.
+                try:
+                    tool = provider.validate_frame(parsed)
+                except BridgeError as exc:
+                    await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                    return
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                if (self._closing
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_app_binding is not app_binding
+                        or not app_binding.armed):
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "installed Session Bridge owner is unavailable"
+                    )
+                    return
+                modifying = tool in MODIFYING_TOOLS
+                try:
+                    result = await provider.handle_frame(parsed)
+                    if (
+                        self._closing
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_app_binding is not app_binding
+                        or not app_binding.armed
+                    ):
+                        raise ValueError("Session Bridge binding changed")
+                except Exception:
+                    result = session_bridge_result(
+                        tool,
+                        code="effect_unknown" if modifying else "backend_unavailable",
+                        message=(
+                            "operation outcome is unknown; reconcile the original operation"
+                            if modifying else "installed Session Bridge owner is unavailable"
+                        ),
+                    )
+                # A response-write failure cannot turn an entered owner into an
+                # invalid-input/no-effect receipt, nor trigger a second send.
+                await self._send_ceo_ingress_response(
+                    writer, {"ok": True, "result": result},
+                    response_ceiling=ceo_ingress.MAX_RESPONSE_BYTES,
+                )
+                return
             if app_peer and isinstance(parsed, Mapping) and parsed.get("schema") in {
                 app_binding.read_schema, ceo_ingress.APP_GROUNDING_SCHEMA,
             }:
@@ -5263,6 +5357,60 @@ class ExecutiveControlService:
             result["workspace_rotation"] = rotation
             return result
 
+
+    def _is_maintenance_recovery_job(self, job: Job, lost_attempt_id: str) -> bool:
+        # An exact predecessor permit only recovers capacity. Ordinary dispatch
+        # and requeue retain the unchanged current-base proof predicate.
+        from ops.executive_os.acceptance_maintenance import (
+            MaintenanceError, recovery_permitted,
+        )
+        if (self.config.ceo_submit_armed or self.config.coo_autonomy_armed
+                or self.config.coo_operator_harness_armed):
+            return False
+        try:
+            permitted = recovery_permitted(
+                job, lost_attempt_id, self.config.proof_base_sha,
+                self.config.worker_id, self.config.quota_class,
+            )
+        except (MaintenanceError, OSError, ValueError):
+            return False
+        projected = dataclasses.replace(
+            job, constraints=dict(job.constraints, base_sha=self.config.proof_base_sha))
+        return permitted and self._is_fixed_proof_job(projected)
+
+    async def _recover_proof_capacity(self, job_id: str, lost_attempt_id: str) -> dict[str, Any]:
+        runtime = self._require_runtime()
+        target = {"worker_id": self.config.worker_id, "quota_class": self.config.quota_class}
+        async with self._dispatch_lock:
+            async with self._workspace_lock:
+                prior = runtime.workers.proof_capacity_recovery_result(
+                    job_id, lost_attempt_id, **target)
+                if prior is not None:
+                    return prior
+                if any(not task.done() for task in self._dispatch_tasks.values()):
+                    raise StateConflict("proof capacity recovery requires no active dispatch")
+                job = runtime.jobs.get_job(job_id)
+                if job is None or not (
+                    self._is_fixed_proof_job(job)
+                    or self._is_maintenance_recovery_job(job, lost_attempt_id)
+                ):
+                    raise StateConflict("proof capacity recovery accepts only its fixed harmless proof job")
+                observer = self._proof_capacity_recovery_observer
+                if observer is None:
+                    raise StateConflict("proof capacity recovery has no fixed broker observer")
+                snapshot = runtime.workers.proof_capacity_recovery_snapshot(
+                    job_id, lost_attempt_id, **target)
+                attempt = runtime.attempts.get_attempt(lost_attempt_id)
+                started = datetime.now(timezone.utc)
+                sweep = await self._run_physical(observer, attempt)
+                finished = datetime.now(timezone.utc)
+                if self._closing or self._service_state != "READY":
+                    raise StateConflict("proof recovery lost READY service custody")
+                return runtime.workers.recover_proof_capacity(
+                    job_id, lost_attempt_id, **target, expected_snapshot=snapshot,
+                    uid_sweep=sweep, expected_worker_uid=self._proof_capacity_recovery_worker_uid,
+                    observation_started_at=started, observation_finished_at=finished)
+
     def _submit_service_intent(self, payload: Any) -> dict[str, Any]:
         """Submit through the existing sink with v2 host composition attached."""
 
@@ -5340,8 +5488,20 @@ class ExecutiveControlService:
                 )
         return receipt
 
+    def _coo_binding_for_root(self, root: Job) -> dict[str, Any]:
+        from ops.executive_os.acceptance_maintenance import MaintenanceError, frozen_binding
+        raw = self._require_current_coo_binding()
+        normalized = _normalise_constraints(raw)
+        normalized["work_placement_union"] = _normalise_work_placement_union(raw["work_placement_union"])
+        try:
+            effective = frozen_binding(root, normalized, self._require_runtime().store)
+        except (MaintenanceError, OSError, ValueError) as exc:
+            raise StateConflict("queued-root maintenance qualification failed") from exc
+        return dict(raw, base_sha=effective["base_sha"],
+                    operator_harness_armed=effective["operator_harness_armed"])
+
     def _is_bound_coo_root(self, root: Job) -> bool:
-        raw_binding = self._require_current_coo_binding()
+        raw_binding = self._coo_binding_for_root(root)
         binding = _normalise_constraints(raw_binding)
         binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
         provenance = root.orchestration_provenance
@@ -5374,7 +5534,7 @@ class ExecutiveControlService:
             or job.orchestration_role not in {"plan", "work", "review", "repair"}
         ):
             raise StateConflict("COO dispatch target is outside the direct strict-v2 subtree")
-        binding = self._require_current_coo_binding()
+        binding = self._coo_binding_for_root(root)
         if (
             job.orchestration_role == "plan"
             and binding["operator_harness_armed"] is True
@@ -5467,7 +5627,7 @@ class ExecutiveControlService:
             job.orchestration_role == "plan"
             and job.attempt_count == 0
             and (
-                observation["head"] != self.config.proof_base_sha
+                observation["head"] != self._coo_binding_for_root(root)["base_sha"]
                 or observation["launch_clean"] is not True
             )
         ):
@@ -5477,11 +5637,56 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _maintenance_workspace_pending(self, root: Job) -> bool:
+        """Only the exact PASS-qualified untouched root may materialize its path."""
+        from ops.executive_os.acceptance_maintenance import descriptor_for
+        if root.worktree is None or self._path_exists(Path(root.worktree)):
+            return False
+        descriptor = descriptor_for(self.config.proof_base_sha)
+        if descriptor is None or descriptor["root_job_id"] != root.job_id:
+            return False
+        self._require_bound_coo_job(root)
+        path = Path(root.worktree)
+        if (path.parent != self.config.proof_workspace_root
+                or not re.fullmatch(r"auto-[0-9a-f]{32}", path.name)
+                or root.branch != "codex/" + path.name
+                or root.status is not JobStatus.QUEUED
+                or root.attempt_count != 0 or root.current_attempt_id is not None):
+            raise StateConflict("preserved root workspace admission drifted")
+        runtime = self._require_runtime()
+        with runtime.store.read() as connection:
+            if (connection.execute("SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1", (root.job_id,)).fetchone()
+                    or connection.execute("SELECT 1 FROM attempts WHERE job_id=? LIMIT 1", (root.job_id,)).fetchone()):
+                raise StateConflict("preserved root already has execution history")
+        return True
+
+    async def _prepare_maintenance_root_workspace(self, root: Job) -> None:
+        # The normal serialized COO owner calls the existing credentialless
+        # workspace allocator; no intake, lease, or dispatch is duplicated.
+        async with self._workspace_lock:
+            if not self._maintenance_workspace_pending(root):
+                return
+            if any(not task.done() for task in self._dispatch_tasks.values()):
+                raise StateConflict("another dispatch owns workspace preparation")
+            binding = self._coo_binding_for_root(root)
+            workspace = Path(root.worktree)
+            receipt = await self._run_physical(
+                prepare_credentialless_clone,
+                self.config.proof_source_repository, self.config.proof_workspace_root,
+                job_id=workspace.name, base_sha=binding["base_sha"], branch=root.branch,
+                shared_gid=self.config.proof_shared_gid,
+                shared_write_paths=tuple(root.allowed_write_paths),
+            )
+            if (receipt.workspace_path != str(workspace) or receipt.branch != root.branch
+                    or receipt.base_sha != binding["base_sha"] or receipt.remote_count != 0):
+                raise StateConflict("preserved root workspace receipt drifted")
+            self._require_initial_coo_workspace(root)
+
     def _require_initial_coo_workspace(self, root: Job) -> dict[str, Any]:
         """Reuse one read-only initial-workspace rule at selection and execution."""
         observation = self._require_coo_workspace(root)
         if (
-            observation["head"] != self.config.proof_base_sha
+            observation["head"] != self._coo_binding_for_root(root)["base_sha"]
             or observation["launch_clean"] is not True
         ):
             raise ServiceError(
@@ -5615,7 +5820,7 @@ class ExecutiveControlService:
                 job = runtime.jobs.get_job(job_id)
                 if job is None:
                     raise StateConflict(f"job {job_id!r} does not exist")
-                self._require_bound_coo_job(job)
+                root = self._require_bound_coo_job(job)
                 if live and live != {job_id}:
                     live_jobs = [runtime.jobs.get_job(value) for value in live]
                     if (
@@ -5662,7 +5867,7 @@ class ExecutiveControlService:
                     self._require_operator_supervisor()
                     if (
                         job.orchestration_role == "plan"
-                        and self.config.coo_operator_harness_armed
+                        and self._coo_binding_for_root(root)["operator_harness_armed"]
                     )
                     else self._require_supervisor()
                 )
@@ -5728,6 +5933,7 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
+                await self._prepare_maintenance_root_workspace(root)
                 self._require_initial_coo_workspace(root)
             live = {
                 value
@@ -5820,7 +6026,8 @@ class ExecutiveControlService:
                     ).fetchone()
                 if child is None and attempt is None:
                     try:
-                        self._require_initial_coo_workspace(root)
+                        if not self._maintenance_workspace_pending(root):
+                            self._require_initial_coo_workspace(root)
                     except (OSError, ServiceError, StateConflict) as exc:
                         if prestart_refusals is not None:
                             prestart_refusals[root.job_id] = exc
@@ -6975,6 +7182,11 @@ class ExecutiveControlService:
                     requeue_lost=False,
                 )
             )
+        if command == "recover-proof-capacity":
+            self._exact_args(args, {"job_id", "lost_attempt_id"})
+            return await self._recover_proof_capacity(
+                self._id(args["job_id"], "job_id"),
+                self._id(args["lost_attempt_id"], "lost_attempt_id"))
         if command == "requeue":
             self._exact_args(args, {"job_id"})
             job_id = self._id(args["job_id"], "job_id")

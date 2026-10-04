@@ -186,8 +186,7 @@ def _stop_stubborn(label: str, *, bootout_exit: int) -> list[Entry]:
     return [
         (f"disable system/{label}", 0, "", ""),
         (f"bootout system/{label}", bootout_exit, "", ""),
-        (f"print system/{label}", 0, "state = running", ""),
-    ]
+    ] + [(f"print system/{label}", 0, "state = running", "")] * 31
 
 
 def _stop_unknown_readback(label: str) -> list[Entry]:
@@ -622,5 +621,55 @@ def test_readside_failed_bootstrap_does_not_poll_or_retry(tmp_path):
     ]
     code, _out, err, log, remaining, *_ = _run(tmp_path, "start-readside", plan)
     assert code == 5
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+
+
+@pytest.mark.parametrize("bootout_exit", [0, 5])
+def test_stop_observes_async_disappearance_without_repeating_effect(
+    tmp_path: Path, bootout_exit: int,
+) -> None:
+    plan = []
+    for label in (CONTROL_LABEL, WORKER_LABEL):
+        plan += [
+            (f"disable system/{label}", 0, "", ""),
+            (f"bootout system/{label}", bootout_exit, "", ""),
+            (f"print system/{label}", 0, "state = running", ""),
+            (f"print system/{label}", 0, "state = waiting", ""),
+            (f"print system/{label}", 113, "", "absent"),
+        ]
+    code, out, err, log, remaining, *_ = _run(tmp_path, "stop", plan)
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    for label in (CONTROL_LABEL, WORKER_LABEL):
+        assert log.count(f"disable system/{label}") == 1
+        assert log.count(f"bootout system/{label}") == 1
+        assert f"service={label} state=absent" in out
+
+
+def test_stop_disappearance_wait_is_bounded_without_second_mutation(tmp_path: Path) -> None:
+    plan = _stop_stubborn(CONTROL_LABEL, bootout_exit=0)
+    code, out, err, log, remaining, *_ = _run(tmp_path, "stop", plan)
+    assert code != 0
+    assert "still registered after stop wait" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert log.count(f"print system/{CONTROL_LABEL}") == 31
+    assert log.count(f"disable system/{CONTROL_LABEL}") == 1
+    assert log.count(f"bootout system/{CONTROL_LABEL}") == 1
+    assert all(WORKER_LABEL not in call for call in log)
+
+
+def test_stop_refuses_unknown_during_disappearance_wait(tmp_path: Path) -> None:
+    plan = [
+        (f"disable system/{CONTROL_LABEL}", 0, "", ""),
+        (f"bootout system/{CONTROL_LABEL}", 0, "", ""),
+        (f"print system/{CONTROL_LABEL}", 0, "state = running", ""),
+        (f"print system/{CONTROL_LABEL}", 5, "", "unknown"),
+    ]
+    code, out, err, log, remaining, *_ = _run(tmp_path, "stop", plan)
+    assert code != 0
+    assert "state unknown" in err
     assert remaining == ""
     assert log == [key for key, *_ in plan]

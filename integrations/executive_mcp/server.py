@@ -67,7 +67,7 @@ from integrations.executive_mcp.schemas import (
     validate_tool_arguments,
 )
 
-__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "run_stdio"]
+__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
 
 _E1_READ_NAMES = tuple(path.rsplit("/", 1)[-1] for path in sorted(E1_READ_PATHS))
 _E1_ENVELOPE_FIELDS = frozenset(
@@ -768,6 +768,11 @@ def _build_profile_mcp_app(
     os_app=None,
     release_profile: bool = False,
     release_tool_names: tuple[str, ...] = (),
+    direct_tool_names: tuple[str, ...] = (),
+    direct_submit_names: tuple[str, ...] = (),
+    direct_handler: Any = None,
+    direct_error_factory: Any = None,
+    inner_server_version: str | None = None,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -778,7 +783,7 @@ def _build_profile_mcp_app(
     """
     from control_plane.ceo_request import app_request_ref, automated_intent_id
     from integrations.mastermind_executive_app.app import (
-        _metadata_policy_and_path, _outcome_response,
+        _authenticate, _metadata_policy_and_path, _outcome_response,
     )
     from integrations.mastermind_executive_app.admission import (
         AdmissionOutcome, STATUS_EFFECT_UNKNOWN,
@@ -805,6 +810,16 @@ def _build_profile_mcp_app(
                 or len(names) != len(set(names))
                 or not set(release_tool_names) <= set(names)):
             raise ValueError("release tool names must match the fixed operation inventory")
+    names = tuple(tool.name for tool in profile_tools)
+    if (type(direct_tool_names) is not tuple or type(direct_submit_names) is not tuple
+            or any(type(name) is not str for name in direct_tool_names + direct_submit_names)
+            or len(direct_tool_names) != len(set(direct_tool_names))
+            or len(direct_submit_names) != len(set(direct_submit_names))
+            or not set(direct_submit_names) <= set(direct_tool_names)
+            or not set(direct_tool_names) <= set(names)
+            or (bool(direct_tool_names) != callable(direct_handler))
+            or (bool(direct_tool_names) != callable(direct_error_factory))):
+        raise ValueError("direct MCP tool composition is invalid")
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
@@ -839,6 +854,8 @@ def _build_profile_mcp_app(
             authenticator_variants, policy_variants
         )
     ))
+    read_authenticators = tuple(pair[0] for pair in authenticator_variants)
+    submit_authenticators = tuple(pair[1] for pair in authenticator_variants)
     # Reuse the bounded ASGI seam. Its generic failure body is never evidence
     # of no effect: all unrecognized submit replies become same-request UNKNOWN.
     inner_app = BoundedE1App(profile_create_app(configured))
@@ -846,7 +863,8 @@ def _build_profile_mcp_app(
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
             configured.policies.submit
-            if release_profile or tool.name in release_tool_names or tool.name == "submit_ceo_intent"
+            if (release_profile or tool.name in release_tool_names
+                or tool.name in direct_submit_names or tool.name == "submit_ceo_intent")
             else configured.policies.read
         )
         schemes = oauth_security_schemes(policy.required_scopes)
@@ -903,7 +921,49 @@ def _build_profile_mcp_app(
             return result(profile_error(name, exc.code, exc.message))
         is_submit = name == "submit_ceo_intent"
         is_release = release_profile or name in release_tool_names
+        is_direct = name in direct_tool_names
         request_ref = app_request_ref(validated["operation_key"]) if is_submit else None
+        if is_direct:
+            active = submit_authenticators if name in direct_submit_names else read_authenticators
+            principal_or_response = await _authenticate(
+                request, active, clock=configured.clock
+            )
+            if isinstance(principal_or_response, JSONResponse):
+                payload = json.loads(principal_or_response.body)
+                challenge = principal_or_response.headers.get("www-authenticate")
+                if (name in direct_submit_names
+                        and payload.get("error", {}).get("code") == "scope_refused"):
+                    challenge = mcp_auth_error_result(
+                        configured.policies.submit, AuthError(AuthErrorCode.SCOPE_REFUSED),
+                        required_scopes=configured.policies.submit.required_scopes,
+                    )["_meta"]["mcp/www_authenticate"][0]
+                return result(payload, challenge=challenge)
+            direct_submit = name in direct_submit_names
+            try:
+                payload = await direct_handler(principal_or_response, name, validated)
+                canonical_json(payload)
+            except Exception:
+                payload = direct_error_factory(
+                    name,
+                    "effect_unknown" if direct_submit else "backend_unavailable",
+                    (
+                        "direct modifying tool outcome is unknown; reconcile the original operation"
+                        if direct_submit
+                        else "direct tool response is unavailable"
+                    ),
+                )
+            reply = result(payload)
+            if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
+                reply = result(direct_error_factory(
+                    name,
+                    "effect_unknown" if direct_submit else "output_too_large",
+                    (
+                        "direct modifying tool outcome is unknown; reconcile the original operation"
+                        if direct_submit
+                        else "direct tool response exceeds the transport budget"
+                    ),
+                ))
+            return reply
         try:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=inner_app, raise_app_exceptions=True),
@@ -956,7 +1016,7 @@ def _build_profile_mcp_app(
                     # Same closed outcome, now usable through existing MCP tools.
                     payload = unknown(request_ref, is_release=False)
             elif response.status_code != 200 or not _is_e1_envelope(
-                payload, name, profile_server_version
+                payload, name, inner_server_version or profile_server_version
             ):
                 payload = profile_error(name, "backend_unavailable", "Executive response is unavailable")
         except Exception:
@@ -1183,6 +1243,132 @@ def build_web_ceo_v3_mcp_app(
         os_app=os_app,
     )
 
+
+def build_web_ceo_sessions_mcp_app(
+    settings: Any,
+    *,
+    audit_sink: Any,
+    session_target_projector: Any,
+    session_reply_handler: Any,
+    session_summon_handler: Any,
+    workspace_app=None,
+    content_app=None,
+    os_app=None,
+) -> Any:
+    """Authenticated Session Bridge profile over the existing Executive OAuth host.
+
+    The three injected callables are incumbent-owner composition seams. They
+    receive the verified principal directly; this host owns no target registry,
+    dialogue state, admission queue, credential store, or retry policy.
+    """
+    import inspect
+    from collections.abc import Mapping
+    from integrations.executive_mcp.web_ceo_sessions import (
+        WEB_CEO_SESSIONS_SERVER_NAME, WEB_CEO_SESSIONS_SERVER_VERSION,
+        SESSION_TOOL_NAMES, SESSION_SUBMIT_TOOL_NAMES,
+        validate_web_ceo_sessions_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.app import create_web_ceo_v2_app
+    from integrations.session_bridge import schemas as bridge_schemas
+
+    for name, value in (("session_target_projector", session_target_projector),
+                        ("session_reply_handler", session_reply_handler),
+                        ("session_summon_handler", session_summon_handler)):
+        if not callable(value):
+            raise TypeError(f"{name} must be callable")
+
+    async def maybe(value: Any) -> Any:
+        return await value if inspect.isawaitable(value) else value
+
+    def envelope(tool: str, *, data: Any = None, code: str | None = None, message: str | None = None):
+        return {
+            "schema": bridge_schemas.RESULT_SCHEMA,
+            "server_version": bridge_schemas.SERVER_VERSION,
+            "tool": tool, "ok": code is None,
+            "data": data if code is None else None,
+            "error": None if code is None else {"code": code, "message": message},
+        }
+
+    def refs(value: Any) -> set[str]:
+        if not isinstance(value, (list, tuple)) or len(value) > 256:
+            raise bridge_schemas.BridgeError("backend_unavailable", "authorized target projection is unavailable")
+        found = set()
+        for row in value:
+            if not isinstance(row, Mapping):
+                raise bridge_schemas.BridgeError("backend_unavailable", "authorized target projection is unavailable")
+            target_ref = bridge_schemas.validate_target_ref(row.get("target_ref"))
+            if target_ref in found:
+                raise bridge_schemas.BridgeError("backend_unavailable", "authorized target projection is ambiguous")
+            found.add(target_ref)
+        return found
+
+    async def direct(principal: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        modifying = name in SESSION_SUBMIT_TOOL_NAMES
+        try:
+            if name == "session_targets":
+                projected = await maybe(session_target_projector(principal, arguments.get("kind")))
+                refs(projected)
+                return envelope(name, data=projected)
+            if name == "session_send":
+                target_ref = arguments["target_ref"]
+                kind = target_ref.partition(":")[0]
+                projected = await maybe(session_target_projector(principal, kind))
+                if target_ref not in refs(projected):
+                    return envelope(name, code="authority_refused",
+                                    message="target is not in the authenticated caller projection")
+                data = await maybe(session_reply_handler(principal, dict(arguments)))
+                if not isinstance(data, Mapping):
+                    return envelope(
+                        name,
+                        code="effect_unknown",
+                        message="session reply outcome is unknown; reconcile the original operation",
+                    )
+                return envelope(name, data=dict(data))
+            data = await maybe(session_summon_handler(principal, dict(arguments)))
+            if not isinstance(data, Mapping):
+                return envelope(
+                    name,
+                    code="effect_unknown",
+                    message="session admission outcome is unknown; reconcile the original operation",
+                )
+            return envelope(name, data=dict(data))
+        except bridge_schemas.BridgeError as exc:
+            return envelope(name, code=exc.code, message=exc.message)
+        except Exception:
+            return envelope(
+                name,
+                code="effect_unknown" if modifying else "backend_unavailable",
+                message=(
+                    "authenticated Session Bridge outcome is unknown; reconcile the original operation"
+                    if modifying
+                    else "authenticated Session Bridge owner is unavailable"
+                ),
+            )
+
+    return _build_profile_mcp_app(
+        settings, audit_sink=audit_sink,
+        profile_server_name=WEB_CEO_SESSIONS_SERVER_NAME,
+        profile_server_version=WEB_CEO_SESSIONS_SERVER_VERSION,
+        profile_tools=tuple(build_web_ceo_sessions_tools()),
+        profile_validator=validate_web_ceo_sessions_tool_arguments,
+        profile_create_app=create_web_ceo_v2_app,
+        workspace_app=workspace_app, content_app=content_app, os_app=os_app,
+        direct_tool_names=SESSION_TOOL_NAMES,
+        direct_submit_names=SESSION_SUBMIT_TOOL_NAMES, direct_handler=direct,
+        direct_error_factory=lambda tool, code, message: envelope(
+            tool, code=code, message=message
+        ),
+        inner_server_version="1.2.0",
+    )
+
+def build_web_ceo_sessions_tools() -> list[mcp_types.Tool]:
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_TOOL_SPECS
+    return [
+        mcp_types.Tool(
+            name=spec.name, description=spec.description, inputSchema=spec.input_schema,
+            annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        ) for spec in WEB_CEO_SESSIONS_TOOL_SPECS
+    ]
 
 def build_tools() -> list[mcp_types.Tool]:
     """The static five-tool advertisement, built from the reviewed table.

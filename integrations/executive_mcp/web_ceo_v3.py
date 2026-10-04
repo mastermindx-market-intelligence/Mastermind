@@ -6,6 +6,7 @@ authority.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 from collections.abc import Mapping
 from typing import Any
@@ -18,8 +19,27 @@ from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
 
 WEB_CEO_V3_PROFILE = "web_ceo_v3"
 WEB_CEO_V3_SERVER_NAME = legacy.SERVER_NAME
-WEB_CEO_V3_SERVER_VERSION = "1.3.0"
+WEB_CEO_V3_SERVER_VERSION = "1.3.1"
 MDM_TOOL_NAME = "executive_mdm"
+
+
+# ChatGPT App SDK transport schemas must remain flat. Conditional request law
+# stays in the profile validator below so the server, not a lossy schema adapter,
+# remains the authority for which selector combinations are accepted.
+FABRIC_V3_TOOL_SPEC = legacy.ToolSpec(
+    name=v2.FABRIC_V2_TOOL_SPEC.name,
+    description=v2.FABRIC_V2_TOOL_SPEC.description,
+    input_schema={
+        "type": "object",
+        "properties": copy.deepcopy(
+            v2.FABRIC_V2_TOOL_SPEC.input_schema["properties"]
+        ),
+        "required": ["view"],
+        "additionalProperties": False,
+    },
+    output_description=v2.FABRIC_V2_TOOL_SPEC.output_description,
+    read_only=True,
+)
 
 MDM_TOOL_SPEC = legacy.ToolSpec(
     name=MDM_TOOL_NAME,
@@ -34,28 +54,32 @@ MDM_TOOL_SPEC = legacy.ToolSpec(
     input_schema={
         "type": "object",
         "properties": {
-            "view": {"type": "string", "enum": ["fleet", "device"]},
-            "serial_number": {"type": "string", "minLength": 1, "maxLength": 128},
-            "hostname": {"type": "string", "minLength": 1, "maxLength": 256},
+            "view": {
+                "type": "string",
+                "enum": ["fleet", "device"],
+                "description": "Bounded fleet inventory or one exact device.",
+            },
+            "serial_number": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": (
+                    "Device selector. Supply exactly one of serial_number or hostname "
+                    "when view=device; omit for view=fleet."
+                ),
+            },
+            "hostname": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "description": (
+                    "Device selector. Supply exactly one of hostname or serial_number "
+                    "when view=device; omit for view=fleet."
+                ),
+            },
         },
         "required": ["view"],
         "additionalProperties": False,
-        "oneOf": [
-            {
-                "properties": {
-                    "view": {"const": "fleet"},
-                    "serial_number": False,
-                    "hostname": False,
-                }
-            },
-            {
-                "properties": {"view": {"const": "device"}},
-                "oneOf": [
-                    {"required": ["serial_number"], "properties": {"hostname": False}},
-                    {"required": ["hostname"], "properties": {"serial_number": False}},
-                ],
-            },
-        ],
     },
     output_description=(
         "mastermind.executive_mcp_result.v1 envelope containing a bounded "
@@ -68,8 +92,12 @@ MDM_TOOL_SPEC = legacy.ToolSpec(
 if v2.WEB_CEO_V2_TOOL_SPECS[-1].name != legacy.MODIFYING_TOOL:
     raise RuntimeError("Web CEO v2 modifying-tool position changed")
 
+_V3_BASE_TOOL_SPECS = tuple(
+    FABRIC_V3_TOOL_SPEC if spec.name == v2.FABRIC_TOOL_NAME else spec
+    for spec in v2.WEB_CEO_V2_TOOL_SPECS[:-1]
+)
 WEB_CEO_V3_TOOL_SPECS = (
-    v2.WEB_CEO_V2_TOOL_SPECS[:-1] + (MDM_TOOL_SPEC,) + v2.WEB_CEO_V2_TOOL_SPECS[-1:]
+    _V3_BASE_TOOL_SPECS + (MDM_TOOL_SPEC,) + v2.WEB_CEO_V2_TOOL_SPECS[-1:]
 )
 _BY_NAME = {spec.name: spec for spec in WEB_CEO_V3_TOOL_SPECS}
 
@@ -164,11 +192,13 @@ def web_ceo_v3_schema_snapshot_sha256() -> str:
 
 
 # Filled from the deterministic snapshot by the implementation test.
-WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "07be259eaf9df920bd68b542b0e38793c606d14f89736ca11b928d621b34e333"
+WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "f653991fa38963e01e80ac515d727c32d73fda7d39b90cef3622b4c5a160be94"
 
 
 def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:
     """Current installed selector; older v2 validator remains frozen."""
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
+
     if type(value) is str and value in {
         v2.INSTALLED_MCP_PROFILE_LEGACY,
         v2.WEB_CEO_V2_PROFILE,
@@ -176,6 +206,7 @@ def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:
         PERSONAL_READ_PROFILE,
         RELEASE_CONTROL_PROFILE,
         WEB_CEO_RELEASE_PROFILE,
+        WEB_CEO_SESSIONS_PROFILE,
     }:
         return value
     raise ValueError("installed Executive MCP profile is invalid")
