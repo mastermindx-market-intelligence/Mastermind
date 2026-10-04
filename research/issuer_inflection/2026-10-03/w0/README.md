@@ -55,3 +55,6 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 
 
 `FIF_LINEAGE_POST_MERGE_ADMISSION.md` records the merged FIF-3A4 dependency truth: post-lineage AAPL assets can resolve to `359241000000`, while an exact current-main hostile probe proves required lineage disclosure fields are not yet fully bound to the live ledger. Historical refusal and post-lineage disclosure-integrity hold are both preserved.
+
+
+Terminal #777 merged as `d9128b500fb434e3548574e89b25a2a85053f3d7`, so the active Analysis-host custody collision is closed. Current master keeps the Company Intelligence BFF/normalizer bytes unchanged; W1 still waits on Macro #7426 semantic recomposition before any sibling reader or final mount.

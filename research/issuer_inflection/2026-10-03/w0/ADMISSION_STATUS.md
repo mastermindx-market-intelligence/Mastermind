@@ -101,3 +101,8 @@ The pre-lineage cross-filing asset negative case remains unchanged and independe
 ## Current release observation
 
 Current-head CI #6070 / run `37174887821` failed the protected identity guard with 159 `400` findings. The exact 159-path attribution action was platform-blocked before execution and was not retried. The earlier proven six-response / 150-finding diagnosis remains evidence but does not account for the extra nine. Evidence relocation and preview execution remain separately held; no guard weakening or alternate-carrier retry occurred.
+
+
+### TERMINAL_HOST_RELEASE_2026-10-04
+
+Terminal #777 merged at `d9128b500fb434e3548574e89b25a2a85053f3d7`; current master observed `8bab55563d24814917e053db29d2431fd6d1473a`. Existing same-origin BFF blob `9a9f9c3f...` and closed normalizer blob `6b15b8f1...` are unchanged. The prior active Analysis host-writer collision is released. This does **not** clear Macro #7426 `HOLD_FOR_OWNER_RECOMPOSE`, rights, trial capture, or authorize an I3 Terminal write. Final mount must target merged `AnalysisWorkspace.tsx` blob `6faa4625...` only after the sibling reader contract is admitted. Terminal receipt: #777 comment `5983190619`.
