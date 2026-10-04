@@ -1,6 +1,6 @@
 # I3-W0 current admission state
 
-**MISSION_COMPLETE: false. W0 not accepted. The independently permitted W1 baseline fixture lane is built; full W1 and its connected preview are not implemented/accepted.**
+**MISSION_COMPLETE: false. W0 not accepted. The independently permitted W1 baseline replay, verified reader, and equal-duration descriptive comparator are built in the development fixture lane; full W1 and its connected product preview are not implemented/accepted.**
 
 Parent carrier remains Mastermind #1183; bounded execution child is **#1195**. Operation: `i3-w0-issuer-inflection-20261003-astra-c4`. Actual integration/recovery owner: Chairman-assigned **Astra CEO / C4**. The exact current candidate is the enclosing Git commit referenced by the current parent checkpoint; initial published candidate was `26e7c5c90b298cf5a98591d742da912a8966ae36`. This record is part of the existing review artifact, not another workstream/runtime registry.
 
@@ -15,9 +15,9 @@ Only the declared W0 research prefix is modified. FIF/CDV-1/Earnings/Capital cod
 
 ## Current-source and incumbent-custody refresh — 2026-10-03 Extra High
 
-Protected Mastermind is now 84df29801d4078724c2b603a136de5aa1532cdfe, Skillpack 1.0.1/bootstrap 1. Movement from the PR pickup base is procedure-only for the I3 owned/dependency set. The protected identity-guard blob remains db923c6ee6f852e808f7dd21e06a3b32c352b693, so the six-response CI diagnosis is not superseded.
+Protected Mastermind is now a2646f458f9ff41ddcedd89b338be4a4349e6cd6, Skillpack 1.0.1/bootstrap 1. Movement from the PR pickup base remains procedure/control-plane-only for the I3 owned/dependency set. The protected identity-guard contract remains the release gate; current-head CI still fails that guard, so the evidence-placement diagnosis is not superseded.
 
-Fresh source heads are Macro f9ed175800257b228166dabe8b3ac9a55e74e237 and Terminal 9e2f0bd94a2ee876c7dbafacb072414635277a36. Six load-bearing blobs are byte-identical to the tested pins: FIF query service 7898ee9ca5bdf084126df8472f893aadeed5ae7a, AAPL raw-ledger provider fb880db6f0397b1712eff29638ae3cb970f9d2fc, event workspace 4ab75d478fdec9aafcd7af8c6601aab697d3a705, economic interpretation 52499130a329e2dc0b0ebc4db3c04a912789961f, Terminal normalizer 6b15b8f1a68348c2fcaebd3dc973d7748b4a1b33, and Terminal Company Intelligence E2E 217e7ab74908faad0a31111eaf127c1545e4c027. This is compatibility evidence, not owner admission.
+Fresh source heads are Macro 94e5865e13fc42063f9c7d1e9b485958ccaee5b1 and Terminal 4a184c411a27c52f3bb883839fdbe9d951b540ff. Seven load-bearing blobs are byte-identical to the tested/accepted interfaces: FIF query service 7898ee9ca5bdf084126df8472f893aadeed5ae7a, AAPL raw-ledger provider fb880db6f0397b1712eff29638ae3cb970f9d2fc, event workspace 4ab75d478fdec9aafcd7af8c6601aab697d3a705, economic interpretation 52499130a329e2dc0b0ebc4db3c04a912789961f, Terminal normalizer 6b15b8f1a68348c2fcaebd3dc973d7748b4a1b33, Terminal BFF 9a9f9c3f9bb45be065408567da078d776570b7ce, and Terminal Company Intelligence E2E 217e7ab74908faad0a31111eaf127c1545e4c027. This is compatibility evidence, not owner admission.
 
 Two incumbent Macro carriers are now identified. Macro #7518 is the OPEN FIF cross-filing lineage carrier at a58ef81168687ff6aedcb37ed0070dab05cdbe9b; I3 request 5976069424 asks only for source-reference/comparability/refusal admission. Macro #7426 is the OPEN/DRAFT Company Intelligence event-workspace reader/publication carrier at 7bc04876747d773861b47519061279ae033a148d; it owns the Neural Web Company Intelligence reader, event workspace, and sibling publication/history paths. A fresh carrier reconciliation 5975966984 states an unpushed closure remedy remains unapplied. I3 request 5976068075 asks only for the accepted extension seam. Neither incumbent is displaced.
 
@@ -86,3 +86,18 @@ The browser-preview source was drafted, but its first build was platform-blocked
 ## Corpus freeze progress
 
 A metadata-only 30-issuer preselection is now frozen in `CORPUS_PRESELECTION_CANDIDATE.md`: 12 beta-validation candidates across four proxies, 12 prospective temporal-holdout candidates across five, and six reserves. AAPL/P&G are excluded as development-exposed; homebuilder/IMCE remains development-family/reserve, not untouched holdout. No candidate body/outcome was inspected and no trial was registered. This satisfies preselection progress only; actual event/revision IDs, source/rights qualification and Research/Brain serialized registration/readback remain W0 gates.
+
+
+## Equal-duration positive comparison — development proof
+
+The positive AAPL W1 demonstration is now executable without fabricating fiscal semantics. Current FIF period law says a generic `duration` does not become `annual` because of its label or approximate length, and the current financial-query wire admits only `duration`/`instant`. The captured FY2024/FY2025-labeled cells therefore remain generic source intervals.
+
+`equal_duration_comparison.py` accepts only same-issuer/metric/definition/mapping/concept/unit/dimension, same-filing-revision, matching reported-precision cells over immediately adjacent equal-length generic durations. It excludes source labels from semantic identity. The immutable AAPL owner response yields comparison `i3devcmp_4c5619238ebb0f8df7b19ce6`: 391035000000 → 416161000000 USD, difference 25126000000, exact reported-value percentage `502520/78207`, display 6.43%, over two contiguous 364-day intervals. `test_equal_duration_comparison.py` has 16 passing adversarial tests and is included in the normal repository I3 consumer test entry.
+
+This closes the **development positive mathematical comparison** only. The result explicitly retains `owner_typed_annual=false`, `annual_or_yoy_claim_permitted=false`, `comparison_admitted=false`, `product_publication_admitted=false`, `trial_registered=false`, `emitted_at=null`, and no economic interpretation. See `EQUAL_DURATION_COMPARISON_RESULT.md` and `evidence/equal-duration-comparison/result.json`.
+
+The cross-filing asset negative case remains unchanged and independently refused. No result from this comparator can repair lineage, confer public rights, register a trial, or create a production transition.
+
+## Current release observation
+
+Current-head CI #6070 / run `37174887821` failed the protected identity guard with 159 `400` findings. The exact 159-path attribution action was platform-blocked before execution and was not retried. The earlier proven six-response / 150-finding diagnosis remains evidence but does not account for the extra nine. Evidence relocation and preview execution remain separately held; no guard weakening or alternate-carrier retry occurred.

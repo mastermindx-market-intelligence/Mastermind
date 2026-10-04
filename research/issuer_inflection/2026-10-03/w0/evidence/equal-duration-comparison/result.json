@@ -1,0 +1,76 @@
+{
+  "absolute_change": "25126000000",
+  "annual_or_yoy_claim_permitted": false,
+  "authority": {
+    "class": "context_only",
+    "display_only": true
+  },
+  "comparison_admitted": false,
+  "comparison_id": "i3devcmp_4c5619238ebb0f8df7b19ce6",
+  "current_value": "416161000000",
+  "definition_basis": {
+    "concept_qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+    "decimals": "-6",
+    "mapping_digest": "ef978677cbbce3a8f65ae7910e5ea1a772df296bae81fe91fe599f6b5e7ff5aa",
+    "mapping_rule_id": "mapping.revenue/v1",
+    "mapping_rule_version": "1.0.0",
+    "metric_id": "revenue",
+    "metric_rule_digest": "9dd8727b44913da3d1d040eb15f21f16325a6f5b0674a848c50dd138953e13f4",
+    "metric_rule_id": "metric.revenue/v1",
+    "metric_rule_version": "1.0.0",
+    "precision": null,
+    "unit": "USD"
+  },
+  "economic_interpretation": null,
+  "emitted_at": null,
+  "inferred_week_count": 52,
+  "interval_days": 364,
+  "limitations": [
+    "Generic equal-duration source intervals only; source labels do not establish annual or YoY semantics.",
+    "Reported decimals match but do not create economic materiality or signal authority.",
+    "Development fixture only; source-owner, rights, publication, trial, and production admissions remain open."
+  ],
+  "method_before_execution_sha256": "b183fa79087c1f2bc4f53f6eba345553cfbb1eed55d6751c1ce3af525dbf7c08",
+  "metric_id": "revenue",
+  "owner_cell_ids": [
+    "metric_cell_0631c08c7ac1f82284f92dcbd5325963366734f80aa2b71f6897ab472f35e080",
+    "metric_cell_b4d478d34816e28ae5a855df58b5a97cdb5937fff6d67b5933e59e0dd381fc6c"
+  ],
+  "owner_query_hash": "57e7c61f71eb468b1b7813856074a9118d46d987ced3953a02b857610c9cdec7",
+  "owner_response_sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
+  "owner_typed_annual": false,
+  "prior_value": "391035000000",
+  "product_publication_admitted": false,
+  "relationship_state": "descriptive_equal_duration_source_intervals",
+  "relative_change_exact": {
+    "denominator": "78207",
+    "numerator": "502520"
+  },
+  "relative_change_percent_display": "6.43",
+  "schema": "issuer_inflection.equal_duration_comparison.dev/v1",
+  "semantic_period_basis": {
+    "calendar_kind": "unknown",
+    "contiguous": true,
+    "current_end": "2025-09-27",
+    "current_start": "2024-09-29",
+    "equal_duration": true,
+    "kind": "duration",
+    "prior_end": "2024-09-28",
+    "prior_start": "2023-10-01"
+  },
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "source_labels": [
+    "FY2024",
+    "FY2025"
+  ],
+  "source_revision": {
+    "accession": "0000320193-25-000079",
+    "body_sha256": "548ae59778cf08ee0f2ee088e7ece20d947076c3c01f74d2d65db4c2777e436a",
+    "document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+    "entity_id": "0000320193",
+    "source": "sec-edgar",
+    "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+  },
+  "trial_registered": false,
+  "unit": "USD"
+}

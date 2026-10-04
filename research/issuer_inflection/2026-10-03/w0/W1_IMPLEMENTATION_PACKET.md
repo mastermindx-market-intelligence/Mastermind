@@ -27,21 +27,23 @@ Macro source `37122b69fffa98cb160022c4831df0338ef3e7e3`:
 - Negative owner response SHA-256: `aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21`.
 - Full requests, owner outputs, real reconstruction timestamps and method-before-execution hash are retained in `evidence/`. This is not historical emission or prediction registration.
 
-### Positive-pair technical evidence matrix — still unadmitted
+### Positive-pair technical evidence matrix — descriptive comparison built; annual/production admission still open
 
 | Comparator prerequisite | Exact observed evidence | Status |
 |---|---|---|
 | Canonical issuer / metric | Same AAPL owner identity; `metric.revenue/v1` | satisfied |
 | Mapping / concept | Same `mapping.revenue/v1`, mapping digest `ef978677...`, concept `us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax` | satisfied |
 | Unit / scope | Same USD semantic unit; no denominator; empty explicit/typed dimensions | satisfied |
-| Revision basis | FIF query arithmetic defines the basis as `(source, accession, document_id, source_body_sha256)`; both cells match `sec-edgar`, accession `0000320193-25-000079`, document `sec_document_d23a...`, body `548ae597...` | satisfied technically |
-| Duration geometry | Adjacent non-overlapping durations; each infers 52 weeks | satisfied technically |
-| Reported precision | Both selected facts carry `decimals=-6`, inline scale 6 | matched; owner precision/display interpretation still required |
-| Typed fiscal meaning | Owner cells are generic `duration`; fiscal year/calendar metadata are unknown/null | **not admitted** |
-| Public/model-use rights | FIF response exposes no `rights`/`rights_profile` | **missing** |
+| Revision basis | FIF query arithmetic defines the basis as `(source, accession, document_id, source_body_sha256)`; both cells match `sec-edgar`, accession `0000320193-25-000079`, document `sec_document_d23a...`, body `548ae597...` | satisfied |
+| Duration geometry | Two immediately adjacent, non-overlapping 364-day generic durations; both infer 52 weeks | **satisfied for equal-duration descriptive comparison** |
+| Reported precision | Both selected facts carry `decimals=-6`, `precision=null` | **satisfied for deterministic arithmetic over the reported values; not exact underlying economics** |
+| Typed fiscal meaning | Owner cells are generic `duration`; fiscal year/calendar metadata are unknown/null. Current financial-query wire admits only `duration`/`instant` | **annual/YoY claim unavailable** |
+| Public/model-use rights | FIF response exposes no `rights`/`rights_profile`; shared `sec_edgar` rights row remains held on #7870 and absent on protected Macro main | **missing on admitted mainline path** |
 | Production source | `committed_golden_fixture`, `attested=false`, `production_issuer_service=false` | **development only** |
 
-This matrix narrows the FIF return: revision basis, unit, metric, source and raw duration geometry are no longer open questions. The owner must still bind the two duration cells to an accepted comparable-period/precision rule, and a separate source-rights decision must authorize the intended consumer purpose. Until both are returned, the exact-rational arithmetic remains review-only and `comparison_admitted=false`.
+The positive mathematical demonstration is now executable through `equal_duration_comparison.py`. It produces comparison `i3devcmp_4c5619238ebb0f8df7b19ce6`: 391035000000 → 416161000000 USD, exact difference 25126000000, exact percentage `502520/78207`, display 6.43%. Sixteen adversarial tests pass, and the suite is included in the normal repository I3 consumer entry. The comparator deliberately sets `owner_typed_annual=false`, `annual_or_yoy_claim_permitted=false`, `comparison_admitted=false`, `product_publication_admitted=false`, `trial_registered=false`, and `emitted_at=null`. See `EQUAL_DURATION_COMPARISON_RESULT.md` and `evidence/equal-duration-comparison/result.json`.
+
+This closes the W1 **development positive-comparison proof** at the narrow source-interval level without creating fiscal semantics. It does not close W0 owner acceptance or authorize annual/YoY copy. If a future FIF owner wants an annual result, it must expose typed annual semantics through an accepted owner interface rather than relying on display labels.
 
 ### FIF lineage consumption boundary
 

@@ -18,6 +18,7 @@ SUITES = (
     "test_baseline_replay.py",
     "test_baseline_source_binding.py",
     "test_verified_baseline_reader.py",
+    "test_equal_duration_comparison.py",
 )
 
 

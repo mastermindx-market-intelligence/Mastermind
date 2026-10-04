@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T05:36:43.392348+00:00",
+  "prepared_at": "2026-10-04T06:03:21.185171+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "8a6616468b3debe3b06e3f418ec108f767bba753c27b7315f1c2fa19c898dbed",
-      "bytes": 16580
+      "sha256": "c54647c7e538a3418da60775bd4905b7a9638095b87e230abf800e57967c060a",
+      "bytes": 18958
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -35,6 +35,10 @@
       "sha256": "24a348c98a6eaa7f57c614b1bdc5e50e0d86f03b2256f428913a17c643411a91",
       "bytes": 961
     },
+    "EQUAL_DURATION_COMPARISON_RESULT.md": {
+      "sha256": "f974962d4cf694e16aeab89b1025a4934d8cdbfa8e0ffbf607ed502bb3acff2a",
+      "bytes": 4553
+    },
     "PREVIEW_EXECUTION_HOLD.md": {
       "sha256": "32ba096d0c57c8b15968d9d4b2a2e4cb6c8c83cd9c75c5e869cf761e966686f6",
       "bytes": 3692
@@ -44,8 +48,8 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "b31606b945d2628ec35fce64809cdc037deb0876c5c339c3bf01d263fdddae6f",
-      "bytes": 5721
+      "sha256": "5e76440d187f1a1fbf8549c55c7677b68032f257301fcc5a73ea91f943ffa15d",
+      "bytes": 6386
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",
@@ -60,12 +64,12 @@
       "bytes": 5530
     },
     "W0_ADMISSION_CANDIDATE.md": {
-      "sha256": "f7ca7410d02baf562d125441468ec9fa35f287ad9544c4a71eedc1c0224b6b47",
-      "bytes": 26429
+      "sha256": "3a500f049b1a5c4e92f3fa4c347c68037bbcdea71d471402d974ca49684a2ce7",
+      "bytes": 26887
     },
     "W1_IMPLEMENTATION_PACKET.md": {
-      "sha256": "b9ebcd5a8fd33c8e514c3b1ad7cb20681bfee4ac1f36dc48bf4662d51b9bd0c8",
-      "bytes": 14665
+      "sha256": "af3e00471bac345b291a4d56a3443ab5ebb61151839c23abbe52c42a5e18ec65",
+      "bytes": 15629
     },
     "baseline_replay.py": {
       "sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
@@ -74,6 +78,10 @@
     "build_fixture_preview.py": {
       "sha256": "090e687b4ac929037b6f95a2b6a8f1d3b41967a0001cb92ab9f1054ab8a2fe83",
       "bytes": 6515
+    },
+    "equal_duration_comparison.py": {
+      "sha256": "aec3f94e7e2cadf8800775125661d7a0be3bf8419fe601405b1b5441527d1c15",
+      "bytes": 15405
     },
     "evidence/BASELINE_REPLAY_GREEN.json": {
       "sha256": "31f664348c7113a8721aae092a230802f2b63cba763bb4a21cde949405e0f55a",
@@ -98,6 +106,10 @@
     "evidence/CAPTURE_BOUNDARY.json": {
       "sha256": "d923b3cb21b4acd0949a6562d0d09529431d2b10653ff2b32c4e331f0beba19f",
       "bytes": 1077
+    },
+    "evidence/EQUAL_DURATION_COMPARISON_R1.json": {
+      "sha256": "c680dd12317540abe419500cba83be0656418ff047e25e0e5aa6605097f9d9ce",
+      "bytes": 3903
     },
     "evidence/PREVIEW_SOURCE_STATIC_CHECK.json": {
       "sha256": "50d4e953687c213ae1659dd6883eab81006c37cc06a9104e4ff4c486b7a06619",
@@ -215,6 +227,10 @@
       "sha256": "484f269ea11f1156ca43062f9eae9e04b2c725d53bfe049fe4dc3b60f385e584",
       "bytes": 1811
     },
+    "evidence/equal-duration-comparison/result.json": {
+      "sha256": "47f6dc350d881052cb9afb1fb68ade9a4659b99d0020a86a835946eba4b2fee4",
+      "bytes": 3013
+    },
     "evidence/event-workspace-delta.json": {
       "sha256": "27b4db86233cc37eea1ba3614f249263d9715e54a1f50cc6b42b667584141ae6",
       "bytes": 14106
@@ -306,6 +322,10 @@
     "test_comparator_policy.py": {
       "sha256": "8c2bdd6a8e4ae6cf11e7b59a2aa96e930b7fd29fba622cb0dcb8cf6f873d9a2b",
       "bytes": 10203
+    },
+    "test_equal_duration_comparison.py": {
+      "sha256": "f8fbb7a801065ba9257d263b4d937b5be9ebc5842d0d14860e63d830c3bb3114",
+      "bytes": 7946
     },
     "test_verified_baseline_reader.py": {
       "sha256": "4c4611e72b21c0ef4ccccfda0e7d07a51cde65c91c87bc083e655680b0ce40e5",
