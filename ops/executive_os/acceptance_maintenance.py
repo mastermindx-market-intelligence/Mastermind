@@ -163,6 +163,10 @@ def frozen_binding(job: Any, current: dict, store: Any) -> dict:
         event = conn.execute("SELECT * FROM events WHERE event_id=?", (descriptor["root_event_id"],)).fetchone()
     if event is None or digest(dict(event)) != descriptor["root_event_sha256"]:
         raise MaintenanceError("preserved root admission event drifted")
+    from control_plane.executive_runtime import JobRegistry
+    if JobRegistry(store).validated_cycle_block(job.job_id) is not None:
+        # A preserved terminal root receives no historical dispatch binding.
+        return current
     # CEO-submit admits while the harness is closed. Later global arming
     # enables capacity, but must not promote this root's admitted profile.
     if (job.constraints.get("operator_harness_armed") is not False
@@ -482,9 +486,17 @@ def require_disarmed(config: dict) -> None:
 
 def require_stopped() -> None:
     for label in ("com.mastermind.executive.control", "com.mastermind.executive.worker.codex"):
-        probe = subprocess.run(["/bin/launchctl","print","system/"+label], capture_output=True)
-        if probe.returncode == 0:
-            raise MaintenanceError("maintenance preparation requires stopped Executive services")
+        try:
+            probe = subprocess.run(
+                ["/bin/launchctl", "print", "system/" + label],
+                capture_output=True, timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise MaintenanceError("Executive service absence could not be verified") from exc
+        absent = f'Could not find service "{label}" in domain for system\n'.encode("ascii")
+        if (probe.returncode != 113 or probe.stdout != b""
+                or probe.stderr not in (absent, b"Bad request.\n" + absent)):
+            raise MaintenanceError("maintenance requires exact launchctl service absence")
 
 def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
     """Read the existing control-owned revocation receipt; grant no new effect."""
@@ -569,16 +581,45 @@ def terminal_carry_fields(runtime: Any, root: Any, config: dict, before: dict, p
         raise MaintenanceError("terminal carry contains native harness history")
     try:
         pending = runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
-        if pending is None or pending["selected_job_id"] != job.job_id:
-            raise MaintenanceError("terminal carry has no exact pending dispatch")
-        outcome = runtime.attempts.terminal_cycle_dispatch_outcome(
-            job.job_id, command_id=pending["dispatch_command_id"],
-        )
-        if outcome.attempt.attempt_id != attempt.attempt_id:
-            raise MaintenanceError("terminal carry observation changed")
+        block = runtime.jobs.validated_cycle_block(root.job_id)
+        effects = [row for row in tables["events"] if row["job_id"] == root.job_id
+                   and row["event_type"] in {"COO_DISPATCH_EFFECT_UNKNOWN", "COO_DISPATCH_RECONCILED"}]
+        markers = [row for row in effects if row["event_type"] == "COO_DISPATCH_EFFECT_UNKNOWN"]
+        if len(markers) != 1:
+            raise MaintenanceError("terminal carry requires one original dispatch marker")
+        marker = markers[0]
+        original = json.loads(marker["payload_json"])
+        if (original["selected_job_id"] != job.job_id or original["attempt_id"] != attempt.attempt_id
+                or original["dispatch_command_id"] != f"coo-cycle:{root.job_id}:dispatch:{job.job_id}:attempt:1"):
+            raise MaintenanceError("terminal carry dispatch differs from its failed planner")
+        if pending is not None:
+            if block is not None or len(effects) != 1 or pending != original:
+                raise MaintenanceError("terminal carry pending dispatch history is inconsistent")
+            outcome = runtime.attempts.terminal_cycle_dispatch_outcome(
+                job.job_id, command_id=pending["dispatch_command_id"],
+            )
+            if outcome.attempt.attempt_id != attempt.attempt_id:
+                raise MaintenanceError("terminal carry observation changed")
+            terminal_history = {}
+        else:
+            resolutions = [row for row in effects if row["event_type"] == "COO_DISPATCH_RECONCILED"]
+            blocks = [row for row in tables["events"]
+                      if row["job_id"] == root.job_id and row["event_type"] == "COO_CYCLE_BLOCKED"]
+            if (block is None or block[1]["reason"] != "plan_terminal_adverse"
+                    or block[1]["selected_job_id"] != job.job_id
+                    or len(effects) != 2 or len(resolutions) != 1 or len(blocks) != 1
+                    or resolutions[0]["command_id"] != original["dispatch_command_id"] + ":reconciled"
+                    or not marker["event_id"] < resolutions[0]["event_id"] < blocks[0]["event_id"]):
+                raise MaintenanceError("terminal carry requires exact reconciliation and adverse-plan block")
+            outcome = runtime.attempts.reconciled_terminal_cycle_dispatch_outcome(
+                job.job_id, command_id=original["dispatch_command_id"],
+            )
+            if outcome.attempt.attempt_id != attempt.attempt_id:
+                raise MaintenanceError("terminal carry reconciled observation changed")
+            terminal_history = {"dispatch_effects": sorted(effects, key=lambda row: row["event_id"]),
+                                "cycle_block": blocks[0]}
     except RuntimeProofError as exc:
         raise MaintenanceError("terminal carry Runtime evidence is invalid") from exc
-    markers = [row for row in tables["events"] if row["command_id"] == pending["command_id"]]
     admissions = [row for row in tables["events"] if row["event_id"] == prior["root_event_id"]]
     if len(markers) != 1 or len(admissions) != 1:
         raise MaintenanceError("terminal carry admission or marker is not unique")
@@ -601,7 +642,7 @@ def terminal_carry_fields(runtime: Any, root: Any, config: dict, before: dict, p
         "terminal_marker_event_id": marker["event_id"], "terminal_marker_event_sha256": digest(marker),
         "terminal_state_sha256": digest({"job": children[0], "attempts": [
             row for row in tables["attempts"] if row["job_id"] == job.job_id
-        ]}),
+        ], **terminal_history}),
         "predecessor_quota_sha256": digest(quotas[0]),
     }
     return proof, fields

@@ -14,7 +14,8 @@ the service.
 ## V1 preparation and proof
 
 Use the ordinary source/review/release gates. With all control arms false and
-both Executive services stopped, run the reviewed successor's
+both Executive services stopped (each exact `launchctl print` exit 113; loaded,
+unknown, timed-out and failed observations refuse), run the reviewed successor's
 `ops/executive_os/acceptance_maintenance.py` as root with:
 
 - `--predecessor-sha`: the exact installed release and queued root base.
@@ -60,6 +61,13 @@ worker access revoked, a passing UID absence sweep, and unchanged directory
 identity. All Attempts must be terminal and all quotas unheld. The proof quota
 must already be AVAILABLE.
 
+A later release may preserve the same failed planner after its exact dispatch
+has been reconciled and the canonical `plan_terminal_adverse` block recorded.
+This phase requires the original marker, one matching reconciliation and one
+validated block in that order, plus the same terminal claim and cleanup proof.
+The descriptor seals this complete effect history. An unresolved marker with
+a block, reconciliation without a block, or malformed/extra history refuses.
+
 Use the same preparation owner with predecessor, successor and root selectors,
 plus `--carry-terminal-dispatch`; omit both recovery selectors. The predecessor
 is the installed release. The root may retain an older base: the owner derives
@@ -83,6 +91,11 @@ normal selection then skips that root. Preserve both events and the failed
 history. Any new acceptance operation uses a new explicit commission/intent
 referencing the failed operation and the current host binding. It must not
 resubmit the old intent or increase its immutable attempt limit.
+
+Once blocked, the original root receives no historical binding compatibility.
+The normal selector validates and skips its canonical block before checking
+current dispatch policy. A subsequent capability-policy rotation can therefore
+preserve terminal history without re-enabling that operation.
 
 ## Continuing the preserved root
 

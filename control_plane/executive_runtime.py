@@ -15961,6 +15961,17 @@ class AttemptRegistry:
     def terminal_cycle_dispatch_outcome(
         self, job_id: str, *, command_id: str
     ) -> OrchestrationDispatchOutcome:
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=False)
+
+    def reconciled_terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        """Observe already reconciled terminal history; never make it dispatchable."""
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=True)
+
+    def _terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str, reconciled: bool
+    ) -> OrchestrationDispatchOutcome:
         """Read an exact terminal lost-return outcome without reacquiring a lease.
 
         A restarted service has a new lease owner. Historical terminal evidence
@@ -15975,12 +15986,12 @@ class AttemptRegistry:
                 "SELECT * FROM events WHERE command_id=?",
                 (f"{command_id}:effect-unknown",),
             ).fetchone()
+            resolution = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (f"{command_id}:reconciled",),
+            ).fetchone()
             if (
                 job is None or marker is None
-                or connection.execute(
-                    "SELECT 1 FROM events WHERE command_id=?",
-                    (f"{command_id}:reconciled",),
-                ).fetchone() is not None
+                or (resolution is not None) != reconciled
                 or JobStatus(job["status"]) not in _TERMINAL_JOB_STATUSES
                 or job["orchestration_role"] is None
             ):
@@ -15988,6 +15999,13 @@ class AttemptRegistry:
             pending = _validated_coo_dispatch_effect_event(
                 connection, marker, expected_root_id=job["root_job_id"]
             )
+            if resolution is not None:
+                resolved = _validated_coo_dispatch_effect_event(
+                    connection, resolution, expected_root_id=job["root_job_id"],
+                )
+                if any(resolved[key] != pending[key] for key in
+                       ("selected_job_id", "attempt_id", "dispatch_command_id")):
+                    raise StateConflict("terminal dispatch reconciliation differs from original claim")
             attempt = connection.execute(
                 "SELECT * FROM attempts WHERE attempt_id=?",
                 (pending["attempt_id"],),
