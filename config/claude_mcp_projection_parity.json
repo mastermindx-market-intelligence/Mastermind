@@ -1,0 +1,348 @@
+{
+  "claim_scope": "static_mcp_configuration_only_not_native_admission",
+  "policy_path": "config/executive_agent_capabilities.json",
+  "policy_schema_version": "mastermind.executive_agent_capabilities/v3",
+  "production_armed": false,
+  "profiles": {
+    "operator.appserver.interactive.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "cd10fce1f53d01d1253e88fcf7850c0ab7928a2d9c7fc2340e3b8a1475fd324f",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        }
+      }
+    },
+    "operator.appserver.readonly.docs-mcp.native-helper.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        }
+      }
+    },
+    "operator.appserver.readonly.docs-mcp.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "13f077d50a2a5cecaa97ec29f5efdb32c8af9159374e16ef140f85556310544b",
+      "surfaces": {
+        "agent-sdk": {
+          "projection": {
+            "auto_approved_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs"
+            ],
+            "cli_arguments_sha256": null,
+            "configuration_sha256": "ac41038aac0ffa961dce0bfda2f76e8c46d9823825af599cb5d79702f067a90c",
+            "denied_tools": [],
+            "enabled_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs"
+            ],
+            "production_armed": false,
+            "source_grant_digests": [
+              "dfca2031b7cb6c2ac69563284a64670f19dc69bc86e5e3e9c2a0d7ef73c11cbb"
+            ],
+            "source_profile_digest": "13f077d50a2a5cecaa97ec29f5efdb32c8af9159374e16ef140f85556310544b",
+            "source_profile_id": "operator.appserver.readonly.docs-mcp.v1",
+            "source_tool_schema_digests": [
+              "9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7"
+            ]
+          },
+          "reason": "Static MCP configuration only; native principal admission, observed catalog and resource launch are NOT proven.",
+          "status": "configuration_supported"
+        },
+        "cli": {
+          "projection": {
+            "auto_approved_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs"
+            ],
+            "cli_arguments_sha256": "b2d066f8588e383b483d1cef3c49dec3efaa342765b01893aafdfcbaf4c9afe6",
+            "configuration_sha256": "fdb532c5429a799f20b37ad6086a49f49269c007690a6df7ec6677f834de21f8",
+            "denied_tools": [],
+            "enabled_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs"
+            ],
+            "production_armed": false,
+            "source_grant_digests": [
+              "dfca2031b7cb6c2ac69563284a64670f19dc69bc86e5e3e9c2a0d7ef73c11cbb"
+            ],
+            "source_profile_digest": "13f077d50a2a5cecaa97ec29f5efdb32c8af9159374e16ef140f85556310544b",
+            "source_profile_id": "operator.appserver.readonly.docs-mcp.v1",
+            "source_tool_schema_digests": [
+              "9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7"
+            ]
+          },
+          "reason": "Static MCP configuration only; native principal admission, observed catalog and resource launch are NOT proven.",
+          "status": "configuration_supported"
+        },
+        "desktop-local": {
+          "reason": "Canonical profile includes HTTP; existing Desktop-local projector requires an independently admitted bridge.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        }
+      }
+    },
+    "operator.appserver.readonly.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "86d642f003c620a02ef9ffd3d1b49e2625d831e116995a5f9a32537ddf4a341c",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        }
+      }
+    },
+    "operator.browser.local-review.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "f0430198b3ba00e53b70583e547d12d3e471dd499b69ef4a495fc14ca2826199",
+      "surfaces": {
+        "agent-sdk": {
+          "projection": {
+            "auto_approved_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs",
+              "mcp__playwrightWorkerBrowser__browser_click",
+              "mcp__playwrightWorkerBrowser__browser_close",
+              "mcp__playwrightWorkerBrowser__browser_console_messages",
+              "mcp__playwrightWorkerBrowser__browser_fill_form",
+              "mcp__playwrightWorkerBrowser__browser_hover",
+              "mcp__playwrightWorkerBrowser__browser_navigate",
+              "mcp__playwrightWorkerBrowser__browser_network_requests",
+              "mcp__playwrightWorkerBrowser__browser_resize",
+              "mcp__playwrightWorkerBrowser__browser_snapshot",
+              "mcp__playwrightWorkerBrowser__browser_tabs",
+              "mcp__playwrightWorkerBrowser__browser_take_screenshot",
+              "mcp__playwrightWorkerBrowser__browser_wait_for"
+            ],
+            "cli_arguments_sha256": null,
+            "configuration_sha256": "b11298ceb53b4328b6f331638a378816ab34e2bc5423c2cb6b22cc96fd3ce3c0",
+            "denied_tools": [],
+            "enabled_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs",
+              "mcp__playwrightWorkerBrowser__browser_click",
+              "mcp__playwrightWorkerBrowser__browser_close",
+              "mcp__playwrightWorkerBrowser__browser_console_messages",
+              "mcp__playwrightWorkerBrowser__browser_fill_form",
+              "mcp__playwrightWorkerBrowser__browser_hover",
+              "mcp__playwrightWorkerBrowser__browser_navigate",
+              "mcp__playwrightWorkerBrowser__browser_network_requests",
+              "mcp__playwrightWorkerBrowser__browser_resize",
+              "mcp__playwrightWorkerBrowser__browser_snapshot",
+              "mcp__playwrightWorkerBrowser__browser_tabs",
+              "mcp__playwrightWorkerBrowser__browser_take_screenshot",
+              "mcp__playwrightWorkerBrowser__browser_wait_for"
+            ],
+            "production_armed": false,
+            "source_grant_digests": [
+              "6f18d73e85cbe159eb4714d3d3eb27f550b12a484e91d5ef28a0417e628be0de",
+              "dfca2031b7cb6c2ac69563284a64670f19dc69bc86e5e3e9c2a0d7ef73c11cbb"
+            ],
+            "source_profile_digest": "f0430198b3ba00e53b70583e547d12d3e471dd499b69ef4a495fc14ca2826199",
+            "source_profile_id": "operator.browser.local-review.v1",
+            "source_tool_schema_digests": [
+              "859063beb705b4ed15b0defc2c42533d6bce1a3f18bf02c38f28f2422598fc0b",
+              "9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7"
+            ]
+          },
+          "reason": "Static MCP configuration only; native principal admission, observed catalog and resource launch are NOT proven.",
+          "status": "configuration_supported"
+        },
+        "cli": {
+          "projection": {
+            "auto_approved_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs",
+              "mcp__playwrightWorkerBrowser__browser_click",
+              "mcp__playwrightWorkerBrowser__browser_close",
+              "mcp__playwrightWorkerBrowser__browser_console_messages",
+              "mcp__playwrightWorkerBrowser__browser_fill_form",
+              "mcp__playwrightWorkerBrowser__browser_hover",
+              "mcp__playwrightWorkerBrowser__browser_navigate",
+              "mcp__playwrightWorkerBrowser__browser_network_requests",
+              "mcp__playwrightWorkerBrowser__browser_resize",
+              "mcp__playwrightWorkerBrowser__browser_snapshot",
+              "mcp__playwrightWorkerBrowser__browser_tabs",
+              "mcp__playwrightWorkerBrowser__browser_take_screenshot",
+              "mcp__playwrightWorkerBrowser__browser_wait_for"
+            ],
+            "cli_arguments_sha256": "0cd66dc540ea9c814c967395908ce365c8b286a516ee6b81312a78115a6a1e0f",
+            "configuration_sha256": "5efdf426cd546c14a6ac98cc65d8d168f7269ed060deb89c78facf21266b854e",
+            "denied_tools": [],
+            "enabled_tools": [
+              "mcp__openaiDeveloperDocs__fetch_openai_doc",
+              "mcp__openaiDeveloperDocs__search_openai_docs",
+              "mcp__playwrightWorkerBrowser__browser_click",
+              "mcp__playwrightWorkerBrowser__browser_close",
+              "mcp__playwrightWorkerBrowser__browser_console_messages",
+              "mcp__playwrightWorkerBrowser__browser_fill_form",
+              "mcp__playwrightWorkerBrowser__browser_hover",
+              "mcp__playwrightWorkerBrowser__browser_navigate",
+              "mcp__playwrightWorkerBrowser__browser_network_requests",
+              "mcp__playwrightWorkerBrowser__browser_resize",
+              "mcp__playwrightWorkerBrowser__browser_snapshot",
+              "mcp__playwrightWorkerBrowser__browser_tabs",
+              "mcp__playwrightWorkerBrowser__browser_take_screenshot",
+              "mcp__playwrightWorkerBrowser__browser_wait_for"
+            ],
+            "production_armed": false,
+            "source_grant_digests": [
+              "6f18d73e85cbe159eb4714d3d3eb27f550b12a484e91d5ef28a0417e628be0de",
+              "dfca2031b7cb6c2ac69563284a64670f19dc69bc86e5e3e9c2a0d7ef73c11cbb"
+            ],
+            "source_profile_digest": "f0430198b3ba00e53b70583e547d12d3e471dd499b69ef4a495fc14ca2826199",
+            "source_profile_id": "operator.browser.local-review.v1",
+            "source_tool_schema_digests": [
+              "859063beb705b4ed15b0defc2c42533d6bce1a3f18bf02c38f28f2422598fc0b",
+              "9c6e56942336e507f7fb8e3cb781288c40028b2284c2b2d629e262521d66f8e7"
+            ]
+          },
+          "reason": "Static MCP configuration only; native principal admission, observed catalog and resource launch are NOT proven.",
+          "status": "configuration_supported"
+        },
+        "desktop-local": {
+          "reason": "Canonical profile includes HTTP; existing Desktop-local projector requires an independently admitted bridge.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        }
+      }
+    },
+    "sealed.worker.claude.readonly.no-extensions.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "421b642a6a4ae978efffbe311023dd3495adc54cbc00e86bf5f6254be3dd5555",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        }
+      }
+    },
+    "sealed.worker.claude.write.no-extensions.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "74c4b0ebcb996b89a8607b71c3ed842fd87cd026d8b5fddd4947cbad0cf529a6",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        }
+      }
+    },
+    "sealed.worker.readonly.no-extensions.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "17893a6eff34b4cd7cbd764c396d5f10f66b83c2677a21bb97d42e2a4b023a03",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        }
+      }
+    },
+    "sealed.worker.write.no-extensions.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "bf4cf0fdd6b4a63def2b9410c0831cde1adfd0877689532c52c608d18477daa0",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        }
+      }
+    }
+  },
+  "projection_source_sha256": "84c9ac5dc61d1db0af3469fda326a045364ebb0c51ea0a016cad0be4bd615455",
+  "schema_version": "mastermind.claude_mcp_projection_parity/v1"
+}
