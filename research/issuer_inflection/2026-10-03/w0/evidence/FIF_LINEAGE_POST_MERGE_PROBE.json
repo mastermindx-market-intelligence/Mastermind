@@ -1,0 +1,79 @@
+{
+  "child_carrier": "Mastermind#1195",
+  "disposition": {
+    "cross_filing_i3_comparison_admitted": false,
+    "historical_pre_lineage_refusal_preserved": true,
+    "lineage_disclosure_trusted_for_i3_source_reference": false,
+    "owner_comment": "macro#7518 issuecomment-5983145862",
+    "owner_repair_required": "reconstruct expected evidence payload from live parent/child occurrence groups and require exact equality before acceptance/emission",
+    "post_lineage_value_owner_observed": true
+  },
+  "fif_feature_head": "07426932618a3458388baa735f7da793fdef82ff",
+  "fif_merge_commit": "4294fd498e8c31cb72424e34b8769a48b1f0afd2",
+  "fif_pr": 7518,
+  "forged_field_probe": {
+    "accepted": true,
+    "cell_state": "value",
+    "cell_value": "359241000000",
+    "emitted_parent_document_id": "sec_document_ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "forged_parent_document_id": "sec_document_ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "forged_receipt_id": "lineage_receipt_56abf2fe8c01d5f34c73731922f8b798730e4c213fab5e082ee2c8385252f86e",
+    "mutation": "positive_evidence.parent_document_id only; genuine occurrence IDs and relation retained; receipt digest/id recomputed over forged payload",
+    "response_sha256": "93f8e469c63f73c57283564b184e70565a32b8778652527dd747dc31ad610f41"
+  },
+  "genuine_owner_response": {
+    "authority": {
+      "class": "context_only",
+      "display_only": true
+    },
+    "cell": {
+      "accession": "0000320193-26-000020",
+      "cell_id": "metric_cell_3d5668afc76c0c0346c0af4f13c7d08934f88bee0ee67759dc6e8621d090d1f5",
+      "document_id": "sec_document_29a36fa46a0bc5309f17bd254c3061f20c4b3de7e05898a2fec9ee58f89e8760",
+      "source_occurrence_ids": [
+        "rawfact_9669446bc8076fa26bca33a3d9a067093bddadbb28e4617318bb3de33a4eca29"
+      ],
+      "state": "value",
+      "value": "359241000000"
+    },
+    "delivery": {
+      "attested": false,
+      "kind": "committed_golden_fixture",
+      "production_issuer_service": false
+    },
+    "lineage": {
+      "child_occurrence_id": "rawfact_9669446bc8076fa26bca33a3d9a067093bddadbb28e4617318bb3de33a4eca29",
+      "evidence_digest": "4b104b86c500968432e5dd09f01eef848a51716755d09d3829d2a10a6f5c6623",
+      "parent_document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+      "parent_occurrence_id": "rawfact_bc9355a292f06baaaf988b683106b2b02e3dd9c4a9555f1eb160a94643e4feaf",
+      "receipt_id": "lineage_receipt_f58a751950d176fb40ac389181346a295b517df8969307547dcb13907e413fb0"
+    },
+    "query_hash": "c857b4767f6d8af44ffb142c9c8d042dd44d792c5813d903f05eaa16c9e0e934",
+    "response_sha256": "74e134907d44731555b9a2db07a2cab42998d63d4f5c6d4bfcd6c2b6efae84a5"
+  },
+  "kind": "i3_fif_lineage_post_merge_dependency_probe/v1",
+  "macro_main_pin": "05216ea0ec0367a1e4061c05c73d0b0a363d4e00",
+  "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
+  "parent_carrier": "Mastermind#1183",
+  "probe_scope": "Disposable exact-main sandbox materialized file-by-file; no Macro source or fixture modified.",
+  "query": {
+    "entity_id": "ISS:US-XNAS-AAPL",
+    "metric_id": "total_assets",
+    "period": {
+      "end": "2025-09-27",
+      "kind": "instant",
+      "label": "2025-09-27",
+      "start": null
+    },
+    "recorded_at": "2026-09-20T00:00:00Z",
+    "selection": "latest_known_as_of",
+    "source_snapshot_at": "2026-09-20T00:00:00Z"
+  },
+  "recorded_at": "2026-10-04T18:39:49.838046+00:00",
+  "source_blobs": {
+    "engine/fundamental_forensics/ixbrl_raw_ledger.py": "7c16e02ac06f1008a0989172fabc6f9d41cfd534",
+    "engine/fundamental_forensics/lineage_evidence.py": "2aaac83a73121e55e38f07c1a7b8228691875149",
+    "engine/fundamental_forensics/query.py": "529d9e7df8e6183848fea0a37280e938c0bd9238",
+    "engine/fundamental_forensics/query_service.py": "aa497dcd6eb825d37465fe0df4888e98cf885dea"
+  }
+}

@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T09:07:15.891605+00:00",
+  "prepared_at": "2026-10-04T18:40:41.217858+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "88c9522c07e7a082aada72b04abb6bbfd80a22f69c1caf017facd46967932b7a",
-      "bytes": 20104
+      "sha256": "e0b410ec7858cfea9f023f0cb96818ab597e15f8623f086a33940b21296aeabc",
+      "bytes": 20293
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -43,6 +43,10 @@
       "sha256": "e7e36fc905c35ba6cd196a43ab9e6d82e38bb65a97a7e0c575e90cd91ce16f63",
       "bytes": 5504
     },
+    "FIF_LINEAGE_POST_MERGE_ADMISSION.md": {
+      "sha256": "74f1e4e434943a83fdddb14d5b7353cfd2e344f4a30393d8878a6ba1d3c6dad3",
+      "bytes": 2434
+    },
     "OWNER_RESPONSE_VALIDATION_R2.md": {
       "sha256": "1863a2dc73cf419f2094c629c733c80ada7f33b7284c0fd83f9c23bc0f00a8f8",
       "bytes": 2329
@@ -56,8 +60,8 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "c1cbd80c7c97badda6c5c37e4347c75eb12b26e7a94cc31614d16d1a87f604bc",
-      "bytes": 7074
+      "sha256": "1f39e60fb6e14a2f72632a50057d9925dad489a75cee49f7503df7b2b6c84055",
+      "bytes": 7425
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "365a4d978f6b505219792dff7b8018e11ecd46a4a6c712f38d3a6c0bdf6e912d",
@@ -72,12 +76,12 @@
       "bytes": 5609
     },
     "W0_ADMISSION_CANDIDATE.md": {
-      "sha256": "ef90abb73b9bf51145951f5f0190089c03fc47f6bba185632b5f470d4ff0d18c",
-      "bytes": 28354
+      "sha256": "22867a3783d97337ff10724e793f0f91c8cda8685e204dacf0dd41346bc19485",
+      "bytes": 28939
     },
     "W1_IMPLEMENTATION_PACKET.md": {
-      "sha256": "b98bbcff683d32f2bb5ac08b52a90a665b5e08d6d2debd8f45b0ddd423b9f1f4",
-      "bytes": 17137
+      "sha256": "4d154ddb33c83abebce0073104972bb60390c147e37cc28fbf2fce66aaad68c7",
+      "bytes": 17148
     },
     "baseline_replay.py": {
       "sha256": "196732a08c42c2a76328295e3cffbe051b3618a6cff1975ea7d147a2870b4896",
@@ -130,6 +134,10 @@
     "evidence/EQUAL_DURATION_COMPARISON_R2.json": {
       "sha256": "c493215d1887302030814508ed8ada94cab6c00a119d82d46b7c226de2716d1b",
       "bytes": 3236
+    },
+    "evidence/FIF_LINEAGE_POST_MERGE_PROBE.json": {
+      "sha256": "cc00a983329a9662ee22dafb3bb8425bd380f9c7a418e17dba99fb825c6c53ab",
+      "bytes": 3908
     },
     "evidence/PREVIEW_SOURCE_STATIC_CHECK.json": {
       "sha256": "ddaa4af7f6c90326adaa50b5dc0fdd5e706bd2bc4f7c518394764f8b474bd90a",
@@ -354,6 +362,10 @@
     "test_equal_duration_comparison.py": {
       "sha256": "c1b6c154aa0d98a14e64a29ee13759ea3126b0ab22a631dfef4dfaf1b1a93caf",
       "bytes": 10431
+    },
+    "test_fif_lineage_post_merge_probe.py": {
+      "sha256": "c5e675735d519ff833af5fc39ce304d7ad8f606da79a17e8d23187ebb3e94141",
+      "bytes": 1453
     },
     "test_verified_baseline_reader.py": {
       "sha256": "4c4611e72b21c0ef4ccccfda0e7d07a51cde65c91c87bc083e655680b0ce40e5",
