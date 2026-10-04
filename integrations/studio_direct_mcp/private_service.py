@@ -40,6 +40,12 @@ REQUEST_TIMEOUT_MS = 300_000
 # execution. The gateway validates up to 1024; keep a bounded 256 installed default.
 MAX_SESSIONS = 256
 
+# Private-seat transport and backend limits are independent. Keep enough backend
+# headroom for eight simultaneous tunnel requests while retaining the gateway's
+# reserved catalog slot and a bounded queue for short contention bursts.
+MAX_BACKEND_CONCURRENCY = 8
+MAX_BACKEND_QUEUE = 16
+
 # Bounded typed-Git publication policy. These are host-owned values, not CLI
 # inputs, so a ChatGPT caller cannot select another repository, remote, lane,
 # credential, Git binary, or workspace authority.
@@ -605,6 +611,8 @@ def _build_config(
         "childEnv": {"NODE_OPTIONS": ""},
         "stateDir": str(state_dir),
         "maxSessions": MAX_SESSIONS,
+        "maxPerSessionConcurrency": MAX_BACKEND_CONCURRENCY,
+        "maxQueuedPerSession": MAX_BACKEND_QUEUE,
         "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
