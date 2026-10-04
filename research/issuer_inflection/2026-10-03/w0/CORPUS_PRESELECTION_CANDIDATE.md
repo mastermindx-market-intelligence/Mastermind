@@ -4,21 +4,26 @@
 
 This freezes a metadata-only issuer preselection under the existing #1183 / #1195 program. It is not a classification result, source-support claim, rights admission, issuer-archetype truth label, untouched-OOS claim or prediction cohort. The existing Research/Brain registry remains the only eventual trial owner.
 
-## Immutable method evidence
+## Reproducible method evidence
 
-- Method-before-selection SHA-256: `8fd1cfcfb9b175612d91ad2cad3a0dabec4414d4062859b07c0be393803be139`
-- Candidate manifest SHA-256: `72287739689c84adfcaba5978708b4b3a3b453b1d396190d5d59b35eac9fac48`
-- Freeze timestamp: `2026-10-04T05:35:05.807358+00:00`
-- Security master: `data/reference/security_master.parquet` at Macro `37122b69fffa98cb160022c4831df0338ef3e7e3`, SHA-256 `ed45e4a4f9e17cc91da1a382ebeffbb1e73ae4d9fb2556036eb4efedb5b30158`; bounded Git comparison shows unchanged through Macro `01c9a44f6987c8c37f5a28ee50a51e74b83e4992`.
-- Issuer master: same tested pin, SHA-256 `61738052362bdd939d686461d2bb19fcb7b01ce6fc2dc8fddd77d8e4ea44b61c`; unchanged through the same current-main comparison.
-- Industry proxy source: `data/sp500_heatmap/industry_map.json` at Macro `01c9a44f6987c8c37f5a28ee50a51e74b83e4992`, blob `d33e40ae40040efd21fe1895cf3544a89d5b3637`.
+- Source-controlled selector: `corpus_preselection_protocol.py`, SHA-256 `14e73eee775cfdba6085997ac01e033d0aea0e54abc00dd32e4147f2f447d0ef`.
+- Selector tests: `test_corpus_preselection_protocol.py`, SHA-256 `b0b506e5e738943badb6b001fa50339117a03fbac7a33b5c7d1b45825c8e92b9`; **4 passed**.
+- Freeze timestamp: `2026-10-04T05:35:05.807358+00:00`.
+- Security master: `data/reference/security_master.parquet`, SHA-256 `ed45e4a4f9e17cc91da1a382ebeffbb1e73ae4d9fb2556036eb4efedb5b30158`.
+- Issuer master: SHA-256 `61738052362bdd939d686461d2bb19fcb7b01ce6fc2dc8fddd77d8e4ea44b61c`.
+- Current discovery source: Macro `94e5865e13fc42063f9c7d1e9b485958ccaee5b1` `data/sp500_heatmap/industry_map.json`, Git blob `d33e40ae40040efd21fe1895cf3544a89d5b3637`, file SHA-256 `b72cc28c092c911dee71cde2883238cf09b20bd9c47857119c3e30a54ee08872`.
+- Existing historical membership owner: `data/breadth/sp1500_pit_membership.parquet`, Git blob `ec7085bc7460aca4a07661fa5983c424e1559be8`.
+- Exact current-source regeneration produced the same 30-name sequence; canonical selected-row SHA-256 `210dd66ab256b056e322e3602fd1fc2d3398352f6b9f76b5259739e4f533f336`.
+- The earlier scratch method/manifest hashes remain historical provenance only; the committed selector above is the reproducible method contract.
 
 Selection used only these metadata sources. It did **not** inspect filing/event/transcript bodies, candidate outputs, prices, future outcomes or validation labels.
 
 ## Frozen selection law
 
 - Archetypes below are **sampling proxies**, not economic classifications. Metric/KPI applicability remains with the domain/source owners.
-- Within each exact proxy, candidate ordering is ticker-lexical on the pinned industry map. The selected rows are a deterministic prefix, not a winner list.
+- Exact proxy predicates are source-controlled in `corpus_preselection_protocol.py` as closed `(sector, sub_industry)` sets; ordering is ticker-lexical after excluding AAPL/P&G. The selected rows are deterministic positions, not a winner list.
+- The pinned current industry map is **candidate discovery only**. It cannot certify historical membership or historical business-family eligibility.
+- A beta candidate may receive a historical event only after event-date membership is re-qualified through the existing PIT membership owner and event-time/source-qualified business-family metadata. If that evidence is unavailable, historical beta assignment is blocked and the candidate may only receive a future eligible post-freeze event.
 - Beta-validation candidate: first three identities in each of semiconductor, application-software, industrial/backlog and bank proxies → 12 issuers / 4 proxies.
 - Prospective temporal-holdout candidate: positions 4–6 semiconductors, positions 4–5 software/industrial/bank, first three consumer price/mix → 12 issuers / 5 proxies. **Only a future eligible event strictly after the freeze can be assigned.**
 - Broad reserve: six remaining selected identities, including the homebuilder family. Homebuilder/IMCE is already a development-exposed family and is not an untouched holdout on this record.

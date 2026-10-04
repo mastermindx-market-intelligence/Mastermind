@@ -27,11 +27,15 @@ class BaselineReplayTests(unittest.TestCase):
         return compare_snapshots(self.raw[before], self.raw[after], before_sha256=self.hashes[before], after_sha256=self.hashes[after], before_request=self.requests[before], after_request=self.requests[after])
     def root(self, data, metric="revenue", kind="duration"):
         return next(n for n in data["receipt"]["nodes"] if n["cell_id"] in data["receipt"]["root_cell_ids"] and n["metric_id"] == metric and n["period"]["kind"] == kind)
-    def mutate(self, fn, name="after_a2_admission"):
-        data=json.loads(self.raw[name]); fn(data); raw=canonical(data)
+    def mutate(self, fn, name="after_a2_admission", *, rehash=True):
+        data=json.loads(self.raw[name]); fn(data)
+        if rehash and isinstance(data.get("receipt"), dict):
+            unsigned={k:v for k,v in data["receipt"].items() if k != "query_hash"}
+            data["receipt"]["query_hash"]=digest(canonical(unsigned))
+        raw=canonical(data)
         return raw, self.requests[name]
-    def refused(self, fn, name="after_a2_admission"):
-        raw,request=self.mutate(fn,name)
+    def refused(self, fn, name="after_a2_admission", *, rehash=True):
+        raw,request=self.mutate(fn,name,rehash=rehash)
         with self.assertRaises(ReplayRefusal): owner_snapshot(raw,digest(raw),request)
     def test_all_four_variables_are_preserved_on_both_sides(self):
         p=self.result()["payload"]
@@ -73,6 +77,8 @@ class BaselineReplayTests(unittest.TestCase):
         cell["provenance"]["reason"]=cell["reason"]
         data["coverage"]["not_evaluable_cells"]-=1
         data["coverage"]["missing_cells"]+=1
+        unsigned={k:v for k,v in data["receipt"].items() if k != "query_hash"}
+        data["receipt"]["query_hash"]=digest(canonical(unsigned))
         after=canonical(data)
         result=compare_snapshots(self.raw[name],after,before_sha256=self.hashes[name],after_sha256=digest(after),before_request=self.requests[name],after_request=self.requests[name])
         row=next(r for r in result["payload"]["variables"] if r["variable"]["metric_id"] == "total_assets" and r["variable"]["period"]["kind"] == "instant")
@@ -155,6 +161,30 @@ class BaselineReplayTests(unittest.TestCase):
     def test_response_byte_limit(self):
         raw=b" "*1_048_577
         with self.assertRaises(ReplayRefusal):owner_snapshot(raw,digest(raw),self.requests["after_a2_admission"])
+    def test_receipt_schema_is_bound(self):
+        self.refused(lambda o:o["receipt"].__setitem__("schema","fundamental_forensics.metric_query/v999"))
+    def test_receipt_proof_scope_is_bound(self):
+        self.refused(lambda o:o["receipt"].__setitem__("proof_scope","unbounded"))
+    def test_receipt_selection_proof_is_bound(self):
+        self.refused(lambda o:o["receipt"].__setitem__("selection_proof","self_asserted"))
+    def test_receipt_entities_are_bound(self):
+        self.refused(lambda o:o["receipt"].__setitem__("entities",[{"ticker":"AAPL","entity_id":"0000789019"}]))
+    def test_receipt_metric_membership_is_bound(self):
+        self.refused(lambda o:o["receipt"].__setitem__("metric_ids",["revenue"]))
+    def test_receipt_period_membership_is_bound(self):
+        self.refused(lambda o:o["receipt"]["periods"][0].__setitem__("label","TEST_ONLY"))
+    def test_query_hash_is_recomputed_from_unsigned_receipt(self):
+        self.refused(lambda o:o["receipt"].__setitem__("query_hash","0"*64), rehash=False)
+    def test_owner_status_must_equal_state(self):
+        self.refused(lambda o:self.root(o,"total_assets","instant").__setitem__("status","value"))
+    def test_owner_reason_must_equal_provenance_reason(self):
+        self.refused(lambda o:self.root(o,"total_assets","instant")["provenance"].__setitem__("reason","TEST_ONLY mismatch"))
+    def test_value_cell_cannot_carry_refusal_reason(self):
+        def mutate(o):
+            node=self.root(o)
+            node["reason"]="TEST_ONLY refusal on value"
+            node["provenance"]["reason"]=node["reason"]
+        self.refused(mutate)
     def test_aggregate_policy_mismatch(self):
         self.refused(lambda o:o["receipt"]["policy"].__setitem__("recorded_at","2020-01-01T00:00:00Z"))
     def test_cell_cutoff_mismatch(self):

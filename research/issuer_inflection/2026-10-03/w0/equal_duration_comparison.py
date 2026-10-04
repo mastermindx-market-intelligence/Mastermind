@@ -19,7 +19,7 @@ import json
 import re
 from typing import Any
 
-from baseline_replay import ReplayRefusal, _load, canonical, digest
+from baseline_replay import ENTITY, ReplayRefusal, _load, canonical, digest, owner_snapshot
 
 ROOT = Path(__file__).resolve().parent
 EVIDENCE = ROOT / "evidence"
@@ -105,13 +105,21 @@ def _change(before: str, after: str) -> dict[str, Any]:
     }
 
 
-def _provenance(cell: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _provenance(cell: dict[str, Any], *, owner_entity_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     _require(type(cell) is dict, "cell_shape")
-    _require(cell.get("state") == "value" and type(cell.get("value")) is str, "owner_value")
+    _require(type(owner_entity_id) is str and bool(owner_entity_id), "owner_entity")
+    _require(cell.get("entity_id") == owner_entity_id, "owner_entity")
+    _require(cell.get("status") == cell.get("state") == "value" and type(cell.get("value")) is str, "owner_value")
     provenance = cell.get("provenance")
     _require(type(provenance) is dict and provenance.get("kind") == "direct", "direct_owner_fact")
+    _require(provenance.get("source_entity_id") == owner_entity_id, "owner_entity")
+    _require(cell.get("reason") is None and provenance.get("reason") is None, "owner_value_reason")
     selected = provenance.get("selected_raw_fact")
     _require(type(selected) is dict and selected.get("is_nil") is False, "selected_owner_fact")
+    source = selected.get("source")
+    context = selected.get("context")
+    _require(type(source) is dict and source.get("entity_id") == owner_entity_id, "owner_entity")
+    _require(type(context) is dict and context.get("entity_identifier") == owner_entity_id, "owner_entity")
     _require(selected.get("parsed_value") == cell["value"], "selected_value")
     return provenance, selected
 
@@ -206,14 +214,14 @@ def _definition_basis(cell: dict[str, Any], provenance: dict[str, Any], selected
     }
 
 
-def compare_owner_cells(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+def compare_owner_cells(prior: dict[str, Any], current: dict[str, Any], *, owner_entity_id: str) -> dict[str, Any]:
     """Compare two already-owner-issued generic duration cells.
 
     The output is descriptive arithmetic only. Labels are intentionally excluded
     from the semantic comparison basis and cannot establish fiscal semantics.
     """
-    prior_provenance, prior_selected = _provenance(prior)
-    current_provenance, current_selected = _provenance(current)
+    prior_provenance, prior_selected = _provenance(prior, owner_entity_id=owner_entity_id)
+    current_provenance, current_selected = _provenance(current, owner_entity_id=owner_entity_id)
 
     _require(prior.get("metric_id") == current.get("metric_id"), "metric")
     prior_basis = _definition_basis(prior, prior_provenance, prior_selected)
@@ -242,6 +250,7 @@ def compare_owner_cells(prior: dict[str, Any], current: dict[str, Any]) -> dict[
     change = _change(prior["value"], current["value"])
     semantic = {
         "method": METHOD,
+        "owner_entity_id": owner_entity_id,
         "metric_id": prior["metric_id"],
         "unit": prior["unit"],
         "definition_basis": prior_basis,
@@ -268,6 +277,7 @@ def compare_owner_cells(prior: dict[str, Any], current: dict[str, Any]) -> dict[
         "schema": SCHEMA,
         "comparison_id": "i3devcmp_" + digest(canonical(semantic))[:24],
         "relationship_state": "descriptive_equal_duration_source_intervals",
+        "owner_entity_id": owner_entity_id,
         "metric_id": prior["metric_id"],
         "unit": prior["unit"],
         "prior_value": prior["value"],
@@ -321,7 +331,11 @@ def load_verified_comparison(
     _require(expected_response_sha256 == RESPONSE_SHA256, "response_identity")
     evidence = Path(evidence_dir) if evidence_dir is not None else EVIDENCE
     method = _verified_json(evidence / "method-before-execution.json", METHOD_SHA256)
-    response = _verified_json(evidence / f"{CASE}.response.json", RESPONSE_SHA256)
+    response_path = evidence / f"{CASE}.response.json"
+    try:
+        response_raw = response_path.read_bytes()
+    except OSError as exc:
+        raise ComparisonRefusal("evidence_unavailable_or_invalid") from exc
 
     request = method.get("requests", {}).get(CASE)
     _require(type(request) is dict, "request_missing")
@@ -332,36 +346,17 @@ def load_verified_comparison(
     _require(type(periods) is list and len(periods) == 2, "request_periods")
     _require(all(type(item) is dict and item.get("kind") == "duration" for item in periods), "request_period_kind")
 
-    _require(response.get("schema") == "fundamental_forensics.financial_query_response/v1", "response_schema")
-    _require(
-        response.get("authority") == {"class": "context_only", "display_only": True},
-        "authority",
-    )
-    _require(
-        response.get("delivery")
-        == {
-            "kind": "committed_golden_fixture",
-            "attested": False,
-            "production_issuer_service": False,
-        },
-        "delivery",
-    )
-    receipt = response.get("receipt")
-    _require(type(receipt) is dict, "receipt")
-    roots = receipt.get("root_cell_ids")
-    nodes = receipt.get("nodes")
-    _require(type(roots) is list and len(roots) == 2 and type(nodes) is list, "root_cells")
-    by_id = {
-        node["cell_id"]: node
-        for node in nodes
-        if type(node) is dict and type(node.get("cell_id")) is str
-    }
-    _require(all(cell_id in by_id for cell_id in roots), "root_cells")
-    cells = [by_id[cell_id] for cell_id in roots]
+    try:
+        snapshot = owner_snapshot(response_raw, RESPONSE_SHA256, request)
+    except ReplayRefusal as exc:
+        raise ComparisonRefusal("owner_response_invalid") from exc
+    cells = list(snapshot["nodes"].values())
+    _require(len(cells) == 2, "root_cells")
     cells.sort(key=lambda cell: cell["period"]["start"])
-    result = compare_owner_cells(cells[0], cells[1])
+    owner_entity_id = snapshot["entity"]["source_entity_id"]
+    result = compare_owner_cells(cells[0], cells[1], owner_entity_id=owner_entity_id)
     result["owner_response_sha256"] = RESPONSE_SHA256
-    result["owner_query_hash"] = receipt.get("query_hash")
+    result["owner_query_hash"] = snapshot["query_hash"]
     result["method_before_execution_sha256"] = METHOD_SHA256
     result["source_commit"] = method.get("source_commit")
     return json.loads(canonical(result))

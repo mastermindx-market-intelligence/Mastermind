@@ -41,7 +41,7 @@ They are adjacent and non-overlapping. Their source display labels are retained 
 
 Deterministic comparison identity:
 
-`i3devcmp_4c5619238ebb0f8df7b19ce6`
+`i3devcmp_75b3515ed838ab4f97ac8ed9`
 
 Reported-value arithmetic:
 
@@ -62,11 +62,13 @@ Flags remain:
 - authority `context_only / display_only`;
 - economic interpretation `null`.
 
-The exact machine record is `evidence/equal-duration-comparison/result.json`.
+The exact machine record is `evidence/equal-duration-comparison/result.json`. R2 verification receipt: `evidence/EQUAL_DURATION_COMPARISON_R2.json`. The semantic identity now also binds owner source-native issuer `0000320193`; changing the cell, provenance, selected-source, or XBRL-context issuer refuses instead of preserving the same comparison ID.
+
+Before comparator-specific checks run, `load_verified_comparison()` now reuses the shared `baseline_replay.owner_snapshot()` owner-response validator. That validator binds the canonical metric-query receipt schema/proof scope/selection proof, declared entity/metric/period membership, recomputed unsigned-receipt `query_hash`, status/state and reason consistency, selected-fact issuer/period/unit/source/clocks, and coverage. Comparator code therefore owns equal-duration comparability + arithmetic rather than a second partial FIF response parser.
 
 ## Adversarial verification
 
-`test_equal_duration_comparison.py` currently has **16 passing tests**. It refuses:
+`test_equal_duration_comparison.py` currently has **22 passing tests**. It refuses:
 
 - annual relabeling;
 - unequal or overlapping/non-contiguous intervals;
@@ -76,7 +78,9 @@ The exact machine record is `evidence/equal-duration-comparison/result.json`.
 - reported precision mismatch;
 - non-value/refused cells;
 - nonpositive percentage baselines;
-- response-identity substitution.
+- response-identity substitution;
+- cell/provenance/source/context issuer-identity drift;
+- value `status/state` disagreement or refusal reasons on value cells.
 
 It separately proves that changing FY display labels does not change the semantic comparison identity.
 

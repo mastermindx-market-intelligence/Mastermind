@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T06:03:21.185171+00:00",
+  "prepared_at": "2026-10-04T08:53:49.890824+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "c54647c7e538a3418da60775bd4905b7a9638095b87e230abf800e57967c060a",
-      "bytes": 18958
+      "sha256": "88c9522c07e7a082aada72b04abb6bbfd80a22f69c1caf017facd46967932b7a",
+      "bytes": 20104
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -24,20 +24,28 @@
       "bytes": 3737
     },
     "COMPARATOR_DEFINITION_CANDIDATE.json": {
-      "sha256": "9da89d63dbf96b25092944c73d672d8ec9000d8c013cb8454abe325b269c8b87",
-      "bytes": 3090
+      "sha256": "9ed1d94937fda6755caecdb04fcc4c6777b91762a9d9ebaea5bdedbff6b02209",
+      "bytes": 3290
+    },
+    "CORPUS_IDENTITY_QUALIFICATION.md": {
+      "sha256": "1c1826a4802dcdab53626c63815178dc3fdc38598ada6ee293b24a69c7941af0",
+      "bytes": 8247
     },
     "CORPUS_PRESELECTION_CANDIDATE.md": {
-      "sha256": "89bf90ea422ea9361b81e861991c8a06a94912048671964be25bb52702cfecc3",
-      "bytes": 7346
+      "sha256": "9ca15cfe6fc3174abe1a42ae7d23e02800975decf42d30fd1bc0d39d0181d999",
+      "bytes": 8342
     },
     "CORPUS_PRESELECTION_VALIDATION.md": {
-      "sha256": "24a348c98a6eaa7f57c614b1bdc5e50e0d86f03b2256f428913a17c643411a91",
-      "bytes": 961
+      "sha256": "09ecac8ef55f85faf8ff62a82a5e3cc997cf4584b29040dd43df62ee196e8c12",
+      "bytes": 1971
     },
     "EQUAL_DURATION_COMPARISON_RESULT.md": {
-      "sha256": "f974962d4cf694e16aeab89b1025a4934d8cdbfa8e0ffbf607ed502bb3acff2a",
-      "bytes": 4553
+      "sha256": "e7e36fc905c35ba6cd196a43ab9e6d82e38bb65a97a7e0c575e90cd91ce16f63",
+      "bytes": 5504
+    },
+    "OWNER_RESPONSE_VALIDATION_R2.md": {
+      "sha256": "1863a2dc73cf419f2094c629c733c80ada7f33b7284c0fd83f9c23bc0f00a8f8",
+      "bytes": 2329
     },
     "PREVIEW_EXECUTION_HOLD.md": {
       "sha256": "32ba096d0c57c8b15968d9d4b2a2e4cb6c8c83cd9c75c5e869cf761e966686f6",
@@ -48,8 +56,8 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "5e76440d187f1a1fbf8549c55c7677b68032f257301fcc5a73ea91f943ffa15d",
-      "bytes": 6386
+      "sha256": "c1cbd80c7c97badda6c5c37e4347c75eb12b26e7a94cc31614d16d1a87f604bc",
+      "bytes": 7074
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",
@@ -60,28 +68,32 @@
       "bytes": 4454
     },
     "VERIFIED_READER_RESULT.md": {
-      "sha256": "05b216a8fe114942e4c7d86be7bb65faff06a56f5b4d3a335afd56f4fa280bbb",
-      "bytes": 5530
+      "sha256": "47948b6cbdc8a4611bb111803dc396063b291670c48de01b976590f46a4f5aa9",
+      "bytes": 5609
     },
     "W0_ADMISSION_CANDIDATE.md": {
-      "sha256": "3a500f049b1a5c4e92f3fa4c347c68037bbcdea71d471402d974ca49684a2ce7",
-      "bytes": 26887
+      "sha256": "bb9a6c7bf848ac64841264c28ddf9fd92a12d25cb564a61b637e76e6fd594c0f",
+      "bytes": 27406
     },
     "W1_IMPLEMENTATION_PACKET.md": {
-      "sha256": "af3e00471bac345b291a4d56a3443ab5ebb61151839c23abbe52c42a5e18ec65",
-      "bytes": 15629
+      "sha256": "0f119bfb4616129ad1bf4d12da9c9d10cdcfbfaaaa533964dd7cc6593f4499df",
+      "bytes": 16189
     },
     "baseline_replay.py": {
-      "sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
-      "bytes": 18353
+      "sha256": "196732a08c42c2a76328295e3cffbe051b3618a6cff1975ea7d147a2870b4896",
+      "bytes": 20523
     },
     "build_fixture_preview.py": {
       "sha256": "090e687b4ac929037b6f95a2b6a8f1d3b41967a0001cb92ab9f1054ab8a2fe83",
       "bytes": 6515
     },
+    "corpus_preselection_protocol.py": {
+      "sha256": "14e73eee775cfdba6085997ac01e033d0aea0e54abc00dd32e4147f2f447d0ef",
+      "bytes": 6224
+    },
     "equal_duration_comparison.py": {
-      "sha256": "aec3f94e7e2cadf8800775125661d7a0be3bf8419fe601405b1b5441527d1c15",
-      "bytes": 15405
+      "sha256": "e7c7536e904ad9f5a2e772d6c6bf5e42a6713e81bd56cdb01d1519c959c8779d",
+      "bytes": 15795
     },
     "evidence/BASELINE_REPLAY_GREEN.json": {
       "sha256": "31f664348c7113a8721aae092a230802f2b63cba763bb4a21cde949405e0f55a",
@@ -107,9 +119,17 @@
       "sha256": "d923b3cb21b4acd0949a6562d0d09529431d2b10653ff2b32c4e331f0beba19f",
       "bytes": 1077
     },
+    "evidence/CORPUS_IDENTITY_QUALIFICATION.json": {
+      "sha256": "5d581797edbf27e680595df10d64a61e26403734584f97c5aad9f245407bba58",
+      "bytes": 26508
+    },
     "evidence/EQUAL_DURATION_COMPARISON_R1.json": {
       "sha256": "c680dd12317540abe419500cba83be0656418ff047e25e0e5aa6605097f9d9ce",
       "bytes": 3903
+    },
+    "evidence/EQUAL_DURATION_COMPARISON_R2.json": {
+      "sha256": "c493215d1887302030814508ed8ada94cab6c00a119d82d46b7c226de2716d1b",
+      "bytes": 3236
     },
     "evidence/PREVIEW_SOURCE_STATIC_CHECK.json": {
       "sha256": "50d4e953687c213ae1659dd6883eab81006c37cc06a9104e4ff4c486b7a06619",
@@ -228,8 +248,8 @@
       "bytes": 1811
     },
     "evidence/equal-duration-comparison/result.json": {
-      "sha256": "47f6dc350d881052cb9afb1fb68ade9a4659b99d0020a86a835946eba4b2fee4",
-      "bytes": 3013
+      "sha256": "fb4271bd63437dfc11d8fc6ccf711efca35824cb4b88413c064ca45e6171de6f",
+      "bytes": 3048
     },
     "evidence/event-workspace-delta.json": {
       "sha256": "27b4db86233cc37eea1ba3614f249263d9715e54a1f50cc6b42b667584141ae6",
@@ -308,8 +328,8 @@
       "bytes": 7390
     },
     "test_baseline_replay.py": {
-      "sha256": "63a20dac4603a1c17a821a838493c97741c8e67052072c7f055bdba071e3e372",
-      "bytes": 12833
+      "sha256": "d0afe64136efd7217d20b42a66c297b640460d8aacc4ed61c67a208967888364",
+      "bytes": 14864
     },
     "test_baseline_source_binding.py": {
       "sha256": "f64930184a8dfb35855c1bae1b50c843a66b974933c016df486bbc217113655f",
@@ -320,12 +340,20 @@
       "bytes": 11733
     },
     "test_comparator_policy.py": {
-      "sha256": "8c2bdd6a8e4ae6cf11e7b59a2aa96e930b7fd29fba622cb0dcb8cf6f873d9a2b",
-      "bytes": 10203
+      "sha256": "439f12e17f3e366d73c61c74db3c120c4d05d5811a08f470ec2132b398c247ef",
+      "bytes": 10744
+    },
+    "test_corpus_identity_qualification.py": {
+      "sha256": "00e30d2c1aafec1a8f1b945a10df3d6d0dff9c2e1cbde64140cac07a60528346",
+      "bytes": 5611
+    },
+    "test_corpus_preselection_protocol.py": {
+      "sha256": "b0b506e5e738943badb6b001fa50339117a03fbac7a33b5c7d1b45825c8e92b9",
+      "bytes": 2698
     },
     "test_equal_duration_comparison.py": {
-      "sha256": "f8fbb7a801065ba9257d263b4d937b5be9ebc5842d0d14860e63d830c3bb3114",
-      "bytes": 7946
+      "sha256": "c1b6c154aa0d98a14e64a29ee13759ea3126b0ab22a631dfef4dfaf1b1a93caf",
+      "bytes": 10431
     },
     "test_verified_baseline_reader.py": {
       "sha256": "4c4611e72b21c0ef4ccccfda0e7d07a51cde65c91c87bc083e655680b0ce40e5",

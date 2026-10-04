@@ -21,6 +21,9 @@ AUTHORITY = {"class": "context_only", "display_only": True}
 ACCESSIONS = {"0000320193-25-000079", "0000320193-26-000020"}
 SOURCE_PIN = "37122b69fffa98cb160022c4831df0338ef3e7e3"
 VARIABLE_STATES = {"value", "missing", "not_evaluable"}
+RECEIPT_SCHEMA = "fundamental_forensics.metric_query/v1"
+RECEIPT_PROOF_SCOPE = "selected_occurrence_consistency_only"
+RECEIPT_SELECTION_PROOF = "external_immutable_ledger_required"
 HEX64 = re.compile(r"[0-9a-f]{64}", re.ASCII)
 VALUE = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", re.ASCII)
 
@@ -65,13 +68,24 @@ def _request(request: dict) -> tuple[list[tuple], dict]:
     _require(request["schema"] == "fundamental_forensics.financial_query_request/v1", "request_schema")
     _require(request["entity_id"] == ENTITY["entity_id"], "wrong_issuer")
     metrics = request["metric_ids"]; periods = request["periods"]; policy = request["policy"]
-    _require(type(metrics) is list and metrics == ["revenue", "total_assets"], "fixture_metric_scope")
-    _require(type(periods) is list and len(periods) == 2, "fixture_period_scope")
-    expected = [
-        {"kind": "duration", "start": "2024-09-29", "end": "2025-09-27", "label": "FY2025"},
-        {"kind": "instant", "start": None, "end": "2025-09-27", "label": "2025-09-27"},
-    ]
-    _require(periods == expected, "fixture_period_scope")
+    _require(type(metrics) is list and type(periods) is list, "fixture_scope_shape")
+    admitted_scopes = (
+        (
+            ["revenue", "total_assets"],
+            [
+                {"kind": "duration", "start": "2024-09-29", "end": "2025-09-27", "label": "FY2025"},
+                {"kind": "instant", "start": None, "end": "2025-09-27", "label": "2025-09-27"},
+            ],
+        ),
+        (
+            ["revenue"],
+            [
+                {"kind": "duration", "start": "2023-10-01", "end": "2024-09-28", "label": "FY2024"},
+                {"kind": "duration", "start": "2024-09-29", "end": "2025-09-27", "label": "FY2025"},
+            ],
+        ),
+    )
+    _require(any(metrics == expected_metrics and periods == expected_periods for expected_metrics, expected_periods in admitted_scopes), "fixture_scope")
     _require(type(policy) is dict and set(policy) == {"selection", "source_snapshot_at", "recorded_at"}, "policy_shape")
     _require(policy["selection"] == "latest_known_as_of", "selection_policy")
     _instant(policy["source_snapshot_at"]); _instant(policy["recorded_at"])
@@ -144,13 +158,29 @@ def owner_snapshot(raw: bytes, expected_sha256: str, request: dict) -> dict:
     _require(delivery["kind"] == DELIVERY["kind"] and delivery["attested"] is False and delivery["production_issuer_service"] is False, "golden_promoted")
     receipt = response.get("receipt")
     _require(type(receipt) is dict, "receipt_missing")
+    _require(receipt.get("schema") == RECEIPT_SCHEMA, "receipt_schema")
+    _require(receipt.get("proof_scope") == RECEIPT_PROOF_SCOPE, "receipt_proof_scope")
+    _require(receipt.get("selection_proof") == RECEIPT_SELECTION_PROOF, "receipt_selection_proof")
+    _require(receipt.get("entities") == [{"ticker": ENTITY["ticker"], "entity_id": ENTITY["source_entity_id"]}], "receipt_entities")
+    expected_metrics = sorted({key[0] for key in requested})
+    _require(receipt.get("metric_ids") == expected_metrics, "receipt_metric_ids")
+    receipt_periods = receipt.get("periods")
+    _require(type(receipt_periods) is list and len(receipt_periods) == len(request["periods"]), "receipt_periods")
+    request_period_keys = {(item["kind"], item.get("start"), item["end"], item["label"]) for item in request["periods"]}
+    try:
+        receipt_period_keys = {(item["kind"], item.get("start"), item["end"], item["label"]) for item in receipt_periods}
+    except (KeyError, TypeError) as exc:
+        raise ReplayRefusal("receipt_periods") from exc
+    _require(receipt_period_keys == request_period_keys, "receipt_periods")
+    query_hash = receipt.get("query_hash")
+    _require(type(query_hash) is str and HEX64.fullmatch(query_hash) is not None, "query_hash_missing")
+    unsigned_receipt = {key: value for key, value in receipt.items() if key != "query_hash"}
+    _require(digest(canonical(unsigned_receipt)) == query_hash, "query_hash_mismatch")
     received_policy = receipt.get("policy")
     _require(type(received_policy) is dict and set(received_policy) == set(policy), "aggregate_policy_shape")
     _require(received_policy["selection"] == policy["selection"], "aggregate_policy_mismatch")
     for clock in ("source_snapshot_at", "recorded_at"):
         _require(_instant(received_policy[clock]) == _instant(policy[clock]), "aggregate_policy_mismatch")
-    query_hash = receipt.get("query_hash")
-    _require(type(query_hash) is str and HEX64.fullmatch(query_hash) is not None, "query_hash_missing")
     nodes = receipt.get("nodes"); roots = receipt.get("root_cell_ids")
     _require(type(nodes) is list and len(nodes) <= MAX_NODES, "node_bound")
     _require(type(roots) is list and len(roots) == len(requested) and all(type(x) is str for x in roots), "root_coverage")
@@ -164,7 +194,7 @@ def owner_snapshot(raw: bytes, expected_sha256: str, request: dict) -> dict:
     for cell_id in roots:
         _require(cell_id in by_id, "missing_root_node")
         node = by_id[cell_id]
-        _require({"cell_id", "metric_id", "period", "entity_id", "state", "value", "unit", "reason", "provenance"}.issubset(node), "root_fields_missing")
+        _require({"cell_id", "metric_id", "period", "entity_id", "status", "state", "value", "unit", "reason", "provenance"}.issubset(node), "root_fields_missing")
         period = node.get("period"); provenance = node.get("provenance")
         _require(type(period) is dict and type(provenance) is dict, "cell_shape")
         try: key = _key(node["metric_id"], period)
@@ -172,11 +202,14 @@ def owner_snapshot(raw: bytes, expected_sha256: str, request: dict) -> dict:
         _require(key in requested and key not in actual, "variable_coverage_mismatch")
         _require(node.get("entity_id") == ENTITY["source_entity_id"], "cell_issuer_mismatch")
         _require(type(node.get("state")) is str and node["state"] in VARIABLE_STATES, "owner_state_unknown")
+        _require(node.get("status") == node["state"], "owner_status_state_mismatch")
+        _require(provenance.get("reason") == node.get("reason"), "owner_reason_mismatch")
         _require(provenance.get("policy") == policy["selection"], "receipt_policy_mismatch")
         for owner_clock, request_clock in (("source_snapshot_at", "source_snapshot_at"), ("recorded_cutoff_at", "recorded_at")):
             _require(_instant(provenance.get(owner_clock)) == _instant(policy[request_clock]), "receipt_cutoff_mismatch")
         selected = provenance.get("selected_raw_fact")
         if node["state"] == "value":
+            _require(node.get("reason") is None, "value_cell_has_refusal_reason")
             _require(type(node.get("value")) is str and len(node["value"]) <= 96 and VALUE.fullmatch(node["value"]) is not None, "owner_value_shape")
             _require(type(selected) is dict and selected.get("is_nil") is False, "selected_fact_missing")
             source = selected.get("source"); clocks = selected.get("clocks")
@@ -209,7 +242,7 @@ def owner_snapshot(raw: bytes, expected_sha256: str, request: dict) -> dict:
     coverage = response.get("coverage")
     expected_counts = {"requested_cells": len(requested), "value_cells": sum(n["state"] == "value" for n in actual.values()), "missing_cells": sum(n["state"] == "missing" for n in actual.values()), "not_evaluable_cells": sum(n["state"] == "not_evaluable" for n in actual.values())}
     _require(type(coverage) is dict and set(coverage) == set(expected_counts) and all(type(v) is int and v >= 0 for v in coverage.values()) and coverage == expected_counts, "owner_coverage_mismatch")
-    return {"owner_response_sha256": expected_sha256, "query_hash": query_hash, "policy": dict(policy), "coverage": expected_counts, "requested": requested, "nodes": actual}
+    return {"owner_response_sha256": expected_sha256, "query_hash": query_hash, "entity": dict(response["entity"]), "policy": dict(policy), "coverage": expected_counts, "requested": requested, "nodes": actual}
 
 def _reference(node: dict, snapshot: dict) -> dict:
     p = node["provenance"]; selected = p.get("selected_raw_fact")

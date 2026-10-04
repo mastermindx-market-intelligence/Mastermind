@@ -6,7 +6,7 @@
     "display_only": true
   },
   "comparison_admitted": false,
-  "comparison_id": "i3devcmp_4c5619238ebb0f8df7b19ce6",
+  "comparison_id": "i3devcmp_75b3515ed838ab4f97ac8ed9",
   "current_value": "416161000000",
   "definition_basis": {
     "concept_qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -36,6 +36,7 @@
     "metric_cell_0631c08c7ac1f82284f92dcbd5325963366734f80aa2b71f6897ab472f35e080",
     "metric_cell_b4d478d34816e28ae5a855df58b5a97cdb5937fff6d67b5933e59e0dd381fc6c"
   ],
+  "owner_entity_id": "0000320193",
   "owner_query_hash": "57e7c61f71eb468b1b7813856074a9118d46d987ced3953a02b857610c9cdec7",
   "owner_response_sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
   "owner_typed_annual": false,

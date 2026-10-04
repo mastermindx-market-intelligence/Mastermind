@@ -36,9 +36,9 @@ The final refusal-to-missing regression and 42-test result are in `evidence/BASE
 
 ## Verified development reader
 
-`VERIFIED_READER_RESULT.md` describes the new source-bound human/text and machine/JSON reader. It consumes the same four original artifacts without minting new identities. The 15 source-binding and 26 reader tests complement, not replace, the 42 baseline tests. `CI_5992_DIAGNOSIS.md` identifies the actual failing repository gate and the held artifact-placement repair. No connected product or release acceptance is claimed.
+`VERIFIED_READER_RESULT.md` describes the new source-bound human/text and machine/JSON reader. It consumes the same four original artifacts without minting new identities. The 15 source-binding and 26 reader tests complement, not replace, the now-52-test baseline owner-response/reconstruction suite. `CI_5992_DIAGNOSIS.md` identifies the actual failing repository gate and the held artifact-placement repair. No connected product or release acceptance is claimed.
 
-The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs four offline consumer suites (baseline replay, source binding, verified reader, equal-duration comparator) without duplicating their assertions. Local entrypoint success does not repair or waive the held repository evidence-placement gate.
+The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs four offline consumer suites (baseline replay, source binding, verified reader, equal-duration comparator) without duplicating their assertions. Local entrypoint success does not repair or waive the held repository evidence-placement gate. `OWNER_RESPONSE_VALIDATION_R2.md` records the single-validator hardening.
 
 ## Unexecuted browser-preview source
 
@@ -46,9 +46,9 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 
 ## Corpus preselection
 
-`CORPUS_PRESELECTION_CANDIDATE.md` freezes a 30-issuer metadata-only candidate universe and deterministic split/reserve law before any holdout body or outcome inspection. It is not registered; `CORPUS_PRESELECTION_VALIDATION.md` records the leakage/identity checks. Source/rights/event eligibility and actual registry write/readback remain mandatory.
+`CORPUS_PRESELECTION_CANDIDATE.md` freezes a 30-issuer metadata-only candidate universe and deterministic split/reserve law before any holdout body or outcome inspection. `CORPUS_IDENTITY_QUALIFICATION.md` then verifies all 30 exact issuer/security IDs, active/resolved state and SEC CIKs against the current unchanged Data OS identity snapshots; its hermetic suite has 10 checks. The source-controlled proxy selector has 4 additional tests and reproduces the exact 30-name sequence from the pinned industry map; current proxy membership is discovery-only and never certifies historical beta eligibility. No filing/event/transcript body or outcome was read and no event/revision ID was assigned. Source/event eligibility, rights and actual registry write/readback remain mandatory.
 
 
 ## Equal-duration descriptive comparison
 
-`EQUAL_DURATION_COMPARISON_RESULT.md` documents the positive W1 development comparison that the current owner wire can actually support. `equal_duration_comparison.py` compares only adjacent equal-length generic duration cells from the same owner response/source revision and never upgrades FY labels into annual/YoY semantics. The exact result is `evidence/equal-duration-comparison/result.json`; `test_equal_duration_comparison.py` has 16 adversarial tests. The result remains context-only, unadmitted, unpublished, unregistered and non-emitted.
+`EQUAL_DURATION_COMPARISON_RESULT.md` documents the positive W1 development comparison that the current owner wire can actually support. `equal_duration_comparison.py` compares only adjacent equal-length generic duration cells from the same owner response/source revision and never upgrades FY labels into annual/YoY semantics. The exact result is `evidence/equal-duration-comparison/result.json`; `test_equal_duration_comparison.py` has 22 adversarial tests. Its actual entry point reuses `baseline_replay.owner_snapshot()` so FIF receipt/entity/hash/state invariants have one fixture-validation owner. The result remains context-only, unadmitted, unpublished, unregistered and non-emitted.

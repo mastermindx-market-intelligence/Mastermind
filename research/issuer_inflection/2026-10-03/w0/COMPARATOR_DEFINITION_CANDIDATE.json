@@ -1,6 +1,6 @@
 {
-  "id": "I3-ANNUAL-REVENUE-SAME-FILING-1",
-  "version": "1.0.1-candidate",
+  "id": "I3-EQUAL-DURATION-REVENUE-SAME-FILING-1",
+  "version": "1.0.2-candidate",
   "admitted": false,
   "purpose": "descriptive_period_comparison_not_economic_inflection",
   "owner_input_schema": "fundamental_forensics.financial_query_response/v1",
@@ -10,7 +10,7 @@
   "require_same_metric_mapping_digest": true,
   "require_same_unit_semantic_key": true,
   "require_known_consolidated_dimensionless_scope": true,
-  "period_admission": "source-backed annual columns; exact durations and owner approval; unknown fiscal fields remain unknown",
+  "period_admission": "same-filing adjacent equal-duration generic duration cells only; annual/FY/YoY semantics remain unavailable until the owner emits or admits typed fiscal-year period semantics",
   "arithmetic": "Bounded exact base-10 integer/rational arithmetic; absolute=after-before; exact percent=100*(after-before)/before for a strictly positive before value. Never use ambient Decimal or floating-point arithmetic.",
   "precision": "Exact absolute finite decimal and reduced percentage numerator/positive-denominator are retained. relative_change_percent is only the single-rounded two-decimal display string, not an unrounded expansion.",
   "nonpositive_denominator": "no percentage; owner-approved absolute change or refusal",
@@ -37,5 +37,8 @@
   },
   "canonicalization": "Parse finite decimal strings to signed integer coefficient and decimal scale; retain original owner references/bytes. Align to the larger source scale for exact subtraction. Reduce 100*difference/before by gcd with a positive denominator; canonical zero is 0/1. Serialize integer numerator/denominator in base ten without leading zeros. Display once by integer divmod of abs(numerator)*100 by denominator; round up above half or at an exact half with an odd quotient; then apply the sign unless the rounded result is zero. No finite decimal expansion is called exact for a repeating rational.",
   "bound_refusal": "Reject wrong input type, nonfinite/exponent/noncanonical numeric spelling, input character/coefficient/fractional bounds, rational integer bounds or derived decimal output bounds. This is a computation resource/serialization boundary, not materiality, near-zero economic admission, rights or comparability.",
-  "repair_return": "Mastermind#1183 issuecomment-5972911613 R1; independent whole-package and source-owner admission remain required."
+  "repair_return": "Mastermind#1183 issuecomment-5972911613 R1; independent whole-package and source-owner admission remain required.",
+  "owner_period_kind_required": "duration",
+  "owner_typed_annual": false,
+  "annual_or_yoy_semantics": "not_admitted"
 }

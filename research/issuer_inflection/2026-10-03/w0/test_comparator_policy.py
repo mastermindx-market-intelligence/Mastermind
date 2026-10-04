@@ -94,8 +94,16 @@ def _reference_math(before: str, after: str) -> dict:
 class ComparatorPolicyTests(unittest.TestCase):
     def test_candidate_freezes_context_independent_exact_policy(self) -> None:
         self.assertEqual(POLICY.get('arithmetic_policy'), REQUIRED_POLICY)
-        self.assertEqual(POLICY.get('version'), '1.0.1-candidate')
+        self.assertEqual(POLICY.get('version'), '1.0.2-candidate')
         self.assertIs(POLICY['admitted'], False)
+    def test_candidate_identity_does_not_self_authorize_annual_semantics(self) -> None:
+        self.assertEqual(POLICY.get('id'), 'I3-EQUAL-DURATION-REVENUE-SAME-FILING-1')
+        self.assertNotIn('ANNUAL', POLICY.get('id', ''))
+        self.assertEqual(POLICY.get('owner_period_kind_required'), 'duration')
+        self.assertIs(POLICY.get('owner_typed_annual'), False)
+        self.assertEqual(POLICY.get('annual_or_yoy_semantics'), 'not_admitted')
+        self.assertNotIn('annual columns', POLICY.get('period_admission', '').lower())
+
     def test_candidate_has_explicit_exact_and_display_representations(self) -> None:
         comparison = SCHEMA['properties']['comparison']
         self.assertIn('relative_change_exact', comparison['required'])
