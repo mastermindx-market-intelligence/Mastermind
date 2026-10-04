@@ -667,7 +667,8 @@ def test_production_admission_reuses_readiness_and_opens_runtime_read_only():
     assert "provider_readiness.validate_receipt_file(" in production
     assert "Runtime.at(" in production
     assert "create=False" in production
-    assert '["/usr/bin/pgrep", "-U", str(uid)]' in production
+    assert "_ps_pids_for_uid(uid)" in production
+    assert "DarwinDistnotedClassifier()" in production
     for forbidden in (
         "provider_readiness.reserve",
         "provider_readiness._finalize",
