@@ -14,9 +14,18 @@ import os
 import pathlib
 import socket
 import stat
+import sys
 import time
 
 import uvicorn
+
+# Production launch uses Python isolated mode. Bind first-party imports only to
+# the immutable checkout containing this exact reviewed launcher; never to cwd
+# or a caller-supplied PYTHONPATH.
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+_repo_root = os.fspath(_REPO_ROOT)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 from integrations.business_mcp_auth.audit import DurableAuthAuditSink
 from integrations.business_mcp_auth.contracts import load_resource_policy

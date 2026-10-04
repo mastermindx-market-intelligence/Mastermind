@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pathlib
+import subprocess
+import sys
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -199,3 +202,19 @@ def test_policy_must_be_exact_studio_design_scope():
         pass
     else:
         raise AssertionError("foreign Studio scope was accepted")
+
+
+def test_cloud_launcher_imports_owned_checkout_under_python_isolated_mode(tmp_path):
+    root = pathlib.Path(__file__).resolve().parents[1]
+    launcher = root / "scripts" / "mastermind_studio_cloud_gateway.py"
+    completed = subprocess.run(
+        [sys.executable, "-I", "-B", str(launcher), "--help"],
+        cwd=tmp_path,
+        env={},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "Studio/Paper public OAuth edge" in completed.stdout
