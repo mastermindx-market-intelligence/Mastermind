@@ -1,3 +1,5 @@
+@import "../typography/fonts.css";
+
 /* Paper AT02 M4J-0 / AT02M N28-0. Shell and navigation remain parent-owned. */
 .atelier-projects {
   --projects-text: #f3f3f3;

@@ -1,3 +1,5 @@
+@import "../typography/fonts.css";
+
 /* Paper AT08 / AT08M composition; DJ1 / MC2 retain the behavior contract. */
 .meta-ceo-office {
   --office-canvas: #080808;

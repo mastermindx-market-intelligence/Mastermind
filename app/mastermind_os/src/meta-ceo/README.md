@@ -121,3 +121,34 @@ those lanes is replaced here. After integration, render the actual product and
 verify desktop, 390px, 320px, 200% text, keyboard/focus, all six source states,
 unknown effect, draft retention and auth invalidation. Installed authenticated
 owner data and the final Chairman journey are required for product acceptance.
+
+## Programs receipt companion
+
+`decodeProgramsObservation` in `../programs-observation.ts` retains a detached Programs
+receipt and Control Room from one authenticated fixed-service response. It delegates
+closed-envelope and owner-observation validation to the existing canonical decoder;
+only its known unavailable/unqualified source results become negative-state data.
+Legacy `decodeProgramsEnvelope` and `MissionHost.readPrograms` are unchanged. This
+companion has no network, storage, command or provider access.
+
+`captureProgramsOfficeRead` and `completeProgramsOfficeRead` apply the actual host auth
+generation, selected context and winning Programs revision to that decoded observation.
+Only a complete collection-scoped SAME receipt plus a valid strict Programs projection
+can produce CURRENT. Collection coverage is `SUPPLIED_COLLECTION`, never a company total.
+UNAVAILABLE clears content and source provenance; unknown/conflicting receipts do not
+release content. Preserve the returned reason codes alongside the snapshot.
+
+The digest is an **authenticated service-attested reference**. The frontend validates
+its shape and the fixed service's receipt, and does not recompute a canonical content
+hash. Tests use injected consumer fixtures under that same trust boundary, not live
+service attestation. No Mission/runtime receipt, generated_at field or UI clock is
+substituted for collection provenance; local observation time is labeled acquisition.
+
+Shared-source integration remains required: add an optional typed host observation read
+using the existing raw Programs acquisition once, under the existing before/after epoch
+checks, then call this companion decoder. App must select that method instead of also
+calling the legacy reader, retain its existing request-token/abort fencing, capture the
+context before acquisition, re-read context after completion, and commit an observed
+context/snapshot atomically. A discarded reply cannot replace a winner. Legacy hosts
+that only provide a bare Control Room remain unqualified for Office/Projects. No live
+host/App call to this companion is installed by this source-only component change.
