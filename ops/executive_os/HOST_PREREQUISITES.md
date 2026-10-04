@@ -173,7 +173,11 @@ decision:
   LaunchAgents. They cannot exist before a console login, so
   `user_session_surfaces` is `ADVISORY` with
   `USER_SESSION_LOGIN_REQUIRED` rather than pretending system-boot
-  availability.
+  availability. The observer recognizes the canonical Desktop Commander label
+  and the fleet installer's bounded compatibility form
+  `com.mastermind.desktop-commander.remote.<local-short-user>`; those two
+  filenames count as one logical surface, and the observer never scans the
+  LaunchAgents directory for arbitrary matches.
 - **FileVault-on recovery is conditional, not generic.** A host with FileVault
   on stops at the preboot unlock screen after a restart, and only one platform
   generation can be unlocked from there without a human at the keyboard. The
