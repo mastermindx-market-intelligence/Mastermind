@@ -78,6 +78,7 @@ STAGE_FILES = (
     "gateway.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
+    "workspace-access.mjs",
     "paper-design.mjs",
     "fleet-status.mjs",
     "private-tunnel-auth.mjs",
@@ -90,13 +91,15 @@ STAGE_FILES = (
 # immediately preceding v0.1.6 install has every current file except the new
 # read-only fleet-status consumer; earlier generations also predate Paper,
 # output paging, and typed Git.
-LEGACY_STAGE_FILES_V4 = tuple(name for name in STAGE_FILES if name != "fleet-status.mjs")
+LEGACY_STAGE_FILES_V5 = tuple(name for name in STAGE_FILES if name != "workspace-access.mjs")
+LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
         frozenset(LEGACY_STAGE_FILES_V3),
         frozenset(LEGACY_STAGE_FILES_V2),
@@ -528,7 +531,11 @@ def _build_config(
     backend_abs: Path,
     state_dir: Path,
     user_root: Path,
+    *,
+    repository_workspaces: bool = False,
 ) -> dict:
+    if type(repository_workspaces) is not bool:
+        raise ValueError("repository workspace setting must be boolean")
     # publicUrl is omitted: the private adapter rejects a public origin.
     config = {
         "accountLabel": account,
@@ -547,6 +554,10 @@ def _build_config(
         "gitPublish": _typed_git_config(user_root),
         "paperDesign": _paper_design_config(user_root),
     }
+    if repository_workspaces:
+        config["repositoryWorkspaces"] = {
+            "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
+        }
     fleet_status = _fleet_status_config(user_root)
     if fleet_status is not None:
         config["fleetStatus"] = fleet_status
@@ -891,6 +902,7 @@ def _write_install(
     result_key: str,
     previous_source: str | None = None,
     dependency_tree_hash: str | None = None,
+    repository_workspaces: bool = False,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -914,6 +926,7 @@ def _write_install(
                 backend_abs,
                 roots["state"],
                 user_root,
+                repository_workspaces=repository_workspaces,
             ),
             indent=2,
             sort_keys=True,
@@ -963,6 +976,26 @@ def _write_install(
 
 
 
+
+def _repository_workspace_setting(args, roots: dict, prior: dict | None) -> bool:
+    """Preserve the manifest-verified setting; only explicit opt-in can enable it."""
+    requested = getattr(args, "enable_repository_workspaces", False)
+    if type(requested) is not bool:
+        raise SystemExit("invalid repository workspace setting")
+    previous = False
+    if prior is not None:
+        config_path = roots["config"]
+        if _sha256_file(config_path) != prior.get("configHash"):
+            raise SystemExit("repository workspace config changed during preflight")
+        value = json.loads(config_path.read_text(encoding="utf-8")).get("repositoryWorkspaces")
+        if value is not None:
+            if (type(value) is not dict or value.get("enabled") is not True
+                    or value != {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}):
+                raise SystemExit("existing repository workspace setting is not the installed closed profile")
+            previous = True
+    return requested or previous
+
+
 def cmd_stage(args) -> int:
     account = args.account
     _validate_account_label(account)
@@ -996,6 +1029,7 @@ def cmd_stage(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="staged",
         dependency_tree_hash=retained_dependency_hash,
+        repository_workspaces=_repository_workspace_setting(args, roots, prior),
     )
 
 def _verify_staged_install(
@@ -1115,6 +1149,7 @@ def cmd_upgrade(args) -> int:
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
+        repository_workspaces=_repository_workspace_setting(args, roots, prior),
     )
 
 
@@ -1251,6 +1286,8 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--source", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
+        s.add_argument("--enable-repository-workspaces", action="store_true",
+                       help="enable the closed installed repository-workspace consumer")
         s.set_defaults(func=globals()[f"cmd_{name}"])
 
     for name in ("seal-runtime", "start", "status", "stop"):

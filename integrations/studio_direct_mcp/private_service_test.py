@@ -188,6 +188,7 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         source=str(source),
         node=str(node),
         backend=str(backend),
+        enable_repository_workspaces=False,
     )
 
 
@@ -228,6 +229,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
     config.pop("paperDesign", None)
     config.pop("fleetStatus", None)
+    config.pop("repositoryWorkspaces", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -238,6 +240,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
         "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
+    removed = (*removed, "workspace-access.mjs")
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -266,6 +269,7 @@ class TestIdentity(unittest.TestCase):
                 "gateway.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
+                "workspace-access.mjs",
                 "paper-design.mjs",
                 "fleet-status.mjs",
                 "private-tunnel-auth.mjs",
