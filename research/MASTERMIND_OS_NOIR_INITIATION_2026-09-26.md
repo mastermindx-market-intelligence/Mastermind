@@ -278,3 +278,180 @@ Exact continuation order:
 This Paper continuation supersedes any inference that manual desktop focus is normal execution. Manual Chairman interaction is an exact last-resort platform gate, not the default Paper workflow.
 
 **PAPER_CONTINUATION_STATE: CHECKPOINTED / SOURCE_HARDENING_IN_REVIEW / CANVAS_WRITES_HELD_AT_DIRECT_PREPARE_PUBLICATION.**
+
+## 2026-10-03 Chairman adoption — canonical Noir Atelier across Mastermind OS
+
+**Approval:** The current Chairman explicitly approved Noir Atelier as the canonical
+design for the entire Mastermind OS project on **3 October 2026, America/Chicago**
+(2026-10-04 UTC), and instructed continued redesign of the remaining pages.
+
+This is the current visual-direction ruling for the OS. It supersedes earlier
+page compositions as the visual starting point. It preserves their feature,
+owner, permission, source, recovery and implementation contracts. It does not
+create a runtime control plane or change another Mastermind product's visual
+authority.
+
+### Current design entry points
+
+- Paper file: **Mastermind OS**, `01M3NRCX55B452A12819WNE1RH`.
+- [Page 12 — Canonical Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0),
+  `p-D-0`.
+- **AT00 `KSB-0`**: project-wide adoption ruling and current route index.
+- **AT90 `KSQ-0`**: shared desktop shell and foundation reference. The five
+  primary destinations remain Today, Projects, Inbox, Conversations and Knowledge.
+  Clone the shell and replace its reference content.
+- **AT91 `NDE-0`**: loading, known-empty, unavailable, withheld, unknown-outcome
+  and control-state examples.
+- [Page 11 — Chat Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-C-0):
+  existing conversation family, including welcome `JB4-0`, conversation
+  `IZB-0`, evidence `JLU-0`, context `JV7-0`, mobile welcome `K3D-0`,
+  mobile conversation `K5X-0` and mobile recovery `KBA-0`.
+  **CH91 `KDN-0`** remains the detailed visual and interaction contract.
+- The existing directory `A2Q-0` and review/build guide `7O-1` now point
+  to the canonical Atelier page. Their earlier routes are explicitly described
+  as retained feature, state and implementation references.
+
+### Applied route family
+
+Thirteen desktop/mobile pairs were authored for this extension. Desktop boards
+are 1600 × 1040; mobile boards are 390 × 844.
+
+| Label | Route | Desktop node | Mobile node |
+|---|---|---|---|
+| AT01 | Today | `LNV-0` | `N27-0` |
+| AT02 | Projects | `M4J-0` | `N28-0` |
+| AT03 | Project workspace | `MHD-0` | `N29-0` |
+| AT04 | Inbox | `KY5-0` | `MNL-0` |
+| AT05 | Knowledge | `L0Z-0` | `MNM-0` |
+| AT06 | Global Search | `L3N-0` | `MNN-0` |
+| AT07 | Settings / System & Sources | `L6N-0` | `MNO-0` |
+| AT08 | Meta-CEO office | `L9V-0` | `MNS-0` |
+| AT09 | Resources & Systems | `LCJ-0` | `MO4-0` |
+| AT10 | Work detail / return review | `LF7-0` | `MOG-0` |
+| AT11 | Tools | `LHV-0` | `MP6-0` |
+| AT14 | New project draft | `N8N-0` | `NBB-0` |
+| AT15 | Session Estate | `NKM-0` | `NPO-0` |
+
+The separate concurrent Session Estate studies `KVF-0` / `M29-0` and
+orchestration contract `M2K-0` were preserved. AT15/AT15M refine the Session
+Estate composition and readability while retaining those studies' five observed
+rows, unknown total, partial coverage, binding/currentness and preview boundaries.
+They do not replace the orchestration owner contract. Only this extension's
+own desktop boards were repositioned to resolve observed canvas overlaps.
+
+### What changed for the user
+
+The shared frame uses ink and graphite surfaces, ivory text and restrained
+champagne actions. Manrope supplies the display hierarchy; Inter carries
+interface and reading text. Original sculptural artwork is reused in the welcome,
+Today, Projects and company office family. No additional token system was added.
+
+Today leads with one reserved decision, then team-owned progress and the next
+project steps. Projects makes status, accountable owner and next move comparable.
+The project workspace keeps work, sessions, evidence, journal, resources and
+source context accessible. Inbox separates the Chairman's decision from ordinary
+team review. Knowledge and Search retain provenance and partial coverage.
+Settings distinguishes Current, Partial, Unavailable and Read-only sources.
+Meta-CEO separates adopted direction, a proposal and a draft review action.
+Resources qualifies missing pressure/capacity. Work distinguishes returned,
+accepted and released states. Tools distinguishes preview preparation, reads and
+unavailable commands. The new-project draft includes name, outcome, workspace
+scope and optional context before review. Session Estate places a bounded
+continuation recommendation ahead of the technical context.
+
+Mobile views use 24 px content gutters, 44 px primary controls and the approved
+status/safe-area geometry. They prioritize the selected task while preserving
+source qualification, owner attribution and access to context. Desktop card
+radii are generally 18–22 px; the shared navigation is 232 px with a 64 px titlebar.
+
+### Behavior and state preservation
+
+- The earlier #702 workspace, #704 consumer freeze and Paper BG2–BG6 references
+  remain feature, implementation and acceptance inputs.
+- Project selection retains project owner/ref/revision; work retains work ref and
+  root Job; sessions retain binding generation and conversation; returned results
+  retain Job/Attempt/digest; evidence retains source/revision. The interface
+  progressively discloses exact identities rather than discarding them.
+- Current, Stale, Unknown, Unavailable, Withheld and Unassociated remain distinct.
+  Missing coverage does not become empty success or zero capacity.
+- Protected content clears after access changes. Scope changes invalidate the
+  affected reads and previews. Unknown outcomes remain attached to the original
+  request for reconciliation.
+- Inbox does not promote routine owner-held work into a Chairman interruption.
+  Return, review, acceptance and release remain separate.
+- Product data on these boards is **illustrative design content**, not a live
+  assertion about project, provider, session or resource state.
+
+### Verification and corrections
+
+Screenshots and inline-style JSX were inspected for the new route pairs, shared
+shell and state guide. Independent reviews checked the root core screens and
+operations family. The final compositions fit their declared desktop/mobile
+viewports without identified clipping or overlapping actions in this scope.
+
+Corrections included mobile Knowledge/Search/Settings overflow, a Work detail
+overflow, consistent project-tab destinations and spacing, a Meta-CEO action that
+now reviews a draft, an explicit mobile resource sample-pressure qualifier, and
+release copy that says installed verification is still needed. The canonical
+directory and guide were also checked after adding the new entry points.
+
+This is design verification. It does **not** establish working links, native
+interaction, keyboard/screen-reader behavior, arbitrary narrow widths,
+enlarged-text behavior, frontend implementation, installed execution, deployment
+or product acceptance.
+
+### Carrier and effect reconciliation
+
+Governing protected source stayed at
+`84df29801d4078724c2b603a136de5aa1532cdfe`, Skillpack 1.0.1 / bootstrap 1.
+A fresh branch read reconfirmed that master pin. PR #1010's
+`4c6b206d3fb7fbc6d077faf61ae361bedf259925` base is historical (148 commits
+behind that pin), not a replacement current procedure.
+
+The direct **Mastermind Paper** app was the sole modifying carrier for the exact
+OS file. The live Paper 0.5.14 catalog was accepted at
+`ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`.
+The observed existing token hash was `fd2ed32e`. Current target-scoped reads,
+fresh guards and unique operation IDs preceded the bounded edits.
+
+One root insertion targeted an empty HTML placeholder that Paper had represented
+as a Rectangle. The upstream tool rejected children on that node and reported
+an effect-unknown wrapper. Same-carrier tree/node readback showed the original
+placeholder unchanged with zero children. The subsequent repair replaced that
+owned placeholder with a proper frame; the failed insertion was not replayed.
+Local result-parser mismatches after several successful agent operations were
+reconciled from their retained applied receipts and reads, without mutation replay.
+No modifying effect remains unresolved in this extension. Working indicators were
+released for all boards modified in this commission.
+
+The historical Studio Direct preparation/component-migration gates earlier in
+this document remain evidence for their original targets and operations. They
+do not describe the freshly proven direct carrier for this OS-file extension.
+This record does not clear an unresolved historical component mutation, transfer
+its custody, claim migration of those original components, or release another file.
+
+### Durable adoption and completion boundary
+
+The app README now records this Chairman-approved direction on the existing
+`sol/noir-qualification-20260926` documentation branch under PR #1010. Its
+adoption commit is `2a27588c6160937eee013d9292f5dcad5cdb8fdb`, README blob
+`821f111b23a293463f3a56a85e71af999ca3d9b2`; exact readback matched the authored
+content. This cumulative record is the second documentation path in that PR.
+No app implementation files were changed by this design extension.
+
+**Design commission:** canonical Atelier ruling, current route extension and
+design handoff are complete in Paper. **Product implementation:** unclaimed.
+The existing PR remains a documentation carrier; no protected merge, deployment
+or live product acceptance is implied.
+
+Next implementation action: use AT00's route index, AT90/AT91 and CH91 with the
+retained behavior/build references to adapt the existing frontend and prove one
+installed end-to-end journey through the normal code, review and release gates.
+Do not re-create this design family or re-open resolved canvas layout work merely
+to recover the project direction.
+
+`FINALIZATION_CLASSIFICATION: PROVEN_OUTCOME` for this bounded Paper design
+commission. `MISSION_COMPLETE: true` for canonical adoption and this route
+redesign extension; the broader frontend implementation/release mission is not
+claimed complete. No autonomous background execution, watcher or runtime
+lifecycle transition was created.
