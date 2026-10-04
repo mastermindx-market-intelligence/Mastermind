@@ -20,7 +20,7 @@ from integrations.mastermind_company_mcp.consultation import (
     COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
 )
 
-COMPANY_MCP_CONFIG_NAME = "company-consultation-v1"
+from control_plane.executive_agent_capabilities import COMPANY_MCP_CONFIG_NAME
 
 
 class CompanyCallerAuthority:

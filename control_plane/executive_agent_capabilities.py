@@ -242,6 +242,7 @@ _COMPANY_CONSULTATION_FORBIDDEN_AUTHORITY = (
     "deploy",
     "admin",
 )
+COMPANY_MCP_CONFIG_NAME = "company-consultation-v1"
 COMPANY_CONSULTATION_SCHEMA = "mastermind.company_consultation_mcp.v1"
 COMPANY_CONSULTATION_SERVER_IDENTITY = "mastermind-company-consultation-mcp"
 COMPANY_CONSULTATION_SERVER_VERSION = "1.0.0"

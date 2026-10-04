@@ -979,8 +979,8 @@ class ConsultationRuntime:
         """Admit one stored native observation in the existing consumption TX."""
         from control_plane.native_company_receipt import company_answer_attestation_sha256
         from control_plane.wake_ledger import wake_record_from_event
-        from integrations.company_consultation_host_authorization import COMPANY_MCP_CONFIG_NAME
-        from integrations.mastermind_company_mcp.consultation import (
+        from control_plane.executive_agent_capabilities import (
+            COMPANY_MCP_CONFIG_NAME,
             COMPANY_CONSULTATION_SERVER_IDENTITY, COMPANY_CONSULTATION_SERVER_VERSION,
             COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
         )

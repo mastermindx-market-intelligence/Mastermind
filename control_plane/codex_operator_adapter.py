@@ -13,12 +13,6 @@ explicit non-default ``CODEX_HOME`` before a process may start.
 from __future__ import annotations
 
 from control_plane.native_company_receipt import project_company_read
-from integrations.mastermind_company_mcp.consultation import (
-    COMPANY_CONSULTATION_SERVER_IDENTITY,
-    COMPANY_CONSULTATION_SERVER_VERSION,
-    COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
-)
-
 import hashlib
 import json
 import os
@@ -37,6 +31,9 @@ from control_plane.executive_process_identity import (
     _observe_process_instance,
 )
 from control_plane.executive_agent_capabilities import (
+    COMPANY_CONSULTATION_SERVER_IDENTITY,
+    COMPANY_CONSULTATION_SERVER_VERSION,
+    COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
     ExecutionCapabilityProfile,
     NativeHelperGrant,
     app_server_security_config_digest,

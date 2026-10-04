@@ -9,6 +9,7 @@ import math
 from typing import Any
 
 HOST_REQUEST_SCHEMA = "mastermind.company_consultation_host_request.v1"
+COMPANY_CONSULTATION_RESULT_SCHEMA = "mastermind.company_consultation_mcp_result.v1"
 MAX_REQUEST_BYTES = 32768
 MAX_RESPONSE_BYTES = 65536
 TOOLS = frozenset({

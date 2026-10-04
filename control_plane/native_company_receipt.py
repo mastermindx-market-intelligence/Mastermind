@@ -11,13 +11,15 @@ import json
 import re
 from typing import Any
 
-from integrations.mastermind_company_mcp.consultation import (
-    COMPANY_CONSULTATION_MAX_RESPONSE_BYTES,
+from common.agent_dialogue_consultation_contract import canonical_consultation_json
+from common.agent_dialogue_contract import DialogueContractError
+from common.company_consultation_host_contract import (
     COMPANY_CONSULTATION_RESULT_SCHEMA,
+    MAX_RESPONSE_BYTES as COMPANY_CONSULTATION_MAX_RESPONSE_BYTES,
+)
+from control_plane.executive_agent_capabilities import (
     COMPANY_CONSULTATION_SERVER_IDENTITY,
     COMPANY_CONSULTATION_SERVER_VERSION,
-    canonical_company_consultation_json,
-    CompanyConsultationToolError,
 )
 
 _REF = re.compile(r"consult-[0-9a-f]{32}\Z")
@@ -98,12 +100,12 @@ def company_answer_attestation_sha256(data: object) -> str | None:
             **{key: data[key] for key in (*digests, "consultation_ref", "deadline", "obligation_id")},
             "intent_event_id": admitted["INTENT"][0],
             "answer_event_id": admitted["ANSWER_AVAILABLE"][0],
-            "answer_sha256": hashlib.sha256(canonical_company_consultation_json(answer)).hexdigest(),
+            "answer_sha256": hashlib.sha256(canonical_consultation_json(answer).encode('utf-8')).hexdigest(),
         }
-        if len(canonical_company_consultation_json(data)) > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES:
+        if len(canonical_consultation_json(data).encode('utf-8')) > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES:
             return None
-        return hashlib.sha256(canonical_company_consultation_json(stable)).hexdigest()
-    except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError, CompanyConsultationToolError):
+        return hashlib.sha256(canonical_consultation_json(stable).encode('utf-8')).hexdigest()
+    except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError, DialogueContractError):
         return None
 
 
@@ -153,10 +155,10 @@ def project_company_read(
                 or envelope["error"] is not None):
             return None
         structured = result.get("structuredContent")
-        canonical = canonical_company_consultation_json(envelope)
+        canonical = canonical_consultation_json(envelope).encode('utf-8')
         if text["text"].encode("utf-8") != canonical:
             return None
-        if structured is not None and canonical_company_consultation_json(structured) != canonical:
+        if structured is not None and canonical_consultation_json(structured).encode('utf-8') != canonical:
             return None
         if len(canonical) > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES:
             return None
@@ -183,6 +185,6 @@ def project_company_read(
                 "result_sha256": result_digest,
                 "answer_attestation_sha256": answer_attestation,
                 "native_item_sha256": hashlib.sha256(
-                    canonical_company_consultation_json(evidence)).hexdigest()}
-    except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError, CompanyConsultationToolError):
+                    canonical_consultation_json(evidence).encode('utf-8')).hexdigest()}
+    except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError, DialogueContractError):
         return None

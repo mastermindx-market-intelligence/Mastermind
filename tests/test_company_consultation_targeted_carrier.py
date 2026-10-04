@@ -600,6 +600,6 @@ def test_production_composition_cannot_grant_an_arbitrary_resolver():
                 else getattr(supplied_func, "id", None)
             )
             assert supplied_name == canonical, (str(relative), node.lineno, supplied_name)
-    # One concrete source composition exists. This is not installation,
-    # an armed profile/listener, native consumption or live acceptance.
-    assert compositions == 1
+    # The live MCP request and stored native-read consumption paths each bind
+    # the same canonical resolver. Neither is proof of installation or acceptance.
+    assert compositions == 2
