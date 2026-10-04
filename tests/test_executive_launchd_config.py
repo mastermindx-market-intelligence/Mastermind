@@ -760,6 +760,7 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
     # Null groups fail validation; an omitted executive_mcp_profile preserves
     # the legacy generation and an omitted realm preserves the v4 worker.
     installed_product_keys = {
+        "company_consultation",
         "executive_mcp_profile",
         "content_observer",
         "content_observer_profile_path",

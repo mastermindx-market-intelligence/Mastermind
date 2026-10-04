@@ -985,10 +985,12 @@ def _agent_relay_prepared_only(
 ) -> bool:
     """Recognize A2's credential-free prepared-only Agent Relay state.
 
-    The host-preparation owner intentionally creates only the fixed service
-    principal and directories. It creates no plist, config, token or socket
-    and does not load or enable the service. That accepted inert state must
-    not make an otherwise coherent stopped Executive installation ambiguous.
+    The host-preparation owner creates the fixed principal and directories,
+    and now establishes an explicit disabled override after proving the Relay
+    unloaded. It creates no plist, config, token or socket and never loads the
+    service. Legacy preparation without an override remains an inert install
+    preimage; enrollment separately requires an explicit disabled override.
+    Neither prepared-only variant is evidence of enrollment readiness.
     """
 
     label = "com.mastermind.executive.agent-relay"
