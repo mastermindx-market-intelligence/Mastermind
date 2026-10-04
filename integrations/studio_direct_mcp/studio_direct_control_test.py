@@ -43,6 +43,10 @@ class ControlTests(unittest.TestCase):
                 account = root / name
                 account.mkdir()
                 (account / 'manifest.json').write_text('{}')
+            for name in ('fabric-read', 'fabric-design'):
+                account = root / name
+                account.mkdir()
+                (account / 'manifest.json').write_text('{}')
             (root / 'chatgpt2').mkdir()
             invalid = root / 'ChatGPT4'
             invalid.mkdir()

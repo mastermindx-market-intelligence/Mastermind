@@ -12,6 +12,9 @@ from pathlib import Path
 ACCOUNT_RE = re.compile(r'[a-z0-9][a-z0-9_-]{0,47}')
 PRIVATE_ROOT = Path.home() / '.local' / 'share' / 'studio-direct-mcp' / 'private'
 INSTALLED_CONTROL_ROOT = Path.home() / '.local' / 'share' / 'studio-direct-mcp' / 'control'
+# Reserved universal-fabric gateway channels are not ChatGPT tunnel seats and
+# therefore never belong in the private-seat fleet owner.
+NON_SEAT_ACCOUNTS = frozenset(('fabric-read', 'fabric-design'))
 
 
 def _invoke_from(root, helper, action, account):
@@ -75,6 +78,7 @@ def installed_accounts(private_root=None):
     accounts = []
     for child in root.iterdir():
         if (child.is_dir() and ACCOUNT_RE.fullmatch(child.name)
+                and child.name not in NON_SEAT_ACCOUNTS
                 and (child / 'manifest.json').is_file()):
             accounts.append(child.name)
     return sorted(accounts)
