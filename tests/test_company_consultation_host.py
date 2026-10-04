@@ -120,7 +120,40 @@ def test_host_real_relay_question_answer_and_read_never_claim_consumption(compos
                 returned = await call(host, composed.a[1], "company.consultation", {"consultation_ref": ref})
                 assert returned["ok"], returned
                 assert returned["data"]["answer"]["text"] == "The bounded answer."
+                from control_plane.native_company_receipt import company_answer_attestation_sha256
+                from tests.test_native_company_receipt import (
+                    call as native_read, make_params, make_item, result_for,
+                )
+                native = native_read(make_params(item=make_item(
+                    arguments={"consultation_ref": ref}, result=result_for(returned))))
+                assert native is not None
+                assert native["answer_attestation_sha256"] == company_answer_attestation_sha256(returned["data"])
                 assert _event_count(composed) == before
+                from control_plane.wake_ledger import (
+                    SourceReadHealth, SourceResolutionCode, resolve_source, resolved_record,
+                )
+                from control_plane.wake_persist import WakeLedgerRepository
+                wake_repo = WakeLedgerRepository(composed.runtime)
+                question_oid = fixtures._obligation_id_for_intent(composed.runtime, ref)
+                obligation = next(record.obligation for record in wake_repo.list_records(question_oid)
+                                  if record.obligation is not None)
+                resolution = resolve_source(
+                    obligation, code=SourceResolutionCode.DIALOGUE_ATTENTION_ABSENT,
+                    health=SourceReadHealth.HEALTHY, source_present=False,
+                    snapshot_digest="f" * 64, resolved_at="2026-09-14T00:00:00Z",
+                )
+                wake_repo.append_records_atomic([(resolved_record(obligation, resolution), obligation)])
+                before_read = _event_count(composed)
+                advanced = await call(host, composed.a[1], "company.consultation", {"consultation_ref": ref})
+                assert advanced["ok"] and advanced["data"]["state"] == "ANSWER_AVAILABLE"
+                assert returned["data"]["wake_state"] == "TARGET_ACKNOWLEDGED"
+                assert advanced["data"]["wake_state"] == "SOURCE_RESOLVED"
+                advanced_native = native_read(make_params(item=make_item(
+                    arguments={"consultation_ref": ref}, result=result_for(advanced))))
+                assert advanced_native is not None
+                assert advanced_native["result_sha256"] != native["result_sha256"]
+                assert advanced_native["answer_attestation_sha256"] == native["answer_attestation_sha256"]
+                assert _event_count(composed) == before_read
                 assert fixtures._consultation_event_count(composed.runtime, ref, "CONSUMED_BY_REQUESTER") == 0
                 assert fixtures._consultation_event_count(composed.runtime, ref, "INTENT") == 1
                 assert fixtures._consultation_event_count(composed.runtime, ref, "ANSWER_AVAILABLE") == 1

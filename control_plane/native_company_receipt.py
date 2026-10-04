@@ -75,16 +75,20 @@ def company_answer_attestation_sha256(data: object) -> str | None:
         if not isinstance(refs, list) or len(refs) > 5:
             return None
         admitted = {}
+        seen_event_ids = set()
         kinds = {"INTENT", "ANSWER_AVAILABLE", "ANSWER_AVAILABLE_HISTORICAL",
                  "ANSWER_REFUSED", "CONSUMED_BY_REQUESTER"}
         for ref in refs:
             if (not isinstance(ref, dict) or set(ref) != {"kind", "event_ids"}
                     or not isinstance(ref["kind"], str) or ref["kind"] not in kinds
                     or ref["kind"] in admitted or not isinstance(ref["event_ids"], list)
+                    or not ref["event_ids"]
                     or any(type(i) is not int or i <= 0 for i in ref["event_ids"])
-                    or ref["event_ids"] != sorted(set(ref["event_ids"]))):
+                    or ref["event_ids"] != sorted(set(ref["event_ids"]))
+                    or seen_event_ids.intersection(ref["event_ids"])):
                 return None
             admitted[ref["kind"]] = ref["event_ids"]
+            seen_event_ids.update(ref["event_ids"])
         if (len(admitted.get("INTENT", [])) != 1
                 or len(admitted.get("ANSWER_AVAILABLE", [])) != 1
                 or "CONSUMED_BY_REQUESTER" in admitted):
