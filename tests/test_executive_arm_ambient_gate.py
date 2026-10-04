@@ -153,7 +153,7 @@ def test_control_uid_quiesce_signals_only_fixed_control_principal(monkeypatch):
     assert signalled == (101, 102)
     assert state == {450: [], 451: [123]}
     assert not any(call[:2] == ("processes", 451) for call in calls)
-    assert [(pid, signum) for kind, pid, signum in calls if kind == "kill"] == [
+    assert [(call[1], call[2]) for call in calls if call[0] == "kill"] == [
         (101, signal.SIGTERM),
         (102, signal.SIGTERM),
     ]
