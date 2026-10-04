@@ -9585,13 +9585,16 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         assert handler._operation_key is None
         assert handler._installed_release_sha == raw["proof_base_sha"]
 
-        # The same installed factory accepts only the already-parsed root grant.
+        # The factory must consume only the trusted profile produced by the
+        # publication/verification owner. A raw config grant alone is not
+        # sufficient authority to arm the canary lane.
+        trusted_grant = DialogueWakeCanaryActivationGrant.from_dict(grant_wire)
         with monkeypatch.context() as composition_patch:
             composition_patch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
             composition_patch.setattr(service_cli, "ExecutiveControlService", capture_service)
             service_cli._service_from_config(
-                {**armed_observation_loaded, "dialogue_wake_canary_activation":
-                    DialogueWakeCanaryActivationGrant.from_dict(grant_wire)},
+                {**armed_observation_loaded, "dialogue_wake_canary_activation": trusted_grant},
+                dialogue_canary_profile=DialogueWakeCanaryProfile(trusted_grant),
                 initial_canary=json.loads(canary.read_text(encoding="utf-8")))
         handler = captured["kwargs"]["dialogue_wake_handler"]
         assert handler.canary_profile.grant.to_dict() == grant_wire
