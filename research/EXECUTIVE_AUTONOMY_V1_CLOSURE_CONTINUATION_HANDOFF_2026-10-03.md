@@ -45,6 +45,7 @@ PRE-MORTEM (W1–W4):
 | L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn (+1 nudge) | RUNNING (launched 03:25Z) | — | agent completion notification |
 | L2 release/install train | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W/ops/executive_os + S/pr{1157,1166,1169,1204,1219,1178,1176,1175}.diff + S/issue1143.md | return packet; S/L2.md | 1 turn (+1 nudge) | RUNNING; hit 12-turn harness cap 03:27Z at inventory stage → nudged once | 03:27Z notification | agent completion notification |
 | L3 seat records | Fable | this file; agentos handoff (Macro) | W branch | commits | — | RUNNING | now | — |
+| L3 Phase-5 readiness census | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W, MACRO agentos, S/packet.md, S/issue1143.md | return packet; S/L3.md | 1 turn (+1 nudge) | LAUNCHING 03:45Z | — | agent completion notification |
 | L4 #1218 gate | Ryan = incumbent writer/repairer; Fable shepherds | none | PR branch (Ryan) | new headRefOid on #1218 | custody tripwire 2026-10-04T04:45Z (posted on #1218 as issuecomment-5976104841) | WAITING_REPAIR (CI FAILED D8 03:01Z; C3 repair review 03:07Z) | 03:09Z gh api | S/watch_1218_1143.out (one process, polls #1218 head + #1143 comment count every 600 s, exits on first edge) |
 
 ## 4 Ledger
@@ -69,7 +70,8 @@ OPEN:
 - Which of #811/#1145/#1041 are required for V1 vs superseded by merged CooCycle/#1200/#1210 — L1.
 - Minimal reproducible install/upgrade/rollback/arm path and which of #1157/#1166/#1169/#1204/#1178/#1176/#1219 belong to the train — L2.
 - Acceptance scenario product task (bounded, low-risk, needs code+browser proof+decision boundary) — Fable, W2.
-- Capability status for browser/devserver worker resource and ASD DECISION_REQUEST path on current master — W2 check.
+- Capability status for browser/devserver worker resource and ASD DECISION_REQUEST path on current master — L3 (Agent OS at Macro f9ed1758: ASD-A2/A3/A4 todo; CF2-I todo; CF2-H0/HF1 in_progress; worker_browser_b1.py exists on master, undocumented in docs/).
+- Acceptance-op product anchor: P0 PRODUCT_TRUST_COHERENCE; WS-MARKET-OS A2-A6 (dependency-eligible, 'one independently useful vertical at a time') and B1B-B6 are candidate pools; choose one bounded UI slice after L3 — Fable.
 NEXT: launch L1a/L1b/L2 audits; seat-split note on #1143; custody tripwire note on #1218; arm the #1218/#1143 edge watcher; post START in the Slack root thread once lanes are live; then consume audit returns → Phase-1 disposition table → train RULING.
 
 ## 5 Open rulings / holds
