@@ -12,6 +12,13 @@ explicit non-default ``CODEX_HOME`` before a process may start.
 
 from __future__ import annotations
 
+from control_plane.native_company_receipt import project_company_read
+from integrations.mastermind_company_mcp.consultation import (
+    COMPANY_CONSULTATION_SERVER_IDENTITY,
+    COMPANY_CONSULTATION_SERVER_VERSION,
+    COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+)
+
 import hashlib
 import json
 import os
@@ -2161,6 +2168,27 @@ class CodexOperatorAdapter:
                 return index + 1
         return None
 
+    @staticmethod
+    def _company_read_server(state: _GenerationState) -> str | None:
+        """Select only the exact requested and observed Company MCP identity."""
+        required = [value for value in state.requested.capabilities.required
+                    if value.kind == "mcp_server"
+                    and value.mcp_server_identity == COMPANY_CONSULTATION_SERVER_IDENTITY]
+        if len(required) != 1:
+            return None
+        expected = required[0]
+        if (not expected.name or expected.mcp_server_version != COMPANY_CONSULTATION_SERVER_VERSION
+                or expected.tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+                or expected.mcp_auth_status != "unsupported"
+                or state.attestation.effective_mcp.count(expected.name) != 1):
+            return None
+        observed = [value for value in state.attestation.capabilities
+                    if value.kind == "mcp_server" and value.name == expected.name]
+        fields = ("mcp_server_identity", "mcp_server_version", "tool_schema_digest", "mcp_auth_status")
+        if len(observed) != 1 or any(getattr(observed[0], key) != getattr(expected, key) for key in fields):
+            return None
+        return expected.name
+
     def _ingest_turn_notifications(
         self,
         state: _GenerationState,
@@ -2389,6 +2417,16 @@ class CodexOperatorAdapter:
                 and notification_thread != state.provider_session_id
             ):
                 native_subordinate_id = register_subordinate(notification_thread)
+
+            if method == "item/completed" and not completed and native_subordinate_id is None:
+                server = self._company_read_server(state)
+                if server is not None:
+                    receipt = project_company_read(
+                        params, server_name=server, thread_id=state.provider_session_id,
+                        turn_id=state.turns.get(turn.turn_id, ""),
+                    )
+                    if receipt is not None:
+                        safe_payload["company_read_receipt"] = receipt
 
             state.events.append(
                 NormalizedEvent(
