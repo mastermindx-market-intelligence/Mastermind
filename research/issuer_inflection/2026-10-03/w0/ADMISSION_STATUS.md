@@ -1,6 +1,6 @@
 # I3-W0 current admission state
 
-**MISSION_COMPLETE: false. W0 not accepted. W1 not implemented.**
+**MISSION_COMPLETE: false. W0 not accepted. The independently permitted W1 baseline fixture lane is built; full W1 and its connected preview are not implemented/accepted.**
 
 Parent carrier remains Mastermind #1183; bounded execution child is **#1195**. Operation: `i3-w0-issuer-inflection-20261003-astra-c4`. Actual integration/recovery owner: Chairman-assigned **Astra CEO / C4**. The exact current candidate is the enclosing Git commit referenced by the current parent checkpoint; initial published candidate was `26e7c5c90b298cf5a98591d742da912a8966ae36`. This record is part of the existing review artifact, not another workstream/runtime registry.
 
@@ -44,3 +44,7 @@ The initial candidate's CodeQL/analysis checks completed successfully while the 
 Next executable dependency after a lawful review/source-owner admission is the exact W1 packet, not another plan. The review artifact also allows an eligible reviewer to run the unchanged owner replay and candidate integrity/shape checks without consuming sealed data or modifying owner source. A fresh session must re-read #1183 and #1195, reconcile this exact operation/workspace and any intervening effects, then acquire its own admitted custody before modification. A checkpoint never transfers a source lock.
 
 All W2–W11 obligations remain open in the original audited masterplan: heterogeneous real coverage, materiality/contradictions/mechanisms/falsifiers, production canary and peer context, full Terminal/Macro What Changed workflows, existing saves/watchlists, discovery/correction-aware alerts, grounded Ask/Neural Web on the same derived identities, normal release and actual authorized producer→user/machine proof, and separate honest reconstruction/classification/usefulness/prediction disposition. No broad coverage or predictive result is claimed.
+
+## Latest independent capability delta: baseline replay
+
+See `BASELINE_REPLAY_RESULT.md`. Four owner snapshots now feed a reference-preserving before/after consumer; all four requested variable slots survive, including missingness, unchanged values and exact refusals. Later evidence can make an asset comparison not evaluable without erasing the baseline or labeling it economic deterioration. Identical-cutoff replay creates no new change. Forty-one adversarial tests pass after two preserved failing rounds; unchanged owner response bytes and null emission/product-admission flags remain intact. This fixture work is expressly allowed by the commissioned masterplan §7 while immediate interfaces wait. It does not close W0 or replace source-owner, independent-review, rights, trial or production gates.

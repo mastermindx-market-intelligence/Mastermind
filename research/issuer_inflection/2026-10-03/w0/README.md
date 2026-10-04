@@ -27,3 +27,7 @@ Run `PYTHONDONTWRITEBYTECODE=1 python3 research/issuer_inflection/2026-10-03/w0/
 ## R1 precision correction
 
 `R1_RESOLUTION.md` records C2's real caller-context defect and the bounded exact-rational repair proposal. Run `PYTHONDONTWRITEBYTECODE=1 python3 research/issuer_inflection/2026-10-03/w0/test_comparator_policy.py` for the 16 numeric-policy tests. The pre-fix RED receipt and both corrected test receipts are retained in `evidence/R1-*.json`. This test-only math witness is not an I3 composer, financial owner, live signal or publication. External confirmation and W0 owner admission remain open.
+
+## Executable baseline fixture lane
+
+`BASELINE_REPLAY_RESULT.md` describes the newly built, reference-preserving before/after consumer and four actual owner-query captures. Run `test_baseline_replay.py` for 41 adversarial integration tests. The latest exact replay is `evidence/baseline-replay/result-r2.json`; original owner captures and both failed test rounds are retained. This is the masterplan's permitted offline fixture lane, not W0 acceptance, a connected preview, a new registered transition schema or production proof.
