@@ -477,10 +477,13 @@ class TestRuntimeRoots(unittest.TestCase):
             self.assertEqual(roots["gateway"].name, "private-tunnel-gateway.mjs")
             self.assertEqual(roots["gateway"], roots["base"] / "private-tunnel-gateway.mjs")
 
-    def test_fabric_gateway_cli_is_tailnet_adapter(self):
-        with IsolatedHome("fabric") as (_, _, roots):
-            self.assertEqual(roots["gateway"].name, "tailnet-gateway.mjs")
-            self.assertEqual(roots["gateway"], roots["base"] / "tailnet-gateway.mjs")
+    def test_fabric_gateways_are_tailnet_adapters(self):
+        for account in ("fabric-read", "fabric-design"):
+            with self.subTest(account=account), IsolatedHome(account) as (_, _, roots):
+                self.assertEqual(roots["gateway"].name, "tailnet-gateway.mjs")
+                self.assertEqual(
+                    roots["gateway"], roots["base"] / "tailnet-gateway.mjs"
+                )
 
     def test_mixed_case_account_is_not_silently_folded(self):
         with IsolatedHome("MyAccount") as (_, label, roots):
@@ -645,16 +648,18 @@ class TestBuildConfig(unittest.TestCase):
 
 
 class TestTailnetFabricConfig(unittest.TestCase):
-    def test_only_fabric_may_bind_exact_tailnet_origin(self):
+    def test_only_fabric_routes_may_bind_exact_tailnet_origin(self):
+        for account in ("fabric-read", "fabric-design"):
+            with self.subTest(account=account):
+                self.assertEqual(
+                    svc._validate_tailnet_public_url(
+                        account, "https://m2.example-tailnet.ts.net/"
+                    ),
+                    "https://m2.example-tailnet.ts.net",
+                )
         self.assertEqual(
             svc._validate_tailnet_public_url(
-                "fabric", "https://m2.example-tailnet.ts.net/"
-            ),
-            "https://m2.example-tailnet.ts.net",
-        )
-        self.assertEqual(
-            svc._validate_tailnet_public_url(
-                "fabric", "https://m2.example-tailnet.ts.net:10000"
+                "fabric-read", "https://m2.example-tailnet.ts.net:10000"
             ),
             "https://m2.example-tailnet.ts.net:10000",
         )
@@ -667,8 +672,10 @@ class TestTailnetFabricConfig(unittest.TestCase):
             "https://m2.example-tailnet.ts.net?x=1",
         ):
             with self.assertRaises(SystemExit):
-                svc._validate_tailnet_public_url("fabric", value)
-        with self.assertRaisesRegex(SystemExit, "reserved for --account fabric"):
+                svc._validate_tailnet_public_url("fabric-read", value)
+        with self.assertRaisesRegex(
+            SystemExit, "reserved for --account fabric-read\\|fabric-design"
+        ):
             svc._validate_tailnet_public_url(
                 "chatgpt1", "https://m2.example-tailnet.ts.net"
             )
@@ -680,7 +687,7 @@ class TestTailnetFabricConfig(unittest.TestCase):
             node = _make_node(Path(raw))
             backend = _make_backend(Path(raw))
             config = svc._build_config(
-                "fabric",
+                "fabric-design",
                 "127.0.0.1",
                 45117,
                 node,
@@ -692,7 +699,7 @@ class TestTailnetFabricConfig(unittest.TestCase):
             self.assertEqual(
                 config["publicUrl"], "https://m2.example-tailnet.ts.net:10000"
             )
-            self.assertEqual(config["accountLabel"], "fabric")
+            self.assertEqual(config["accountLabel"], "fabric-design")
             self.assertEqual(config["host"], "127.0.0.1")
             self.assertIn("paperDesign", config)
             self.assertNotIn("token", json.dumps(config).lower())
