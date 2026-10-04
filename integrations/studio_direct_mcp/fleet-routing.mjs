@@ -258,11 +258,19 @@ export function createFleetRouter(rawConfig, deps = {}) {
       throw new Error('FLEET_ROUTE_TOOL_NOT_ALLOWED');
     }
     // Exactly one remote tools/call. No retry/replay exists in this adapter.
-    return state.client.callTool(
-      request,
-      undefined,
-      { timeout: cfg.requestTimeoutMs, signal: options.signal },
-    );
+    try {
+      return await state.client.callTool(
+        request,
+        undefined,
+        { timeout: cfg.requestTimeoutMs, signal: options.signal },
+      );
+    } catch (error) {
+      // The route session may now be tainted or disconnected. Retire it rather
+      // than silently reusing it; a later frontend session must explicitly
+      // preflight a fresh remote MCP session on the same configured host.
+      await drop(hostRef);
+      throw error;
+    }
   }
 
   return Object.freeze({
