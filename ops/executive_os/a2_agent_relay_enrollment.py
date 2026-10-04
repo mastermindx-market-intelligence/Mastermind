@@ -903,7 +903,10 @@ def _prepare_disabled() -> dict[str, object]:
                 _pre_enrollment_artifacts_absent(binding)
                 _assert_bound_config_current(binding)
             except A2EnrollmentError:
-                raise A2EnrollmentError("A2_ENROLLMENT_WRITE_REFUSED") from None
+                # The modifying launchctl call returned, but a nonzero status
+                # alone does not prove that the disabled override was unchanged.
+                # Without positive readback, the original effect stays unknown.
+                raise A2EnrollmentError("A2_ENROLLMENT_EFFECT_UNKNOWN") from None
             return {
                 "action": "prepared_disabled_recovered",
                 "release_sha": release_sha,
