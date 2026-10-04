@@ -474,6 +474,62 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
   assert.equal(payload.gatewayVersion, '0.1.10');
 });
 
+test('configured fleet routing advertises one-way host selection and refuses late binding', async () => {
+  const { gw } = await bootGateway({
+    fleetRouting: {
+      enabled: true,
+      requestTimeoutMs: 5000,
+      routes: [
+        {
+          hostRef: 'mini4',
+          url: 'https://mini4.example-tailnet.ts.net/mcp',
+        },
+      ],
+    },
+  });
+  const a = newClient('tok-alice');
+  await connect(a.client, gw.url, a.transportOpts);
+
+  const listed = await a.client.listTools();
+  const selector = listed.tools.find((tool) => tool.name === 'studio_select_host');
+  assert.ok(selector, 'configured fleet router must advertise studio_select_host');
+  assert.deepEqual(
+    [
+      selector.annotations.readOnlyHint,
+      selector.annotations.destructiveHint,
+      selector.annotations.idempotentHint,
+      selector.annotations.openWorldHint,
+    ],
+    [true, false, true, false],
+  );
+
+  const initialPing = await a.client.callTool({ name: 'studio_ping', arguments: {} });
+  assert.equal(initialPing.structuredContent.selectedHostRef, null);
+
+  const unknown = await a.client.callTool({
+    name: 'studio_select_host',
+    arguments: { hostRef: 'unknown-host' },
+  });
+  assert.equal(unknown.isError, true);
+  assert.equal(unknown.structuredContent.code, 'FLEET_ROUTE_PREFLIGHT_REFUSED');
+
+  const localRead = await a.client.callTool({
+    name: 'read_file',
+    arguments: { path: '/fixture-local-before-bind' },
+  });
+  assert.notEqual(localRead.isError, true);
+
+  const late = await a.client.callTool({
+    name: 'studio_select_host',
+    arguments: { hostRef: 'mini4' },
+  });
+  assert.equal(late.isError, true);
+  assert.equal(late.structuredContent.code, 'FLEET_BIND_AFTER_BACKEND_USE_REFUSED');
+
+  const finalPing = await a.client.callTool({ name: 'studio_ping', arguments: {} });
+  assert.equal(finalPing.structuredContent.selectedHostRef, null);
+});
+
 test('configured studio_fleet_status lists and returns the bounded public projection', async () => {
   const dir = mkdtempSync(resolve(tmpdir(), 'studio-fleet-gateway-'));
   cleanup.dirs.push(dir);
