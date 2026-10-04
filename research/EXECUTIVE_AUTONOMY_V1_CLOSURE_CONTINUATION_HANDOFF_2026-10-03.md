@@ -144,6 +144,13 @@ WATCHER: the convergence writer posts design packets every ~10 min; none names t
 RECORDS: Macro #8414 MERGED 05:58:29Z by the sweeper (one bounded read at 07:21Z; no PR-bar binding, no polling). The next Agent OS amendment (A2 human gates / #1227 / successor service-control chain on P5's wait condition) waits for a batch of changes, not a PR per edge.
 NEXT: quiet. Wakes: watch11 edge; a ruling naming this seat; Remote Control toggle (human).
 
+### 4m Cycle 07:45Z–07:53Z — research-only master edge consumed; NO_DELTA_LOOP tactic change → independent review of #1227 posted (CHANGES_REQUESTED)
+EDGE: master a2646f45 → 521720b0 = #1226 (`research/TREND_PERSISTENCE_PREREG_C1.md` only, +646). No mission path touched: procedure pin at a2646f45 stays content-valid (docs/sol_skills, ACTIVE_EXECUTION, SESSION_RELIABILITY unchanged); installed Control release remains a2646f45. Watcher replaced by watch12 (`S/watch12.sh`): master edges filtered to mission paths (ops/executive_os, integrations/session_bridge, phase1c, control_plane, executive_*, A2/agent-relay tests, docs/sol_skills, authority/strategic config), 30-min cadence, 6-h budget; non-mission master moves advance the baseline silently.
+NO_DELTA_LOOP: 4l + this edge = two consecutive cycles with no capability delta → tactic changed from watching to closing the open "missing independent review" gate on the critical-path carrier (packet failure law; S.7 four conditions held: no worker on it, read-only tools, no other owner, no EFFECT_UNKNOWN).
+#1227 (sole modifying carrier for the A2 pre-enrollment disabled state; head 0b031d72; author chriswong6031-creator; exact-head review requested 06:57Z with nine effect-boundary points; no reviewer assigned; author's M2 receipts 7 PASS / 50 PASS cover the A2 suite only): binding CI `test` = FAILURE (run 37184716065, 07:05Z→07:26Z) on `tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults` → `['_mastermind_agent_relay','_mastermind_exec']`: the module-docstring reflow re-adds both identity literals on added lines, and D8 deliberately preserves `_mastermind_*` findings inside multiline strings (scope `:!tests/`, merge-base `origin/master`). Reproduced deterministically with the master D8 scanner + head postimage (`S/d8_master.py`, `S/a2_head.py`); docstring-only repair (keep master's identity-bearing lines byte-identical; add the `prepare-disabled` paragraph separately) → scan `[]` (`S/a2_fixed_candidate.py`); non-docstring additions flag nothing. Effect boundary: all nine requested points PASS with head line refs (parser bare subcommand :139; TTY gate enroll-only :1143; identity/disarmed split :800/:838; artifacts-absent + loaded refusal before launchctl :844/:870; single exact `launchctl disable system/<RELAY_LABEL>` :880, no other verb literal; readback = `_assert_disarmed` + artifacts-absent + bound-dir on every PASS path; EFFECT_UNKNOWN :894/:909/:920 + ERROR_CODES :84; idempotent already-disabled :872; descriptor closed :1107). Review posted: pullrequestreview-5404908792 (07:52:33Z, CHANGES_REQUESTED, shared account `mastermindxryan`, seat-identified; body in `S/review1227.md`). Not claimed: host proof, merge/label/release.
+OWED BY THIS SEAT: re-review on the repaired head (closing re-check = D8/`test` green at the new head). Nothing else owed.
+NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
+
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
 |---|---|---|---|---|
@@ -169,6 +176,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Human gates: root/admin ceremony for install (host owner); ChatGPT app catalog rescan (Chairman/platform); Fable connector OAuth (Chairman).
 
 ## 6 Do-not-redo
+- Do not re-post the #1227 review (pullrequestreview-5404908792); re-review only a NEW head, and only against the D8/`test` gate plus any changed hunk. Do not open a competing fix branch for #1227's docstring — the author owns the carrier.
 - #1218 repaired + MERGED (a2646f45, 04:14Z) by the Sol C3 lane; Control successor a2646f45 installed by the host owner (receipt location to confirm). Never re-open the D8 repair.
 - Reader backend_unavailable diagnosis CLOSED on #1143 04:42Z (no source fix).
 - PICKUP_ACK (ts 1791083562.416539) and START (ts 1791083970.655569) posted once in #agent-dispatch; seat-split note on #1143 and custody tripwire on #1218 posted once.
@@ -186,6 +194,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 07:53Z: #1227 independent review posted (CHANGES_REQUESTED; D8 docstring red reproduced, documentation-only fix named). Owed: re-review on the new #1227 head. Watcher watch13 (adds #1227). Wakes: watch13 edge; ruling naming this seat; Remote Control toggle (human).
 - 07:17Z: QUIET; watcher cadence 30 min. Macro #8414 MERGED 05:58Z (records on main). Nothing owed by this seat. Wakes: watch11 edge; rulings naming this seat; Remote Control toggle (human).
 - 07:08Z: QUIET. Live-canary chain now: #1191 → #1227 → human A2 enrollment → successor service-control Agent-Relay verbs → relay start → re-census → natural Codex child → canary grant. Nothing owed by this seat. Wakes: watch10 edge; rulings naming this seat; Remote Control toggle (human).
 - 06:58Z: QUIET. Live canary blocked upstream by two human/A2-owner gates (Relay enrollment ceremony; disabled-state precondition producer). Nothing owed by this seat. Wakes: watch9 edge; rulings naming this seat; Remote Control toggle (human).
