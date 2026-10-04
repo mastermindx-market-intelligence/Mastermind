@@ -1,9 +1,9 @@
 """Trusted, effect-free projection for anti-premature-finalization continuation.
 
 This module owns no lifecycle state, target registry, scheduler, retry policy, wake
-transport, dialogue write, or action authority. It composes a host-owned turn
-disposition with the existing canonical Sol action-target resolution. Model prose
-is never authority.
+transport, dialogue write, or action authority. It composes host-owned turn facts
+with the existing canonical Sol action-target resolution. Model prose is never
+authority, and positive output never carries a caller-supplied target selector.
 """
 from __future__ import annotations
 
@@ -11,9 +11,11 @@ from dataclasses import dataclass
 import re
 
 from control_plane.sol_action_target import (
+    ActionTargetReason,
     ActionTargetState,
     SolActionTargetResolution,
 )
+from control_plane.wake_events import JOB_ID_RE
 
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _STOP_DISPOSITIONS = frozenset({
@@ -39,12 +41,16 @@ def _ref(value: object, field: str) -> str:
 
 @dataclass(frozen=True)
 class TrustedTurnDisposition:
-    """Current host-owned turn facts; not an authority token or lifecycle record."""
+    """Current host-owned turn facts; not an authority token or lifecycle record.
+
+    root_job_id must come from the authenticated operation/carrier context.
+    The projection joins it to the canonical action-target resolution. There is
+    intentionally no caller-supplied target reference or target generation.
+    """
 
     operation_key: str
     carrier_ref: str
-    target_ref: str
-    target_generation: str
+    root_job_id: str
     mission_revision: str
     authorization_ref: str
     mission_complete: bool
@@ -53,21 +59,28 @@ class TrustedTurnDisposition:
     user_stop: bool
     denial_active: bool
     unresolved_modifying_effect: bool
-    target_addressable: bool
     authorization_current: bool
     exact_next_action_ref: str | None
     prior_continue_effect_unresolved: bool = False
 
     def __post_init__(self) -> None:
         for field in (
-            "operation_key", "carrier_ref", "target_ref", "target_generation",
-            "mission_revision", "authorization_ref",
+            "operation_key",
+            "carrier_ref",
+            "mission_revision",
+            "authorization_ref",
         ):
             _ref(getattr(self, field), field)
+        if not isinstance(self.root_job_id, str) or JOB_ID_RE.fullmatch(self.root_job_id) is None:
+            raise ContinuationProjectionError("invalid_root_job_id")
         for field in (
-            "mission_complete", "disposition_evidence_complete", "user_stop",
-            "denial_active", "unresolved_modifying_effect", "target_addressable",
-            "authorization_current", "prior_continue_effect_unresolved",
+            "mission_complete",
+            "disposition_evidence_complete",
+            "user_stop",
+            "denial_active",
+            "unresolved_modifying_effect",
+            "authorization_current",
+            "prior_continue_effect_unresolved",
         ):
             if type(getattr(self, field)) is not bool:
                 raise ContinuationProjectionError(f"invalid_{field}")
@@ -84,9 +97,12 @@ class ContinuationRequirement:
     reason: str
     operation_key: str
     carrier_ref: str
-    target_ref: str
-    target_generation: str
+    root_job_id: str
     exact_next_action_ref: str | None
+    session_alias: str | None = None
+    binding_id: str | None = None
+    binding_generation: int | None = None
+    reasoning_surface: str | None = None
     action_target_evidence_digest: str | None = None
 
 
@@ -96,8 +112,7 @@ def _held(state: TrustedTurnDisposition, reason: str) -> ContinuationRequirement
         reason=reason,
         operation_key=state.operation_key,
         carrier_ref=state.carrier_ref,
-        target_ref=state.target_ref,
-        target_generation=state.target_generation,
+        root_job_id=state.root_job_id,
         exact_next_action_ref=state.exact_next_action_ref,
     )
 
@@ -120,8 +135,6 @@ def _project_turn_facts(
         return _held(state, "disposition_evidence_incomplete")
     if state.finalization_disposition is not None:
         return _held(state, "lawful_stop_disposition")
-    if not state.target_addressable:
-        return _held(state, "target_not_addressable")
     if not state.authorization_current:
         return _held(state, "authorization_stale")
     if state.exact_next_action_ref is None:
@@ -131,8 +144,7 @@ def _project_turn_facts(
         reason="turn_continuation_candidate",
         operation_key=state.operation_key,
         carrier_ref=state.carrier_ref,
-        target_ref=state.target_ref,
-        target_generation=state.target_generation,
+        root_job_id=state.root_job_id,
         exact_next_action_ref=state.exact_next_action_ref,
     )
 
@@ -144,10 +156,14 @@ def project_continuation_requirement(
 ) -> ContinuationRequirement:
     """Project eligibility for one existing canonical CONTINUE, without sending it.
 
-    A positive result requires both the trusted turn facts and a fresh resolution
-    from the existing sol_action_target owner proving the current actor is the
-    exact action-authoritative CEO binding. The resolution remains evidence, not a
-    reusable authorization token; an effect owner must re-resolve at action time.
+    A positive result requires both trusted turn facts and a fresh resolution from
+    the existing sol_action_target owner proving the current actor is the exact
+    action-authoritative CEO binding for the same canonical root. The destination
+    identity in the result is derived only from that canonical resolution.
+
+    The resolution remains evidence, not a reusable authorization token. The
+    existing effect owner must re-resolve current authority/binding before any
+    continuation effect.
     """
     if not isinstance(state, TrustedTurnDisposition):
         raise ContinuationProjectionError("invalid_trusted_turn_disposition")
@@ -160,8 +176,15 @@ def project_continuation_requirement(
 
     if action_target.state is not ActionTargetState.RESOLVED:
         return _held(state, "action_target_unresolved")
-    if action_target.action_authoritative is not True:
+    if (
+        action_target.reason is not ActionTargetReason.EXACT_RUNTIME_BINDING
+        or action_target.action_authoritative is not True
+        or action_target.observer_only is not False
+        or action_target.target_seat != "ceo"
+    ):
         return _held(state, "actor_not_action_authoritative")
+    if action_target.root_job_id != state.root_job_id:
+        return _held(state, "action_target_root_mismatch")
     if (
         action_target.session_alias is None
         or action_target.binding_id is None
@@ -170,23 +193,17 @@ def project_continuation_requirement(
     ):
         return _held(state, "action_target_incomplete")
 
-    expected_generation = (
-        f"{action_target.session_alias}:"
-        f"{action_target.binding_id}:"
-        f"{action_target.binding_generation}:"
-        f"{action_target.reasoning_surface}"
-    )
-    if state.target_generation != expected_generation:
-        return _held(state, "action_target_generation_mismatch")
-
     return ContinuationRequirement(
         required=True,
         reason="continuation_required",
         operation_key=state.operation_key,
         carrier_ref=state.carrier_ref,
-        target_ref=state.target_ref,
-        target_generation=state.target_generation,
+        root_job_id=state.root_job_id,
         exact_next_action_ref=state.exact_next_action_ref,
+        session_alias=action_target.session_alias,
+        binding_id=action_target.binding_id,
+        binding_generation=action_target.binding_generation,
+        reasoning_surface=action_target.reasoning_surface,
         action_target_evidence_digest=action_target.evidence_digest,
     )
 
