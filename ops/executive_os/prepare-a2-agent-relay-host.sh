@@ -2,7 +2,8 @@
 # Credential-free host preparation for the private A2 Agent Relay.
 #
 # This source-owned entry point creates or verifies only the fixed service
-# principal and non-secret prerequisite directories. It never enrolls a token,
+# principal, non-secret prerequisite directories and disabled launchd override.
+# It refuses a loaded Relay and never enrolls a token,
 # writes Relay configuration or a plist, or loads and starts a service.
 set -euo pipefail
 umask 077
@@ -14,6 +15,8 @@ RELAY_HOME="$RUNTIME_ROOT/home"
 TOKEN_PATH="$CONFIG_ROOT/agent-relay.token"
 CONFIG_PATH="$CONFIG_ROOT/agent-relay.json"
 PLIST_PATH="/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist"
+
+RELAY_LABEL="com.mastermind.executive.agent-relay"
 
 RELAY_USER="_mastermind_agent_relay"
 RELAY_GROUP="_mastermind_agent_relay"
@@ -195,11 +198,41 @@ preflight_directory() {
   fi
 }
 
+assert_relay_unloaded() {
+  local status=0
+  /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1 || status=$?
+  [ "$status" -eq 113 ] || refuse "Agent Relay must be proven unloaded before enrollment"
+}
+
+prepare_disarmed_relay() {
+  local disabled
+  # Recheck immediately before the one lifecycle effect. A live or enrolled
+  # Relay belongs to its existing service owner; preparation never boots it out.
+  for reserved in "$TOKEN_PATH" "$CONFIG_PATH" "$PLIST_PATH"; do
+    [ ! -e "$reserved" ] && [ ! -L "$reserved" ] \
+      || refuse "existing enrollment or service artifact must be reconciled first"
+  done
+  assert_relay_unloaded
+  /bin/launchctl disable "system/$RELAY_LABEL" \
+    || refuse "Agent Relay disabled override could not be established"
+  assert_relay_unloaded
+  disabled="$(/bin/launchctl print-disabled system)" \
+    || refuse "Agent Relay disabled override could not be read"
+  printf '%s\n' "$disabled" | /usr/bin/awk -v label="$RELAY_LABEL" '
+    index($0, "\"" label "\"") {
+      count++
+      if ($0 ~ /^[[:space:]]*"com\.mastermind\.executive\.agent-relay"[[:space:]]*=>[[:space:]]*(true|disabled)[[:space:]]*,?[[:space:]]*$/) valid++
+    }
+    END {exit !(count == 1 && valid == 1)}
+  ' || refuse "Agent Relay disabled override is absent or ambiguous"
+}
+
 assert_exec_identity
 for reserved in "$TOKEN_PATH" "$CONFIG_PATH" "$PLIST_PATH"; do
   [ ! -e "$reserved" ] && [ ! -L "$reserved" ] \
     || refuse "existing enrollment or service artifact must be reconciled first"
 done
+assert_relay_unloaded
 preflight_directory "$SYSTEM_ROOT" 0 0 755
 preflight_directory "$CONFIG_ROOT" 0 0 755
 preflight_directory "$RUNTIME_ROOT" 0 0 711
@@ -219,4 +252,6 @@ ensure_directory "$CONFIG_ROOT" root wheel 0 0 755
 ensure_directory "$RUNTIME_ROOT" root wheel 0 0 711
 ensure_directory "$RELAY_HOME" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 700
 
-/bin/echo "A2 Agent Relay host preparation complete: principal and non-secret directories only"
+prepare_disarmed_relay
+
+/bin/echo "A2 Agent Relay host preparation complete: exact principal, directories and disabled unloaded Relay"
