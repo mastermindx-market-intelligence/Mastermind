@@ -50,6 +50,7 @@ from integrations.mastermind_steward_app.research_server import (
     build_authenticated_research_app,
     build_research_tools,
 )
+from integrations.mastermind_steward_app.ui import UI_RESOURCE_URI
 
 
 MCP_PATH = "/mcp/steward/v1"
@@ -1089,6 +1090,69 @@ def test_research_generation_adds_only_search_and_fetch_to_protected_six_tools()
         schemes = rendered["securitySchemes"]
         assert schemes == [{"type": "oauth2", "scopes": [REQUIRED_SCOPE]}]
         assert rendered["_meta"]["securitySchemes"] == schemes
+
+
+def test_research_generation_serves_same_existing_ui_resource_as_secretary_v2():
+    policy = _policy()
+    v2_verifier, _ = _stub_verifier(policy, _access_token(policy, token="v2-token"))
+    v3_verifier, _ = _stub_verifier(policy, _access_token(policy, token="v3-token"))
+    v2 = build_authenticated_app(
+        build_contract_server(_Port()),
+        policy=policy,
+        token_verifier=v2_verifier,
+    )
+    v3 = build_authenticated_research_app(
+        build_contract_server(_Port()),
+        policy=policy,
+        token_verifier=v3_verifier,
+    )
+    list_body = {
+        "jsonrpc": "2.0",
+        "id": 40,
+        "method": "resources/list",
+        "params": {},
+    }
+    read_body = {
+        "jsonrpc": "2.0",
+        "id": 41,
+        "method": "resources/read",
+        "params": {"uri": UI_RESOURCE_URI},
+    }
+
+    with TestClient(v2, base_url=BASE_URL) as v2_client:
+        v2_list = v2_client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": "Bearer v2-token"},
+            json=list_body,
+        )
+        v2_read = v2_client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": "Bearer v2-token"},
+            json=read_body,
+        )
+    with TestClient(v3, base_url=BASE_URL) as v3_client:
+        v3_list = v3_client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": "Bearer v3-token"},
+            json=list_body,
+        )
+        v3_read = v3_client.post(
+            MCP_PATH,
+            headers={**MCP_HEADERS, "authorization": "Bearer v3-token"},
+            json=read_body,
+        )
+
+    for response in (v2_list, v3_list, v2_read, v3_read):
+        assert response.status_code == 200
+        assert response.json().get("error") is None
+    assert v2_list.json()["result"] == v3_list.json()["result"]
+    assert v2_read.json()["result"] == v3_read.json()["result"]
+    resources = v3_list.json()["result"]["resources"]
+    assert [resource["uri"] for resource in resources] == [UI_RESOURCE_URI]
+    contents = v3_read.json()["result"]["contents"]
+    assert len(contents) == 1
+    assert contents[0]["uri"] == UI_RESOURCE_URI
+    assert contents[0]["mimeType"] == "text/html;profile=mcp-app"
 
 
 def test_research_auth_failure_occurs_before_company_state_access():

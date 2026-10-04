@@ -39,6 +39,7 @@ from integrations.mastermind_steward_app.server import (
     REQUIRED_SCOPE,
     SERVER_NAME,
     build_tools as build_secretary_tools,
+    register_ui_resource,
 )
 
 _RESEARCH_TOOL_NAMES = frozenset({SEARCH_TOOL, FETCH_TOOL})
@@ -146,6 +147,7 @@ def build_research_mcp_server(
             return _error("INTERNAL_ERROR")
         return _success(payload)
 
+    register_ui_resource(server)
     return server
 
 

@@ -379,6 +379,50 @@ def test_attention_document_uses_only_global_attention_read_after_catalog():
     ]
 
 
+class _TwoSubjectAttentionPort(_Port):
+    def __init__(self, *, swap: bool) -> None:
+        super().__init__()
+        self.swap = swap
+
+    async def get_attention(self) -> StewardGrounding:
+        self._record("get_attention")
+        shared = _source("executive_inbox", "executive-inbox:shared")
+        alpha_subject = "responsibility:beta" if self.swap else "responsibility:alpha"
+        beta_subject = "responsibility:alpha" if self.swap else "responsibility:beta"
+        return StewardGrounding(
+            state="DEGRADED",
+            facts=(
+                GroundingFact(alpha_subject, "attention.ref", "EXEC:alpha", "FRESH", shared),
+                GroundingFact(alpha_subject, "attention.reason", "Alpha decision.", "FRESH", shared),
+                GroundingFact(alpha_subject, "attention.state", "SOL_REQUIRED", "FRESH", shared),
+                GroundingFact(beta_subject, "attention.ref", "EXEC:beta", "FRESH", shared),
+                GroundingFact(beta_subject, "attention.reason", "Beta decision.", "FRESH", shared),
+                GroundingFact(beta_subject, "attention.state", "SOL_REQUIRED", "FRESH", shared),
+            ),
+            reason_codes=("NO_SOURCE",),
+        )
+
+
+def _attention_text(port: _TwoSubjectAttentionPort) -> str:
+    gateway = _gateway(port)
+    search = asyncio.run(gateway.search({"query": "executive attention"}))
+    document = next(
+        row for row in search["results"] if row["title"] == "Mastermind executive attention"
+    )
+    return asyncio.run(gateway.fetch({"id": document["id"]}))["text"]
+
+
+def test_attention_research_render_preserves_exact_subject_associations():
+    original = _attention_text(_TwoSubjectAttentionPort(swap=False))
+    swapped = _attention_text(_TwoSubjectAttentionPort(swap=True))
+
+    assert "subject_ref: responsibility:alpha\n- attention.ref = \"EXEC:alpha\"" in original
+    assert "subject_ref: responsibility:beta\n- attention.ref = \"EXEC:beta\"" in original
+    assert "subject_ref: responsibility:alpha\n- attention.ref = \"EXEC:beta\"" in swapped
+    assert "subject_ref: responsibility:beta\n- attention.ref = \"EXEC:alpha\"" in swapped
+    assert original != swapped
+
+
 @pytest.mark.parametrize(
     "private_value",
     [

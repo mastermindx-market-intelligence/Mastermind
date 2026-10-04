@@ -539,7 +539,14 @@ def _render_text(
         if not facts:
             lines.append("facts: none")
             continue
+        current_subject_ref: str | None = None
         for fact in facts:
+            subject_ref = fact.get("subject_ref")
+            if not isinstance(subject_ref, str) or not subject_ref:
+                raise ResearchError("RESPONSE_REFUSED")
+            if subject_ref != current_subject_ref:
+                lines.append(f"subject_ref: {subject_ref}")
+                current_subject_ref = subject_ref
             value = json.dumps(
                 fact.get("value"),
                 ensure_ascii=False,
