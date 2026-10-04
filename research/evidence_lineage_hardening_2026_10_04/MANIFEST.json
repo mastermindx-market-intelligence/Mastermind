@@ -1,0 +1,48 @@
+{
+  "audit_date": "2026-10-04",
+  "automatic_effects_authorized": false,
+  "files": {
+    "AUDIT_REGISTER.md": {
+      "bytes": 7564,
+      "sha256": "9b32b6a52cc8a8eedb5e4b3fd9c758b2dbd781ebe44f6e02e2e1ade640e3621c"
+    },
+    "FINAL_REPORT.md": {
+      "bytes": 65028,
+      "sha256": "5575e6cfc23fc1700b1e60dddc95eea1bc539c71ab746f64ba1df86d5322e70f"
+    },
+    "README.md": {
+      "bytes": 2651,
+      "sha256": "246a49a0ca333cf2e5924a1772702eaa0e497275a68e9142fb6f07df0adb9180"
+    },
+    "VERIFICATION.md": {
+      "bytes": 3564,
+      "sha256": "962cf4fcf31140b41d46093db9663996ff46305f88e71be24343e760e9316bc1"
+    },
+    "mathematics_run.txt": {
+      "bytes": 2708,
+      "sha256": "91e6fa4ca24c9b97fc0f5a6c6071d11790ff068caab60b410d742bee4a5ef075"
+    },
+    "source_report.original.md": {
+      "bytes": 25833,
+      "sha256": "be9d6bd856b59f8bdb4fca54c36dd7c18740732c0b18b36d0185c14ead0080b5"
+    },
+    "verification_results.json": {
+      "bytes": 2172,
+      "sha256": "870977f61bc1534958af664ce48f2edf9e6313e03d9f9ba8969b27f52eb7b28d"
+    },
+    "verify_mathematics.py": {
+      "bytes": 9297,
+      "sha256": "b4a73075db7c682e4b65cd131b11dc91bb5497f764ac432cafb52a8633e30e08"
+    }
+  },
+  "native_tests_executed": false,
+  "original_filename": "deep-research-report (8).md",
+  "production_qualified": false,
+  "report_version": "hardened-1.0",
+  "schema": "commission7.research_package_manifest.v1",
+  "scope": "research_hardening_and_publication_only",
+  "source_pins": {
+    "Mastermind": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+    "macro": "d2904d45fb2bbaf12d3dae4a35eacaaefcc8bad3"
+  }
+}
