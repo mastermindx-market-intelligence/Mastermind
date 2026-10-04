@@ -235,8 +235,11 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     manifest["version"] = 1
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
-    removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
-        "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
+    removed = (
+        "tailnet-gateway.mjs", "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs"
+    ) if typed_git else (
+        "tailnet-gateway.mjs", "fleet-status.mjs", "paper-design.mjs",
+        "output-budget.mjs", "git-publish.mjs"
     )
     for name in removed:
         (roots["base"] / name).unlink()
@@ -270,6 +273,7 @@ class TestIdentity(unittest.TestCase):
                 "fleet-status.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
+                "tailnet-gateway.mjs",
                 "package.json",
                 "package-lock.json",
             },
@@ -473,6 +477,11 @@ class TestRuntimeRoots(unittest.TestCase):
             self.assertEqual(roots["gateway"].name, "private-tunnel-gateway.mjs")
             self.assertEqual(roots["gateway"], roots["base"] / "private-tunnel-gateway.mjs")
 
+    def test_fabric_gateway_cli_is_tailnet_adapter(self):
+        with IsolatedHome("fabric") as (_, _, roots):
+            self.assertEqual(roots["gateway"].name, "tailnet-gateway.mjs")
+            self.assertEqual(roots["gateway"], roots["base"] / "tailnet-gateway.mjs")
+
     def test_mixed_case_account_is_not_silently_folded(self):
         with IsolatedHome("MyAccount") as (_, label, roots):
             self.assertIn("MyAccount", str(roots["base"]))
@@ -633,6 +642,60 @@ class TestBuildConfig(unittest.TestCase):
                     "fabricTimeoutMs": 8_000,
                 },
             )
+
+
+class TestTailnetFabricConfig(unittest.TestCase):
+    def test_only_fabric_may_bind_exact_tailnet_origin(self):
+        self.assertEqual(
+            svc._validate_tailnet_public_url(
+                "fabric", "https://m2.example-tailnet.ts.net/"
+            ),
+            "https://m2.example-tailnet.ts.net",
+        )
+        self.assertEqual(
+            svc._validate_tailnet_public_url(
+                "fabric", "https://m2.example-tailnet.ts.net:10000"
+            ),
+            "https://m2.example-tailnet.ts.net:10000",
+        )
+        for value in (
+            None,
+            "http://m2.example-tailnet.ts.net",
+            "https://example.com",
+            "https://m2.example-tailnet.ts.net/path",
+            "https://user:pass@m2.example-tailnet.ts.net",
+            "https://m2.example-tailnet.ts.net?x=1",
+        ):
+            with self.assertRaises(SystemExit):
+                svc._validate_tailnet_public_url("fabric", value)
+        with self.assertRaisesRegex(SystemExit, "reserved for --account fabric"):
+            svc._validate_tailnet_public_url(
+                "chatgpt1", "https://m2.example-tailnet.ts.net"
+            )
+
+    def test_fabric_config_projects_public_origin_without_changing_paper_owner(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            node = _make_node(Path(raw))
+            backend = _make_backend(Path(raw))
+            config = svc._build_config(
+                "fabric",
+                "127.0.0.1",
+                45117,
+                node,
+                backend,
+                home / "state",
+                home,
+                public_url="https://m2.example-tailnet.ts.net:10000",
+            )
+            self.assertEqual(
+                config["publicUrl"], "https://m2.example-tailnet.ts.net:10000"
+            )
+            self.assertEqual(config["accountLabel"], "fabric")
+            self.assertEqual(config["host"], "127.0.0.1")
+            self.assertIn("paperDesign", config)
+            self.assertNotIn("token", json.dumps(config).lower())
 
 
 class TestBuildPlist(unittest.TestCase):
