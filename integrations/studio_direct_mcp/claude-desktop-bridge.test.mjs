@@ -3,21 +3,40 @@ import test from 'node:test';
 
 import { assertCatalog, routeUrl, ROUTES } from './claude-desktop-bridge.mjs';
 
-const ORIGIN = 'https://bridge.fixture.ts.net';
+test('routeUrl derives loopback endpoint from exact installed route manifest', async () => {
+  const seen = [];
+  const result = await routeUrl('design', {
+    home: '/fixture-home',
+    readManifest: async (path) => {
+      seen.push(path);
+      return { account: 'fabric-design', port: 45118 };
+    },
+  });
+  assert.equal(result.route, 'design');
+  assert.equal(result.account, 'fabric-design');
+  assert.equal(result.url, 'http://127.0.0.1:45118/mcp');
+  assert.equal(
+    seen[0],
+    '/fixture-home/.local/share/studio-direct-mcp/private/fabric-design/manifest.json',
+  );
+});
 
-test('routeUrl accepts only exact HTTPS tailnet origins and fixed routes', () => {
-  assert.equal(routeUrl(ORIGIN, 'read'), ORIGIN + '/studio-fabric');
-  assert.equal(routeUrl(ORIGIN + '/', 'design'), ORIGIN + '/studio-design');
-  for (const value of [
-    'http://bridge.fixture.ts.net',
-    'https://bridge.fixture.ts.net:8443',
-    'https://user@bridge.fixture.ts.net',
-    'https://bridge.fixture.ts.net/path',
-    'https://bridge.fixture.example',
-  ]) {
-    assert.throws(() => routeUrl(value, 'design'), /STUDIO_ORIGIN_REFUSED/);
+test('routeUrl refuses missing, wrong-account, and invalid-port runtime state', async () => {
+  await assert.rejects(
+    () => routeUrl('read', { readManifest: async () => { throw new Error('missing'); } }),
+    /STUDIO_RUNTIME_UNAVAILABLE/,
+  );
+  await assert.rejects(
+    () => routeUrl('read', { readManifest: async () => ({ account: 'fabric-design', port: 1 }) }),
+    /STUDIO_RUNTIME_REFUSED/,
+  );
+  for (const port of [0, 65536, 1.5, '45117']) {
+    await assert.rejects(
+      () => routeUrl('read', { readManifest: async () => ({ account: 'fabric-read', port }) }),
+      /STUDIO_RUNTIME_REFUSED/,
+    );
   }
-  assert.throws(() => routeUrl(ORIGIN, 'admin'), /STUDIO_ROUTE_REFUSED/);
+  await assert.rejects(() => routeUrl('admin'), /STUDIO_ROUTE_REFUSED/);
 });
 
 test('catalog fence accepts exact read/design ceilings', () => {

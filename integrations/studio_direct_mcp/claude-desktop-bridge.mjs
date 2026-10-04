@@ -3,9 +3,13 @@
  * Local Claude Desktop stdio projection for the guarded Studio/Paper MCP.
  *
  * This process owns no Paper, fleet, placement, authentication, or tool
- * authority. It mirrors one already-running tailnet Studio route into stdio
- * for Claude Desktop's local-MCP mechanism and refuses catalog drift.
+ * authority. It mirrors one already-installed loopback Studio route into
+ * stdio for Claude Desktop's local-MCP mechanism and refuses catalog drift.
  */
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -17,7 +21,7 @@ import {
 
 export const ROUTES = Object.freeze({
   read: Object.freeze({
-    path: '/studio-fabric',
+    account: 'fabric-read',
     tools: Object.freeze([
       'paper_catalog',
       'paper_inspect',
@@ -27,7 +31,7 @@ export const ROUTES = Object.freeze({
     ]),
   }),
   design: Object.freeze({
-    path: '/studio-design',
+    account: 'fabric-design',
     tools: Object.freeze([
       'paper_catalog',
       'paper_edit',
@@ -40,37 +44,56 @@ export const ROUTES = Object.freeze({
   }),
 });
 
-export function routeUrl(originValue, routeValue) {
+function routeSpec(routeValue) {
   const route = String(routeValue || '').trim().toLowerCase();
   const spec = ROUTES[route];
   if (!spec) throw new Error('STUDIO_ROUTE_REFUSED');
+  return { route, spec };
+}
 
-  let origin;
+export async function routeUrl(
+  routeValue,
+  {
+    home = process.env.HOME || homedir(),
+    readManifest = async (path) => JSON.parse(await readFile(path, 'utf8')),
+  } = {},
+) {
+  const { route, spec } = routeSpec(routeValue);
+  const manifestPath = join(
+    String(home || ''),
+    '.local',
+    'share',
+    'studio-direct-mcp',
+    'private',
+    spec.account,
+    'manifest.json',
+  );
+  let manifest;
   try {
-    origin = new URL(String(originValue || ''));
+    manifest = await readManifest(manifestPath);
   } catch {
-    throw new Error('STUDIO_ORIGIN_REFUSED');
+    throw new Error('STUDIO_RUNTIME_UNAVAILABLE');
   }
   if (
-    origin.protocol !== 'https:' ||
-    !origin.hostname.endsWith('.ts.net') ||
-    origin.hostname === '.ts.net' ||
-    origin.username ||
-    origin.password ||
-    origin.port ||
-    origin.search ||
-    origin.hash ||
-    (origin.pathname !== '' && origin.pathname !== '/')
+    !manifest ||
+    typeof manifest !== 'object' ||
+    manifest.account !== spec.account ||
+    !Number.isInteger(manifest.port) ||
+    manifest.port < 1 ||
+    manifest.port > 65535
   ) {
-    throw new Error('STUDIO_ORIGIN_REFUSED');
+    throw new Error('STUDIO_RUNTIME_REFUSED');
   }
-  return `https://${origin.hostname}${spec.path}`;
+  return {
+    route,
+    account: spec.account,
+    manifestPath,
+    url: `http://127.0.0.1:${manifest.port}/mcp`,
+  };
 }
 
 export function assertCatalog(routeValue, toolsValue) {
-  const route = String(routeValue || '').trim().toLowerCase();
-  const spec = ROUTES[route];
-  if (!spec) throw new Error('STUDIO_ROUTE_REFUSED');
+  const { spec } = routeSpec(routeValue);
   if (!Array.isArray(toolsValue)) throw new Error('STUDIO_CATALOG_REFUSED');
 
   const actual = [];
@@ -95,26 +118,28 @@ export function assertCatalog(routeValue, toolsValue) {
 }
 
 export async function createBridge({
-  origin,
   route,
+  home = process.env.HOME || homedir(),
+  readManifest,
   remoteClient = null,
   remoteTransport = null,
 } = {}) {
-  const normalizedRoute = String(route || '').trim().toLowerCase();
-  const url = routeUrl(origin, normalizedRoute);
+  const resolved = await routeUrl(route, { home, readManifest });
   const client = remoteClient ?? new Client(
     { name: 'mastermind-claude-desktop-studio-bridge', version: '1.0.0' },
     { capabilities: {} },
   );
-  const transport = remoteTransport ?? new StreamableHTTPClientTransport(new URL(url));
+  const transport = remoteTransport ?? new StreamableHTTPClientTransport(
+    new URL(resolved.url),
+  );
   if (!remoteClient) {
     await client.connect(transport);
   }
 
   const initial = await client.listTools();
-  assertCatalog(normalizedRoute, initial?.tools);
+  assertCatalog(resolved.route, initial?.tools);
 
-  const allowed = new Set(ROUTES[normalizedRoute].tools);
+  const allowed = new Set(ROUTES[resolved.route].tools);
   const server = new Server(
     { name: 'mastermindStudio', version: '1.0.0' },
     { capabilities: { tools: {} } },
@@ -122,7 +147,7 @@ export async function createBridge({
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const listed = await client.listTools();
-    assertCatalog(normalizedRoute, listed?.tools);
+    assertCatalog(resolved.route, listed?.tools);
     return listed;
   });
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -136,30 +161,25 @@ export async function createBridge({
     });
   });
 
-  return { server, client, transport, url, route: normalizedRoute };
+  return { server, client, transport, ...resolved };
 }
 
 function parseArgs(argv) {
   let route = 'design';
-  let origin = process.env.MASTERMIND_STUDIO_MCP_ORIGIN || '';
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '--route') {
       route = argv[++index] || '';
       continue;
     }
-    if (token === '--origin') {
-      origin = argv[++index] || '';
-      continue;
-    }
     throw new Error('STUDIO_ARGUMENT_REFUSED');
   }
-  return { route, origin };
+  return { route };
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const { route, origin } = parseArgs(argv);
-  const bridge = await createBridge({ origin, route });
+  const { route } = parseArgs(argv);
+  const bridge = await createBridge({ route });
   const stdio = new StdioServerTransport();
   await bridge.server.connect(stdio);
 
