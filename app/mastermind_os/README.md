@@ -120,7 +120,8 @@ in the Mastermind OS file `01M3NRCX55B452A12819WNE1RH`:
   define Knowledge and Search with qualified coverage and exact source destinations.
 - **KD01/KD01M `SPU-0` / `STU-0`** show the source reader and original scoped
   draft. UX09 specifies the added-draft state, conditional Undo, full mobile
-  append payload and expanded source details; the last two remain reader amendments.
+  append payload and expanded source details. Mobile payload/details and visible
+  status/Close chrome remain reader amendments recorded in the handoff.
 
 Apply the ink and graphite surfaces, ivory reading hierarchy, champagne primary
 actions, original sculptural artwork and progressive disclosure consistently
@@ -197,9 +198,9 @@ and implementation gates. The #1046/#1150 draft custody and source-release
 boundaries are not cleared by this design work. No working prototype links,
 installed UX or live command behavior are claimed from Paper screenshots.
 
-The source-reader copy operation recorded in the design handoff returned an
-unreadable response and remains unresolved on its original carrier. No verified
-KD02 product variant is claimed. UX09 contains the reviewable added-state,
-mobile-payload and details specifications; the original reader targets remain
-paused for those amendments until that exact operation is reconciled. Other
-completed screens and notes are unaffected.
+The design handoff records unresolved Paper copy and note-text responses on
+their original targets. No verified KD02 product variant is claimed. UX09 holds
+the reviewable added-state, mobile-payload and details specifications; the full
+contract also records the pending mobile header correction. Those exact target
+writes remain paused until the original operations are reconciled. Other
+completed screens and notes retain their reviewed state.
