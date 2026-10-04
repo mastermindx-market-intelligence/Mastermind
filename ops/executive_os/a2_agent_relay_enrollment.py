@@ -867,6 +867,8 @@ def _prepare_disabled() -> dict[str, object]:
         if loaded:
             raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
         if disabled:
+            _assert_disarmed()
+            _pre_enrollment_artifacts_absent(binding)
             _assert_bound_config_current(binding)
             return {"action": "already_disabled", "release_sha": release_sha}
 
