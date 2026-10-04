@@ -39,3 +39,7 @@ The final refusal-to-missing regression and 42-test result are in `evidence/BASE
 `VERIFIED_READER_RESULT.md` describes the new source-bound human/text and machine/JSON reader. It consumes the same four original artifacts without minting new identities. The 15 source-binding and 26 reader tests complement, not replace, the 42 baseline tests. `CI_5992_DIAGNOSIS.md` identifies the actual failing repository gate and the held artifact-placement repair. No connected product or release acceptance is claimed.
 
 The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs the three offline consumer suites without duplicating their assertions. Local entrypoint success does not repair or waive the held repository evidence-placement gate.
+
+## Unexecuted browser-preview source
+
+`PREVIEW_EXECUTION_HOLD.md` records the new three-file display draft and the blocked build. Python/JavaScript syntax was checked without importing or running the renderer. No HTML/browser result exists in this evidence set. Do not retry the blocked build absent actual platform recovery; this draft is not a Terminal/Macro integration or W1 acceptance.

@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T02:30:08.159667+00:00",
+  "prepared_at": "2026-10-04T02:49:08.865165+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "02417bb5bcae3e7777aff7b281319dfc8a016e1ff7115bd37688d5f602f3898f",
-      "bytes": 10619
+      "sha256": "ebf6e6a173b92a95e64aa9e29620f0ec58ea1dbfb7993a38556bb6a50a88a5de",
+      "bytes": 11042
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -27,13 +27,17 @@
       "sha256": "9da89d63dbf96b25092944c73d672d8ec9000d8c013cb8454abe325b269c8b87",
       "bytes": 3090
     },
+    "PREVIEW_EXECUTION_HOLD.md": {
+      "sha256": "32ba096d0c57c8b15968d9d4b2a2e4cb6c8c83cd9c75c5e869cf761e966686f6",
+      "bytes": 3692
+    },
     "R1_RESOLUTION.md": {
       "sha256": "c8747d9f0fcc856b571acf66e9467d6c64173882f1bb78792e2f80e31b1654ad",
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "7800622ac2b15ab16ad829ab197ace1e7996b1387ac091bddc687960b4a8bf88",
-      "bytes": 4953
+      "sha256": "8094b94bee874477cbad20e3aa537f4572a14b86aac8d798f21b022af35074e6",
+      "bytes": 5345
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",
@@ -59,6 +63,10 @@
       "sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
       "bytes": 18353
     },
+    "build_fixture_preview.py": {
+      "sha256": "090e687b4ac929037b6f95a2b6a8f1d3b41967a0001cb92ab9f1054ab8a2fe83",
+      "bytes": 6515
+    },
     "evidence/BASELINE_REPLAY_GREEN.json": {
       "sha256": "31f664348c7113a8721aae092a230802f2b63cba763bb4a21cde949405e0f55a",
       "bytes": 666
@@ -82,6 +90,10 @@
     "evidence/CAPTURE_BOUNDARY.json": {
       "sha256": "d923b3cb21b4acd0949a6562d0d09529431d2b10653ff2b32c4e331f0beba19f",
       "bytes": 1077
+    },
+    "evidence/PREVIEW_SOURCE_STATIC_CHECK.json": {
+      "sha256": "50d4e953687c213ae1659dd6883eab81006c37cc06a9104e4ff4c486b7a06619",
+      "bytes": 1560
     },
     "evidence/R1-contract-shape-tests.json": {
       "sha256": "5a4bbe8dd444b460b757e4c852bb04f0db20befee53f08cf217088b6c9bbcbcb",
@@ -250,6 +262,14 @@
     "evidence/targeted-source-delta.json": {
       "sha256": "2831b7972f59a63738f8fc69db670de6a7dd24d6534442c45d2a41e31686cc75",
       "bytes": 3747
+    },
+    "fixture_preview.css": {
+      "sha256": "065c780c2eaade6acc496221ed83bdfaf3d2f65449ade42e5d5d77bdb052acbb",
+      "bytes": 7491
+    },
+    "fixture_preview.js": {
+      "sha256": "a9769d2564d9f224f8c237dfe209832c421308f8d50cd6560506e697d7fb1bdc",
+      "bytes": 6452
     },
     "issuer_state_transition.candidate.schema.json": {
       "sha256": "6247a5f696127629b0b2f9884f6feaee32c6fc6a8a340b15684542e13a1bc9e3",

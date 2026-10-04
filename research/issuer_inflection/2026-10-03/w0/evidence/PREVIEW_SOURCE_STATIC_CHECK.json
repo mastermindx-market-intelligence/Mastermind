@@ -1,0 +1,32 @@
+{
+  "kind": "preview_source_static_syntax_only",
+  "source_before_change": "46b8e32942df90402f941c297f721e333e64e35e",
+  "recorded_at": "2026-10-04T02:48:11.002100+00:00",
+  "completed_at": "2026-10-04T02:48:11.044259+00:00",
+  "source_sha256": {
+    "build_fixture_preview.py": "090e687b4ac929037b6f95a2b6a8f1d3b41967a0001cb92ab9f1054ab8a2fe83",
+    "fixture_preview.css": "065c780c2eaade6acc496221ed83bdfaf3d2f65449ade42e5d5d77bdb052acbb",
+    "fixture_preview.js": "a9769d2564d9f224f8c237dfe209832c421308f8d50cd6560506e697d7fb1bdc"
+  },
+  "python_ast_parse": "PASS",
+  "javascript_syntax_check": "PASS",
+  "preview_module_imported": false,
+  "build_preview_called": false,
+  "html_generated": false,
+  "browser_launched": false,
+  "browser_tested": false,
+  "css_or_visual_quality_verified": false,
+  "product_admitted": false,
+  "source_admitted": false,
+  "trial_registered": false,
+  "production_proof": false,
+  "execution_hold": {
+    "action": "build_preview and create first offline HTML/method output directory",
+    "dispatch": "blocked before execution; no process receipt",
+    "reported_message": "This tool call was blocked by OpenAI because we couldn't determine the safety status of the request.",
+    "effect": "EFFECT_NONE for the blocked call; previously created source is preserved",
+    "retry_performed": false,
+    "alternate_carrier_used": false
+  },
+  "verification_boundary": "Only syntax inspection of the previously created files. No import, evaluation, fixture loading, rendering or substitute execution of the blocked build."
+}

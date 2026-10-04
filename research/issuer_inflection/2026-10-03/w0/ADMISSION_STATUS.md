@@ -56,3 +56,7 @@ Final fixture correction: `not_evaluable` → `missing` is now `became_missing`,
 The source-bound development reader and selected-source period/unit/clock checks are now implemented in this candidate. Fifteen source-binding tests, all 42 existing baseline tests and 26 reader tests pass. See VERIFIED_READER_RESULT.md and the source-hashed evidence. Original artifact hashes and response bytes remain unchanged. This is local CLI human/machine parity, not connected Terminal/Macro, Ask or live producer proof.
 
 CI #5992 is confirmed FAILED, not pending. All 150 identity-literal findings originate in six nested raw response JSON files outside the guard's recognized evidence location. The existing structural check accepts the original financial responses and rejects injected UID fields. A byte-preserving relocation preflight was platform-blocked, so relocation remains unperformed; no guard/data/permission change was made. See CI_5992_DIAGNOSIS.md. Required release, independent review and source/rights/capture admissions remain held.
+
+## Latest source-only continuation
+
+The browser-preview source was drafted, but its first build was platform-blocked before execution. Only static Python/JavaScript syntax checks ran. See PREVIEW_EXECUTION_HOLD.md and evidence/PREVIEW_SOURCE_STATIC_CHECK.json. No new runnable/browser capability is asserted; all owner/admission/release gates above remain. The source and scope stay on #1195 under the existing operation.
