@@ -1,0 +1,21 @@
+{
+  "kind": "R1_candidate_test_receipt",
+  "test_path": "research/issuer_inflection/2026-10-03/w0/test_candidate_schema.py",
+  "test_sha256": "4b2f00610d1f52fe2247446feef726bc4bb4714381fa0bb115582c3e07a22da1",
+  "comparator_sha256": "9da89d63dbf96b25092944c73d672d8ec9000d8c013cb8454abe325b269c8b87",
+  "schema_sha256": "6247a5f696127629b0b2f9884f6feaee32c6fc6a8a340b15684542e13a1bc9e3",
+  "source_candidate_before_repair": "0d98eef5e54d763ba5dbcf62e2e533fcbdb7104a",
+  "recorded_before_execution_at": "2026-10-03T20:28:24.536303+00:00",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "research/issuer_inflection/2026-10-03/w0/test_candidate_schema.py"
+  ],
+  "test_count": 29,
+  "i3_acceptance": false,
+  "production_proof": false,
+  "owner_admitted": false,
+  "completed_at": "2026-10-03T20:28:24.739786+00:00",
+  "exit_code": 0,
+  "output": ".............................\n----------------------------------------------------------------------\nRan 29 tests in 0.090s\n\nOK\n",
+  "output_sha256": "8cccdfc6566f0c67de8725bfcab62cda4035cabd1f4880e6f5f72b6739619025"
+}

@@ -1,0 +1,48 @@
+{
+  "kind": "refusal_to_missing_regression",
+  "source_before_repair": "34bf437ed15e8bc73a07c0677442d8eb9e4267a7",
+  "before_module_sha256": "aacde90fa238ca623f185216f146f15bf780be72acc856de596105b9fdc6d4f2",
+  "test_driver_sha256": "63a20dac4603a1c17a821a838493c97741c8e67052072c7f055bdba071e3e372",
+  "red": {
+    "exit_code": 1,
+    "tests_run": 42,
+    "failures": 1,
+    "output": "..........................F...............\n======================================================================\nFAIL: test_refusal_to_missing_is_not_unchanged_value (__main__.BaselineReplayTests.test_refusal_to_missing_is_not_unchanged_value)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/Volumes/Mastermind/agent-workspaces/web/i3-w0-issuer-inflection-20261003-astra-c4/research/issuer_inflection/2026-10-03/w0/test_baseline_replay.py\", line 79, in test_refusal_to_missing_is_not_unchanged_value\n    self.assertEqual(row[\"reconstruction_state\"],\"became_missing\")\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'unchanged_value' != 'became_missing'\n- unchanged_value\n+ became_missing\n\n\n----------------------------------------------------------------------\nRan 42 tests in 0.109s\n\nFAILED (failures=1)\n",
+    "output_sha256": "8917e8af8375c2c57311017a15bd011ac26a5ea875348d5e82f7693c7b9933e8"
+  },
+  "green_method_recorded_at": "2026-10-04T00:20:32.732829+00:00",
+  "owner_response_bytes_changed": false,
+  "i3_acceptance": false,
+  "production_proof": false,
+  "after_module_sha256": "4f3516830dba112649b46b965c90e481c7c25ca1f81225658ef3b8ae36e8f472",
+  "green": {
+    "exit_code": 0,
+    "tests_run": 42,
+    "output": "..........................................\n----------------------------------------------------------------------\nRan 42 tests in 0.108s\n\nOK\n",
+    "output_sha256": "f48e339dd0e20a2f04a504a3665e34e29314fcf83ce08181fcb84c7d1f516ccd",
+    "completed_at": "2026-10-04T00:20:32.902793+00:00"
+  },
+  "unchanged_owner_case_parity": [
+    {
+      "case": "first_admission",
+      "artifact_sha256": "ee7faddbd0bf053a0ec674344fa6a7d5c95fd9fecdab822188606f81c27809cd",
+      "unchanged": true
+    },
+    {
+      "case": "later_admission_refusal",
+      "artifact_sha256": "52cb04350d7cee2769b106827a0b39a592fd85d7a723a1c64c8cc8e5db7ad82b",
+      "unchanged": true
+    },
+    {
+      "case": "source_cutoff_refusal",
+      "artifact_sha256": "007542c487242ff0e2536b0b03ff6412ffd47e54ab349f3554ceaa1e6a855eca",
+      "unchanged": true
+    },
+    {
+      "case": "identical_cutoff",
+      "artifact_sha256": "efeb04d0ef1f53b8eeed2d14c9474492e95e0ab186cb67e3305ba7448bcaba41",
+      "unchanged": true
+    }
+  ],
+  "same_test_driver_red_green": true
+}

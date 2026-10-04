@@ -1,0 +1,67 @@
+{
+  "kind": "review_and_runtime_recovery_observation",
+  "scope": "This supplements earlier runtime observations; earlier receipts remain unchanged.",
+  "independent_review": {
+    "requested_peer": "C3 / U0BR1GQH7SB",
+    "channel_id": "C0C5FCK1F45",
+    "thread_ts": "1791057530.889919",
+    "hold_message_ts": "1791057593.513879",
+    "disposition": "CAPACITY_HOLD_NO_PICKUP",
+    "reason": "Receiver could not verify WEB / CHAT_INCLUDED_DEFAULT / NON_PRO_DEFAULT eligibility.",
+    "review_verdict": null,
+    "closeout_reply_ts": "1791058378.689359",
+    "closeout_effect": "No further work expected from C3 under this delivery; recovery retained by Astra/C4."
+  },
+  "executive_submit": {
+    "operation_key": "i3-w0-architecture-review-20261003-astra-c4",
+    "execution_profile": "research_only",
+    "attempt_limit": 1,
+    "status": "refused",
+    "error_code": "backend_unavailable",
+    "message": "Executive CEO ingress backend is unavailable",
+    "request_ref": "req-ecefd58e3c477e47b36b80092cbb02f0",
+    "accepted_job_id": null,
+    "accepted_intent_id": null,
+    "dispatch_receipt": null,
+    "retry_or_alternative_registration": false
+  },
+  "subsequent_canonical_roots_read": {
+    "arguments": {
+      "view": "roots",
+      "limit": 10
+    },
+    "generated_at": "2026-10-03T20:17:50Z",
+    "ok": true,
+    "count": 3,
+    "total": 3,
+    "truncated": false,
+    "job_ids": [
+      "JOB-001",
+      "JOB-002",
+      "JOB-003"
+    ],
+    "snapshot_digest": "eb54d17d7ac2147f187325da3a74902f2d9204db7176a90cd1fb0411471660f3",
+    "generation_before": 2,
+    "generation_after": 2,
+    "ceo_submit_armed": false,
+    "degraded": [
+      "ceo_submit_armed: false; new CEO submissions are unavailable through this arm",
+      "root enumeration provenance is unjoined; creation provenance requires exact-root acquisition"
+    ],
+    "limit": "Same three pre-existing roots; no I3 review acceptance/dispatch receipt. Do not infer completed provenance from root enumeration or retry ingress through another path."
+  },
+  "successful_inbox_read": {
+    "generated_at": "2026-10-03T20:13:14Z",
+    "payload_generated_at": "2026-10-03T20:13:24Z",
+    "mastermind_installed_sha": "7cff784b47556464eb6ec20445fcf5e659c5b64d",
+    "macro_installed_sha": "88804ed7079700c598bb8e04aa64307d1335402d",
+    "runtime_counts": {
+      "jobs": 3,
+      "attempts": 2,
+      "workers_available": 1
+    },
+    "availability_limit": "An AVAILABLE count is not current mode/quota/suitability/placement or an I3 source-owner binding."
+  },
+  "integration_recovery_owner": "Astra CEO / C4",
+  "background_i3_execution_claimed": false
+}

@@ -1,0 +1,39 @@
+{
+  "archive_sha256": "a02aec7db76da6a145c35c078182c90c2b257cf850afab912babf602edbd467f",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-m",
+    "pytest",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_required_governed_aapl_values",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_unlinked_vintages_are_not_evaluable",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_pit_cutoffs_hide_future_knowledge",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_statement_query_reconciliation_for_direct_metrics"
+  ],
+  "completed_at": "2026-10-03T19:39:34.519357+00:00",
+  "exit_code": 1,
+  "i3_acceptance": false,
+  "kind": "read_only_owner_input_preflight",
+  "observed_result": "SETUP_FAILURE: isolated HOME hid user-site pytest; tests not collected",
+  "production_proof": false,
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "source_modified": false,
+  "source_paths": [
+    "engine",
+    "app",
+    "collectors",
+    "config",
+    "lib",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py",
+    "tests/fixtures/fundamental_forensics/aapl_10k_2025",
+    "tests/fixtures/fundamental_forensics/aapl_10q_2026q3"
+  ],
+  "source_repository": "mastermindx-market-intelligence/macro",
+  "started_at": "2026-10-03T19:39:34.415578+00:00",
+  "stdout_bytes": 69,
+  "stdout_sha256": "c99d342a1664b93a03868ad56a22451965948da811503ce3b0d29ae5123b9dbb"
+}
