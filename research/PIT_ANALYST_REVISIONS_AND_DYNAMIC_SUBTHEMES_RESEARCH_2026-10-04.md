@@ -1,440 +1,963 @@
-# MastermindX Research — Point-in-Time Analyst Revisions & Dynamic Subtheme Intelligence
-
-**Status:** RESEARCH ONLY — no procurement, production ingestion, deployment, portfolio/trading behavior change, or new source decision authority is authorized by this document.  
-**Protected source pin used for publication:** `mastermindx-market-intelligence/Mastermind@84df29801d4078724c2b603a136de5aa1532cdfe`  
-**Skillpack:** `mastermind.sol_skillpack.v1`, version `1.0.1`, bootstrap major `1`  
-**Publication date:** 2026-10-04  
-**Confidence convention:** HIGH = directly verified in current protected Git or primary vendor documentation; MEDIUM = supported but incomplete; LOW = requires vendor/sample/license confirmation.
-
-> Publication note: the preceding Deep Research run contained several over-broad or weakly sourced current-state claims. This GitHub version tightens the source boundary. Internal Mastermind claims below are limited to facts observed at the protected source pin. Vendor details that were not established from primary documentation are explicitly left unverified rather than filled with assumptions.
-
-## A. Executive conclusion
-
-Mastermind should build the **capability to reconstruct market expectations point-in-time**, with analyst forecast revisions as a first-class, inspectable evidence family. The capability is important because Mastermind already names `fundamental_revisions` / `earnings_expectations` as an evidence family, while current protected research explicitly says the repository does **not** expose a mature historical revisions series suitable for persistence research. The same protected research also says historical fine-grained dynamic subtheme identity must not be fabricated.
-
-The correct P0 is therefore **not “buy vendor X” and not “wire a revisions score into the portfolio.”** It is:
-
-1. establish a canonical bitemporal contract for estimate observations, coverage, fiscal-period identity, corrections, actuals, and consensus snapshots;
-2. run a bounded source bake-off proving PIT reconstructability and rights;
-3. build deterministic revision/dispersion/breadth/staleness features only from eligible observations;
-4. prove incremental predictive value against existing SUE, price, options, news, guidance, fundamentals, flow, theme, and macro evidence;
-5. promote only evidence dimensions that survive leakage, cost, correlation, and out-of-sample tests.
-
-**What is proven internally (HIGH):**
-- `portfolio/held_risk.py` contains an `earnings_expectation` lane and `_lane_earnings_expectation(...)`; its documented real-data mapping includes earnings summary fields and `revisions.est_chg_30d`.
-- `research/TREND_PERSISTENCE_PROTOCOL.md` explicitly says the current census does not expose a mature historical revisions series suitable for the experiment and forbids fabricating analyst-revision persistence.
-- The same protocol explicitly says there is no clearly canonical fine-grained dynamic subtheme taxonomy in this repository and requires PIT membership before dynamic subtheme/network persistence work.
-- Portfolio V3 source contains `source_family: fundamental_revisions` and `independence_family: earnings_expectations`, and the repository contains a Decision Snapshot implementation plan.
-- `brain/signal_history.py` is an existing KEEP-FIRST decision-time history owner; `brain/outcome_ledger.py` joins what the engine predicted, what happened, and what it saw.
-
-**What remains unproven:** which commercial source best satisfies analyst-level PIT reconstruction; exact licensed history/latency/correction semantics by package; economic alpha after modern costs and controls; and whether dynamic subthemes add incremental information beyond existing group/theme evidence.
-
-**Recommendation-changing evidence:** reject or materially down-rank this build if no candidate source can reproduce historical knowledge states without post-hoc correction leakage, if rights prevent required internal use, if analyst-detail adds no material value over PIT consensus, or if the family fails pre-registered incremental OOS tests after realistic costs.
-
-## B. Current-state census
-
-### Verified protected-repository observations
-
-| Artifact | Exact observed symbol/contract | Observed behavior | Temporal semantics | State | Material implication |
-|---|---|---|---|---|---|
-| `portfolio/held_risk.py` | `_lane_earnings_expectation(sd, run_date)`; lane name `earnings_expectation` | Consumes earnings/SUE-style state plus revision direction; search evidence shows `revisions.est_chg_30d` in the real-data mapping | Decision-time lane, but the search evidence alone does not prove a mature historical analyst-detail source | BUILT | Revisions already have a consumer shape; do not create a parallel evidence plane |
-| `tests/test_held_risk.py` | fixtures include `revisions.breadth`, `est_chg_30d`, `est_chg_90d`, `net_up_30d`, `n_analysts` | Tests expected lane behavior with synthetic revision fields | Test fixtures are not proof of live historical source provenance | BUILT test contract | Canonical source work should preserve inspectable dimensions rather than invent a new opaque score |
-| `research/TREND_PERSISTENCE_PROTOCOL.md` | “Fundamental-revision gap” and “Theme identity gap” | Explicitly blocks revision persistence until canonical PIT history exists; blocks fabricated historical fine-grained theme membership | Requires PIT histories/effective dating | LIVE research law / charter | Strongest current internal evidence that history is the missing substrate |
-| `brain/signal_history.py` | KEEP-FIRST per `(asof, ticker)` lens snapshot + decision | Preserves what the engine saw at decision time | PIT decision snapshot semantics | BUILT | Candidate derived revision evidence should attach to the existing decision-time history rather than create a second memory ledger |
-| `brain/outcome_ledger.py` | joins prediction + realized result + decision-time lens snapshot | Grades calibration and lens edge | Historical join over decision-time snapshots and realized outcomes | BUILT | Natural owner for incremental validation outcomes |
-| Portfolio V3 design | `source_family: fundamental_revisions`; `independence_family: earnings_expectations` | Specifies evidence-family separation and Decision Snapshot direction | PIT/correction-safe architecture is an explicit design concern | PARTIAL / mixed implementation | New revisions evidence must preserve independence/provenance semantics |
-| `docs/superpowers/plans/2026-09-15-mastermind-portfolio-v3-s0-decision-snapshot.md` | Decision Snapshot vertical | Plan describes immutable, bounded, correction-safe PIT snapshot and read-only inspection | Explicit PIT/correction-safe language | PLAN with adjacent implementation evidence in repo | Integrate through existing snapshot/provenance owners; do not create a parallel control plane |
-| `research/competitive_intelligence/fiscal/2026-08-22/recon01/observations.jsonl` | observations of estimates/revision-history surfaces | Shows prior lawful reconnaissance of estimate/revision UI capabilities; raw authenticated assets were omitted for rights safety | Remaining unknown explicitly includes provider/PIT export semantics | OBSERVED reconnaissance | Reuse as product-intelligence evidence, not as a licensed historical dataset |
-
-### Gaps that are directly supported by protected source
-
-1. **Historical analyst-revision maturity gap — HIGH.** Protected research says the current census does not expose a mature historical revisions series suitable for the persistence experiment.
-2. **Fine-grained dynamic subtheme PIT identity gap — HIGH.** Protected research says no clearly canonical fine-grained dynamic subtheme taxonomy is present and forbids projecting current membership backward.
-3. **Consumption vs existence must be separated — HIGH.** Synthetic revision fields in tests and an earnings-expectation consumer do not prove source maturity, historical PIT correctness, or production coverage.
-4. **Decision-time evidence has an existing owner — HIGH.** `brain.signal_history` / outcome infrastructure should be extended, not duplicated.
-
-### Not established by this publication
-
-This report does **not** claim that every starting-point file from the original commission has been fully line-by-line re-audited, nor does it claim that Macro, Terminal/charting, or Research Vault repository identities have been completely reconciled here. Those are mandatory pre-build archaeology items for the implementation owner.
-
-## C. State-of-the-art research
-
-### Point-in-time expectation data
-
-Institutional-grade estimate research requires reconstructing what was knowable at a historical decision timestamp, not merely querying a vendor’s latest corrected history. “Estimate date,” “snapshot date,” “vendor as-of,” and “Mastermind known-at” are not interchangeable.
-
-LSEG’s public company-data catalogue states that its company data includes point-in-time data and I/B/E/S estimates, with broad global coverage and multiple delivery surfaces. LSEG’s StarMine Analyst Revisions Model publicly states that it uses earnings, revenue, EBITDA and recommendation revision signals and covers 17,600 public companies since 1995. These claims establish that revision-oriented institutional products exist; they do **not** by themselves prove that every delivery package exposes raw analyst-level bitemporal history suitable for Mastermind’s reconstruction requirements.
-
-WRDS’ I/B/E/S vendor page documents a critical identity hazard: broker and analyst identifiers were reassigned in a major 2018 change, and WRDS warns that additional reshuffles can occur. Therefore analyst/broker IDs must be treated as vendor-vintage-scoped identifiers unless a verified stable crosswalk exists.
-
-### Quant implications
-
-The research program should distinguish:
-- **earnings prediction**: whether revisions improve forecasts of future actuals;
-- **cross-sectional return prediction**: whether revisions predict residual returns after factor/sector/country/liquidity controls;
-- **event interaction**: whether revisions add information conditional on SUE/PEAD, guidance, and earnings-event timing;
-- **information decay**: whether any historical anomaly survives in modern samples after transaction costs and crowding.
-
-The literature review for implementation approval must prioritize original papers and modern replications on forecast revisions, dispersion, PEAD/SUE interactions, analyst skill/herding, stale estimates, and anomaly decay. Publication-era results are hypotheses, not promotion evidence.
-
-### Dynamic themes
-
-Protected Mastermind research already has sector/theme/basket context but explicitly lacks canonical fine-grained dynamic subtheme PIT identity. Industry thematic frameworks support the idea that themes evolve and can be measured using text/NLP, but that does not justify backfilling a modern taxonomy into history. Prospective effective-dated capture should begin only under an accepted canonical contract.
-
-## D. Source landscape
-
-| Source | Coverage | History | Latency | PIT quality | Corrections | Rights | Cost class | Best use |
-|---|---|---|---|---|---|---|---|---|
-| LSEG I/B/E/S / company data | Broad global estimates; exact package scope must be confirmed | Public LSEG material indicates long company-data history; exact detail-history start varies | Package-dependent | Potentially strong; must prove raw/detail reconstruction | Must confirm vintage/correction delivery; WRDS documents ID reshuffles | Commercial license | Enterprise | Candidate analyst-detail and/or consensus source |
-| LSEG StarMine ARM | Public claim: 17,600 public companies | Public claim: since 1995 | Model/product dependent | Derived model, not a substitute for raw PIT detail | Model recalibration/inputs require documentation | Commercial license | Enterprise | Benchmark/derived comparison, not canonical raw source |
-| S&P Capital IQ Estimates / Visible Alpha | Broad sell-side estimate/model coverage | Deep history claimed by S&P; exact metric/region start must be confirmed | Product dependent | Potentially strong; analyst-detail vs consensus capabilities must be separated | Must confirm correction/vintage semantics | Commercial license | Enterprise | Candidate detailed expectations/KPI source |
-| FactSet Estimates | Broad institutional estimate coverage | UNVERIFIED here by primary package documentation | Product dependent | Must prove PIT snapshots/detail rather than assume | Must confirm | Commercial license | Enterprise | Bake-off candidate |
-| Bloomberg Estimates | Broad institutional coverage | UNVERIFIED here | Fast/current | Historical analyst-detail reconstructability unverified | Must confirm | Commercial license | Enterprise | Current monitoring / bake-off candidate if licensed |
-| WRDS I/B/E/S access | Research access to I/B/E/S where institutionally licensed | Dataset/package dependent | Batch/research | Strong research utility; vintage handling is mandatory | WRDS explicitly warns of analyst/broker ID reshuffles | Academic/institutional license | Institutional | Research-grade validation where available |
-| SEC EDGAR/XBRL | US issuer filings/actuals/guidance evidence | Filing history; XBRL era strongest | Filing-time | Strong event timestamp for issuer disclosures; not analyst consensus | Amendments/restatements explicit in filings | Public | Free | Actuals, issuer guidance, filing-time controls; **not a substitute for analyst estimates** |
-| Public industry codes (NAICS/SIC) | Broad issuer/entity classification | Scheme/version dependent | Slow | Can be effective-dated if versions/mappings retained | Reclassification/version changes | Public/low | Low | Baseline static cohorts |
-| Licensed GICS/ICB/RBICS/theme products | Broad classification depending vendor | Vendor dependent | Periodic | Must retain membership effective dates | Rebalances/reclassifications | Commercial | Enterprise | Candidate baseline taxonomy, not automatically dynamic PIT truth |
-| News/transcripts/filings text | Broad event corpus depending rights | Source dependent | Minutes to filing-time | PIT possible if original publication timestamps and corpus versions retained | Corrections/retractions/model-version drift | Mixed | Mixed | Prospective dynamic-theme evidence |
-
-**Do not treat open finance websites as substitutes for PIT estimate history unless they can prove historical vintages, correction behavior, identifiers, and rights.**
-
-### Primary references used for source claims
-
-- LSEG company data: https://www.lseg.com/en/data-catalogue/company-data
-- LSEG StarMine Analyst Revisions Model: https://www.lseg.com/en/data-catalogue/analytics/quantitative-analytics/starmine-analyst-revisions-model
-- WRDS I/B/E/S vendor page: https://wrds-www.wharton.upenn.edu/pages/about/data-vendors/vendor-partner-ibes/
-- S&P Global discussion of Capital IQ / Visible Alpha estimates: https://www.spglobal.com/market-intelligence/en/news-insights/research/2026/08/the-price-of-intelligence
-- SEC EDGAR APIs: https://www.sec.gov/search-filings/edgar-application-programming-interfaces
-- BlackRock thematic investing discussion: https://www.blackrock.com/us/individual/insights/thematic-investing
-- MSCI thematic indexes: https://www.msci.com/indexes/category/thematic-indexes
-
-## E. Canonical data model
-
-The canonical model must be **vendor-neutral and bitemporal**. Never use one overloaded `as_of_date` to mean both source publication time and Mastermind knowledge time.
-
-### 1. `security_entity_identity_v1`
-
-Minimum fields:
-`entity_id`, `security_id`, `vendor`, `vendor_security_id`, `ticker`, `exchange`, `currency`, `effective_from`, `effective_to`, `known_at`, `ingested_at`, `source_receipt_id`.
-
-Purpose: PIT identifier mapping through ticker changes, listings, mergers, share-class changes, and vendor remaps.
-
-### 2. `analyst_broker_identity_v1`
-
-`vendor`, `vendor_vintage_id`, `vendor_analyst_id`, `vendor_broker_id`, optional normalized internal identity, `effective_from/to`, `known_at`, `correction_generation`, provenance.
-
-**Invariant:** vendor analyst/broker IDs are not assumed stable across vintages.
-
-### 3. `estimate_observation_v1`
-
-`entity_id`, `security_id`, `metric`, `basis` (GAAP/non-GAAP/adjusted/vendor-defined), `period_type`, `fiscal_period_id`, `fiscal_period_end`, `fiscal_period_version`, `currency`, `units`, `split_basis`, `raw_value`, `normalized_value`, analyst/broker-vintage refs, vendor record ID, status, and the full temporal envelope.
-
-### 4. `coverage_event_v1`
-
-Coverage initiation, stop, resume, dropped estimate, broker termination, analyst reassignment, and vendor eligibility events. Coverage changes are signal candidates and missingness controls, not mere null-handling.
-
-### 5. `actual_result_v1`
-
-Actual metric value with issuer/source event time, vendor availability time, correction lineage, basis/currency/units, fiscal-period identity/version, and source receipt.
-
-### 6. `consensus_snapshot_v1`
-
-`entity_id`, metric/period identity, aggregation method, contributor count, mean/median/high/low/dispersion where licensed, stale-count diagnostics, and provenance indicating whether the snapshot is:
-- vendor-provided; or
-- deterministically derived from eligible analyst observations.
-
-Never claim analyst-level reconstruction from consensus-only history.
-
-### 7. `source_receipt_v1`
-
-Source/vendor, package/version, request/export identity, checksum, acquisition time, documented cutoff/timezone, rights class, correction generation, raw-object locator, normalization version, and quality flags.
-
-### 8. `theme_membership_v1`
-
-`entity_id`, `theme_id`, taxonomy/version, membership source, `effective_from/to`, `known_at`, confidence/score where appropriate, evidence refs, model/version for machine-derived assignments, and correction generation.
-
-### Temporal semantics
-
-Every time-sensitive record must distinguish:
-- **event_time** — when the underlying economic/publication event occurred;
-- **as_of** — source/vendor snapshot reference time;
-- **observed_at** — when the source observation was made by the acquisition process;
-- **available_at / known_at** — earliest time Mastermind can prove the information was available to the historical decision process;
-- **ingested_at** — when Mastermind persisted it;
-- **effective_from / effective_to** — business-valid interval;
-- **correction_generation** — lineage for vendor QA, restatement, remap, or normalization corrections.
-
-**Backtest eligibility gate:** a record is eligible only when its proven `known_at/available_at <= decision_cutoff`, under the historical acquisition policy being simulated. A vendor estimate date alone is insufficient.
-
-## F. Derived intelligence
-
-### Deterministic computation graph
-
-`raw receipt → dedupe → correction/vintage selection → temporal eligibility → security/entity resolution → analyst/broker vintage resolution → fiscal-period alignment → basis/unit/currency/split normalization → coverage eligibility → stale-estimate classification → consensus construction → revision/breadth/dispersion calculations → quality/provenance flags → evidence artifact`
-
-No LLM belongs in PIT eligibility, arithmetic normalization, estimate imputation, correction selection, or consensus calculation.
-
-### Candidate deterministic features
-
-Keep dimensions inspectable:
-- consensus change over 1d/5d/20d/60d windows;
-- revision magnitude scaled by price, prior estimate, or historical forecast error where economically valid;
-- upward/downward revision breadth;
-- analyst count and active coverage count;
-- dispersion and dispersion change;
-- stale-estimate share / age distribution;
-- revision acceleration/deceleration;
-- clustered same-direction revisions;
-- initiation/termination/resumption events;
-- analyst-detail vs consensus disagreement;
-- time-to-earnings and post-earnings revision response;
-- actual-vs-prior-PIT-consensus surprise;
-- interaction terms with SUE/PEAD, guidance changes, price momentum, options-implied moves, and news intensity.
-
-### Legitimate LLM roles
-
-**Cheap models:** classify text evidence into a fixed taxonomy, extract candidate theme mentions from already timestamped documents, summarize provenance, and flag records for human/data-QA review.
-
-**Frontier models:** research synthesis across heterogeneous evidence, proposed causal explanations, contradiction analysis, and candidate new-theme discovery for later deterministic adjudication.
-
-LLMs must never invent numeric estimates, repair missing observations without trace, decide PIT eligibility, or silently overwrite source values.
-
-## G. Mastermind integration map
-
-| Producer | Canonical owner/artifact | Evidence family | Consumer |
-|---|---|---|---|
-| Licensed estimate source(s) | vendor-neutral PIT estimate contracts under existing data ownership | `fundamental_revisions` | existing earnings-expectation lane; research/shadow consumers |
-| SEC/issuer disclosures | existing fundamental/event owners | actuals / guidance / fundamentals | revision controls, SUE/event interaction |
-| Existing decision-time evidence | `brain.signal_history` | decision snapshot evidence | `brain.outcome_ledger`, calibration/research |
-| Existing outcome infrastructure | `brain.outcome_ledger` / outcomes | realized grading | validation and promotion decisions |
-| Existing Portfolio V3 snapshot/provenance direction | Decision Snapshot contracts | evidence provenance / independence | portfolio research and inspection |
-| Effective-dated theme producer | existing theme/group owner once canonical | thematic exposure | rotation/theme research consumers |
-
-**Architecture rule:** analyst revisions are an evidence family, not a new lifecycle, memory, outcome, portfolio-authority, or decision control plane.
-
-## H. Empirical validation program
-
-### Pre-register before looking at results
-
-1. **Universe:** PIT investable universe with delisted securities retained; explicit country/exchange/security-type rules.
-2. **Identity:** PIT entity/security mapping; corporate-action handling; no current-ticker backfill.
-3. **Clock:** explicit decision cutoff, exchange timezone, market-hours policy, and next-executable-price convention.
-4. **Vendor vintage:** fixed correction policy; raw snapshot/receipt hashes retained.
-5. **Costs:** spread/slippage/fees, borrow where short legs exist, turnover and capacity.
-6. **Controls:** sector/industry/country/size/liquidity, standard factor exposures, price momentum, SUE, guidance, options, news, fundamentals, flows/themes/macro where available.
-7. **Horizons:** event-window, 1w, 1m, 3m, 6m; earnings-outcome horizons separately.
-8. **OOS:** rolling/walk-forward; embargo/purging for overlapping labels where needed.
-9. **Multiplicity:** family-wise or FDR controls across feature/horizon variants.
-10. **Missingness:** test coverage initiation/termination and no-coverage as explicit variables.
-11. **Ablations:** consensus-only vs analyst-detail; magnitude vs breadth vs dispersion vs staleness; with/without SUE; with/without event conditioning.
-12. **Cross-source replication:** where rights/trials allow, compare the same security/date sample across vendors.
-
-### Metrics
-
-- rank IC / ICIR and incremental IC;
-- cross-sectional regression alpha/t-stat after controls;
-- calibration and error reduction for future earnings outcomes;
-- top-minus-bottom spreads and monotonicity;
-- turnover, realized costs, capacity and decay;
-- regime/subperiod stability;
-- missingness/coverage-selection diagnostics;
-- incremental explanatory power over existing Mastermind evidence.
-
-### Promotion thresholds
-
-Set exact numerical thresholds in the preregistration after the candidate source sample is known. At minimum promotion requires:
-- no unresolved PIT leakage;
-- economically material OOS improvement, not statistical significance alone;
-- stability across multiple subperiods/regimes;
-- acceptable turnover/cost/capacity;
-- incremental value after existing-evidence controls;
-- reproducibility from retained receipts;
-- rights compatible with intended internal use.
-
-### Kill criteria
-
-Reject or defer if any of the following holds:
-- historical knowledge state cannot be reconstructed;
-- vendor corrections overwrite history without recoverable vintages;
-- identifiers cannot be reconciled sufficiently for the intended tests;
-- rights block required storage/use;
-- analyst-detail does not outperform materially cheaper PIT consensus;
-- incremental OOS value disappears after SUE/momentum/news/guidance controls;
-- alpha is consumed by costs/turnover/capacity;
-- results depend on one fragile metric, era, sector, or vendor definition;
-- missingness/coverage bias dominates the signal;
-- dynamic theme membership cannot be effective-dated without retrospective leakage.
-
-## I. Risks and failure modes
-
-1. **Lookahead leakage:** post-hoc corrected histories masquerading as historical knowledge.
-2. **Consensus/detail confusion:** treating consensus snapshots as if individual analyst histories can be reconstructed.
-3. **Identifier instability:** especially analyst/broker IDs across I/B/E/S vintages.
-4. **Fiscal-period drift:** FY1/FY2 or quarter identity can roll/remap after corporate calendar changes.
-5. **Basis drift:** GAAP/non-GAAP/adjusted metric definitions can change.
-6. **Currency/unit/split discontinuity:** revisions can be artifacts of normalization.
-7. **Stale estimates:** consensus can move because old observations drop out, not because analysts revised.
-8. **Coverage selection:** initiation/termination correlates with issuer size, liquidity and events.
-9. **Survivorship:** current-covered issuers are not the historical investable universe.
-10. **Correction leakage:** vendor QA performed later can improve historical data ex post.
-11. **Evidence duplication:** revisions may repackage earnings, guidance, news and price information.
-12. **Vendor lock-in:** proprietary IDs/taxonomies/delivery formats can become architecture.
-13. **False precision:** many estimates do not imply independent information.
-14. **Theme backfill leakage:** modern themes projected into historical companies create artificial persistence.
-15. **LLM model drift:** machine-derived themes can change when model/version/prompts change.
-
-## J. Build priority
-
-**P0**
-- Canonical PIT estimate/actual/coverage/identity/correction/source-receipt contracts.
-- Source bake-off/trial protocol.
-- PIT eligibility and deterministic normalization/revision engine design.
-- Pre-registered validation plan.
-- Prospective effective-dated theme-membership capture contract if a current owner accepts it.
-
-**P1**
-- Bounded research ingestion for approved trial data only.
-- Consensus and analyst-detail ablation datasets.
-- Deterministic revision/breadth/dispersion/staleness features.
-- Shadow evidence artifacts attached to existing decision-time history.
-- OOS validation and independence tests.
-
-**P2**
-- Dynamic theme extraction/classification after canonical PIT membership exists.
-- Cross-source replication and richer analyst-skill/herding features.
-- Research/operator inspection surfaces.
-
-**Defer**
-- Large proprietary theme graphs before baseline PIT membership and incremental value are proven.
-- Recommendation/price-target families unless they add independent value beyond estimate revisions.
-
-**Reject**
-- Latest-only estimate feeds presented as historical PIT.
-- Retroactively backfilled dynamic themes without evidence-time lineage.
-- Opaque composite scores that erase independent evidence dimensions.
-- Any implementation that gives a new data family direct portfolio/trading authority.
-
-## K. Proposed implementation phases
-
-### Phase 0 — acceptance and archaeology
-Re-pin protected source, complete the exact Mastermind/Macro/Terminal/Research Vault census, identify existing data owners/adapters/contracts, and reconcile any adjacent plan. **No procurement or production write.**
-
-### Phase 1 — source bake-off
-Using approved trials or already licensed access, evaluate a fixed security/date/metric sample across candidates for PIT reconstructability, analyst-detail fidelity, corrections, identifiers, history, latency, delivery ergonomics, documentation, rights, and cost class. Produce a scored evidence matrix. **No purchase authority.**
-
-### Phase 2 — canonical contract prototype
-Implement research-only schemas and deterministic transformations behind fixtures/samples. Prove bitemporal reconstruction and correction lineage. **No production ingestion.**
-
-### Phase 3 — research dataset and preregistered tests
-Build a bounded research dataset, run leakage audits, consensus-vs-detail ablations, incremental tests, costs, factor controls, OOS and falsifiers. Publish receipts and reproducible results.
-
-### Phase 4 — shadow integration
-Only if promotion thresholds pass, attach namespaced evidence to existing decision-time history / Decision Snapshot-compatible research surfaces. No sizing, gating, execution, or trading effect.
-
-### Phase 5 — production admission
-Separate commission. Requires current source law, license/rights approval, production data ownership, monitoring, correction policy, security review, and explicit portfolio-authority decision. Passing research does not grant this phase.
-
-## L. Exact implementation handoff
-
-### Follow-on commission: PIT Analyst Revisions — Trial, Contract Prototype, and Validation
-
-You are implementing a **research-only, non-production trial** of Mastermind’s point-in-time analyst-revision capability.
-
-**Authority boundary**
-- Do not purchase or license data.
-- Do not deploy production ingestion.
-- Do not modify live portfolio/trading behavior, sizing, gating, execution, or settlement.
-- Do not grant a new source or evidence family decision authority.
-- Do not bypass current Mastermind bootstrap, admission, source-custody, rights, or protected-procedure gates.
-- Use only already licensed access or separately approved vendor trials.
-- Treat any later procurement, production build, and production admission as separate gates/commissions.
-
-**Required source recovery**
-1. Pin current protected `mastermindx-market-intelligence/Mastermind` master.
-2. Load current `docs/sol_skills/INDEX.md` and required companions from that same commit.
-3. Resolve the actual current Mastermind, Macro, Terminal/charting, and Research Vault repositories/owners relevant to estimates and themes.
-4. Census existing estimate/fundamental/theme adapters and adjacent plans before creating anything.
-
-**Phase A — bake-off**
-Evaluate approved candidate sources on the same fixed security/date/metric sample. Measure:
-- PIT reconstructability;
-- analyst-detail vs consensus capability;
-- correction/vintage transparency;
-- analyst/broker/security identity stability;
-- fiscal-period mapping;
-- coverage/history/latency;
-- API/bulk ergonomics;
-- rights and retention constraints;
-- cost class;
-- cross-source disagreement.
-
-Deliver a source-evidence matrix and an unverified/vendor-confirmation register. Do not select a vendor merely from marketing claims.
-
-**Phase B — canonical research contracts**
-Prototype vendor-neutral research contracts for:
-- security/entity identity;
-- analyst/broker vintage identity;
-- estimate observation/revision;
-- coverage stop/resume;
-- actual result;
-- consensus snapshot;
-- fiscal-period identity/version;
-- source receipt/correction lineage.
-
-The temporal envelope must explicitly separate `event_time`, `as_of`, `observed_at`, `available_at/known_at`, `ingested_at`, `effective_from/to`, and `correction_generation`.
-
-**Phase C — deterministic engine**
-Implement only research-scoped deterministic steps:
-dedupe → correction/vintage selection → PIT eligibility → identity resolution → fiscal-period alignment → basis/unit/currency/split normalization → coverage eligibility → staleness → consensus/revision/breadth/dispersion → provenance/quality flags.
-
-LLMs may classify/summarize already timestamped text or propose research hypotheses. They may not determine PIT eligibility, invent estimates, or repair numeric history without trace.
-
-**Phase D — validation**
-Pre-register and execute:
-- PIT universe + delisting controls;
-- market-clock/execution assumptions;
-- factor/sector/country/size/liquidity controls;
-- SUE/PEAD, price, options, guidance, news, fundamentals, flow/theme/macro controls;
-- consensus-vs-detail ablations;
-- revision magnitude/breadth/dispersion/staleness ablations;
-- rolling OOS/walk-forward;
-- multiple-testing control;
-- transaction costs/turnover/capacity;
-- missingness and coverage-event tests;
-- cross-source replication where lawful;
-- negative controls and falsifiers.
-
-**Promotion output**
-Return one of:
-- `PROMOTE_TO_SHADOW_RESEARCH`
-- `MORE_EVIDENCE_REQUIRED`
-- `REJECT_DATA_FAMILY`
-
-A promotion result authorizes only a later shadow-research commission. It does not authorize procurement, production deployment, or portfolio/trading effects.
-
-## Unverified / needs vendor confirmation register
-
-- Exact earliest analyst-detail history by region/metric/package for each commercial vendor.
-- Whether historical exports preserve original observations versus retrospectively corrected values.
-- Exact availability timestamp semantics and timezone/cutoff policy.
-- Treatment of late-arriving estimates, stopped estimates, broker mergers, and analyst reassignment.
-- Corporate-action, currency, unit, basis, and fiscal-period remapping policy.
-- API/bulk delivery entitlements and retention/redistribution restrictions.
-- Commercial cost class for Mastermind’s intended use; no price is asserted here.
-- Whether any already licensed Mastermind/Macro estate access can satisfy the bake-off without new procurement.
-- Full current identities and source pins for Macro, Terminal/charting, and Research Vault estates.
+# MastermindX Research — Point-in-Time Expectations & Theme Intelligence
+
+## Deep-census reassessment: reuse first, upgrade overlaps, build only residual gaps
+
+**Status:** RESEARCH / ARCHITECTURE ONLY. This document authorizes no data purchase, vendor contact, production ingestion, deployment, portfolio/trading behavior change, source-authority expansion, or new control plane.  
+**Protected Mastermind source pin:** `mastermindx-market-intelligence/Mastermind@715e6ac01f16ef446dc6eba3c215454d0eddb54d`  
+**Protected skillpack at that pin:** `mastermind.sol_skillpack.v1` / `1.0.1` / bootstrap major `1`  
+**Macro census pin used for relevant-file reads:** `mastermindx-market-intelligence/macro@b0ba2f79c25ac7892c48b24f14a167781e16247b`  
+**Macro decision-boundary recheck:** current master advanced to `80fd8a1b993afe6109d289cb6916809dde70c830`; the one-commit diff touches only Entry Radar catalyst files and does not change the expectation/theme files cited below.  
+**Terminal census pin:** `mastermindx-market-intelligence/mastermind-terminal@601db3352044535e327a7700221db062f5eca053`  
+**Research Vault identity resolved:** `mastermindx-market-intelligence/executive-dr-vault`; targeted searches found no expectation/revision/theme implementation owner there.  
+**Prior Mastermind study carrier:** PR #1223, branch `research/pit-analyst-revisions-study-2026-10-04`.  
+**Direct overlapping Macro research carrier:** PR #8402, `research: harden Commission 2 PIT analyst expectations audit`, OPEN and UNMERGED at census time.  
+**Direct overlapping Macro source-proof carrier:** PR #8312, `research: initiate Information→Price and complete native SRC-A1 proof`, OPEN/DRAFT and UNMERGED at census time.
+
+> **Major correction to the first version of this study:** the original recommendation was directionally right about point-in-time expectations, but it substantially overestimated how much greenfield architecture was needed. The deep census found an already-established Expectation Market Dynamics program, an accepted physical owner for prospective EPS/revenue observations, bitemporal/correction contracts, a vendor bake-off, a frozen evaluation preregistration, a mature theme-graph owner with local-theme identity, and existing research/outcome infrastructure. The new plan is therefore **upgrade-first and integration-first**, not warehouse-first.
 
 ---
 
-### Protected Mastermind evidence references
+# A. Executive conclusion — what changed after the census
+
+The highest-value problem is **not** “Mastermind needs an analyst-revisions warehouse” and it is **not** “Mastermind needs a dynamic-subtheme graph.”
+
+Both statements are now too broad.
+
+The deep census found that Mastermind's estate already contains:
+
+1. a current earnings-expectation consumer in protected Mastermind;
+2. a prospective expectation source owner in Macro with immutable observation/attempt artifacts, explicit clock separation, correction lineage, missingness, rights state, fiscal-period anchors and mutation gates;
+3. legacy revision snapshot/history artifacts already consumed by theme-revision logic;
+4. a separate monthly recommendation-revision lane;
+5. a frozen Expectation Market Dynamics architecture with explicit no-rebuild law;
+6. a completed public vendor research wave (`VEND-0`) whose result is already `SAMPLE_REQUIRED / PROBE_FURTHER`;
+7. a frozen evaluation preregistration (`K3E-EVAL-0-V1`);
+8. a bitemporal GMI Theme Graph with canonical/local theme identity, evidence, belief-time history, local-theme nodes, and a merged `theme_state/v1` producer implementation;
+9. a Company Theme Exposure projection and a Terminal company-theme-context API;
+10. existing PIT decision-history, outcome, rank-IC/HAC/FDR, walk-forward and trend-persistence research machinery.
+
+Therefore the revised capability thesis is:
+
+> **Finish, prove, and consume the existing expectation and theme owners; add only the missing institutional history/detail and cross-owner read models that cannot be obtained from the current estate.**
+
+## What should be built next
+
+The P0 capability is no longer a new canonical warehouse. It is a **thin, deterministic, owner-preserving expectation read model over the existing K3E/SRC-A1 source plane**, but only after the incumbent SRC-A1 proof lane is reconciled.
+
+The next implementation owner must first inspect the outcome of Macro PR #8312. If its proof is accepted and protected, the first genuinely new slice is `EXP-1`: a read-only expectation surface over the existing `data/revisions/expectation_observations.parquet` / `expectation_attempts.parquet` source-owner records. If #8312 is rejected or remains unproven, the first slice is **repair/prove the existing SRC-A1 owner**, not create another store.
+
+For themes, the next action is **not** to create `theme_membership_v1`. GMI already owns this territory. Mastermind should wait for/reuse the accepted GMI D2/W3B/W3C contracts and consume `theme_state/v1` / Company Theme Exposure through existing projections. Open GMI PRs must be reconciled rather than duplicated.
+
+## What should be deleted from the old plan
+
+Delete as new-build tasks:
+
+- a new security/entity identity store;
+- a new source-receipt store;
+- a new raw estimate-history store;
+- a new consensus truth store;
+- a new actual-results store;
+- a new theme-membership store;
+- a new theme graph;
+- a new validation/outcome ledger;
+- a new Decision Snapshot implementation inside this program;
+- a second broad vendor landscape study;
+- a new LLM theme-classification control plane.
+
+## What remains genuinely missing
+
+The residual gaps are narrower and more valuable:
+
+1. **accepted production proof of the existing prospective expectation source**;
+2. **a deterministic expectation read model (`EXP-1`)** over that source;
+3. **mature historical institutional PIT expectations** if current prospective history is insufficient for the intended empirical questions;
+4. **analyst-level contributor history/identity** only if a sample proves incremental value over PIT consensus;
+5. **cross-source correction/vintage validation** for any institutional source;
+6. **incremental predictive validation** against existing SUE, price, news, options, fundamentals, themes and macro;
+7. **accepted GMI membership lifecycle / ThemeState production semantics** where open GMI work is still incomplete;
+8. **Mastermind-side consumption** of accepted K3E/GMI outputs without inventing new authority.
+
+---
+
+# B. Deep current-state census
+
+## B1. Protected Mastermind
+
+| Capability | Exact owner / evidence | State from this census | Reuse ruling |
+|---|---|---|---|
+| Earnings expectation risk lane | `portfolio/held_risk.py::_lane_earnings_expectation`; tests in `tests/test_held_risk.py` | **BUILT_NOT_PROVEN** from source/test census | **EXTEND CONSUMPTION, do not replace.** It already reads SUE/PEAD-style state plus `revisions.est_chg_30d`, `net_up_30d`, breadth and analyst count fixtures. |
+| Per-name evidence matrix | `portfolio/lenses.py` | **BUILT_NOT_PROVEN** | **KEEP.** New expectation evidence must remain an inspectable lens/family, not an opaque fused score. |
+| Decision-time signal history | `brain/signal_history.py` | **BUILT_NOT_PROVEN** | **KEEP / later extend.** This is the existing KEEP-FIRST decision-time history owner. |
+| Outcome/calibration join | `brain/outcome_ledger.py`, `brain/outcomes` | **BUILT_NOT_PROVEN** | **KEEP.** No new outcome ledger. |
+| Cross-sectional validation | `portfolio/predictions.py` | **BUILT / research-used** | **KEEP / GENERALIZE.** It already handles entry-date clustering, non-overlapping windows and rank-IC/HAC-style inference. |
+| Survivorship-safe price substrate | `loop/single_name_panel.py` | **BUILT** | **KEEP.** It unions deep + delisted names and preserves PIT membership outside the price assembler. |
+| PIT fundamentals research | `loop/fundamentals.py` | **BUILT / research** | **KEEP.** Reuse its causal/as-of discipline; do not create a separate fundamental actuals owner. |
+| Research LLM lane | `brain/research_desk.py` | **BUILT_NOT_PROVEN** | **KEEP, narrow role.** It can propose hypotheses/themes but cannot own numeric PIT eligibility or source truth. |
+| Physical bottleneck reasoning | `brain/bottleneck.py` | **BUILT_NOT_PROVEN** | **KEEP.** It is already display-only and anchored to observed RS; do not create another bottleneck/theme reasoning organ. |
+| Rotation measurement | `brain/rotation_tensor.py` | **BUILT_NOT_PROVEN** | **KEEP.** It already provides causal price/breadth/churn/flow rotation measurements with no sizing authority. |
+| Trend persistence protocol | `research/TREND_PERSISTENCE_PROTOCOL.md` | **ACTIVE RESEARCH LAW** | **KEEP.** It explicitly says group persistence must reuse existing owners and dynamic subthemes must consume Macro/GMI once PIT membership is stable. |
+| Trend persistence harness | `research/trend_persistence_panel.py`, `trend_persistence_walkforward.py`, V2/B2 results | **PROVEN AS A RESEARCH INSTRUMENT** | **KEEP / reuse for methodology.** V2 confirmed 29 drawdown tests; B2 found no incremental model value over volatility-aware baselines, proving the harness can kill attractive-looking signals. |
+| Group persistence Wave C | `research/TREND_PERSISTENCE_PREREG_C1.md` | **SPEC_ONLY / PREREGISTERED, not yet run** | **KEEP.** Do not create another group-persistence experiment. The prior dates are used; future confirmatory dates are required. |
+| Portfolio V3 Decision Snapshot | V3 spec + S0 plan only | **NOT_BUILT** on protected master | **DO NOT BUILD HERE.** Separate Portfolio V3 owner. Future expectation evidence may consume it after that owner lands. |
+| V3 claim ledger / reliability-independence fusion | V3 spec | **NOT_BUILT** | **DO NOT BUILD HERE.** This study can specify compatibility only. |
+| Static system census | `data/census/CENSUS.md`, generated 2026-07-16 | **STALE for October negative proof** | **REFERENCE ONLY.** Live Git/code/PR archaeology outranks its absence claims. |
+
+### Important Mastermind correction
+
+The prior study treated “Decision Snapshot” as if this program might need to provide the provenance substrate. That is wrong. Portfolio V3 owns that vertical and it remains separate. Expectation/theme work should emit owner-native, provenance-bearing evidence that a future Decision Snapshot can consume; it should not build the snapshot system.
+
+## B2. Macro — expectation/revision estate
+
+### Existing physical source owner
+
+`collectors/equity_revisions.py` is already the accepted owner for prospective EPS/revenue expectation accrual.
+
+The accepted decision `DEC-SRC-A1-PROSPECTIVE-EXPECTATION-SOURCE-CONTRACT` fixes:
+
+- owner: `collectors/equity_revisions.py`;
+- source artifacts:
+  - `data/revisions/expectation_observations.parquet`
+  - `data/revisions/expectation_attempts.parquet`;
+- legacy artifacts that must retain their semantics:
+  - `data/revisions/latest.parquet`
+  - `data/revisions/history.parquet`;
+- explicit non-owner:
+  - `collectors/yf_analyst.py` remains price-target/rating only.
+
+The accepted `DATA_CLOCK_RIGHTS_MATRIX.md` already defines the source plane with:
+
+- `source_effective_at`;
+- `source_published_at`;
+- `provider_observed_at`;
+- `system_observed_at`;
+- market-session classification;
+- fiscal period/horizon fields;
+- deterministic collection/attempt/observation identity;
+- append/supersede correction lineage;
+- typed missingness;
+- rights state;
+- idempotency;
+- rate-limit evidence;
+- mutation gates against fiscal rollover, zero substitution, failure overwrite, horizon collapse, unit/currency/basis drift and hindsight backfill.
+
+This is substantially more mature than the canonical contract proposed in the first version of this study.
+
+### Current capability state
+
+Main's dated `CURRENT_CAPABILITY_LEDGER.md` still labels SRC-A1 `BUILT_NOT_PROVEN` after an August audit failure and subsequent repairs. That ledger is stale relative to October activity.
+
+Open Macro PR #8312 is the current direct proof carrier. Its body reports a native October corpus and proposes promotion to `PROVEN_LIVE`, but the PR was OPEN/DRAFT and UNMERGED during this census. Therefore this study **does not promote the capability**. Current protected/main truth remains:
+
+> **SRC-A1 = BUILT_NOT_PROVEN pending accepted proof.**
+
+This is the single most important gate before any new expectation read model.
+
+### Existing legacy revision analytics
+
+`engine/theme_revisions.py` already consumes `latest.parquet` and `history.parquet` and computes:
+
+- per-theme revision breadth;
+- coverage-normalized breadth;
+- 90-day estimate drift;
+- PIT breadth acceleration when enough history exists;
+- an explicitly display-only 30d-vs-90d proxy when PIT history is insufficient;
+- honest `INSUFFICIENT_HISTORY` states;
+- coverage thresholds.
+
+This means the old plan's proposal to newly invent revision breadth/acceleration is duplicative. The work should be **generalized/reused**, not rebuilt.
+
+`engine/analyst_revisions.py` separately computes monthly recommendation revision momentum from append-only Finnhub recommendation snapshots. It is useful adjacent evidence, but it is not analyst-level EPS/revenue estimate history.
+
+### Existing K3E program
+
+`research/alpha_intelligence/expectation_market_dynamics/` already contains:
+
+- `MASTERPLAN.md`;
+- `BUILD_SEQUENCE.md`;
+- `OWNER_AND_REUSE_MATRIX.md`;
+- `DATA_CLOCK_RIGHTS_MATRIX.md`;
+- `CURRENT_CAPABILITY_LEDGER.md`;
+- `VEND_0_INSTITUTIONAL_ESTIMATES_BAKEOFF_2026-08-23.md`;
+- `EVALUATION_PREREG.md`;
+- `eval0_preregistration.v1.json`.
+
+Its owner law is already explicit:
+
+```text
+OWNER-NATIVE TRUTH
+  expectations / events / financial facts / price / residuals / options / identity
+      ↓
+DERIVED K3E READ MODEL
+  expectation surface → market-response surface → coupling / lag / disagreement / phase
+      ↓
+DESCRIPTIVE PROJECTIONS
+```
+
+K3E is explicitly not a new truth store, event system, identity plane, residual engine, ranker, publication plane or lifecycle plane.
+
+### Vendor work already done
+
+`VEND-0` is already complete at:
+
+`SAMPLE_REQUIRED / PROBE_FURTHER`
+
+No winner, rights clearance, trial or procurement authority exists. This is the correct state. The old study's broad vendor-research phase should be removed. Any future vendor work is a **record-level sample/rights bakeoff only**, and only if the current estate cannot answer the empirical question.
+
+### Evaluation law already frozen
+
+`K3E-EVAL-0-V1` is already frozen and has an activation receipt. It must not be silently rewritten by this study.
+
+If a future analyst-detail experiment asks a genuinely new question, it needs a new preregistration/version with a new forward boundary. It does not justify a new evaluation system.
+
+## B3. Macro — theme/subtheme estate
+
+The first study's “dynamic subtheme identity gap” was true only from the narrow protected-Mastermind-repo view. It is no longer a valid estate-wide statement.
+
+### GMI Theme Graph already owns this territory
+
+Current Macro contains:
+
+- `engine/theme_graph/store.py` — bitemporal graph storage semantics;
+- `engine/theme_graph/identity.py` — canonical/local theme identity, including `ltheme:finviz:*` and `ltheme:ths:*`;
+- `engine/theme_graph/ontology.py` / inventory;
+- `engine/theme_graph/membership_evidence.py`;
+- `engine/theme_graph/capability.py`;
+- `engine/theme_graph/theme_state.py` — `theme_state/v1`;
+- `engine/company_theme_exposure/` — context-only company-theme projection;
+- `contracts/theme_graph/*`;
+- local-theme materialization for Finviz/THS;
+- bitemporal edge semantics with `valid_from/valid_to`, `evidence_time`, `belief_time`, `computed_at`.
+
+The estate's own evidence census records production graph/evidence activity and thousands of latest-belief edges. Therefore **a new theme graph or theme-membership store is prohibited duplication**.
+
+### Current GMI maturity is partial, not absent
+
+Relevant PR state at census time:
+
+- #8379 — merged PIT membership-history integrity repair;
+- #8382 — merged `theme_state/v1` schema/compiler/reader implementation;
+- #8417 — OPEN/DRAFT Selection Cohort / Company Theme Exposure work;
+- #8432 — OPEN/DRAFT membership lifecycle work;
+- #8435 — OPEN/DRAFT structural-owner binding.
+
+So the correct classification is:
+
+- core graph + local-theme plane: **operating / existing owner**;
+- ThemeState implementation: **BUILT_NOT_PROVEN / not yet sufficient for every downstream claim**;
+- full membership lifecycle / D2C-D2D-D2E acceptance: **PARTIAL**;
+- W3C cohort interpretation: **PARTIAL / open carrier**.
+
+The residual gap is **completion and accepted consumption**, not a new taxonomy architecture.
+
+## B4. Terminal adjacency
+
+Terminal is not the canonical expectation source, but it already has adjacent functionality.
+
+### Current estimates
+
+`ingest/collect_us_fund.py` fetches yfinance:
+
+- `earnings_estimate`;
+- `revenue_estimate`;
+- `eps_trend`;
+- recommendation summary;
+- price targets and analyst-opinion fields.
+
+These are useful display/current-state inputs. They are **not** a reason to create another historical estimate store. Terminal should remain a consumer/projection. A future convergence can replace duplicated current-state fetching where economically justified, but this study does not authorize that migration.
+
+### Current theme projection
+
+Terminal main contains:
+
+`terminal/app/api/company-theme-context/[symbol]/route.ts`
+
+It serves `mastermind.company-theme-context/v1`, verifies authentication, checks current Company Intelligence generation, and resolves Company Theme Exposure from the incumbent R2 source.
+
+Therefore the old plan's implied need for a new theme-facing product surface is also too broad. A projection already exists; upstream owner maturity and cross-product consumption are the real gaps.
+
+## B5. Research Vault
+
+The current repository identity is `mastermindx-market-intelligence/executive-dr-vault`. Targeted searches for estimates, revisions, analyst, theme, `known_at`, and Fiscal did not identify an implementation owner relevant to this capability. It is not used as an architecture authority in this plan.
+
+---
+
+# C. Prior-study overlap audit
+
+| Prior planned capability | Census result | New disposition | Exact existing owner / action |
+|---|---|---|---|
+| New canonical security/entity identity contract | Existing identity owners already govern joins | **DELETE-AS-DUPLICATE** | Reuse Stock Identity / Data OS identity. K3E explicitly forbids a new identity plane. |
+| New analyst/broker identity store | No accepted contributor-detail owner yet; current SRC-A1 is consensus-level | **NEW ONLY IF REQUIRED** | Add vendor-vintage-scoped contributor identity only inside the accepted source-owner extension after sample proof. Never create a global analyst identity plane preemptively. |
+| New raw estimate observation store | Already exists | **DELETE-AS-DUPLICATE** | `collectors/equity_revisions.py` + `expectation_observations.parquet`. |
+| New coverage-event store | Attempt/missingness/coverage semantics already exist; contributor coverage lifecycle is residual | **EXTEND** | Extend source-owner records only if analyst-detail samples require explicit contributor start/stop/resume events. |
+| New actual-results store | Existing Earnings/FIF owners | **DELETE-AS-DUPLICATE** | Consume owner-native earnings/financial facts. |
+| New consensus snapshot truth store | K3E source/read-model architecture already exists | **GENERALIZE / EXTEND** | `EXP-1` should derive lawful snapshots from existing source records; no second truth store. |
+| New source receipt contract/store | Existing attempt receipts + evidence foundation + owner provenance | **DELETE-AS-DUPLICATE** | Reuse `expectation_attempts.parquet`, K1 evidence contracts, owner-native receipts. |
+| New temporal vocabulary | Data OS + K3E already define clocks | **GENERALIZE** | Map source-specific fields to existing temporal law; do not mint a rival vocabulary. |
+| New correction lineage model | SRC-A1 already has append/supersede lineage | **KEEP / EXTEND ONLY** | Add vendor-specific correction generation only where institutional samples require it. |
+| New revision breadth/magnitude/dispersion engine | Much already exists | **EXTEND** | Reuse `engine/theme_revisions.py`, existing revision fields, and later `EXP-1`; add only features not already emitted. |
+| New recommendation revision feature | Already exists | **KEEP** | `engine/analyst_revisions.py`. Treat separately from EPS/revenue revisions. |
+| New theme-membership contract | GMI already owns | **DELETE-AS-DUPLICATE** | Reuse `engine/theme_graph/*`, local-theme identities, membership evidence, `theme_state/v1`. |
+| New dynamic-subtheme graph | Already exists | **DELETE-AS-DUPLICATE** | GMI Theme Graph. |
+| New theme-state engine | Already merged in GMI | **DELETE-AS-DUPLICATE** | Consume accepted `theme_state/v1`; do not fork. |
+| New theme product/API | Terminal already has company-theme-context projection | **DELETE / CONVERGE LATER** | Reuse Company Theme Exposure / Terminal BFF. |
+| New validation stack | Existing `portfolio.predictions`, trend-persistence, Eval OS, K3E EVAL-0 | **DELETE-AS-DUPLICATE** | Reuse existing graders/prereg machinery. |
+| New decision-time history | Already exists | **DELETE-AS-DUPLICATE** | `brain.signal_history`. |
+| New outcome ledger | Already exists | **DELETE-AS-DUPLICATE** | `brain.outcome_ledger` / `brain.outcomes`. |
+| New Decision Snapshot | Separate V3 owner; not built | **DELETE FROM THIS PROGRAM** | Wait for Portfolio V3 S0; emit compatible evidence only. |
+| Broad vendor landscape research | VEND-0 + open Commission 2 already cover it | **DELETE-AS-REPEAT** | Next vendor step is sample/rights proof only if needed. |
+| LLM theme classifier as source truth | Existing research desk + GMI owner; unsafe as truth | **REJECT** | LLM may propose hypotheses/summarize evidence, never mint PIT eligibility or numeric truth. |
+
+---
+
+# D. Existing architecture reuse map
+
+```text
+PROSPECTIVE EXPECTATIONS
+collectors/equity_revisions.py
+  ├─ data/revisions/latest.parquet              [legacy current revision surface]
+  ├─ data/revisions/history.parquet             [prospective revision history]
+  ├─ expectation_observations.parquet           [SRC-A1 immutable source observations]
+  └─ expectation_attempts.parquet               [SRC-A1 attempts / nulls / failures / rate limits]
+          │
+          ├─ engine/theme_revisions.py           [existing theme breadth/drift/accel]
+          └─ K3E EXP-1                           [missing deterministic expectation read model]
+                 │
+                 ├─ protected Mastermind held-risk / lenses / signal_history
+                 ├─ later V3 Decision Snapshot consumer, when separately built
+                 └─ research validation via existing prediction/eval owners
+
+RECOMMENDATION REVISIONS
+collectors/finnhub_altdata.py
+  └─ data/finnhub/recommendation.parquet
+       └─ engine/analyst_revisions.py            [existing monthly recommendation delta]
+
+THEMES
+GMI Theme Graph
+  ├─ nodes / edges / evidence / belief_time
+  ├─ local_theme identity (Finviz / THS)
+  ├─ membership evidence / lifecycle
+  ├─ theme_state/v1
+  └─ company_theme_exposure.v1
+       ├─ Terminal company-theme-context/v1
+       └─ future Mastermind/Prophet consumers through accepted owner adapters
+
+RESEARCH / GRADING
+portfolio.predictions + loop/single_name_panel
+  ├─ rank IC / HAC / non-overlap / delisted names
+  ├─ trend_persistence prereg / holdout / walk-forward / null models
+  ├─ brain.signal_history
+  └─ brain.outcome_ledger / outcomes
+```
+
+---
+
+# E. Genuine residual gaps
+
+## E1. Expectation source proof
+
+The current source is built but not accepted as production-proven on protected/main evidence available to this study. Open #8312 may close that gap; it must be reconciled, not duplicated.
+
+## E2. Deterministic expectation read model
+
+K3E's `EXP-1` remains the clean residual capability: a cutoff-safe, rights-aware, missing-aware, source-owner-derived expectation surface.
+
+This should answer, for a security/metric/horizon/cutoff:
+
+- latest lawful observation;
+- prior lawful observation;
+- revision magnitude;
+- breadth where available;
+- contributor/coverage count where lawful;
+- staleness;
+- dispersion where supplied;
+- fiscal-period identity;
+- correction lineage;
+- missingness/degradation;
+- source clocks;
+- rights state.
+
+It should not rank, size, gate or trade.
+
+## E3. Historical institutional PIT depth
+
+Prospective accrual beginning in 2026 cannot answer long-history questions by itself. Historical institutional data is justified only for empirical questions requiring older regimes or analyst-level detail.
+
+This is a **data-depth gap**, not an architecture gap.
+
+## E4. Analyst-level contributor detail
+
+Current SRC-A1 explicitly emits `aggregation_level=consensus_snapshot` and `contributor_id=null`.
+
+Contributor detail is therefore genuinely missing. It should be acquired/built only if:
+
+1. a sample proves the vendor can reconstruct PIT contributor history;
+2. rights permit intended storage/use;
+3. contributor detail adds material incremental value over consensus;
+4. identity reshuffles can be handled without false stable-ID assumptions.
+
+## E5. GMI membership lifecycle / accepted ThemeState consumption
+
+The graph exists. Residual work is to finish/accept the incumbent D2/W3B/W3C path and then consume it. Mastermind should not build around open GMI carriers.
+
+## E6. Cross-family independence proof
+
+Mastermind still needs empirical evidence that revisions add information beyond:
+
+- SUE/PEAD;
+- earnings/guidance;
+- news;
+- price momentum;
+- options;
+- fundamentals;
+- institutional/flow context;
+- themes;
+- macro.
+
+This is a validation gap, not a source-schema gap.
+
+---
+
+# F. Updated external/source landscape — residual gaps only
+
+The broad source survey is no longer a P0 task.
+
+The accepted K3E `VEND-0` research already concluded `SAMPLE_REQUIRED / PROBE_FURTHER`, and open Macro PR #8402 contains a newer hardened vendor audit. Because #8402 is unmerged, it is evidence, not protected law.
+
+The only justified future external-source activity is a **record-level bakeoff** after the internal source/read-model gate:
+
+| Question | Existing estate first | External sample only if… |
+|---|---|---|
+| Prospective consensus revisions | SRC-A1 | current coverage/history cannot support the experiment |
+| Historical PIT consensus | none with mature long history | long-regime validation is required |
+| Analyst-level detail | none | consensus passes and contributor detail has a clear incremental hypothesis |
+| Actuals/guidance | Earnings/FIF/SEC owners | never replace with analyst vendor data merely for convenience |
+| Theme membership | GMI | never buy a second taxonomy until GMI coverage/rights prove insufficient |
+| Theme state | GMI `theme_state/v1` | no external substitute should be evaluated before incumbent owner acceptance |
+
+**Do not repeat public vendor marketing research.** The next useful vendor evidence is delivered sample rows, documented cutoff/correction semantics, identifier behavior, rights, and cross-vintage reproducibility.
+
+---
+
+# G. Revised canonical data model — extensions, not new planes
+
+## G1. Keep existing SRC-A1 source records
+
+Do not replace:
+
+- `expectation_observations.parquet`;
+- `expectation_attempts.parquet`.
+
+Do not create a parallel `estimate_observation_v1` store in Mastermind.
+
+## G2. Add only a derived EXP-1 contract
+
+The smallest genuinely new contract is a **read-model result**, not another source truth.
+
+Suggested shape, subject to the K3E owner:
+
+`k3e.expectation_surface/v1`
+
+Required fields should reference, not duplicate, owner-native records:
+
+- security/issuer reference from existing identity owner;
+- metric;
+- raw horizon/fiscal-period identity;
+- cutoff;
+- eligible observation IDs;
+- latest/prior values;
+- deterministic revision deltas;
+- coverage / contributor counts if actually supplied;
+- dispersion if supplied;
+- staleness;
+- missingness/degradation;
+- source clock summary;
+- correction/supersession refs;
+- rights state;
+- source receipt/attempt refs;
+- computation version;
+- authority = descriptive/context only.
+
+## G3. Contributor identity only as a conditional extension
+
+If an institutional sample includes analyst/broker detail, add a vendor-vintage-scoped mapping inside the accepted source owner. Never assume IDs are globally stable.
+
+Do not create this contract before sample evidence requires it.
+
+## G4. Themes: no new membership contract
+
+Use:
+
+- GMI node/edge/evidence contracts;
+- local-theme IDs;
+- membership lifecycle;
+- `theme_state/v1`;
+- `company_theme_exposure.v1`.
+
+Any Mastermind adapter should carry owner refs and cutoff, not copy graph truth into a second store.
+
+## G5. Temporal law
+
+The estate already has overlapping but compatible temporal vocabularies. The read model must preserve source-native fields and map them explicitly to the company temporal law.
+
+For historical eligibility, the controlling rule remains:
+
+> a record may influence a historical decision only if the owner can prove it was knowable/available by the decision cutoff.
+
+Never substitute estimate date, fiscal period, provider observation time or ingestion time for a missing knowable time.
+
+---
+
+# H. Revised derived intelligence
+
+## Already exists — do not rebuild
+
+- per-name revision breadth/current drift fields;
+- theme revision breadth;
+- coverage-normalized theme breadth;
+- PIT breadth acceleration;
+- display-only short-history drift proxy;
+- monthly recommendation revision momentum;
+- SUE/earnings surprise context;
+- price/rotation/breadth measurement;
+- trend persistence research harness.
+
+## New only inside EXP-1 or later institutional extension
+
+Candidate deterministic outputs:
+
+- cutoff-safe consensus delta by metric/horizon;
+- staleness distribution;
+- observation age;
+- fiscal-roll-aware revision;
+- correction-aware revision;
+- coverage change;
+- dispersion change;
+- consensus-vs-recommendation disagreement;
+- post-earnings reset trajectory;
+- analyst-detail breadth/cluster only if contributor data exists;
+- consensus-vs-detail ablation fields.
+
+No opaque master score.
+
+## LLM role
+
+Existing `brain/research_desk.py` already owns hypothesis-oriented LLM research. Use it, if at all, to:
+
+- explain why revisions may have changed;
+- connect revisions to guidance/news/competitive mechanisms;
+- propose falsifiers;
+- suggest theme hypotheses for deterministic owner review.
+
+Do not use an LLM to:
+
+- decide PIT eligibility;
+- infer missing numeric estimates;
+- repair vendor history;
+- normalize currency/units/splits;
+- determine correction generation;
+- mint theme membership;
+- decide rank/size/trade authority.
+
+---
+
+# I. Integration map
+
+| Producer | Existing canonical owner/artifact | Evidence family | Consumer |
+|---|---|---|---|
+| Yahoo/yfinance prospective expectation collection | Macro `collectors/equity_revisions.py` + SRC-A1 artifacts | earnings expectations / revisions | K3E `EXP-1`; existing theme revisions |
+| Legacy revision snapshots | `data/revisions/latest.parquet`, `history.parquet` | revisions | `engine/theme_revisions.py`; published stockdata; protected Mastermind held-risk |
+| Recommendation trends | Finnhub collector + `engine/analyst_revisions.py` | recommendation revisions | descriptive research / existing consumers |
+| Earnings/actuals/guidance | Earnings Intelligence / FIF / SEC owners | earnings/fundamentals | controls and event conditioning |
+| Price/residuals | existing market-data / DRL owners | market response | K3E later MKT-1; validation |
+| Themes | GMI Theme Graph | thematic identity/state | Company Theme Exposure, Terminal, later Mastermind consumers |
+| Decision-time evidence | `brain.signal_history` | PIT engine evidence | `brain.outcome_ledger`, research grading |
+| Validation | `portfolio.predictions`, trend-persistence harness, Eval OS | empirical evidence | promotion/kill decisions |
+| Portfolio V3 snapshot | separate Portfolio V3 owner, currently NOT_BUILT | future decision provenance | future only; this program does not implement it |
+
+---
+
+# J. Validation program — reuse existing machinery
+
+## J1. Source proof before alpha tests
+
+Before any return-prediction experiment:
+
+1. reconcile #8312;
+2. prove source replay/idempotency/correction/fiscal-roll semantics;
+3. verify missingness and rate-limit states cannot masquerade as neutral data;
+4. verify no current snapshot is backfilled into earlier cutoffs;
+5. verify exact source rights for the intended experiment.
+
+## J2. EXP-1 contract tests
+
+Required:
+
+- cutoff mutation test;
+- correction-generation mutation test;
+- fiscal-roll test;
+- missing/zero distinction;
+- failed-attempt cannot overwrite good observation;
+- source-clock non-alias test;
+- same-session replay idempotency;
+- changed-payload supersession;
+- rights-blocked fail-closed result;
+- no contributor fields fabricated from consensus.
+
+## J3. Incremental information tests
+
+Reuse the existing survivorship-safe/delisted substrate and inference discipline.
+
+Test separately:
+
+- consensus magnitude;
+- breadth;
+- dispersion;
+- staleness;
+- coverage change;
+- post-event revision response;
+- recommendation revisions;
+- analyst detail if available.
+
+Controls:
+
+- SUE/PEAD;
+- price momentum;
+- volatility;
+- sector/industry/country/size/liquidity;
+- earnings/guidance/news event state;
+- options;
+- fundamentals;
+- theme/rotation state;
+- macro.
+
+Use:
+
+- rank IC / ICIR;
+- cross-sectional regressions;
+- event-conditioned specifications;
+- portfolio spreads only after descriptive tests;
+- turnover/cost/capacity;
+- rolling OOS;
+- multiple-testing control;
+- missingness-as-signal tests;
+- consensus-vs-detail ablations;
+- cross-vendor replication where lawful.
+
+## J4. Theme validation
+
+Do not rerun the used-up stock-level Trend Persistence dates.
+
+For group/theme persistence:
+
+- consume the existing C1 preregistration;
+- wait for eligible future confirmatory dates;
+- use accepted GMI PIT membership only;
+- test incremental value beyond member-level momentum;
+- kill the family if performance is concentrated in a tiny number of sectors/themes or fails the preregistered controls.
+
+---
+
+# K. Risks and failure modes
+
+1. **Duplicate truth stores** — the largest architecture risk after this census.
+2. **Unmerged research promoted to law** — especially Macro #8402 and #8312.
+3. **Stale capability ledgers** — current source may be ahead of dated records; live Git and accepted evidence must reconcile before action.
+4. **Current-state duplication in Terminal** — useful for display, unsafe as a second canonical research source.
+5. **PIT leakage** — corrected vendor histories can look cleaner than historical knowledge.
+6. **Fiscal rollover mistaken for revision** — already a known SRC-A1 mutation gate.
+7. **Coverage/reviser-count confusion** — existing theme logic explicitly distinguishes them; preserve that.
+8. **Recommendation vs earnings-estimate conflation** — `engine/analyst_revisions.py` is a different evidence family from EPS/revenue expectations.
+9. **Consensus vs contributor detail conflation** — current SRC-A1 is consensus-level.
+10. **Theme graph duplication** — prohibited; GMI owns it.
+11. **Theme membership incompleteness** — graph existence does not imply every lifecycle/coverage wave is accepted.
+12. **Correlated evidence** — revisions can repackage earnings, guidance, news and price information.
+13. **Validation duplication** — new notebooks/graders can silently diverge from existing inference law.
+14. **Opaque fusion** — prohibited by K3E/V3 principles.
+15. **Premature vendor procurement** — no source purchase is justified before internal estate and sample evidence are exhausted.
+16. **LLM truth laundering** — narrative synthesis cannot become numeric or PIT source truth.
+
+---
+
+# L. Revised build priority
+
+## P0 — prove and expose what already exists
+
+1. Reconcile Macro PR #8312 and the incumbent SRC-A1 proof state.
+2. Reconcile direct overlapping research PR #8402; adopt useful findings only after accepted merge/review.
+3. If SRC-A1 is accepted, build **EXP-1 only** as a read-only deterministic expectation surface.
+4. Bind EXP-1 to existing identity/event/financial/price owners; no new stores.
+5. Add research-only Mastermind consumption through existing decision-history/validation owners, not portfolio authority.
+
+## P1 — validate incremental value
+
+1. Run preregistered consensus-level tests on the existing prospective estate.
+2. Test whether current free-estate history is enough for the target horizon.
+3. If not, execute the already-defined VEND-0 next step: record-level sample/rights bakeoff.
+4. Add institutional historical PIT consensus only if the empirical question needs it.
+5. Add analyst detail only if consensus passes and detail has a clear incremental hypothesis.
+
+## P2 — accepted theme integration
+
+1. Wait for/reconcile GMI D2/W3B/W3C outcomes.
+2. Consume `theme_state/v1` / Company Theme Exposure through owner adapters.
+3. Use the existing group-persistence preregistration when future dates become eligible.
+4. Later test expectation × theme-state interactions only after both families independently pass.
+
+## Defer
+
+- contributor-skill/herding models;
+- KPI/segment expectation depth;
+- cross-vendor ensemble consensus;
+- rich theme exposure weights;
+- Portfolio V3 Decision Snapshot integration until that separate owner lands.
+
+## Reject / remove
+
+- new analyst warehouse;
+- new theme graph;
+- new theme membership store;
+- new identity plane;
+- new receipt plane;
+- new outcome ledger;
+- new evaluation stack;
+- new broad vendor survey;
+- new LLM classification truth plane;
+- direct wiring of revisions/themes into rank/size/trade authority.
+
+---
+
+# M. Migration / upgrade path for overlaps
+
+## Old study → new owner-preserving path
+
+```text
+OLD: build estimate contracts
+NEW: reuse SRC-A1; build only EXP-1 derived read model
+
+OLD: build source receipts
+NEW: reuse expectation_attempts + evidence foundation
+
+OLD: build identity mapping
+NEW: reuse Stock Identity / Data OS
+
+OLD: build actual-result contract
+NEW: reuse Earnings / FIF
+
+OLD: build consensus snapshot store
+NEW: derive cutoff-safe surface in EXP-1
+
+OLD: build dynamic subtheme membership
+NEW: consume GMI graph/local-theme/ThemeState
+
+OLD: build theme API
+NEW: reuse Company Theme Exposure / Terminal projection
+
+OLD: build validation program from scratch
+NEW: reuse portfolio.predictions + trend-persistence + Eval OS
+
+OLD: broad vendor research
+NEW: only sample/rights bakeoff if internal estate is insufficient
+
+OLD: attach directly to future Decision Snapshot
+NEW: emit compatible evidence; Portfolio V3 remains separate owner
+```
+
+## Compatibility rule
+
+No migration may destroy the legacy `latest.parquet` / `history.parquet` semantics that existing consumers use. New institutional data must be additive behind the source owner until a separate, accepted migration proves equivalence and consumer safety.
+
+---
+
+# N. Exact bounded follow-on implementation commission
+
+## Commission: K3E expectation source reconciliation and minimal EXP-1 read model
+
+**Purpose:** create the highest-value missing capability with the minimum new surface area.
+
+### Authority
+
+Authorized only after this research is accepted:
+
+- source archaeology;
+- tests;
+- research-only deterministic read model;
+- fixture/sample work using already lawful data;
+- read-only Mastermind research consumption.
+
+Not authorized:
+
+- vendor contact or purchase;
+- production deployment;
+- live portfolio/trading changes;
+- rank/size/gate/entry authority;
+- new identity/source-receipt/outcome/theme/control plane;
+- changing Portfolio V3;
+- bypassing active Macro/GMI carriers.
+
+### Phase 0 — collision reconciliation
+
+Read current protected Mastermind + current Macro + current Terminal.
+
+Inspect at minimum:
+
+- Macro PR #8312;
+- Macro PR #8402;
+- GMI PRs #8417, #8432, #8435 or their accepted successors;
+- `CURRENT_CAPABILITY_LEDGER.md`;
+- `OWNER_AND_REUSE_MATRIX.md`;
+- `DATA_CLOCK_RIGHTS_MATRIX.md`;
+- `DEC-SRC-A1-PROSPECTIVE-EXPECTATION-SOURCE-CONTRACT.md`;
+- `collectors/equity_revisions.py`;
+- `engine/theme_revisions.py`;
+- `engine/analyst_revisions.py`.
+
+**DONE_WHEN:** every overlapping active carrier is classified accepted / rejected / still active, exact writer custody is known, and no duplicate modifier is started.
+
+### Phase 1 — source proof decision
+
+If SRC-A1 is already accepted `PROVEN_LIVE`, do not re-prove it without a material invalidator.
+
+If not accepted, repair/prove only the failed invariant in the incumbent owner.
+
+**DONE_WHEN:** the source is either:
+- `PROVEN_LIVE` with accepted evidence; or
+- blocked by one exact unresolved invariant; or
+- rejected.
+
+**Tests/evidence:** existing mutation gates, natural source receipts, cutoff/correction/fiscal-roll proof.
+
+**Safety:** no new store, cadence expansion, universe expansion or manual source replay merely to manufacture proof.
+
+### Phase 2 — minimal EXP-1
+
+Only after Phase 1 passes.
+
+Implement a pure/read-only `k3e.expectation_surface/v1` (exact final name owned by K3E) over existing source artifacts.
+
+It may compute only deterministic, cutoff-safe, rights-aware descriptive fields.
+
+**DONE_WHEN:**
+- contract tests pass;
+- cutoff mutation changes eligibility correctly;
+- correction/fiscal-roll tests pass;
+- no source records are mutated;
+- no rank/gate/size/trade consumer exists;
+- one real research consumer can read the surface.
+
+### Phase 3 — Mastermind research adapter
+
+Add the smallest read-only adapter needed to expose accepted EXP-1 fields to research/shadow evaluation.
+
+Prefer:
+- `brain.signal_history` compatible snapshot fields;
+- existing lens/read-only research surfaces.
+
+Do not modify held-risk thresholds or portfolio authority in this phase.
+
+**DONE_WHEN:** a historical/replay test proves the exact evidence visible at cutoff and a null/missing source fails closed.
+
+### Phase 4 — incremental validation
+
+Use existing research infrastructure. Pre-register before outcome inspection.
+
+**DONE_WHEN:** the family receives one of:
+- `PROMOTE_TO_SHADOW_RESEARCH`;
+- `MORE_EVIDENCE_REQUIRED`;
+- `REJECT_DATA_FAMILY`.
+
+Promotion is research-only.
+
+### Phase 5 — institutional sample gate
+
+Run only if Phase 4 shows the prospective/free estate is insufficient for the intended question.
+
+Use the existing VEND-0 conclusion. Do not repeat broad research.
+
+Compare delivered samples on:
+
+- PIT reconstructability;
+- correction transparency;
+- fiscal-period stability;
+- identity behavior;
+- history/coverage;
+- rights;
+- sample-level disagreement;
+- incremental empirical value.
+
+No procurement authority is implied.
+
+### Theme lane
+
+No theme implementation occurs inside Phases 0–5.
+
+A later separate adapter commission may consume accepted GMI `theme_state/v1` / Company Theme Exposure after the incumbent GMI work is protected and production-proven at the level required.
+
+### Smallest first implementation slice
+
+**If #8312 is accepted:** implement EXP-1 read-only cutoff-safe expectation surface over existing SRC-A1 records, with one research consumer and zero portfolio effect.
+
+**If #8312 is not accepted:** repair/prove the incumbent SRC-A1 source only. Do not start EXP-1 and do not create any replacement source.
+
+---
+
+# Evidence register
+
+## Protected Mastermind
 
 - `portfolio/held_risk.py`
 - `tests/test_held_risk.py`
-- `research/TREND_PERSISTENCE_PROTOCOL.md`
+- `portfolio/lenses.py`
 - `brain/signal_history.py`
 - `brain/outcome_ledger.py`
-- `docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md`
-- `docs/superpowers/plans/2026-09-15-mastermind-portfolio-v3-s0-decision-snapshot.md`
-- `research/competitive_intelligence/fiscal/2026-08-22/recon01/observations.jsonl`
+- `brain/research_desk.py`
+- `brain/bottleneck.py`
+- `brain/rotation_tensor.py`
+- `loop/fundamentals.py`
+- `loop/single_name_panel.py`
+- `portfolio/predictions.py`
+- `research/TREND_PERSISTENCE_PROTOCOL.md`
+- `research/TREND_PERSISTENCE_READOUT.md`
+- `research/TREND_PERSISTENCE_PREREG_C1.md`
+- `docs/source_thematic_rotation_framework.md`
+- Portfolio V3 design/spec and S0 plan
+- `data/census/CENSUS.md` (stale negative-proof caveat)
 
-All internal references above were evaluated against the protected source pin declared at the top of this report unless explicitly marked as an unverified follow-up.
+## Macro
+
+- `collectors/equity_revisions.py`
+- `engine/theme_revisions.py`
+- `engine/analyst_revisions.py`
+- `lib/dataos/temporal.py`
+- `research/alpha_intelligence/expectation_market_dynamics/*`
+- `agentos/decisions/DEC-SRC-A1-PROSPECTIVE-EXPECTATION-SOURCE-CONTRACT.md`
+- `agentos/workstreams/WS-ALPHA-INTELLIGENCE-INTEGRATION.md`
+- `engine/theme_graph/*`
+- `engine/company_theme_exposure/*`
+- GMI Theme Graph workstream / completion freeze
+- PR #8312 (open, evidence only)
+- PR #8402 (open, evidence only)
+- PRs #8379/#8382 (merged)
+- PRs #8417/#8432/#8435 (open at census time)
+
+## Terminal
+
+- `ingest/collect_us_fund.py`
+- `ingest/collect_us_deep.py`
+- `ingest/pull_macro_intel.py`
+- `terminal/app/api/company-theme-context/[symbol]/route.ts`
+- `terminal/lib/companyThemeExposure.ts` and incumbent R2 projection path
+
+---
+
+## Final recommendation
+
+The estate is much further along than the first study assumed. The strongest plan is now **convergence, proof and selective depth**, not greenfield architecture.
+
+Mastermind should spend engineering effort in this order:
+
+1. prove the existing expectation source;
+2. expose it through the missing deterministic K3E read model;
+3. measure incremental value with the existing research stack;
+4. buy/sample deeper history only if the internal estate cannot answer the question;
+5. consume GMI's existing theme intelligence rather than rebuild it;
+6. keep all portfolio authority separate until independent evidence and the separately owned Portfolio V3 architecture are ready.
