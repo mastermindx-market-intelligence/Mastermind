@@ -95,6 +95,14 @@ def test_turn_boundaries_never_require_continuation(changes, reason):
     assert result.reason == reason
 
 
+def test_unresolved_modifying_effect_outranks_optimistic_mission_complete():
+    result = _project(
+        _state(mission_complete=True, unresolved_modifying_effect=True)
+    )
+    assert result.required is False
+    assert result.reason == "effect_unknown"
+
+
 @pytest.mark.parametrize(
     "disposition",
     [

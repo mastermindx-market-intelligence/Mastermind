@@ -120,16 +120,16 @@ def _project_turn_facts(
     state: TrustedTurnDisposition,
 ) -> ContinuationRequirement:
     """Evaluate only turn/finalization facts; never infer action authority."""
+    if state.unresolved_modifying_effect:
+        return _held(state, "effect_unknown")
+    if state.prior_continue_effect_unresolved:
+        return _held(state, "continue_effect_unresolved")
     if state.mission_complete:
         return _held(state, "mission_complete")
     if state.user_stop:
         return _held(state, "user_stop")
     if state.denial_active:
         return _held(state, "denial_active")
-    if state.unresolved_modifying_effect:
-        return _held(state, "effect_unknown")
-    if state.prior_continue_effect_unresolved:
-        return _held(state, "continue_effect_unresolved")
     if not state.disposition_evidence_complete:
         return _held(state, "disposition_evidence_incomplete")
     if state.finalization_disposition is not None:
