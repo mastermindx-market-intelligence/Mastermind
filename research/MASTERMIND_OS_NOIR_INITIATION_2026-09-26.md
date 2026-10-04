@@ -657,3 +657,55 @@ design and builder-handoff commission. `MISSION_COMPLETE: true` for that
 commission. Frontend implementation, working prototype links, merge,
 deployment and daily product acceptance remain unclaimed. No autonomous
 background execution or runtime lifecycle transition was created.
+
+
+<!-- DAILY_CONTINUATION_2026_10_04_START -->
+## 2026-10-04 — Conversation continuity and daily navigation extension
+
+Continuation of the Chairman-approved Atelier daily-UX design commission, on the
+existing exact Paper file `01M3NRCX55B452A12819WNE1RH` and draft PR #1010.
+Protected source recovered at `28be2ce2d481fd542ec869344e178e5cec4d7d75`,
+Skillpack 1.0.1 / bootstrap 1. The bounded comparison from the prior `a2646f4`
+pin contains no app-source delta; the current daily app remains read-only.
+New candidate observations: #1046 `274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f`;
+#1150 `8aca50467f774f52b31cd9147a305936034f46bc`, both open/draft.
+
+### Applied, verified prefix
+
+- New CV01 `SD8-0` and CV01M `SI5-0` on canonical page `p-D-0`:
+  a company-office entry, exact project conversation with scoped draft, separate
+  accessible-project fallback when conversation access is absent, local
+  project/topic filtering, and incomplete-coverage qualification. Independent
+  screenshot/tree review accepted both at 1600×1040 and 390×844.
+- Existing CH1 `IZB-0`, CH2 `JLU-0`, CH3 `JV7-0`, CH6 `K5X-0`,
+  CH7 `KBA-0`: Project Sol/About Mastermind OS is explicit; opening evidence
+  no longer promotes an unsent draft into a sent message or replaces composition.
+  Default controls are Options + Send. Hidden historical controls remain editable.
+  CH7 retains original-operation Check delivery and paused Send. Eight logical
+  effects were applied and verified; those five working indicators were released.
+- Existing Inbox `KY5-0` / `MNL-0`: one known qualified decision and visible
+  partial coverage; non-actionable team review removed from Needs-you; one
+  Review decision navigation step; team follow-through remains contextual.
+  Final screenshots fit and preserve the mobile safe area.
+
+All dispatched Paper writes in this continuation are observed as applied; no
+unknown modifying effect, replay, carrier change or focus transition is present.
+The direct Mastermind Paper carrier and accepted catalog `ac18857d…` remain
+unchanged. Other sessions' advanced AT16+ route work is preserved.
+
+### Current continuation frontier
+
+The screen-refinement phase is saved. Remaining work in this same commission:
+add UX06 directory states and UX07 composer/continuity states to existing page
+`p-E-0`, wire their entries into the existing guides, finish the targeted builder
+spec update, independently review the connected contracts, then verify exact
+repository readback and release the parent-owned working indicators.
+The spec's local edit is owned by the admitted bounded documentation helper;
+no concurrent parent edit of that file is underway.
+
+This is an in-progress design checkpoint, not frontend implementation, working
+prototype-link proof, runtime action, installation, deployment or product
+acceptance. No new runtime, watcher, external message or source custody transfer
+was created. Historical component and original-operation obligations earlier
+in this record remain unchanged.
+<!-- DAILY_CONTINUATION_2026_10_04_END -->
