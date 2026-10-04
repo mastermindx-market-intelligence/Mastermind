@@ -1,14 +1,15 @@
 """Native, production-disarmed enrollment for the private A2 Agent Relay.
 
+The ceremony qualifies one stdin-only Slack bot token, installs the exact
+release-bound token/config/launchd files, and stops.  It never provisions an
+app or principal and never loads, enables, or starts the service.  The Relay
+runs only as the host-prepared dedicated ``_mastermind_agent_relay`` owner;
+``_mastermind_exec`` remains the single filesystem-reachable, peer-credential-
+checked client. Slack prose conveys no host authority.
+
 The credential-free ``prepare-disabled`` operation may establish only the exact
 Agent Relay launchd-disabled override while the service is unloaded and no
-enrollment artifacts exist.  The enrollment ceremony then qualifies one
-stdin-only Slack bot token, installs the exact release-bound token/config/launchd
-files, and stops.  This helper never provisions an app or principal and never
-loads, enables, or starts the service.  The Relay runs only as the host-prepared
-dedicated ``_mastermind_agent_relay`` owner; ``_mastermind_exec`` remains the
-single filesystem-reachable, peer-credential-checked client. Slack prose conveys
-no host authority.
+enrollment artifacts exist; it reads no token and installs nothing.
 """
 from __future__ import annotations
 
