@@ -14,7 +14,7 @@ PRIVATE_ROOT = Path.home() / '.local' / 'share' / 'studio-direct-mcp' / 'private
 INSTALLED_CONTROL_ROOT = Path.home() / '.local' / 'share' / 'studio-direct-mcp' / 'control'
 # Reserved universal-fabric gateway channels are not ChatGPT tunnel seats and
 # therefore never belong in the private-seat fleet owner.
-NON_SEAT_ACCOUNTS = frozenset(('fabric-read', 'fabric-design'))
+NON_SEAT_ACCOUNTS = frozenset(('fabric-read', 'fabric-design', 'fleet-host'))
 
 
 def _invoke_from(root, helper, action, account):
