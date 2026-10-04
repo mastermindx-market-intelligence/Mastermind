@@ -10487,8 +10487,9 @@ def test_proof_recovery_observer_requires_positive_fixed_uid(tmp_path, uid):
                                 proof_capacity_recovery_worker_uid=uid)
 
 
+@pytest.mark.parametrize("schema", ["v1", "v2"])
 @pytest.mark.parametrize("fault", [None, "root", "history", "extra_event", "quota", "fence"])
-def test_maintenance_preserves_baseline_across_real_proof_lineage(tmp_path, short_socket_root, fault):
+def test_maintenance_preserves_baseline_across_real_proof_lineage(tmp_path, short_socket_root, fault, schema):
     from ops.executive_os import acceptance_maintenance as maintenance
     async def scenario():
         service, _ = _service(tmp_path, socket_root=short_socket_root)
@@ -10496,16 +10497,29 @@ def test_maintenance_preserves_baseline_across_real_proof_lineage(tmp_path, shor
         service._proof_capacity_recovery_worker_uid = 451
         await service.start()
         try:
-            old_id, old_lost = await _requeued_missing_proof(service)
+            if schema == "v1":
+                old_id, old_lost = await _requeued_missing_proof(service)
+            else:
+                assert (await _request(service, "register-worker"))["ok"]
+                old = await _request(service, "create-proof-job")
+                assert old["ok"], old
+                old_id = old["result"]["job_id"]
+                assert (await _request(service, "dispatch", {"job_id": old_id}))["ok"]
+                await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+                assert service.runtime.jobs.get_job(old_id).status.value == "COMPLETED"
             runtime = service.runtime
             root_receipt = service._submit_service_intent(_coo_intent(service.config,"maintenance"))
             root_id = root_receipt["job_id"]
             database = service.config.runtime_root/"data/control_plane/executive.sqlite3"
             before = maintenance.snapshot(database)
-            descriptor = dict(recovery_job_id=old_id, recovery_attempt_id=old_lost.attempt_id,
+            descriptor = dict(schema_version=maintenance.SCHEMA if schema == "v1" else maintenance.SCHEMA_V2,
                               worker_id=service.config.worker_id, quota_class=service.config.quota_class,
                               successor_sha=service.config.proof_base_sha)
-            await service._recover_proof_capacity(old_id,old_lost.attempt_id)
+            if schema == "v1":
+                descriptor.update(recovery_job_id=old_id, recovery_attempt_id=old_lost.attempt_id)
+                await service._recover_proof_capacity(old_id,old_lost.attempt_id)
+            else:
+                descriptor["template_proof_job_id"] = old_id
             first = await _request(service,"create-proof-job")
             first_id = first["result"]["job_id"]
             assert (await _request(service,"dispatch",{"job_id":first_id}))["ok"]
@@ -10518,7 +10532,7 @@ def test_maintenance_preserves_baseline_across_real_proof_lineage(tmp_path, shor
             if fault=="root":
                 next(r for r in after["tables"]["jobs"] if r["job_id"]==root_id)["version"] += 1
             elif fault=="history":
-                after["tables"]["events"][0]["actor"]="foreign"
+                next(e for e in after["tables"]["events"] if e["job_id"] == root_id and e["event_type"] == "JOB_CREATED")["actor"]="foreign"
             elif fault=="extra_event":
                 event=dict(after["tables"]["events"][-1],event_id=9999,job_id=root_id)
                 after["tables"]["events"].append(event)
@@ -10581,7 +10595,7 @@ def test_maintenance_root_binding_keeps_frozen_base_and_harness(tmp_path, short_
             service._coo_execution_binding=service._load_coo_execution_binding()
             with service.runtime.store.read() as conn:
                 event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
-            descriptor=dict(root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+            descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
                 predecessor_sha=predecessor,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
             summary_raw=b"reviewed acceptance"
             carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,
@@ -10730,7 +10744,7 @@ def test_maintenance_workspace_materializes_exact_frozen_root_once(tmp_path, sho
             service._coo_execution_binding=service._load_coo_execution_binding()
             with service.runtime.store.read() as conn:
                 event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
-            descriptor=dict(root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+            descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
                 predecessor_sha=old_base,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
             raw=b"complete acceptance"
             carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,

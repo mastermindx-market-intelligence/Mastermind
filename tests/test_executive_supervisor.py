@@ -789,17 +789,11 @@ def test_complete_launch_attestation_reads_schema_version_from_common_contract(
             "schema_version": "mastermind.executive_effective_grant/v1",
             "authorities": ["READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"],
             "write_paths": ["research/proof.md"],
-            "validation_argv": ["/usr/bin/true"],
-            "policy_sha": "p" * 64,
+            "validation_argv": [["/usr/bin/true"]],
+            "policy_sha": attempt.authority_policy_hash,
             "job_id": job.job_id,
-            "role": "primary",
+            "role": "work",
         }
-
-    monkeypatch.setattr(
-        ExecutiveSupervisor,
-        "_effective_grant",
-        staticmethod(fake_effective_grant),
-    )
 
     runtime, job_id, _workspace = _runtime_and_job(tmp_path)
     inspector = FakeInspector()
@@ -834,10 +828,29 @@ def test_complete_launch_attestation_reads_schema_version_from_common_contract(
         instance_id="supervisor-fixture-common-contract",
     )
 
-    receipt = asyncio.run(supervisor.run_once(job_id))
-
-    assert receipt.attempt.status is AttemptStatus.COMPLETED
-    persisted_attestation = receipt.attempt.launch_metadata["launch_attestation"]
+    active = asyncio.run(supervisor.start_job(job_id))
+    job = dataclasses.replace(runtime.jobs.get_job(job_id), orchestration_role="work")
+    grant = fake_effective_grant(job, active.lease.attempt)
+    digest = hashlib.sha256(json.dumps(
+        grant, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+    ).encode()).hexdigest()
+    lease = dataclasses.replace(active.lease, attempt=dataclasses.replace(
+        active.lease.attempt, effective_grant=grant, effective_grant_digest=digest,
+    ))
+    spec = supervisor._launch_spec(job, lease, active.launch_spec.result_schema_path, grant)
+    spec = dataclasses.replace(
+        spec, isolation_manifest=active.launch_spec.isolation_manifest,
+        isolation_manifest_sha256=active.launch_spec.isolation_manifest_sha256,
+    )
+    # Exercise the effective-grant branch with a valid typed contract without
+    # fabricating a grant on a legacy Runtime claim with no sealed digest.
+    monkeypatch.setattr(
+        supervisor, "_receipt_path", lambda *args, **kwargs: tmp_path / "common-schema-attestation.json",
+    )
+    metadata = supervisor._launch_metadata(
+        job=job, lease=lease, spec=spec, process_ref=active.process_ref, effective_grant=grant,
+    )
+    persisted_attestation = metadata["launch_attestation"]
     assert (
         persisted_attestation["schema_version"]
         == worker_contract_module.LAUNCH_ATTESTATION_SCHEMA_VERSION
@@ -850,9 +863,7 @@ def test_complete_launch_attestation_reads_schema_version_from_common_contract(
         persisted_attestation["schema_version"]
         != codex_worker_module.LAUNCH_ATTESTATION_SCHEMA_VERSION
     )
-    assert persisted_attestation.get("effective_grant_digest") == (
-        receipt.attempt.effective_grant_digest
-    )
+    assert persisted_attestation["effective_grant_digest"] == digest
 
 
 def test_terminal_state_is_not_persisted_when_assignment_seal_fails(
@@ -2413,3 +2424,58 @@ def test_restart_unbound_generic_broker_error_never_cancels_or_proves_absence(tm
     persisted = runtime.attempts.get_attempt(attempt.attempt_id)
     assert persisted.status is AttemptStatus.CLAIMED
     assert persisted.fence_generation == attempt.fence_generation
+
+
+def test_supervisor_orchestration_spec_crosses_broker_boundary(tmp_path):
+    from control_plane.executive_worker_broker import (
+        BrokerPolicy, _launch_spec_from_wire, _launch_spec_to_json,
+    )
+    from control_plane.worker_execution_contract import (
+        OrchestrationLaunchSpec, worker_launch_spec_sha256,
+    )
+
+    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    adapter = FakeAdapter(FakeInspector())
+    supervisor = _supervisor(
+        runtime, tmp_path, adapter,
+        worker_uid=os.geteuid(), worker_gid=os.getegid(), shared_run_gid=os.getegid(),
+    )
+    lease = runtime.attempts.claim_job(job_id, lease_owner="supervisor-fixture")
+    assert lease is not None
+    job = dataclasses.replace(runtime.jobs.get_job(job_id), orchestration_role="work")
+    grant = {
+        "schema_version": "mastermind.executive_effective_grant/v1",
+        "authorities": list(job.requested_authorities),
+        "write_paths": list(job.allowed_write_paths),
+        "validation_argv": copy.deepcopy(job.validation_commands),
+        "policy_sha": lease.attempt.authority_policy_hash,
+        "job_id": job.job_id,
+        "role": job.orchestration_role,
+    }
+    digest = hashlib.sha256(json.dumps(
+        grant, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+    ).encode()).hexdigest()
+    lease = dataclasses.replace(lease, attempt=dataclasses.replace(
+        lease.attempt, effective_grant=grant, effective_grant_digest=digest,
+    ))
+    run_dir = supervisor._run_dir(lease.attempt.attempt_id)
+    run_dir.mkdir(parents=True, mode=0o700)
+    schema = run_dir / "worker-result.schema.json"
+    schema.write_text("{}")
+    spec = supervisor._launch_spec(job, lease, schema, grant)
+    policy = BrokerPolicy(
+        control_uid=os.geteuid() + 1000,
+        worker_uid=os.geteuid(), worker_gid=os.getegid(),
+        worker_user=supervisor.worker_user, worker_id=lease.attempt.worker_id,
+        workspace_root=tmp_path / "workspaces", run_root=tmp_path / "runs",
+        provider_home=tmp_path / "codex-home",
+    )
+    received = _launch_spec_from_wire(_launch_spec_to_json(spec), policy)
+    assert type(received) is OrchestrationLaunchSpec
+    # Broker has always canonicalized the unordered isolation-root set.
+    expected = dataclasses.replace(
+        spec, isolation_roots=tuple(sorted(spec.isolation_roots, key=str)),
+    )
+    assert received == expected
+    assert received.effective_grant_digest == lease.attempt.effective_grant_digest
+    assert worker_launch_spec_sha256(received) == worker_launch_spec_sha256(expected)
