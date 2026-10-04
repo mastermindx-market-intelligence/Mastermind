@@ -115,3 +115,11 @@ def test_gate_has_no_process_mutation_or_credential_path():
     for forbidden in ("DedicatedUIDSweeper(", ".kill(", "os.kill", "bootout", "kickstart",
                       "subprocess.run", "auth.json", "receipt_path"):
         assert forbidden not in source
+
+
+def test_worker_account_must_match_canonical_slot_uid(monkeypatch):
+    host, calls = setup(monkeypatch)
+    monkeypatch.setattr(control.pwd, 'getpwnam', lambda name: SimpleNamespace(
+        pw_uid=450 if name == control.CONTROL_USER else 999))
+    refused(host, 'service_uid_process_unknown')
+    assert calls == []

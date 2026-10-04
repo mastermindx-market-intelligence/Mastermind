@@ -62,6 +62,7 @@ from control_plane.executive_autonomy import (
 from ops.executive_os import release_manifest
 from ops.executive_os import git_handoff_preflight
 from ops.executive_os import provider_readiness
+from ops.executive_os import provider_worker_slots
 from scripts import executive_os_phase1c_control_wrapper as control_wrapper
 
 
@@ -2488,8 +2489,11 @@ class ProductionArmHost(ProductionStatusHost):
 
         try:
             control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
-            worker_uid = pwd.getpwnam("_mastermind_worker").pw_uid
-        except KeyError as exc:
+            worker = provider_worker_slots.get_slot("codex-01")
+            worker_uid = pwd.getpwnam(worker.worker_user).pw_uid
+            if worker_uid != worker.worker_uid:
+                raise ArmAdmissionError("service_uid_process_unknown")
+        except (KeyError, provider_worker_slots.SlotCatalogError) as exc:
             raise ArmAdmissionError("service_uid_process_unknown") from exc
         for uid in (control_uid, worker_uid):
             try:
