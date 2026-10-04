@@ -414,6 +414,10 @@ test('SDK tool requests progress through a single HTTP connection after initiali
     assert.ok(list.tools.length > 0);
     const ping = await a.client.callTool({ name: 'studio_ping', arguments: {} }, undefined, { timeout: 2000 });
     assert.equal(ping.isError, undefined);
+    assert.equal(ping.structuredContent.concurrency.scope, 'session-backend');
+    assert.equal(ping.structuredContent.concurrency.maxActive, 4);
+    assert.equal(ping.structuredContent.concurrency.maxQueued, 4);
+    assert.equal(ping.structuredContent.concurrency.catalogReservedSlots, 0);
     assert.equal(transport.sessionId, sessionId);
     assert.equal(gw.stats().backend.spawns, 1);
   } finally {
@@ -581,6 +585,7 @@ test('shared backend reserves one slot for catalog traffic while typed Git remai
     backendMode: 'shared-account',
     maxSessions: 8,
     maxPerSessionConcurrency: 4,
+    maxQueuedPerSession: 12,
     requestTimeoutMs: 10_000,
     gitPublish: {
       enabled: true,
@@ -597,6 +602,12 @@ test('shared backend reserves one slot for catalog traffic while typed Git remai
     await connect(actor.client, gw.url, actor.transportOpts);
     actors.push(actor);
   }
+
+  const ping = await actors[4].client.callTool({ name: 'studio_ping', arguments: {} });
+  assert.equal(ping.structuredContent.concurrency.scope, 'account-backend');
+  assert.equal(ping.structuredContent.concurrency.maxActive, 4);
+  assert.equal(ping.structuredContent.concurrency.maxQueued, 12);
+  assert.equal(ping.structuredContent.concurrency.catalogReservedSlots, 1);
 
   const catalog = await actors[4].client.listTools();
   const names = new Set(catalog.tools.map((tool) => tool.name));
