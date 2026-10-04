@@ -288,7 +288,7 @@ case "$1" in
     # Cycle only its fixed LaunchDaemon so an accepted release can refresh
     # the MCP tool catalog without changing worker/control/relay state.
     stop_one "$MCP_LABEL"
-    start_one "$MCP_LABEL" "$MCP_PLIST"
+    ensure_running "$MCP_LABEL" "$MCP_PLIST"
     ;;
   start-readside)
     require_root

@@ -366,17 +366,37 @@ def test_restart_gateway_cycles_only_fixed_mcp_and_confirms_running(
     tmp_path: Path,
 ) -> None:
     mcp_plist = tmp_path / "mcp.plist"
-    plan = _stop_ok(MCP_LABEL) + _start_via_bootstrap(MCP_LABEL, mcp_plist)
+    plan = _stop_ok(MCP_LABEL) + _ensure_running_bootstrap(MCP_LABEL, mcp_plist)
     code, out, err, log, remaining, *_ = _run(tmp_path, "restart-gateway", plan)
     assert code == 0, err
     assert remaining == ""
     assert f"service={MCP_LABEL} state=absent" in out
-    assert f"service={MCP_LABEL} state = running" in out
+    assert f"service={MCP_LABEL} state=running existing=0" in out
     assert log == [key for key, *_ in plan]
     assert not any(CONTROL_LABEL in call for call in log)
     assert not any(WORKER_LABEL in call for call in log)
     assert not any(RELAY_LABEL in call for call in log)
     assert not any(BACKUP_LABEL in call for call in log)
+
+
+def test_restart_gateway_refuses_registered_but_nonrunning_mcp(
+    tmp_path: Path,
+) -> None:
+    mcp_plist = tmp_path / "mcp.plist"
+    plan = (
+        _stop_ok(MCP_LABEL)
+        + [
+            (f"enable system/{MCP_LABEL}", 0, "", ""),
+            (f"print system/{MCP_LABEL}", 113, "", "absent"),
+            (f"bootstrap system {mcp_plist}", 0, "", ""),
+        ]
+        + [(f"print system/{MCP_LABEL}", 0, "state = exited", "")] * 31
+    )
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "restart-gateway", plan)
+    assert code != 0
+    assert "did not become running" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
 
 
 def test_partial_two_service_stop_failure_remains_failed_without_rollback(
