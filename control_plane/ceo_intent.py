@@ -888,6 +888,7 @@ def _receipt(
     receipt_schema: str = RECEIPT_SCHEMA,
     principal: dict[str, Any] | None = None,
     request_ref: str | None = None,
+    work_ref: str | None = None,
 ) -> dict[str, Any]:
     value = {
         "schema": receipt_schema,
@@ -915,6 +916,10 @@ def _receipt(
             raise CeoIntentError("principal receipt identity is unavailable")
         value["principal"] = dict(principal)
         value["request_ref"] = _require_principal_request_ref(request_ref, intent_id)
+    if receipt_schema == RECEIPT_SCHEMA_V2 and work_ref is not None:
+        value["work_ref"] = _text(
+            work_ref, "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
+        )
     return value
 
 
@@ -939,6 +944,7 @@ def build_receipt(
         receipt_schema=_receipt_schema_for(intent.get("schema")),
         principal=_principal_identity(intent) if intent.get("schema") == INTENT_SCHEMA_PRINCIPAL else None,
         request_ref=principal_request_ref,
+        work_ref=intent.get("workstream") if intent.get("schema") == INTENT_SCHEMA_V2 else None,
     )
 
 
@@ -1147,6 +1153,16 @@ def _receipt_from_event(
                 or job.escalation_target != "coo" or job.parent_job_id is not None
                 or not 1 <= job.attempt_limit <= 2):
             raise CeoIntentError("principal durable identity or Job binding differs")
+    work_ref = None
+    if provenance_schema == INTENT_SCHEMA_V2 and "workstream" in provenance:
+        # Revalidate the immutable source pointer before exposing it on replay.
+        # Older v2 events without this optional field remain readable as-is.
+        work_ref = _text(
+            provenance["workstream"],
+            "intent.workstream",
+            pattern=_WORKSTREAM_RE,
+            max_chars=72,
+        )
     grounding = provenance.get("grounding")
     return _receipt(
         job,
@@ -1156,7 +1172,9 @@ def _receipt_from_event(
         duplicate=True,
         created_at_ms=int(event.get("created_at_ms") or 0),
         receipt_schema=_receipt_schema_for(provenance_schema),
-        principal=principal, request_ref=request_ref,
+        principal=principal,
+        request_ref=request_ref,
+        work_ref=work_ref,
     )
 
 
