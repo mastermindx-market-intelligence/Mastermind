@@ -25,6 +25,8 @@ from control_plane.consultation_runtime import (
 from control_plane.executive_peer_identity import PeerIdentity, capture_peer_identity
 from control_plane.executive_runtime import ActiveMcpCapabilityBindingFacts, Runtime, StateConflict
 from control_plane.wake_events import utc_now_iso
+from control_plane.wake_ledger import LedgerPhase
+from control_plane.wake_persist import WakeLedgerRepository
 from integrations.company_consultation_dispatch import (
     CallerIdentity, InvocationContext, NoSuchRecipient, RecipientBinding,
     RuntimeConsultationDispatcher,
@@ -116,6 +118,38 @@ class _RequestContext:
     def resolve(self) -> DialogueBinding:
         self.guard()
         return _dialogue_binding(self.caller.target)
+
+
+class _StoredReadContext:
+    """Fresh service-owned Runtime context, never a cached connected caller grant."""
+
+    def __init__(self, host, evidence):
+        self.host, self.evidence = host, evidence
+        self.caller = self._current_party()
+
+    def _current_party(self):
+        facts = self.host._capability(self.evidence.target_attempt_id)
+        party = self.host._caller(facts)
+        binding = party.binding
+        if (facts.binding.process_generation_id != self.evidence.process_generation_id
+                or binding.binding_id != self.evidence.binding_id
+                or binding.binding_generation != self.evidence.binding_generation
+                or not binding.native_handle
+                or hashlib.sha256(binding.native_handle.encode()).hexdigest()
+                != self.evidence.provider_session_sha256):
+            raise StateConflict("stored native read requester is no longer current")
+        return party
+
+    def guard(self, phase=None):
+        if self._current_party() != self.caller:
+            raise StateConflict("stored native read caller changed before consumption")
+
+    def resolve(self):
+        self.guard()
+        return _dialogue_binding(self.caller.target)
+
+    def current(self):
+        return None  # This context cannot originate a new consultation.
 
 
 class CompanyConsultationHost:
@@ -234,6 +268,39 @@ class CompanyConsultationHost:
                 binding=MappingProxyType(_binding_fields(party.binding)),
             ))
         return CompanyConsultationPeerResolver(tuple(peers)), parties
+
+    async def consume_stored_native_read(self, delivered_command_id: str) -> dict[str, Any]:
+        """Reduce exact stored evidence; not an MCP tool or peer-request operation."""
+        if type(delivered_command_id) is not str:
+            raise StateConflict("native consumption requires a stored delivery command")
+        stored = WakeLedgerRepository(self.runtime).get_by_command_id(delivered_command_id)
+        if (stored is None or stored.record.phase is not LedgerPhase.DELIVERED
+                or stored.record.native_company_read is None):
+            raise StateConflict("native consumption requires a stored Company read")
+        evidence = stored.record.native_company_read
+        context = _StoredReadContext(self, evidence)
+        packets = TargetedAgentDialogueConsultationPacketCarrier(
+            binding_resolver=context,
+            targets=ExecutiveConsultationPacketTargetResolver(
+                self.runtime, workspace_id=self.workspace_id, channel_id=self.channel_id,
+            ), socket_path=self.relay_socket_path,
+        )
+        caller = context.resolve()
+        def no_recipient(ref):
+            raise NoSuchRecipient(ref)
+        dispatcher = RuntimeConsultationDispatcher(
+            runtime=self.runtime, repository_root=self.repository_root,
+            caller=CallerIdentity(
+                job_id=caller.actor_ref["job_id"], attempt_id=caller.actor_ref["attempt_id"],
+                worker_id=caller.actor_ref["worker_id"], reasoning_surface="codex",
+                binding=_binding_fields(context.caller.binding), dialogue_binding=caller,
+            ), recipients=no_recipient, packets=packets, invocations=context,
+            before_effect=context.guard,
+        )
+        context.guard()
+        return await dispatcher.consume_answer(
+            evidence.consultation_ref, native_delivery_command_id=delivered_command_id,
+        )
 
     async def call(self, peer: PeerIdentity, frame: bytes) -> bytes:
         tool, authority, dispatch_started = "unknown", None, False

@@ -1159,7 +1159,9 @@ class RuntimeConsultationDispatcher:
 
     # -- explicit authenticated consumption seam (NOT reachable via __call__) --
 
-    async def consume_answer(self, consultation_ref: str) -> dict[str, Any]:
+    async def consume_answer(
+        self, consultation_ref: str, *, native_delivery_command_id: str | None = None,
+    ) -> dict[str, Any]:
         """Append one exact ``CONSUMED_BY_REQUESTER`` event for the requester.
 
         This is the only Python seam that appends ``CONSUMED_BY_REQUESTER``
@@ -1224,6 +1226,7 @@ class RuntimeConsultationDispatcher:
                 answer_frame,
                 requester_attempt_id=self.caller.attempt_id,
                 observed_at=self._clock(),
+                native_delivery_command_id=native_delivery_command_id,
             )
         except (StateConflict, ConsultationConflict) as exc:
             raise ConsultationRefusal(
