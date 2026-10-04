@@ -4,8 +4,8 @@
 //
 // This adapter calls the same `startGateway` the OAuth service uses, so every
 // engine invariant is inherited unchanged: one SDK HTTP transport plus one
-// stdio engine child per MCP session, principal-bound sessions, the 4+4
-// account-wide limiter, duplicate-id 409, and timeout/loss answered as
+// stdio engine child per MCP session, principal-bound sessions, the configured bounded
+// account-wide limiter and queue, duplicate-id 409, and timeout/loss answered as
 // EFFECT_UNKNOWN with no retry. Nothing here retries a `tools/call`, ever.
 //
 // Deliberate differences from the OAuth service listener:
