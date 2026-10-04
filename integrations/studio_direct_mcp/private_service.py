@@ -72,6 +72,8 @@ FLEET_STATUS_LAUNCHER_REL = Path(".local/bin/studio-direct")
 FLEET_STATUS_TIMEOUT_MS = 15_000
 FLEET_FABRIC_LAUNCHER_REL = Path(".local/bin/pool")
 FLEET_FABRIC_TIMEOUT_MS = 8_000
+FLEET_ROUTE_HOST_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+MAX_FLEET_ROUTES = 32
 
 # CLI adapters. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
@@ -590,6 +592,90 @@ def _validate_tailnet_public_url(account: str, value: str | None) -> str | None:
     return normalized
 
 
+def _validate_fleet_routes(
+    account: str, values: list[str] | tuple[str, ...] | None
+) -> tuple[tuple[str, str], ...]:
+    if values in (None, (), []):
+        return ()
+    if account in TAILNET_FABRIC_ACCOUNTS:
+        raise SystemExit("fleet routes are not allowed on tailnet fabric/fleet-host gateways")
+    if not isinstance(values, (list, tuple)) or len(values) > MAX_FLEET_ROUTES:
+        raise SystemExit(f"--fleet-route accepts at most {MAX_FLEET_ROUTES} routes")
+    routes: list[tuple[str, str]] = []
+    host_refs: set[str] = set()
+    urls: set[str] = set()
+    for raw in values:
+        if not isinstance(raw, str) or "=" not in raw:
+            raise SystemExit("--fleet-route must use HOST_REF=https://<host>.ts.net/mcp")
+        host_ref, url_value = raw.split("=", 1)
+        if FLEET_ROUTE_HOST_RE.fullmatch(host_ref) is None:
+            raise SystemExit("--fleet-route host ref is invalid")
+        try:
+            parsed = urlsplit(url_value)
+            port = parsed.port
+        except (TypeError, ValueError) as exc:
+            raise SystemExit("--fleet-route URL must be exact HTTPS tailnet /mcp") from exc
+        hostname = parsed.hostname
+        if (
+            parsed.scheme != "https"
+            or not isinstance(hostname, str)
+            or not hostname.endswith(".ts.net")
+            or len(hostname) <= len(".ts.net")
+            or port not in (None, 443)
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path != "/mcp"
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise SystemExit("--fleet-route URL must be exact HTTPS tailnet /mcp")
+        normalized = f"https://{hostname}/mcp"
+        if host_ref in host_refs or normalized in urls:
+            raise SystemExit("--fleet-route host refs and URLs must be unique")
+        host_refs.add(host_ref)
+        urls.add(normalized)
+        routes.append((host_ref, normalized))
+    return tuple(sorted(routes))
+
+
+def _fleet_routing_config(routes: tuple[tuple[str, str], ...]) -> dict | None:
+    if not routes:
+        return None
+    return {
+        "enabled": True,
+        "requestTimeoutMs": REQUEST_TIMEOUT_MS,
+        "routes": [
+            {"hostRef": host_ref, "url": url}
+            for host_ref, url in routes
+        ],
+    }
+
+
+def _installed_fleet_routes(config: object, account: str) -> tuple[tuple[str, str], ...]:
+    if not isinstance(config, dict):
+        raise SystemExit("not staged: config invalid")
+    raw = config.get("fleetRouting")
+    if raw is None:
+        return ()
+    if (
+        not isinstance(raw, dict)
+        or set(raw) != {"enabled", "requestTimeoutMs", "routes"}
+        or raw.get("enabled") is not True
+        or raw.get("requestTimeoutMs") != REQUEST_TIMEOUT_MS
+        or not isinstance(raw.get("routes"), list)
+    ):
+        raise SystemExit("not staged: fleet routing config invalid")
+    encoded: list[str] = []
+    for route in raw["routes"]:
+        if not isinstance(route, dict) or set(route) != {"hostRef", "url"}:
+            raise SystemExit("not staged: fleet routing config invalid")
+        encoded.append(f"{route.get('hostRef')}={route.get('url')}")
+    try:
+        return _validate_fleet_routes(account, encoded)
+    except SystemExit as exc:
+        raise SystemExit("not staged: fleet routing config invalid") from exc
+
+
 def _build_config(
     account: str,
     host: str,
@@ -600,6 +686,7 @@ def _build_config(
     user_root: Path,
     *,
     public_url: str | None = None,
+    fleet_routes: tuple[tuple[str, str], ...] = (),
 ) -> dict:
     # Ordinary private seats omit publicUrl; reserved fabric routes bind one
     # exact tailnet HTTPS origin while the gateway itself remains loopback-only.
@@ -624,6 +711,9 @@ def _build_config(
     }
     if public_url is not None:
         config["publicUrl"] = public_url
+    fleet_routing = _fleet_routing_config(fleet_routes)
+    if fleet_routing is not None:
+        config["fleetRouting"] = fleet_routing
     fleet_status = _fleet_status_config(user_root)
     if fleet_status is not None:
         config["fleetStatus"] = fleet_status
