@@ -1472,6 +1472,8 @@ class _FakeProcPidInfo:
         self.calls = []
         self.size = 56
         self.unique_id = 113769795
+        self.parent_unique_id = 113769700
+        self.parent_pidversion = 235172800
         self.pidversion = 235172879
         self.error = None
 
@@ -1481,6 +1483,8 @@ class _FakeProcPidInfo:
             raise self.error
         result = ctypes.cast(output, ctypes.POINTER(installed._ProcUniqueIdentifierInfo)).contents
         result.p_uniqueid = self.unique_id
+        result.p_puniqueid = self.parent_unique_id
+        result.p_orig_ppidversion = self.parent_pidversion
         result.p_idversion = self.pidversion
         return self.size
 
@@ -1523,7 +1527,11 @@ def test_process_instance_binds_exact_native_signature_and_clears_errno(process_
                               ctypes.c_void_p, ctypes.c_int]
     assert query.restype is ctypes.c_int
     assert (value.unique_id, value.pidversion) == (query.unique_id, query.pidversion)
-    assert list(value.__dataclass_fields__) == ["unique_id", "pidversion"]
+    assert value.parent_unique_id == query.parent_unique_id
+    assert value.parent_pidversion == query.parent_pidversion
+    assert list(value.__dataclass_fields__) == [
+        "unique_id", "pidversion", "parent_unique_id", "parent_pidversion"
+    ]
     with pytest.raises(AttributeError):
         value.unique_id = 1
     assert "_observe_process_instance" not in installed.__all__

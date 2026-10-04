@@ -919,8 +919,91 @@ sudo /bin/bash \
 ```
 
 Recovery removes only the stale transaction marker. It never removes a receipt,
-changes a credential, or authorizes another canary. A reserved or adverse
-receipt still requires a newly authorized credential-replacement attempt.
+changes a credential, or authorizes another canary. A reserved or uncertain
+receipt remains blocked; it is never treated as a terminal provider failure.
+
+For an unchanged **company device-auth** credential whose explicitly approved
+revalidation deadline has expired or has 30 minutes or less remaining, the same
+`executive.worker_auth.verify_ready` action accepts
+`--renew-device-revalidation-sha256 SHA256`. This is an explicit new operational
+revalidation under a current authorized acceptance assignment, never an automatic
+extension of a token expiry or a deadline-only edit. Supply the SHA256 of the
+exact prior **passing** receipt and a newly approved deadline more than 30 and
+no more than 60 minutes ahead. A still-live window with more than 30 minutes
+remaining must be reused; it cannot be renewed early.
+
+Renewal requires full equality of the current credential and binary identities
+with the prior passing receipt, including device numbers. It admits only the
+fixed company device-auth principal and workspace policy. Reservations,
+nonpassing/unknown receipts, changed credentials/binaries, personal slots,
+service-account tokens and personal access tokens refuse. It is mutually
+exclusive with terminal-adverse requalification and ordinary readiness refresh.
+
+This explicit renewal uses the existing readiness transaction lock, exact
+preimage digest/lstat comparison, immutable superseded-receipt archive and
+sticky canary reservation. A fresh identity probe must retain the same provider
+policy, exactly one new canary must pass, and the post-canary identity must still
+match before a new passing receipt can bind the new deadline. No logout,
+credential replacement, deletion or copying occurs. The old passing receipt
+remains evidence; it never becomes current readiness by changing its deadline.
+Retain one request ID and use the existing same-ID status/reconciliation path
+after transport loss. The predecessor digest is a concurrency fence, not a
+source of renewal authority.
+
+For the reviewed Codex **0.147.0 to 0.159.2** upgrade only, the existing
+`executive.worker_auth.verify_ready` broker action also accepts the explicit
+`--requalify-terminal-adverse-sha256 SHA256` option. This is a new bounded
+qualification, not a replay of the burned canary. Use it only under the current
+authorized acceptance assignment, after normal protected release installation
+and reconciliation of any earlier request. The digest is the full SHA256 of
+the exact root-owned live readiness receipt bytes; it is a concurrency fence,
+not authority. Keep a single explicit request ID and reconcile that same ID
+after transport loss; never manufacture another ID to evade an uncertain effect.
+
+This path is company device-auth only: no slot selector, service-account token,
+personal access token, credential replacement, logout or receipt invalidation.
+The administrator must attest the company binding and a Chairman-approved
+revalidation deadline more than 30 and no more than 60 minutes ahead. This is
+an operational device-auth horizon, not an assertion about token expiry.
+
+Admission requires a finalized v2 `provider_turn_failed` receipt with exact
+inference exit 1, no timeout, matching terminal event/refusal and a non-null
+sanitized canary. Credential lstat and identity policy must be unchanged,
+except for the tightly paired device-number comparison described below. The
+receipt, identity and canary must bind the exact reviewed predecessor binary,
+whose retained root-owned install attestation must still validate. The current
+binary must be the reviewed successor; the new identity probe must pass.
+Passing receipts, reservations, missing/ambiguous results, timeouts, signal
+exits, other failures, changed credentials and same-generation attempts refuse
+before a canary. Without this explicit option, existing refusal behavior stays
+unchanged.
+
+A specialized `paired_filesystem_device_renumbering` comparison is confined to
+this explicit new qualification and its NOT_APPLIED reconciliation. Historical
+auth and predecessor binary must have one matching positive integer device
+number; current auth, reattested predecessor and successor must share another.
+Every non-device lstat field and fixed binary path/version/SHA/team must match.
+A single-file device change, split current devices or any other drift refuses.
+This recognizes the observed paired renumbering pattern; **historical volume
+identity is unproven** because the old receipt contains no VolumeUUID. It never
+normalizes generic lstat identity, reuses old readiness, infers an account ID,
+or weakens exact current reservation/post-canary identity comparisons.
+
+The readiness transaction owner revalidates the exact preimage, saves its bytes
+under the existing digest-named `.superseded-*.json` sibling at root-only mode
+0400, fsyncs it, and atomically replaces the unchanged live receipt with one
+fresh reservation. A crash before replacement leaves the old final receipt;
+a crash after replacement leaves a sticky reservation. The existing one-canary,
+post-identity and finalization procedure then applies. Neither outcome permits
+a second canary on the successor binary. The broker request digest and preserved
+sibling provide provenance without changing the readiness receipt schema.
+
+The existing `NOT_APPLIED` reconciliation owner recognizes this request shape
+from its exact target digest. It may prove non-application only when the same
+old final bytes predate the request, the prior/current binary transition and
+credential identity still validate, and no readiness lock/process remains.
+Any changed receipt or reservation keeps the effect unknown. Reconciliation
+preserves the original marker and never replays the request.
 
 This install-before-readiness order is deliberate, not circular: `install.sh`
 requires strong structural auth metadata (exact worker UID/GID, mode `0600`,

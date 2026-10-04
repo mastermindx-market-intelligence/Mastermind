@@ -19,6 +19,7 @@ import pytest
 INSTALL = Path(__file__).resolve().parents[1] / "ops/executive_os/install.sh"
 MAIN = b"main-0147\n"
 HELPER = b"helper-0147\n"
+PREDECESSOR = b"helper-previous-generation\n"
 
 FAKE = r'''
 import json, os, shutil, stat, sys
@@ -64,6 +65,16 @@ elif command == 'ls':
 elif command == 'codesign':
     if fault == 'signature': sys.exit(1)
     if '--verify' not in args:
+        if target == 'stage' and os.environ.get('FINAL_REPLACE_RACE') == '1':
+            countfile = root / 'stage-signature-count'
+            count = int(countfile.read_text()) + 1 if countfile.exists() else 1
+            countfile.write_text(str(count))
+            if count == 2:
+                winner = path.parent / 'other-operator-helper'
+                winner.write_bytes(b'newer-unobserved-generation\n')
+                winner.chmod(0o555)
+                os.replace(winner, path.parent / 'codex-code-mode-host')
+                (root / 'final-race-observed').write_text('1')
         print('TeamIdentifier='+('WRONGTEAM' if fault == 'team' else '2DC432GLL2'))
         identifier = 'codex' if path.read_bytes() == b'main-0147\n' else 'codex-code-mode-host'
         print('Identifier='+('wrong-helper' if fault == 'identifier' else identifier))
@@ -124,22 +135,35 @@ def harness(tmp_path):
         "SYSTEM_ROOT": str(system), "CODEX_BINARY": str(binary),
         "CODEX_VERSION": "0.159.2", "CODEX_SHA256": hashlib.sha256(MAIN).hexdigest(),
         "CODEX_CODE_MODE_HOST_SHA256": hashlib.sha256(HELPER).hexdigest(),
+        "CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256": hashlib.sha256(PREDECESSOR).hexdigest(),
         "CODEX_CODE_MODE_HOST_TEMP": "",
+        "CODEX_CODE_MODE_HOST_BACKUP": "",
+        "CODEX_CODE_MODE_HOST_ACTION": "",
         "PYTHON_BINARY": sys.executable,
     }
 
-    def run(*, fault="", target="", tamper=False, race=False, version="0.159.2", real_acl=False):
+    def run(*, fault="", target="", tamper=False, race=False, replace_race=False,
+            final_replace_race=False, version="0.159.2", real_acl=False):
         setup["CODEX_VERSION"] = version
         script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in setup.items())
         observed_functions = functions if real_acl else functions.replace(
             "/bin/ls", f"{shlex.quote(sys.executable)} {shlex.quote(str(fake))} ls"
         )
         script += "\n" + observed_functions + "\ncleanup() {\n" + cleanup + "}\ntrap cleanup EXIT\n"
-        script += preflight + "\ninstall_codex_code_mode_host || exit 65\n"
+        script += preflight + "\nprepare_codex_code_mode_host || exit 65\n"
+        if replace_race:
+            script += (
+                'destination="$SYSTEM_ROOT/bin/codex-code-mode-host"\n'
+                '/bin/chmod 0755 "$destination"\n'
+                '/usr/bin/printf "raced-helper\\n" >"$destination"\n'
+                '/bin/chmod 0555 "$destination"\n'
+            )
+        script += "install_codex_code_mode_host || exit 65\n"
         return subprocess.run(["/bin/bash", "-c", script], text=True, capture_output=True, timeout=15,
                               env={**os.environ, "FIXTURE_ROOT": str(tmp_path), "FAULT": fault,
                                    "FAULT_TARGET": target, "TAMPER_STAGE": str(int(tamper)),
-                                   "RACE_DESTINATION": race if isinstance(race, str) else str(int(race))})
+                                   "RACE_DESTINATION": race if isinstance(race, str) else str(int(race)),
+                                   "FINAL_REPLACE_RACE": str(int(final_replace_race))})
 
     def root_owned(path):
         with (tmp_path / "root-inodes").open("a") as f:
@@ -151,10 +175,16 @@ def harness(tmp_path):
 def test_exact_official_package_and_pre_mutation_wiring():
     text = INSTALL.read_text()
     assert 'CODEX_CODE_MODE_HOST_SHA256="ed79fbc9e1683feb29d73fb421f3e16932d178a459f63741754014c6c7ea6107"' in text
+    assert 'CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256="a059beb029cdbc989e72e23f8680be9f703cb6cf83d9598d91041f82178d018d"' in text
     assert 'CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"' in text
     preflight = text.index('verify_codex_component "$CODEX_CODE_MODE_HOST_BINARY"')
-    assert preflight < text.index('trap leave_installed_services_stopped EXIT')
-    assert text.index('install_codex_code_mode_host || exit 65') < text.index('INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"')
+    prepared = text.index('prepare_codex_code_mode_host || exit 65')
+    teardown = text.index('trap leave_installed_services_stopped EXIT')
+    installed = text.index('install_codex_code_mode_host || exit 65')
+    assert preflight < prepared < teardown
+    assert text.index('INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"') < installed
+    assert text.index('if [ "$ARM_PRIVILEGED_BROKER" = "1" ]; then') < installed
+    assert installed < text.index('/bin/echo "installed exact Executive OS release $EXPECTED_SHA"')
     subprocess.run(["/bin/bash", "-n", str(INSTALL)], check=True)
 
 
@@ -237,13 +267,23 @@ def test_installed_postimage_refused(harness, fault):
     assert dest.read_bytes() == HELPER
 
 
-@pytest.mark.parametrize("case", ["symlink", "dangling_symlink", "hardlink", "directory", "mode", "hash"])
+@pytest.mark.parametrize(
+    "case",
+    ["symlink", "dangling_symlink", "symlink_to_fifo", "fifo", "hardlink", "directory", "mode", "hash"],
+)
 def test_bad_existing_destination_is_never_replaced(harness, case):
     run, _, _, dest, _, root_owned = harness
-    if case == "directory": dest.mkdir()
-    elif case in ("symlink", "dangling_symlink"):
+    if case == "directory":
+        dest.mkdir()
+    elif case == "fifo":
+        os.mkfifo(dest)
+    elif case in ("symlink", "dangling_symlink", "symlink_to_fifo"):
         actual = dest.with_name("actual")
-        if case == "symlink": actual.write_bytes(HELPER); actual.chmod(0o555)
+        if case == "symlink":
+            actual.write_bytes(HELPER)
+            actual.chmod(0o555)
+        elif case == "symlink_to_fifo":
+            os.mkfifo(actual)
         dest.symlink_to(actual)
     else:
         dest.write_bytes(b"foreign" if case == "hash" else HELPER)
@@ -253,6 +293,46 @@ def test_bad_existing_destination_is_never_replaced(harness, case):
     inode = dest.lstat().st_ino
     assert run().returncode == 65
     assert dest.lstat().st_ino == inode
+
+
+def test_trusted_previous_generation_helper_is_replaced(harness):
+    run, _, _, dest, _, root_owned = harness
+    dest.write_bytes(PREDECESSOR)
+    dest.chmod(0o555)
+    root_owned(dest)
+    inode = dest.lstat().st_ino
+    result = run()
+    assert result.returncode == 0, result.stderr
+    assert dest.read_bytes() == HELPER
+    assert dest.lstat().st_ino != inode
+    assert not list(dest.parent.glob(".codex-code-mode-host.*"))
+
+
+def test_prepared_replacement_refuses_changed_predecessor(harness):
+    run, _, _, dest, _, root_owned = harness
+    dest.write_bytes(PREDECESSOR)
+    dest.chmod(0o555)
+    root_owned(dest)
+    inode = dest.lstat().st_ino
+    result = run(replace_race=True)
+    assert result.returncode == 65
+    assert dest.lstat().st_ino == inode
+    assert dest.read_bytes() == b"raced-helper\n"
+    assert not list(dest.parent.glob(".codex-code-mode-host.*"))
+
+
+def test_final_validation_preserves_later_privileged_winner(harness):
+    run, _, _, dest, root, root_owned = harness
+    dest.write_bytes(PREDECESSOR)
+    dest.chmod(0o555)
+    root_owned(dest)
+
+    result = run(final_replace_race=True)
+
+    assert (root / "final-race-observed").exists()
+    assert result.returncode == 65
+    assert dest.read_bytes() == b"newer-unobserved-generation\n"
+    assert not list(dest.parent.glob(".codex-code-mode-host.*"))
 
 
 @pytest.mark.parametrize("fault", ["owner", "group", "acl", "acl_observer_failure", "stat_failure"])

@@ -677,12 +677,18 @@ def create_web_ceo_v2_app(settings: AppSettings) -> Any:
 
 
 def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
-    """Installed Web-CEO v3: v2 Executive reads plus local MDM observation."""
+    """Installed Web-CEO v3 with direct Session Bridge + local MDM observation."""
 
     if not settings.read_from_ceo_ingress:
         raise ValueError("Web CEO v3 is installed-only")
+    from integrations.executive_mcp.web_ceo_sessions import SESSION_TOOL_NAMES
+
+    # Session Bridge tools are authenticated direct-owner calls in the outer
+    # MCP host. Never fall through to the ordinary Executive read gateway.
     read_names = tuple(
-        name for name in web_ceo_v3_tool_names() if name != "submit_ceo_intent"
+        name
+        for name in web_ceo_v3_tool_names()
+        if name != "submit_ceo_intent" and name not in SESSION_TOOL_NAMES
     )
     gateway = partial(WebCeoV3CeoIngressReadGateway, mdm_reader=mdm_reader)
     return _create_profile_app(

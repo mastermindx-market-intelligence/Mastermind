@@ -20,6 +20,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import pwd
 import signal
 import stat
@@ -33,6 +34,7 @@ from uuid import uuid4
 from control_plane.worker_execution_contract import (
     LAUNCH_ATTESTATION_SCHEMA_VERSION,
     CollectionReceipt,
+    OrchestrationLaunchSpec,
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
@@ -206,6 +208,7 @@ class ProcessPresence(str, Enum):
 
     LIVE = "LIVE"
     ABSENT = "ABSENT"
+    MISSING = "MISSING"
     TERMINAL_OWNED = "TERMINAL_OWNED"
     UNKNOWN = "UNKNOWN"
 
@@ -390,13 +393,6 @@ class ActiveRun:
     recovered_presence: ProcessPresence | None = dataclasses.field(
         default=None, repr=False
     )
-
-
-@dataclasses.dataclass(frozen=True)
-class OrchestrationLaunchSpec(WorkerLaunchSpec):
-    """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
-
-    effective_grant_digest: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1362,6 +1358,20 @@ class ExecutiveSupervisor:
                 "read-only execution profile refuses a write-capable Job grant"
             )
 
+    @staticmethod
+    def _require_attested_isolation(
+        spec: WorkerLaunchSpec, attestation: Mapping[str, Any]
+    ) -> None:
+        digest = spec.isolation_manifest_sha256
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or attestation.get("isolation_manifest_sha256") != digest
+        ):
+            raise SupervisorError(
+                "worker launch attestation does not bind the admitted isolation manifest"
+            )
+
     def _launch_metadata(
         self,
         *,
@@ -1402,6 +1412,12 @@ class ExecutiveSupervisor:
             or attestation.get("schema_version") != LAUNCH_ATTESTATION_SCHEMA_VERSION
         ):
             raise SupervisorError("worker adapter did not provide a complete launch attestation")
+        if (
+            self.require_complete_launch_attestation
+            or effective_grant is not None
+            or spec.isolation_manifest_sha256 is not None
+        ):
+            self._require_attested_isolation(spec, attestation)
         if effective_grant is not None:
             if "effective_grant_digest" in attestation:
                 raise SupervisorError("worker launch attestation preempted supervisor grant binding")
@@ -2519,6 +2535,12 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "worker recovery binding differs from launch attestation"
             )
+        if (
+            self.require_complete_launch_attestation
+            or effective_grant is not None
+            or spec.isolation_manifest_sha256 is not None
+        ):
+            self._require_attested_isolation(spec, attestation)
         return binding, spec, effective_grant
 
     def _normalise_recovered_lease(
@@ -2896,8 +2918,13 @@ class ExecutiveSupervisor:
                 # retained terminal run still cannot match missing control
                 # metadata, so repeating presence() would recreate the wedge.
                 presence = ProcessPresence.ABSENT
-            elif presence is ProcessPresence.ABSENT:
-                if not self.process_controller.absence_verified(attempt):
+            elif presence in {ProcessPresence.ABSENT, ProcessPresence.MISSING}:
+                verified = (
+                    self.process_controller.presence(attempt) is ProcessPresence.MISSING
+                    if presence is ProcessPresence.MISSING
+                    else self.process_controller.absence_verified(attempt)
+                )
+                if not verified:
                     presence = ProcessPresence.UNKNOWN
                 else:
                     # This must be fresh for an initially absent process too;

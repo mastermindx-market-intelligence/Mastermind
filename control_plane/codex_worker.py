@@ -269,6 +269,7 @@ class ProcessIdentity:
     effective_gid: int
     real_uid: int
     real_gid: int
+    parent_pid: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1142,6 +1143,7 @@ class ProcessInspector:
                 effective_gid=int(info.pbi_gid),
                 real_uid=int(info.pbi_ruid),
                 real_gid=int(info.pbi_rgid),
+                parent_pid=int(info.pbi_ppid),
             )
 
         try:
@@ -3774,6 +3776,7 @@ class CodexWorkerAdapter:
                 binary=self.binary,
                 rendered_argv=_redact_argv(argv),
                 environment_keys=tuple(sorted(environment)),
+                isolation_manifest_sha256=spec.isolation_manifest_sha256,
                 permission_profile_sha256=_canonical_sha256(permission_profile),
                 prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
                 expected_base_sha=spec.expected_base_sha,
