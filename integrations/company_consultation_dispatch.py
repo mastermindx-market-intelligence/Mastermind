@@ -46,6 +46,7 @@ from control_plane.consultation_runtime import (
     ConsultationConflict,
     ConsultationEventResult,
     ConsultationRuntime,
+    RequesterAnswerAttentionProjection,
 )
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import utc_now_iso
@@ -1112,6 +1113,7 @@ class RuntimeConsultationDispatcher:
         packets: ConsultationPacketCarrier,
         invocations: InvocationContextSource,
         before_effect: Callable[[str], None] | None = None,
+        requester_answer_wake_dispatch: Callable[[RequesterAnswerAttentionProjection], Awaitable[None]] | None = None,
         _clock: ClockFn | None = None,
         _wake_repository: WakeLedgerRepository | None = None,
     ) -> None:
@@ -1123,6 +1125,9 @@ class RuntimeConsultationDispatcher:
             raise TypeError("_wake_repository must be WakeLedgerRepository")
         if before_effect is not None and not callable(before_effect):
             raise TypeError("before_effect must be callable")
+        if requester_answer_wake_dispatch is not None and not callable(requester_answer_wake_dispatch):
+            raise TypeError("requester answer Wake dispatch must be callable")
+        self._requester_answer_wake_dispatch = requester_answer_wake_dispatch
         self._before_effect = before_effect
         self._wake_repository = _wake_repository
         self.runtime = runtime
@@ -2126,11 +2131,11 @@ class RuntimeConsultationDispatcher:
                 detail="answer requires canonical TARGET_ACKNOWLEDGED Wake evidence",
             )
 
-        def _reconciled_envelope(
+        async def _reconciled_envelope(
             reserved_event: Any, validated_frame: Mapping[str, Any]
         ) -> dict[str, Any]:
             attention_requested, wake_state, blocker = (
-                self._request_answer_attention(validated_frame, intent)
+                await self._request_answer_attention(validated_frame, intent)
             )
             return {
                 "ok": True,
@@ -2192,7 +2197,7 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="admitted ANSWER_AVAILABLE but carrier frame is missing or fails validation",
                 )
-            return _reconciled_envelope(reserved, validated)
+            return await _reconciled_envelope(reserved, validated)
 
         answer_box: dict[str, Any] = {}
         runtime_refusal: ConsultationRefusal | None = None
@@ -2308,7 +2313,7 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="replay ANSWER_AVAILABLE admitted but carrier frame is missing or fails validation",
                 )
-            return _reconciled_envelope(current_reserved, validated)
+            return await _reconciled_envelope(current_reserved, validated)
         except ConsultationPacketEffectUnknown:
             answer = answer_box.get("result")
             current_reserved = _non_historical_answer_event(
@@ -2470,7 +2475,7 @@ class RuntimeConsultationDispatcher:
                         "blocker": "CARRIER_RECONCILIATION_REQUIRED",
                     },
                 }
-            return _reconciled_envelope(current_reserved, validated)
+            return await _reconciled_envelope(current_reserved, validated)
         event, event_type, payload_fact, historical = _answer_event_facts(answer)
         if historical or not answer.inserted:
             raise ConsultationRefusal(
@@ -2478,7 +2483,7 @@ class RuntimeConsultationDispatcher:
             )
 
         attention_requested, wake_state, blocker = (
-            self._request_answer_attention(answer_frame, intent)
+            await self._request_answer_attention(answer_frame, intent)
         )
         return {
             "ok": True,
@@ -2500,7 +2505,7 @@ class RuntimeConsultationDispatcher:
             },
         }
 
-    def _request_answer_attention(
+    async def _request_answer_attention(
         self, answer_frame: Mapping[str, Any], intent_event: Any
     ) -> tuple[bool | None, str | None, str | None]:
         """Create/reconcile the one requester-directed answer Wake request."""
@@ -2559,6 +2564,17 @@ class RuntimeConsultationDispatcher:
                 "RECONCILIATION_REQUIRED",
                 "ANSWER_ATTENTION_UNRESOLVED",
             )
+        if self._requester_answer_wake_dispatch is not None:
+            try:
+                self._guard_effect("ANSWER_WAKE")
+                await self._requester_answer_wake_dispatch(projection)
+            except Exception:
+                # The answer and any recorded delivery survive a held native
+                # consumer. Retry/restart re-enters the same Wake obligation.
+                return (
+                    True, _wake_state_readback(self._wake_repository, obligation_id),
+                    "ANSWER_ATTENTION_UNRESOLVED",
+                )
         return (
             True,
             _wake_state_readback(self._wake_repository, obligation_id),

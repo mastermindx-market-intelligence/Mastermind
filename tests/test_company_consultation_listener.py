@@ -73,6 +73,7 @@ def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(tmp
         assert hosts == []  # Runtime is opened only by service startup.
         runtime = object()
         binding.host_factory(runtime)
+        assert callable(hosts[0].pop("requester_answer_wake_dispatch"))
         assert hosts == [dict(runtime=runtime, repository_root=raw["proof_source_repository"],
                              worker_uid=451, relay_socket_path=cli._CANONICAL_AGENT_RELAY_SOCKET,
                              workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID)]
@@ -331,4 +332,31 @@ def test_company_close_preserves_same_inode_after_custody_drift(tmp_path, short_
         assert path.exists()
         assert path.lstat().st_ino == before.st_ino
         assert service._lock_fd is None
+    asyncio.run(scenario())
+
+
+
+def test_answer_recovery_can_read_company_listener_during_startup(tmp_path, short_socket_root, monkeypatch):
+    monkeypatch.setattr(service_module, "_peer_uid", lambda connection: 451)
+    async def scenario():
+        service, path, hosts = _service(tmp_path, short_socket_root)
+        recovered = []
+        async def recover():
+            assert service._company_consultation_ready
+            assert service._server.is_serving()
+            assert service._company_consultation_server.is_serving()
+            assert service._coo_tick_task is None
+            reader, writer = await asyncio.open_unix_connection(path)
+            writer.write(b"company\n")
+            await writer.drain()
+            assert await asyncio.wait_for(reader.readline(), 1) == b"accepted\n"
+            writer.close()
+            await writer.wait_closed()
+            recovered.append(hosts[0].runtime)
+        monkeypatch.setattr(service, "_reconcile_company_answer_wakes", recover)
+        await service.start()
+        try:
+            assert recovered == [service.runtime]
+        finally:
+            await service.close()
     asyncio.run(scenario())

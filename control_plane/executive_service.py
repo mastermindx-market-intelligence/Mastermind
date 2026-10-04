@@ -430,6 +430,98 @@ class ExecutiveDialogueWakeBridge:
         self._installed_release_sha = installed_release_sha
         self._operation_key = operation_key
 
+    async def dispatch_requester_answer(self, runtime, projection, *, before_effect=None) -> str | None:
+        """Reconcile one exact requester source through the existing Wake carrier.
+
+        Return only a stored native-read delivery command, never a synthesized
+        receipt. Production route and retry arming remain mandatory.
+        """
+        from control_plane.consultation_runtime import (
+            ConsultationRuntime, RequesterAnswerAttentionProjection,
+        )
+        from control_plane.session_targets import load_session_targets, route_obligation
+        from control_plane.wake_ledger import LedgerPhase, assert_causal
+        from control_plane.wake_persist import WakeLedgerRepository
+
+        if (not isinstance(runtime, Runtime)
+                or not isinstance(projection, RequesterAnswerAttentionProjection)
+                or self._canary_profile is not None):
+            raise StateConflict("requester answer Wake composition is unavailable")
+        owner = ConsultationRuntime(runtime, repository_root=runtime.store.root)
+        def current_source():
+            if before_effect is not None:
+                before_effect()
+            with runtime.store.read() as connection:
+                recovered = owner.recover_requester_answer_attention(
+                    projection.obligation, connection=connection,
+                )
+                if recovered != projection:
+                    raise StateConflict("requester answer projection is stale")
+                source = runtime.current_harness_binding_source(
+                    projection.identity.requester_attempt_id, connection=connection,
+                )
+            return source
+        source = current_source()
+        target, binding = projection.target, projection.binding
+        registry = load_session_targets()
+        # This fixed alias is owned by consultation_requester_binding, not a
+        # caller-selected seat or a search for any current writer.
+        registry = dataclasses.replace(
+            registry, targets={**registry.targets, target.session_alias: target},
+        )
+        registry = registry.with_root_job_bindings({
+            **registry.root_job_bindings,
+            projection.identity.root_job_id: {
+                **registry.root_job_bindings.get(projection.identity.root_job_id, {}),
+                target.target_seat: target.session_alias,
+            },
+        })
+        route = route_obligation(projection.obligation, registry, binding=binding)
+        if not route.delivery_allowed or not self._retry_policy.armed:
+            raise StateConflict("requester answer Wake route is unarmed")
+        epoch, generation = runtime.operator_harness.generation_refs(source.process_generation_id)
+        if (
+            epoch.attempt_id != projection.identity.requester_attempt_id
+            or runtime.operator_harness.current_writer_generation(epoch) != generation
+        ):
+            raise StateConflict("requester answer writer is stale")
+        resolved = DialogueWakeTarget(
+            registry=registry, runtime_binding=binding,
+            target_attempt_id=projection.identity.requester_attempt_id,
+            process_generation_id=source.process_generation_id,
+            operator_adapter=self._operator_adapter,
+        )
+        carrier = self._carrier_factory(
+            runtime=runtime, resolved=resolved, target=target, current_binding=binding,
+            retry_policy=self._retry_policy, generation=generation,
+            source_guard=current_source,
+        )
+        state = await carrier.reconcile(projection.obligation, route)
+        if state.value == "EFFECT_UNKNOWN":
+            from control_plane.wake_dispatcher import WakeEffectUnknownError
+            raise WakeEffectUnknownError("requester answer Wake needs same-attempt reconciliation")
+        if state.value == "MISSING":
+            current_source()
+            await carrier.submit(projection.obligation, route)
+        stored = WakeLedgerRepository(runtime).list_records(projection.obligation.obligation_id)
+        assert_causal(tuple(item.record for item in stored))
+        delivered = [item for item in stored if item.record.phase is LedgerPhase.DELIVERED]
+        if len(delivered) > 1:
+            raise StateConflict("requester answer has ambiguous delivered evidence")
+        if not delivered or delivered[0].record.native_company_read is None:
+            return None
+        record = delivered[0].record
+        if (
+            record.binding_id != binding.binding_id
+            or record.binding_generation != binding.binding_generation
+            or record.destination_digest != route.destination_digest
+            or record.session_alias != target.session_alias
+            or record.reasoning_surface != binding.reasoning_surface
+            or record.native_company_read.target_attempt_id != projection.identity.requester_attempt_id
+        ):
+            raise StateConflict("requester answer delivered identity drifted")
+        return delivered[0].event.command_id
+
     @property
     def canary_profile(self) -> Any:
         return self._canary_profile
@@ -2075,6 +2167,7 @@ class ExecutiveControlService:
         self._listener_drains: set[asyncio.Task[Any]] = set()
         self._read_provider_drain: asyncio.Task[Any] | None = None
         self._startup_reconciliation: list[Any] = []
+        self._company_answer_reconciliation: list[dict[str, str]] = []
         self._started_at: str | None = None
         if service_state not in {"READY", "AWAITING_CANARY"}:
             raise ValueError("service_state must be READY or AWAITING_CANARY")
@@ -3139,6 +3232,79 @@ class ExecutiveControlService:
                 self._company_consultation_tasks.discard(task)
                 self._company_consultation_writers.discard(writer)
 
+    def _require_company_answer_attention(self) -> None:
+        if (
+            self._closing or self._service_state != "READY"
+            or self._company_consultation_binding is None
+            or not self._company_consultation_ready
+            or not self.config.coo_operator_harness_armed
+        ):
+            raise StateConflict("Company answer attention service is unarmed")
+        self._require_current_autonomy()
+
+    async def _reconcile_company_answer_wakes(self) -> None:
+        """One bounded pass at existing startup/operator reconciliation edges."""
+        from control_plane.consultation_runtime import ConsultationRuntime
+        from control_plane.wake_events import SourceKind, WakeKind
+        from control_plane.wake_ledger import (
+            LedgerPhase, WAKE_AGGREGATE_TYPE, wake_record_from_event,
+        )
+        from control_plane.wake_persist import WakeLedgerRepository
+
+        host = self._company_consultation_host
+        if (host is None or self._service_state != "READY"
+                or not self.config.coo_operator_harness_armed):
+            return
+        dispatch = getattr(host, "dispatch_requester_answer", None)
+        consume = getattr(host, "consume_stored_native_read", None)
+        if not callable(dispatch) or not callable(consume):
+            return
+        runtime = self._require_runtime()
+        owner = ConsultationRuntime(runtime, repository_root=runtime.store.root)
+        repository = WakeLedgerRepository(runtime)
+        outcomes = []
+        for event in runtime.events.list_events(aggregate_type=WAKE_AGGREGATE_TYPE):
+            if event.event_type != LedgerPhase.WAKE_REQUESTED.value:
+                continue
+            try:
+                requested = wake_record_from_event(event)
+                obligation = requested.obligation
+                if (obligation is None
+                        or obligation.wake_kind is not WakeKind.CONSULTATION_ANSWER_AVAILABLE
+                        or obligation.source_kind is not SourceKind.CONSULTATION_ANSWER_ATTENTION):
+                    continue
+                self._require_company_answer_attention()
+                stored = repository.list_records(obligation.obligation_id)
+                if any(row.record.phase in {
+                    LedgerPhase.TARGET_ACKNOWLEDGED, LedgerPhase.SOURCE_RESOLVED,
+                } for row in stored):
+                    continue
+                delivered = [row for row in stored if row.record.phase is LedgerPhase.DELIVERED]
+                if len(delivered) > 1:
+                    raise StateConflict("Company answer has ambiguous delivery")
+                if delivered:
+                    if delivered[0].record.native_company_read is not None:
+                        await consume(delivered[0].event.command_id)
+                        state = "CONSUMED"
+                    else:
+                        state = "DELIVERED_WITHOUT_NATIVE_READ"
+                else:
+                    with runtime.store.read() as connection:
+                        projection = owner.recover_requester_answer_attention(
+                            obligation, connection=connection,
+                        )
+                    await dispatch(projection)
+                    state = "RECONCILED"
+                outcomes.append({"obligation_id": obligation.obligation_id, "state": state})
+            except Exception as exc:
+                # Holds are observational and remain on their existing stream;
+                # an unrelated malformed source does not invent a new queue.
+                outcomes.append({
+                    "obligation_id": event.aggregate_id, "state": "HELD",
+                    "reason": type(exc).__name__,
+                })
+        self._company_answer_reconciliation = outcomes
+
     async def start(self) -> None:
         if self._server is not None:
             raise ServiceError("Executive control service is already started")
@@ -3255,6 +3421,9 @@ class ExecutiveControlService:
             # (Operator starts second, so this line already runs after both),
             # unchanged single-listener timing otherwise.
             self._started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            # Native Wake can call Company MCP. Recover only after every
+            # listener is serving, under the same existing service owner.
+            await self._reconcile_company_answer_wakes()
             if (
                 self.config.coo_autonomy_armed
                 and self._service_state == "READY"
@@ -7253,6 +7422,8 @@ class ExecutiveControlService:
                 "active_dispatches": active,
                 "dispatch_errors": dict(sorted(self._dispatch_errors.items())),
                 "startup_reconciliation": _jsonable(self._startup_reconciliation),
+                **({"company_answer_reconciliation": self._company_answer_reconciliation}
+                   if self._company_consultation_binding is not None else {}),
                 "coo_autonomy": {
                     "armed": self.config.coo_autonomy_armed,
                     "tick_interval_seconds": self.config.coo_tick_interval_seconds,
@@ -7367,12 +7538,11 @@ class ExecutiveControlService:
             self._exact_args(args, set())
             if any(not task.done() for task in self._dispatch_tasks.values()):
                 raise StateConflict("cannot reconcile while this service owns an active dispatch")
-            return _jsonable(
-                await self._run_physical(
-                    self._require_supervisor().reconcile_restart,
-                    requeue_lost=False,
-                )
+            result = await self._run_physical(
+                self._require_supervisor().reconcile_restart, requeue_lost=False,
             )
+            await self._reconcile_company_answer_wakes()
+            return _jsonable(result)
         if command == "recover-proof-capacity":
             self._exact_args(args, {"job_id", "lost_attempt_id"})
             return await self._recover_proof_capacity(

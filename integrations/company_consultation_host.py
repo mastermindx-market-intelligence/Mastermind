@@ -158,7 +158,7 @@ class CompanyConsultationHost:
     def __init__(
         self, *, runtime: Runtime, repository_root: Path, worker_uid: int,
         relay_socket_path: Path, workspace_id: str, channel_id: str,
-        inspector=None,
+        inspector=None, requester_answer_wake_dispatch=None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("Company host requires canonical Runtime")
@@ -172,6 +172,9 @@ class CompanyConsultationHost:
         self.worker_uid, self.relay_socket_path = worker_uid, path
         self.workspace_id, self.channel_id = workspace_id, channel_id
         self.inspector = inspector
+        if requester_answer_wake_dispatch is not None and not callable(requester_answer_wake_dispatch):
+            raise TypeError("requester answer Wake dispatch must be callable")
+        self._requester_answer_wake_dispatch = requester_answer_wake_dispatch
         # This existing resolver owns and validates the exact Relay scope.
         ExecutiveConsultationPacketTargetResolver(
             runtime, workspace_id=workspace_id, channel_id=channel_id,
@@ -269,6 +272,14 @@ class CompanyConsultationHost:
             ))
         return CompanyConsultationPeerResolver(tuple(peers)), parties
 
+    async def dispatch_requester_answer(self, projection) -> None:
+        """Internal service port; it carries no cached Company caller authority."""
+        if self._requester_answer_wake_dispatch is None:
+            raise StateConflict("requester answer Wake dispatch is unavailable")
+        command_id = await self._requester_answer_wake_dispatch(projection)
+        if command_id is not None:
+            await self.consume_stored_native_read(command_id)
+
     async def consume_stored_native_read(self, delivered_command_id: str) -> dict[str, Any]:
         """Reduce exact stored evidence; not an MCP tool or peer-request operation."""
         if type(delivered_command_id) is not str:
@@ -342,6 +353,10 @@ class CompanyConsultationHost:
                     worker_id=caller.actor_ref["worker_id"], reasoning_surface="codex",
                     binding=_binding_fields(context.caller.binding), dialogue_binding=caller,
                 ), recipients=recipient, packets=packets, invocations=context, before_effect=context.guard,
+                requester_answer_wake_dispatch=(
+                    self.dispatch_requester_answer
+                    if self._requester_answer_wake_dispatch is not None else None
+                ),
             )
             async def dispatch(name, request):
                 nonlocal dispatch_started

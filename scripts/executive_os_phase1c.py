@@ -57,6 +57,7 @@ def _build_executive_dialogue_wake_carrier(
     current_binding,
     retry_policy,
     generation,
+    source_guard=None,
 ):
     """Compose existing Wake owners outside the control-plane dependency layer."""
 
@@ -79,16 +80,17 @@ def _build_executive_dialogue_wake_carrier(
         attempt_id=resolved.target_attempt_id,
         runtime_binding=current_binding,
     )
+    def current_binding_for(_route):
+        if source_guard is not None:
+            source_guard()
+        return project_runtime_binding(runtime, resolved.target_attempt_id, target)
+
     return PersistedWakeCarrier(
         repository=WakeLedgerRepository(runtime),
         dispatchers=WakeDispatcherRegistry(
             {"codex-app-server": CodexAppServerWakeDispatcher(wake_client)}
         ),
-        current_binding_for=lambda _route: project_runtime_binding(
-            runtime,
-            resolved.target_attempt_id,
-            target,
-        ),
+        current_binding_for=current_binding_for,
         retry_policy=retry_policy,
         target_registry=resolved.registry,
     )
@@ -2106,11 +2108,30 @@ def _service_from_config(
 
         company_repository = Path(raw["proof_source_repository"])
         company_worker_uid = int(raw["worker_uid"])
+        answer_bridge = dialogue_observation_kwargs.get("dialogue_wake_handler")
+        if answer_bridge is None:
+            from control_plane.wake_ledger import WakeRetryPolicy
+            def company_wake_turn_input_loader(_turn):
+                raise ServiceError("Company answer Wake cannot load provider turns")
+            answer_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=raw.get("dialogue_wake_retry_policy", WakeRetryPolicy(armed=False)),
+                operator_adapter=RemoteCodexOperatorAdapter(
+                    client, turn_input_loader=company_wake_turn_input_loader,
+                ),
+                carrier_factory=_build_executive_dialogue_wake_carrier,
+            )
         def company_host_factory(runtime):
+            async def dispatch_answer(projection):
+                service._require_company_answer_attention()
+                return await answer_bridge.dispatch_requester_answer(
+                    runtime, projection, before_effect=service._require_company_answer_attention,
+                )
             return CompanyConsultationHost(
                 runtime=runtime, repository_root=company_repository,
                 worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
-                workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID)
+                workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
+                requester_answer_wake_dispatch=dispatch_answer)
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)
         company_binding = CompanyConsultationBinding(

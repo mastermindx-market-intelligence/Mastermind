@@ -669,6 +669,107 @@ class ConsultationRuntime:
             obligation=obligation,
         )
 
+    def recover_requester_answer_attention(
+        self,
+        obligation: WakeObligation,
+        *,
+        connection: sqlite3.Connection,
+    ) -> RequesterAnswerAttentionProjection:
+        """Recover one persisted answer source from immutable Runtime events.
+
+        The source hash is matched against the exact requester's consultation
+        history. No inbox, provider read, new request, or mutable identity is
+        used to discover the answer.
+        """
+        self.runtime.store._assert_owned_snapshot_connection(connection)
+        if not connection.in_transaction:
+            raise StateConflict("answer recovery requires an active transaction")
+        if (
+            not isinstance(obligation, WakeObligation)
+            or obligation.wake_kind is not WakeKind.CONSULTATION_ANSWER_AVAILABLE
+            or obligation.source_kind is not SourceKind.CONSULTATION_ANSWER_ATTENTION
+            or not obligation.attempt_id
+        ):
+            raise StateConflict("answer recovery requires an exact requester obligation")
+        records = WakeLedgerRepository(self.runtime).list_ledger_records_on_connection(
+            connection, obligation.obligation_id
+        )
+        requested = [row for row in records if row.phase is LedgerPhase.WAKE_REQUESTED]
+        if len(requested) != 1 or requested[0].obligation != obligation:
+            raise StateConflict("answer recovery requires the exact stored WAKE_REQUESTED")
+        try:
+            assert_causal(records)
+        except ValueError as exc:
+            raise StateConflict("answer recovery requires a causal Wake stream") from exc
+
+        groups: dict[str, list[Event]] = {}
+        for event in self.runtime.events.list_events(
+            attempt_id=obligation.attempt_id, aggregate_type="consultation",
+            connection=connection,
+        ):
+            if event.command_id.startswith(self._command_prefix({"consultation_id": event.aggregate_id})):
+                groups.setdefault(event.aggregate_id, []).append(event)
+        candidates = []
+        root = self._root_job_id_on_connection(obligation.attempt_id, connection)
+        for consultation_id, events in groups.items():
+            intents = [event for event in events if event.event_type == "INTENT"]
+            if len(intents) != 1:
+                continue
+            try:
+                request = self._intent_from_event(intents[0])
+                actor, frozen = request["requester_actor_ref"], request["requester_binding"]
+                if (
+                    request["consultation_id"] != consultation_id
+                    or actor["attempt_id"] != obligation.attempt_id
+                    or actor["job_id"] != obligation.job_id
+                ):
+                    continue
+                for answer in events:
+                    payload = answer.payload
+                    if (
+                        answer.event_type != "ANSWER_AVAILABLE"
+                        or payload.get("schema_version") != CONSULTATION_RECEIPT_SCHEMA
+                        or payload.get("fact") != "ANSWER_AVAILABLE"
+                        or payload.get("consultation_id") != consultation_id
+                        or payload.get("historical") is not False
+                    ):
+                        continue
+                    identity = RequesterAnswerAvailableSourceIdentity.create(
+                        consultation_id=consultation_id,
+                        answer_message_key=payload["message_key"],
+                        answer_fingerprint=payload["answer_fingerprint"],
+                        semantic_answer_digest=payload["semantic_answer_digest"],
+                        root_job_id=root, requester_job_id=actor["job_id"],
+                        requester_attempt_id=obligation.attempt_id,
+                        requester_binding_id=frozen["binding_id"],
+                        requester_binding_generation=frozen["binding_generation"],
+                        requester_reasoning_surface=frozen["reasoning_surface"],
+                    )
+                    if requester_answer_attention_source_ref(identity) == obligation.source_ref:
+                        candidates.append(identity)
+            except (KeyError, TypeError, ValueError, StateConflict):
+                # A malformed unrelated consultation cannot supply an identity.
+                continue
+        if len(candidates) != 1:
+            raise StateConflict("answer recovery requires one exact immutable source")
+        identity = candidates[0]
+        target, binding = self._requester_target_and_binding_on_connection(
+            obligation.attempt_id, connection
+        )
+        expected = mint_obligation(
+            wake_kind=WakeKind.CONSULTATION_ANSWER_AVAILABLE,
+            source_kind=SourceKind.CONSULTATION_ANSWER_ATTENTION,
+            source_ref=requester_answer_attention_source_ref(identity),
+            declared_target_seat=target.target_seat, job_id=identity.requester_job_id,
+            attempt_id=identity.requester_attempt_id, root_job_id=identity.root_job_id,
+            emitted_at=obligation.emitted_at,
+        )
+        if expected != obligation:
+            raise StateConflict("answer recovery obligation identity drifted")
+        projection = RequesterAnswerAttentionProjection(identity, target, binding, obligation)
+        self.assert_requester_answer_attention_current(projection, connection=connection)
+        return projection
+
     def assert_requester_answer_attention_current(
         self,
         projection: RequesterAnswerAttentionProjection,
