@@ -662,50 +662,137 @@ background execution or runtime lifecycle transition was created.
 <!-- DAILY_CONTINUATION_2026_10_04_START -->
 ## 2026-10-04 — Conversation continuity and daily navigation extension
 
-Continuation of the Chairman-approved Atelier daily-UX design commission, on the
-existing exact Paper file `01M3NRCX55B452A12819WNE1RH` and draft PR #1010.
-Protected source recovered at `28be2ce2d481fd542ec869344e178e5cec4d7d75`,
-Skillpack 1.0.1 / bootstrap 1. The bounded comparison from the prior `a2646f4`
-pin contains no app-source delta; the current daily app remains read-only.
-New candidate observations: #1046 `274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f`;
-#1150 `8aca50467f774f52b31cd9147a305936034f46bc`, both open/draft.
+Completed continuation of the Chairman-approved Atelier daily-UX design
+commission, in the existing exact Paper file `01M3NRCX55B452A12819WNE1RH`
+and existing draft PR #1010.
 
-### Applied, verified prefix
+### Source and scope
 
-- New CV01 `SD8-0` and CV01M `SI5-0` on canonical page `p-D-0`:
-  a company-office entry, exact project conversation with scoped draft, separate
-  accessible-project fallback when conversation access is absent, local
-  project/topic filtering, and incomplete-coverage qualification. Independent
-  screenshot/tree review accepted both at 1600×1040 and 390×844.
-- Existing CH1 `IZB-0`, CH2 `JLU-0`, CH3 `JV7-0`, CH6 `K5X-0`,
-  CH7 `KBA-0`: Project Sol/About Mastermind OS is explicit; opening evidence
-  no longer promotes an unsent draft into a sent message or replaces composition.
-  Default controls are Options + Send. Hidden historical controls remain editable.
-  CH7 retains original-operation Check delivery and paused Send. Eight logical
-  effects were applied and verified; those five working indicators were released.
-- Existing Inbox `KY5-0` / `MNL-0`: one known qualified decision and visible
-  partial coverage; non-actionable team review removed from Needs-you; one
-  Review decision navigation step; team follow-through remains contextual.
-  Final screenshots fit and preserve the mobile safe area.
+Protected procedure and implementation compatibility were recovered at
+`28be2ce2d481fd542ec869344e178e5cec4d7d75`, compatible Skillpack 1.0.1 /
+bootstrap 1. The bounded comparison from the original `a2646f4…` census
+contains three commits and 22 changed files with no `app/` delta. The daily
+app remains a read-only consumer; this continuation changes design and
+documentation.
 
-All dispatched Paper writes in this continuation are observed as applied; no
-unknown modifying effect, replay, carrier change or focus transition is present.
-The direct Mastermind Paper carrier and accepted catalog `ac18857d…` remain
-unchanged. Other sessions' advanced AT16+ route work is preserved.
+Dated candidate observations are #1046 at
+`274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f` and #1150 at
+`8aca50467f774f52b31cd9147a305936034f46bc`, both open/draft/unmerged.
+The former clears Work alongside other protected views on auth-generation
+invalidation. The latter's exact LAUNCH port remains unchanged from the prior
+read and adds no message/STOP capability. The builder spec records primary
+source references S22–S25; no candidate capability was promoted to installed
+or protected app behavior.
 
-### Current continuation frontier
+### Exact Paper outcome
 
-The screen-refinement phase is saved. Remaining work in this same commission:
-add UX06 directory states and UX07 composer/continuity states to existing page
-`p-E-0`, wire their entries into the existing guides, finish the targeted builder
-spec update, independently review the connected contracts, then verify exact
-repository readback and release the parent-owned working indicators.
-The spec's local edit is owned by the admitted bounded documentation helper;
-no concurrent parent edit of that file is underway.
+Nine product screens were added or refined, with two new explanatory boards
+and five existing guide/index entry points reconciled.
 
-This is an in-progress design checkpoint, not frontend implementation, working
-prototype-link proof, runtime action, installation, deployment or product
-acceptance. No new runtime, watcher, external message or source custody transfer
-was created. Historical component and original-operation obligations earlier
-in this record remain unchanged.
+| Target | Exact IDs | Applied outcome |
+| --- | --- | --- |
+| CV01 / CV01M | `SD8-0` / `SI5-0`, page `p-D-0` | New Conversations destination: durable Meta-CEO office, exact Project Sol thread, retained scoped draft, local metadata filter, independent permitted-project fallback and visible partial coverage |
+| Inbox desktop / mobile | `KY5-0` / `MNL-0`, page `p-D-0` | One known reserved decision; team review excluded from Needs you; one Review decision navigation action; explicit coverage limits |
+| CH1 / CH2 / CH3 | `IZB-0` / `JLU-0` / `JV7-0`, page `p-C-0` | Same Project Sol/Mastermind OS scope and same separate sent message/unsent draft through conversation, evidence and context |
+| CH6 / CH7 | `K5X-0` / `KBA-0`, page `p-C-0` | Mobile Options + Send, with original-message recovery and paused sending when delivery is uncertain |
+| UX06 | `SMO-0`, page `p-E-0` | Office/project branches, filtered empty versus complete current empty versus unavailable scope, binding changes, exact fallback identity and return |
+| UX07 | `SMP-0`, page `p-E-0` | Draft continuity; ready, read-only, sending, owner-accepted, delivered and uncertain states; known-no-effect recovery, draft revision and keyboard/focus |
+| Existing entry points | AT00 `KSB-0`; UX00 `PBO-0`; directory `A2Q-0`; MC90 `A8Q-0`; CH91 `KDN-0` | Links by exact board label/ID to UX00–UX07, CV01/CV01M and the repository contract |
+
+CV01/CV01M sit at y=6800 on Page 12. UX06/UX07 sit at y=3750 on Page 13.
+The eight workflow notes extend the original guide set. The existing Atelier
+ink/graphite/ivory/champagne tokens, Manrope/Inter typography and original
+sculptural artwork were retained. Disjoint AT16+ work, including the later
+advanced-operation references in the shared index, remains intact.
+
+### Daily experience decisions
+
+The directory offers the existing company office or the exact project's
+permitted conversation. A topic title or newest provider tab cannot select an
+owner. New conversation opens a draft only. A Terminal conversation-access
+failure may open the separately permitted Terminal project through the AT03
+layout; it must never open the fixed Mastermind OS example.
+
+CH2 previously portrayed CH1's unsent text as a sent message and replaced its
+composer. That continuity error is corrected. The already-sent text is
+“Keep this moving. What’s still missing before release?”; the separate unsent
+draft remains “What evidence is still missing?” across CH1/CH2/CH3/CH6.
+Reading evidence does not send, replace, attach or retarget it. Add to draft
+is an explicit permitted append. The default composer uses Options + Send;
+historical attachment/microphone layers remain hidden and editable.
+
+Submission, owner acceptance, recipient delivery, responding and response
+received remain distinct. A delayed receipt can clear only its submitted
+draft revision, even if the next draft contains identical words. Uncertain
+delivery retains the original owner operation; Check delivery reads that
+original and creates no retry. Timeout or `not_found` is not no effect.
+An authoritative known-no-effect result permits only a newly qualified,
+explicit attempt.
+
+Inbox no longer presents routine team review as a Chairman obligation. Its
+known decision concerns release-baseline scope, keeps the current baseline
+as the recommendation, and navigates directly to the exact decision packet.
+Partial coverage stays visible rather than implying the queue is complete.
+
+### Verification and corrections
+
+Actual screenshots, editable trees and inline-style JSX were inspected.
+Independent bounded review accepted CV01/CV01M, the Inbox pair, and the shared
+conversation/spec semantics. The CH editor inspected all five changed chat
+roots; the principal additionally inspected final CH2 and CH7.
+
+Independent UX06/UX07 review found two precise copy corrections, both applied
+and visually rechecked: complete-empty wording is limited to the current
+scope, and return may reopen the keyboard only if the composer actually had
+prior focus. No unresolved layout issue remained in that review.
+
+Product desktops remain 1600 × 1040 and mobiles 390 × 844. New note boards
+are 1600 × 1120. Final computed styles confirm the reviewed mobile controls
+have at least 44px targets, and the bottom safe area remains. The complete
+UX00 guide list was clipped after accumulated index content; its canvas is
+now 1600 × 1200 with adjusted spacing, fitting before the next row at y=1250.
+The final guide-entry renders and extraction were inspected.
+
+These observations establish editable visual/semantic fit. They do not
+establish working prototype links, actual keyboard/IME/screen-reader behavior,
+320px or enlarged-text behavior, network-fault behavior, installed messaging,
+or daily product acceptance. The existing fifteen implementation scenarios
+have explicit continuation checks; they remain requirements to execute.
+
+### Effects and durable handoff
+
+The direct Mastermind Paper carrier was used throughout. Exact-file reads,
+fresh target-scoped guards and unique operation IDs accompanied mutations.
+Accepted catalog:
+`ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`.
+All dispatched Paper effects in this continuation returned
+`APPLIED_RESPONSE_OBSERVED`; no modifying effect remains unknown.
+Owned working indicators, including the five CH roots and the parent-owned
+screens/notes/index entries, were explicitly released. There was no active-file
+transition, browser fallback, duplicate replay or provider/runtime action.
+
+The earlier in-progress checkpoint was saved in
+`bd10d22c71635ba4094886282c4be25fe84184fc`; this completed section replaces
+only that checkpoint and preserves the historical record above.
+The expanded builder specification is saved in
+`d9a5538002e76eaa24f9a621b51883e94b35d4be`;
+the eight-guide README update is
+`2bbec8c67caa85e9793b6590c8bc8e001b184d2b`.
+Both were authored for `sol/noir-qualification-20260926` under draft PR #1010.
+Exact content readback is required at close-out. Historical component/P-series
+custody and original-operation obligations above remain unchanged.
+
+The builder's next concrete slice is the real integrated, source-qualified
+Today → exact project → permitted conversation/evidence → contextual return
+journey, using existing bounded reads and honest unavailable states. Consume
+the current Paper screens and action maps; test source coverage, exact identity,
+auth invalidation, draft/reading/focus continuity and mobile behavior.
+Add messaging and other actions only through their separately qualified owner
+capabilities. Do not create a substitute session, transcript or command store
+to imitate the design.
+
+`FINALIZATION_CLASSIFICATION: PROVEN_OUTCOME` and `MISSION_COMPLETE: true`
+apply only to this bounded Paper design and builder-handoff continuation.
+No app implementation, protected merge, installation, deployment, background
+execution, outgoing message or source-custody transfer was performed.
 <!-- DAILY_CONTINUATION_2026_10_04_END -->
