@@ -2,10 +2,18 @@
 
 **Stage:** `DESIGN_CONTRACT` — reviewable design and builder contract; not live product qualification.
 **Target repository path:** `docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md`.
-**Protected implementation baseline:** `mastermindx-market-intelligence/Mastermind@a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
+**Original protected implementation census:** `mastermindx-market-intelligence/Mastermind@a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
+**Continuation compatibility pin:** `28be2ce2d481fd542ec869344e178e5cec4d7d75`; bounded comparison found no app-source delta (§18.2).
 **Design source:** approved Atelier visual direction, the current five-destination OS shell, and the daily-flow design decisions made in this Chairman-requested commission on 4 October 2026.
 **Paper:** file `01M3NRCX55B452A12819WNE1RH`, page `p-E-0`, “13 · Daily Experience · Flow + Builder Notes”.
 **Illustration rule:** every person, count, message, decision, outcome, project, status, and timestamp in a mockup is illustrative unless separately qualified by its current canonical owner.
+
+### Builder reading order
+
+1. Read UX00 and §1 for the daily loop, durable responsibilities, and current implementation boundary.
+2. Use §2 and the actual action maps in §§6.4 and 11.1 to connect the exact screen family. Start with the read-only slice in §15.
+3. Apply UX01–UX04 and UX06–UX07 with §§10–14 for source states, draft continuity, message outcomes, recovery, keyboard and return behavior. The intended default composer is Options + Send; hidden historical controls are not instructions to restore their former behavior.
+4. Build the slice-appropriate fixtures and run §§16–17 against the real application. Record the tested source revision and actual results; the Paper review is design evidence only.
 
 ## 1. Purpose and completion boundary
 
@@ -50,7 +58,7 @@ The protected source does not implement project creation, Inbox decision command
 ## 2. Paper directory and screen lineage
 
 New UX artboards are explanatory flow/state contracts; existing AT/CH screens remain the visual component lineage.
-All six IDs below were read back from the exact Paper file. The page is an editable storyboard and builder note set; the accepted Paper catalog exposes no prototype-link operation, so working click-through behavior is not claimed.
+All eight IDs below were read back from the exact Paper file. Continuation notes UX06/UX07 extend the original six on the same page. The page is an editable storyboard and builder note set; the accepted Paper catalog exposes no prototype-link operation, so working click-through behavior is not claimed.
 Desktop and mobile variants share the same source-state and effect semantics.
 
 | Label | Content | Paper ID | Existing screen lineage |
@@ -61,6 +69,8 @@ Desktop and mobile variants share the same source-state and effect semantics.
 | UX03 | Decision packet and closure | `PAY-0` | AT20 `OU0-0` / `P0I-0`; AT08 `L9V-0` / `MNS-0` |
 | UX04 | Recovery, scope switch, evidence detour, return | `PAZ-0` | CH0 `JB4-0`, CH1 `IZB-0`, CH2 `JLU-0`, CH7 `KBA-0` |
 | UX05 | Builder slice, capability gates, acceptance scenarios | `PBR-0` | all applicable lineage |
+| UX06 | Conversation selection, source and empty-state contract | `SMO-0` | CV01 `SD8-0` / CV01M `SI5-0` |
+| UX07 | Composer stages, detour continuity and original-message recovery | `SMP-0` | CH1/CH2/CH3/CH6/CH7 |
 
 Avoid rendering the full provenance explanation as the daily headline.
 Use a short understandable status near the content, with owner, clock, scope, reason, and limits available in details.
@@ -76,7 +86,8 @@ Use [Page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A
 | AT01 Today | `LNV-0` / `N27-0` | default orientation; selected decision to AT20; office continuation to AT08 |
 | AT02 Projects | `M4J-0` / `N28-0` | All projects or primary navigation; exact selection to AT03; new draft to AT14 |
 | AT03 Project overview | `MHD-0` / `N29-0` | project outcome and owner; conversation to CH1; work to AT10; plan/evidence/journal through scoped tabs |
-| AT04 Inbox | `KY5-0` / `MNL-0` | only qualified personal decisions/attention; selected item to AT20, preserving filter and origin |
+| AT04 Inbox | `KY5-0` / `MNL-0` | qualified reserved Chairman decisions; selected item to AT20, preserving filter and origin; team reviews through Projects |
+| CV01 Conversations | `SD8-0` / `SI5-0` | primary Conversations destination; durable office or exact permitted project selection; bounded metadata filter |
 | AT05 Knowledge | `L0Z-0` / `MNM-0` | reusable permitted knowledge; exact source detail; explicit Add to draft is not Send |
 | AT06 Global search | `L3N-0` / `MNN-0` | Search/keyboard shortcut; visible scope; result opens exact permitted object; Close returns prior view |
 | AT07 Settings & Sources | `L6N-0` / `MNO-0` | account/source detail and recovery; contextual entry retains originating view; no automatic reconnect authority |
@@ -118,6 +129,9 @@ The full action name and actual node ID identify a control. Short F-prefixes gro
 | New project: Review project | `PZO-0` / `NFI-0` | UX02 creation-review contract; no creation on this navigation action |
 | Session Estate: Inspect next turn | text `NT6-0` / text `NU9-0` | AT17 advanced inspection; no routine Chairman approval requirement |
 | Evidence and context return | CH2 `JLU-0` / CH7 `KBA-0` recovery | restore permitted exact origin; do not rebind or resend |
+| Inbox: Review decision | `LSS-0` / `MW0-0` | navigation once to exact AT20/AT20M; preserve Inbox item and filter |
+| Inbox: Evidence | `LSN-0` / `MVV-0` | permitted evidence with exact decision context and origin retained |
+| Inbox: Projects footer | `LSZ-0` / mobile equivalent where exposed | AT02; team obligations stay with project owners |
 
 The Office mobile View project control is verified by its semantic layer name `F03M.OpenProject`; if an implementation extraction rebuilds its node IDs, resolve the live named node within AT08M rather than guessing. IDs identify this review snapshot and do not establish source identity.
 
@@ -137,9 +151,9 @@ Do not treat a project reference, conversation ID, Job ID, and work reference as
 | `project.work` | See scoped work posture | admitted Mission children and coverage | existing Activity projection |
 | `project.evidence` | Inspect evidence for this project | owner/ref/revision and observation clocks | existing Evidence projection |
 | `project.more` | Reach Sessions, Journal, Resources | scoped references and supported reads | links only when owner capability exists |
-| `inbox` | Find current decisions and attention | exact owner item, coverage, filters | feed capability absent in baseline |
+| `inbox` | Find current reserved Chairman decisions | exact owner item, independent coverage, filters | feed capability absent in baseline |
 | `decision.packet` | Review and choose for one exact item | complete current owner packet and revision | fixture/preview until qualified decision capability |
-| `conversations` | Find durable office/project conversations | canonical conversation ownership | current-window-only constrained baseline |
+| `conversations` | Select office or exact project in CV01 | qualified office binding and permitted known project/topic metadata | directory feed absent; current-window-only baseline stays constrained |
 | `conversation.office` | Ask durable Meta-CEO office | current office binding; company/decision context | design requirement; no guessed session binding |
 | `conversation.project` | Ask current project Sol | current project binding; To + About | current permitted window only where admitted |
 | `knowledge` | Find reusable knowledge and evidence | canonical search/read scope | Evidence entry first; general search separately qualified |
@@ -235,6 +249,35 @@ A consequential command or reserved change receives one contextual deterministic
 Answer prose does not execute, adopt a plan, dispatch a worker, create a project, or record a decision.
 Ordinary Send acknowledgment means the message was accepted by the message owner; it proves none of those separate downstream facts.
 
+### 6.4 CV01 — conversation selection and coverage
+
+Primary **Conversations** opens CV01/CV01M. The office entry opens the one durable Meta-CEO office; a project entry opens that exact project's current permitted binding. A topic title, recent sidebar row, provider tab, or newest session is never sufficient identity. Directory metadata and conversation content have separate permission checks. Known metadata may remain visible while conversation content is unavailable only when its owner independently permits that metadata. The protected app currently exposes a permitted window, not a conversation list; CV01 is a qualified target design, not an implemented feed [S7, S22].
+
+**Find by project or topic** filters only metadata supplied in the admitted directory scope. It does not search full history, hidden message bodies, other accounts, or missing sources. Keep the scope/coverage caveat when filtering. A cleared filter restores the admitted rows; it must not trigger a guessed session lookup. Office availability is independent of the project filter.
+
+| Directory state | Required presentation |
+| --- | --- |
+| permitted known rows, partial coverage | show those rows and incomplete-coverage note; no exhaustive count |
+| filter has no matches | “No matches in the available projects and topics”; Clear filter; retain coverage |
+| bounded source returns no rows | “No conversations were returned in this available scope”; no company-wide empty claim |
+| fresh complete permitted scope is empty | scope-qualified empty state; office remains independent |
+| unavailable source or binding | explain unavailable scope; permitted known metadata only; no inferred empty history |
+| stale/historical rows | show qualified observation time; revalidate the exact binding before opening current content |
+
+Terminal's metadata-visible/content-unavailable example offers **Open project** only when the separate exact Terminal project read is permitted. AT03/AT03M supplies the visual template, whose illustrative Mastermind OS content must be replaced with Terminal's canonical project reference and its own admitted selection. Never route Terminal to the fixed Mastermind OS example or borrow its Mission root. Without separately permitted project access, expose source/access details instead of an enabled fallback.
+
+Return restores the original permitted filter, selected row, reading position and actual originating focus; an existing scoped draft remains with its recipient/project. Revalidate permission and binding before restoring protected text. If the origin vanished, offer an honest permitted directory state without guessing a replacement. **New conversation** opens CH0/CH4 composition only: no new office, project record, transcript, Runtime job, or provider session. Draft retention means this authorized open view unless an existing approved persistence path proves more.
+
+| CV01 action | Desktop / mobile control | Exact connection |
+| --- | --- | --- |
+| Open office | `SKC-0` / `SLZ-0` | AT08 / AT08M, canonical office |
+| Open Work visibility | `SKZ-0` / `SM3-0` | CH1 / CH6, exact Mastermind OS project context |
+| Open accessible Terminal project | `SLC-0` / `SMG-0`; named `CV01.OpenTerminalProject.withExactProjectRef` / `CV01M.OpenTerminalProject.withExactProjectRef` | AT03 / AT03M template with exact Terminal identity |
+| Sources and access | `SLI-0` / `SMK-0` | AT07 / AT07M; retain directory return context |
+| Local metadata filter | `SKI-0` / `SLP-0` | admitted project/topic metadata only |
+| New composition draft | `SHT-0` / `SJG-0` | CH0 / CH4; no creation effect |
+| Open primary navigation | existing desktop shell / `SJM-0` | five destinations; no binding mutation |
+
 ## 7. AT14 — named project creation
 
 AT14 collects **Name** and **Outcome**; Scope is visible; Context and constraints are optional unless the existing owner requires them.
@@ -265,6 +308,8 @@ No “Done” aggregate may erase a missing acceptance owner or release receipt.
 Protected Mission/Activity fields can support the first overview/work/evidence slice, but missing outcome/milestone/plan fields remain explicit gaps [S8, S9, S10].
 
 ## 9. AT20 — exact decision packet and closure
+
+AT04 **Needs you** contains actual reserved Chairman decisions supplied by their current owners. A non-actionable team review is removed from this list, including hidden source layers that could accidentally become a rendered row. Team review remains discoverable through Projects and its accountable owner; it is not an approval request. The footer opens Projects. **Review decision** navigates directly to the one exact AT20 packet; it is not a preliminary review preview followed by another navigation ritual. Packet evidence preserves its decision identity, choice draft, revision and Inbox origin. These are illustrative target behaviors; the protected app still lacks the decision feed and recording command.
 
 Today or Inbox opens one exact item with its canonical identity, packet revision, and originating filter.
 AT20 is the complete **current** packet, not an approval card built from partial attention text.
@@ -339,6 +384,20 @@ The Chairman must not hunt sessions, compare newest tabs, or decide which worker
 **Continue work** is an execution command and appears only when supported by the current owner law and capability.
 Unknown effect remains tied to its original operation even if the user navigates, switches project, changes model, or signs in again.
 
+### 11.1 CH conversation, evidence and context continuity
+
+CH1, CH2, CH3 and CH6 depict the same sent message, **“Keep this moving. What’s still missing before release?”**, and the same separate unsent draft, **“What evidence is still missing?”**. The examples are illustrative; actual protected content remains the owner's current permitted window. Opening Evidence or Context cannot send, replace that draft, attach a context pack, change To/About, or rebind the conversation. Reading a pack does not select it for a later message. **Add to draft** is an explicit permitted append to the existing scoped draft, visibly preserving prior text; it never sends or records a separate effect.
+
+| CH screen | Verified controls | Connection / continuity |
+| --- | --- | --- |
+| CH1 `IZB-0` | Options `JAR-0`; Send `JB0-0`; Evidence `JA2-0`; Context `J84-0` | current project composition; Evidence→CH2; Context→CH3 |
+| CH2 `JLU-0` | Options `JQ2-0`; Send `JQ6-0`; Back `JLW-0`; draft `JQ0-0`; reading scope `JPZ-0` | same draft and recipient; Back restores CH1 origin |
+| CH3 `JV7-0` | Options `JVL-0`; Send `JVD-0`; Add to draft `K2Y-0`; Close `K0E-0` | explicit append only; Close preserves CH1 composition |
+| CH6 `K5X-0` | Options `K96-0`; Send `K9F-0`; Evidence `K8T-0`; Context `K6G-0` | mobile same exact project/draft; detour uses corresponding permitted context |
+| CH7 `KBA-0` | Options `KBO-0`; paused Send `KBG-0`; Check original `KDH-0`; next draft `KBE-0` | original uncertain operation remains bound; next draft is not a retry |
+
+These IDs identify design controls, not effective command ports. Supplemental unavailable/read-only variants preserve unsupported Send as disabled with explanation. Options opens only supported composition/context choices and has no effect by itself; it cannot adopt a plan, switch an uncertain operation's owner, create a runtime, or manufacture retry authority. Return restores actual previous focus; mobile return from an evidence/context read must not focus the textarea and open the keyboard unless that was the user's actual prior focus.
+
 ## 12. Command stage truth and action inventory
 
 The labels below describe distinct facts; builders may not compress them into a generic success state.
@@ -373,6 +432,32 @@ The labels below describe distinct facts; builders may not compress them into a 
 | Sign in/out | auth boundary | implemented | separate acquisition/content; clear protected state |
 | Change model/recipient | composition configuration | only when supported | never resolves prior unknown effect |
 | Sessions/Resources/Tools | contextual reads/actions | owner-capability dependent | More/Advanced; no new plane |
+
+### 12.1 Message composition and delivery stages — UX07
+
+The composer and original message have separate state. UX07 describes their qualified target behavior; the current protected slice remains read-only. Rendering a realistic Send specimen is not proof of an authenticated message owner or transport. Show unsupported capability independently of whether the permitted draft contains text. Permission/generation changes follow the existing auth fence; they never certify receipt, delivery or no effect.
+
+| State | Required fact and visible behavior |
+| --- | --- |
+| available, empty | permitted supported composer; no ready message; Send disabled; no new operation |
+| available, nonempty | current exact recipient/project and supported send capability; one ready Send |
+| unsupported/read-only | “Sending is not available in this build”; permitted draft remains; keyboard cannot submit |
+| sending | original submitted snapshot and operation retained; prevent duplicate submission of that operation |
+| accepted, awaiting delivery | matched owner acceptance/recording; explicitly still awaiting delivery |
+| delivered, awaiting reply | delivery owner proves delivery for the exact message; no inferred reply or responding state |
+| uncertain original | request may have effected; outcome unresolved; Check original only where status read is supported |
+| authoritative known-no-effect rejection | owner establishes exact operation had no effect; show reason and permitted correction/retry choices |
+| response received | permitted response belongs to the exact conversation/message context; response text is readable within owner scope |
+
+Use **Sent**, **Delivered**, or **Responding** only when the owner actually evidences the named stage. Client submission does not mean Sent; acceptance does not mean Delivered; delivery does not mean Responding. A spinner, elapsed time, adjacent transcript message, server transport success, or generic generated answer cannot fill the missing stage. Owner-projected generation may support a responding indication only with its exact message association; generation is not business acceptance, project creation or release.
+
+At submission capture the immutable message snapshot, draft revision, exact recipient/project and existing owner operation identity. A delayed acceptance/receipt may clear only that submitted snapshot under the owner's acknowledgment policy. It must never erase text the user typed afterward, including a newer draft with coincidentally identical words. Keep the submitted original and next unsent draft visibly distinct; typing the next draft does not submit it or replace the original tracking identity. Do not add a second transcript store, directory registry or client command queue to provide this presentation.
+
+Transport aborts, timeouts, permission changes and a `not_found` status do not establish no effect. Uncertainty remains with the original operation, principal context and owner. Do not resend it, switch its scope, fail it over to another provider, or start a new operation to evade uncertainty. Read the exact original status when supported. If status is unsupported, explain the limit and retain the original reference for existing-owner reconciliation. Authoritative known-no-effect evidence permits a new explicit attempt only after current scope, content, capability and owner guards are requalified; never auto-replay a rejected message.
+
+Navigation and evidence reads can remain useful while an original message is unresolved, subject to current permission. They must preserve recovery identity without implying continued execution or a terminal result. A later response or newer message resolves only the operation its owner actually associates with it. An answer received is not a command effect, review verdict, accepted outcome or released artifact.
+
+Desktop Enter sends once only for a ready supported draft. Shift+Enter inserts a newline and IME composition Enter never sends. Mobile uses the explicit supported Send control; newline/return is composition. Options and detour closure restore actual focus without stealing it during source refresh. Show stage changes through concise accessible status, keeping the draft readable and recovery reachable rather than repeatedly announcing unchanged observations. Actual keyboard and assistive-technology behavior remains unexecuted build acceptance.
 
 ## 13. Failure and microcopy matrix
 
@@ -431,7 +516,7 @@ This is product read/navigation verification, not action acceptance or installat
 ### Slice B — separately qualified future actions
 
 Send, command preflight, project creation, decision recording, operation reconciliation, execution continuation, and STOP need current owner capability and source custody.
-This commission directly re-read both candidate PRs on 4 October 2026: #1046 remains open/draft at `089a745b9aa4a4f2ec615827912f547f3884d744`; #1150 remains open/draft at `37d02586eeb97d92e6fb9ed6dbc7cd142dd6449c` and is a launch-only candidate. These are custody observations, not protected implementation or installed proof.
+The original census directly re-read both candidate PRs on 4 October 2026: #1046 was open/draft at `089a745b9aa4a4f2ec615827912f547f3884d744`; #1150 was open/draft at `37d02586eeb97d92e6fb9ed6dbc7cd142dd6449c` and was a launch-only candidate. Preserve these as dated custody observations; the continuation's later heads are recorded in §18.2. Neither observation is protected implementation or installed proof.
 SEND/STOP remain unavailable; candidate behavior must not be presented as protected behavior.
 Before action implementation, reread the exact current #1046/#1150 sources through the existing custody procedure and bind the full revision and lawful capability.
 BG3/BG5 retain the first Meta-CEO slice and source-ownership fences. In particular, no existing App/Work/command path is released for modification by this design document. Reconcile the current incumbent before the proposed broader shell integration; use only separately owned new Meta-CEO projection/fixture work while those paths remain held.
@@ -479,9 +564,24 @@ Fixtures are test/design inputs only; names below are not claims about actual co
 Future-action scenarios are required before that slice becomes enabled, not evidence that those capabilities exist today.
 Record test results with exact source revision and actual observation; do not convert this list into a checklist of fabricated passes.
 
+### 17.1 Continuation extensions to the same fifteen scenarios
+
+These are **unexecuted design acceptance requirements**, supplementing the existing scenarios rather than claiming new test passes.
+
+| Existing scenarios | Required continuation checks |
+| --- | --- |
+| 1, 4, 6 | Conversations→CV01; office→AT08; exact project→CH1/CH6. Terminal fallback uses Terminal identity through the overview template, never Mastermind's sample. New conversation opens only CH0/CH4 draft. |
+| 2, 3, 5, 11 | Needs you excludes team review; packet opens once. Directory unavailable, partial, bounded-empty, complete-empty and local-filter-empty remain distinct. Clearing filter restores admitted metadata without session discovery. |
+| 7, 8, 9 | Read-only variant cannot send through pointer/Enter; supported empty/nonempty, sending, accepted-awaiting-delivery, delivered-awaiting-reply and received-response states keep separate evidence. Options adds no effect. |
+| 12, 13 | Uncertain message/status-not-found retains original identity; no resend/failover. Known-no-effect requires exact owner proof. Auth generation clears stale Work and other protected content before reacquisition; draft follows current approved retention. |
+| 8, 14 | Delayed receipt after further typing clears only submitted draft revision. Evidence/Context detour preserves shared sent message, unsent draft and To/About. Add to draft appends explicitly and never sends. |
+| 14, 15 | Directory/Inbox return restores permitted filter, selected row, scroll and actual focus. Mobile evidence return does not summon keyboard unless composer was prior focus. Verify 320/390 px, expanded text, IME and Shift+Enter in the actual build. |
+
+Run action-stage checks only after that owner capability is qualified; until then verify the honest unavailable/read-only presentation. Paper visual acceptance establishes no transport, receipt or accessibility execution.
+
 ## 18. Protected-source references
 
-Each reference is a primary repository source pinned to `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
+Original references S1–S21 are primary repository sources pinned to `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`; preserve this original census rather than silently repinning it. S22–S25 below record the continuation separately.
 The census did not execute these sources or qualify installation, registration, permissions, callbacks, or live effects.
 
 | Ref | Exact source | Relevant fact |
@@ -517,9 +617,30 @@ The approved five-destination shell differs from implemented nine-view navigatio
 Today decision/attention completeness, durable office bindings, project recording, Inbox packet commands, and broader knowledge search still require existing-owner capability feeds.
 Resolve those gaps through the existing owners; do not create substitute planes to make a design look complete.
 
+### 18.2 Continuation source compatibility and candidate observations
+
+The bounded protected comparison `a264…28be` is ahead by three commits with 22 changed files and no `app/` changes [S22]. Its research preregistration, managed multi-repository workspace/Studio composition and fixed host Agent Relay lifecycle do not alter the daily app's window, evidence, project, decision or auth contract. Source capability does not prove installation or live return. Existing S1–S21 therefore remain the original exact evidence for this unchanged app surface.
+
+Dated reads on 2026-10-04 observe #1046 open/draft/unmerged at `274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f`, and #1150 open/draft/unmerged at `8aca50467f774f52b31cd9147a305936034f46bc`, stacked on the former [S23, S24]. #1046's current composition clears old Work rows in the auth-notification render, alongside Programs/Mission/window/Result invalidation, including identical-display native generation changes. Work becomes pending only when acquisition remains admitted; otherwise authentication-unavailable [S25]. Carry this fence into UX04/F10 and scenario 13; it is candidate composition evidence, not released source custody.
+
+#1150's exact LAUNCH port source is unchanged from the original `37d…` read. It still returns null for message and STOP intents, retains unknown original status and requires matched receipt identity [S24]. Neither candidate establishes installed authenticated composition, canonical write arming, actual launch, deployment, or real return/reopen acceptance. No app implementation is commissioned in this design continuation.
+
+| Ref | Exact primary evidence | Scope |
+| --- | --- | --- |
+| S22 | [Protected comparison](https://github.com/mastermindx-market-intelligence/Mastermind/compare/a2646f458f9ff41ddcedd89b338be4a4349e6cd6...28be2ce2d481fd542ec869344e178e5cec4d7d75) | bounded no-app-change compatibility check |
+| S23 | [PR1046](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1046), [host at274a L94–145](https://github.com/mastermindx-market-intelligence/Mastermind/blob/274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f/app/mastermind_os/src/host.ts#L94-L145) | dated candidate head/status and typed Work/auth read |
+| S24 | [PR1150](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1150), [LAUNCH port at8aca L298–455](https://github.com/mastermindx-market-intelligence/Mastermind/blob/8aca50467f774f52b31cd9147a305936034f46bc/app/mastermind_os/src/orchestration/executive-launch-command-port.ts#L298-L455) | dated launch-only candidate; unchanged port; no Send/STOP |
+| S25 | [App at274a L1225–1270](https://github.com/mastermindx-market-intelligence/Mastermind/blob/274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f/app/mastermind_os/src/App.tsx#L1225-L1270), [auth fixture L114–129](https://github.com/mastermindx-market-intelligence/Mastermind/blob/274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f/app/mastermind_os/src/App.auth-generation.test.tsx#L114-L129) | current candidate Work immediate-clear implementation and fixture |
+
 ## 19. Review outcome and remaining proof
 
-All six workflow artboards exist on the exact Paper page, with their IDs recorded above. Actual screenshots and editable JSX were inspected. Today, Meta-CEO, project navigation, welcome context and new-project intake were refined in the canonical screen family. The directory, AT00, MC90 and CH91 point builders to this flow contract. The UX04 project-conversation example was reconciled to Project Sol rather than the company Meta-CEO. The AT15 example now keeps review recorded/correction next distinct from acceptance; Inspect next turn is an optional read.
+The original six workflow artboards exist on the exact Paper page, with their IDs recorded above. Actual screenshots and editable JSX were inspected. Today, Meta-CEO, project navigation, welcome context and new-project intake were refined in the canonical screen family. The directory, AT00, MC90 and CH91 point builders to this flow contract. The UX04 project-conversation example was reconciled to Project Sol rather than the company Meta-CEO. The AT15 example now keeps review recorded/correction next distinct from acceptance; Inspect next turn is an optional read.
+
+Continuation adds CV01/CV01M and UX06/UX07, and refines the Inbox pair and CH1/CH2/CH3/CH6/CH7: nine product screens and two new note boards in this continuation. Screenshots and editable extraction received scoped visual/semantic review at tokens `fd2ed32e`. Desktop product roots remain 1600 × 1040; mobile roots remain 390 × 844. The new note boards are 1600 × 1120. Options and Send controls retain 44px heights; reviewed mobile navigation/recovery actions retain at least 44px targets and their bottom safe area. These are static layout observations, not executed accessibility tests.
+
+Independent reviews accepted CV01/CV01M, the Inbox pair and the connected semantic contract. The CH editor inspected all five affected chat frames; the principal additionally inspected final CH2 and CH7. Independent note review identified two wording corrections, now applied and visually rechecked: current complete-empty scope does not imply empty conversation history, and return may reopen the keyboard only when the composer had actual prior focus. Final extraction confirms the separate sent message and unsent draft, exact To/About scope, supported Options, distinct delivery stages and original-operation recovery.
+
+AT00, UX00, the main directory, MC90 and CH91 now point to all eight workflow notes. The UX00 directory was expanded to 1600 × 1200 and its spacing adjusted so its complete guide list fits; the next row begins at y=1250. Existing advanced-operation references were retained. This proves readable design and named connections, not a directory feed, working links or enabled command ports.
 
 Independent visual/semantic review accepted Today desktop/mobile, Meta-CEO desktop/mobile and UX00–UX04 at their reviewed states; the principal inspected UX05 and the final refinements. This proves editable design, fit and contract clarity, not functioning navigation or action. Enabled message/create/decision specimens describe a qualified target state; the present read-only slice must retain unavailable/preview behavior until its owner capability is actually accepted. There is no synthetic send, save, success receipt, deployment, background worker or production acceptance in this commission.
 
