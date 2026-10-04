@@ -89,6 +89,55 @@ security tradeoff described in `HOST_PREREQUISITES.md` (for example, leaving
 FileVault off on a physically controlled always-on host). Do not silently
 weaken disk encryption to make a readiness check green.
 
+## Post-unlock recovery boundary
+
+A successful FileVault preboot unlock does not imply that a normal Aqua
+console session exists. Immediately after unlock, the normal OS may expose
+Remote Login, Screen Sharing/Remote Management, system NetworkExtensions and
+other boot services while the console user is still `root` and the
+`gui/<uid>` launchd domain is absent.
+
+Treat that state as a normal recovery phase, not proof that a per-user service
+installation is corrupt:
+
+1. re-run the external route probe and require normal public-key SSH auth to
+   return;
+2. verify the host-local recovery profile before admitting heavy work;
+3. verify boot/system services separately from user LaunchAgents;
+4. never repeatedly `launchctl bootstrap gui/<uid>` when that GUI domain does
+   not exist;
+5. if an already-reviewed per-user recovery connector has a fixed installed
+   runner, an attended operator may start that exact runner directly as the
+   owning user to regain temporary control-plane access; do not invent a new
+   service, credential, launch label or persistence path;
+6. once a normal GUI login later exists, the installed `RunAtLoad + KeepAlive`
+   LaunchAgent resumes normal ownership. A temporary attended runner must not
+   be treated as a replacement service definition.
+
+### Low-swap / watchdog incident handling
+
+When a reboot follows repeated Jetsam `low-swap` events or a watchdog panic,
+do not classify the incident as a network outage merely because Tailscale,
+Screen Sharing and user LaunchAgents disappear behind FileVault.
+
+Before restarting heavy workloads:
+
+- preserve the panic/Jetsam evidence;
+- run the canonical host-recovery readiness profile and require the disk-free
+  floor to pass;
+- restore reviewed power policy such as AC sleep/autorestart through its
+  existing privileged owner when drift is proven;
+- recover control-plane transport and verify it independently;
+- inspect current memory and swap state rather than assuming the pre-crash
+  pressure still exists after reboot; and
+- keep workload/admission remediation with the existing Capacity/physical
+  resource owners. This runbook does not create a local process-killing
+  watchdog or new host scheduler.
+
+A passing post-reboot readiness report proves the host is again eligible for
+recovery use. It does not explain or erase the workload pressure that caused
+the reboot.
+
 ## Acceptance discipline
 
 A departure/readiness claim for an externally managed home Mac is valid only
