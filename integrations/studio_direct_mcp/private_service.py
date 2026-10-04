@@ -91,6 +91,7 @@ STAGE_FILES = (
     "git-publish.mjs",
     "paper-design.mjs",
     "fleet-status.mjs",
+    "fleet-routing.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
     "tailnet-gateway.mjs",
@@ -99,10 +100,11 @@ STAGE_FILES = (
 )
 
 # Historical installs are admitted only through exact known file sets. The
-# immediately preceding current generation lacks only the tailnet fabric
-# adapter; earlier generations also predate fleet status, Paper, output paging,
-# and typed Git.
-LEGACY_STAGE_FILES_V5 = tuple(name for name in STAGE_FILES if name != TAILNET_GATEWAY_NAME)
+# immediately preceding generation lacks only the fleet-routing module; the
+# next older generation lacks the tailnet fabric adapter as well. Earlier
+# generations also predate fleet status, Paper, output paging, and typed Git.
+LEGACY_STAGE_FILES_V6 = tuple(name for name in STAGE_FILES if name != "fleet-routing.mjs")
+LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != TAILNET_GATEWAY_NAME)
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
@@ -110,6 +112,7 @@ LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != 
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
         frozenset(LEGACY_STAGE_FILES_V3),
