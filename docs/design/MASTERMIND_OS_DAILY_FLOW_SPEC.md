@@ -91,13 +91,15 @@ Use [Page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A
 | AT18 Project evidence | `OE8-0` / `OKF-0` | Evidence or current result; source-bound evidence detail returns to the original selection |
 | AT19 Project journal | `OMG-0` / `ORL-0` | More/Journal; material changes, next owner and source; no second memory plane |
 | AT20 Chairman decision | `OU0-0` / `P0I-0` | exact complete packet; UX03 defines one final action and all closure branches |
-| AT21 Receipt study | `P2V-0` / no counterpart verified in this pass | concurrent reference retained; use UX03 for this commission's completed receipt/recovery contract |
+| AT21 Receipt study | `P2V-0` / `P8L-0` | concurrent reference retained; use UX03 for this commission's completed receipt/recovery contract; mobile directory identity observed at close-out |
 | CH0 / CH4 Welcome | `JB4-0` / `K3D-0` | new composition draft defaults to Meta-CEO/company; starter prompt appends, never auto-sends |
 | CH1 / CH6 Project conversation | `IZB-0` / `K5X-0` | Sol with exact project context; evidence detour to CH2; unknown outcome to CH7 |
 | CH2 Evidence / CH3 Context | `JLU-0` / `JV7-0` | companion to same conversation; preserve draft, selection, reading anchor and focus |
 | CH7 Delivery recovery | `KBA-0` mobile | original-message status and no duplicate send; UX04 expands the recovery contract |
 
 AT12/AT12M and AT13 remain retained earlier Session Estate/orchestration studies. AT15 is the current composition reference for that route. AT16–AT21 were observed as concurrent studies and were not modified by this commission; their current owner/source gates remain in force.
+
+A bounded directory read at close-out on 2026-10-04 also observed another session's ongoing extension: AT22 Local Delegation Preview (`PK4-0` / `PXW-0`), AT23 New Web Session Preview (`PR3-0` / `Q1O-0`), and AT24 Activation Receipts (`Q50-0`; only desktop observed in that read). These are preserved concurrent references, not newly reviewed or implemented capabilities in this commission. Open their current owner notes before wiring those advanced actions. Their preview/release limits do not impose an extra Chairman approval on ordinary supported messages or routine in-policy follow-through. The directory snapshot is bounded; do not infer that an unlisted counterpart or later board is absent.
 
 ### 2.2 Concrete action anchors for wiring
 
