@@ -25,6 +25,12 @@ Macro source `37122b69fffa98cb160022c4831df0338ef3e7e3`:
 - Positive owner response SHA-256: `a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af`.
 - Negative input: `total_assets`, instant `2025-09-27`, latest-known query at source cutoff `2026-08-01T00:00:00Z`, recorded cutoff `2026-08-23T12:00:00Z`. Exact owner reason: `unlinked source vintages require an explicit typed revision lineage`.
 - Negative owner response SHA-256: `aa6f82dc415e2d3449118c627deb339f98814f0a1be6dff61e88f8819495bb21`.
+
+### FIF lineage consumption boundary
+
+Current merged/tested FIF-3A3 responses used by this packet do not carry an accepted cross-filing lineage bridge, so the assets case above remains the canonical W1 refusal. The incumbent #7518 candidate shows the intended future owner seam without granting its unmerged implementation: when FIF has actually applied cutoff-visible lineage evidence, `execute_financial_query` adds a top-level `lineage` disclosure to the existing `fundamental_forensics.financial_query_response/v1` envelope. The disclosure is schema `fundamental_forensics.financial_query_lineage/v1`, relation `xbrl_confirmation`, explicitly `is_reported_revision=false`, and leaves the existing receipt/query hash unchanged when absent.
+
+I3 must therefore consume lineage only through an owner-issued financial-query response. It must not import `engine.fundamental_forensics.lineage_evidence`, derive confirmation receipts itself, or reinterpret `xbrl_confirmation` as an amendment/restatement/correction. Absence of the owner disclosure cannot be repaired by I3; the existing not-evaluable reason propagates unchanged. A future accepted positive owner response can be referenced as supporting cross-filing evidence only after the FIF owner returns the admitted revision/source/cutoff and the response bytes are captured under the current program method.
 - Full requests, owner outputs, real reconstruction timestamps and method-before-execution hash are retained in `evidence/`. This is not historical emission or prediction registration.
 
 The same-filing period pair is not a prior-cutoff state reconstruction by itself. W1 must additionally exercise the distinct source/system cutoffs before SEC acceptance and before fixture admission, then at eligibility, and preserve unaffected baseline variables throughout.
