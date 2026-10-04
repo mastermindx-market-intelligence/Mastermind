@@ -21,7 +21,24 @@ import { startGateway } from './gateway.mjs';
 import { createTunnelAuth, TUNNEL_CLIENT_ID, TUNNEL_SCOPE } from './private-tunnel-auth.mjs';
 import { installSignalHandlers, loadPrivateTunnelConfig } from './private-tunnel-gateway.mjs';
 
-export const TAILNET_ACCOUNT_LABEL = 'fabric';
+export const TAILNET_PROFILES = Object.freeze({
+  'fabric-read': Object.freeze([
+    'studio_ping',
+    'studio_fleet_status',
+    'paper_inspect',
+    'paper_catalog',
+    'paper_read',
+  ]),
+  'fabric-design': Object.freeze([
+    'studio_ping',
+    'studio_fleet_status',
+    'paper_inspect',
+    'paper_catalog',
+    'paper_read',
+    'paper_prepare',
+    'paper_edit',
+  ]),
+});
 export const REQUIRED_HOST = '127.0.0.1';
 export const RESERVED_FUNNEL_PORT = 45017;
 const TAILNET_SUFFIX = '.ts.net';
@@ -63,11 +80,19 @@ export function resolveTailnetGatewayConfig(partial = {}) {
   }
   const config = { ...partial };
 
-  if (!absent(config.accountLabel) && config.accountLabel !== TAILNET_ACCOUNT_LABEL) {
+  const accountLabel = config.accountLabel;
+  if (
+    typeof accountLabel !== 'string' ||
+    !Object.prototype.hasOwnProperty.call(TAILNET_PROFILES, accountLabel)
+  ) {
     throw new TailnetGatewayConfigError(
-      `tailnet gateway accountLabel is fixed to ${TAILNET_ACCOUNT_LABEL}`);
+      'tailnet gateway accountLabel must be fabric-read or fabric-design');
   }
-  config.accountLabel = TAILNET_ACCOUNT_LABEL;
+  if (config.toolAllowlist !== undefined && config.toolAllowlist !== null) {
+    throw new TailnetGatewayConfigError(
+      'tailnet gateway toolAllowlist is profile-owned and cannot be supplied');
+  }
+  config.toolAllowlist = TAILNET_PROFILES[accountLabel];
 
   if (!absent(config.host) && config.host !== REQUIRED_HOST) {
     throw new TailnetGatewayConfigError(
@@ -98,16 +123,16 @@ export function resolveTailnetGatewayConfig(partial = {}) {
   config.backendMode = 'shared-account';
   config.reclaimIdleCatalogSessions = true;
 
-  const auth = createTunnelAuth({ accountLabel: TAILNET_ACCOUNT_LABEL });
+  const auth = createTunnelAuth({ accountLabel });
   delete config.accountLabel;
-  return { config, auth };
+  return { config, auth, accountLabel };
 }
 
 export async function startTailnetGateway(config = {}) {
-  const { config: resolved, auth } = resolveTailnetGatewayConfig(config);
+  const { config: resolved, auth, accountLabel } = resolveTailnetGatewayConfig(config);
   const gateway = await startGateway(resolved, auth);
   return Object.assign(gateway, {
-    accountLabel: TAILNET_ACCOUNT_LABEL,
+    accountLabel,
     principal: auth.principal,
     auth,
   });
@@ -118,7 +143,7 @@ export async function main(argv = process.argv) {
   if (!configPath) {
     process.stderr.write(
       'usage: node tailnet-gateway.mjs <config.json>\n' +
-      'requires accountLabel=fabric, loopback bind, and https://*.ts.net publicUrl\n');
+      'requires accountLabel=fabric-read|fabric-design, loopback bind, and https://*.ts.net publicUrl\n');
     process.exitCode = 1;
     return null;
   }
