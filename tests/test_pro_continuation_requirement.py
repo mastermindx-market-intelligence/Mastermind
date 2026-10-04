@@ -103,7 +103,6 @@ def test_turn_boundaries_never_require_continuation(changes, reason):
         "EFFECT_UNKNOWN",
         "ALL_SCOPED_LANES_BLOCKED",
         "DURABLE_EXECUTION_RUNNING",
-        "PLATFORM_FAILURE",
         "CHECKPOINTED_CONTINUATION",
     ],
 )
@@ -111,6 +110,11 @@ def test_every_lawful_stop_disposition_holds(disposition):
     result = _project(_state(finalization_disposition=disposition))
     assert result.required is False
     assert result.reason == "lawful_stop_disposition"
+
+
+def test_platform_failure_is_a_blocker_reason_not_a_finalization_disposition():
+    with pytest.raises(ContinuationProjectionError, match="invalid_finalization_disposition"):
+        _state(finalization_disposition="PLATFORM_FAILURE")
 
 
 def test_model_prose_and_target_selectors_cannot_affect_projection():
