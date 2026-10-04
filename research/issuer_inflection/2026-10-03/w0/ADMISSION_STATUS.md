@@ -89,6 +89,8 @@ A metadata-only 30-issuer preselection is now frozen in `CORPUS_PRESELECTION_CAN
 
 `CORPUS_EVENT_IDENTITY_GATE.md` now checks the existing Earnings/SEC metadata plane without reading bodies. Owner code has the correct exact `(CIK, accession)` filing-key law and the collector code can emit accessions, but the actual committed `earnings_8k_dates.parquet` is still the legacy five-column store with no accession. It contains 98,975 rows / 1,314 tickers and covers 11/12 beta candidates (`CFG` missing), 12/12 prospective names historically, and 5/6 reserves (`EL` missing); none is an I3 event assignment because the canonical key is unavailable. Six gate tests pass. No date/fuzzy join or historical holdout reuse is allowed. The Earnings/SEC owner must publish an accession-complete pre-body metadata cut before corpus event assignment.
 
+A live owner candidate now exists: Macro #8392 head `3ec016886c2fd359cacab5c3739dc2fc7fd76f26` carries an accession-complete 173,495-row store with 0 empty accessions, 0 duplicate `(CIK, accession)` keys and 30/30 frozen names. It is open/unmerged with current-head CI/review unfinished, so I3 does not consume it as admitted source. Metadata-only witness `CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md` additionally shows all 12 beta names have exactly one active `sp500` PIT membership at their latest candidate filing dates. Historical business-family/archetype evidence remains unavailable; no event is assigned and no current proxy label is back-projected.
+
 
 ## Equal-duration positive comparison — development proof
 

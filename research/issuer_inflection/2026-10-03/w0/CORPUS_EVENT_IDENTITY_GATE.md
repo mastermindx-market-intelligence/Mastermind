@@ -84,3 +84,13 @@ I3 must not:
 - treat 28/30 legacy metadata presence as 28 qualified validation units.
 
 Until the owner publishes an accession-complete metadata cut, every frozen corpus row retains `event_id=null`, `source_revision_id=null`, and source-event qualification false.
+
+## Live successor candidate — #8392
+
+Macro #8392 head `3ec016886c2fd359cacab5c3739dc2fc7fd76f26` is an **open owner candidate**, not admitted mainline source. Its exact parquet blob `ae24d76bc985a6baba998811da3b8cb84d831423` / SHA-256 `5309ece0cd66b33d69abb8055afa05333d00bcfb43ace87d7997b3655946446f` was inspected metadata-only through the authenticated repository API. It has 173,495 rows, all eight upgraded columns, zero empty accessions, zero duplicate `(CIK, accession)` pairs, and covers all 30 frozen I3 names.
+
+That head materially demonstrates that the existing owner can close the legacy-store identity gap, but it is not yet an I3 source because #8392 is open, current-head CI/review are unfinished, and Macro main continues moving. I3 dependency comment: #8392 `5983380209`.
+
+The candidate data ends `2026-10-02`, before the I3 freeze on `2026-10-04`; therefore none of its rows can be used as a prospective temporal-holdout event.
+
+`CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md` uses only that candidate metadata plus the existing PIT membership owner. All 12 beta names are single-match S&P 500 members at their latest candidate filing dates. This closes index-membership qualification **for the witness only**. Historical business-family/archetype balance remains unqualified because the available sector/industry map is current/static rather than point-in-time. No event has been assigned.

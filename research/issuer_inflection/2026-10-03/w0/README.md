@@ -50,6 +50,8 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 
 `CORPUS_EVENT_IDENTITY_GATE.md` then checks the current committed Earnings/SEC metadata substrate. The owner filing-key contract requires exact `(CIK, accession)` with zero date tolerance, while the durable `earnings_8k_dates.parquet` is still a legacy store without accession despite upgraded collector code. The six-test gate records exact role coverage and keeps every corpus event/source-revision identity unassigned until the existing owner publishes an accession-complete metadata cut.
 
+Macro #8392 is now the observed owner-side successor candidate for that cut; `CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md` proves 12/12 beta names also satisfy existing point-in-time S&P membership at their candidate filing dates. Both remain witness-only: #8392 is unmerged, historical business-family metadata is not PIT-qualified, and no event/body/trial is admitted.
+
 
 ## Equal-duration descriptive comparison
 

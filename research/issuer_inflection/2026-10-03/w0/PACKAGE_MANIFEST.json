@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T19:00:28.082656+00:00",
+  "prepared_at": "2026-10-04T19:11:01.839186+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "13aa68318a93803f50f89e483e3ad40207b4e3bbd0e33afd08343f35b8b59cc8",
-      "bytes": 22035
+      "sha256": "c0cde4a817d549290f58f9ee6ea41586828ef4144aab134b1d1c88d0f1c5dd57",
+      "bytes": 22690
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -27,9 +27,13 @@
       "sha256": "9ed1d94937fda6755caecdb04fcc4c6777b91762a9d9ebaea5bdedbff6b02209",
       "bytes": 3290
     },
+    "CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md": {
+      "sha256": "d3bdb551ef70b34c212291287eb93080968297c383b3741a7e26d60bff352d8f",
+      "bytes": 3487
+    },
     "CORPUS_EVENT_IDENTITY_GATE.md": {
-      "sha256": "6e8be3bdff32a7c51e1df07ed45ba33838fae27df38218abe0eb620eb27a04f3",
-      "bytes": 4344
+      "sha256": "c1b0faeeaeedd22566263a4eda24c7b723b6fdf66e5d6299aa89d81b11662202",
+      "bytes": 5748
     },
     "CORPUS_IDENTITY_QUALIFICATION.md": {
       "sha256": "313de2d0cb88ef16a988e42c941ba982259ee18aea84a46eb6d801447d9cbb54",
@@ -64,8 +68,8 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "0629a9da02095ff4c06dbba97f34923777f26a773b73a36efc1e6ab91cb9c208",
-      "bytes": 8452
+      "sha256": "8aa2032f270a6fee8b45595855b578fb3b36e31baceaabc1558136ace55f3821",
+      "bytes": 8818
     },
     "SEC_RIGHTS_PURPOSE_RECONCILIATION.md": {
       "sha256": "5c06224673fee4eb6db4c8297cfe6442aaf8e0c78d08fdcc05d6d7d26f2336e3",
@@ -84,8 +88,8 @@
       "bytes": 5609
     },
     "W0_ADMISSION_CANDIDATE.md": {
-      "sha256": "32818c8d1455ca1aa3c27c349e73a1376a7888b20826b244aa0f550f4a0f486d",
-      "bytes": 29869
+      "sha256": "3d85c4760fc751ad91318dbd63d259e835ff3962dbb310c7843761f84a5e4295",
+      "bytes": 30536
     },
     "W1_IMPLEMENTATION_PACKET.md": {
       "sha256": "9c61fcd33da4593c6b88f9ed37a50c00bb76a9a2c47282700e9c1d390161f425",
@@ -131,9 +135,13 @@
       "sha256": "d923b3cb21b4acd0949a6562d0d09529431d2b10653ff2b32c4e331f0beba19f",
       "bytes": 1077
     },
+    "evidence/CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.json": {
+      "sha256": "548cccc660880639259779104aa1186afe0cb65a7e97cd752a7b15435a9fddb7",
+      "bytes": 8484
+    },
     "evidence/CORPUS_EVENT_IDENTITY_GATE.json": {
-      "sha256": "93630b0fbfb1f80673fcba4e369eabbf06a8f44cddd385793202518d293bb949",
-      "bytes": 2106
+      "sha256": "34436545efbcc9412110b2bba9ae84c0fd94f23c1660f8d1b5a93fe39339a4f5",
+      "bytes": 2158
     },
     "evidence/CORPUS_IDENTITY_QUALIFICATION.json": {
       "sha256": "5d581797edbf27e680595df10d64a61e26403734584f97c5aad9f245407bba58",
@@ -366,6 +374,10 @@
     "test_comparator_policy.py": {
       "sha256": "439f12e17f3e366d73c61c74db3c120c4d05d5811a08f470ec2132b398c247ef",
       "bytes": 10744
+    },
+    "test_corpus_beta_pit_membership_witness.py": {
+      "sha256": "97b8b25d6f0b1e049e5ac62598b92391d9e4ccd34f684c7f75e7255031b3a64f",
+      "bytes": 1640
     },
     "test_corpus_event_identity_gate.py": {
       "sha256": "8c6b31fc2fcb3969ac4a97b45be0be7c6088dec11fcb94a92cf93e0a1dcc471f",

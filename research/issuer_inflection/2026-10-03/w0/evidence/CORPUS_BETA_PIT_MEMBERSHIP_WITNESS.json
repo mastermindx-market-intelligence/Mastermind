@@ -1,0 +1,314 @@
+{
+  "all_beta_single_pit_membership": true,
+  "body_reads": 0,
+  "current_proxy_may_certify_historical_family": false,
+  "earnings_metadata_candidate": {
+    "admitted": false,
+    "head": "3ec016886c2fd359cacab5c3739dc2fc7fd76f26",
+    "parquet_blob": "ae24d76bc985a6baba998811da3b8cb84d831423",
+    "parquet_sha256": "5309ece0cd66b33d69abb8055afa05333d00bcfb43ace87d7997b3655946446f",
+    "pr": "macro#8392"
+  },
+  "event_identity_admitted": false,
+  "event_owner_contract": {
+    "blob": "54290bc7373aa1db8a127b8a9e000633efc72d7b",
+    "event_key_fields": [
+      "cik",
+      "report_date"
+    ],
+    "path": "engine/earnings_release/binding.py"
+  },
+  "historical_business_family_qualified": false,
+  "latest_metadata_rule": "latest acceptance_datetime per frozen ticker; accession lexical tie-break; metadata only",
+  "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
+  "pit_membership": {
+    "git_blob": "ec7085bc7460aca4a07661fa5983c424e1559be8",
+    "macro_pin": "ce53dddb28a0718a4ab656a5306ef7293b6c779c",
+    "path": "data/breadth/sp1500_pit_membership.parquet",
+    "sha256": "7b34316c0561619ba052f02036ec1fbe7fff3d00dcda3e7acb7dffda10582eca"
+  },
+  "program": "issuer-inflection-intelligence",
+  "role": "beta_validation_candidate",
+  "rows": [
+    {
+      "acceptance_datetime": "2026-07-14T10:45:08.000Z",
+      "accession": "0000070858-26-000353",
+      "body_read": false,
+      "cik": "0000070858",
+      "event_assigned": false,
+      "filing_date": "2026-07-14",
+      "form": "8-K",
+      "owner_event_key": "0000070858|2026-07-14",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "1996-01-02"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-07-14",
+      "ticker": "BAC"
+    },
+    {
+      "acceptance_datetime": "2026-07-14T13:39:47.000Z",
+      "accession": "0001104659-26-083383",
+      "body_read": false,
+      "cik": "0000831001",
+      "event_assigned": false,
+      "filing_date": "2026-07-14",
+      "form": "8-K",
+      "owner_event_key": "0000831001|2026-07-14",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "1996-01-02"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-07-14",
+      "ticker": "C"
+    },
+    {
+      "acceptance_datetime": "2026-07-16T10:32:21.000Z",
+      "accession": "0000759944-26-000133",
+      "body_read": false,
+      "cik": "0000759944",
+      "event_assigned": false,
+      "filing_date": "2026-07-16",
+      "form": "8-K",
+      "owner_event_key": "0000759944|2026-07-16",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "2016-02-01"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-07-16",
+      "ticker": "CFG"
+    },
+    {
+      "acceptance_datetime": "2026-08-04T13:56:19.000Z",
+      "accession": "0001037868-26-000173",
+      "body_read": false,
+      "cik": "0001037868",
+      "event_assigned": false,
+      "filing_date": "2026-08-04",
+      "form": "8-K",
+      "owner_event_key": "0001037868|2026-08-04",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "2013-09-23"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-08-04",
+      "ticker": "AME"
+    },
+    {
+      "acceptance_datetime": "2026-07-30T10:58:56.000Z",
+      "accession": "0000091142-26-000096",
+      "body_read": false,
+      "cik": "0000091142",
+      "event_assigned": false,
+      "filing_date": "2026-07-30",
+      "form": "8-K",
+      "owner_event_key": "0000091142|2026-07-30",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "2017-07-26"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-07-30",
+      "ticker": "AOS"
+    },
+    {
+      "acceptance_datetime": "2026-08-04T10:31:44.000Z",
+      "accession": "0000018230-26-000040",
+      "body_read": false,
+      "cik": "0000018230",
+      "event_assigned": false,
+      "filing_date": "2026-08-04",
+      "form": "8-K",
+      "owner_event_key": "0000018230|2026-08-04",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "1996-01-02"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-08-04",
+      "ticker": "CAT"
+    },
+    {
+      "acceptance_datetime": "2026-08-27T20:05:06.000Z",
+      "accession": "0000769397-26-000059",
+      "body_read": false,
+      "cik": "0000769397",
+      "event_assigned": false,
+      "filing_date": "2026-08-27",
+      "form": "8-K",
+      "owner_event_key": "0000769397|2026-08-27",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "1996-01-02"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-08-27",
+      "ticker": "ADSK"
+    },
+    {
+      "acceptance_datetime": "2026-08-05T20:06:12.000Z",
+      "accession": "0001751008-26-000057",
+      "body_read": false,
+      "cik": "0001751008",
+      "event_assigned": false,
+      "filing_date": "2026-08-05",
+      "form": "8-K",
+      "owner_event_key": "0001751008|2026-08-05",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "2025-09-22"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-08-05",
+      "ticker": "APP"
+    },
+    {
+      "acceptance_datetime": "2026-08-26T20:03:53.000Z",
+      "accession": "0001108524-26-000187",
+      "body_read": false,
+      "cik": "0001108524",
+      "event_assigned": false,
+      "filing_date": "2026-08-26",
+      "form": "8-K",
+      "owner_event_key": "0001108524|2026-08-26",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "2008-09-15"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-08-26",
+      "ticker": "CRM"
+    },
+    {
+      "acceptance_datetime": "2026-08-19T11:03:13.000Z",
+      "accession": "0000006281-26-000072",
+      "body_read": false,
+      "cik": "0000006281",
+      "event_assigned": false,
+      "filing_date": "2026-08-19",
+      "form": "8-K",
+      "owner_event_key": "0000006281|2026-08-19",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "1999-10-12"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-08-19",
+      "ticker": "ADI"
+    },
+    {
+      "acceptance_datetime": "2026-08-04T20:16:24.000Z",
+      "accession": "0000002488-26-000121",
+      "body_read": false,
+      "cik": "0000002488",
+      "event_assigned": false,
+      "filing_date": "2026-08-04",
+      "form": "8-K",
+      "owner_event_key": "0000002488|2026-08-04",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "2017-03-20"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-08-04",
+      "ticker": "AMD"
+    },
+    {
+      "acceptance_datetime": "2026-09-02T20:26:04.000Z",
+      "accession": "0001730168-26-000076",
+      "body_read": false,
+      "cik": "0001730168",
+      "event_assigned": false,
+      "filing_date": "2026-09-02",
+      "form": "8-K",
+      "owner_event_key": "0001730168|2026-09-02",
+      "pit_intervals": [
+        {
+          "end_date": null,
+          "src": "sp500",
+          "start_date": "2014-05-08"
+        }
+      ],
+      "pit_membership_count": 1,
+      "pit_sources": [
+        "sp500"
+      ],
+      "report_date": "2026-09-02",
+      "ticker": "AVGO"
+    }
+  ],
+  "schema": "issuer_inflection.beta_pit_membership_witness/v1",
+  "selection_state": "WITNESS_NOT_ASSIGNMENT",
+  "source_revision_assigned": false,
+  "trial_registered": false
+}
