@@ -761,6 +761,28 @@ class TestTailnetFabricConfig(unittest.TestCase):
                     "tailnet-gateway.mjs",
                 )
 
+    def test_fleet_host_stages_without_paper_runtime_or_typed_git(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir(parents=True, exist_ok=True)
+            (home / "Library" / "LaunchAgents").mkdir(parents=True, exist_ok=True)
+            src = _make_source(tmp)
+            node = _make_node(tmp)
+            backend = _make_backend(tmp)
+            args = _stage_args(src, node, backend, "fleet-host", 45120)
+            args.public_url = "https://mini4.example-tailnet.ts.net"
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                rc, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+                self.assertEqual(rc, 0)
+                roots = svc._build_runtime_roots("fleet-host")
+                config = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(config["accountLabel"], "fleet-host")
+            self.assertNotIn("paperDesign", config)
+            self.assertNotIn("gitPublish", config)
+            self.assertEqual(config["publicUrl"], "https://mini4.example-tailnet.ts.net")
+
     def test_only_fabric_routes_may_bind_exact_tailnet_origin(self):
         for account in ("fabric-read", "fabric-design", "fleet-host"):
             with self.subTest(account=account):
