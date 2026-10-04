@@ -2535,32 +2535,41 @@ class ProductionArmHost(ProductionStatusHost):
         except Exception as exc:
             raise ArmAdmissionError("service_uid_process_unknown") from exc
         if not before:
-            return ()
+            time.sleep(0.1)
+            try:
+                if not _ps_pids_for_uid(control_uid):
+                    return ()
+            except Exception as exc:
+                raise ArmAdmissionError("service_uid_process_unknown") from exc
 
         signalled: set[int] = set()
         for signum in (signal.SIGTERM, signal.SIGKILL):
+            phase_signalled: set[int] = set()
             for _ in range(50):
                 try:
                     live = _ps_pids_for_uid(control_uid)
                 except Exception as exc:
                     raise ArmAdmissionError("service_uid_process_unknown") from exc
                 if not live:
+                    time.sleep(0.1)
                     try:
-                        if not _ps_pids_for_uid(control_uid):
-                            return tuple(sorted(signalled))
+                        live = _ps_pids_for_uid(control_uid)
                     except Exception as exc:
                         raise ArmAdmissionError("service_uid_process_unknown") from exc
-                    time.sleep(0.1)
-                    continue
+                    if not live:
+                        return tuple(sorted(signalled))
                 for pid in live:
                     if pid <= 1:
                         raise ArmAdmissionError("service_uid_process_unknown")
+                    if pid in phase_signalled:
+                        continue
                     try:
                         os.kill(pid, signum)
                     except ProcessLookupError:
                         continue
                     except OSError as exc:
                         raise ArmAdmissionError("service_uid_process_unknown") from exc
+                    phase_signalled.add(pid)
                     signalled.add(pid)
                 time.sleep(0.1)
 
