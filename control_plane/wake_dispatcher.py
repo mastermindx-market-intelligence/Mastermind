@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
+from control_plane.operator_harness_contract import AttentionCompanyReadProjection
 from control_plane.session_targets import RuntimeBinding, SessionTargetRegistry, WakeRoute
 from control_plane.wake_ack_ingress import (
     TrustedWorkerWakeAckProjection,
@@ -319,6 +320,11 @@ class WakeTransportCompletion:
         repr=False,
     )
 
+    company_read_projection: AttentionCompanyReadProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
     def __post_init__(self) -> None:
         if not isinstance(self.receipt, TransportReceipt):
             raise WakeDispatchError("Wake transport completion requires a receipt")
@@ -332,6 +338,12 @@ class WakeTransportCompletion:
                 raise WakeDispatchError(
                     "Wake transport completion ACK projection requires DELIVERED"
                 )
+        company = self.company_read_projection
+        if company is not None:
+            if not isinstance(company, AttentionCompanyReadProjection):
+                raise WakeDispatchError("Wake Company read projection must be typed")
+            if self.receipt.outcome is not TransportOutcome.DELIVERED:
+                raise WakeDispatchError("Wake Company read projection requires DELIVERED")
 
 
 def normalize_transport_completion(
