@@ -64,6 +64,22 @@ class BaselineReplayTests(unittest.TestCase):
         self.assertEqual(revenue["target"]["period"]["calendar_kind"],"unknown")
     def test_identical_cutoff_has_no_new_change(self):
         self.assertEqual(self.result("after_a2_admission","after_a2_admission")["payload"]["counts"],{"unchanged_refusal":3,"unchanged_value":1})
+    def test_refusal_to_missing_is_not_unchanged_value(self):
+        name="after_a2_admission"
+        data=json.loads(self.raw[name])
+        cell=self.root(data,"total_assets","instant")
+        cell["state"]="missing"; cell["status"]="missing"
+        cell["reason"]="TEST_ONLY owner source no longer available"
+        cell["provenance"]["reason"]=cell["reason"]
+        data["coverage"]["not_evaluable_cells"]-=1
+        data["coverage"]["missing_cells"]+=1
+        after=canonical(data)
+        result=compare_snapshots(self.raw[name],after,before_sha256=self.hashes[name],after_sha256=digest(after),before_request=self.requests[name],after_request=self.requests[name])
+        row=next(r for r in result["payload"]["variables"] if r["variable"]["metric_id"] == "total_assets" and r["variable"]["period"]["kind"] == "instant")
+        self.assertEqual(row["reconstruction_state"],"became_missing")
+        self.assertIsNone(row["baseline"]["value"])
+        self.assertIsNone(row["target"]["value"])
+        self.assertIsNone(row["economic_interpretation"])
     def test_source_time_refusal_separate_from_system_admission(self):
         p=self.result("before_a2_source","after_a2_admission")["payload"]
         self.assertEqual(p["baseline_cutoffs"]["recorded_at"],p["target_cutoffs"]["recorded_at"])

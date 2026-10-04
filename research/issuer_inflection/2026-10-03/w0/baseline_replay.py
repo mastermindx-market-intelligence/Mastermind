@@ -194,7 +194,7 @@ def compare_snapshots(before_raw: bytes, after_raw: bytes, *, before_sha256: str
         elif a["state"] == "not_evaluable": status = "became_not_evaluable"
         elif b["state"] == a["state"] == "missing": status = "missing_at_both_cutoffs"
         elif b["state"] != "value" and a["state"] == "value": status = "became_available_not_economic_change"
-        elif b["state"] == "value" and a["state"] == "missing": status = "became_missing"
+        elif a["state"] == "missing": status = "became_missing"
         elif br["definition_refs"] != ar["definition_refs"] or b.get("unit") != a.get("unit"): status = "basis_changed_requires_owner_admission"
         elif b["value"] == a["value"]:
             status = "unchanged_value" if br["selected_occurrence_ref"] == ar["selected_occurrence_ref"] else "same_value_evidence_changed"

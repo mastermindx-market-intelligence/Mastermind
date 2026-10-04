@@ -30,4 +30,6 @@ Run `PYTHONDONTWRITEBYTECODE=1 python3 research/issuer_inflection/2026-10-03/w0/
 
 ## Executable baseline fixture lane
 
-`BASELINE_REPLAY_RESULT.md` describes the newly built, reference-preserving before/after consumer and four actual owner-query captures. Run `test_baseline_replay.py` for 41 adversarial integration tests. The latest exact replay is `evidence/baseline-replay/result-r2.json`; original owner captures and both failed test rounds are retained. This is the masterplan's permitted offline fixture lane, not W0 acceptance, a connected preview, a new registered transition schema or production proof.
+`BASELINE_REPLAY_RESULT.md` describes the newly built, reference-preserving before/after consumer and four actual owner-query captures. Run `test_baseline_replay.py` for 42 adversarial integration tests. The latest exact replay is `evidence/baseline-replay/result-r2.json`; original owner captures and both failed test rounds are retained. This is the masterplan's permitted offline fixture lane, not W0 acceptance, a connected preview, a new registered transition schema or production proof.
+
+The final refusal-to-missing regression and 42-test result are in `evidence/BASELINE_REPLAY_R3.json`; the four source-case outputs in `result-r2.json` remain byte-semantically unchanged.

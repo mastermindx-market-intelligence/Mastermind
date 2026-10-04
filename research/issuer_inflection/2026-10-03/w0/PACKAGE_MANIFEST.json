@@ -4,20 +4,20 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T00:13:13.445860+00:00",
+  "prepared_at": "2026-10-04T00:20:32.925951+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "2a85434a9212ba4b0609015385bb6c459cee8896ee10d9936302d3eb724a665c",
-      "bytes": 9246
+      "sha256": "db70d8d8c3cb1f4dfd99ba71fb5c966ba57021a00e85a99698bcdb6f8636402e",
+      "bytes": 9625
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
       "bytes": 1813
     },
     "BASELINE_REPLAY_RESULT.md": {
-      "sha256": "addeeddb426a99a729fe156cd00c2824b678ed0c45739be74af906c56c6e0c50",
-      "bytes": 8118
+      "sha256": "ee8a08c712aa55f68c78968a0c8218530293e1398518c242a3ebc0f50aa071c1",
+      "bytes": 8833
     },
     "COMPARATOR_DEFINITION_CANDIDATE.json": {
       "sha256": "9da89d63dbf96b25092944c73d672d8ec9000d8c013cb8454abe325b269c8b87",
@@ -28,8 +28,8 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "5944e41933e0fe7aec7c22291876de9230f4db38c6ee7fed03f4ab4cd5c16374",
-      "bytes": 4058
+      "sha256": "bc014582d2bc4c9f624f02b8305b5a4caf31df2e0fef22b9d8cc7fbf6a637a42",
+      "bytes": 4246
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",
@@ -48,8 +48,8 @@
       "bytes": 9800
     },
     "baseline_replay.py": {
-      "sha256": "aacde90fa238ca623f185216f146f15bf780be72acc856de596105b9fdc6d4f2",
-      "bytes": 15972
+      "sha256": "4f3516830dba112649b46b965c90e481c7c25ca1f81225658ef3b8ae36e8f472",
+      "bytes": 15946
     },
     "evidence/BASELINE_REPLAY_GREEN.json": {
       "sha256": "31f664348c7113a8721aae092a230802f2b63cba763bb4a21cde949405e0f55a",
@@ -62,6 +62,10 @@
     "evidence/BASELINE_REPLAY_R2_RED.json": {
       "sha256": "a50084a54380587618babb325e21a9a62d693fb8932b4956ab5d1335f94bab87",
       "bytes": 901
+    },
+    "evidence/BASELINE_REPLAY_R3.json": {
+      "sha256": "bfd823685d966b82d1109fbe08ffda10fe5642a13cbe6fbdf4149de2ef807204",
+      "bytes": 2781
     },
     "evidence/BASELINE_REPLAY_RED.json": {
       "sha256": "9bce6ed4097f8d27456c7437074953b8e65cb822f94fdcc73e62ee85b2b64300",
@@ -236,8 +240,8 @@
       "bytes": 7390
     },
     "test_baseline_replay.py": {
-      "sha256": "f1c0c7e7184053a6f09e08d41d1cff8f2424c196ab7fb698ed399437d6485305",
-      "bytes": 11768
+      "sha256": "63a20dac4603a1c17a821a838493c97741c8e67052072c7f055bdba071e3e372",
+      "bytes": 12833
     },
     "test_candidate_schema.py": {
       "sha256": "4b2f00610d1f52fe2247446feef726bc4bb4714381fa0bb115582c3e07a22da1",

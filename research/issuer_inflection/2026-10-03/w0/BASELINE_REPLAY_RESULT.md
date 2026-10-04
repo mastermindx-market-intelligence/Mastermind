@@ -62,3 +62,7 @@ The runner refuses a changed named dependency or Data OS input. It does not subs
 No architecture/source-owner admission is claimed by these tests. The complete W1 transition composer, admitted same-filing economic comparator, correction publication, connected Terminal preview and same-identity authorized product/machine reads still require W0's independent and owner-specific decisions. The existing research capture registry/rights/consumer gaps are not filled by this static evidence directory. This is not predictive or analyst-usefulness validation, and no holdout was touched.
 
 Astra retains owner/review recovery and all W0–W11 scope. After the required gates are accepted, the next implementation uses this already-tested baseline behavior together with the original W1 packet, not another financial interpreter or a new control plane.
+
+## Final state-transition regression
+
+An additional control found that a `not_evaluable` owner state becoming `missing` could be mislabeled `unchanged_value` because both numeric values were null. A one-line state-dispatch correction now reports `became_missing`, preserves both null values/reasons, and emits no economic interpretation. The same **42-test** driver failed that one control before the repair and passed afterward. All four actual owner-case semantic hashes remain unchanged. `evidence/BASELINE_REPLAY_R3.json` retains the exact before/after module and test hashes, failing/passing outputs and parity results. The earlier 36/41-test rounds remain historical evidence; the current suite is 42 tests.
