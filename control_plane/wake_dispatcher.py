@@ -18,7 +18,8 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
-from control_plane.operator_harness_contract import AttentionCompanyReadProjection
+from control_plane.operator_harness_contract import (AttentionCompanyReadProjection,
+    AttentionContinuationInput, AttentionContinuationResponseProjection)
 from control_plane.session_targets import RuntimeBinding, SessionTargetRegistry, WakeRoute
 from control_plane.wake_ack_ingress import (
     TrustedWorkerWakeAckProjection,
@@ -36,6 +37,7 @@ from control_plane.wake_ledger import (
     DeliveryAttempt,
     LedgerPhase,
     NativeCompanyReadEvidence,
+    NativeContinuationResponseEvidence,
     ObligationStatus,
     UNARMED_RETRY_POLICY,
     WakeLedgerRecord,
@@ -231,7 +233,7 @@ class WakeReceipt:
 
 @dataclasses.dataclass(frozen=True)
 class WakeNudge:
-    """Adapter input.  No worker prose, objective, result, or authority data."""
+    """Adapter identities plus an optional ephemeral canonical continuation projection."""
 
     session_alias: str
     reasoning_surface: str
@@ -244,6 +246,17 @@ class WakeNudge:
     obligation_ids: tuple[str, ...]
     attempt_command_ids: tuple[str, ...]
     nudge_id: str
+    continuation_input: AttentionContinuationInput | None = dataclasses.field(default=None, repr=False)
+
+    def __post_init__(self):
+        value = self.continuation_input
+        if value is not None and (
+            type(value) is not AttentionContinuationInput
+            or self.obligation_ids != (value.obligation_id,)
+            or len(self.attempt_command_ids) != 1
+            or self.wake_transport != "codex-app-server" or self.reasoning_surface != "codex"
+        ):
+            raise WakeDispatchError("continuation input requires one exact Codex obligation")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -326,6 +339,10 @@ class WakeTransportCompletion:
         repr=False,
     )
 
+    continuation_response_projection: AttentionContinuationResponseProjection | None = dataclasses.field(
+        default=None, repr=False,
+    )
+
     def __post_init__(self) -> None:
         if not isinstance(self.receipt, TransportReceipt):
             raise WakeDispatchError("Wake transport completion requires a receipt")
@@ -345,6 +362,13 @@ class WakeTransportCompletion:
                 raise WakeDispatchError("Wake Company read projection must be typed")
             if self.receipt.outcome is not TransportOutcome.DELIVERED:
                 raise WakeDispatchError("Wake Company read projection requires DELIVERED")
+        continuation = self.continuation_response_projection
+        if continuation is not None and (
+            not isinstance(continuation, AttentionContinuationResponseProjection)
+            or self.receipt.outcome is not TransportOutcome.DELIVERED
+            or projection is None or projection.obligation_ids != (continuation.obligation_id,)
+        ):
+            raise WakeDispatchError("continuation response requires exact delivered ACK")
 
 
 def normalize_transport_completion(
@@ -710,6 +734,7 @@ def _nudge_from(
     *,
     binding: RuntimeBinding | None,
     first_route: WakeRoute,
+    continuation_input: AttentionContinuationInput | None = None,
 ) -> WakeNudge:
     first = attempts[0]
     native = None if binding is None else binding.native_handle
@@ -722,6 +747,7 @@ def _nudge_from(
         if binding.binding_id != first.binding_id:
             raise WakeDispatchError("runtime binding id does not match the route")
     return WakeNudge(
+        continuation_input=continuation_input,
         session_alias=first.session_alias,
         reasoning_surface=first.reasoning_surface,
         wake_transport=first.wake_transport,
@@ -900,6 +926,49 @@ def _native_company_evidence(
         return None
 
 
+
+def _native_continuation_evidence(completion, wake, pairs):
+    if (not isinstance(completion, WakeTransportCompletion)
+            or completion.receipt.outcome is not TransportOutcome.DELIVERED
+            or len(pairs) != 1):
+        return None
+    projection = completion.continuation_response_projection
+    ack = completion.target_ack_projection
+    if projection is None or ack is None:
+        return None
+    obligation, route = pairs[0]
+    if (wake.wake_transport != "codex-app-server" or wake.reasoning_surface != "codex"
+            or projection.obligation_id != obligation.obligation_id
+            or projection.target_attempt_id != obligation.attempt_id
+            or projection.binding_id != wake.binding_id or projection.binding_id != route.binding_id
+            or projection.binding_generation != wake.binding_generation
+            or projection.binding_generation != route.binding_generation
+            or projection.nudge_id != wake.nudge_id
+            or projection.provider_session_id != wake.native_handle
+            or ack.obligation_ids != (projection.obligation_id,)
+            or any(getattr(projection, k) != getattr(ack, k) for k in (
+                "target_attempt_id", "process_generation_id", "binding_id", "binding_generation",
+                "provider_session_id", "provider_native_turn_id", "nudge_id"))
+            or any(sanitize_external_text(getattr(projection, k), limit=700) != getattr(projection, k)
+                   for k in ("text", "next_step"))):
+        return None
+    source = wake.continuation_input
+    if source is not None and any(getattr(projection, k) != getattr(source, k) for k in (
+        "obligation_id", "operation_key", "request_message_key",
+        "physical_source_sha256", "immutable_input_sha256")):
+        return None
+    try:
+        return NativeContinuationResponseEvidence(
+            **{k: getattr(projection, k) for k in (
+                "target_attempt_id", "process_generation_id", "binding_id", "binding_generation",
+                "nudge_id", "obligation_id", "operation_key", "request_message_key",
+                "physical_source_sha256", "immutable_input_sha256", "text", "next_step")},
+            provider_session_sha256=hashlib.sha256(projection.provider_session_id.encode("utf-8")).hexdigest(),
+            provider_native_turn_sha256=hashlib.sha256(projection.provider_native_turn_id.encode("utf-8")).hexdigest())
+    except (ValueError, TypeError):
+        return None
+
+
 def _stored_native_company_evidence(
     repo: WakeLedgerRepository, nudge_attempt: NudgeAttempt,
 ) -> NativeCompanyReadEvidence | None:
@@ -924,12 +993,14 @@ def _persist_transport_result(
     target_ack_projection: TrustedWorkerWakeAckProjection | None,
     target_registry: SessionTargetRegistry | None,
     native_company_read: NativeCompanyReadEvidence | None = None,
+    native_continuation_response: NativeContinuationResponseEvidence | None = None,
 ) -> PersistedNudgeResult:
     attempts = nudge_attempt.attempts
     phase = LedgerPhase(transport.outcome.value)
     terminal_persisted = repo.append_records_atomic(
         tuple(
-            (attempt_record(attempt, phase, native_company_read=native_company_read), obligation)
+            (attempt_record(attempt, phase, native_company_read=native_company_read,
+                            native_continuation_response=native_continuation_response), obligation)
             for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
         )
     )
@@ -990,6 +1061,7 @@ async def dispatch_persisted_nudge(
     descriptor: WakeTransportDescriptor | None = None,
     retry_policy: WakeRetryPolicy | None = None,
     target_registry: SessionTargetRegistry | None = None,
+    continuation_input: AttentionContinuationInput | None = None,
 ) -> PersistedNudgeResult:
     """Persist one exact nudge before making at most one provider submission."""
 
@@ -1087,6 +1159,7 @@ async def dispatch_persisted_nudge(
             nudge_attempt.attempts,
             binding=binding,
             first_route=first_route,
+            continuation_input=continuation_input,
         )
         reconcile = getattr(dispatcher, "reconcile", None)
         if not callable(reconcile):
@@ -1116,6 +1189,7 @@ async def dispatch_persisted_nudge(
             target_ack_projection=target_ack_projection,
             target_registry=target_registry,
             native_company_read=_native_company_evidence(raw_completion, wake, pairs),
+            native_continuation_response=_native_continuation_evidence(raw_completion, wake, pairs),
         )
 
     if first_route.human_required or not first_route.delivery_allowed:
@@ -1150,9 +1224,11 @@ async def dispatch_persisted_nudge(
     if not all(item.inserted for item in persisted):
         return _reconciliation_required(nudge_attempt)
 
-    wake = _nudge_from(attempts, binding=binding, first_route=first_route)
+    wake = _nudge_from(attempts, binding=binding, first_route=first_route,
+                       continuation_input=continuation_input)
     target_ack_projection: TrustedWorkerWakeAckProjection | None = None
     native_company_read: NativeCompanyReadEvidence | None = None
+    native_continuation_response = None
     try:
         raw_completion = await dispatcher.nudge(wake)
         raw_transport, target_ack_projection = normalize_transport_completion(
@@ -1162,6 +1238,7 @@ async def dispatch_persisted_nudge(
             raw_transport, expected_nudge_id=wake.nudge_id
         )
         native_company_read = _native_company_evidence(raw_completion, wake, pairs)
+        native_continuation_response = _native_continuation_evidence(raw_completion, wake, pairs)
     except WakePreSubmitError as exc:
         transport = TransportReceipt(
             outcome=exc.outcome,
@@ -1184,6 +1261,7 @@ async def dispatch_persisted_nudge(
         target_ack_projection=target_ack_projection,
         target_registry=target_registry,
         native_company_read=native_company_read,
+        native_continuation_response=native_continuation_response,
     )
 
 

@@ -12,6 +12,7 @@ codec.  There is still no Wake table.
 from __future__ import annotations
 
 import dataclasses
+from common.redaction import sanitize_external_text
 import re
 from enum import Enum
 from typing import Mapping, Sequence
@@ -34,6 +35,7 @@ from control_plane.wake_events import (
     utc_now_iso,
 )
 from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
+from control_plane.operator_harness_contract import validate_continuation_reply_text
 
 
 WAKE_AGGREGATE_TYPE = "wake"
@@ -272,6 +274,63 @@ class NativeCompanyReadEvidence:
         return cls(**dict(value))
 
 
+
+@dataclasses.dataclass(frozen=True)
+class NativeContinuationResponseEvidence:
+    """Durable bounded reply from one delivered turn; raw provider IDs excluded."""
+    target_attempt_id: str
+    process_generation_id: str
+    binding_id: str
+    binding_generation: int
+    nudge_id: str
+    obligation_id: str
+    operation_key: str
+    request_message_key: str
+    physical_source_sha256: str
+    immutable_input_sha256: str
+    provider_session_sha256: str
+    provider_native_turn_sha256: str
+    text: str = dataclasses.field(repr=False)
+    next_step: str = dataclasses.field(repr=False)
+
+    def __post_init__(self):
+        patterns = {
+            "target_attempt_id": r"ATT-[0-9a-f]{32}",
+            "process_generation_id": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+            "binding_id": BINDING_ID_RE.pattern, "nudge_id": NUDGE_ID_RE.pattern,
+            "obligation_id": WAKE_ID_RE.pattern,
+            "operation_key": r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}",
+            "request_message_key": r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}",
+        }
+        for name, pattern in patterns.items():
+            value = getattr(self, name)
+            if type(value) is not str or re.fullmatch(pattern, value) is None:
+                raise WakeLedgerError(f"native continuation {name} is malformed")
+        _strict_positive_int(self.binding_generation, "binding_generation")
+        for name in ("physical_source_sha256", "immutable_input_sha256",
+                     "provider_session_sha256", "provider_native_turn_sha256"):
+            value = getattr(self, name)
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise WakeLedgerError(f"native continuation {name} is malformed")
+        for name in ("text", "next_step"):
+            value = getattr(self, name)
+            if (type(value) is not str or not value.strip() or len(value) > 700
+                    or any(ord(c) < 32 and c not in "\n\t" for c in value)):
+                raise WakeLedgerError("native continuation text is malformed")
+            validate_continuation_reply_text(value)
+            if sanitize_external_text(value, limit=700, include_environment=False) != value:
+                raise WakeLedgerError("native continuation reply must be sanitized")
+
+    def to_dict(self):
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, value):
+        if type(value) is not dict or set(value) != {f.name for f in dataclasses.fields(cls)}:
+            raise WakeLedgerError("native continuation requires exact closed shape")
+        return cls(**value)
+
+
 @dataclasses.dataclass(frozen=True)
 class WakeLedgerRecord:
     command_id: str
@@ -292,6 +351,7 @@ class WakeLedgerRecord:
     obligation: WakeObligation | None = None
     physical_source: PhysicalDialogueSourceIdentity | None = None
     native_company_read: NativeCompanyReadEvidence | None = None
+    native_continuation_response: NativeContinuationResponseEvidence | None = None
 
     def matches_attempt(self, attempt: DeliveryAttempt) -> bool:
         return (
@@ -378,6 +438,7 @@ def requested_record(
 def attempt_record(
     attempt: DeliveryAttempt, phase: LedgerPhase,
     *, native_company_read: NativeCompanyReadEvidence | None = None,
+    native_continuation_response: NativeContinuationResponseEvidence | None = None,
 ) -> WakeLedgerRecord:
     if phase not in ATTEMPT_PHASES:
         raise WakeLedgerError(f"{phase} is not an attempt-scoped phase")
@@ -398,6 +459,7 @@ def attempt_record(
             nudge_id=attempt.nudge_id,
             nudge_attempt_command_ids=attempt.nudge_attempt_command_ids,
             native_company_read=native_company_read,
+            native_continuation_response=native_continuation_response,
         )
     )
 
@@ -425,6 +487,7 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
                 record.nudge_attempt_command_ids,
                 record.native_handle,
                 record.native_company_read,
+                record.native_continuation_response,
             )
         ):
             raise WakeLedgerError("global wake phase cannot carry route/native fields")
@@ -516,6 +579,20 @@ def parse_ledger_record(record: WakeLedgerRecord) -> WakeLedgerRecord:
                 or evidence.nudge_id != record.nudge_id
                 or len(record.nudge_attempt_command_ids) != 1):
             raise WakeLedgerError("native Company evidence disagrees with exact DELIVERED route")
+    continuation = record.native_continuation_response
+    if continuation is not None:
+        if type(continuation) is not NativeContinuationResponseEvidence:
+            raise WakeLedgerError("native continuation evidence must be typed")
+        NativeContinuationResponseEvidence.from_dict(continuation.to_dict())
+        if (record.phase is not LedgerPhase.DELIVERED
+                or record.reasoning_surface != "codex"
+                or record.wake_transport != "codex-app-server"
+                or continuation.obligation_id != oid
+                or continuation.binding_id != record.binding_id
+                or continuation.binding_generation != record.binding_generation
+                or continuation.nudge_id != record.nudge_id
+                or len(record.nudge_attempt_command_ids) != 1):
+            raise WakeLedgerError("native continuation disagrees with exact DELIVERED route")
     return record
 
 
@@ -849,6 +926,14 @@ def assert_causal(records: Sequence[WakeLedgerRecord]) -> None:
     source_resolved = False
     earlier: list[WakeLedgerRecord] = [parsed[0]]
     for record in parsed[1:]:
+        continuation = record.native_continuation_response
+        if continuation is not None:
+            physical = parsed[0].physical_source
+            if (physical is None or continuation.target_attempt_id != requested.attempt_id
+                    or continuation.obligation_id != requested.obligation_id
+                    or continuation.request_message_key != physical.predecessor_message_key
+                    or continuation.physical_source_sha256 != physical.digest):
+                raise WakeLedgerError("native continuation disagrees with frozen physical source")
         if record.phase is LedgerPhase.WAKE_REQUESTED:
             raise WakeLedgerError("duplicate WAKE_REQUESTED")
         if record.phase is LedgerPhase.TARGET_ACKNOWLEDGED:
@@ -1173,6 +1258,8 @@ def event_payload_for(
             )
         if record.native_company_read is not None:
             payload["native_company_read"] = record.native_company_read.to_dict()
+        if record.native_continuation_response is not None:
+            payload["native_continuation_response"] = record.native_continuation_response.to_dict()
         return payload
     raise WakeLedgerError(f"unsupported ledger phase {record.phase}")
 
@@ -1221,6 +1308,8 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
         raise WakeLedgerError("physical source is WAKE_REQUESTED-only")
     if "native_company_read" in payload and phase is not LedgerPhase.DELIVERED:
         raise WakeLedgerError("native Company evidence is DELIVERED-only")
+    if "native_continuation_response" in payload and phase is not LedgerPhase.DELIVERED:
+        raise WakeLedgerError("native continuation evidence is DELIVERED-only")
     oid = _obligation_id(aggregate_id)
     if command_id.split(":", 1)[0] != oid:
         raise WakeLedgerError("wake command_id does not belong to aggregate_id")
@@ -1302,19 +1391,23 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
         return parse_ledger_record(
             WakeLedgerRecord(command_id=command_id, phase=phase, ack=ack)
         )
-    evidence = None
-    if "native_company_read" in payload:
+    evidence = continuation = None
+    evidence_keys = {"native_company_read", "native_continuation_response"} & set(payload)
+    if evidence_keys:
         allowed = {
             "obligation_id", "attempt_n", "attempt_command_id", "destination_digest",
             "route_digest", "binding_id", "binding_generation", "session_alias",
-            "reasoning_surface", "wake_transport", "nudge_id",
-            "nudge_attempt_command_ids", "native_company_read",
-        }
+            "reasoning_surface", "wake_transport", "nudge_id", "nudge_attempt_command_ids",
+        } | evidence_keys
         if set(payload) != allowed:
-            raise WakeLedgerError("native Company DELIVERED payload must have its exact shape")
-        evidence = NativeCompanyReadEvidence.from_dict(payload["native_company_read"])
-        if getattr(event, "attempt_id", None) != evidence.target_attempt_id:
-            raise WakeLedgerError("native Company evidence disagrees with Event attempt")
+            raise WakeLedgerError("native DELIVERED payload must have its exact shape")
+        if "native_company_read" in evidence_keys:
+            evidence = NativeCompanyReadEvidence.from_dict(payload["native_company_read"])
+        if "native_continuation_response" in evidence_keys:
+            continuation = NativeContinuationResponseEvidence.from_dict(payload["native_continuation_response"])
+        for item in (evidence, continuation):
+            if item is not None and getattr(event, "attempt_id", None) != item.target_attempt_id:
+                raise WakeLedgerError("native evidence disagrees with Event attempt")
     attempt_n = _strict_positive_int(payload.get("attempt_n"))
     raw_group = payload.get("nudge_attempt_command_ids", ())
     if not isinstance(raw_group, (list, tuple)):
@@ -1335,6 +1428,7 @@ def wake_record_from_event(event: object) -> WakeLedgerRecord:
             nudge_id=str(payload.get("nudge_id") or "") or None,
             nudge_attempt_command_ids=tuple(str(item) for item in raw_group),
             native_company_read=evidence,
+            native_continuation_response=continuation,
         )
     )
 
@@ -1370,6 +1464,7 @@ def _payload_attempt_n(payload: Mapping[str, object], phase: LedgerPhase) -> int
 
 
 __all__ = [
+    "NativeContinuationResponseEvidence",
     "AckMode",
     "DeliveryAttempt",
     "LedgerPhase",

@@ -23,6 +23,8 @@ from control_plane.operator_harness_contract import (
     AdapterFailureClass,
     AttentionTurnObservation,
     AttentionCompanyReadProjection,
+    AttentionContinuationInput,
+    AttentionContinuationResponseProjection,
     AuthIdentityConfidence,
     AuthRealmFact,
     AuthRealmRequirement,
@@ -313,6 +315,10 @@ def turn_start_observation(value: Any) -> TurnStartObservation:
     return _construct(TurnStartObservation, value, name="turn start observation")
 
 
+def attention_continuation_input(value: Any) -> AttentionContinuationInput:
+    return _construct(AttentionContinuationInput, value, name="continuation input")
+
+
 def attention_turn_observation(value: Any) -> AttentionTurnObservation:
     raw = _closed(value, AttentionTurnObservation, name="attention turn observation")
     projection = raw["wake_ack_projection"]
@@ -338,6 +344,12 @@ def attention_turn_observation(value: Any) -> AttentionTurnObservation:
         raw,
         name="attention turn observation",
         wake_ack_projection=nested,
+        continuation_response_projection=(
+            None if raw["continuation_response_projection"] is None else _construct(
+                AttentionContinuationResponseProjection, raw["continuation_response_projection"],
+                name="attention continuation response",
+            )
+        ),
         company_read_projection=(
             None if raw["company_read_projection"] is None else _construct(
                 AttentionCompanyReadProjection, raw["company_read_projection"],

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdentity
 
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.runtime_binding_projection import project_runtime_binding
@@ -13,6 +15,7 @@ from control_plane.session_targets import (
 from control_plane.wake_events import ATTEMPT_ID_RE, WAKE_ID_RE
 from control_plane.wake_ledger import (
     NUDGE_ID_RE,
+    NativeContinuationResponseEvidence,
     AckMode,
     LedgerPhase,
     TrustedAckContext,
@@ -98,6 +101,30 @@ class TrustedWorkerWakeAckProjection:
             raise WakeAckIngressError("trusted projection requires a terminal ACK trailer")
 
 
+
+def _same_attempt_native_continuation_ack(obligation, requested, delivered, trusted):
+    evidence = delivered.native_continuation_response
+    physical = requested.physical_source
+    if (type(evidence) is not NativeContinuationResponseEvidence
+            or type(physical) is not PhysicalDialogueSourceIdentity
+            or physical.candidate.mode != "ACTIVE_CURRENT_WORKER"
+            or trusted.obligation_ids != (obligation.obligation_id,)):
+        return False
+    return (
+        obligation.attempt_id == trusted.target_attempt_id == evidence.target_attempt_id == physical.candidate.attempt_id
+        and physical.candidate.job_id == obligation.job_id
+        and evidence.obligation_id == physical.obligation_id == obligation.obligation_id
+        and evidence.request_message_key == physical.predecessor_message_key
+        and evidence.physical_source_sha256 == physical.digest
+        and evidence.nudge_id == delivered.nudge_id == trusted.nudge_id
+        and evidence.binding_id == delivered.binding_id == trusted.binding_id
+        and evidence.binding_generation == delivered.binding_generation == trusted.binding_generation
+        and evidence.process_generation_id == trusted.process_generation_id
+        and evidence.provider_session_sha256 == hashlib.sha256(trusted.provider_session_id.encode("utf-8")).hexdigest()
+        and evidence.provider_native_turn_sha256 == hashlib.sha256(trusted.provider_native_turn_id.encode("utf-8")).hexdigest()
+    )
+
+
 def acknowledge_consumed_wakes(
     runtime: Runtime,
     registry: SessionTargetRegistry,
@@ -132,6 +159,7 @@ def acknowledge_consumed_wakes(
                     WakeLedgerRecord | None,
                 ]
             ] = []
+            requested_by_id = {}
             for obligation_id in claim.obligation_ids:
                 records = repository.list_ledger_records_on_connection(
                     connection, obligation_id
@@ -146,6 +174,7 @@ def acknowledge_consumed_wakes(
                     raise WakeAckIngressError(
                         "ACK ingress requires exactly one WAKE_REQUESTED obligation"
                     )
+                requested_by_id[obligation_id] = requests[0]
                 obligation = requests[0].obligation
                 assert obligation is not None
                 deliveries = [
@@ -203,7 +232,9 @@ def acknowledge_consumed_wakes(
             records_to_append = []
             batch_identity = None
             for obligation, delivered, _existing in prepared:
-                if obligation.attempt_id == trusted.target_attempt_id:
+                if (obligation.attempt_id == trusted.target_attempt_id
+                        and not _same_attempt_native_continuation_ack(
+                            obligation, requested_by_id[obligation.obligation_id], delivered, trusted)):
                     raise WakeAckIngressError(
                         "target Attempt cannot be inferred from the Wake source Attempt"
                     )

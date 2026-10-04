@@ -2625,13 +2625,16 @@ class ExecutiveWorkerBroker:
             "instruction",
             "completion_timeout_seconds",
         }
-        if set(payload) != expected:
+        if set(payload) not in (expected, expected | {"continuation_input"}):
             raise BrokerPreSubmitError(
                 "ohf-deliver-attention payload fields are invalid"
             )
         try:
             self._require_current_autonomy()
             generation = wire_process_generation_ref(payload["generation"])
+            from control_plane.operator_harness_wire import attention_continuation_input
+            continuation = (attention_continuation_input(payload["continuation_input"])
+                            if "continuation_input" in payload else None)
         except (WorkerBrokerError, OperatorHarnessWireError) as exc:
             raise BrokerPreSubmitError(
                 "current operator generation is unavailable"
@@ -2695,6 +2698,7 @@ class ExecutiveWorkerBroker:
                     opaque_ids=tuple(opaque_ids),
                     instruction=instruction,
                     completion_timeout_seconds=float(timeout),
+                    **({"continuation_input": continuation} if continuation is not None else {}),
                 )
             except Exception as exc:
                 effect_unknown = getattr(exc, "effect_unknown", None)

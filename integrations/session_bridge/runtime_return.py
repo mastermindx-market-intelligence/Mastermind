@@ -426,6 +426,27 @@ class RuntimeSessionReturn:
             raise ValueError("canonical parent context changed")
         return parent
 
+    def read_ref_for_physical_source(self, physical):
+        """Join the exact physical CONTINUE to its existing immutable request."""
+        candidate = physical.candidate
+        values = self.runtime.events.list_events(
+            job_id=candidate.job_id, attempt_id=candidate.attempt_id,
+            aggregate_type="session_bridge_continue")
+        if len(values) > 1024:
+            raise BridgeError("source_unavailable", "continuation request evidence exceeds bound")
+        matches = [event.payload.get("read_ref") for event in values
+                   if event.attempt_id == candidate.attempt_id and event.job_id == candidate.job_id
+                   and all(event.payload.get(k) == getattr(candidate, k) for k in
+                           ("root_job_id", "job_id", "attempt_id", "worker_id"))
+                   and event.payload.get("request_message_key") == physical.predecessor_message_key
+                   and event.payload.get("context", {}).get("operation_key") == physical.operation_key
+                   and event.payload.get("carrier") == {k: getattr(physical, k) for k in
+                                                       ("workspace_id", "channel_id", "thread_ts")}]
+        if len(matches) != 1:
+            raise BridgeError("source_unavailable", "original continuation request is unavailable")
+        self._request(matches[0])
+        return matches[0]
+
     async def read_continuation_source(self, *, read_ref):
         """Internal read for the root publisher; never a grant or public endpoint.
 
@@ -513,8 +534,10 @@ class RuntimeSessionReturn:
             original_binding = dataclasses.replace(
                 binding, reply_to_message_key=value["predecessor_message_key"]
             )
+            from .native_reply import native_reply_message_key
+            own_reply_key = native_reply_message_key(operation_key)
             if (binding.reply_to_message_key not in {
-                        value["predecessor_message_key"], value["request_message_key"]}
+                        value["predecessor_message_key"], value["request_message_key"], own_reply_key}
                     or original_binding.continuation_operation_key != operation_key
                     or _digest(dataclasses.asdict(original_binding)) != value["binding_sha256"]
                     or target.generation != value["target_generation"]):
@@ -525,6 +548,7 @@ class RuntimeSessionReturn:
                 binding_generation=generation["binding_generation"],
                 process_generation_id=generation["process_generation_id"],
                 context=DialogueContextV2(**value["context"]), thread_ts=value["thread_ts"],
-                request_message_key=in_reply_to, reply_operation_key=operation_key)
+                request_message_key=in_reply_to, reply_operation_key=operation_key,
+                reply_predecessor_advanced=binding.reply_to_message_key == own_reply_key)
         except Exception:
             raise BridgeError("binding_unavailable", "exact native return binding unavailable") from None

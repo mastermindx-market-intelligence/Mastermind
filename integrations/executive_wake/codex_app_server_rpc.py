@@ -14,6 +14,8 @@ from control_plane.executive_worker_broker import RemoteBrokerError
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionCompanyReadProjection,
+    AttentionContinuationInput,
+    AttentionContinuationResponseProjection,
     AttentionTurnObservation,
     ProcessGenerationRef,
     ReconcileObservation,
@@ -86,6 +88,7 @@ class CodexCurrentWriterWakeClient:
         nudge_id: str,
         opaque_ids: Sequence[str],
         instruction: str,
+        continuation_input: AttentionContinuationInput | None = None,
     ) -> CodexWakeDeliveryObservation:
         if instruction != ATTENTION_TURN_INSTRUCTION:
             raise _pre_submit(
@@ -101,6 +104,7 @@ class CodexCurrentWriterWakeClient:
             nudge_id=str(nudge_id),
             opaque_ids=tuple(str(item) for item in opaque_ids),
             instruction=instruction,
+            continuation_input=continuation_input,
         )
 
     async def reconcile_wake(
@@ -134,6 +138,7 @@ class CodexCurrentWriterWakeClient:
         nudge_id: str,
         opaque_ids: tuple[str, ...],
         instruction: str,
+        continuation_input: AttentionContinuationInput | None = None,
     ) -> CodexWakeDeliveryObservation:
         guard = self._pre_submit_guard
         if guard is not None:
@@ -154,6 +159,7 @@ class CodexCurrentWriterWakeClient:
                 opaque_ids=opaque_ids,
                 instruction=instruction,
                 completion_timeout_seconds=self._completion_timeout_seconds,
+                **({"continuation_input": continuation_input} if continuation_input is not None else {}),
             )
         except RemoteBrokerError as exc:
             if exc.code == "BrokerPreSubmitError":
@@ -264,6 +270,16 @@ class CodexCurrentWriterWakeClient:
             # Company consumption is independent of provider delivery and Wake ACK.
             # Withhold foreign/stale evidence without inventing effect uncertainty.
             company = None
+        continuation = observation.continuation_response_projection
+        if continuation is not None and (
+            not isinstance(continuation, AttentionContinuationResponseProjection)
+            or target_ack_projection is None
+            or target_ack_projection.obligation_ids != (continuation.obligation_id,)
+            or continuation.target_attempt_id != self._attempt_id
+            or continuation.binding_id != self._runtime_binding.binding_id
+            or continuation.binding_generation != self._runtime_binding.binding_generation
+        ):
+            continuation = None
         return CodexWakeDeliveryObservation(
             native_handle=native_handle,
             nudge_id=nudge_id,
@@ -271,6 +287,7 @@ class CodexCurrentWriterWakeClient:
             delivered=observation.delivered,
             target_ack_projection=target_ack_projection,
             company_read_projection=company,
+            continuation_response_projection=continuation,
         )
 
 
