@@ -160,3 +160,40 @@ fences, existing projector or backend features. Reuse this operation's workspace
 through the custody owner and refresh only material invalidators.
 
 **INITIATION: established. PROJECT_COMPLETE: false. NATIVE_ACCEPTANCE: unproven.**
+
+
+## Deep implementation-design continuation — 2026-10-04
+
+The Chairman requested deeply detailed implementation ideas, planning and process. The linked
+[design package](claude_capability_hardening_20261004/README.md) now supplies detailed H1–H6
+contracts, shared identity/effect/versioning rules, a 16-node execution dependency graph,
+80 explicitly unrun acceptance scenarios, official provider research notes and a read-only
+consistency verifier. Its source register contains 36 immutable Git anchors at protected
+`17b9fa1363db6071d338be3373a4fdb11fc0076d`. Relevant source/procedure bytes are unchanged from
+the initial protected base; the original operation workspace and PR #1240 are reused.
+
+Key refinements: rich Claude admission requires coordinated registry/native observer/supervisor
+qualification; current COO submission creates a bounded job, not a CooCycle root; orchestration
+needs a separate role-correct versioned admission operation. Two reviewed children reserve 19
+slots against the current limit of 16, while the proposed reviewed-plus-read-only graph reserves
+11. The neutral dialogue contract itself restricts COO actors to worker-style messages, so a
+principal ruling needs commission-scoped semantics/binding changes, not just a new tool. The
+reciprocal cycle is performed while the child is live, not replayed after its terminal close.
+
+New actual source-contract test result: 334 passed, three MCP-dependent cases skipped. The broader
+initial selection had two collection errors for missing jwt/mcp; dependency-complete integration
+is not claimed green. Design verification checked source digests, original handoff identity,
+case coverage and graph/link consistency; eight in-memory negative checker tests refused as
+expected. Those are not executions of the 80 planned native/integration acceptance scenarios.
+
+**Planning is materially advanced but not completely persisted.** The detailed H7 browser-packet
+write and a later two-entry source-register extension were blocked before dispatch and were not
+retried, rephrased or rerouted. H7 remains explicitly tied to the original handoff; no substitute
+file or native proof is claimed. See `claude_capability_hardening_20261004/VALIDATION.md` for the
+exact holds. Existing runtime/profile/plugin and sealed-worker source remains untouched.
+
+The next implementation dependency is owner review of the coordinated H1 admission/observation
+and H3 package contract, while H4 root and H6 scoped-ruling contracts proceed through their
+existing owners after current custody is resolved. The remaining planning-file holds require a
+legitimate recovery condition, not another carrier/account/mode. Publication, exact-head CI,
+independent review, installation, selection, authentication and native acceptance remain distinct.
