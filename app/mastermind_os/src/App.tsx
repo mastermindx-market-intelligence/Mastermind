@@ -7,6 +7,7 @@ import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
+import { Projects } from "./projects/Projects";
 import {
   OperationController,
   type OperationKind,
@@ -57,6 +58,7 @@ import {
 } from "./work";
 export const navigation = [
   "Today",
+  "Projects",
   "Work",
   "Programs",
   "Fleet & Capacity",
@@ -69,6 +71,7 @@ export const navigation = [
 type View = (typeof navigation)[number];
 const primaryNavigation: readonly View[] = [
   "Today",
+  "Projects",
   "Work",
   "Programs",
   "Fleet & Capacity",
@@ -82,6 +85,7 @@ const missionNavigation: readonly View[] = [
 ];
 const navGlyph: Record<View, string> = {
   Today: "⌂",
+  Projects: "◫",
   Work: "▤",
   Programs: "◫",
   "Fleet & Capacity": "◇",
@@ -1698,6 +1702,8 @@ export function App() {
           : "UNAVAILABLE",
     headerState = conversationActive
       ? conversationState
+      : active === "Projects"
+        ? office.projection.programs.source.state
       : active === "Today"
         ? index.state === "PENDING"
           ? "SOURCE_READ_PENDING"
@@ -1717,6 +1723,8 @@ export function App() {
         : windowDocument && authState?.content
           ? "A global current permitted window. No relationship to the selected Mission is proven."
           : "No Mission-linked conversation is currently established."
+      : active === "Projects"
+        ? "Exact Project identities from the supplied owner collection; company-wide coverage is not established."
       : active === "Today"
         ? d && d.read_state.state !== "CURRENT"
           ? `Selected mission projection is ${label(d.read_state.state)}; source qualification is not current.`
@@ -2109,6 +2117,11 @@ export function App() {
         projection={office.projection} draft={office.draft} onDraftChange={office.changeDraft} />
       <button type="button" className="primary" onClick={() => setActive("Programs")}>Open Programs</button>
     </>;
+  else if (active === "Projects")
+    content = <Projects programs={office.projection.programs} selectedProject={selection}
+      onNavigateMission={office.projection.programs.source.state === "CURRENT"
+        ? (target, mode) => { if (mode === "current") open(target.workRef, target.rootJobId); }
+        : undefined} />;
   else if (active === "Programs")
     content = (
       <section className="card">

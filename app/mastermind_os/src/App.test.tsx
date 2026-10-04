@@ -84,7 +84,7 @@ afterEach(() => {
 
 describe("React read lifecycle fences", () => {
   it("hides displayed A synchronously while B is pending and after B rejects", async () => {
-    const b = deferred<unknown>(),
+    const b = deferred<unknown>(), collectionB = deferred<unknown>(),
       read = vi.fn(({ workRef }: { workRef: string }) =>
         workRef === "WS:ALPHA"
           ? Promise.resolve(missionFixture("WS:ALPHA", "JOB-A"))
@@ -92,7 +92,7 @@ describe("React read lifecycle fences", () => {
       );
     window.MastermindMissionHost = {
       selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
-      readPrograms,
+      readPrograms: vi.fn().mockImplementationOnce(readPrograms).mockImplementation(() => collectionB.promise),
       readMission: read,
     };
     const user = userEvent.setup();
@@ -106,7 +106,10 @@ describe("React read lifecycle fences", () => {
       await screen.findByRole("button", { name: /Beta program/ }),
     );
     expect(screen.queryByText("JOB-A")).toBeNull();
-    expect(screen.getByText(/SOURCE_READ_PENDING/)).toBeTruthy();
+    expect(screen.getByText(/PROGRAM_SELECTION_PENDING/)).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(1);
+    await act(async () => collectionB.resolve(await readPrograms()));
+    expect(await screen.findByText(/SOURCE_READ_PENDING/)).toBeTruthy();
     await act(async () => b.reject(new Error("disconnected")));
     expect(await screen.findByText(/SOURCE_UNAVAILABLE/)).toBeTruthy();
     expect(screen.queryByText("JOB-A")).toBeNull();
