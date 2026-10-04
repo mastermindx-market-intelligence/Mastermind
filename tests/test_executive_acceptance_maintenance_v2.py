@@ -282,3 +282,63 @@ def test_terminal_assignment_binds_existing_uid_and_filesystem_receipt(tmp_path,
     else:
         with pytest.raises(m.MaintenanceError):
             m.terminal_assignment(config, job, attempt)
+
+
+def _close_dispatch(runtime, root, job_id, attempt_id, *, block=True):
+    from control_plane.executive_coo_cycle import CooCycle
+    command = f"coo-cycle:{root.job_id}:dispatch:{job_id}:attempt:1"
+    receipt = runtime.attempts.terminal_cycle_dispatch_outcome(job_id, command_id=command)
+    runtime.jobs.reconcile_cycle_dispatch_effect(root.job_id, selected_job_id=job_id,
+                                                dispatch_command_id=command, receipt=receipt)
+    if block:
+        def forbidden(*args):
+            raise AssertionError("resolved terminal history cannot dispatch")
+        assert CooCycle(runtime, dispatcher=forbidden).run_once(root.job_id).action == "BLOCKED"
+    return command
+
+
+def test_terminal_carry_preserves_canonical_block_without_reopening(tmp_path, monkeypatch):
+    runtime, root, _before, config, prior, material, proof, job_id, attempt_id = _terminal_fixture(tmp_path, monkeypatch)
+    _close_dispatch(runtime, root, job_id, attempt_id)
+    before = m.snapshot(runtime.store.path)
+    selected, fields = m.terminal_carry_fields(runtime, root, config, before, "b"*40)
+    assert selected is proof
+    assert fields["terminal_attempt_id"] == attempt_id
+    assert runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is None
+    assert runtime.jobs.validated_cycle_block(root.job_id)[1]["reason"] == "plan_terminal_adverse"
+    assert m.snapshot(runtime.store.path) == before
+    descriptor = dict(prior, schema_version=m.SCHEMA_V2, predecessor_sha="b"*40,
+                      successor_sha="c"*40, **material)
+    monkeypatch.setattr(m, "descriptor_for", lambda sha: descriptor)
+    monkeypatch.setattr(m, "summary_document", lambda sha: ({}, b"accepted"))
+    monkeypatch.setattr(m, "validate_carry_receipt", lambda *args: None)
+    # Policy rotation must not recover the old root's historical binding.
+    current = dict(base_sha="c"*40, execution_profile_digest="f"*64, operator_harness_armed=True)
+    assert m.frozen_binding(root, current, runtime.store) is current
+
+
+@pytest.mark.parametrize("fault", ["no-block", "extra-resolution", "order", "block-identity", "claim", "lease"])
+def test_blocked_terminal_carry_refuses_incomplete_or_changed_history(tmp_path, monkeypatch, fault):
+    runtime, root, _before, config, _prior, _material, _proof, job_id, attempt_id = _terminal_fixture(tmp_path, monkeypatch)
+    command = _close_dispatch(runtime, root, job_id, attempt_id, block=fault != "no-block")
+    if fault in {"block-identity", "claim", "lease"}:
+        with runtime.store.transaction() as conn:
+            # Deliberate corruption of this isolated test database: the normal
+            # immutability triggers already reject these writes at runtime.
+            conn.execute("DROP TRIGGER " + ("terminal_attempts_are_immutable" if fault == "lease"
+                                           else "events_are_immutable_update"))
+            if fault == "block-identity":
+                conn.execute("UPDATE events SET actor='foreign' WHERE event_type='COO_CYCLE_BLOCKED' AND job_id=?", (root.job_id,))
+            elif fault == "claim":
+                conn.execute("UPDATE events SET aggregate_id='foreign' WHERE command_id=?", (command,))
+            else:
+                conn.execute("PRAGMA ignore_check_constraints=ON")
+                conn.execute("UPDATE attempts SET lease_token='foreign' WHERE attempt_id=?", (attempt_id,))
+    before = m.snapshot(runtime.store.path)
+    if fault == "extra-resolution":
+        resolution = next(e for e in before["tables"]["events"] if e["event_type"] == "COO_DISPATCH_RECONCILED")
+        before["tables"]["events"].append(dict(resolution, event_id=9999))
+    elif fault == "order":
+        next(e for e in before["tables"]["events"] if e["event_type"] == "COO_CYCLE_BLOCKED")["event_id"] = 1
+    with pytest.raises(m.MaintenanceError):
+        m.terminal_carry_fields(runtime, root, config, before, "b"*40)

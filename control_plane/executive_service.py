@@ -6009,13 +6009,13 @@ class ExecutiveControlService:
             raise ServiceError("bounded COO root scan limit was exceeded")
         for row in rows:
             root = runtime.jobs.get_job(str(row["job_id"]))
-            if root is None or not self._is_bound_coo_root(root):
+            if root is None:
                 continue
-            blocked = any(
-                event.event_type == "COO_CYCLE_BLOCKED"
-                for event in runtime.events.list_events(job_id=root.job_id)
-            )
-            if blocked:
+            # Terminal history survives source/profile rotation. Validate its
+            # canonical block before asking whether it could dispatch now.
+            if runtime.jobs.validated_cycle_block(root.job_id) is not None:
+                continue
+            if not self._is_bound_coo_root(root):
                 continue
             if (
                 root.status is JobStatus.QUEUED
