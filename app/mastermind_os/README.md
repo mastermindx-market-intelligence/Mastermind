@@ -1,9 +1,12 @@
 # Mastermind OS shared product
 
 This read-only React/TypeScript product installs a fixed web or Tauri host before
-mounting. It consumes the closed Programs envelope and Mission v2 from the
-workspace service, preserving the existing Program selection, generation and
-abort fences. Historical v1 fixtures remain decoder regression inputs.
+mounting. At the inspected protected source `a2646f458f9f`, the app consumes the
+closed Programs envelope, Mission v3 (with the existing v2 fallback), and exact
+Result reads from the workspace service, preserving Program selection,
+generation and abort fences. Historical v1 fixtures remain decoder regression
+inputs. Use the pinned code references in the daily-flow specification when
+reconciling this documentation branch with the current implementation.
 
 Programs join one `work_ref` to exactly one Runtime root. Mission reads carry
 exactly `work_ref` and `root_job_id`; no recent-root guessing is performed.
@@ -50,13 +53,14 @@ reload. Sign-out is local token disposal, not an Auth0 SSO logout.
 
 Native Rust opens the system browser and receives the registered deep link.
 Tokens stay in Rust memory. React uses only `auth_status`, `sign_in`, `sign_out`,
-`read_programs`, `read_mission`, and `read_current_window`; it has no token
-getter or arbitrary URL bridge. The macOS app must be installed/registered for
+`read_programs`, `read_mission`, `read_mission_v3`, `read_result`, and
+`read_current_window`; it has no token getter or arbitrary URL bridge. The macOS app must be installed/registered for
 its custom scheme before an actual callback can be qualified. This source
 change neither installs nor launches it.
 
-The fixed public GET routes are `/workspace/programs/current`,
-`/workspace/mission/current`, and `/workspace/window/current`. Every public
+The inspected fixed public GET routes are `/workspace/programs/current`,
+`/workspace/mission/current`, `/workspace/mission/v3/current`,
+`/workspace/result/current`, and `/workspace/window/current`. Every public
 response is capped at 2,000,000 bytes. Token responses are capped at 32,768
 bytes. The content service's separate internal frame limit remains 544 KiB.
 Web hosting must serve the product and exact callback through the `/os/` SPA
@@ -126,3 +130,34 @@ not establish frontend implementation, installed behavior, keyboard or enlarged-
 text validation, deployment, or product acceptance. The cumulative design and
 verification record remains
 [`research/MASTERMIND_OS_NOIR_INITIATION_2026-09-26.md`](../../research/MASTERMIND_OS_NOIR_INITIATION_2026-09-26.md).
+
+## Daily workflow and builder starting point
+
+Read the [Daily Experience Builder Flow Specification](../../docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md)
+before wiring the mockups. It grounds the intended experience in protected
+product law and implementation source `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
+
+[Paper page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0)
+connects the route family through six editable workflow notes:
+
+- UX00 `PBO-0`: daily loop, roles and directory.
+- UX01 `PBP-0`: complete, partial, historical and unprojected Today states.
+- UX02 `PBQ-0`: direction, accountable next result and named project creation.
+- UX03 `PAY-0`: exact decision, one final action and confirmed/uncertain outcomes.
+- UX04 `PAZ-0`: scoped drafts, evidence detours, session succession and access loss.
+- UX05 `PBR-0`: route/owner/capability boundaries and first build slice.
+
+The daily product shows what needs the Chairman's judgment and what the team
+owns. Meta-CEO remains one durable company office; project conversations retain
+their Project Sol and project scope. Ordinary supported messages do not require
+a blanket approval step. Work, decisions, receipts, acceptance and release keep
+their distinct canonical meanings.
+
+The specification includes actual Paper action anchors, source-owner mappings,
+transition and recovery matrices, twelve illustrative fixtures and fifteen
+implementation acceptance scenarios. The current protected app remains a
+read-only consumer; message send, project creation, decision recording, full
+history and execution continuation are target capabilities with separate owner
+and implementation gates. The #1046/#1150 draft custody and source-release
+boundaries are not cleared by this design work. No working prototype links,
+installed UX or live command behavior are claimed from Paper screenshots.
