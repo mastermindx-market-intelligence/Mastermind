@@ -41,10 +41,16 @@ function mission(title = "Previous scope mission") {
 async function nativeFixture() {
   let notify!: (event: { payload: unknown }) => void;
   let hold = false;
-  const pendingPrograms = deferred(), pendingMission = deferred(), pendingWindow = deferred();
+  const pendingPrograms: ReturnType<typeof deferred>[] = [];
+  const pendingMission = deferred(), pendingWindow = deferred();
   const invoke = vi.fn(async (command: string) => {
     if (command === "auth_status") return signed;
-    if (command === "read_programs") return hold ? pendingPrograms.promise : programs();
+    if (command === "read_programs") {
+      if (!hold) return programs();
+      const pending = deferred();
+      pendingPrograms.push(pending);
+      return pending.promise;
+    }
     if (command === "read_mission_v3") return hold ? pendingMission.promise : mission();
     if (command === "read_current_window") return hold ? pendingWindow.promise : pairedFixture.window;
     throw new Error("unexpected fixture command: " + command);
@@ -54,10 +60,10 @@ async function nativeFixture() {
     return () => {};
   });
   const host = bindMissionHost(client);
-  return { client, host, invoke, notify,
+  return { client, host, invoke, notify, pendingPrograms,
     hold: () => { hold = true; },
     settle: () => {
-      pendingPrograms.resolve(programs("Current scope program"));
+      for (const pending of pendingPrograms) pending.resolve(programs("Current scope program"));
       pendingMission.resolve(mission("Current scope mission"));
       pendingWindow.resolve(pairedFixture.window);
     },
@@ -107,6 +113,43 @@ describe("native auth generation reaches the actual workspace", () => {
       await act(async () => { e.notify({ payload: { ...signed } }); await flush(); });
       expect(document.body.textContent).not.toContain(privateText);
       expect(e.invoke.mock.calls.filter(([name]) => name === "read_programs")).toHaveLength(reads + 1);
+    } finally { await act(async () => { e.settle(); await flush(); }); }
+  });
+  it.each(["resolve", "reject"] as const)("cancels the superseded typed read and refuses its late %s across an identical-state auth boundary", async (lateOutcome) => {
+    const e = await nativeFixture();
+    window.MastermindMissionHost = e.host;
+    render(<App />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Programs" }));
+    await waitFor(() => expect(document.body.textContent).toContain("Previous scope program"));
+    e.hold();
+    let oldOutcome = "PENDING";
+    const oldRead = e.host.readPrograms!({ signal: new AbortController().signal }).then(
+      () => { oldOutcome = "RESOLVED"; },
+      (error: Error) => { oldOutcome = error.message; },
+    );
+    try {
+      await waitFor(() => expect(e.pendingPrograms).toHaveLength(1));
+      const before = e.host.invalidationGeneration!();
+      await act(async () => { e.notify({ payload: { ...signed } }); await flush(); });
+      expect(e.host.invalidationGeneration!()).toBeGreaterThan(before);
+      expect(oldOutcome).toBe("READ_CANCELLED");
+      expect(document.body.textContent).not.toContain("Previous scope program");
+      expect(e.pendingPrograms).toHaveLength(2);
+      await act(async () => {
+        if (lateOutcome === "resolve") e.pendingPrograms[0]!.resolve(programs("Late old private program"));
+        else e.pendingPrograms[0]!.reject(new Error("LATE_OLD_READ_FAILURE"));
+        await flush();
+      });
+      expect(document.body.textContent).not.toContain("Late old private program");
+      expect(document.body.textContent).not.toContain("Previous scope program");
+      expect(oldOutcome).toBe("READ_CANCELLED");
+      await act(async () => {
+        e.pendingPrograms[1]!.resolve(programs("Fresh replacement program"));
+        await flush();
+      });
+      await waitFor(() => expect(document.body.textContent).toContain("Fresh replacement program"));
+      expect(document.body.textContent).not.toContain("Late old private program");
+      await oldRead;
     } finally { await act(async () => { e.settle(); await flush(); }); }
   });
   it("deduplicates an unchanged legacy client notification without inventing a generation", () => {
