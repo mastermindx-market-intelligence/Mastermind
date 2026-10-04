@@ -346,3 +346,45 @@ def test_multiple_effective_origins_are_not_one_repository_binding(fleet):
     code, result = acquire(fleet, "macro")
     assert code == 2 and "REPOSITORY_REMOTE_MISMATCH" in result["error"]
     assert not root.exists()
+
+
+def test_reinstall_without_registration_cannot_silently_remove_repository_bindings(tmp_path, fleet):
+    repos, _, _, _ = fleet
+    source, launcher, _, env = install_fixture(tmp_path, fleet)
+    installer = ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh")]
+    first = subprocess.run([*installer, "--repository-source", "macro=" + str(repos["macro"][0]),
+                            "--repository-source", "terminal=" + str(repos["terminal"][0])],
+                           env=env, capture_output=True, text=True, timeout=30)
+    assert first.returncode == 0, first.stderr
+    before = launcher.read_bytes()
+    second = subprocess.run(installer, env=env, capture_output=True, text=True, timeout=30)
+    assert second.returncode == 0, second.stderr
+    result = subprocess.run([str(launcher), "repositories"], env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    rows = {row["alias"]: row for row in json.loads(result.stdout)["receipt"]["repositories"]}
+    assert {alias for alias, row in rows.items() if row["state"] == "READY"} == set(IDENTITIES)
+    assert launcher.read_bytes() == before, "same-release reinstall retains exactly the same pinned map"
+
+
+@pytest.mark.parametrize("fault", ["empty_map", "symlink", "writable"])
+def test_reinstall_refuses_untrusted_previous_wrapper_before_overwrite(tmp_path, fleet, fault):
+    repos, _, _, _ = fleet
+    source, launcher, payload, env = install_fixture(tmp_path, fleet)
+    installer = ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh")]
+    first = subprocess.run([*installer, "--repository-source", "macro=" + str(repos["macro"][0])],
+                           env=env, capture_output=True, text=True, timeout=30)
+    assert first.returncode == 0, first.stderr
+    if fault == "empty_map":
+        lines = launcher.read_text().splitlines()
+        launcher.write_text("\n".join("export MASTERMIND_WORKSPACE_REPOSITORIES=''" if line.startswith("export MASTERMIND_WORKSPACE_REPOSITORIES=") else line for line in lines) + "\n")
+    elif fault == "writable":
+        launcher.chmod(0o777)
+    else:
+        retained = launcher.with_name("retained-wrapper")
+        launcher.rename(retained)
+        launcher.symlink_to(retained)
+    before = launcher.read_bytes()
+    result = subprocess.run(installer, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0, result.stdout
+    assert launcher.read_bytes() == before
+    assert launcher.is_symlink() is (fault == "symlink")

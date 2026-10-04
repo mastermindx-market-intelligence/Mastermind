@@ -14,6 +14,7 @@ if [ "$(basename "$common_abs")" != ".git" ]; then
   exit 2
 fi
 source_repo="$(dirname "$common_abs")"
+target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
 
 # Select the workspace root once through the canonical workspace route.
 # This is installer policy only: it does not reserve storage or perform Runtime
@@ -24,7 +25,7 @@ if [ -x /opt/homebrew/bin/python3 ]; then
 else
   profile_python=python3
 fi
-profile_output="$("$profile_python" - "$repo/scripts/mastermind_workspace.py" "$HOME" "$source_repo" "$@" <<'PY'
+profile_output="$("$profile_python" - "$repo/scripts/mastermind_workspace.py" "$HOME" "$source_repo" "$target" "$@" <<'PY'
 import argparse
 import importlib.util
 import json
@@ -36,14 +37,14 @@ home = Path(sys.argv[2])
 source = Path(sys.argv[3])
 parser = argparse.ArgumentParser(description="Install host-owned attended repository bindings", allow_abbrev=False)
 parser.add_argument("--repository-source", action="append", default=[], metavar="ALIAS=/absolute/source")
-arguments = parser.parse_args(sys.argv[4:])
+arguments = parser.parse_args(sys.argv[5:])
 spec = importlib.util.spec_from_file_location("mastermind_workspace_install_profile", script)
 if spec is None or spec.loader is None:
     raise SystemExit("cannot load workspace installation profile")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 profile = module.installation_storage_profile(home)
-repositories = module.installation_repository_bindings(source, arguments.repository_source)
+repositories = module.installation_repository_bindings(source, arguments.repository_source, installed_launcher=Path(sys.argv[4]))
 for key in ("root", "mount_point", "policy_path"):
     value = profile[key]
     if "\n" in value or "\r" in value:
@@ -61,7 +62,6 @@ if [ -z "$workspace_root" ]; then
   exit 2
 fi
 
-target="${MASTERMIND_WORKSPACE_CLI_INSTALL:-$HOME/.local/bin/mmx-workspace}"
 payload_root="${MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT:-$HOME/.local/share/mastermind/workspace-cli/$release_sha}"
 mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane" "$payload_root/common"
 cp "$repo/scripts/mastermind_workspace.py" "$payload_root/scripts/mastermind_workspace.py"

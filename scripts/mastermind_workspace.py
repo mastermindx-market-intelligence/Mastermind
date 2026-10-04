@@ -14,6 +14,7 @@ import json
 import os
 import plistlib
 import shutil
+import shlex
 import stat
 import subprocess
 import sys
@@ -117,8 +118,7 @@ def _inspect_repository_binding(alias: str, value: object) -> dict[str, str]:
             "source_repository": str(source), "common_git_dir": str(common)}
 
 
-def _installed_repository_bindings() -> dict[str, object]:
-    raw = os.environ.get(_REPOSITORY_CONFIG_ENV, "")
+def _parse_repository_bindings(raw: str) -> dict[str, object]:
     if not raw:
         return {}
     try:
@@ -134,6 +134,56 @@ def _installed_repository_bindings() -> dict[str, object]:
         return value["repositories"]
     except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
         raise WorkspaceError("REPOSITORY_BINDING_INVALID: installed repository configuration is invalid") from exc
+
+
+
+def _installed_repository_bindings() -> dict[str, object]:
+    return _parse_repository_bindings(os.environ.get(_REPOSITORY_CONFIG_ENV, ""))
+
+
+def _retained_installer_bindings(launcher: Path | None) -> dict[str, object]:
+    """Read the prior wrapper's literal; never execute/source an old shell file."""
+    if launcher is None:
+        return {}
+    descriptor = -1
+    try:
+        if not launcher.exists() and not launcher.is_symlink():
+            return {}
+        descriptor = os.open(launcher, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                             | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid not in {0, os.geteuid()}
+                or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) & 0o022
+                or not 0 < before.st_size <= 65536):
+            raise ValueError("prior launcher identity is unsafe")
+        raw = os.read(descriptor, before.st_size + 1)
+        after = os.fstat(descriptor)
+        named = launcher.lstat()
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if len(raw) != before.st_size or any(getattr(before, key) != getattr(item, key)
+                for item in (after, named) for key in fields):
+            raise ValueError("prior launcher changed while reading")
+        text = raw.decode("utf-8")
+        if not text.startswith("#!/bin/sh\n") or "mastermind_workspace.py" not in text:
+            raise ValueError("prior launcher is not a workspace wrapper")
+        marker = "export " + _REPOSITORY_CONFIG_ENV + "="
+        lines = [line for line in text.splitlines() if line.startswith(marker)]
+        if not lines:
+            return {}  # The exact pre-repository wrapper remains compatible.
+        if len(lines) != 1:
+            raise ValueError("prior wrapper has ambiguous bindings")
+        values = shlex.split(lines[0], posix=True)
+        if len(values) != 2 or values[0] != "export" or not values[1].startswith(_REPOSITORY_CONFIG_ENV + "="):
+            raise ValueError("prior wrapper binding is not a shell literal")
+        retained = _parse_repository_bindings(values[1].split("=", 1)[1])
+        if not retained:
+            raise ValueError("prior wrapper has an empty repository binding")
+        return retained
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise WorkspaceError("REPOSITORY_BINDING_INVALID: prior installed bindings cannot be preserved safely") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _selected_repository(alias: str, *, explicit: bool) -> Path:
@@ -173,21 +223,28 @@ def _repository_discovery(root: Path) -> dict[str, object]:
             "admission_check_only": True, "workspace_created": False}
 
 
-def installation_repository_bindings(source: Path, registrations: list[str]) -> dict[str, object]:
-    """Validate installer-only paths before producing one immutable wrapper input."""
+def installation_repository_bindings(
+    source: Path, registrations: list[str], *, installed_launcher: Path | None = None,
+) -> dict[str, object]:
+    """Validate new selections and retain prior host bindings on normal upgrades."""
+    bindings = _retained_installer_bindings(installed_launcher)
     selected = {"mastermind": source.resolve()}
+    explicit: set[str] = set()
     for registration in registrations:
         alias, separator, raw_path = registration.partition("=")
-        if not separator or alias not in _REPOSITORIES or alias in selected:
+        if not separator or alias not in _REPOSITORIES or alias == "mastermind" or alias in explicit:
             raise WorkspaceError("REPOSITORY_BINDING_INVALID: duplicate or unsupported installer target")
+        explicit.add(alias)
         selected[alias] = _repository_path(raw_path).resolve()
-    bindings: dict[str, object] = {}
     for alias, repository in selected.items():
         common = Path(_repository_git(repository, "rev-parse", "--git-common-dir"))
         common = (common if common.is_absolute() else repository / common).resolve()
         candidate = {"source_repository": str(repository), "common_git_dir": str(common)}
-        _inspect_repository_binding(alias, candidate)
+        if alias == "mastermind" and alias in bindings and bindings[alias] != candidate:
+            raise WorkspaceError("REPOSITORY_SOURCE_CHANGED: reinstall would change the incumbent Mastermind binding")
         bindings[alias] = candidate
+    for alias, candidate in bindings.items():
+        _inspect_repository_binding(alias, candidate)
     if len({value["common_git_dir"] for value in bindings.values()}) != len(bindings):
         raise WorkspaceError("REPOSITORY_BINDING_INVALID: independent repositories share Git metadata")
     return {"schema": _REPOSITORY_SCHEMA, "repositories": bindings}
