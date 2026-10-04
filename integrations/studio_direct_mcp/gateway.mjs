@@ -115,7 +115,7 @@ import {
 } from './fleet-status.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.8';
+export const GATEWAY_VERSION = '0.1.9';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -135,6 +135,8 @@ const IDLE_TIMEOUT_MS_DEFAULT = 30 * 60 * 1000;
 const SESSION_SWEEP_INTERVAL_MS = 60_000;
 /** Shared-account frontend shells must be idle this long before capacity reclaim. */
 const RECLAIM_IDLE_GRACE_MS_DEFAULT = 30_000;
+const TOOL_NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/;
+const MAX_TOOL_ALLOWLIST = 128;
 
 /**
  * Closed vocabulary used in logs and in stats.byClassification, so log
@@ -267,6 +269,25 @@ function mapStrings(obj) {
   return out;
 }
 
+function resolveToolAllowlist(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_TOOL_ALLOWLIST) {
+    throw new TypeError(
+      `config.toolAllowlist must be an array with 1..${MAX_TOOL_ALLOWLIST} tool names`);
+  }
+  const names = [];
+  for (const raw of value) {
+    if (typeof raw !== 'string' || !TOOL_NAME_RE.test(raw)) {
+      throw new TypeError('config.toolAllowlist contains an invalid tool name');
+    }
+    if (names.includes(raw)) {
+      throw new TypeError(`config.toolAllowlist contains duplicate tool name ${raw}`);
+    }
+    names.push(raw);
+  }
+  return Object.freeze([...names].sort());
+}
+
 /**
  * Validate and normalise a partial config into the shape the gateway uses.
  * Throws a descriptive Error on anything that would silently weaken security.
@@ -370,6 +391,7 @@ export function resolveConfig(partial = {}) {
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
+  cfg.toolAllowlist = resolveToolAllowlist(cfg.toolAllowlist);
 
   return cfg;
 }
@@ -894,7 +916,24 @@ class GatewaySession {
     this.fleetStatus = cfg.fleetStatus
       ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
       : null;
+    this.toolAllowlist = cfg.toolAllowlist ? new Set(cfg.toolAllowlist) : null;
     this.owner?.sessions.add(this);
+  }
+
+  toolIsExposed(name) {
+    return this.toolAllowlist === null || this.toolAllowlist.has(name);
+  }
+
+  localTools() {
+    const tools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+    if (this.fleetStatus) tools.push({ ...STUDIO_FLEET_STATUS_TOOL });
+    if (this.gitPublisher) {
+      tools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
+    }
+    if (this.paperDesigner) {
+      tools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
+    }
+    return tools;
   }
 
   rememberToolAnnotations(tool) {
@@ -1005,39 +1044,49 @@ class GatewaySession {
       },
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async (request, extra) =>
-      session.withBackendSlot(async () => {
+    server.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
+      const localTools = session.localTools();
+      const localNames = new Set(localTools.map((tool) => tool.name));
+      if (
+        session.toolAllowlist &&
+        [...session.toolAllowlist].every((name) => localNames.has(name))
+      ) {
+        const tools = localTools.filter((tool) => session.toolIsExposed(tool.name));
+        for (const tool of tools) session.rememberToolAnnotations(tool);
+        session.bumpTool(LIST_TOOLS_KEY);
+        return { tools };
+      }
+      return session.withBackendSlot(async () => {
         const backend = await session.ensureBackend();
         const result = await backend.client.listTools(request.params ?? {}, {
           timeout: session.cfg.requestTimeoutMs,
           signal: extra?.signal,
         });
         const tools = sanitizeToolList(result.tools);
-        const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
-        if (session.fleetStatus) {
-          localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
-        }
-        if (session.gitPublisher) {
-          localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
-        }
-        if (session.paperDesigner) {
-          localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
-        }
         const backendNames = new Set(tools.map((tool) => tool.name));
         for (const localTool of localTools) {
           if (backendNames.has(localTool.name)) {
-            throw new McpError(ErrorCode.InternalError, `Backend tool name collides with gateway-owned tool: ${localTool.name}`);
+            throw new McpError(
+              ErrorCode.InternalError,
+              `Backend tool name collides with gateway-owned tool: ${localTool.name}`,
+            );
           }
           tools.push(localTool);
         }
-        for (const tool of tools) session.rememberToolAnnotations(tool);
-        const out = { tools };
-        if (typeof result.nextCursor === 'string' && result.nextCursor.length > 0) {
+        const exposed = tools.filter((tool) => session.toolIsExposed(tool.name));
+        for (const tool of exposed) session.rememberToolAnnotations(tool);
+        const out = { tools: exposed };
+        if (
+          session.toolAllowlist === null &&
+          typeof result.nextCursor === 'string' &&
+          result.nextCursor.length > 0
+        ) {
           out.nextCursor = result.nextCursor;
         }
         session.bumpTool(LIST_TOOLS_KEY);
         return out;
-      }, { kind: 'tools/list', catalogPriority: true }));
+      }, { kind: 'tools/list', catalogPriority: true });
+    });
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
       session.callTool(request, extra));
@@ -1046,8 +1095,15 @@ class GatewaySession {
     // during installation, so the advertised references must remain readable
     // through the same authenticated session and bounded backend queue.
     const proxyCatalog = (schema, capability, method, emptyResult) => {
-      server.setRequestHandler(schema, async (request, extra) =>
-        session.withBackendSlot(async () => {
+      server.setRequestHandler(schema, async (request, extra) => {
+        if (session.toolAllowlist) {
+          if (emptyResult) return { ...emptyResult };
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'Resources are not exposed on this restricted Studio gateway.',
+          );
+        }
+        return session.withBackendSlot(async () => {
           const backend = await session.ensureBackend();
           if (!backend.client.getServerCapabilities()?.[capability]) {
             if (emptyResult) return { ...emptyResult };
@@ -1057,7 +1113,8 @@ class GatewaySession {
             timeout: session.cfg.requestTimeoutMs,
             signal: extra?.signal,
           });
-        }, { kind: request.method, catalogPriority: true }));
+        }, { kind: request.method, catalogPriority: true });
+      });
     };
     proxyCatalog(ListResourcesRequestSchema, 'resources', 'listResources', { resources: [] });
     proxyCatalog(ListResourceTemplatesRequestSchema, 'resources', 'listResourceTemplates', { resourceTemplates: [] });
@@ -1077,6 +1134,19 @@ class GatewaySession {
   async callTool(request, extra) {
     const name = request?.params?.name;
     const started = Date.now();
+
+    if (!this.toolIsExposed(name)) {
+      log('info', 'tool_call_refused_not_exposed', {
+        sid: this.tag,
+        tool: typeof name === 'string' ? name : 'invalid',
+        durationMs: Date.now() - started,
+        classification: CLASSIFICATION.NOT_FOUND,
+      });
+      throw new McpError(
+        ErrorCode.MethodNotFound,
+        'Tool is not exposed on this Studio gateway.',
+      );
+    }
 
     if (name === OUTPUT_PAGE_TOOL.name) {
       this.touch();
