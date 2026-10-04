@@ -115,7 +115,7 @@ import {
 } from './fleet-status.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.9';
+export const GATEWAY_VERSION = '0.1.10';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -127,7 +127,7 @@ const GATEWAY_GENERATION = randomUUID();
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_SESSIONS_DEFAULT = 8;
 const MAX_PER_SESSION_CONCURRENCY = 4;
-const MAX_QUEUED_PER_SESSION = 4;
+const MAX_QUEUED_PER_SESSION_DEFAULT = 4;
 /** Reserve one shared-backend slot for MCP catalog/template traffic. */
 const CATALOG_RESERVED_BACKEND_SLOTS = 1;
 const REQUEST_TIMEOUT_MS_DEFAULT = 60_000;
@@ -329,6 +329,8 @@ export function resolveConfig(partial = {}) {
     cfg.reclaimIdleGraceMs, 250, 10 * 60 * 1000, RECLAIM_IDLE_GRACE_MS_DEFAULT);
   cfg.maxPerSessionConcurrency = clampInt(
     cfg.maxPerSessionConcurrency, 1, 64, MAX_PER_SESSION_CONCURRENCY);
+  cfg.maxQueuedPerSession = clampInt(
+    cfg.maxQueuedPerSession, 1, 256, MAX_QUEUED_PER_SESSION_DEFAULT);
   cfg.requestTimeoutMs = clampInt(
     cfg.requestTimeoutMs, 1, 24 * 60 * 60 * 1000, REQUEST_TIMEOUT_MS_DEFAULT);
   cfg.idleTimeoutMs = clampInt(
@@ -556,7 +558,7 @@ function createLimiter(max, maxQueued, { reservePriority = 0 } = {}) {
       const priorityQueued = queue.length - normalQueued;
       if ((!waiter.priority && normalQueued >= normalQueueCap) ||
           (waiter.priority && priorityQueued >= priorityQueueCap)) {
-        const err = new Error('Server busy: per-session concurrency cap reached');
+        const err = new Error('Server busy: backend concurrency cap reached');
         err.code = 'STUDIO_BUSY';
         return Promise.reject(err);
       }
@@ -628,6 +630,7 @@ let pingCounter = 0;
 
 function handleStudioPing(session) {
   const startNs = process.hrtime.bigint();
+  const limiter = session?.owner?.limiter ?? session?.limiter ?? null;
   const structured = {
     timestamp: new Date().toISOString(),
     generation: GATEWAY_GENERATION,
@@ -636,6 +639,14 @@ function handleStudioPing(session) {
     monotonicDurationMs: 0,
     gatewayVersion: GATEWAY_VERSION,
     sessionId: session ? session.id : null,
+    concurrency: limiter ? {
+      scope: session?.owner ? 'account-backend' : 'session-backend',
+      active: limiter.active,
+      queued: limiter.queued,
+      maxActive: session.cfg.maxPerSessionConcurrency,
+      maxQueued: session.cfg.maxQueuedPerSession,
+      catalogReservedSlots: session?.owner ? CATALOG_RESERVED_BACKEND_SLOTS : 0,
+    } : null,
   };
   structured.monotonicDurationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
   return {
@@ -793,7 +804,7 @@ class BackendOwner {
     this.closePromise = null;
     this.closing = false;
     this.sessions = new Set();
-    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, MAX_QUEUED_PER_SESSION, {
+    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, cfg.maxQueuedPerSession, {
       reservePriority: CATALOG_RESERVED_BACKEND_SLOTS,
     });
   }
@@ -896,7 +907,7 @@ class GatewaySession {
     // idle expiry only. Separate from `limiter`, which counts backend
     // operations, so an idle SSE listener can never starve tool calls.
     this.httpRequestsInFlight = 0;
-    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, MAX_QUEUED_PER_SESSION);
+    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, cfg.maxQueuedPerSession);
 
     this.backendState = 'idle'; // idle | connecting | ready | broken
     this.backendClient = null;
@@ -2193,6 +2204,12 @@ export async function startGateway(partialConfig = {}, auth = {}) {
       backend: {
         spawns: stats.backend.spawns,
         lost: stats.backend.lost,
+        limits: {
+          maxConcurrency: cfg.maxPerSessionConcurrency,
+          maxQueued: cfg.maxQueuedPerSession,
+          catalogReservedSlots: cfg.backendMode === 'shared-account'
+            ? CATALOG_RESERVED_BACKEND_SLOTS : 0,
+        },
         // Expose backend generation per owner (shared mode only).
         // Useful for tests that verify different principals got different generations.
         ...(cfg.backendMode === 'shared-account' && {
@@ -2200,6 +2217,8 @@ export async function startGateway(partialConfig = {}, auth = {}) {
             principal: o.principalTag,
             generation: o.generation,
             state: o.state,
+            active: o.limiter.active,
+            queued: o.limiter.queued,
           })),
         }),
       },
