@@ -5,7 +5,7 @@ RECEIVER: Fable 5.1 principal, Claude Desktop Code tab on m2studio (Mac14,14); w
 `/Volumes/Mastermind/agent-workspaces/claude/44ff44e73b840f81/executive-autonomy-v1-closure-fable-001-fb6072752abe8e13`,
 branch `claude/ssd-executive-autonomy-v1-closure-fable-001-fb6072752abe8e13` (base = protected master 84df2980).
 GOVERNING PLAN: `research/MASTERMIND_EXECUTIVE_AUTONOMY_V1_CLOSURE_2026-08-25.md` + `research/MASTERMIND_AUTONOMY_V1_OPERATIONAL_RECONCILIATION_2026-08-26.md`. No new masterplan.
-PROCEDURE PIN (2026-10-04T02:52Z): protected master `84df29801d4078724c2b603a136de5aa1532cdfe` (#706 atop creation pin `03f7ca04`);
+PROCEDURE PIN (re-pinned 2026-10-04T04:50Z): protected master `a2646f458f9ff41ddcedd89b338be4a4349e6cd6` (= #1218 merged atop 84df2980; prior pin 84df2980 at 02:52Z; creation pin 03f7ca04);
 `docs/sol_skills/INDEX.md` blob `38a18571229e487f525b1c9780f7993220a5da93`, `mastermind.sol_skillpack.v1` 1.0.1 / bootstrap 1.
 
 ## 0 Mission and exit gate
@@ -18,7 +18,7 @@ receipts, GitHub + Agent OS durable refs, zero Chairman message carriage. Return
 - Slack `#agent-dispatch` (C0BSBM78V1N): operation root = Fable PICKUP_ACK post (ts recorded below once posted). Secondary: `#mastermindosbuild` (C0C47UNNF3R).
 - GitHub issue #1143 `[ASTRA HANDOFF][PART 2/2] Exact-session interconnect` = live HOST carrier (install/acceptance/service-control/arm effects).
 - Carrier PRs: #811 #1145 #1041 #1157 #1166 #1169 #1204 #1218 #1219 #1178 #1176 #1175 (+adjacent #1150/#1046 #955 #908 #892 #1201).
-- LAST CONSUMED EDGE: #1143 comment 2026-10-04T02:51:53Z (mastermindx-3 `REQUEST_DIAGNOSIS` — external V3 1.4 reader `backend_unavailable`, diagnose before full fabric arm).
+- LAST CONSUMED EDGE: #1143 comment 2026-10-04T04:42:25Z (mastermindx-2 READER DIAGNOSIS CLOSED: CeoIngress listener lifecycle/instance drift; no source fix for the train; Control successor a2646f45 installed/restarted by the host owner; MCP still 03f7ca04/1.4.0; external V3 reads healthy; lifecycle hardening stays with draft #1219). Prior: 02:51:53Z C3 REQUEST_DIAGNOSIS.
 - Slack ACK root: C0BSBM78V1N ts `1791083562.416539` (https://mastermindxgroup.slack.com/archives/C0BSBM78V1N/p1791083562416539), posted 2026-10-04T03:12Z. START posted in-thread ts `1791083970.655569` at 03:19Z (https://mastermindxgroup.slack.com/archives/C0BSBM78V1N/p1791083970655569).
 
 ## 2 Wave plan
@@ -41,16 +41,18 @@ PRE-MORTEM (W1–W4):
 | lane | owner/tier | owned files | worktree/branch | sentinel/artifact | budget | state | last verified (UTC, how) | watcher |
 |---|---|---|---|---|---|---|---|---|
 | C0 host diag+arm | #1143 incumbent host owner (effects), Sol C3 directs | host only | n/a | #1143 comments; Fable seat-split note = issuecomment-5976104646 | n/a | RUNNING (not mine) | 03:20Z gh issue view (no new edge) | S/watch_1218_1143.out |
-| L1a #811/#1145 disposition | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none (read-only) | reads W + S/pr811|1145.diff | return packet (agent notification); packet copy S/L1a.md | 1 turn (+1 nudge) | DELIVERED 03:58Z, ACCEPTED (PARTIAL: no git-history view; all 6 items answered) | 03:58Z return packet | — |
-| L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn (+1 nudge) | DELIVERED 03:50Z, ACCEPTED after seat spot-check (SCHEMA_VERSION 5→6, M2 v6 reservation, max_depth 1→2 all confirmed) | 03:55Z grep | — |
-| L2 release/install train | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W/ops/executive_os + S/pr{1157,1166,1169,1204,1219,1178,1176,1175}.diff + S/issue1143.md | return packet; S/L2.md | 1 turn (+1 nudge) | RUNNING; hit 12-turn harness cap 03:27Z at inventory stage → nudged once | 03:27Z notification | agent completion notification |
+| L1a #811/#1145 disposition | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none (read-only) | reads W + S/pr811|1145.diff | return packet (agent notification); packet copy S/L1a.md | 1 turn (+1 nudge) | DELIVERED ~03:29Z, ACCEPTED (PARTIAL: no git-history view; all 6 items answered) | 03:29Z return packet | — |
+| L1b #1041 classify/split | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W + S/pr1041.diff | return packet; S/L1b.md | 1 turn (+1 nudge) | DELIVERED ~03:28Z, ACCEPTED after seat spot-check (SCHEMA_VERSION 5→6, M2 v6 reservation, max_depth 1→2 all confirmed) | 03:30Z grep | — |
+| L2 release/install train | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W/ops/executive_os + S/pr{1157,1166,1169,1204,1219,1178,1176,1175}.diff + S/issue1143.md | return packet; S/L2.md | 1 turn (+1 nudge) | DELIVERED ~03:31Z, ACCEPTED after seat spot-check of E10/E11 (autonomy_control.py:740-756, :1567-1572, :1704-1707, :4399) | 04:50Z sed | — |
 | L3 seat records | Fable | this file; agentos handoff (Macro) | W branch | commits | — | RUNNING | now | — |
-| L3 Phase-5 readiness census | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W, MACRO agentos, S/packet.md, S/issue1143.md | return packet; S/L3.md | 1 turn (+1 nudge) | LAUNCHING 03:45Z | — | agent completion notification |
-| L4 #1218 gate | Ryan = incumbent writer/repairer; Fable shepherds | none | PR branch (Ryan) | new headRefOid on #1218 | custody tripwire 2026-10-04T04:45Z (posted on #1218 as issuecomment-5976104841) | WAITING_REPAIR (CI FAILED D8 03:01Z; C3 repair review 03:07Z) | 03:09Z gh api | S/watch_1218_1143.out (one process, polls #1218 head + #1143 comment count every 600 s, exits on first edge) |
+| L3 Phase-5 readiness census | native Opus auditor ROUTE: AUDIT MODE: READ_ONLY | none | reads W, MACRO agentos, S/packet.md, S/issue1143.md | return packet; S/L3.md | 1 turn (+1 nudge) | run 1 FAILED (Opus session rate limit, reset 04:30Z); run 2 RUNNING from 04:52Z with the separation-law question added | 04:52Z launch | agent completion notification |
+| L4 #1218 gate | Sol C3 web-interconnect lane (branch sol/web-interconnect-acceptance-maintenance-20261003, GitHub identity mastermindxryan) | none | n/a | merged | — | MERGED 04:14:27Z via merge queue → protected master a2646f45 (parent 84df2980); repaired head 2315270a landed 03:09–03:18Z; tripwire comment moot (withdrawn by note) | 04:50Z gh api + git fetch | — |
 
 ## 4 Ledger
 DECIDED:
-- #1041 = should_close_unmerged; #811 = needs_current_base_repair (7-step spec posted on #811, custody tripwire 05:30Z); #1145 = still_required but V1.x-inert, not in the V1 train — 2026-10-04 ~04:00Z, from L1a/L1b packets + spot-checks.
+- #1041 = should_close_unmerged (posted issuecomment-5976714813); #811 = needs_current_base_repair (7-step spec posted issuecomment-5976714641, custody tripwire 06:30Z); #1145 = still_required but V1.x-inert, not in the V1 train — 2026-10-04 03:31Z decided, 04:52Z posted.
+- Phase-2 (from L2, accepted): none of #1157/#1166/#1169/#1204/#1219/#1178/#1176/#1175 is required for the next host cycle; install.sh is the live installer (03f7ca04 and a2646f45 cycles ran on it). #1178 already_superseded → close; #1176 conflicts_with_newer_source → close (closure gate salvageable later); #1204 should_close_unmerged (second writer of the MCP plist); #1175 V1.x → close for Phase 2; #1219 needs_current_base_repair (bind expected sha; pair with an MCP generation producer) — conditionally needed, not for this cycle; #1157/#1166/#1169 still_required for the dormant in-band release-owner lane only (no root caller/publisher; policy CONFIGURED collision dissolves with #1041 closing) → PARKED pending a Sol ruling on install.sh vs release-owner exclusivity — 2026-10-04 04:50Z.
+- SEPARATION LAW (seat-verified from source): CEO-submit arm refuses while coo_autonomy/coo_operator_harness/worker_operator_harness are armed (autonomy_control.py:1567-1572) and refuses under full autonomy unless proves_safe_coexistence, default REFUSE (:1704-1707, :4399). Model-authored widening is forbidden; the acceptance operation is designed around it or Sol rules the sequence — 2026-10-04 04:50Z.
 - START posted 03:19Z once Phase-1 audit lanes were live; host effects remain EFFECT_NONE from this seat — 2026-10-04.
 - Native Opus auditor agents are capped at 12 turns per run by the harness; a capped return is PARTIAL, continued by one nudge (O.10), never by a replacement agent on the same question — 2026-10-04.
 - Treat the pasted packet as deliberate DIRECT_TARGETED delivery; ACK once in #agent-dispatch; no second claim — 2026-10-04T02:4xZ.
@@ -90,6 +92,8 @@ NEXT: launch L1a/L1b/L2 audits; seat-split note on #1143; custody tripwire note 
 - Human gates: root/admin ceremony for install (host owner); ChatGPT app catalog rescan (Chairman/platform); Fable connector OAuth (Chairman).
 
 ## 6 Do-not-redo
+- #1218 repaired + MERGED (a2646f45, 04:14Z) by the Sol C3 lane; Control successor a2646f45 installed by the host owner (receipt location to confirm). Never re-open the D8 repair.
+- Reader backend_unavailable diagnosis CLOSED on #1143 04:42Z (no source fix).
 - PICKUP_ACK (ts 1791083562.416539) and START (ts 1791083970.655569) posted once in #agent-dispatch; seat-split note on #1143 and custody tripwire on #1218 posted once.
 - Chairman packet extracted verbatim to S/packet.md (scratchpad; 239 lines) — re-extract from the transcript only if S is lost.
 - 03f7ca04 install + formal acceptance PASS, v2 carry-forward (receipt 5975776425, #1143 02:27Z).
