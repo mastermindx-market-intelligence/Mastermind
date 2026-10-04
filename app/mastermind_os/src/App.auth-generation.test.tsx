@@ -2,12 +2,14 @@
 // Native events and source documents are injected fixtures, not live account reads.
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { controlRoomFixture } from "./test-fixtures";
 import { bindMissionHost, createNativeClient, type AuthState, type RawClient } from "./host";
 import programsFixture from "./fixtures/programs-available-workspace-service.json";
 import pairedFixture from "./fixtures/window-mission-association-producer.json";
+import workFixture from "./fixtures/work-service-available.json";
 
 const signed: AuthState = { status: "signed_in", reason: null, acquisition: true, content: true };
 const deferred = () => {
@@ -45,6 +47,7 @@ async function nativeFixture() {
   const invoke = vi.fn(async (command: string) => {
     if (command === "auth_status") return signed;
     if (command === "read_programs") return hold ? pendingPrograms.promise : programs();
+    if (command === "read_work") return structuredClone(workFixture);
     if (command === "read_mission_v3") return hold ? pendingMission.promise : mission();
     if (command === "read_current_window") return hold ? pendingWindow.promise : pairedFixture.window;
     throw new Error("unexpected fixture command: " + command);
@@ -109,12 +112,28 @@ describe("native auth generation reaches the actual workspace", () => {
       expect(e.invoke.mock.calls.filter(([name]) => name === "read_programs")).toHaveLength(reads + 1);
     } finally { await act(async () => { e.settle(); await flush(); }); }
   });
+  it("clears rendered Work in the auth-notification commit before passive reacquisition", async () => {
+    const e = await nativeFixture();
+    window.MastermindMissionHost = e.host;
+    render(<App />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Work" }));
+    await waitFor(() => expect(document.body.textContent).toContain("JOB-2"));
+    e.hold();
+    try {
+      flushSync(() => { e.notify({ payload: { ...signed } }); });
+      expect(document.body.textContent).not.toContain("JOB-2");
+    } finally {
+      await act(async () => { e.settle(); await flush(); });
+    }
+  });
+
   it("deduplicates an unchanged legacy client notification without inventing a generation", () => {
     let notify!: (state: AuthState) => void;
     const client: RawClient = {
       getState: () => signed, subscribe: (listener) => { notify = listener; return () => {}; },
       signIn: async () => {}, signOut: async () => {},
-      readPrograms: async () => programs(), readMission: async () => ({}), readCurrentWindow: async () => ({}),
+      readPrograms: async () => programs(), readWork: async () => structuredClone(workFixture),
+      readMission: async () => ({}), readCurrentWindow: async () => ({}),
     };
     const host = bindMissionHost(client);
     const before = host.invalidationGeneration!();
