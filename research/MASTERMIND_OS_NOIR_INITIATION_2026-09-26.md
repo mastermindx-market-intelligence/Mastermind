@@ -4,7 +4,13 @@ Operation: `mastermind-os-noir-design-system-20260926-sol-001`
 
 **MISSION_COMPLETE: false.** The first isolated, static qualification set now covers button, navigation, chip, work-row, evidence and composer patterns. Shared-library adoption, P-series refinement, Fabric and production proof remain incomplete. This document is implementation evidence, not source law, runtime admission, custody transfer or design acceptance.
 
-## Current frontier
+## Latest reviewed contribution — 4 October 2026
+
+The current continuation adds the Sources/access recovery and Projects-finding flows to the approved Noir Atelier family: six product artboards created/refined, three new notes (UX10–UX12), and exact builder control/source/return contracts. The thirteen-note directory is current. Full evidence and saved commit references appear in **Sources/access and Projects daily-flow continuation — 4 October 2026** at the end of this record.
+
+The opening frontier and earlier dated continuations below are retained historical snapshots. The current compatibility pin is `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`. Both earlier Paper unknown-effect fences remain unresolved; this contribution establishes editable design and documentation, not installed product acceptance.
+
+## Current frontier — opening snapshot retained
 
 - Existing carrier: Draft PR #1010, branch `sol/noir-qualification-20260926`. Update this document; do not open a replacement carrier.
 - Current Chairman intent: continue the README-first A+B design implementation.
@@ -880,3 +886,75 @@ Read UX08 and UX09, then §11.2–11.6 for the source journey and the exact open
 
 This continuation does not claim complete product UX, live interaction, source merge, installation, deployment, messaging, production acceptance or cleared effect custody. Its reviewed design and documentation contribution is durable; its remaining amendments and original-operation identities are concrete and recoverable.
 <!-- KNOWLEDGE_FLOW_2026_10_04_END -->
+
+
+<!-- SOURCES_PROJECTS_FLOW_2026_10_04_BEGIN -->
+## Sources/access and Projects daily-flow continuation — 4 October 2026
+
+### Scope and current source
+
+The Chairman's continuing instruction remains to make the approved Noir Atelier design coherent across Mastermind OS, reduce daily complexity and make the mockup flow explicit for the builder. This continuation completed two connected, bounded journeys: Sources/access → exact evidence-read detail → recovery → retained origin, and Projects Find/Clear → exact project → same filtered list. The contribution is editable Paper design plus source-grounded builder documentation.
+
+The current compatibility pin is protected `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`; prior `3ac05a00dacde2c06893f5f15082b703d2c04463` and the original `a264…` app census are preserved history. The bounded 3ac…5b comparison has one commit and 104 changed files, with no `app/` or Paper bridge/workflow changes. This is a bounded compatibility check, not an audit of all 104 files. Same-pin bootstrap, execution, reliability, routing, reconciliation and Paper source were recovered. INDEX blob `38a18571229e487f525b1c9780f7993220a5da93` remains skillpack 1.0.1/bootstrap 1.
+
+The source audit read App, host, workspace DTO, web authentication, app README and the Company edge document at that exact pin. Current Connections is a Mission relationship graph/list, not a connector inventory. Fixed host methods remain auth and bounded reads; ordinary read failures collapse their cause, while the exact Result reader alone accepts its typed 503 unavailable envelope. Acquisition access and Conversation content access are independent. Token availability is not enrollment, source-read health or freshness. Re-running the existing web sign-in resets both resource tokens and uses the configured popup flow; no isolated content-only recovery endpoint exists.
+
+The separate Company edge has a disabled execution profile and outstanding installed-native qualification at this source pin. Its read_ref, delivery, consumption and parent-return facts do not enlarge the app host. Programs supplies title/state/nextAction and exact workRef/root resolution; local project Find, Active/Archived classification and rich return state are design requirements. The builder spec carries exact primary anchors; no generic service status, reconnect, source reader, message-send or project-creation port was invented.
+
+### Reviewed Paper contribution
+
+Exact file: `01M3NRCX55B452A12819WNE1RH`. Canonical Page 12: `p-D-0`; Daily Experience Page 13: `p-E-0`. The unrelated foreground file was left in place. All effects used the original direct Mastermind Paper carrier, explicit file/target and a fresh exact-file write guard. Target ownership was bounded to artboards and nodes, not a file/page lease. Shared Atelier tokens remain unchanged.
+
+| Family | Exact artboards | Contribution |
+| --- | --- | --- |
+| Sources overview | AT07 `L6N-0` / AT07M `MNO-0` | Focused diagnostic detour, original Search context, four illustrative owner-specific rows, separate partial content/freshness, secondary collapsed Preferences |
+| Exact evidence read | New SA01 `T0U-0` / SA01M `T0V-0` | Selected GitHub evidence reference, available metadata/unavailable full content, unknown cause, unverified freshness and missing clocks, bounded Recheck and actual Return |
+| Projects | AT02 `M4J-0` / AT02M `N28-0` | Find within shown projects, inactive empty-query Clear, bounded counts, exact row opening, no invented saved-recency promise |
+| Source-read notes | New UX10 `T7J-0` | Independent access/read/freshness/capability axes, exact overview/detail/recheck/return mapping, admitted/unchanged/failed/cancelled outcomes |
+| Recovery notes | New UX11 `T7K-0` | Partial access, supported sign-in, protected-content invalidation, late-read fencing, concrete Checking evidence…/Cancel specimen and mobile/keyboard return |
+| Project-finding notes | New UX12 `T9B-0` | Empty query, Find/Clear, exact selection and return; no-match, source-empty, partial, unavailable and unresolved-root states; filtered example |
+
+Product desktop/mobile roots retain 1600 × 1040 / 390 × 844 dimensions. SA01/SA01M are at x=0/1680,y=8120 on Page 12. UX10/UX11 are 1600 × 1120 at x=0/1680,y=6250; UX12 is 1600 × 1120 at x=0,y=7500 on Page 13. The guide family now contains thirteen notes UX00–UX12.
+
+The source fixture is **Work visibility review pack · v2**, in **Mastermind OS**, with query **source freshness**, **To Project Sol / About Mastermind OS / Topic Work visibility** and the original unsent draft **What evidence is still missing?**. Metadata remains independently permitted, full content did not read, cause is unknown, freshness is unverified and neither source nor observation time was supplied. The reference title is illustrative; it is not the complete canonical owner pointer or evidence of latest revision.
+
+Recheck runs only an admitted existing owner read. Back to Sources returns one level; Close returns to the actual reading origin; Back to Search restores the saved Search branch and eligible draft. A second desktop Open project action was removed from the active layout to keep the same focused recovery choices at both sizes. The retained layer has computed display:none and is absent from the reviewed screenshot; it was not deleted. No source read appends, sends, changes recipient or retries an unresolved write.
+
+| Control | Desktop / mobile | Intended target or behavior |
+| --- | --- | --- |
+| Sources → evidence details | `MEU-0` / `T19-0` | SA01 / SA01M, exact selected reference |
+| Detail → Sources | `T4L-0` / `T4D-0` | AT07 / AT07M, preserve selection and nested origin |
+| Detail Close | `T3Z-0` / `T4H-0` | actual permitted reading origin |
+| Recheck evidence | `T62-0` / `T76-0` | exact bounded owner read; pending disables repeat |
+| Detail Back to Search | `T6O-0` / `T7D-0` | retained query, scope, selection, position, focus and draft |
+| Projects Find | `M7P-0` / `N5P-0` | only admitted project titles or references |
+| Projects Clear | `TA9-0` / `TAC-0` | clear query, keep selected status facet and restore input focus |
+| Open Mastermind OS | `M8C-0` / `N68-0` | exact project `MHD-0` / `N29-0` |
+| Project negative states | UX12 `TBZ-0`, `TC4-0`, `TC9-0`, `TCE-0`, `TCJ-0` | no-match, empty source, limited coverage, unavailable read, unresolved/conflicted root |
+| Project filtered example | `TCU-0`, Clear `TD0-0`, Open `TD2-0` | query Mastermind; one of three shown rows matches; explicit clear/open |
+
+### Review, known effects and remaining proof
+
+The principal independently inspected screenshots of AT07 desktop/mobile, SA01 desktop/mobile, AT02 desktop/mobile and all three new notes. The Sources detail pair also received an independent UX review. The initial SA01 mobile layout obscured the home indicator; reduced padding and gaps restored the safe area in a new 390 × 844 screenshot. The desktop Recheck icon was corrected to an explicit light stroke and rechecked. Products and guides now fit their reviewed sizes without visible clipping. Project artwork and Atelier typography/palette remain consistent with the approved family.
+
+The source detail Recheck controls are 46/44 px high, return controls 46/44 px high, and Close controls 52 × 44 / 44 × 44 px. Project Find controls are 380 × 46 / 342 × 46, Clear controls 56 × 44, and other row arrows 44 × 44. UX11's pending controls and UX12's filtered-fixture actions are 44 px high. These are static design measurements; keyboard/IME, 320px, enlarged-text, actual focus restoration, network faults and live transport have not been executed.
+
+AT00, UX00, the main directory, MC90 and CH91 now name UX00–UX12. Sources index names SA01/SA01M. Exact parent index operations `mm-source-access-guide-indexes-20261004-001` and `mm-project-finding-guide-indexes-20261004-001` returned APPLIED_RESPONSE_OBSERVED; updated entries were read and screenshot-reviewed. All new Paper modifying calls in this continuation returned APPLIED_RESPONSE_OBSERVED, with raw replies preserved before parsing. The overview lane records 14 applied operations and the Projects/UX12 lane 25. No new effect-unknown response occurred.
+
+Each agent released only its own artboards. The parent released its source/detail/guide/index targets through `mm-source-access-release-owned-20261004-001`, and the final updated directory entries through `mm-project-finding-release-indexes-20261004-001`. Indicator release is not content-effect reconciliation.
+
+Both prior unknown operations remain unchanged:
+
+- `mm-knowledge-flow-added-state-shells-20261004-001`, involving KD01 roots `SPU-0` / `STU-0`.
+- `mm-knowledge-guide-mobile-chrome-amendment-20261004-001`, involving UX09 leaf `T0J-0`.
+
+The initial same-carrier checks still found no identifiable duplicated readers and retained the prior leaf text; those observations do not establish known no effect. Current bridge source adds no receipt lookup. The original duplication and overlapping reader amendments, plus the exact note-leaf change, therefore remain fenced. No replay, replacement operation ID, reconstructed KD02 or carrier change was used. The Sources/Projects contribution is disjoint and does not release either fence. The original two unknown-operation paragraphs in spec §11.6 were preserved byte-for-byte.
+
+### Saved handoff
+
+The Sources specification checkpoint was saved in `725854be3e57b9d2b6f3ea9399c745d734c7467a`; its initial twelve-guide README companion in `7fcd47ac77802f51add2e05442473abaaf41ec60`. The final thirteen-guide README is saved in `40733a68f9be5a191dbe46c5ce8f9c353f4310a9`, and the final Projects-extended specification in `c5ec3ba29e5b080130a4424b01d07ff68f2425d9`. The existing carrier remains draft PR #1010 on `sol/noir-qualification-20260926`.
+
+Builder reading order for this continuation: UX10 → SA01 → UX11 for Sources; UX12 → AT02 → exact project for project finding. The full flow specification records exact controls, source mappings, recovery state, retained context and required scenario extensions. The same fifteen main implementation scenarios remain required and unexecuted.
+
+The completed contribution is six product artboards created/refined and three new guide artboards, plus connected indexes and repository documentation. It is not frontend implementation, a working Paper prototype, production acceptance, installed auth qualification, source merge or deployment. The next application task is the integrated source-qualified daily slice described in the handoff; the deferred KD01 amendments remain dependent on original-operation reconciliation.
+<!-- SOURCES_PROJECTS_FLOW_2026_10_04_END -->
