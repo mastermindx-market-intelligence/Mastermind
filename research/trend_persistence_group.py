@@ -883,8 +883,9 @@ def nct_cdf(t: float, df: int, delta: float, tol: float = 1e-13, max_terms: int 
     for j in range(max_terms):
         lp = -lam + (j * log_lam if lam > 0 else (0.0 if j == 0 else -math.inf)) - math.lgamma(j + 1)
         lq = -lam + (j * log_lam if lam > 0 else (0.0 if j == 0 else -math.inf)) - math.lgamma(j + 1.5)
-        pj = math.exp(lp) if lp > -745 else 0.0
-        qj = (delta / math.sqrt(2.0)) * (math.exp(lq) if lq > -745 else 0.0)
+        # math.exp underflows to 0.0 silently (lp/lq are finite or -inf, never NaN), so no guard.
+        pj = math.exp(lp)
+        qj = (delta / math.sqrt(2.0)) * math.exp(lq)
         term = pj * wf._betainc(j + 0.5, 0.5 * df, x) + qj * wf._betainc(j + 1.0, 0.5 * df, x)
         total += term
         if j > lam and abs(term) < tol:
