@@ -1410,6 +1410,29 @@ def test_prepare_disabled_reconciles_lost_command_result_without_replay(
     assert not any(path.exists() for path in paths)
 
 
+def test_prepare_disabled_nonzero_exit_is_effect_unknown_without_positive_readback(
+    monkeypatch, tmp_path: Path
+):
+    enrollment = _module()
+    _state, paths = _install_prepare_disabled_fakes(
+        monkeypatch, enrollment, tmp_path
+    )
+    calls: list[list[str]] = []
+
+    def refused_without_readback(argv, **_kwargs):
+        calls.append(list(argv))
+        return SimpleNamespace(returncode=5)
+
+    monkeypatch.setattr(enrollment.subprocess, "run", refused_without_readback)
+
+    with pytest.raises(
+        enrollment.A2EnrollmentError, match="A2_ENROLLMENT_EFFECT_UNKNOWN"
+    ):
+        enrollment._prepare_disabled()  # noqa: SLF001
+    assert len(calls) == 1
+    assert not any(path.exists() for path in paths)
+
+
 def test_prepare_disabled_preserves_effect_unknown_when_readback_cannot_prove_state(
     monkeypatch, tmp_path: Path
 ):
