@@ -90,6 +90,19 @@ OPEN:
 - Replacement acceptance product slice (bounded, low-risk, Control Room surface, code+review+B1 proof+decision boundary) — Fable, this cycle.
 NEXT: verify DEVIATIONS pool → write the replacement candidate into §9 (still NOT FROZEN; R1–R4 unchanged); consume watch4 / 06:30Z timer / Slack ruling; no host act.
 
+### 4e Cycle 05:38Z — CHAIRMAN CONVERGENCE RULING consumed (#1143, relayed by C2/mastermindx-2)
+CONSUMED EDGES (#1143, all by mastermindx-2 = C2 host-owner seat, issue author):
+- 05:29:59Z id 5976942566 HOST FACT: Control profile mismatch closed on the host (executive_mcp_profile web_ceo_v2→web_ceo_v3; only Control restarted via kickstart; Control PID 70405→25538; relay 70322 + MCP 74959 preserved; worker absent; CEO submit disarmed; COO/dialogue arms false; rollback custody `custody/control-v3-session-bridge-a2646f45…-20261004-v1/`). UID458 `session_targets` reaches the live Session Bridge provider; returns count 0 eligible targets. External V3 read plane healthy (server 1.4.0).
+- 05:33:36Z id 5976964871 **CHAIRMAN CONVERGENCE RULING** — "Current priority is not to expand Session Bridge or Autonomy V1." Prove the parenting loop first: ChatGPT parent watcher → discover one exact already-running Fable/Codex child → one governed CONTINUE → child consumes/continues → one correlated RESULT → the same parent consumes. Critical path 1-6 (target projection; client catalog refresh in a fresh ChatGPT conversation; one-way send proof; reverse-path proof; watcher integration; then scale). HELD until proven: consultation, `session_summon`, **full Autonomy V1, multi-worker concurrency**, generalized parent orchestration. "Convergence slice under existing #1143 ownership, not a new project or control plane."
+- 05:34:04Z id 5976967865 SOURCE-PROVEN NEXT GAP (composition only): `integrations/session_bridge/installed.py::build_runtime_session_bridge` composes `claude_reader=lambda: []` and `attention_waker=lambda *_: {"state":"UNAVAILABLE"}` (seat-verified at a2646f45: installed.py :185-219; phase1c :1953-2024 passes only `codex_owner_configured`); merged native owners exist (`claude_native.py` ClaudeNativeTargetProjector/ClaudeSessionManagementAttentionAdapter — needs a host-injected ClaudeSessionManagementPort with list_sessions/get_session/send_message/reconcile_message; `codex_queued_wake.py` CodexQueuedWakeClient requires the exact RuntimeBinding). Asks: consume on #1143; reuse any incumbent writer on these exact files; "if an active writer exists, do not race it; return the existing carrier/head and exact remaining proof instead."
+DECIDED (seat, under the ruling):
+- Phase 4 (arm CEO ingress) and Phase 5 (17-step acceptance op) → **HELD_BY_CHAIRMAN_RULING** (supersedes my 05:13Z a/b/c ruling request; the coexistence finding DSC stays filed as a prerequisite for any future Phase 4 — not re-litigated, not withdrawn). Phase 3 "≥2 governed workers" → HELD (multi-worker concurrency held). §9 spec stays DRAFT/NOT FROZEN; L5 census result becomes low-priority reference only.
+- #811 custody tripwire 06:30Z: under the ruling the seat will NOT commission a #811 repair lane (not on the ruling's critical path); if the writer is still silent, record custody state only and PARK #811 behind the convergence slice. Phase 1+2 dispositions unchanged.
+- The ruling's critical path is an executable Autonomy V1 dependency (CP-4: Chairman-free Sol↔child dialogue), so the seat stays on it as integrator: writer census first (O.16) — never race an incumbent writer on installed.py/phase1c.
+- Identity note: this session is itself an "already-running Fable child bound to a canonical operation/carrier" (session 527c6117…, op key, #1143 + Slack root) — a candidate exact target for step 1 once a Claude session-management port is injected; the seat does not self-register anywhere (no identity plane).
+FACTS: Slack root thread re-read OK 05:38Z (hook recovered): no replies after my 1791090788.888659 — the ruling lives on #1143 only. #811 head cb8f1586 (46 comments, last 04:52Z mine). master a2646f45. L5 census lane running (lease acquired, no output yet).
+NEXT: read #1191/#1145 as incumbent writers on the composition files → post ONE consumption note on #1143 (ruling consumed; phases re-sequenced; incumbent writer + exact remaining proof) → re-arm the carrier watcher → amend Macro #8410 P4/P5 wait conditions to cite the ruling if still open.
+
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
 |---|---|---|---|---|
@@ -109,6 +122,7 @@ Carrier acts 05:15Z: Slack root replies (ruling 1791090270.115769; correction 17
 Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-min). Own posts trip it — re-arm after each own post.
 
 ## 5 Open rulings / holds
+- 05:38Z SUPERSEDED: the 05:13Z coexistence ruling request (a/b/c) is moot while full Autonomy V1 is HELD by the Chairman convergence ruling (#1143 5976964871). It re-opens automatically if Phase 4 is re-sequenced; the DSC stays filed.
 - PROVISIONAL TRAIN RULING (pending L2/L3): M' = 84df2980 + repaired #1218 + repaired #811 + L2-required install PRs. Fallback if #811's repair outruns the train: cycle 1 on {#1218 + L2-required} for ARMED_READY + disarm/re-arm proofs, cycle 2 adds #811 before the acceptance operation. Decide at the #811 custody tripwire (05:30Z).
 - #1143 ownership: host effects = incumbent owner; CEO ingress/app = Sol C3. Fable = source estate / release train / acceptance integration. (To post.)
 - Human gates: root/admin ceremony for install (host owner); ChatGPT app catalog rescan (Chairman/platform); Fable connector OAuth (Chairman).
@@ -131,6 +145,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 05:40Z: CHAIRMAN CONVERGENCE RULING consumed (#1143 5976964871): Phases 4/5 + multi-worker HELD_BY_CHAIRMAN_RULING; seat stays on the parenting-loop critical path as integrator; incumbent-writer census on installed.py/phase1c before any commission; one #1143 consumption note; watcher re-arm; no host act.
 - 05:27Z: Phase 4 still HELD on the coexistence ruling. Macro #8410 armed `merge-on-green` (sweeper → MERGED). §9 candidate refuted → select a replacement slice from the Control Room DEVIATIONS pool (verify first). Independent lanes unchanged: #811 tripwire 06:30Z; watch4; Slack re-read at the next cycle. No host act.
 - 05:15Z: Phase 4 HELD on the coexistence ruling (options a/b/c requested). Independent lanes: #811 tripwire 06:30Z (custody transfer + bounded pool lane if silent); Agent OS WS/DEC/DSC Macro PR; consume next watcher edge. No host act.
 1. (done 03:12Z) PICKUP_ACK posted. 2. Commission L1a/L1b/L2 audits (native Opus, read-only). 3. Watcher on #1218 head + #1143 comments. 4. Seat-split note on #1143; tripwire note on #1218. 5. START post in the Slack root thread. 6. Consume audits → disposition table → RULING.
