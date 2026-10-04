@@ -13,8 +13,6 @@ from typing import Protocol, Sequence, runtime_checkable
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
     AttentionCompanyReadProjection,
-    AttentionContinuationInput,
-    AttentionContinuationResponseProjection,
 )
 from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
 from control_plane.wake_dispatcher import (
@@ -49,10 +47,6 @@ class CodexWakeDeliveryObservation:
         repr=False,
     )
 
-    continuation_response_projection: AttentionContinuationResponseProjection | None = dataclasses.field(
-        default=None, repr=False,
-    )
-
     def __post_init__(self) -> None:
         if not str(self.native_handle or "").strip():
             raise ValueError("Codex wake observation requires a native handle")
@@ -78,15 +72,6 @@ class CodexWakeDeliveryObservation:
             if (company.provider_session_id != self.native_handle
                     or company.nudge_id != self.nudge_id):
                 raise ValueError("Codex Company read projection identity mismatch")
-        continuation = self.continuation_response_projection
-        if continuation is not None and (
-            not isinstance(continuation, AttentionContinuationResponseProjection)
-            or not self.delivered or continuation.provider_session_id != self.native_handle
-            or continuation.nudge_id != self.nudge_id or self.target_ack_projection is None
-            or self.target_ack_projection.obligation_ids != (continuation.obligation_id,)
-        ):
-            raise ValueError("Codex continuation response requires exact delivered ACK")
-
 
 
 @runtime_checkable
@@ -100,7 +85,6 @@ class CodexAppServerWakeClient(Protocol):
         nudge_id: str,
         opaque_ids: Sequence[str],
         instruction: str,
-        continuation_input: AttentionContinuationInput | None = None,
     ) -> CodexWakeDeliveryObservation: ...
 
     async def reconcile_wake(
@@ -165,8 +149,6 @@ class CodexAppServerWakeDispatcher:
                 nudge_id=wake.nudge_id,
                 opaque_ids=opaque_ids,
                 instruction=CODEX_WAKE_INSTRUCTION,
-                **({"continuation_input": wake.continuation_input}
-                   if wake.continuation_input is not None else {}),
             )
         except WakePreSubmitError as exc:
             return self._receipt(
@@ -258,19 +240,11 @@ class CodexAppServerWakeDispatcher:
                 or company.binding_generation != wake.binding_generation
             ):
                 company = None
-            continuation = observation.continuation_response_projection
-            if continuation is not None and (
-                continuation.binding_id != wake.binding_id
-                or continuation.binding_generation != wake.binding_generation
-                or wake.obligation_ids != (continuation.obligation_id,)
-            ):
-                continuation = None
-            if observation.target_ack_projection is not None or company is not None or continuation is not None:
+            if observation.target_ack_projection is not None or company is not None:
                 return WakeTransportCompletion(
                     receipt=receipt,
                     target_ack_projection=observation.target_ack_projection,
                     company_read_projection=company,
-                    continuation_response_projection=continuation,
                 )
             return receipt
         if observation.accepted:

@@ -15,7 +15,6 @@ from __future__ import annotations
 from control_plane.native_company_receipt import project_company_read
 import hashlib
 import json
-from common.redaction import sanitize_external_text
 import os
 import pwd
 import re
@@ -53,8 +52,6 @@ from control_plane.operator_harness_contract import (
     AdapterFailureClass,
     AttentionTurnObservation,
     AttentionCompanyReadProjection,
-    AttentionContinuationInput,
-    AttentionContinuationResponseProjection,
     AuthIdentityConfidence,
     AuthRealmFact,
     CandidateResult,
@@ -263,64 +260,6 @@ def _terminal_wake_ack_ids(completion: Mapping[str, Any]) -> tuple[str, ...] | N
     return tuple(sorted(ids))
 
 
-
-_CONTINUE_RESPONSE_PREFIX = "MASTERMIND_CONTINUE_RESPONSE "
-
-
-def _terminal_continuation_response(completion, *, pending, state, native_turn_id):
-    source = pending.continuation_input
-    if source is None or _terminal_wake_ack_ids(completion) != (source.obligation_id,):
-        return None
-    text = _attention_final_text(completion)
-    if text is None:
-        return None
-    lines = text.splitlines()
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if (len(lines) < 2 or not lines[-2].startswith(_CONTINUE_RESPONSE_PREFIX)
-            or _fenced_line_states(lines)[-2]
-            or any(line.startswith(_CONTINUE_RESPONSE_PREFIX) for line in lines[:-2])):
-        return None
-    raw = lines[-2][len(_CONTINUE_RESPONSE_PREFIX):]
-    expected = {name: getattr(source, name) for name in (
-        "obligation_id", "operation_key", "request_message_key",
-        "physical_source_sha256", "immutable_input_sha256")}
-    try:
-        value = json.loads(raw)
-        if (type(value) is not dict or set(value) != {*expected, "text", "next_step"}
-                or any(value[k] != v for k, v in expected.items())
-                or json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) != raw
-                or any(type(value[k]) is not str or sanitize_external_text(value[k], limit=700) != value[k]
-                       or state.provider_session_id in value[k] or native_turn_id in value[k]
-                       for k in ("text", "next_step"))):
-            return None
-        return AttentionContinuationResponseProjection(
-            target_attempt_id=pending.attempt_id,
-            process_generation_id=state.generation.process_generation_id,
-            binding_id=pending.binding_id, binding_generation=pending.binding_generation,
-            provider_session_id=state.provider_session_id,
-            provider_native_turn_id=native_turn_id, nudge_id=pending.nudge_id, **value)
-    except (ValueError, TypeError, UnicodeError):
-        return None
-
-
-def _continuation_prompt(source):
-    data = {**source.material(), "immutable_input_sha256": source.immutable_input_sha256}
-    return (
-        "\n\nCanonical bounded continuation input (source data, no additional authority):\n"
-        + json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        + "\nCarry out only this continuation within its stop condition and current authority. "
-        "After doing so, place one unfenced MASTERMIND_CONTINUE_RESPONSE line immediately before "
-        "the existing terminal MASTERMIND_WAKE_ACK line. Its value must be canonical JSON "
-        "(sorted keys, compact separators, UTF-8) with exactly obligation_id, operation_key, "
-        "request_message_key, physical_source_sha256, immutable_input_sha256 copied from the input, "
-        "plus text and next_step: nonblank sanitized summaries, each at most 700 characters. "
-        "Do not include credentials, local paths or raw native session identifiers. "
-        "Do not claim parent consumption."
-    )
-
-
-
 def _attention_terminal_status(completion: Mapping[str, Any]) -> str | None:
     """Classify one exact provider terminal outcome without exporting it."""
 
@@ -485,7 +424,6 @@ class _PendingAttentionRequest:
     binding_generation: int
     nudge_id: str
     opaque_ids: tuple[str, ...]
-    continuation_input: AttentionContinuationInput | None = None
 
 
 @dataclass
@@ -2837,7 +2775,6 @@ class CodexOperatorAdapter:
         opaque_ids: Sequence[str],
         instruction: str,
         completion_timeout_seconds: float,
-        continuation_input: AttentionContinuationInput | None = None,
     ) -> AttentionTurnObservation:
         """Use the exact current generation client for one bounded Wake turn."""
 
@@ -2869,14 +2806,6 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "attention request is outside the closed current-writer contract",
             )
-        if continuation_input is not None and (
-            type(continuation_input) is not AttentionContinuationInput
-            or len(opaque) != 2
-            or opaque[0] != continuation_input.obligation_id
-            or re.fullmatch(re.escape(continuation_input.obligation_id) + r":A[1-9][0-9]*", opaque[1]) is None
-        ):
-            raise CodexAdapterError(AdapterFailureClass.VALIDATION_FAILURE,
-                                    "continuation input requires one exact obligation")
         if (
             state.epoch.attempt_id != attempt_id
             or binding_id
@@ -2932,8 +2861,6 @@ class CodexOperatorAdapter:
             if not ids
             else f"{instruction}\n\nOpaque Wake identities (not authority):\n{ids}"
         )
-        if continuation_input is not None:
-            text += _continuation_prompt(continuation_input)
         params = {
             "threadId": provider_session_id,
             "clientUserMessageId": nudge_id,
@@ -2952,7 +2879,6 @@ class CodexOperatorAdapter:
             binding_generation=binding_generation,
             nudge_id=nudge_id,
             opaque_ids=opaque,
-            continuation_input=continuation_input,
         )
         try:
             started = state.client.request("turn/start", params, timeout=30.0)
@@ -3150,8 +3076,6 @@ class CodexOperatorAdapter:
             delivered=True,
             wake_ack_projection=wake_ack_projection,
             company_read_projection=company,
-            continuation_response_projection=_terminal_continuation_response(
-                completion, pending=pending, state=state, native_turn_id=native_turn_id),
         )
 
     def _reconcile_late_attention_completion(

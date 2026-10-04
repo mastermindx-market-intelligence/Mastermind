@@ -71,12 +71,9 @@ def _material(f, message):
     return obligation, physical
 
 
-@pytest.mark.parametrize("source_fault,completion_mode", [
-    (None, "pending"), (None, "delivered"), (None, "late"),
-    ("parent_during_read", "pending"), ("foreign_parent_attestation", "pending"),
-])
+@pytest.mark.parametrize("source_fault", [None, "parent_during_read", "foreign_parent_attestation"])
 def test_session_send_real_w3c_persists_once_and_original_parent_reads(
-    tmp_path, short_socket_root, monkeypatch, source_fault, completion_mode,
+    tmp_path, short_socket_root, monkeypatch, source_fault,
 ):
     f = _strict_dialogue_runtime(tmp_path, monkeypatch, provider_session_id=NATIVE)
     # NativeReplyReader binds its default clock at import, so refresh the exact
@@ -107,35 +104,8 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
         calls = 0
         reconciles = 0
 
-        def completed(self):
-            from control_plane.operator_harness_contract import (
-                AttentionContinuationResponseProjection, WorkerLocalWakeAckProjection)
-            kwargs = self.pending
-            value = kwargs["continuation_input"]
-            identity = dict(
-                target_attempt_id=f.sealed.attempt_id,
-                process_generation_id=f.generation.process_generation_id,
-                binding_id=f.binding.binding_id, binding_generation=f.binding.binding_generation,
-                provider_session_id=NATIVE, provider_native_turn_id="turn-parenting-one",
-                nudge_id=kwargs["nudge_id"])
-            projection = AttentionContinuationResponseProjection(
-                **identity, **{k: getattr(value, k) for k in (
-                    "obligation_id", "operation_key", "request_message_key",
-                    "physical_source_sha256", "immutable_input_sha256")},
-                text="The exact bounded finding is confirmed.", next_step="Continue the parent task.")
-            return AttentionTurnObservation(
-                **{k: identity[k] for k in ("process_generation_id", "provider_session_id",
-                                          "provider_native_turn_id", "nudge_id")},
-                accepted=True, delivered=True, continuation_response_projection=projection,
-                wake_ack_projection=WorkerLocalWakeAckProjection(
-                    **identity, obligation_ids=(value.obligation_id,), terminal_ack_trailer=True))
-
         def deliver_attention(self, **kwargs):
             self.calls += 1
-            self.pending = kwargs
-            assert kwargs["continuation_input"].continuation_text == "Read the exact bounded finding."
-            if completion_mode == "delivered":
-                return self.completed()
             return AttentionTurnObservation(
                 process_generation_id=f.generation.process_generation_id,
                 provider_session_id=NATIVE, nudge_id=kwargs["nudge_id"],
@@ -147,8 +117,7 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
             return ReconcileObservation(
                 process_liveness=ProcessLiveness.ALIVE, observed_process=f.process,
                 provider_session_reachable=True, provider_writer_state=ProviderWriterState.HELD,
-                observed_provider_session_id=NATIVE,
-                late_attention_observation=self.completed() if completion_mode == "late" else None)
+                observed_provider_session_id=NATIVE)
 
     async def run():
         client = InMemorySlackClient(relay_bot_user_id=BOT)
@@ -244,31 +213,10 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
             )
             assert proposal.grant == grant
             assert proposal.read_ref == event.payload["read_ref"]
-            from integrations.session_bridge.native_continuation import build_native_continuation_callbacks
-            input_for, _ = build_native_continuation_callbacks(f.runtime, dialogue_socket_path=relay_path)
-            native_input = await input_for(physical, f.binding)
-            assert native_input.operation_key == args["operation_key"]
-            assert native_input.continuation_text == args["instruction"]
             operator = Operator()
-            failures = []
-            carriers = []
-            carrier_arguments = []
-            def carrier_factory(**kwargs):
-                carrier_arguments.append(dict(kwargs))
-                carrier = _build_executive_dialogue_wake_carrier(**kwargs, dialogue_socket_path=relay_path)
-                submit = carrier.submit
-                async def observed_submit(*a, **k):
-                    try:
-                        return await submit(*a, **k)
-                    except Exception as exc:
-                        failures.append(repr(exc))
-                        raise
-                carrier.submit = observed_submit
-                carriers.append(carrier)
-                return carrier
             bridge = ExecutiveDialogueWakeBridge(
                 target_provider=None, retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
-                operator_adapter=operator, carrier_factory=carrier_factory,
+                operator_adapter=operator, carrier_factory=_build_executive_dialogue_wake_carrier,
                 canary_profile=DialogueWakeCanaryProfile(grant),
                 canary_now_epoch_seconds=lambda: 1700000100, installed_release_sha="a" * 40)
             observation_path = short_socket_root / "observation" / "parenting.sock"
@@ -291,98 +239,8 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
             turn = observer()
             first = await turn.reconcile_once()
             assert [(r.outcome.value, r.reason) for r in first] == [
-                ("WAKE_SUBMITTED", "DIALOGUE_TURN_PENDING")], (failures, operator.calls)
+                ("WAKE_SUBMITTED", "DIALOGUE_TURN_PENDING")]
             assert operator.calls == 1
-            from integrations.slack_agent_dialogue.turn_observer import WakeCarrierState
-            if completion_mode != "pending":
-                if completion_mode == "late":
-                    assert client.post_call_count == 1
-                    late = await observer().reconcile_once()
-                    assert all(x.outcome.value != "EFFECT_UNKNOWN_HOLD" for x in late), late
-                records = [x.record for x in repository.list_records(obligation.obligation_id)]
-                delivered = [x for x in records if x.phase is LedgerPhase.DELIVERED]
-                ack = [x for x in records if x.phase is LedgerPhase.TARGET_ACKNOWLEDGED]
-                assert len(delivered) == len(ack) == 1
-                assert delivered[0].native_continuation_response.text == "The exact bounded finding is confirmed."
-                assert ack[0].ack.delivered_command_id == delivered[0].command_id
-                import dataclasses
-                from control_plane.wake_ack_ingress import (
-                    _same_attempt_native_continuation_ack, TrustedWorkerWakeAckProjection)
-                evidence = delivered[0].native_continuation_response
-                trusted = TrustedWorkerWakeAckProjection(
-                    target_attempt_id=f.sealed.attempt_id,
-                    process_generation_id=f.generation.process_generation_id,
-                    binding_id=f.binding.binding_id, binding_generation=f.binding.binding_generation,
-                    provider_session_id=NATIVE, provider_native_turn_id="turn-parenting-one",
-                    nudge_id=evidence.nudge_id, obligation_ids=(obligation.obligation_id,),
-                    terminal_ack_trailer=True)
-                requested = next(x for x in records if x.phase is LedgerPhase.WAKE_REQUESTED)
-                assert _same_attempt_native_continuation_ack(obligation, requested, delivered[0], trusted)
-                assert not _same_attempt_native_continuation_ack(
-                    obligation, requested, dataclasses.replace(delivered[0], native_continuation_response=None), trusted)
-                for key, value in {
-                    "process_generation_id": "gen-other", "binding_id": "bind-otherone",
-                    "binding_generation": 2, "nudge_id": "NUDGE-"+"f"*32,
-                    "provider_session_id": "other-native", "provider_native_turn_id": "other-turn",
-                }.items():
-                    assert not _same_attempt_native_continuation_ack(
-                        obligation, requested, delivered[0], dataclasses.replace(trusted, **{key: value}))
-                from control_plane.wake_ledger import assert_causal, WakeLedgerError
-                for key, value in {"physical_source_sha256": "f"*64,
-                                   "request_message_key": "asd-other", "target_attempt_id": "ATT-"+"f"*32}.items():
-                    changed = dataclasses.replace(delivered[0], native_continuation_response=
-                                                  dataclasses.replace(evidence, **{key: value}))
-                    with pytest.raises(WakeLedgerError):
-                        assert_causal([changed if x is delivered[0] else x for x in records])
-                assert client.post_call_count == 2 and operator.calls == 1
-                result = await call("session_reply_read", {"read_ref": sent["data"]["read_ref"]})
-                assert result["ok"] and result["data"]["in_reply_to"] == request_key, result
-                assert result["data"]["text"] == "The exact bounded finding is confirmed."
-                # Lose the carrier object, then advance the physical leaf by
-                # the exact already-posted native reply before reconciliation.
-                view = await relay.engine_v2.read_thread(thread_ts=THREAD, context=context)
-                reply_message = next(x.message for x in view.messages
-                                     if x.message["body"].get("stage") == "message_reply")
-                reply_obligation, reply_physical = _material(f, reply_message)
-                repository.append_record(requested_record(reply_obligation, physical_source=reply_physical),
-                                         obligation=reply_obligation)
-                from integrations.session_bridge.schemas import BridgeError
-                duplicate = await NativeReplyWriter(
-                    returns, native_session_id=NATIVE, socket_path=relay_path)({
-                        "operation_key": args["operation_key"], "in_reply_to": request_key,
-                        "text": "The exact bounded finding is confirmed.", "next_step": "Continue the parent task."})
-                assert duplicate["action"] == "DUPLICATE"
-                with pytest.raises(BridgeError, match="different content"):
-                    await NativeReplyWriter(returns, native_session_id=NATIVE, socket_path=relay_path)({
-                        "operation_key": args["operation_key"], "in_reply_to": request_key,
-                        "text": "Different finding.", "next_step": "Continue the parent task."})
-                # A new factory publishes from the durable response only. It may
-                # reconcile the exact reply, but cannot create another provider turn.
-                carrier_factory(**carrier_arguments[-1])
-                assert await carriers[-1].reconcile(obligation, route) is WakeCarrierState.RECORDED
-                assert client.post_call_count == 2 and operator.calls == 1
-                foreign = dict(reply_message)
-                foreign.pop("fingerprint")
-                foreign["message_key"] = "asd-later-foreign-leaf"
-                foreign["body"] = {"stage": "later", "completed": "Later work.", "next": "Wait."}
-                foreign = build_message_v2(foreign)
-                foreign_obligation, foreign_physical = _material(f, foreign)
-                repository.append_record(requested_record(foreign_obligation, physical_source=foreign_physical),
-                                         obligation=foreign_obligation)
-                assert await carriers[-1].reconcile(obligation, route) is WakeCarrierState.EFFECT_UNKNOWN
-                assert client.post_call_count == 2 and operator.calls == 1
-                from control_plane.wake_ledger import (
-                    resolve_source, resolved_record, expected_resolution_code, SourceReadHealth)
-                resolution = resolve_source(
-                    obligation, code=expected_resolution_code(obligation),
-                    health=SourceReadHealth.HEALTHY, source_present=False, snapshot_digest="a"*64)
-                repository.append_record(resolved_record(obligation, resolution), obligation=obligation)
-                def forbidden_publisher(*a):
-                    raise AssertionError("closed source must not enter publisher")
-                carriers[-1]._continuation_reply_publisher = forbidden_publisher
-                assert await carriers[-1].reconcile(obligation, route) is WakeCarrierState.RECORDED
-                assert client.post_call_count == 2 and operator.calls == 1
-                return
             assert codex.resolve(target["target_ref"]).reply_binding().reply_to_message_key == request_key
             def attempts():
                 return [x for x in repository.list_records(obligation.obligation_id)

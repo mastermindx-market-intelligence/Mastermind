@@ -19,7 +19,6 @@ Interface version: ``mastermind.operator_harness/v2``.
 from __future__ import annotations
 
 import hashlib
-import json
 import inspect
 import re
 from dataclasses import dataclass, field, fields
@@ -1254,102 +1253,6 @@ class AttentionCompanyReadProjection:
                 raise ValueError(f"AttentionCompanyReadProjection.{name} is malformed")
 
 
-
-def _continuation_text(value: object, name: str) -> str:
-    if (type(value) is not str or not value.strip() or len(value) > 700
-            or any(ord(c) < 32 and c not in "\n\t" for c in value)):
-        raise ValueError(f"{name} is not bounded continuation text")
-    value.encode("utf-8")
-    return value
-
-
-def validate_continuation_reply_text(value):
-    _continuation_text(value, "reply")
-    if re.search(r"(?:/(?:Users|Volumes|private|home|tmp|Library)/|[A-Za-z]:\\|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})", value):
-        raise ValueError("continuation reply contains a private path or native identifier")
-    return value
-
-
-def _continuation_identity(value, name, pattern):
-    if type(value) is not str or re.fullmatch(pattern, value) is None:
-        raise ValueError(f"continuation {name} is malformed")
-
-
-@dataclass(frozen=True)
-class AttentionContinuationInput:
-    """Ephemeral canonical source projection; never a stored Wake payload."""
-    schema: str
-    obligation_id: str
-    operation_key: str
-    request_message_key: str
-    physical_source_sha256: str
-    continuation_text: str = field(repr=False)
-    stop_condition: str = field(repr=False)
-    immutable_input_sha256: str
-
-    def __post_init__(self):
-        if self.schema != "mastermind.attention_continuation_input.v1" or type(self.schema) is not str:
-            raise ValueError("continuation schema is invalid")
-        _continuation_identity(self.obligation_id, "obligation", r"WAKE-[0-9a-f]{32}")
-        _continuation_identity(self.operation_key, "operation", r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}")
-        _continuation_identity(self.request_message_key, "request", r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}")
-        for name in ("physical_source_sha256", "immutable_input_sha256"):
-            _continuation_identity(getattr(self, name), name, r"[0-9a-f]{64}")
-        _continuation_text(self.continuation_text, "continuation_text")
-        _continuation_text(self.stop_condition, "stop_condition")
-        if self.immutable_input_sha256 != self.digest(self.material()):
-            raise ValueError("continuation input digest mismatch")
-
-    def material(self):
-        return {f.name: getattr(self, f.name) for f in fields(self)
-                if f.name != "immutable_input_sha256"}
-
-    @staticmethod
-    def digest(material):
-        return hashlib.sha256(json.dumps(material, sort_keys=True,
-            separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
-
-    @classmethod
-    def create(cls, **material):
-        material = {"schema": "mastermind.attention_continuation_input.v1", **material}
-        return cls(**material, immutable_input_sha256=cls.digest(material))
-
-
-@dataclass(frozen=True)
-class AttentionContinuationResponseProjection:
-    """Same attention-turn reply; source linkage is checked by the input owner."""
-    target_attempt_id: str
-    process_generation_id: str
-    binding_id: str
-    binding_generation: int
-    provider_session_id: str
-    provider_native_turn_id: str
-    nudge_id: str
-    obligation_id: str
-    operation_key: str
-    request_message_key: str
-    physical_source_sha256: str
-    immutable_input_sha256: str
-    text: str = field(repr=False)
-    next_step: str = field(repr=False)
-
-    def __post_init__(self):
-        WorkerLocalWakeAckProjection(
-            target_attempt_id=self.target_attempt_id,
-            process_generation_id=self.process_generation_id,
-            binding_id=self.binding_id, binding_generation=self.binding_generation,
-            provider_session_id=self.provider_session_id,
-            provider_native_turn_id=self.provider_native_turn_id,
-            nudge_id=self.nudge_id, obligation_ids=(self.obligation_id,),
-            terminal_ack_trailer=True)
-        _continuation_identity(self.operation_key, "operation", r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}")
-        _continuation_identity(self.request_message_key, "request", r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}")
-        for name in ("physical_source_sha256", "immutable_input_sha256"):
-            _continuation_identity(getattr(self, name), name, r"[0-9a-f]{64}")
-        validate_continuation_reply_text(self.text)
-        validate_continuation_reply_text(self.next_step)
-
-
 @dataclass(frozen=True)
 class AttentionTurnObservation:
     """Closed evidence from one attention-only turn on the current writer.
@@ -1372,10 +1275,6 @@ class AttentionTurnObservation:
     company_read_projection: AttentionCompanyReadProjection | None = field(
         default=None,
         repr=False,
-    )
-
-    continuation_response_projection: AttentionContinuationResponseProjection | None = field(
-        default=None, repr=False,
     )
 
     def __post_init__(self) -> None:
@@ -1417,18 +1316,6 @@ class AttentionTurnObservation:
                    ("process_generation_id", "provider_session_id",
                     "provider_native_turn_id", "nudge_id")):
                 raise ValueError("Company read projection identity disagrees with observation")
-        continuation = self.continuation_response_projection
-        if continuation is not None:
-            if not isinstance(continuation, AttentionContinuationResponseProjection) or not self.delivered:
-                raise ValueError("continuation response requires typed exact delivery")
-            if any(getattr(continuation, name) != getattr(self, name) for name in
-                   ("process_generation_id", "provider_session_id",
-                    "provider_native_turn_id", "nudge_id")):
-                raise ValueError("continuation response identity mismatch")
-            if (projection is None or projection.obligation_ids != (continuation.obligation_id,)
-                    or any(getattr(continuation, name) != getattr(projection, name) for name in
-                           ("target_attempt_id", "binding_id", "binding_generation"))):
-                raise ValueError("continuation response requires the same exact terminal ACK")
 
 
 @dataclass(frozen=True)
@@ -3047,8 +2934,6 @@ __all__ = [
     "AdapterFailureClass",
     "AttentionTurnObservation",
     "AttentionCompanyReadProjection",
-    "AttentionContinuationInput",
-    "AttentionContinuationResponseProjection",
     "AttemptBoundary",
     "AttemptExecutionMode",
     "CANONICAL_SESSION_FIELD",

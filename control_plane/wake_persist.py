@@ -226,10 +226,6 @@ class WakeLedgerRepository:
                 and (obligation is None
                      or record.native_company_read.target_attempt_id != attempt_id)):
             raise WakeLedgerError("native Company evidence requires the exact Wake Attempt")
-        if (record.native_continuation_response is not None
-                and (obligation is None
-                     or record.native_continuation_response.target_attempt_id != attempt_id)):
-            raise WakeLedgerError("native continuation requires the exact Wake Attempt")
         existing = self.store.get_event_by_command_id(
             record.command_id, connection=connection
         )

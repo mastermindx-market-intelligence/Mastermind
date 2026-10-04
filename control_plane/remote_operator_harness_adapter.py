@@ -22,7 +22,6 @@ from control_plane.executive_worker_broker import (
 from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AttentionTurnObservation,
-    AttentionContinuationInput,
     CandidateResult,
     EventCursor,
     HarnessAdapterCapabilities,
@@ -374,7 +373,6 @@ class RemoteOperatorHarnessAdapter:
         opaque_ids: tuple[str, ...],
         instruction: str,
         completion_timeout_seconds: float,
-        continuation_input: AttentionContinuationInput | None = None,
     ) -> AttentionTurnObservation:
         result = self.client.request_sync(
             "ohf-deliver-attention",
@@ -388,8 +386,6 @@ class RemoteOperatorHarnessAdapter:
                 "opaque_ids": list(opaque_ids),
                 "instruction": instruction,
                 "completion_timeout_seconds": float(completion_timeout_seconds),
-                **({"continuation_input": to_wire(continuation_input)}
-                   if continuation_input is not None else {}),
             },
             timeout_seconds=float(completion_timeout_seconds) + 30.0,
         )

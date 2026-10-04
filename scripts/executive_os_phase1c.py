@@ -64,7 +64,6 @@ def _build_executive_dialogue_wake_carrier(
     historical_context_for=None,
     historical_only=False,
     physical_source=None,
-    dialogue_socket_path=None,
 ):
     """Compose existing Wake owners outside the control-plane dependency layer."""
 
@@ -123,27 +122,13 @@ def _build_executive_dialogue_wake_carrier(
         canary_kwargs = dict(
             canary_profile=canary_profile, physical_source=physical_source,
             historical_context_for=historical_context)
-        if physical_source is not None:
-            from integrations.session_bridge.native_continuation import build_native_continuation_callbacks
-            source_input, publisher = build_native_continuation_callbacks(
-                runtime, dialogue_socket_path=dialogue_socket_path or _CANONICAL_AGENT_RELAY_SOCKET)
-            canary_kwargs.update(continuation_input_for=source_input,
-                                 continuation_reply_publisher=publisher)
-    def historical_current_binding(route):
-        from control_plane.session_targets import load_session_targets
-        grant = canary_profile.grant
-        if grant is None:
-            return None
-        current_target = load_session_targets().get(grant.target_session_alias)
-        return project_runtime_binding(runtime, grant.target_attempt_id, current_target)
-
     if historical_only:
         if canary_profile is None:
             raise ServiceError("historical Wake requires its original canary profile")
         return PersistedWakeCarrier(
             repository=WakeLedgerRepository(runtime),
             dispatchers=WakeDispatcherRegistry(),
-            current_binding_for=historical_current_binding,
+            current_binding_for=lambda _route: None,
             retry_policy=retry_policy, **canary_kwargs,
         )
 

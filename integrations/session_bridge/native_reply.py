@@ -44,13 +44,6 @@ class NativeReplyBinding:
     thread_ts: str
     request_message_key: str
     reply_operation_key: str
-    reply_predecessor_advanced: bool = False
-
-
-def native_reply_message_key(operation_key: str) -> str:
-    return "asd-native-reply-" + hashlib.sha256(
-        ("mastermind.session_bridge.native_reply.v1\n" + operation_key).encode()
-    ).hexdigest()[:40]
 
 
 class NativeReplyResolver(Protocol):
@@ -142,8 +135,7 @@ class NativeReplyWriter:
                     or _ID.fullmatch(binding.process_generation_id) is None
                     or not isinstance(binding.thread_ts, str)
                     or _TS.fullmatch(binding.thread_ts) is None
-                    or type(binding.context) is not DialogueContextV2
-                    or type(binding.reply_predecessor_advanced) is not bool):
+                    or type(binding.context) is not DialogueContextV2):
                 raise ValueError
             context = binding.context.normalized()
             validate_native_reply_context(context)
@@ -154,8 +146,7 @@ class NativeReplyWriter:
                 "process_generation_id": binding.process_generation_id,
                 "context": context, "thread_ts": binding.thread_ts,
                 "request_message_key": binding.request_message_key,
-                "reply_operation_key": binding.reply_operation_key,
-                "reply_predecessor_advanced": binding.reply_predecessor_advanced}, sort_keys=True)
+                "reply_operation_key": binding.reply_operation_key}, sort_keys=True)
             context = json.loads(json.dumps(context))
             return binding, context, identity
         except Exception:
@@ -207,7 +198,9 @@ class NativeReplyWriter:
                 or request["actor_ref"].get("kind") != "executive_surface"
                 or request["actor_ref"].get("seat") != "ceo"):
             raise BridgeError("carrier_stale", "original message is not an executive continuation")
-        key = native_reply_message_key(binding.reply_operation_key)
+        key = "asd-native-reply-" + hashlib.sha256(
+            ("mastermind.session_bridge.native_reply.v1\n" + binding.reply_operation_key).encode()
+        ).hexdigest()[:40]
         try:
             message = build_message_v2({
                 "schema": MESSAGE_SCHEMA_V2, "message_key": key, "message_type": "PROGRESS",
@@ -231,8 +224,6 @@ class NativeReplyWriter:
             if len(prior) != 1 or prior[0] != message:
                 raise BridgeError("operation_conflict", "reply operation already has different content")
             return self._receipt(binding, message, "DUPLICATE")
-        if binding.reply_predecessor_advanced:
-            raise BridgeError("carrier_stale", "advanced reply predecessor has no exact canonical reply")
         executive = [(ts, m) for ts, m in items if m["actor_ref"].get("kind") == "executive_surface"]
         if any(ts > request_ts or (ts == request_ts and m["message_key"] != binding.request_message_key)
                for ts, m in executive):

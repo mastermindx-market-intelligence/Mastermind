@@ -105,25 +105,6 @@ the owned known preimages through the same global transaction; it neither republ
 nor retries a provider turn. Unknown third-party config/receipt changes retain the
 transaction for reconciliation. Ordinary autonomy disarm cannot adopt this transaction.
 
-On this exact canary carrier, the existing current-writer attention turn receives a
-closed ephemeral projection of the canonical CONTINUE and its stop condition.
-The provider's same final message may return one canonical
-`MASTERMIND_CONTINUE_RESPONSE` line immediately before the existing terminal
-`MASTERMIND_WAKE_ACK`. The response echoes the immutable source and input digests;
-ambiguous, foreign, fenced or unsafe response text receives no reply credit.
-Only bounded redacted reply text and hashed provider identities are retained on
-the existing DELIVERED event. The exact current-writer ACK remains separately
-required. A same-attempt ACK is permitted only with that matching native response,
-physical source and independent current binding/process proof.
-
-After those durable facts, the incumbent native reply writer emits one correlated
-`PROGRESS/message_reply`. Restart and late-completion paths reuse its deterministic
-key and stored text; they do not start another provider turn. If the exact reply
-itself advances the thread, recovery can only confirm the identical canonical
-duplicate. A later foreign leaf, changed writer or changed reply refuses; a resolved
-source produces no additional reply. The protocol does not reinterpret this
-nonterminal correlated reply as a terminal role `RESULT`.
-
 A published grant, successful attention delivery, terminal ACK, correlated native
 `PROGRESS/message_reply`, original-parent read and next parent edge are separate
 evidence. This ceremony alone proves none of the latter steps. The canary expires

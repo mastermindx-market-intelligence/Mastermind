@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import inspect
 from collections.abc import Callable, Sequence
 
 from control_plane.dialogue_wake_canary_activation import (
@@ -48,8 +47,6 @@ from control_plane.wake_dispatcher import (
 from control_plane.wake_events import WakeObligation, canonical_json_bytes
 from control_plane.wake_ledger import (
     DeliveryAttempt,
-    NativeContinuationResponseEvidence,
-    assert_causal,
     LedgerPhase,
     WakeRetryPolicy,
     event_payload_for,
@@ -78,8 +75,6 @@ class PersistedWakeCarrier:
             Callable[[DeliveryAttempt], "HistoricalWakeContext"] | None
         ) = None,
         physical_source: PhysicalDialogueSourceIdentity | None = None,
-        continuation_input_for=None,
-        continuation_reply_publisher=None,
     ) -> None:
         if not isinstance(repository, WakeLedgerRepository):
             raise TypeError("repository must be WakeLedgerRepository")
@@ -114,53 +109,6 @@ class PersistedWakeCarrier:
         self._canary_profile = canary_profile
         self._historical_context_for = historical_context_for
         self._physical_source = physical_source
-        if (continuation_input_for is None) != (continuation_reply_publisher is None):
-            raise TypeError("continuation input and publisher must be composed together")
-        if continuation_input_for is not None and (
-            not callable(continuation_input_for) or not callable(continuation_reply_publisher)
-            or canary_profile is None or physical_source is None
-        ):
-            raise TypeError("native continuation requires exact physical canary composition")
-        self._continuation_input_for = continuation_input_for
-        self._continuation_reply_publisher = continuation_reply_publisher
-
-    async def _continuation_input(self, binding):
-        if self._continuation_input_for is None:
-            return None
-        value = self._continuation_input_for(self._physical_source, binding)
-        return await value if inspect.isawaitable(value) else value
-
-    async def _publish_if_ready(self, obligation, route):
-        if self._continuation_reply_publisher is None:
-            return True
-        try:
-            rows = self._repository.list_records(obligation.obligation_id)
-            _assert_requested_replay(obligation, rows, self._physical_source)
-            records = tuple(row.record for row in rows)
-            assert_causal(records)
-            if any(r.phase is LedgerPhase.SOURCE_RESOLVED for r in records):
-                return True  # Closed source owns no further publication.
-            delivered = [r for r in records if r.phase is LedgerPhase.DELIVERED]
-            ack = [r for r in records if r.phase is LedgerPhase.TARGET_ACKNOWLEDGED]
-            if not delivered or not ack:
-                return True
-            if (len(delivered) != 1 or len(ack) != 1
-                    or sum(r.phase is LedgerPhase.DELIVERY_ATTEMPT for r in records) != 1
-                    or any(r.phase in {LedgerPhase.FAILED, LedgerPhase.TARGET_UNAVAILABLE} for r in records)
-                    or ack[0].ack.delivered_command_id != delivered[0].command_id):
-                return False
-            evidence = delivered[0].native_continuation_response
-            if type(evidence) is not NativeContinuationResponseEvidence:
-                return False
-            binding = self._current_binding_for(route)
-            _assert_current_binding(binding, route)
-            value = self._continuation_reply_publisher(self._physical_source, binding, evidence)
-            if inspect.isawaitable(value):
-                await value
-            return True
-        except Exception:
-            # Delivery remains durable. Only the same original reply may reconcile.
-            return False
 
     def has_persisted_attempt(self, obligation: WakeObligation) -> bool:
         """Classify effect presence without route resolution or provider access."""
@@ -343,8 +291,7 @@ class PersistedWakeCarrier:
         except Exception:
             return WakeCarrierState.EFFECT_UNKNOWN
         if result.state is PersistedDeliveredAckState.RECORDED:
-            return (WakeCarrierState.RECORDED if await self._publish_if_ready(obligation, effective_route)
-                    else WakeCarrierState.EFFECT_UNKNOWN)
+            return WakeCarrierState.RECORDED
         if result.state is PersistedDeliveredAckState.HOLD:
             return WakeCarrierState.MISSING
         return WakeCarrierState.EFFECT_UNKNOWN
@@ -400,7 +347,6 @@ class PersistedWakeCarrier:
             _assert_current_binding(binding, effective_route)
             assert binding is not None
             dispatcher = self._dispatchers.resolve(route.wake_transport)
-            continuation_input = await self._continuation_input(binding)
             result = await dispatch_persisted_nudge(
                 self._repository,
                 [(obligation, effective_route)],
@@ -408,12 +354,10 @@ class PersistedWakeCarrier:
                 binding=binding,
                 retry_policy=self._retry_policy,
                 target_registry=self._target_registry,
-                continuation_input=continuation_input,
             )
             if result.state is PersistedNudgeState.RECONCILIATION_REQUIRED:
                 return WakeCarrierState.EFFECT_UNKNOWN
-            return (WakeCarrierState.RECORDED if await self._publish_if_ready(obligation, effective_route)
-                    else WakeCarrierState.EFFECT_UNKNOWN)
+            return WakeCarrierState.RECORDED
 
         attempt = _delivery_attempt(attempt_records[0])
         if profile.grant is None:
@@ -430,8 +374,7 @@ class PersistedWakeCarrier:
             LedgerPhase.TARGET_UNAVAILABLE,
         }
         if any(phase in terminal for phase in phases):
-            return (WakeCarrierState.RECORDED if await self._publish_if_ready(obligation, effective_route)
-                    else WakeCarrierState.EFFECT_UNKNOWN)
+            return WakeCarrierState.RECORDED
         if LedgerPhase.ACCEPTED not in phases:
             return WakeCarrierState.EFFECT_UNKNOWN
         resolver = self._historical_context_for
@@ -456,8 +399,7 @@ class PersistedWakeCarrier:
         except Exception:
             return WakeCarrierState.EFFECT_UNKNOWN
         if result.state is PersistedNudgeState.DELIVERED:
-            return (WakeCarrierState.RECORDED if await self._publish_if_ready(obligation, effective_route)
-                    else WakeCarrierState.EFFECT_UNKNOWN)
+            return WakeCarrierState.RECORDED
         return WakeCarrierState.EFFECT_UNKNOWN
 
 
