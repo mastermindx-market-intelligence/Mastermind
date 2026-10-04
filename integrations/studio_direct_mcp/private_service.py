@@ -1167,10 +1167,30 @@ def cmd_stage(args) -> int:
         account, getattr(args, "public_url", None)
     )
 
+    requested_route_values = getattr(args, "fleet_route", None)
+    clear_fleet_routes = bool(getattr(args, "clear_fleet_routes", False))
+    requested_routes = (
+        _validate_fleet_routes(account, requested_route_values)
+        if requested_route_values is not None else ()
+    )
+
     roots = _build_runtime_roots(account)
     prior = _preflight_stage(
         source, node_abs, backend_abs, account, label, host, port, roots, public_url
     )
+    fleet_routes = () if clear_fleet_routes else requested_routes
+    if isinstance(prior, dict):
+        try:
+            existing_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit("refusing restage: existing config invalid") from exc
+        existing_routes = _installed_fleet_routes(existing_config, account)
+        if requested_route_values is None and not clear_fleet_routes:
+            fleet_routes = existing_routes
+        elif fleet_routes != existing_routes:
+            raise SystemExit(
+                "refusing restage: fleet route config diverges; use upgrade while stopped"
+            )
     # The Paper-owned immutable runtime must exist and match before this
     # lifecycle writes a config/plist that advertises the Paper capability.
     _verify_paper_runtime(_user_root())
@@ -1185,6 +1205,7 @@ def cmd_stage(args) -> int:
         result_key="staged",
         dependency_tree_hash=retained_dependency_hash,
         public_url=public_url,
+        fleet_routes=fleet_routes,
     )
 
 def _verify_staged_install(
@@ -1294,6 +1315,13 @@ def cmd_upgrade(args) -> int:
         account, getattr(args, "public_url", None)
     )
 
+    requested_route_values = getattr(args, "fleet_route", None)
+    clear_fleet_routes = bool(getattr(args, "clear_fleet_routes", False))
+    requested_routes = (
+        _validate_fleet_routes(account, requested_route_values)
+        if requested_route_values is not None else ()
+    )
+
     roots = _build_runtime_roots(account)
     if _launchd_inspect(label) is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
@@ -1311,6 +1339,18 @@ def cmd_upgrade(args) -> int:
         raise SystemExit(
             "refusing upgrade: node, backend, host and port must match the existing install"
         )
+    try:
+        existing_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("refusing upgrade: existing config invalid") from exc
+    existing_routes = _installed_fleet_routes(existing_config, account)
+    if clear_fleet_routes:
+        fleet_routes = ()
+    elif requested_route_values is None:
+        fleet_routes = existing_routes
+    else:
+        fleet_routes = requested_routes
+
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
     # Upgrade is still pre-effect here. Refuse before replacing any staged
@@ -1321,6 +1361,7 @@ def cmd_upgrade(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
         public_url=public_url,
+        fleet_routes=fleet_routes,
     )
 
 
@@ -1458,6 +1499,13 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
         s.add_argument("--public-url")
+        routes = s.add_mutually_exclusive_group()
+        routes.add_argument(
+            "--fleet-route",
+            action="append",
+            metavar="HOST_REF=HTTPS_TS_NET_MCP_URL",
+        )
+        routes.add_argument("--clear-fleet-routes", action="store_true")
         s.set_defaults(func=globals()[f"cmd_{name}"])
 
     for name in ("seal-runtime", "start", "status", "stop"):
