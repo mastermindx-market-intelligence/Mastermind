@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 
 import {
   FLEET_BACKEND_TOOL_NAMES,
@@ -169,4 +170,43 @@ test('one routed call means one remote tools/call and unknown tools are refused 
   );
   assert.equal(h.created[0].calls, 1, 'refused call must not dispatch remotely');
   assert.ok(FLEET_BACKEND_TOOL_NAMES.includes('start_process'));
+});
+
+
+test('deterministic remote refusal keeps the route but ambiguous failure retires it', async () => {
+  let mode = 'deterministic';
+  const h = harness({
+    callImpl() {
+      const error = new Error(mode);
+      if (mode === 'deterministic') error.code = ErrorCode.InvalidParams;
+      throw error;
+    },
+  });
+  const router = createFleetRouter(config(), { clientFactory: h.factory });
+  const expected = new Map([['read_file', READ_SCHEMA]]);
+  await router.preflight('mini4', expected);
+
+  await assert.rejects(
+    router.call('mini4', { name: 'read_file', arguments: { path: '/tmp/x' } }),
+    /deterministic/,
+  );
+  assert.equal(h.created[0].clientCloses, 0);
+  assert.equal(h.created[0].transportCloses, 0);
+
+  mode = 'ambiguous';
+  await assert.rejects(
+    router.call('mini4', { name: 'read_file', arguments: { path: '/tmp/y' } }),
+    /ambiguous/,
+  );
+  assert.equal(h.created[0].clientCloses, 1);
+  assert.equal(h.created[0].transportCloses, 1);
+
+  await assert.rejects(
+    router.call('mini4', { name: 'read_file', arguments: { path: '/tmp/z' } }),
+    /NOT_BOUND/,
+  );
+
+  const rebound = await router.preflight('mini4', expected);
+  assert.equal(rebound.state, 'READY');
+  assert.equal(h.created.length, 2);
 });
