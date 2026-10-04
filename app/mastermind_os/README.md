@@ -93,6 +93,36 @@ acceptance. The readiness command retains `BUILT_NOT_PROVEN` until an external
 installation qualification exists. No updater, native signing, service
 installation, registration, or release is performed by these checks.
 
-Approved design references remain #702's workspace and #704's consumer freeze.
-The header uses the existing facts/buttons and the content uses existing cards,
-state labels and typography; no additional design system was introduced.
+## Approved visual design
+
+The Chairman approved **Noir Atelier** as the canonical visual direction for the
+entire Mastermind OS project on **3 October 2026, America/Chicago**
+(2026-10-04 UTC).
+
+The current design entry point is [Paper page 12 — Canonical Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-D-0)
+in the Mastermind OS file `01M3NRCX55B452A12819WNE1RH`:
+
+- **AT00 `KSB-0`** records the project-wide ruling and current route index.
+- **AT90 `KSQ-0`** defines the shared shell, typography, palette and spacing.
+- **AT91 `NDE-0`** defines loading, empty, unavailable, withheld, unknown-outcome
+  and control states.
+- [Paper page 11 — Chat Atelier](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-C-0)
+  remains the originating conversation family; **CH91 `KDN-0`** provides its
+  detailed visual and interaction contract.
+
+Apply the ink and graphite surfaces, ivory reading hierarchy, champagne primary
+actions, original sculptural artwork and progressive disclosure consistently
+across every OS route and responsive layout. Keep the five primary destinations:
+Today, Projects, Inbox, Conversations and Knowledge. Work, sessions, evidence,
+journal and resources remain accessible in project context.
+
+The earlier #702 workspace, #704 consumer freeze and retained Paper state
+families remain feature and behavior references. Preserve owner attribution,
+permissions, source freshness, exact action identity and the distinction between
+returned, accepted and released work while adopting the current visual family.
+
+These are approved editable designs. Visual approval and screenshot review do
+not establish frontend implementation, installed behavior, keyboard or enlarged-
+text validation, deployment, or product acceptance. The cumulative design and
+verification record remains
+[`research/MASTERMIND_OS_NOIR_INITIATION_2026-09-26.md`](../../research/MASTERMIND_OS_NOIR_INITIATION_2026-09-26.md).
