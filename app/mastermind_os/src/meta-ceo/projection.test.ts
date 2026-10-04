@@ -3,7 +3,7 @@ import { decodeMission, decodeMissionv3, type MissionDocument } from "../mission
 import { decodeResultEnvelope } from "../result";
 import currentV3 from "../fixtures/mission-v3-design-current-17-slots.json";
 import availableResult from "../fixtures/result-design-available-reject-unicode.json";
-import { missionFixture } from "../test-fixtures";
+import currentMission from "../fixtures/mission-v2-current-128c46f6.json";
 import {
   projectOffice,
   type OfficeInput,
@@ -13,18 +13,18 @@ import {
 
 const context: ProjectionContext = {
   authGeneration: 7,
-  selection: { workRef: "WS:ALPHA", rootJobId: "JOB-ROOT" },
+  selection: { workRef: "WS:ONE", rootJobId: "JOB-1" },
   sessionRef: "session:exact-a",
   bindingGeneration: "generation:1",
   revisions: { mission: "revision:1", programs: "programs:1", result: null, conversation: null },
 };
 function input(): OfficeInput {
-  const raw = missionFixture();
+  const raw = structuredClone(currentMission);
   raw.read_state = { state: "CURRENT", reason_codes: [], usable_sections: raw.read_state.usable_sections };
   return {
     mission: {
       context: structuredClone(context),
-      source: { owner: "EXECUTIVE_OS", ref: "mission:JOB-ROOT", revision: "revision:1", observed_at: "2026-10-03T10:00:00Z", state: "CURRENT", coverage: "COMPLETE" },
+      source: { owner: "EXECUTIVE_OS", ref: "mission:JOB-1", revision: "revision:1", observed_at: "2026-10-03T10:00:00Z", state: "CURRENT", coverage: "COMPLETE" },
       value: decodeMission(raw, context.selection!)!,
     },
     programs: null,
@@ -42,7 +42,7 @@ function withResult() {
   mission.mission.root_job_candidates = [selection.rootJobId];
   mission.result_refs.root_job_id = selection.rootJobId;
   mission.source.owner_observation!.selection = { work_ref: selection.workRef, root_job_id: selection.rootJobId };
-  const result = decodeResultEnvelope(availableResult, {
+  const result = decodeResultEnvelope(structuredClone(availableResult), {
     ...selection, jobId: availableResult.selection.job_id,
     attemptId: availableResult.selection.attempt_id, resultEnvelopeDigest: availableResult.selection.result_envelope_digest,
   })!;
@@ -63,7 +63,7 @@ describe("owner-fed office projection", () => {
     mission.acceptance.state = "NOT_PROJECTED";
     const projected = projectOffice(source, context);
     expect(projected.schema).toBe("mastermind.product_projection.v1");
-    expect(projected.mission.value?.program.work_ref).toBe("WS:ALPHA");
+    expect(projected.mission.value?.program.work_ref).toBe("WS:ONE");
     expect(projected.mission.source).toEqual(source.mission!.source);
     expect(projected.mission.value?.program.evidence).toEqual(mission.program.evidence);
     expect(projected.receipts.review).toBe("approve");
@@ -85,12 +85,12 @@ describe("owner-fed office projection", () => {
     const projected = projectOffice(input(), { ...context, authGeneration: 8 });
     expect(projected.mission.source.state).toBe("WITHHELD");
     expect(projected.mission.value).toBeNull();
-    expect(JSON.stringify(projected)).not.toContain("Alpha program");
+    expect(JSON.stringify(projected)).not.toContain("One");
   });
 
   it.each([
-    { selection: { workRef: "WS:BETA", rootJobId: "JOB-ROOT" } },
-    { selection: { workRef: "WS:ALPHA", rootJobId: "JOB-OTHER" } },
+    { selection: { workRef: "WS:BETA", rootJobId: "JOB-1" } },
+    { selection: { workRef: "WS:ONE", rootJobId: "JOB-2" } },
     { sessionRef: "session:exact-b" },
     { bindingGeneration: "generation:2" },
   ])("does not reuse a projection after a target or binding changes: %j", (change) => {

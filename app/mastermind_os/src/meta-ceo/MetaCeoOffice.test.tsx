@@ -5,16 +5,16 @@ import { useState } from "react";
 import { MetaCeoOffice } from "./MetaCeoOffice";
 import { projectOffice, type OfficeInput, type ProjectionContext, type SourceState } from "./projection";
 import { decodeMission } from "../mission";
-import { missionFixture } from "../test-fixtures";
+import currentMission from "../fixtures/mission-v2-current-128c46f6.json";
 
 afterEach(cleanup);
-const context: ProjectionContext = { authGeneration: 1, selection: { workRef: "WS:ALPHA", rootJobId: "JOB-ROOT" }, sessionRef: null, bindingGeneration: null, revisions: { mission: "rev:1", programs: null, result: null, conversation: null } };
+const context: ProjectionContext = { authGeneration: 1, selection: { workRef: "WS:ONE", rootJobId: "JOB-1" }, sessionRef: null, bindingGeneration: null, revisions: { mission: "rev:1", programs: null, result: null, conversation: null } };
 function input(): OfficeInput {
-  const raw = missionFixture();
+  const raw = structuredClone(currentMission);
   raw.read_state = { state: "CURRENT", reason_codes: [], usable_sections: raw.read_state.usable_sections };
   return { programs: null, result: null, conversation: null, mission: {
     context,
-    source: { owner: "EXECUTIVE_OS", ref: "mission:JOB-ROOT", revision: "rev:1", observed_at: "2026-10-03T10:00:00Z", state: "CURRENT", coverage: "COMPLETE" },
+    source: { owner: "EXECUTIVE_OS", ref: "mission:JOB-1", revision: "rev:1", observed_at: "2026-10-03T10:00:00Z", state: "CURRENT", coverage: "COMPLETE" },
     value: decodeMission(raw, context.selection!)!,
   } };
 }
@@ -23,7 +23,7 @@ describe("Daily Office consumer", () => {
   it("puts the qualified answer before movement and exposes missing producers", () => {
     render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
     expect(screen.getByRole("heading", { name: "Today, through one Meta-CEO." })).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("Alpha program");
+    expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("One");
     expect(screen.getByText(/Company total is not established/)).toBeTruthy();
     expect(screen.getByText(/Work is awaiting source-custody reconciliation/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^send$/i })).toBeNull();
@@ -60,7 +60,7 @@ describe("Daily Office consumer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review direction preview" }));
     rerender(<MetaCeoOffice projection={projectOffice(input(), { ...context, authGeneration: 2 })} draft={{ text: "Private draft", context }} onDraftChange={() => {}} />);
     expect(screen.queryByText("Private draft")).toBeNull();
-    expect(screen.queryByText("Alpha program")).toBeNull();
+    expect(screen.queryByRole("heading", { name: /^One:/ })).toBeNull();
     expect(screen.queryByRole("region", { name: "Direction preview" })).toBeNull();
   });
 
