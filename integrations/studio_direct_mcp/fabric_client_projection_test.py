@@ -136,15 +136,22 @@ class TestProviderProjection(unittest.TestCase):
             "claude", "design", read_url=READ, design_url=DESIGN
         )
         rendered = json.dumps(p.as_dict(), sort_keys=True)
+        client_surface = p.config_text + " " + " ".join(p.cli_args)
         for forbidden in (
             "Bearer ",
             "access_token",
             "refresh_token",
-            "start_process",
             "ssh_alias",
             "deviceId",
         ):
             self.assertNotIn(forbidden, rendered)
+        for forbidden_tool in (
+            "start_process",
+            "interact_with_process",
+            "studio_git_push_current_branch",
+        ):
+            self.assertNotIn(forbidden_tool, client_surface)
+        self.assertIs(p.as_dict()["authority"]["may_start_process"], False)
         self.assertEqual(READ_PATH, "/studio-fabric")
         self.assertEqual(DESIGN_PATH, "/studio-design")
 
