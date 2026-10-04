@@ -1336,75 +1336,19 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
     assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
 
 
-def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
-    tmp_path: Path,
-    short_socket_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The production carrier crosses the socket without replacing either resolver."""
-
-    from contextlib import contextmanager
-    from control_plane.dialogue_wake_canary_activation import (
-        DialogueWakeCanaryActivationGrant,
-        DialogueWakeCanaryProfile,
-        SCHEMA as CANARY_SCHEMA,
-        effective_dialogue_wake_canary_route,
-    )
+def _strict_dialogue_runtime(tmp_path, monkeypatch, *, provider_session_id="PROVIDER-SESSION-1"):
+    """Admit the real CEO root, current OHF writer and immutable dialogue source."""
     from control_plane.ceo_intent import submit_intent
     from control_plane.operator_harness_contract import (
-        AttentionTurnObservation,
-        CapabilityIdentity,
-        CapabilityManifest,
-        ObservedCapabilityIdentity,
-        OperationId,
-        ProcessIdentityObservation,
-        ProcessLiveness,
-        ProviderWriterState,
-        ReconcileObservation,
-        TurnStartObservation,
-        WorkerLocalWakeAckProjection,
+        CapabilityIdentity, CapabilityManifest, ObservedCapabilityIdentity,
+        OperationId, ProcessIdentityObservation,
     )
-    from control_plane.executive_orchestration_principal import (
-        OperatorPrincipalObservation,
-    )
+    from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
     from control_plane.runtime_binding_projection import project_runtime_binding
     from control_plane.session_targets import (
-        SCHEMA as TARGET_SCHEMA,
-        SessionTarget,
-        SessionTargetRegistry,
-        route_digest,
-        route_obligation,
+        SCHEMA as TARGET_SCHEMA, SessionTarget, SessionTargetRegistry,
     )
-    from control_plane.wake_ledger import (
-        AckMode,
-        LedgerPhase,
-        SourceReadHealth,
-        SourceResolution,
-        SourceResolutionCode,
-        TrustedAckContext,
-        WakeLedgerError,
-        WakeRetryPolicy,
-        acknowledge,
-        ack_record,
-        attempt_record,
-        make_delivery_attempt,
-        requested_record,
-        resolved_record,
-    )
-    from control_plane.wake_persist import WakeLedgerRepository
-    from control_plane.wake_events import mint_obligation_id
-    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
-    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.contract_v2 import (
-        PARENT_SCHEMA_V2,
-        build_message_v2,
-        build_parent_v2,
-    )
-    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
-        HistoricalWakeContext,
-        PersistedWakeCarrier,
-    )
+    from integrations.slack_agent_dialogue.contract_v2 import PARENT_SCHEMA_V2, build_parent_v2
     from tests import test_wake_ack_ingress as ack_fixtures
 
     source = _terminal_dialogue_source()
@@ -1508,14 +1452,14 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         operation_id=start_operation,
         fence_generation=sealed.fence_generation,
         lease_token=dispatch.lease_token,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process=process,
     )
     principal = OperatorPrincipalObservation(
         attempt_id=sealed.attempt_id,
         worker_id="worker-a",
         process_generation_id=generation.process_generation_id,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process_identity={
             "pid": process.pid,
             "pgid": process.pgid,
@@ -1630,6 +1574,122 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         worker_id=material["worker_id"],
         evidence_digest=material["evidence_digest"],
     )
+    return SimpleNamespace(
+        attestation=attestation,
+        execution_binding=execution_binding,
+        facts_reader=facts_reader,
+        mcp_capability=mcp_capability,
+        principal=principal,
+        profile=profile,
+        source=source,
+        runtime=runtime,
+        root=root,
+        dispatch=dispatch,
+        sealed=sealed,
+        epoch=epoch,
+        generation=generation,
+        process=process,
+        parent=parent,
+        target=target,
+        ceo_target=ceo_target,
+        registry=registry,
+        binding=binding,
+        candidate=candidate,
+    )
+
+
+def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production carrier crosses the socket without replacing either resolver."""
+
+    from contextlib import contextmanager
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+        effective_dialogue_wake_canary_route,
+    )
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        AttentionTurnObservation,
+        CapabilityIdentity,
+        CapabilityManifest,
+        ObservedCapabilityIdentity,
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+        TurnStartObservation,
+        WorkerLocalWakeAckProjection,
+    )
+    from control_plane.executive_orchestration_principal import (
+        OperatorPrincipalObservation,
+    )
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import (
+        AckMode,
+        LedgerPhase,
+        SourceReadHealth,
+        SourceResolution,
+        SourceResolutionCode,
+        TrustedAckContext,
+        WakeLedgerError,
+        WakeRetryPolicy,
+        acknowledge,
+        ack_record,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+        resolved_record,
+    )
+    from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.wake_events import mint_obligation_id
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_message_v2,
+        build_parent_v2,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
+        PersistedWakeCarrier,
+    )
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    fixture = _strict_dialogue_runtime(tmp_path, monkeypatch)
+    attestation = fixture.attestation
+    execution_binding = fixture.execution_binding
+    facts_reader = fixture.facts_reader
+    mcp_capability = fixture.mcp_capability
+    principal = fixture.principal
+    profile = fixture.profile
+    source = fixture.source
+    runtime = fixture.runtime
+    root = fixture.root
+    dispatch = fixture.dispatch
+    sealed = fixture.sealed
+    epoch = fixture.epoch
+    generation = fixture.generation
+    process = fixture.process
+    parent = fixture.parent
+    target = fixture.target
+    ceo_target = fixture.ceo_target
+    registry = fixture.registry
+    binding = fixture.binding
+    candidate = fixture.candidate
     obligation = mint_obligation(
         wake_kind="dialogue_turn_pending",
         source_kind="agent_dialogue_attention",

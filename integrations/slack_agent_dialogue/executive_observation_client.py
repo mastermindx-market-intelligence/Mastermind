@@ -314,6 +314,23 @@ class ExecutiveDialogueObservationClient(
         ):
             raise WakePreSubmitError("dialogue Wake parent context is invalid") from None
         if source_observation is not None:
+            # Executive-surface CONTINUE attention has no worker identity of
+            # its own. Bind the v2 proposal to the same fresh observation
+            # candidate already validated above, as the v1 correlated envelope
+            # does. The server still reauthorizes this exact current worker.
+            attention_obligation = mint_obligation(
+                wake_kind=obligation.wake_kind,
+                source_kind=obligation.source_kind,
+                source_ref=obligation.source_ref,
+                declared_target_seat=obligation.declared_target_seat,
+                job_id=candidate_value.job_id,
+                attempt_id=candidate_value.attempt_id,
+                root_job_id=candidate_value.root_job_id,
+                workstream=obligation.workstream,
+                source_workstream=obligation.source_workstream,
+                source_created_at=obligation.source_created_at,
+                emitted_at=obligation.emitted_at,
+            )
             if (
                 type(source_observation) is not DialogueSourceObservation
                 or source_observation.thread_ts != thread_ts
