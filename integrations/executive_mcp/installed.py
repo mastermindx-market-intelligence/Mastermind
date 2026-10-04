@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import configparser
+import contextvars
+import copy
 import ctypes
 import hashlib
 import json
@@ -16,6 +18,7 @@ import re
 import shutil
 import stat
 import tempfile
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1714,6 +1717,14 @@ def _inner_packet_timeout(total_timeout: float) -> float:
     return max(0.01, total_timeout - margin)
 
 
+@dataclass
+class _PacketCollection:
+    future: concurrent.futures.Future[dict[str, Any]]
+    subscribers: int = 0
+    physical: int = 0
+    started: bool = False
+
+
 class InstalledBootPacketCollector:
     """Build one canonical packet from immutable code plus stable clean data roots."""
 
@@ -1742,6 +1753,57 @@ class InstalledBootPacketCollector:
         if expected_source_sha is not None and not _valid_sha(expected_source_sha):
             raise ValueError("expected installed source SHA must be lowercase hexadecimal")
         self._expected_source_sha = expected_source_sha
+        self._collection_lock = threading.Lock()
+        self._collections: dict[tuple[str | None, float], _PacketCollection] = {}
+        self._request_collection: contextvars.ContextVar[
+            tuple[tuple[str | None, float], _PacketCollection] | None
+        ] = contextvars.ContextVar("installed_packet_request", default=None)
+
+    def _discard_unused_collection(self, key, collection):
+        if (not collection.started and collection.subscribers == 0
+                and collection.physical == 0 and self._collections.get(key) is collection):
+            del self._collections[key]
+
+    @contextmanager
+    def request_scope(self, *, now: str | None, timeout: float):
+        """Join before executor admission, without starting any physical work.
+
+        Only already-overlapping requests retain this future after publication.
+        A later request cannot discover a completed packet in the collection map.
+        asyncio.to_thread in the existing executor carries this request context.
+        """
+        key = (now, float(timeout))
+        with self._collection_lock:
+            collection = self._collections.get(key)
+            if collection is None:
+                collection = _PacketCollection(concurrent.futures.Future())
+                self._collections[key] = collection
+            collection.subscribers += 1
+        token = self._request_collection.set((key, collection))
+        try:
+            yield
+        finally:
+            self._request_collection.reset(token)
+            with self._collection_lock:
+                collection.subscribers -= 1
+                self._discard_unused_collection(key, collection)
+
+    @contextmanager
+    def physical_scope(self):
+        """Keep an admitted thread's subscription through real physical drain."""
+        bound = self._request_collection.get()
+        if bound is None:
+            yield
+            return
+        key, collection = bound
+        with self._collection_lock:
+            collection.physical += 1
+        try:
+            yield
+        finally:
+            with self._collection_lock:
+                collection.physical -= 1
+                self._discard_unused_collection(key, collection)
 
     def _repository_observation_pair(
         self, source_observer: Callable[[], tuple[str, str]],
@@ -1887,7 +1949,49 @@ class InstalledBootPacketCollector:
         total_timeout = float(timeout)
         if total_timeout <= 0:
             raise GatewayError("backend_unavailable", "installed boot-packet timeout is invalid")
-        deadline = time.monotonic() + total_timeout
+        # Share only overlapping identical source observations. The existing read
+        # executor still owns admission and physical capacity; every caller builds
+        # its own fresh Runtime/inbox projection after this packet is returned.
+        # Remove the entry before publication, so completed packets and failures
+        # are never cached or reused by a later call.
+        key = (now, total_timeout)
+        bound = self._request_collection.get()
+        with self._collection_lock:
+            collection = (bound[1] if bound is not None and bound[0] == key
+                          else self._collections.get(key))
+            if collection is None:
+                collection = _PacketCollection(concurrent.futures.Future())
+                self._collections[key] = collection
+            owner = not collection.started
+            if owner:
+                collection.started = True
+            future = collection.future
+        if not owner:
+            try:
+                return copy.deepcopy(future.result(timeout=total_timeout))
+            except concurrent.futures.TimeoutError as exc:
+                raise GatewayError(
+                    "backend_unavailable",
+                    "installed boot-packet collector exceeded its cumulative deadline",
+                ) from exc
+        try:
+            packet = self._collect_packet(repo=repo, now=now, timeout=total_timeout)
+            shared_packet = copy.deepcopy(packet)
+        except BaseException as exc:
+            with self._collection_lock:
+                if self._collections.get(key) is collection:
+                    del self._collections[key]
+                future.set_exception(exc)
+            raise
+        with self._collection_lock:
+            if self._collections.get(key) is collection:
+                del self._collections[key]
+            future.set_result(shared_packet)
+        return packet
+
+    def _collect_packet(self, *, repo: Path, now: str | None,
+                        timeout: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
 
         def remaining() -> float:
             try:
@@ -2107,6 +2211,23 @@ class InstalledExecutiveReaders(ExecutiveMcpGateway):
             packet_builder=packet_builder, inbox_builder=self._canonical_inbox,
             runtime_factory=lambda _root: _open_readonly_runtime(self._installed_runtime_root),
         )
+
+    async def _run_read_attempt(self, name, arguments, generated_at):
+        collector = self._packet_builder
+        if isinstance(collector, InstalledBootPacketCollector) and name in {
+            "executive_state", "executive_inbox",
+        }:
+            with collector.request_scope(now=self.config.now,
+                                         timeout=self.config.boot_packet_timeout):
+                return await super()._run_read_attempt(name, arguments, generated_at)
+        return await super()._run_read_attempt(name, arguments, generated_at)
+
+    def _read(self, name, arguments, generated_at):
+        collector = self._packet_builder
+        if isinstance(collector, InstalledBootPacketCollector):
+            with collector.physical_scope():
+                return super()._read(name, arguments, generated_at)
+        return super()._read(name, arguments, generated_at)
 
     def _installed_packet(self, **kwargs: Any) -> dict[str, Any]:
         """Preserve #697's optional degraded path when no boot runtime is bound."""

@@ -170,6 +170,19 @@ def test_six_effect_actions_remain_backward_compatible() -> None:
     assert request["schema"] == REQUEST_SCHEMA
 
 
+def _complete_failed_status_receipt() -> dict:
+    return {
+        "schema": "mastermind.executive_privileged_action_receipt.v1",
+        "request_id": "req-001", "request_sha256": "0" * 64,
+        "action": "executive.services.start", "effect_class": "SERVICE_CONTROL",
+        "started_at": "2026-09-14T00:00:00Z", "finished_at": "2026-09-14T00:00:01Z",
+        "exit_code": 65, "outcome": "FAILED", "release_sha": "b" * 40,
+        "broker_version": "1",
+        "stdout_bytes": 0, "stdout_sha256": "0" * 64, "stdout_excerpt": "",
+        "stderr_bytes": 0, "stderr_sha256": "0" * 64, "stderr_excerpt": "",
+    }
+
+
 def test_main_status_terminal_exit_code_is_zero_regardless_of_stored_outcome(monkeypatch, capsys) -> None:
     response = {
         "schema": "mastermind.executive_privileged_action_response.v1",
@@ -178,7 +191,7 @@ def test_main_status_terminal_exit_code_is_zero_regardless_of_stored_outcome(mon
         "status": "TERMINAL",
         "request_id": "req-001",
         "installed_release_sha": "a" * 40,
-        "receipt": {"request_id": "req-001", "outcome": "FAILED", "exit_code": 65},
+        "receipt": _complete_failed_status_receipt(),
     }
     monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
     rc = mmx_admin.main(["status", "--request-id", "req-001"])
@@ -273,6 +286,7 @@ def test_main_status_effect_unknown_exit_code_is_75(monkeypatch) -> None:
         "status": "EFFECT_UNKNOWN",
         "request_id": "req-001",
         "installed_release_sha": "a" * 40,
+        "marker_release_sha": "b" * 40,
     }
     monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
     assert mmx_admin.main(["status", "--request-id", "req-001"]) == 75
@@ -351,7 +365,7 @@ def test_status_client_refuses_uncorrelated_or_malformed_terminal(monkeypatch, p
         "schema": "mastermind.executive_privileged_action_response.v1", "ok": True,
         "query": True, "status": "TERMINAL", "request_id": "req-001",
         "installed_release_sha": "a" * 40,
-        "receipt": {"request_id": "req-001", "outcome": "FAILED", "exit_code": 65},
+        "receipt": _complete_failed_status_receipt(),
     }
     response.update(patch)
     monkeypatch.setattr(mmx_admin, "send_status_request", lambda *_a, **_k: response)
@@ -426,3 +440,44 @@ def test_client_builds_closed_readside_service_actions() -> None:
 def test_readside_service_actions_reject_effect_arguments(action: str) -> None:
     with pytest.raises(PrivilegedActionError, match="arguments"):
         build_request([action, "--slot-id", "codex-pro-01"])
+
+
+
+def test_shared_status_client_preserves_reconciled_not_applied_history():
+    from control_plane.executive_privileged_client import validate_status_response
+
+    response = _reconciled_status_response()
+    validated = validate_status_response(response, expected_request_id="req-001")
+    assert validated == response
+    assert validated["status"] == "RECONCILED_NOT_APPLIED"
+    assert validated["reconciliation"]["classification"] == "NOT_APPLIED"
+    assert validated["reconciliation"] is not response["reconciliation"]
+    assert "receipt" not in validated
+
+
+@pytest.mark.parametrize("mutation", [
+    "extra", "marker_missing", "marker_invalid", "marker_mismatch",
+    "record_missing", "wrong_request", "wrong_action", "unproven_absence",
+])
+def test_shared_status_client_refuses_uncorrelated_reconciliation(mutation):
+    from control_plane.executive_privileged_client import validate_status_response
+
+    response = _reconciled_status_response()
+    if mutation == "extra":
+        response["ready"] = True
+    elif mutation == "marker_missing":
+        del response["marker_release_sha"]
+    elif mutation == "marker_invalid":
+        response["marker_release_sha"] = True
+    elif mutation == "marker_mismatch":
+        response["marker_release_sha"] = "c" * 40
+    elif mutation == "record_missing":
+        del response["reconciliation"]
+    elif mutation == "wrong_request":
+        response["reconciliation"]["target_request_id"] = "req-other"
+    elif mutation == "wrong_action":
+        response["reconciliation"]["target_action"] = "executive.worker_auth.verify_only"
+    elif mutation == "unproven_absence":
+        response["reconciliation"]["verify_ready_process_absent"] = 1
+    with pytest.raises(RuntimeError):
+        validate_status_response(response, expected_request_id="req-001")

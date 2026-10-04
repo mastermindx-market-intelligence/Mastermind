@@ -181,11 +181,14 @@ def test_shared_index_stays_group_readable_after_control_cleanliness(
     real_run_bytes = executive_workspace._run_bytes
 
     def observed_run_bytes(argv, *, cwd, env):
-        recorded_envs.append(dict(env))
-        recorded_argv.append(tuple(argv))
-        index = Path(cwd) / ".git" / "index"
-        if index.exists() and not index_mode_before_status:
-            index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
+        # Construction now reads the pinned profile from the source. This
+        # regression guards the distinct post-sharing workspace observations.
+        if Path(cwd) != source:
+            recorded_envs.append(dict(env))
+            recorded_argv.append(tuple(argv))
+            index = Path(cwd) / ".git" / "index"
+            if index.exists() and not index_mode_before_status:
+                index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
         return real_run_bytes(argv, cwd=cwd, env=env)
 
     monkeypatch.setattr(executive_workspace, "_run_bytes", observed_run_bytes)

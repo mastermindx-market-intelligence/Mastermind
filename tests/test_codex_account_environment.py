@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+from control_plane import codex_account_environment as account_environment
 from control_plane.codex_account_environment import (
     CodexAccountError, account_readiness, native_codex_account_scope,
 )
@@ -93,6 +94,49 @@ def test_rejects_symlink_home_and_symlink_ancestor(home, tmp_path):
     with pytest.raises(CodexAccountError):
         with native_codex_account_scope(link / "nested"):
             pytest.fail("ancestor alias admitted")
+
+
+@pytest.mark.parametrize(
+    ("platform", "path", "canonical", "accepted"),
+    [
+        (
+            "darwin",
+            Path("/var/db/mastermind-executive/workers/codex-01/provider-home"),
+            Path("/private/var/db/mastermind-executive/workers/codex-01/provider-home"),
+            True,
+        ),
+        ("linux", Path("/var/db/provider-home"), Path("/private/var/db/provider-home"), False),
+        ("darwin", Path("/tmp/provider-home"), Path("/private/tmp/provider-home"), False),
+        ("darwin", Path("/var/db/provider-home"), Path("/private/var/other-home"), False),
+    ],
+)
+def test_only_darwin_system_var_alias_is_admitted(
+    monkeypatch, platform, path, canonical, accepted,
+):
+    monkeypatch.setattr(account_environment.sys, "platform", platform)
+    assert account_environment._is_macos_var_alias(path, canonical) is accepted
+
+
+def test_macos_var_alias_preserves_principal_home_refusal(home, monkeypatch):
+    canonical = Path("/private/var/db/mastermind-executive/workers/codex-01/provider-home")
+    original_resolve = Path.resolve
+
+    def alias_resolve(path, strict=False):
+        if path == home:
+            return canonical
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", alias_resolve)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(
+        account_environment,
+        "_is_macos_var_alias",
+        lambda path, observed: path == home and observed == canonical,
+    )
+
+    with pytest.raises(CodexAccountError, match="PRIVATE_DEDICATED"):
+        account_environment._home(home)
+    assert account_environment._home(home, principal_home_admitted=True) == home
 
 
 @pytest.mark.parametrize("name", ["auth.json", ".executive-native-account.lock"])
@@ -322,3 +366,107 @@ def test_missing_and_api_auth_are_not_native_capacity(account, expected):
     result = account_readiness(account, {"rateLimits": {"primary": window(), "secondary": window()}}, now=1000)
     assert result["auth_state"] == expected
     assert result["capacity_state"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("other_key", ["primary", "secondary"])
+@pytest.mark.parametrize("kind,expected", [
+    ("null", "NOT_APPLICABLE"), ("missing", "MISSING"),
+    ("malformed", "INVALID_OR_STALE"), ("observed", "OBSERVED"),
+])
+def test_exhausted_projection_preserves_each_window_evidence_state(other_key, kind, expected):
+    exhausted_key = "secondary" if other_key == "primary" else "primary"
+    bucket = {exhausted_key: window(100)}
+    if kind == "null":
+        bucket[other_key] = None
+    elif kind == "malformed":
+        bucket[other_key] = {"usedPercent": "secret-not-a-measurement"}
+    elif kind == "observed":
+        bucket[other_key] = window(25)
+    before = json.dumps(bucket, sort_keys=True)
+    result = account_readiness(ACCOUNT, {"rateLimits": bucket}, now=1000)
+    assert result["capacity_state"] == "EXHAUSTED"
+    assert result["window_states"] == {exhausted_key: "OBSERVED", other_key: expected}
+    assert (other_key in result["windows"]) is (kind == "observed")
+    assert result["admission_granted"] is False
+    assert "secret" not in json.dumps(result)
+    assert json.dumps(bucket, sort_keys=True) == before
+    assert json.loads(json.dumps(result))["window_states"] == result["window_states"]
+
+
+@pytest.mark.parametrize("bad", [True, {}, window(float("nan")), {**window(), "resetsAt": 999}])
+def test_invalid_window_state_does_not_become_not_applicable(bad):
+    result = account_readiness(ACCOUNT, {"rateLimits": {"primary": window(), "secondary": bad}}, now=1000)
+    assert result["window_states"]["secondary"] == "INVALID_OR_STALE"
+    assert result["capacity_state"] == "UNKNOWN"
+
+
+@pytest.mark.parametrize("account", [{}, {"account": None}, {"account": {"type": "apiKey"}}])
+def test_unqualified_identity_cannot_attest_window_applicability(account):
+    result = account_readiness(account, {"rateLimits": {"primary": window(), "secondary": None}}, now=1000)
+    assert result["window_states"] == {"primary": "UNKNOWN", "secondary": "UNKNOWN"}
+    assert result["windows"] == {}
+    assert result["admission_granted"] is False
+
+
+@pytest.mark.parametrize("buckets", [{}, None, {"another": {"primary": window(), "secondary": None}}])
+def test_missing_named_bucket_cannot_borrow_legacy_window_states(buckets):
+    result = account_readiness(ACCOUNT, {"rateLimitsByLimitId": buckets,
+        "rateLimits": {"primary": window(), "secondary": None}}, now=1000)
+    assert result["window_states"] == {"primary": "UNKNOWN", "secondary": "UNKNOWN"}
+    assert result["capacity_state"] == "UNKNOWN"
+
+
+def test_two_not_applicable_windows_do_not_establish_unlimited_capacity():
+    result = account_readiness(ACCOUNT, {"rateLimits": {"primary": None, "secondary": None}}, now=1000)
+    assert result["window_states"] == {"primary": "NOT_APPLICABLE", "secondary": "NOT_APPLICABLE"}
+    assert result["capacity_state"] == "UNKNOWN"
+    assert result["windows"] == {}
+    assert result["admission_granted"] is False
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("null", "NOT_APPLICABLE"), ("missing", "MISSING"), ("malformed", "INVALID_OR_STALE"),
+])
+def test_native_probe_json_consumer_retains_window_evidence(home, monkeypatch, kind, expected):
+    from scripts.ohf import laboratory
+    private(home / "auth.json", auth())
+    bucket = {"primary": {**window(100), "resetsAt": int(time.time()) + 3600}}
+    if kind == "null":
+        bucket["secondary"] = None
+    elif kind == "malformed":
+        bucket["secondary"] = {"usedPercent": "secret-invalid"}
+    calls = []
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+        def start(self):
+            pass
+        def request(self, method, *args, **kwargs):
+            calls.append(method)
+            if method == "initialize":
+                return {"userAgent": "fixture-only"}
+            if method == "account/read":
+                return ACCOUNT
+            assert method == "account/rateLimits/read"
+            return {"rateLimits": bucket}
+        def notify(self, *args):
+            pass
+        def graceful_close(self):
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=True, leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=False,
+                termination_outcome="fixture")
+
+    monkeypatch.setattr(laboratory, "AppServerClient", Client)
+    with native_codex_account_scope(home) as environment:
+        result = account_environment.probe_native_account(environment, Path("/not-launched"))
+    packet = json.loads(json.dumps(result))
+    assert packet["state"] == "NATIVE_READS_COMPLETED"
+    assert packet["account"]["window_states"] == {"primary": "OBSERVED", "secondary": expected}
+    assert packet["account"]["capacity_state"] == "EXHAUSTED"
+    assert packet["account"]["admission_granted"] is False
+    assert packet["stop"]["private_group_empty"] is True
+    assert calls == ["initialize", "account/read", "account/rateLimits/read"]
+    assert "secret" not in json.dumps(packet)

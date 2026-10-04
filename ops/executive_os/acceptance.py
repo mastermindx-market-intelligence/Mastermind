@@ -32,6 +32,11 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from ops.executive_os.acceptance_maintenance import Maintenance, MaintenanceError
+from ops.executive_os.install_source_policy import (
+    InstallSourcePolicyError,
+    validate_acceptance_source,
+)
 from ops.executive_os.a2_agent_relay_enrollment import (
     RELAY_GID as AGENT_RELAY_GID,
     RELAY_GROUP as AGENT_RELAY_GROUP,
@@ -313,6 +318,34 @@ def _canonical_canary_paths(config: Mapping[str, Any]) -> dict[str, Path]:
     }
 
 
+def _configured_assignment_root(path: Path) -> Path:
+    """Resolve a trusted configured root, including the macOS /var alias."""
+    try:
+        if not path.is_absolute():
+            raise ValueError("relative configured root")
+        canonical = path.resolve(strict=True)
+        if not canonical.is_dir():
+            raise ValueError("configured root is not a directory")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise AcceptanceError("configured assignment root is unavailable") from exc
+    return canonical
+
+
+def _canonical_durable_path(raw: str) -> Path:
+    """Require producer evidence to be canonical; never repair its spelling."""
+    path = Path(raw)
+    try:
+        if (
+            not path.is_absolute()
+            or raw != os.fspath(path)
+            or path.resolve(strict=True) != path
+        ):
+            raise ValueError("noncanonical durable path")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise AcceptanceError("durable assignment paths escaped their configured roots") from exc
+    return path
+
+
 def _durable_assignment_paths(
     job: Mapping[str, Any],
     attempt: Mapping[str, Any],
@@ -337,16 +370,48 @@ def _durable_assignment_paths(
         or not isinstance(result_raw, str)
     ):
         raise AcceptanceError("durable assignment identity is incomplete")
-    workspace = Path(workspace_raw)
-    run_dir = Path(result_raw).parent.parent
+    workspace_root = _configured_assignment_root(workspace_root)
+    run_root = _configured_assignment_root(run_root)
+    workspace = _canonical_durable_path(workspace_raw)
+    result = Path(result_raw)
+    run_dir = result.parent.parent
     if (
-        not workspace.is_absolute()
-        or workspace.parent != workspace_root
+        workspace.parent != workspace_root
+        or result_raw != os.fspath(result)
         or run_dir != run_root / attempt_id
-        or Path(result_raw) != run_dir / "output" / "result.json"
+        or result != run_dir / "output" / "result.json"
+        or not workspace.is_dir()
+        or not run_dir.is_dir()
+        or not result.parent.is_dir()
+        or attempt.get("status") not in {"COMPLETED", "LOST"}
     ):
         raise AcceptanceError("durable assignment paths escaped their configured roots")
+    _canonical_durable_path(os.fspath(run_dir))
+    _canonical_durable_path(os.fspath(result.parent))
+    try:
+        result_info = result.lstat()
+    except FileNotFoundError as exc:
+        # LOST preserves the admitted path, not a provider's completed output.
+        if attempt["status"] != "LOST":
+            raise AcceptanceError("completed assignment result is missing") from exc
+    else:
+        if not stat.S_ISREG(result_info.st_mode) or result_info.st_nlink != 1:
+            raise AcceptanceError("assignment result is not a single regular file")
+        _canonical_durable_path(result_raw)
     return workspace, run_dir
+
+
+
+def _durable_rotation_paths(
+    *, workspace_root: Path, job_id: str, attempt_id: str,
+    archive_path: str, receipt_path: str,
+) -> tuple[Path, Path]:
+    root = _configured_assignment_root(workspace_root)
+    expected_archive = root / ".lost-attempts" / job_id / attempt_id
+    expected_receipt = expected_archive.with_name(f"{attempt_id}.rotation.json")
+    if archive_path != os.fspath(expected_archive) or receipt_path != os.fspath(expected_receipt):
+        raise AcceptanceError("workspace rotation proof path drifted")
+    return _canonical_durable_path(archive_path), _canonical_durable_path(receipt_path)
 
 
 def _validate_assignment_seal_payload(
@@ -993,7 +1058,7 @@ def _prepare_acceptance_receipt_root(
 class Acceptance:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.source_repository = args.source_repo.resolve(strict=True)
+        self.source_repository = args.source_repo
         self.expected_sha = args.expected_sha
         self.operator_user = args.operator_user
         self.python = Path(sys.executable).resolve(strict=True)
@@ -1008,6 +1073,7 @@ class Acceptance:
         self.worker_config: dict[str, Any] = {}
         self.receipt_root = RUNTIME_ROOT / "control" / "acceptance" / self.expected_sha
         self.services_started = False
+        self.maintenance: Maintenance | None = None
         self.helper: subprocess.Popen[bytes] | None = None
         self.helper_pid: int | None = None
         self.nonexecutive_disabled_before: str | None = None
@@ -1124,7 +1190,7 @@ class Acceptance:
             self._write_json(persist, response)
         return response
 
-    def _broker_status(self, persist: str) -> dict[str, Any]:
+    def _broker_status(self, persist: str | None = None) -> dict[str, Any]:
         code = (
             "import json,sys; "
             "from control_plane.executive_worker_broker import WorkerBrokerClient; "
@@ -1181,8 +1247,21 @@ class Acceptance:
             or value.get("quarantined_reason") is not None
         ):
             raise AcceptanceError("worker broker did not attest the dedicated principal boundary")
-        self._write_json(persist, value)
+        if persist is not None:
+            self._write_json(persist, value)
         return value
+
+    def _wait_replacement_broker(self, expected_pid: int) -> dict[str, Any]:
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
+            try:
+                broker = self._broker_status()
+                if broker.get("broker_pid") == expected_pid:
+                    return broker
+            except AcceptanceError:
+                pass
+            time.sleep(0.25)
+        raise AcceptanceError("replacement worker broker socket did not become ready")
 
     def _launchd_pid(self, label: str) -> int | None:
         completed = _run(
@@ -1464,12 +1543,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         attempt_id = str(attempt["attempt_id"])
         expected_seal = (
-            Path(self.config["receipts_root"])
+            _configured_assignment_root(Path(self.config["receipts_root"]))
             / attempt_id
             / "assignment-seal-receipt.json"
         )
-        if seal_path is not None and Path(seal_path) != expected_seal:
+        if seal_path is not None and seal_path != os.fspath(expected_seal):
             raise AcceptanceError("assignment seal receipt path drifted")
+        _canonical_durable_path(os.fspath(expected_seal))
         info = expected_seal.lstat()
         if (
             stat.S_ISLNK(info.st_mode)
@@ -1508,6 +1588,15 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             },
         )
         return workspace, run_dir
+
+    def _source_tree_sha(self) -> str:
+        try:
+            return validate_acceptance_source(
+                source_repo=self.source_repository,
+                expected_sha=self.expected_sha,
+            )
+        except InstallSourcePolicyError as exc:
+            raise AcceptanceError(str(exc)) from exc
 
     def validate_install(self) -> None:
         if os.geteuid() != 0 or sys.platform != "darwin":
@@ -1625,44 +1714,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             agent_relay_present=agent_relay_present,
         )
 
-        head = _run(
-            ["/usr/bin/git", "-C", self.source_repository, "rev-parse", "HEAD"],
-            label="source HEAD",
-        ).stdout.decode().strip()
-        remote = _run(
-            [
-                "/usr/bin/git",
-                "-C",
-                self.source_repository,
-                "rev-parse",
-                "refs/remotes/origin/master",
-            ],
-            label="origin/master",
-        ).stdout.decode().strip()
-        dirty = _run(
-            [
-                "/usr/bin/git",
-                "--no-optional-locks",
-                "-C",
-                self.source_repository,
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=normal",
-            ],
-            label="source cleanliness",
-        ).stdout
-        if head != self.expected_sha or remote != self.expected_sha or dirty:
-            raise AcceptanceError("source is not a clean checkout of exact origin/master")
-        tree_sha = _run(
-            [
-                "/usr/bin/git",
-                "-C",
-                self.source_repository,
-                "rev-parse",
-                f"{self.expected_sha}^{{tree}}",
-            ],
-            label="source tree identity",
-        ).stdout.decode().strip()
+        tree_sha = self._source_tree_sha()
         _run(
             [
                 self.python,
@@ -1907,17 +1959,21 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             raise AcceptanceError("control environment canary file is not root/control 0440")
 
         database = Path(self.config["runtime_root"]) / "data" / "control_plane" / "executive.sqlite3"
-        if database.exists() or database.is_symlink():
-            raise AcceptanceError("Executive runtime is not clean; archive it before acceptance")
-        for field, label in (
-            ("proof_workspace_root", "proof workspace root"),
-            ("worker_runs_root", "worker runs root"),
-            ("receipts_root", "launch receipts root"),
-            ("backup_root", "backup root"),
-        ):
-            _empty_directory(Path(self.config[field]), label=label)
-        if Path(self.config["secret_canary_receipt_path"]).exists():
-            raise AcceptanceError("a prior secret-canary receipt exists")
+        maintenance_digest = getattr(self.args, "maintenance_descriptor_sha256", None)
+        if maintenance_digest is not None:
+            self.maintenance = Maintenance(self.expected_sha, maintenance_digest, self.config)
+        else:
+            if database.exists() or database.is_symlink():
+                raise AcceptanceError("Executive runtime is not clean; archive it before acceptance")
+            for field, label in (
+                ("proof_workspace_root", "proof workspace root"),
+                ("worker_runs_root", "worker runs root"),
+                ("receipts_root", "launch receipts root"),
+                ("backup_root", "backup root"),
+            ):
+                _empty_directory(Path(self.config[field]), label=label)
+            if Path(self.config["secret_canary_receipt_path"]).exists():
+                raise AcceptanceError("a prior secret-canary receipt exists")
         _prepare_acceptance_receipt_root(
             self.receipt_root,
             control_uid=self.control_identity.pw_uid,
@@ -1987,7 +2043,16 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         production_sentinel = paths["forbidden_production_sentinel"]
         protected = [admin_sentinel, other_sentinel, production_sentinel]
         for path in protected:
-            self._create_sentinel(path)
+            if getattr(self, "maintenance", None) is not None and path != admin_sentinel:
+                info = path.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or info.st_uid != self.control_identity.pw_uid
+                        or info.st_gid != self.control_group.gr_gid
+                        or stat.S_IMODE(info.st_mode) != 0o600
+                        or info.st_size != 65 or has_macos_acl(path)):
+                    raise AcceptanceError("preserved canary sentinel identity drifted")
+            else:
+                self._create_sentinel(path)
 
     def install_secret_canary_receipt(
         self,
@@ -2328,7 +2393,137 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             return True
         return True
 
-    def interrupted_job(self, old_control_pid: int) -> tuple[str, int]:
+    def _assert_owner_loss_reconciliation(
+        self, outcome: Any, evidence: Any, startup_sweep: dict[str, Any], worker_pid: int,
+    ) -> None:
+        if (
+            not isinstance(outcome, dict)
+            or outcome.get("status") != "MISSING_LOST"
+            or outcome.get("process_was_live") is not False
+        ):
+            raise AcceptanceError("restart did not prove exact missing owner loss")
+        if (
+            not isinstance(evidence, dict)
+            or evidence.get("schema_version") != "mastermind.executive_reconciliation_evidence/v1"
+            or evidence.get("outcome") != {**outcome, "uid_sweep_receipt_path": None}
+        ):
+            raise AcceptanceError("durable reconciliation outcome differs from exact live outcome")
+        sweep = evidence.get("uid_sweep")
+        preceding_startup = (
+            sweep.get("preceding_broker_startup_sweep") if isinstance(sweep, dict) else None
+        )
+        if (
+            not isinstance(sweep, dict)
+            or not _uid_sweep_is_passing(sweep)
+            or sweep.get("reason") != "status_absence"
+            or sweep.get("worker_uid") != self.worker_identity.pw_uid
+            or sweep.get("broker_pid") != worker_pid
+            or preceding_startup != startup_sweep
+        ):
+            raise AcceptanceError("control-owned startup and fresh UID sweeps did not pass")
+        try:
+            startup_at = datetime.fromisoformat(startup_sweep["observed_at"])
+            absent_at = datetime.fromisoformat(sweep["observed_at"])
+            if absent_at.utcoffset() is None or absent_at < startup_at:
+                raise ValueError("absence observation predates startup")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AcceptanceError("fresh absence sweep time is invalid") from exc
+
+    def _restart_interrupted_owners(
+        self, old_control_pid: int, old_worker_pid: int, helper_pid: int,
+        attempt_started_at: str,
+    ) -> tuple[int, int, dict[str, Any]]:
+        # A control-only restart must recover the existing broker-owned run.
+        # For this LOST proof, interrupt both canonical owners, control first.
+        _run(
+            ["/bin/launchctl", "kill", "SIGKILL", f"system/{CONTROL_LABEL}"],
+            label="abrupt active control-service kill",
+        )
+        _run(
+            ["/bin/launchctl", "kill", "SIGKILL", f"system/{WORKER_LABEL}"],
+            label="abrupt active worker-broker kill",
+        )
+        worker_pid = self._wait_pid(WORKER_LABEL, different_from=old_worker_pid)
+        control_pid = self._wait_control(different_from=old_control_pid)
+        pending = self._control_request(
+            "status", persist="interrupted-preactivation-control-status.json"
+        )["result"]
+        if (
+            pending.get("service_state") != "AWAITING_CANARY"
+            or pending.get("startup_reconciliation") != []
+        ):
+            raise AcceptanceError("replacement control reconciled before canary activation")
+        self._assert_process_principal(
+            control_pid, self.control_identity.pw_uid, self.control_group.gr_gid,
+            "replacement control service",
+        )
+        self._assert_process_principal(
+            worker_pid, self.worker_identity.pw_uid, self.worker_group.gr_gid,
+            "replacement worker broker",
+        )
+        broker = self._wait_replacement_broker(worker_pid)
+        startup = broker.get("startup_sweep")
+        if (
+            broker.get("adapter_id") != "codex-cli"
+            or broker.get("broker_pid") != worker_pid
+            or broker.get("worker_uid") != self.worker_identity.pw_uid
+            or broker.get("active_run_id") is not None
+            or broker.get("active_operator_attempt_id") is not None
+            or broker.get("active_operator_generation_id") is not None
+            or broker.get("starting") is not False
+            or broker.get("validation_busy") is not False
+            or broker.get("status_sweep_busy") is not False
+            or broker.get("quarantined_reason") is not None
+            or not isinstance(startup, dict)
+            or not _uid_sweep_is_passing(startup)
+            or startup.get("reason") != "broker_startup"
+            or startup.get("worker_uid") != self.worker_identity.pw_uid
+            or startup.get("broker_pid") != worker_pid
+            or helper_pid not in startup.get("residual_pids_before", [])
+        ):
+            raise AcceptanceError("replacement broker has no exact startup cleanup proof")
+        try:
+            started = datetime.fromisoformat(attempt_started_at)
+            swept = datetime.fromisoformat(startup["observed_at"])
+            if started.utcoffset() is None or swept.utcoffset() is None or swept <= started:
+                raise ValueError("startup sweep predates the interrupted attempt")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AcceptanceError("replacement broker startup time is invalid") from exc
+        if self._pid_exists(helper_pid):
+            raise AcceptanceError("replacement startup left the detached helper alive")
+        self._write_json("interrupted-preactivation-broker-status.json", broker)
+        self._activate_live_canary(control_pid, worker_pid)
+        return control_pid, worker_pid, startup
+
+    def _recover_requeued_proof_capacity(
+        self, job_id: str, lost_attempt: dict[str, Any]
+    ) -> None:
+        """Requeue leaves ERROR capacity unheld and undispatchable.
+
+        Requalify only this fixed proof quota using the existing broker's fresh
+        startup/absence evidence before permitting the higher-fence dispatch.
+        """
+        response = self._control_request(
+            "recover-proof-capacity", job_id, lost_attempt["attempt_id"],
+            persist="requeued-capacity-recovery.json",
+        )
+        recovery = response.get("result")
+        snapshot = recovery.get("previous_snapshot") if isinstance(recovery, dict) else None
+        if (
+            not isinstance(recovery, dict) or not isinstance(snapshot, dict)
+            or recovery.get("schema_version") != "mastermind.executive_proof_capacity_recovery/v1"
+            or recovery.get("job_id") != job_id
+            or recovery.get("lost_attempt_id") != lost_attempt["attempt_id"]
+            or recovery.get("worker_id") != lost_attempt.get("worker_id")
+            or recovery.get("quota_class") != lost_attempt.get("quota_class")
+            or recovery.get("status") != "AVAILABLE"
+            or snapshot.get("fence_generation") != lost_attempt.get("fence_generation")
+        ):
+            raise AcceptanceError("proof quota recovery receipt is incomplete")
+
+    def interrupted_job(
+        self, old_control_pid: int, old_worker_pid: int
+    ) -> tuple[str, int, int]:
         created = self._control_request("create-proof-job", persist="interrupted-job-created.json")
         job_id = created["result"].get("job_id")
         if not isinstance(job_id, str):
@@ -2344,17 +2539,16 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         interrupted_attempt_id = running.get("current_attempt_id")
         if not isinstance(interrupted_attempt_id, str):
             raise AcceptanceError("active proof job has no durable attempt identity")
-        self._assert_attempt_attestation(running, "interrupted-attempt-before-kill.json")
+        interrupted_attempt = self._assert_attempt_attestation(
+            running, "interrupted-attempt-before-kill.json"
+        )
         helper_pid = self._spawn_detached_helper()
         still_active = self._job(job_id)
         if still_active.get("status") not in {"RUNNING", "CHECKPOINTED"}:
             raise AcceptanceError("proof job finished before abrupt-restart fault injection")
-        _run(
-            ["/bin/launchctl", "kill", "SIGKILL", f"system/{CONTROL_LABEL}"],
-            label="abrupt active control-service kill",
+        new_pid, new_worker_pid, startup_sweep = self._restart_interrupted_owners(
+            old_control_pid, old_worker_pid, helper_pid, interrupted_attempt.get("started_at")
         )
-        new_pid = self._wait_control(different_from=old_control_pid)
-        self._activate_live_canary(new_pid, self._wait_pid(WORKER_LABEL))
         lost = self._wait_job(job_id, {"LOST"}, timeout=90.0)
         if not lost.get("checkpoint"):
             raise AcceptanceError("LOST attempt did not preserve its checkpoint")
@@ -2381,8 +2575,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         evidence_path_raw = (
             outcome.get("uid_sweep_receipt_path") if isinstance(outcome, dict) else None
         )
-        if not isinstance(evidence_path_raw, str):
-            raise AcceptanceError("restart reconciliation has no control-owned UID evidence")
+        if (
+            not isinstance(outcome, dict)
+            or outcome.get("status") != "MISSING_LOST"
+            or outcome.get("process_was_live") is not False
+            or not isinstance(evidence_path_raw, str)
+        ):
+            raise AcceptanceError("restart reconciliation has no exact MISSING_LOST UID evidence")
         evidence_path = Path(evidence_path_raw)
         evidence_info = evidence_path.lstat()
         if (
@@ -2393,20 +2592,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         ):
             raise AcceptanceError("restart reconciliation UID evidence is not control-private")
         evidence = _safe_json(evidence_path)
-        sweep = evidence.get("uid_sweep")
-        terminal_sweep = (
-            sweep.get("preceding_terminal_sweep") if isinstance(sweep, dict) else None
+        self._assert_owner_loss_reconciliation(
+            outcome, evidence, startup_sweep, new_worker_pid
         )
-        if (
-            not isinstance(sweep, dict)
-            or not _uid_sweep_is_passing(sweep)
-            or sweep.get("reason") != "status_absence"
-            or not isinstance(terminal_sweep, dict)
-            or not _uid_sweep_is_passing(terminal_sweep)
-            or terminal_sweep.get("reason") != "run_terminal"
-            or helper_pid not in terminal_sweep.get("residual_pids_before", [])
-        ):
-            raise AcceptanceError("control-owned terminal and fresh UID sweeps did not pass")
         self._write_json("interrupted-reconciliation-evidence.json", evidence)
 
         seal_path_raw = (
@@ -2444,16 +2632,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             or not isinstance(rotation.get("receipt_path"), str)
         ):
             raise AcceptanceError("workspace rotation evidence is incomplete")
-        archive_path = Path(rotation["archive_path"])
-        expected_archive = (
-            Path(self.config["proof_workspace_root"])
-            / ".lost-attempts"
-            / job_id
-            / interrupted_attempt_id
+        archive_path, rotation_receipt_path = _durable_rotation_paths(
+            workspace_root=Path(self.config["proof_workspace_root"]),
+            job_id=job_id,
+            attempt_id=interrupted_attempt_id,
+            archive_path=rotation["archive_path"],
+            receipt_path=rotation["receipt_path"],
         )
-        if archive_path != expected_archive:
-            raise AcceptanceError("archived prior workspace path drifted")
-        rotation_receipt_path = Path(rotation["receipt_path"])
         rotation_info = rotation_receipt_path.lstat()
         archive_info = archive_path.lstat()
         fresh_info = prior_workspace.lstat()
@@ -2501,6 +2686,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 "archived_raw_worker_probe": archived_probe,
             },
         )
+        self._recover_requeued_proof_capacity(job_id, lost_attempt)
         dispatch_response = self._control_request(
             "dispatch", job_id, persist="requeued-dispatch.json"
         )
@@ -2517,6 +2703,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             not isinstance(fresh_attempt_id, str)
             or dispatched_attempt.get("job_id") != job_id
             or fresh_attempt_id == interrupted_attempt_id
+            or not isinstance(dispatched_attempt.get("fence_generation"), int)
+            or dispatched_attempt["fence_generation"] <= lost_attempt["fence_generation"]
         ):
             raise AcceptanceError("requeued dispatch returned no fresh attempt identity")
         fresh_probe = self._raw_worker_path_probe(
@@ -2564,7 +2752,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 "raw_worker_probe": archive_after_terminal,
             },
         )
-        return job_id, new_pid
+        return job_id, new_pid, new_worker_pid
 
     def backup_restore(self, expected_jobs: Sequence[str]) -> None:
         backup = self._control_request("backup", persist="backup-created.json")
@@ -2746,11 +2934,23 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
     def run(self) -> None:
         self.validate_install()
         self.initialize_runtime_and_fixtures()
-        control_pid, _worker_pid = self.start_and_attest_services()
+        control_pid, worker_pid = self.start_and_attest_services()
+        if self.maintenance is not None and self.maintenance.predecessor_recovery_required:
+            descriptor = self.maintenance.descriptor
+            self._control_request(
+                "recover-proof-capacity", descriptor["recovery_job_id"],
+                descriptor["recovery_attempt_id"], persist="predecessor-capacity-recovered.json",
+            )
         success_job_id = self.successful_job()
         control_pid = self.restart_after_completion(success_job_id, control_pid)
-        interrupted_job_id, control_pid = self.interrupted_job(control_pid)
+        interrupted_job_id, control_pid, worker_pid = self.interrupted_job(
+            control_pid, worker_pid
+        )
+        if self.maintenance is not None:
+            self.maintenance.verify([success_job_id, interrupted_job_id])
         self.backup_restore((success_job_id, interrupted_job_id))
+        if self.maintenance is not None:
+            self.maintenance.verify([success_job_id, interrupted_job_id])
         control_pid = self._wait_control()
         self._wait_pid(WORKER_LABEL)
         if self._control_request("status")["result"].get("service_state") != "READY":
@@ -2794,6 +2994,10 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             },
         )
 
+        if self.maintenance is not None:
+            self.maintenance.finish(
+                [success_job_id, interrupted_job_id], self.receipt_root / "acceptance-summary.json")
+
     def cleanup_after_failure(self) -> None:
         if self.services_started:
             self._capture_failure_observability()
@@ -2817,6 +3021,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-repo", type=Path, required=True)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--operator-user", required=True)
+    parser.add_argument("--maintenance-descriptor-sha256",
+                        help="Exact root-sealed maintenance descriptor; default remains clean-only.")
     parser.add_argument("--success-timeout", type=float, default=2400.0)
     parser.add_argument("--active-timeout", type=float, default=120.0)
     return parser
@@ -2834,7 +3040,7 @@ def main() -> int:
     try:
         acceptance = Acceptance(args)
         acceptance.run()
-    except (AcceptanceError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
+    except (AcceptanceError, MaintenanceError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
         if acceptance is not None:
             acceptance.cleanup_after_failure()
         print(f"acceptance error: {type(exc).__name__}: {exc}", file=sys.stderr)

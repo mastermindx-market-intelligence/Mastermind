@@ -27,11 +27,13 @@ import re
 import secrets
 import sqlite3
 import threading
+from types import MappingProxyType
 from abc import ABC, abstractmethod
 from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from enum import Enum
+import inspect
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
@@ -957,6 +959,7 @@ def _project_work_placement(
     placement: Mapping[str, Any],
     *,
     raw_root_constraints: Mapping[str, Any],
+    plan_schema_version: str | None = None,
 ) -> dict[str, Any]:
     provider_realm = str(placement.get("provider_realm") or "").strip().lower()
     quota_class = str(placement.get("quota_class") or "").strip().lower()
@@ -984,11 +987,38 @@ def _project_work_placement(
         raise StateConflict(
             "plan step placement is outside the reviewed host work-placement union"
         )
+
     projected = dict(constraints)
     projected["provider"] = provider_realm
     projected["eligible_quota_classes"] = [quota_class]
-    return projected
+    if plan_schema_version == "mastermind.execution_plan/v4":
+        reasons = list(projected.get("routing_reason_codes") or [])
+        if "manual_pool_override" not in reasons:
+            reasons.append("manual_pool_override")
+        projected["routing_reason_codes"] = reasons
 
+    # V4 may add an exact model inside the already-admitted pool. This is a
+    # hard narrowing constraint, not provider/account/host selection. Runtime
+    # capacity still chooses the concrete Worker and claim target; if no
+    # currently eligible quota row serves the requested model, claim returns
+    # no capacity and the caller must not silently fall back.
+    if "model" in placement:
+        if plan_schema_version != "mastermind.execution_plan/v4":
+            raise StateConflict("plan step model override requires execution plan v4")
+        model = str(placement.get("model") or "").strip().lower()
+        if (
+            not model
+            or len(model) > 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in model)
+        ):
+            raise StateConflict("plan step model override is invalid")
+        projected["model"] = model
+        reasons = list(projected.get("routing_reason_codes") or [])
+        if "manual_model_override" not in reasons:
+            reasons.append("manual_model_override")
+        projected["routing_reason_codes"] = reasons
+
+    return projected
 
 def _has_executive_provenance(
     provenance: dict[str, Any] | None, *, target: str
@@ -1291,6 +1321,14 @@ class BoundedAttemptPage:
 
     items: tuple[Attempt, ...]
     next_cursor: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class CurrentAttemptAuthoritySnapshot:
+    """Public authority facts from one current transaction; no lease token."""
+
+    job: Job
+    attempt: Attempt
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3484,6 +3522,13 @@ class RuntimeStore:
     ) -> None:
         self.read_binding = read_binding
         self._bound_connections: set[_BoundReadConnection] = set()
+        # Exact handles currently owned by ``transaction()`` after
+        # ``BEGIN IMMEDIATE``.  ``connection.in_transaction`` alone is not a
+        # write-ownership proof: an ordinary ``read()`` snapshot also has an
+        # active deferred transaction and can otherwise be upgraded by SQLite.
+        self._write_connections: set[sqlite3.Connection] = set()
+        # Exact handles currently owned by an unbound ``read()`` snapshot.
+        self._read_connections: set[sqlite3.Connection] = set()
         self._finite_control_context: FiniteControlContext | None = None
         if read_binding is not None:
             if not isinstance(read_binding, RuntimeReadBinding) or create or existing_writable:
@@ -4118,6 +4163,7 @@ class RuntimeStore:
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared after write lock acquisition"
                 )
+            self._write_connections.add(connection)
             yield connection
             if self._upgrade_barrier_present():
                 raise PersistenceError(
@@ -4143,6 +4189,7 @@ class RuntimeStore:
                 connection.rollback()
             raise
         finally:
+            self._write_connections.discard(connection)
             connection.close()
 
     def _close_read_connection(self, connection: sqlite3.Connection | _BoundReadConnection) -> None:
@@ -4256,6 +4303,7 @@ class RuntimeStore:
         connection = self._open()
         try:
             connection.execute("BEGIN")
+            self._read_connections.add(connection)
             yield connection
             connection.commit()
         except RuntimeProofError:
@@ -4271,7 +4319,50 @@ class RuntimeStore:
                 connection.rollback()
             raise
         finally:
+            self._read_connections.discard(connection)
             connection.close()
+
+    def list_events(
+        self,
+        *,
+        job_id: str | None = None,
+        attempt_id: str | None = None,
+        aggregate_type: str | None = None,
+        aggregate_id: str | None = None,
+        command_id_prefix: str | None = None,
+        connection: sqlite3.Connection | None = None,
+    ) -> list[Event]:
+        clauses: list[str] = []
+        params: list[str] = []
+        if job_id:
+            clauses.append("job_id=?")
+            params.append(job_id)
+        if attempt_id:
+            clauses.append("attempt_id=?")
+            params.append(attempt_id)
+        if aggregate_type:
+            clauses.append("aggregate_type=?")
+            params.append(str(aggregate_type).strip())
+        if aggregate_id:
+            clauses.append("aggregate_id=?")
+            params.append(str(aggregate_id).strip())
+        if command_id_prefix:
+            token = str(command_id_prefix).strip()
+            if not token or any(ch in token for ch in "%_"):
+                raise StateConflict("command_id_prefix must be a literal namespace")
+            clauses.append("command_id LIKE ?")
+            params.append(token + "%")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        def _load(conn: sqlite3.Connection) -> list[Event]:
+            rows = conn.execute(
+                f"SELECT * FROM events{where} ORDER BY event_id", params
+            ).fetchall()
+            return [_event_from_row(row) for row in rows]
+
+        if connection is not None:
+            return _load(connection)
+        with self.read() as conn:
+            return _load(conn)
 
     def append_event(
         self,
@@ -5821,6 +5912,203 @@ class WorkerRegistry:
             ]
         return [worker for item in worker_ids if (worker := self.get_worker(item))]
 
+
+    @staticmethod
+    def _proof_recovery_command(job_id: str, lost_attempt_id: str) -> str:
+        return f"proof-capacity-recover:{job_id}:{lost_attempt_id}"
+
+    @staticmethod
+    def _validate_proof_recovery_receipt(
+        receipt: Any, *, job_id: str, lost_attempt_id: str, worker_id: str, quota_class: str,
+    ) -> dict[str, Any]:
+        """Validate durable replay with the same closed receipt law as a fresh write."""
+        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+        keys = {"schema_version", "job_id", "lost_attempt_id", "worker_id", "quota_class",
+                "status", "previous_snapshot", "uid_sweep",
+                "observation_started_at", "observation_finished_at"}
+        numeric = {"job_version", "attempt_version", "worker_version", "quota_version",
+                   "quota_updated_at_ms", "fence_generation", "attempt_started_at_ms",
+                   "lost_event_id", "requeue_event_id"}
+        target = {"job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                  "worker_id": worker_id, "quota_class": quota_class}
+        try:
+            snapshot = receipt["previous_snapshot"]
+            sweep = receipt["uid_sweep"]
+            startup = sweep["preceding_broker_startup_sweep"]
+            observed = datetime.fromisoformat(sweep["observed_at"])
+            booted = datetime.fromisoformat(startup["observed_at"])
+            began = datetime.fromisoformat(receipt["observation_started_at"])
+            ended = datetime.fromisoformat(receipt["observation_finished_at"])
+            valid = (
+                isinstance(receipt, dict) and set(receipt) == keys
+                and receipt["schema_version"] == "mastermind.executive_proof_capacity_recovery/v1"
+                and receipt["status"] == "AVAILABLE"
+                and all(receipt[k] == v for k, v in target.items())
+                and isinstance(snapshot, dict) and set(snapshot) == set(target) | numeric
+                and all(snapshot[k] == v for k, v in target.items())
+                and all(type(snapshot[k]) is int and snapshot[k] > 0 for k in numeric)
+                and snapshot["lost_event_id"] < snapshot["requeue_event_id"]
+                and uid_sweep_receipt_is_passing(sweep)
+                and uid_sweep_receipt_is_passing(startup)
+                and sweep.get("reason") == "status_absence"
+                and startup.get("reason") == "broker_startup"
+                and type(sweep.get("worker_uid")) is int and sweep["worker_uid"] > 0
+                and sweep["worker_uid"] == startup.get("worker_uid")
+                and type(sweep.get("broker_pid")) is int and sweep["broker_pid"] > 1
+                and sweep["broker_pid"] == startup.get("broker_pid")
+                and all(t.utcoffset() is not None for t in (observed, booted, began, ended))
+                and snapshot["attempt_started_at_ms"] < booted.timestamp() * 1000
+                and booted <= observed and began <= observed <= ended
+            )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            valid = False
+        if not valid:
+            raise StateConflict("proof recovery receipt is malformed or belongs to another target")
+        return receipt
+
+    def proof_capacity_recovery_result(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        """Reconcile the one immutable recovery event before observing or writing."""
+        def read(conn):
+            row = conn.execute("SELECT * FROM events WHERE command_id=?", (
+                self._proof_recovery_command(job_id, lost_attempt_id),
+            )).fetchone()
+            if row is None:
+                return None
+            if (row["event_type"] != "PROOF_CAPACITY_RECOVERED"
+                    or row["aggregate_type"] != "quota_class"
+                    or row["aggregate_id"] != f"{worker_id}:{quota_class}"
+                    or row["job_id"] != job_id or row["attempt_id"] != lost_attempt_id
+                    or row["worker_id"] != worker_id or row["quota_class"] != quota_class):
+                raise StateConflict("proof recovery command belongs to another target")
+            return self._validate_proof_recovery_receipt(
+                _json_loads(row["payload_json"], fallback={}), job_id=job_id,
+                lost_attempt_id=lost_attempt_id, worker_id=worker_id, quota_class=quota_class)
+        if connection is not None:
+            return read(connection)
+        with self.store.read() as conn:
+            return read(conn)
+
+    def proof_capacity_recovery_snapshot(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        """Bind the explicit requeue and unheld error quota before broker I/O."""
+        def read(conn):
+            job = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            attempt = conn.execute("SELECT * FROM attempts WHERE attempt_id=?",
+                                   (lost_attempt_id,)).fetchone()
+            quota = conn.execute(
+                "SELECT * FROM worker_quota_classes WHERE worker_id=? AND quota_class=?",
+                (worker_id, quota_class)).fetchone()
+            worker = conn.execute("SELECT * FROM workers WHERE worker_id=?",
+                                  (worker_id,)).fetchone()
+            error = {"reason": "process identity absent during supervisor restart",
+                     "verified_process_absent": True}
+            if (job is None or attempt is None or quota is None or worker is None
+                    or job["status"] != "QUEUED" or job["current_attempt_id"] is not None
+                    or job["assigned_worker_id"] is not None
+                    or job["assigned_quota_class"] is not None
+                    or job["orchestration_role"] is not None
+                    or attempt["job_id"] != job_id or attempt["worker_id"] != worker_id
+                    or attempt["quota_class"] != quota_class or attempt["status"] != "LOST"
+                    or attempt["execution_mode"] != "SEALED_WORKER"
+                    or attempt["lease_token"] is not None
+                    or _json_loads(attempt["error_json"], fallback={}) != error
+                    or quota["status"] != "ERROR" or quota["held_attempt_id"] is not None
+                    or quota["fence_counter"] != attempt["fence_generation"]
+                    or worker["identity_status"] != "ONLINE"):
+                raise StateConflict("proof recovery requires the exact requeued missing-owner quota")
+            lost = conn.execute(
+                "SELECT * FROM events WHERE event_type='ATTEMPT_LOST' AND attempt_id=?",
+                (lost_attempt_id,)).fetchall()
+            requeue = conn.execute(
+                "SELECT * FROM events WHERE event_type='JOB_REQUEUED' AND job_id=? "
+                "ORDER BY event_id DESC LIMIT 1", (job_id,)).fetchone()
+            latest = conn.execute(
+                "SELECT attempt_id FROM attempts WHERE job_id=? ORDER BY attempt_number DESC LIMIT 1",
+                (job_id,)).fetchone()
+            if (len(lost) != 1 or lost[0]["job_id"] != job_id
+                    or lost[0]["worker_id"] != worker_id or lost[0]["quota_class"] != quota_class
+                    or lost[0]["actor"] != "supervisor"
+                    or _json_loads(lost[0]["payload_json"], fallback={}) != error
+                    or requeue is None or requeue["attempt_id"] != lost_attempt_id
+                    or _json_loads(requeue["payload_json"], fallback={}) != {"previous_status": "LOST"}
+                    or requeue["event_id"] <= lost[0]["event_id"]
+                    or latest is None or latest["attempt_id"] != lost_attempt_id
+                    or conn.execute(
+                        "SELECT 1 FROM worker_quota_classes WHERE worker_id=? AND held_attempt_id IS NOT NULL",
+                        (worker_id,)).fetchone() is not None):
+                raise StateConflict("proof recovery has no exact missing-owner requeue evidence")
+            return {
+                "job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                "worker_id": worker_id, "quota_class": quota_class,
+                "job_version": job["version"], "attempt_version": attempt["version"],
+                "worker_version": worker["version"], "quota_version": quota["version"],
+                "quota_updated_at_ms": quota["updated_at_ms"],
+                "fence_generation": quota["fence_counter"],
+                "attempt_started_at_ms": attempt["started_at_ms"],
+                "lost_event_id": lost[0]["event_id"], "requeue_event_id": requeue["event_id"],
+            }
+        if connection is not None:
+            return read(connection)
+        with self.store.read() as conn:
+            return read(conn)
+
+    def recover_proof_capacity(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        expected_snapshot: Mapping[str, Any], uid_sweep: Mapping[str, Any],
+        expected_worker_uid: int, observation_started_at: datetime,
+        observation_finished_at: datetime,
+    ) -> dict[str, Any]:
+        """Explicit resource requalification; never changes LOST or requeue history."""
+        with self.store.transaction() as conn:
+            prior = self.proof_capacity_recovery_result(
+                job_id, lost_attempt_id, worker_id=worker_id, quota_class=quota_class,
+                connection=conn)
+            if prior is not None:
+                return prior
+            snapshot = self.proof_capacity_recovery_snapshot(
+                job_id, lost_attempt_id, worker_id=worker_id, quota_class=quota_class,
+                connection=conn)
+            if snapshot != dict(expected_snapshot):
+                raise StateConflict("proof recovery state changed during broker observation")
+            receipt = {
+                "schema_version": "mastermind.executive_proof_capacity_recovery/v1",
+                "job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                "worker_id": worker_id, "quota_class": quota_class, "status": "AVAILABLE",
+                "previous_snapshot": snapshot, "uid_sweep": dict(uid_sweep),
+                "observation_started_at": observation_started_at.isoformat(),
+                "observation_finished_at": observation_finished_at.isoformat(),
+            }
+            self._validate_proof_recovery_receipt(
+                receipt, job_id=job_id, lost_attempt_id=lost_attempt_id,
+                worker_id=worker_id, quota_class=quota_class)
+            if (type(expected_worker_uid) is not int
+                    or uid_sweep["worker_uid"] != expected_worker_uid):
+                raise StateConflict("proof recovery receipt names a foreign worker UID")
+            timestamp = self.store.now_ms()
+            changed = conn.execute(
+                """UPDATE worker_quota_classes
+                   SET status='AVAILABLE',last_seen_at_ms=?,updated_at_ms=?,version=version+1
+                   WHERE worker_id=? AND quota_class=? AND status='ERROR'
+                     AND held_attempt_id IS NULL AND fence_counter=? AND version=?
+                     AND updated_at_ms=?""",
+                (timestamp, timestamp, worker_id, quota_class, snapshot["fence_generation"],
+                 snapshot["quota_version"], snapshot["quota_updated_at_ms"])).rowcount
+            if changed != 1:
+                raise StateConflict("proof recovery quota compare-and-set failed")
+            self.store.append_event(
+                conn, aggregate_type="quota_class", aggregate_id=f"{worker_id}:{quota_class}",
+                event_type="PROOF_CAPACITY_RECOVERED", actor="executive-control-service",
+                job_id=job_id, attempt_id=lost_attempt_id, worker_id=worker_id,
+                quota_class=quota_class, payload=receipt,
+                command_id=self._proof_recovery_command(job_id, lost_attempt_id),
+                timestamp_ms=timestamp)
+            return receipt
+
     def set_worker_status(
         self,
         worker_id: str,
@@ -7308,7 +7596,12 @@ def _validated_sealed_worker_launch_material(
     binary = attestation.get("binary") if isinstance(attestation, dict) else None
     if (
         not isinstance(attestation, dict)
-        or set(attestation) != attestation_keys
+        # Historical terminal v1 receipts remain readable. New principal sealing
+        # requires the explicit isolation digest; no persisted receipt is backfilled.
+        or set(attestation) not in (
+            attestation_keys, attestation_keys | {"isolation_manifest_sha256"}
+        )
+        or (allow_unsealed_principal and "isolation_manifest_sha256" not in attestation)
         or attestation.get("schema_version")
         != "mastermind.executive_launch_attestation/v1"
         or metadata.get("schema_version") != "mastermind.executive_process_launch/v1"
@@ -7344,7 +7637,13 @@ def _validated_sealed_worker_launch_material(
         )
         or any(
             re.fullmatch(r"[0-9a-f]{64}", str(attestation.get(name))) is None
-            for name in {"permission_profile_sha256", "prompt_sha256"}
+            for name in (
+                {"permission_profile_sha256", "prompt_sha256"}
+                | (
+                    {"isolation_manifest_sha256"}
+                    if "isolation_manifest_sha256" in attestation else set()
+                )
+            )
         )
         or not isinstance(attestation.get("secret_canary_verdict"), dict)
         or attestation["secret_canary_verdict"].get("passed") is not True
@@ -8559,16 +8858,16 @@ def _work_dependency_manifest(
     plan_body: dict[str, Any],
     plan_step_id: str,
 ) -> dict[str, Any]:
-    """Derive the canonical accepted-revision snapshot for one V3 work step."""
+    """Derive the canonical accepted-revision snapshot for one V3/V4 work step."""
 
     if (
-        plan_body.get("schema_version") != "mastermind.execution_plan/v3"
+        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         or admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2
         or admission.get("root_job_id") != root_row["job_id"]
         or admission.get("plan_attempt_id") != plan_body.get("plan_attempt_id")
         or admission.get("plan_digest") is None
     ):
-        raise StateConflict("work dependency manifest requires an admitted V3 plan")
+        raise StateConflict("work dependency manifest requires an admitted V3/V4 plan")
     steps = [
         step for step in plan_body.get("steps", [])
         if isinstance(step, Mapping) and step.get("step_id") == plan_step_id
@@ -8766,7 +9065,7 @@ def _validated_plan_admission(
     plan_body = dict(envelope["role_result"])
     expected_admission_schema = (
         _COO_PLAN_ADMISSION_SCHEMA_V2
-        if plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+        if plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         else _COO_PLAN_ADMISSION_SCHEMA_V1
     )
     if admission_schema != expected_admission_schema:
@@ -8943,6 +9242,7 @@ def _validated_plan_admission(
             plan_step_id=str(step["step_id"]),
             repair_round=0,
             placement=step.get("placement"),
+            plan_schema_version=str(plan_body["schema_version"]),
             dependency_manifest=dependency_manifest,
         )
     try:
@@ -9334,7 +9634,7 @@ def _current_orchestration_tree_material_for_dispatch(
         if not revisions:
             deferred_v3 = bool(
                 admission.get("schema_version") == _COO_PLAN_ADMISSION_SCHEMA_V2
-                and plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                 and step.get("prerequisite_step_ids")
                 and reservation.get("initial_work_job_id") is None
                 and reservation.get("initial_work_command_id") is None
@@ -9646,7 +9946,7 @@ def _validated_job_dependency_manifest(
         name="work dependency JOB_CREATED payload",
     )
 
-    is_v3 = plan_body.get("schema_version") == "mastermind.execution_plan/v3"
+    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
     has_manifest = "dependency_manifest" in payload
     has_digest = "dependency_manifest_digest" in payload
     if not is_v3:
@@ -9654,9 +9954,9 @@ def _validated_job_dependency_manifest(
             raise StateConflict("legacy work unexpectedly carries dependency evidence")
         return None
     if admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2:
-        raise StateConflict("V3 work dependency admission is not V2")
+        raise StateConflict("V3/V4 work dependency admission is not V2")
     if not has_manifest or not has_digest:
-        raise StateConflict("V3 work is missing immutable dependency evidence")
+        raise StateConflict("V3/V4 work is missing immutable dependency evidence")
 
     manifest = _validate_work_dependency_manifest(
         payload["dependency_manifest"],
@@ -10366,6 +10666,7 @@ def _insert_cycle_child(
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
     placement: dict[str, Any] | None = None,
+    plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
     allow_active_interactive_plan: bool = False,
 ) -> sqlite3.Row:
@@ -10391,6 +10692,7 @@ def _insert_cycle_child(
             raw_root_constraints=_strict_canonical_json_loads(
                 str(root_row["constraints_json"]), name="root constraints"
             ),
+            plan_schema_version=plan_schema_version,
         )
     constraints = _normalise_constraints(constraints)
     try:
@@ -10459,7 +10761,7 @@ def _insert_cycle_child(
     manifest = None
     if dependency_manifest is not None:
         if role != "work":
-            raise StateConflict("only V3 work may carry a dependency manifest")
+            raise StateConflict("only V3/V4 work may carry a dependency manifest")
         manifest = _validate_work_dependency_manifest(
             dependency_manifest,
             root_job_id=str(root_row["job_id"]),
@@ -10618,6 +10920,7 @@ def _reconcile_cycle_child_creation(
     provenance_source_digest: str | None = None,
     creation_evidence: dict[str, str] | None = None,
     placement: dict[str, Any] | None = None,
+    plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
@@ -10652,6 +10955,7 @@ def _reconcile_cycle_child_creation(
             raw_root_constraints=_strict_canonical_json_loads(
                 str(root_row["constraints_json"]), name="root constraints"
             ),
+            plan_schema_version=plan_schema_version,
         )
     expected_constraints = _normalise_constraints(expected_constraints)
     stored_authorities = _strict_canonical_json_loads(
@@ -10670,7 +10974,7 @@ def _reconcile_cycle_child_creation(
     manifest = None
     if dependency_manifest is not None:
         if role != "work":
-            raise StateConflict("only V3 work may carry a dependency manifest")
+            raise StateConflict("only V3/V4 work may carry a dependency manifest")
         manifest = _validate_work_dependency_manifest(
             dependency_manifest,
             root_job_id=str(root_row["job_id"]),
@@ -12295,24 +12599,54 @@ class JobRegistry:
                 )
                 for step in plan_body["steps"]
             )
-            is_v3 = plan_body["schema_version"] == "mastermind.execution_plan/v3"
+            is_v3 = plan_body["schema_version"] in {
+                "mastermind.execution_plan/v3",
+                "mastermind.execution_plan/v4",
+            }
             if plan_body["schema_version"] in {
                 "mastermind.execution_plan/v2",
                 "mastermind.execution_plan/v3",
+                "mastermind.execution_plan/v4",
             }:
-                if any("placement" not in step for step in plan_body["steps"]):
+                requires_placement = plan_body["schema_version"] in {
+                    "mastermind.execution_plan/v2",
+                    "mastermind.execution_plan/v3",
+                }
+                if requires_placement and any(
+                    "placement" not in step for step in plan_body["steps"]
+                ):
                     raise StateConflict(
                         "v2/v3 plan work steps require an exact placement"
                     )
                 for step in plan_body["steps"]:
+                    if "placement" not in step:
+                        continue
                     placement = step.get("placement")
+                    expected_placement_keys = {"provider_realm", "quota_class"}
+                    actual_placement_keys = (
+                        set(placement) if isinstance(placement, dict) else set()
+                    )
+                    v4_keys_valid = (
+                        plan_body["schema_version"] == "mastermind.execution_plan/v4"
+                        and actual_placement_keys
+                        in (
+                            expected_placement_keys,
+                            expected_placement_keys | {"model"},
+                        )
+                    )
                     if (
                         not isinstance(placement, dict)
-                        or set(placement)
-                        != {"provider_realm", "quota_class"}
+                        or (
+                            plan_body["schema_version"] != "mastermind.execution_plan/v4"
+                            and actual_placement_keys != expected_placement_keys
+                        )
+                        or (
+                            plan_body["schema_version"] == "mastermind.execution_plan/v4"
+                            and not v4_keys_valid
+                        )
                     ):
                         raise StateConflict(
-                            "v2/v3 plan step placement is invalid"
+                            "v2/v3/v4 plan step placement is invalid"
                         )
             try:
                 reserved_total = policy.reserved_children_total(requirements)
@@ -12370,6 +12704,7 @@ class JobRegistry:
                     plan_step_id=str(step["step_id"]),
                     repair_round=0,
                     placement=step.get("placement"),
+                    plan_schema_version=str(plan_body["schema_version"]),
                     allow_active_interactive_plan=interactive,
                 )
                 created_ids.append(str(member["job_id"]))
@@ -12433,6 +12768,7 @@ class JobRegistry:
                         plan_step_id=str(step["step_id"]),
                         repair_round=0,
                         placement=step.get("placement"),
+                        plan_schema_version=str(plan_body["schema_version"]),
                         dependency_manifest=manifest,
                         allow_active_interactive_plan=interactive,
                     )
@@ -12465,7 +12801,7 @@ class JobRegistry:
         root_job_id: str,
         plan_step_id: str,
     ) -> dict[str, Any]:
-        """Project one ready deferred V3 step without minting authority."""
+        """Project one ready deferred V3/V4 step without minting authority."""
 
         root_token = str(root_job_id or "").strip()
         step_token = str(plan_step_id or "").strip()
@@ -12489,11 +12825,11 @@ class JobRegistry:
             )
             if (
                 admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
-                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                 or step is None
                 or not step["prerequisite_step_ids"]
             ):
-                raise StateConflict("dependency projection requires a deferred V3 step")
+                raise StateConflict("dependency projection requires a deferred V3/V4 step")
             existing = connection.execute(
                 """
                 SELECT 1 FROM jobs
@@ -12504,7 +12840,7 @@ class JobRegistry:
                 (root_token, step_token),
             ).fetchone()
             if existing is not None:
-                raise StateConflict("deferred V3 step already has a work revision")
+                raise StateConflict("deferred V3/V4 step already has a work revision")
             return _work_dependency_manifest(
                 connection,
                 root_row=root,
@@ -12554,14 +12890,14 @@ class JobRegistry:
             )
             if (
                 admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
-                or plan_body["schema_version"] != "mastermind.execution_plan/v3"
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                 or step is None
                 or reservation is None
                 or not step["prerequisite_step_ids"]
                 or reservation["initial_work_job_id"] is not None
                 or reservation["initial_work_command_id"] is not None
             ):
-                raise StateConflict("work creation requires one deferred V3 reservation")
+                raise StateConflict("work creation requires one deferred V3/V4 reservation")
             expected_manifest = _work_dependency_manifest(
                 connection,
                 root_row=root,
@@ -12611,6 +12947,7 @@ class JobRegistry:
                     plan_step_id=step_token,
                     repair_round=0,
                     placement=step.get("placement"),
+                    plan_schema_version=str(plan_body["schema_version"]),
                     dependency_manifest=expected_manifest,
                 )
                 return _job_from_row(row)
@@ -12625,7 +12962,7 @@ class JobRegistry:
                 (root_token, step_token),
             ).fetchall()
             if existing_step_rows:
-                raise StateConflict("deferred V3 step already consumed a reserved slot")
+                raise StateConflict("deferred V3/V4 step already consumed a reserved slot")
             child_count = int(
                 connection.execute(
                     "SELECT COUNT(*) FROM jobs WHERE parent_job_id=?", (root_token,)
@@ -12654,6 +12991,7 @@ class JobRegistry:
                 plan_step_id=step_token,
                 repair_round=0,
                 placement=step.get("placement"),
+                plan_schema_version=str(plan_body["schema_version"]),
                 dependency_manifest=expected_manifest,
             )
             created_id = str(row["job_id"])
@@ -15009,6 +15347,11 @@ class AttemptRegistry:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
         self.store._assert_owned_snapshot_connection(connection)
+        unresolved = ReleaseMaintenanceRegistry(self.store).read_unresolved_admission(
+            connection
+        )
+        if unresolved is not None:
+            raise StateConflict("release admission holds global runtime fence")
         is_c2 = carrier_claim is not None
         if is_c2:
             commitment_contract = _capacity_commitment_contract()
@@ -15615,6 +15958,99 @@ class AttemptRegistry:
             if payload["exact_worker_target"] != target.evidence():
                 raise StateConflict("exact worker target first-issuance observation differs")
 
+    def terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=False)
+
+    def reconciled_terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        """Observe already reconciled terminal history; never make it dispatchable."""
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=True)
+
+    def _terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str, reconciled: bool
+    ) -> OrchestrationDispatchOutcome:
+        """Read an exact terminal lost-return outcome without reacquiring a lease.
+
+        A restarted service has a new lease owner. Historical terminal evidence
+        must not impersonate the old owner or pass through fresh claim routing.
+        The existing COO ambiguity owner still commits reconciliation.
+        """
+        with self.store.read() as connection:
+            job = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            marker = connection.execute(
+                "SELECT * FROM events WHERE command_id=?",
+                (f"{command_id}:effect-unknown",),
+            ).fetchone()
+            resolution = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (f"{command_id}:reconciled",),
+            ).fetchone()
+            if (
+                job is None or marker is None
+                or (resolution is not None) != reconciled
+                or JobStatus(job["status"]) not in _TERMINAL_JOB_STATUSES
+                or job["orchestration_role"] is None
+            ):
+                raise StateConflict("terminal dispatch requires an exact lost-return marker")
+            pending = _validated_coo_dispatch_effect_event(
+                connection, marker, expected_root_id=job["root_job_id"]
+            )
+            if resolution is not None:
+                resolved = _validated_coo_dispatch_effect_event(
+                    connection, resolution, expected_root_id=job["root_job_id"],
+                )
+                if any(resolved[key] != pending[key] for key in
+                       ("selected_job_id", "attempt_id", "dispatch_command_id")):
+                    raise StateConflict("terminal dispatch reconciliation differs from original claim")
+            attempt = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?",
+                (pending["attempt_id"],),
+            ).fetchone()
+            claim = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (command_id,)
+            ).fetchone()
+            if attempt is None or claim is None:
+                raise StateConflict("terminal dispatch lost its historical claim")
+            payload = _strict_canonical_json_loads(
+                claim["payload_json"], name="terminal dispatch claim"
+            )
+            expected_command = (
+                f"coo-cycle:{job['root_job_id']}:dispatch:{job_id}:attempt:"
+                f"{attempt['attempt_number']}"
+            )
+            if (
+                pending["selected_job_id"] != job_id
+                or pending["dispatch_command_id"] != command_id
+                or command_id != expected_command
+                or claim["aggregate_type"] != "job"
+                or claim["aggregate_id"] != job_id
+                or claim["worker_id"] != attempt["worker_id"]
+                or claim["quota_class"] != attempt["quota_class"]
+                or not isinstance(payload, dict)
+                or payload.get("cycle_command_id") != command_id
+                or payload.get("dispatch_job_id") != job_id
+                or attempt["job_id"] != job_id
+                or job["current_attempt_id"] != attempt["attempt_id"]
+                or AttemptStatus(attempt["status"]) not in _TERMINAL_ATTEMPT_STATUSES
+                or attempt["status"] != job["status"]
+                or attempt["lease_token"] is not None
+                or connection.execute(
+                    "SELECT 1 FROM worker_quota_classes WHERE held_attempt_id=?",
+                    (attempt["attempt_id"],),
+                ).fetchone() is not None
+            ):
+                raise StateConflict("terminal dispatch historical identity drifted")
+            return OrchestrationDispatchOutcome(
+                command_id=command_id,
+                job_id=job_id,
+                attempt=_attempt_from_row(attempt),
+                outcome="TERMINAL",
+            )
+
     def dispatch_cycle_job(
         self,
         job_id: str,
@@ -15666,13 +16102,12 @@ class AttemptRegistry:
             claimed_now=True,
         )
 
-    def _leased_row(
+    def _current_row(
         self,
         connection: sqlite3.Connection,
         *,
         attempt_id: str,
         fence_generation: int,
-        lease_token: str,
         timestamp: int,
         statuses: set[AttemptStatus],
     ) -> sqlite3.Row:
@@ -15707,11 +16142,6 @@ class AttemptRegistry:
             raise PersistenceError(
                 f"attempt {attempt_id} and quota class have inconsistent fences"
             )
-        persisted_token = row["lease_token"]
-        if persisted_token is None or not hmac.compare_digest(
-            str(persisted_token), str(lease_token)
-        ):
-            raise StateConflict(f"attempt {attempt_id} has an invalid lease token")
         if timestamp >= int(row["lease_expires_at_ms"]):
             raise StateConflict(f"attempt {attempt_id} lease has expired")
         if (
@@ -15720,6 +16150,66 @@ class AttemptRegistry:
         ):
             raise StateConflict(f"attempt {attempt_id} is no longer current")
         return row
+
+    def _leased_row(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        attempt_id: str,
+        fence_generation: int,
+        lease_token: str,
+        timestamp: int,
+        statuses: set[AttemptStatus],
+    ) -> sqlite3.Row:
+        row = self._current_row(
+            connection, attempt_id=attempt_id, fence_generation=fence_generation,
+            timestamp=timestamp, statuses=statuses,
+        )
+        persisted_token = row["lease_token"]
+        if persisted_token is None or not hmac.compare_digest(
+            str(persisted_token), str(lease_token)
+        ):
+            raise StateConflict(f"attempt {attempt_id} has an invalid lease token")
+        return row
+
+    def current_authority_snapshot(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        job_id: str,
+        attempt_id: str,
+        fence_generation: int,
+        timestamp: int,
+        statuses: set[AttemptStatus],
+    ) -> CurrentAttemptAuthoritySnapshot:
+        """Admit token-free P2 authority on the existing current Attempt owner.
+
+        The caller owns the transaction. Shared currentness stays identical to
+        lease mutation, while the sealed-worker and identity gates apply only
+        to this controller capability. No persisted token leaves this method.
+        """
+        if type(fence_generation) is not int or fence_generation <= 0:
+            raise StateConflict("fence_generation must be a positive integer")
+        active = {AttemptStatus.CLAIMED, AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED}
+        row = self._current_row(
+            connection, attempt_id=attempt_id, fence_generation=fence_generation,
+            timestamp=timestamp, statuses=statuses & active,
+        )
+        if row["job_id"] != job_id:
+            raise StateConflict("attempt does not belong to the requested job")
+        if row["execution_mode"] not in (None, AttemptExecutionMode.SEALED_WORKER.value):
+            raise StateConflict("privileged readiness requires a SEALED_WORKER attempt")
+        if not row["lease_token"]:
+            raise StateConflict(f"attempt {attempt_id} has no persisted lease token")
+        job_row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        worker_row = connection.execute(
+            "SELECT identity_status FROM workers WHERE worker_id=?", (row["worker_id"],)
+        ).fetchone()
+        if (job_row is None or job_row["assigned_worker_id"] != row["worker_id"]
+                or job_row["assigned_quota_class"] != row["quota_class"]
+                or worker_row is None or worker_row["identity_status"] != "ONLINE"):
+            raise StateConflict("attempt worker identity or assignment is not current")
+        return CurrentAttemptAuthoritySnapshot(_job_from_row(job_row), _attempt_from_row(row))
 
     def adopt_attempt(
         self,
@@ -16232,6 +16722,7 @@ class AttemptRegistry:
                     "rendered_argv",
                     "environment_keys",
                     "permission_profile_sha256",
+                    "isolation_manifest_sha256",
                     "prompt_sha256",
                     "expected_base_sha",
                     "observed_base_sha",
@@ -16271,7 +16762,10 @@ class AttemptRegistry:
                     raise StateConflict(
                         "launch attestation environment allow-list is invalid"
                     )
-                for digest_field in ("permission_profile_sha256", "prompt_sha256"):
+                for digest_field in (
+                    "permission_profile_sha256", "prompt_sha256",
+                    "isolation_manifest_sha256",
+                ):
                     digest = attestation.get(digest_field)
                     if (
                         not isinstance(digest, str)
@@ -20279,6 +20773,8 @@ class OperatorHarnessRegistry:
         dispatch_id = f"{operation_id.command_id}:dispatch"
         with self.store.transaction() as connection:
             timestamp = self.store.now_ms()
+            if ReleaseMaintenanceRegistry(self.store).read_unresolved_admission(connection) is not None:
+                raise StateConflict("release admission holds global runtime fence")
             row = self._leased(
                 connection,
                 attempt_id=attempt_id,
@@ -20865,33 +21361,13 @@ class EventRegistry:
         aggregate_type: str | None = None,
         aggregate_id: str | None = None,
         command_id_prefix: str | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> list[Event]:
-        clauses: list[str] = []
-        params: list[str] = []
-        if job_id:
-            clauses.append("job_id=?")
-            params.append(job_id)
-        if attempt_id:
-            clauses.append("attempt_id=?")
-            params.append(attempt_id)
-        if aggregate_type:
-            clauses.append("aggregate_type=?")
-            params.append(str(aggregate_type).strip())
-        if aggregate_id:
-            clauses.append("aggregate_id=?")
-            params.append(str(aggregate_id).strip())
-        if command_id_prefix:
-            token = str(command_id_prefix).strip()
-            if not token or any(ch in token for ch in "%_"):
-                raise StateConflict("command_id_prefix must be a literal namespace")
-            clauses.append("command_id LIKE ?")
-            params.append(token + "%")
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        with self.store.read() as connection:
-            rows = connection.execute(
-                f"SELECT * FROM events{where} ORDER BY event_id", params
-            ).fetchall()
-            return [_event_from_row(row) for row in rows]
+        return self.store.list_events(
+            job_id=job_id, attempt_id=attempt_id, aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id, command_id_prefix=command_id_prefix,
+            connection=connection,
+        )
 
 
 class ResourceBroker:
@@ -22553,6 +23029,13 @@ class ActiveOperatorBindingFacts:
     provider: str
     account_label: str
     owner_seat: str
+    job_id: str
+    worker_id: str
+    process_generation_id: str
+    pid: int
+    pgid: int
+    process_start_identity: str
+    boot_id: str
 
 
 def _discover_job_roots_bounded(acquisition: BoundedRuntimeAcquisition) -> BoundedRuntimeRootDiscovery:
@@ -23173,6 +23656,7 @@ class Runtime:
     events: EventRegistry
     operator_harness: OperatorHarnessRegistry
     broker: ResourceBroker
+    release_maintenance: ReleaseMaintenanceRegistry
 
 
 
@@ -23186,6 +23670,7 @@ class Runtime:
             events=EventRegistry(store),
             operator_harness=OperatorHarnessRegistry(store),
             broker=ResourceBroker(store),
+            release_maintenance=ReleaseMaintenanceRegistry(store),
         )
 
     @classmethod
@@ -23847,6 +24332,55 @@ class Runtime:
                 attempt_token=attempt_token,
             )
 
+    def current_harness_binding_for_parent_pid(
+        self,
+        parent_pid: int,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> ActiveOperatorBindingFacts:
+        """Select one current OHF writer by an internally observed PID hint.
+
+        This read-only projection does not authenticate an MCP peer. The host
+        must additionally prove the connected child's kernel parent identity
+        equals this exact process instance before each effect.
+        """
+        if type(parent_pid) is not int or not 0 < parent_pid <= (1 << 31) - 1:
+            raise StateConflict("runtime parent lookup requires an exact positive PID")
+        if connection is None:
+            with self.store.read() as owned_connection:
+                return self.current_harness_binding_for_parent_pid(
+                    parent_pid, connection=owned_connection
+                )
+        self.store._assert_owned_snapshot_connection(connection)
+        rows = connection.execute(
+            """
+            SELECT a.attempt_id,g.process_generation_id,g.session_epoch_id,
+                   g.pid,g.pgid,g.process_start_identity,g.boot_id
+            FROM main.process_generations g
+            JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+            JOIN main.attempts a ON a.attempt_id=e.attempt_id
+            WHERE g.pid=? AND g.executive_writer_held=1
+              AND g.ended_at_ms IS NULL AND e.state='CURRENT'
+            LIMIT 2
+            """,
+            (parent_pid,),
+        ).fetchall()
+        if len(rows) != 1:
+            raise StateConflict("runtime parent lookup requires exactly one current writer")
+        row = rows[0]
+        facts = self.current_harness_binding_source(
+            str(row["attempt_id"]), connection=connection
+        )
+        if any(
+            getattr(facts, key) != row[key]
+            for key in (
+                "attempt_id", "session_epoch_id", "process_generation_id",
+                "pid", "pgid", "process_start_identity", "boot_id",
+            )
+        ):
+            raise StateConflict("runtime parent lookup process identity drifted")
+        return facts
+
     def current_harness_binding_source(
         self,
         attempt_id: str,
@@ -24346,7 +24880,2008 @@ class Runtime:
             provider=str(placement["provider"]),
             account_label=str(placement["account_label"]),
             owner_seat=str(row["owner_seat"]),
+            job_id=str(row["job_id"]),
+            worker_id=str(row["worker_id"]),
+            process_generation_id=str(row["process_generation_id"]),
+            pid=int(row["generation_pid"]),
+            pgid=int(row["generation_pgid"]),
+            process_start_identity=str(row["generation_process_start_identity"]),
+            boot_id=str(row["generation_boot_id"]),
         )
+
+
+# ---------------------------------------------------------------------------
+# P4 C1 release-maintenance slice — record_approval + read_approval only.
+#
+# Production approval/prepare/commit remain disabled. This slice records the
+# immutable owner-sealed approval Event using RuntimeStore's owner-validated
+# connection, transaction semantics, Events table, and the existing
+# append_event / get_event_by_command_id boundary. No new schema, table,
+# database, scheduler, lease, signing-key access, maintenance fence, host or
+# installer effect is introduced.
+# ---------------------------------------------------------------------------
+
+# Strict envelope constants for the approval Event family.
+EXECUTIVE_RELEASE_APPROVED_EVENT_TYPE = "EXECUTIVE_RELEASE_APPROVED"
+EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE = "EXECUTIVE_RELEASE_ADMITTED"
+EXECUTIVE_RELEASE_AGGREGATE_TYPE = "executive_release"
+EXECUTIVE_RELEASE_ACTOR_PREFIX = "release-principal:"
+
+# Closed, versioned admission Event payload wrapper schema. The wrapper is
+# the ONLY shape accepted by ``ReleaseMaintenanceRegistry.read_admission``.
+# It binds, in a single canonical record, the public admission projection
+# (already schema-validated by ``executive_release_contract.validate_admission``),
+# the precondition manifest (validated by ``validate_precondition_manifest``),
+# the original approval evidence digest (re-derived from the persisted
+# approval Event), and the opaque ``root_qualification_digest`` that the
+# coupled qualified root broker transport bound into the admission-purpose
+# context, together with that closed purpose context and its evidence digest.
+# No additional keys are accepted.
+_RELEASE_ADMISSION_WRAPPER_SCHEMA = "mastermind.executive_release_admission_wrapper/v1"
+_RELEASE_ADMISSION_WRAPPER_REQUIRED_KEYS = frozenset({
+    "schema",
+    "admission",
+    "preconditions",
+    "approval_evidence_digest",
+    "root_qualification_digest",
+    "admission_context",
+    "evidence_digest",
+})
+_REQUEST_REF_HEX = re.compile(r"[0-9a-f]{64}", re.ASCII)
+_APP_REQUEST_REF_RE = re.compile(r"req-[0-9a-f]{32}", re.ASCII)
+
+# Module-private capability token. ``TrustedReleaseContext`` is gated on this
+# token so ordinary production code paths and direct callers can never mint
+# one. Production disarming: no public mint method exists. Tests use the
+# deliberately private capability fixture ``_release_context_for_test``.
+_RELEASE_MAINTENANCE_CAPABILITY = object()
+_RELEASE_ADMISSION_CAPABILITY = object()
+_RELEASE_CLOSING_CAPABILITY = object()
+_RELEASE_CANCELLATION_CAPABILITY = object()
+
+# Approval payload key set is fully closed; any other key rejects the record.
+_RELEASE_APPROVAL_REQUIRED_KEYS = frozenset({
+    "schema",
+    "operation_key",
+    "request_ref",
+    "approved_transition_ref",
+    "action",
+    "owner_installation_id",
+    "target_ref",
+    "principal_projection",
+    "normalized_requested_effect",
+    "transition_digest",
+    "grant",
+    "effective_grant_digest",
+    "created_at_ms",
+    "expires_at_ms",
+    "owner_seal",
+})
+
+_RELEASE_ADMISSION_CONTEXT_KEYS = frozenset({
+    "schema",
+    "approval_evidence_digest",
+    "request_fingerprint",
+    "preconditions_digest",
+    "target_observation_digest",
+    "owner_installation_id",
+    "target_ref",
+    "boot_id",
+    "principal_digest",
+    "grant_digest",
+    "policy_id",
+    "policy_generation",
+    "authority_policy_hash",
+    "key_id",
+    "trust_generation",
+    "prepared_deadline_ms",
+    "root_qualification_digest",
+})
+
+_RELEASE_TERMINAL_CONTEXT_KEYS = frozenset({
+    "schema",
+    "approval_evidence_digest",
+    "request_fingerprint",
+    "terminal_status_digest",
+    "terminal_receipt_digest",
+    "admission_digest",
+    "journal_observation_digest",
+    "owner_installation_id",
+    "target_ref",
+    "principal_digest",
+    "grant_digest",
+    "key_id",
+    "trust_generation",
+})
+
+_RELEASE_CANCELLATION_CONTEXT_KEYS = frozenset({
+    "schema", "approval_evidence_digest", "request_fingerprint",
+    "admission_digest", "reservation_digest", "cancellation_digest",
+    "root_qualification_digest", "journal_observation_digest",
+    "owner_installation_id", "target_ref", "principal_digest",
+    "grant_digest", "key_id", "trust_generation",
+})
+
+
+class ReleaseMaintenanceError(RuntimeProofError):
+    """Typed diagnostic for release-maintenance refusals.
+
+    The error message carries only a field/code pair, never the rejected
+    payload, principal identity or sealed bytes.
+    """
+
+    def __init__(self, field: str, code: str) -> None:
+        super().__init__(f"{field}:{code}")
+        self.field = field
+        self.code = code
+
+
+def _release_refusal(field: str, code: str) -> ReleaseMaintenanceError:
+    return ReleaseMaintenanceError(field, code)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TrustedReleaseContext:
+    """Typed opaque host-internal release authority.
+
+    A TrustedReleaseContext can ONLY be constructed under the deliberately
+    private module-level capability token. A mapping, structural seal,
+    principal string, ReleaseRecord, Event row, caller-built lookalike or
+    foreign handle carries no authority. Production has no public mint
+    method; this slice never invokes the broker key, never verifies the
+    owner_seal MAC, and never authorises a release. The context binds the
+    sealed-evidence digest, the verified principal digest, target, owner
+    installation id, policy id, and trust generation to this exact store
+    and connection.
+    """
+
+    _store: "RuntimeStore"
+    # Retain the exact object so a closed connection's integer id can never be
+    # reused by a later handle and accidentally satisfy this authority bind.
+    _connection: sqlite3.Connection
+    _sealed_evidence_digest: str
+    _principal_digest: str
+    _target_ref: str
+    _owner_installation_id: str
+    _policy_id: str
+    _policy_generation: int
+    _authority_policy_hash: str
+    _key_id: str
+    _trust_generation: int
+    _capability: object
+    _process_id: int = dataclasses.field(default_factory=os.getpid)
+
+    @property
+    def purpose(self) -> str:
+        return "approval"
+
+    @property
+    def evidence_digest(self) -> str:
+        return self._sealed_evidence_digest
+
+    @property
+    def request_fingerprint(self) -> str | None:
+        return None
+
+    @property
+    def created_process_id(self) -> int:
+        return self._process_id
+
+    def __post_init__(self) -> None:
+        if self._capability is not _RELEASE_MAINTENANCE_CAPABILITY:
+            raise StateConflict(
+                "trusted release context is Runtime-minted only"
+            )
+        if type(self._process_id) is not int or self._process_id != os.getpid():
+            raise StateConflict("trusted release context has a foreign issuing process")
+        if not isinstance(self._principal_digest, str) or len(self._principal_digest) != 64:
+            raise StateConflict(
+                "trusted context principal_digest must be a 64-char hex digest"
+            )
+        if not isinstance(self._target_ref, str) or len(self._target_ref) != 64:
+            raise StateConflict(
+                "trusted context target_ref must be a 64-char hex digest"
+            )
+        if not isinstance(self._owner_installation_id, str) or not self._owner_installation_id:
+            raise StateConflict(
+                "trusted context owner_installation_id is required"
+            )
+        if not isinstance(self._policy_id, str) or not self._policy_id:
+            raise StateConflict(
+                "trusted context policy_id is required"
+            )
+        if not isinstance(self._trust_generation, int) or self._trust_generation < 1:
+            raise StateConflict(
+                "trusted context trust_generation must be a positive integer"
+            )
+
+    @property
+    def store(self) -> "RuntimeStore":
+        return self._store
+
+    @property
+    def principal_digest(self) -> str:
+        return self._principal_digest
+
+    @property
+    def target_ref(self) -> str:
+        return self._target_ref
+
+    @property
+    def owner_installation_id(self) -> str:
+        return self._owner_installation_id
+
+    @property
+    def policy_id(self) -> str:
+        return self._policy_id
+
+    @property
+    def trust_generation(self) -> int:
+        return self._trust_generation
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TrustedReleaseAdmissionContext:
+    """Purpose-bound synthetic/source admission authority."""
+
+    _store: RuntimeStore
+    _connection: sqlite3.Connection
+    _evidence_digest: str
+    _capability: object
+    _record: Mapping[str, Any]
+    _process_id: int = dataclasses.field(default_factory=os.getpid)
+
+    def __post_init__(self) -> None:
+        if self._capability is not _RELEASE_ADMISSION_CAPABILITY:
+            raise StateConflict("admission context is Runtime-minted only")
+        if set(self._record) != _RELEASE_ADMISSION_CONTEXT_KEYS:
+            raise StateConflict("admission context is closed")
+        if self._record.get("schema") != (
+            "mastermind.executive_release_admission_context/v1"
+        ):
+            raise StateConflict("admission context schema is invalid")
+        if self._process_id != os.getpid():
+            raise StateConflict("admission context is process-bound")
+
+    @property
+    def purpose(self) -> str:
+        return "admission"
+
+    @property
+    def store(self) -> RuntimeStore:
+        return self._store
+
+    @property
+    def evidence_digest(self) -> str:
+        return self._evidence_digest
+
+    @property
+    def record(self) -> Mapping[str, Any]:
+        return self._record
+
+    @property
+    def created_process_id(self) -> int:
+        return self._process_id
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TrustedReleaseClosingContext:
+    """Purpose-bound synthetic/source terminal authority."""
+
+    _store: RuntimeStore
+    _connection: sqlite3.Connection
+    _evidence_digest: str
+    _capability: object
+    _record: Mapping[str, Any]
+    _process_id: int = dataclasses.field(default_factory=os.getpid)
+
+    def __post_init__(self) -> None:
+        if self._capability is not _RELEASE_CLOSING_CAPABILITY:
+            raise StateConflict("closing context is Runtime-minted only")
+        if set(self._record) != _RELEASE_TERMINAL_CONTEXT_KEYS:
+            raise StateConflict("closing context is closed")
+        if self._record.get("schema") != (
+            "mastermind.executive_release_closing_context/v1"
+        ):
+            raise StateConflict("closing context schema is invalid")
+        if self._process_id != os.getpid():
+            raise StateConflict("closing context is process-bound")
+
+    @property
+    def purpose(self) -> str:
+        return "closing"
+
+    @property
+    def store(self) -> RuntimeStore:
+        return self._store
+
+    @property
+    def evidence_digest(self) -> str:
+        return self._evidence_digest
+
+    @property
+    def record(self) -> Mapping[str, Any]:
+        return self._record
+
+    @property
+    def created_process_id(self) -> int:
+        return self._process_id
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TrustedReleaseCancellationContext:
+    """Purpose-bound private PRESTART cancellation closure evidence."""
+
+    _store: RuntimeStore
+    _connection: sqlite3.Connection
+    _evidence_digest: str
+    _capability: object
+    _record: Mapping[str, Any]
+    _process_id: int = dataclasses.field(default_factory=os.getpid)
+
+    def __post_init__(self) -> None:
+        if self._capability is not _RELEASE_CANCELLATION_CAPABILITY:
+            raise StateConflict("cancellation context is Runtime-minted only")
+        if set(self._record) != _RELEASE_CANCELLATION_CONTEXT_KEYS:
+            raise StateConflict("cancellation context is closed")
+        if self._record.get("schema") != "mastermind.executive_release_cancellation_context/v1":
+            raise StateConflict("cancellation context schema is invalid")
+        if self._process_id != os.getpid():
+            raise StateConflict("cancellation context is process-bound")
+
+    @property
+    def purpose(self) -> str:
+        return "cancellation"
+
+    @property
+    def store(self) -> RuntimeStore:
+        return self._store
+
+    @property
+    def evidence_digest(self) -> str:
+        return self._evidence_digest
+
+    @property
+    def record(self) -> Mapping[str, Any]:
+        return self._record
+
+    @property
+    def created_process_id(self) -> int:
+        return self._process_id
+
+
+def _release_context_for_test(
+    store: "RuntimeStore",
+    connection: sqlite3.Connection,
+    *,
+    sealed_approval: Mapping[str, Any],
+) -> TrustedReleaseContext:
+    """Deliberately private test-only mint for ``TrustedReleaseContext``.
+
+    Production never imports or invokes this fixture. Runtime exposes no
+    public mint method; a production broker integration would mint an
+    analogous context via a separate, separately reviewed commission.
+    The fixture binds the sealed-evidence digest and the actual principal,
+    target, owner, policy and trust identities to this exact store and
+    connection, exactly as a host-internal trusted path would.
+    """
+    from control_plane import executive_release_contract
+    validated = executive_release_contract.validate_approval_evidence(sealed_approval)
+    canonical = executive_release_contract.canonical_release_bytes(validated)
+    sealed_digest = hashlib.sha256(canonical).hexdigest()
+    principal = validated["principal_projection"]
+    principal_digest = hashlib.sha256(
+        executive_release_contract.canonical_release_bytes(principal)
+    ).hexdigest()
+    grant = validated["grant"]
+    if grant["principal_digest"] != principal_digest:
+        raise _release_refusal("trusted_context", "PRINCIPAL_DIGEST_MISMATCH")
+    return TrustedReleaseContext(
+        _store=store,
+        _connection=connection,
+        _sealed_evidence_digest=sealed_digest,
+        _principal_digest=principal_digest,
+        _target_ref=validated["target_ref"],
+        _owner_installation_id=validated["owner_installation_id"],
+        _policy_id=principal["policy_id"],
+        _policy_generation=grant["policy_generation"],
+        _authority_policy_hash=grant["authority_policy_hash"],
+        _key_id=validated["owner_seal"]["key_id"],
+        _trust_generation=validated["owner_seal"]["trust_generation"],
+        _capability=_RELEASE_MAINTENANCE_CAPABILITY,
+    )
+
+
+class ReleaseMaintenanceRegistry:
+    """P4 Event-backed approval, admission, fence and qualified closure.
+
+    Uses the owner-validated RuntimeStore transaction and existing Events.
+    No second store, scheduler, physical owner, token decoder or service
+    action is created here. Production context mint remains separately gated.
+    """
+
+    _EVENT_TYPE = EXECUTIVE_RELEASE_APPROVED_EVENT_TYPE
+    _AGGREGATE_TYPE = EXECUTIVE_RELEASE_AGGREGATE_TYPE
+    _ACTOR_PREFIX = EXECUTIVE_RELEASE_ACTOR_PREFIX
+
+    def __init__(self, store: RuntimeStore) -> None:
+        self.store = store
+
+    @staticmethod
+    def _canonical_record_digest(value: Any) -> str:
+        from control_plane import executive_release_contract
+        return hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(value)
+        ).hexdigest()
+
+    @classmethod
+    def _release_admission_context_for_test(
+        cls,
+        store: RuntimeStore,
+        connection: sqlite3.Connection,
+        *,
+        approval: Mapping[str, Any],
+        preconditions: Mapping[str, Any],
+        target_observation_digest: str,
+        prepared_deadline_ms: int,
+        root_qualification_digest: str,
+    ) -> TrustedReleaseAdmissionContext:
+        from control_plane import executive_release_contract
+        validated_approval = executive_release_contract.validate_approval_evidence(approval)
+        validated_preconditions = (
+            executive_release_contract.validate_precondition_manifest(preconditions)
+        )
+        record = cls._admission_context_record(
+            approval=validated_approval,
+            request_fingerprint=executive_release_contract.request_fingerprint_for(
+                validated_approval
+            ),
+            preconditions=validated_preconditions,
+            target_observation_digest=target_observation_digest,
+            prepared_deadline_ms=prepared_deadline_ms,
+            root_qualification_digest=root_qualification_digest,
+        )
+        evidence_digest = hashlib.sha256(
+            cls._canonical_context_evidence("admission", record)
+        ).hexdigest()
+        return TrustedReleaseAdmissionContext(
+            _store=store,
+            _connection=connection,
+            _evidence_digest=evidence_digest,
+            _capability=_RELEASE_ADMISSION_CAPABILITY,
+            _record=record,
+        )
+
+    @classmethod
+    def _release_closing_context_for_test(
+        cls,
+        store: RuntimeStore,
+        connection: sqlite3.Connection,
+        *,
+        approval: Mapping[str, Any],
+        admission: Mapping[str, Any],
+        terminal_status: Mapping[str, Any],
+        journal_observation_digest: str,
+    ) -> TrustedReleaseClosingContext:
+        from control_plane import executive_release_contract
+        validated_approval = executive_release_contract.validate_approval_evidence(approval)
+        validated_admission = executive_release_contract.validate_admission(admission)
+        validated_status = executive_release_contract.validate_release_terminal_status(
+            terminal_status, expected_approval=validated_approval
+        )
+        record = cls._closing_context_record(
+            approval=validated_approval,
+            admission=validated_admission,
+            terminal_status=validated_status,
+            journal_observation_digest=journal_observation_digest,
+        )
+        evidence_digest = hashlib.sha256(
+            cls._canonical_context_evidence("closing", record)
+        ).hexdigest()
+        return TrustedReleaseClosingContext(
+            _store=store,
+            _connection=connection,
+            _evidence_digest=evidence_digest,
+            _capability=_RELEASE_CLOSING_CAPABILITY,
+            _record=record,
+        )
+
+    @classmethod
+    def _release_cancellation_context_for_test(
+        cls,
+        store: RuntimeStore,
+        connection: sqlite3.Connection,
+        *,
+        approval: Mapping[str, Any],
+        admission: Mapping[str, Any],
+        reservation: Mapping[str, Any],
+        cancellation: Mapping[str, Any],
+        journal_observation_digest: str,
+    ) -> TrustedReleaseCancellationContext:
+        from control_plane import executive_release_contract as contract
+        valid_approval = contract.validate_approval_evidence(approval)
+        valid_admission = contract.validate_admission(admission)
+        valid_reservation = contract.validate_release_prestart_reservation(
+            reservation, expected_approval=valid_approval
+        )
+        valid_cancellation = contract.validate_release_prestart_cancellation(
+            cancellation,
+            expected_approval=valid_approval,
+            expected_admission=valid_admission,
+            expected_reservation=valid_reservation,
+        )
+        record = cls._cancellation_context_record(
+            approval=valid_approval,
+            admission=valid_admission,
+            reservation=valid_reservation,
+            cancellation=valid_cancellation,
+            journal_observation_digest=journal_observation_digest,
+        )
+        digest = hashlib.sha256(
+            cls._canonical_context_evidence("cancellation", record)
+        ).hexdigest()
+        return TrustedReleaseCancellationContext(
+            _store=store,
+            _connection=connection,
+            _evidence_digest=digest,
+            _capability=_RELEASE_CANCELLATION_CAPABILITY,
+            _record=record,
+        )
+
+    @staticmethod
+    def _reject_release_temp_shadow(connection: sqlite3.Connection) -> None:
+        """Keep release evidence and the quiescence fence on the durable DB.
+
+        SQLite resolves TEMP names before main, including for the shared
+        RuntimeStore Event helpers. A caller-owned TEMP table or view named
+        ``events`` or ``attempts`` must therefore refuse before a release
+        read or write can interpret it as durable evidence.
+        """
+        try:
+            shadows = connection.execute(
+                "SELECT name FROM temp.sqlite_master WHERE type IN ('table','view')"
+                " AND name COLLATE NOCASE IN ('events','attempts') LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise _release_refusal("connection", "TEMP_NAMESPACE_UNVERIFIABLE") from exc
+        if shadows is not None:
+            raise _release_refusal("connection", "TEMP_SHADOW")
+
+    @staticmethod
+    @contextmanager
+    def _atomic_release_event(connection: sqlite3.Connection) -> Iterator[None]:
+        """Undo a refused Event write even when its caller catches the error.
+
+        The owner supplied the surrounding write transaction. A post-append
+        readback refusal must not leave an invalid release Event in that
+        transaction for the caller to commit after catching the exception.
+        """
+        connection.execute("SAVEPOINT release_event_append")
+        try:
+            yield
+        except BaseException:
+            connection.execute("ROLLBACK TO SAVEPOINT release_event_append")
+            connection.execute("RELEASE SAVEPOINT release_event_append")
+            raise
+        else:
+            connection.execute("RELEASE SAVEPOINT release_event_append")
+
+    def _require_owned_write_connection(self, connection: sqlite3.Connection) -> None:
+        if not isinstance(connection, sqlite3.Connection):
+            raise _release_refusal("connection", "CONNECTION_TYPE")
+        if connection.in_transaction is not True:
+            raise _release_refusal(
+                "connection", "WRITE_TRANSACTION_REQUIRED"
+            )
+        if connection not in self.store._write_connections:
+            raise _release_refusal(
+                "connection", "WRITE_TRANSACTION_NOT_OWNER_ISSUED"
+            )
+        # _assert_owned_snapshot_connection demands an active transaction AND
+        # that the supplied connection's main database is this store's stable
+        # file. That is the contract for every write the Runtime accepts from
+        # a caller.
+        self.store._assert_owned_snapshot_connection(connection)
+        self._reject_release_temp_shadow(connection)
+
+    def _require_owned_snapshot_connection(
+        self, connection: sqlite3.Connection, *, allow_write: bool = False
+    ) -> None:
+        if not isinstance(connection, sqlite3.Connection):
+            raise _release_refusal("connection", "CONNECTION_TYPE")
+        if allow_write and connection in self.store._write_connections:
+            if connection.in_transaction is not True:
+                raise _release_refusal(
+                    "connection", "WRITE_TRANSACTION_REQUIRED"
+                )
+            self.store._assert_owned_snapshot_connection(connection)
+            self._reject_release_temp_shadow(connection)
+            return
+        if (
+            self.store.read_binding is None
+            and connection not in self.store._read_connections
+        ):
+            raise _release_refusal(
+                "connection", "READ_CONNECTION_NOT_OWNER_ISSUED"
+            )
+        # Read snapshot still requires an active transaction (BEGIN started by
+        # ``RuntimeStore.read()`` or the caller's own bound read), and the main
+        # database identity must be this store's stable file.
+        self.store._assert_owned_snapshot_connection(connection)
+        self._reject_release_temp_shadow(connection)
+
+    def _require_trusted_context(
+        self,
+        connection: sqlite3.Connection,
+        trusted_context: Any,
+        sealed_bytes_digest: str,
+    ) -> None:
+        if not isinstance(trusted_context, TrustedReleaseContext):
+            raise _release_refusal("trusted_context", "TYPE")
+        if trusted_context.store is not self.store:
+            raise _release_refusal("trusted_context", "FOREIGN_STORE")
+        if trusted_context._connection is not connection:
+            raise _release_refusal("trusted_context", "FOREIGN_CONNECTION")
+        if trusted_context.created_process_id != os.getpid():
+            raise _release_refusal("trusted_context", "FOREIGN_PROCESS")
+        if trusted_context._sealed_evidence_digest != sealed_bytes_digest:
+            raise _release_refusal("trusted_context", "SEALED_EVIDENCE_MISMATCH")
+
+    def _validate_envelope(
+        self,
+        event: Event,
+        *,
+        expected_command_id: str,
+        expected_principal_digest: str,
+        expected_owner_installation_id: str,
+    ) -> None:
+        if event.command_id != expected_command_id:
+            raise _release_refusal("command_id", "MISMATCH")
+        if event.event_type != self._EVENT_TYPE:
+            raise _release_refusal("event_envelope", "FAMILY")
+        if event.aggregate_type != self._AGGREGATE_TYPE:
+            raise _release_refusal("event_envelope", "AGGREGATE")
+        if event.aggregate_id != expected_owner_installation_id:
+            raise _release_refusal("event_envelope", "AGGREGATE_ID")
+        if not event.actor.startswith(self._ACTOR_PREFIX):
+            raise _release_refusal("actor", "PREFIX")
+        actor_principal = event.actor[len(self._ACTOR_PREFIX):]
+        if actor_principal != expected_principal_digest:
+            raise _release_refusal("actor", "PRINCIPAL")
+        if (
+            event.job_id is not None
+            or event.attempt_id is not None
+            or event.worker_id is not None
+            or event.quota_class is not None
+        ):
+            raise _release_refusal("event_envelope", "JOB_LINK")
+
+    def _validate_stored_approval(
+        self,
+        connection: sqlite3.Connection,
+        event: Event,
+        *,
+        expected_command_id: str,
+        expected_principal_digest: str,
+        expected_canonical: bytes | None = None,
+    ) -> Any:
+        from control_plane import executive_release_contract
+        payload = event.payload
+        if set(payload.keys()) != _RELEASE_APPROVAL_REQUIRED_KEYS:
+            raise _release_refusal("payload", "FIELDS")
+        # Structural + cross-field validation refuses malformed persisted
+        # payloads (missing/wrong-typed fields, non-canonical bytes, mismatched
+        # digests, unparseable principal/effect/grant, unparseable owner_seal).
+        validated = executive_release_contract.validate_approval_evidence(payload)
+        principal_projection = validated["principal_projection"]
+        principal_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(principal_projection)
+        ).hexdigest()
+        expected_owner_installation_id = validated["owner_installation_id"]
+        self._validate_envelope(
+            event,
+            expected_command_id=expected_command_id,
+            expected_principal_digest=expected_principal_digest,
+            expected_owner_installation_id=expected_owner_installation_id,
+        )
+        if principal_digest != expected_principal_digest:
+            raise _release_refusal("payload", "PRINCIPAL")
+        if validated["target_ref"] != validated["grant"]["target_ref"]:
+            raise _release_refusal("payload", "TARGET_BIND")
+        if validated["action"] != validated["grant"]["action"]:
+            raise _release_refusal("payload", "ACTION_BIND")
+        if validated["approved_transition_ref"] != expected_command_id:
+            raise _release_refusal("payload", "REF_BIND")
+        # Canonical round-trip: the persisted JSON must equal the canonical
+        # bytes of its parsed form. Any non-canonical encoding (manual edit,
+        # insertion of duplicate keys, reordered keys, etc.) refuses here.
+        raw_row = connection.execute(
+            "SELECT payload_json,created_at_ms FROM events WHERE event_id=?",
+            (int(event.event_id),),
+        ).fetchone()
+        if raw_row is None:
+            raise _release_refusal("payload", "PERSISTED_LOST")
+        stored_raw = str(raw_row["payload_json"])
+        canonical = executive_release_contract.canonical_release_bytes(payload).decode(
+            "utf-8"
+        )
+        if stored_raw != canonical:
+            raise _release_refusal("payload", "NONCANONICAL")
+        if expected_canonical is not None and stored_raw.encode("utf-8") != expected_canonical:
+            raise _release_refusal("payload", "SEMANTIC_MISMATCH")
+        if int(raw_row["created_at_ms"]) != int(validated["created_at_ms"]):
+            raise _release_refusal("event_envelope", "TIMESTAMP")
+        return validated
+
+    def record_approval(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        sealed_approval: Mapping[str, Any],
+        trusted_context: TrustedReleaseContext,
+    ) -> Any:
+        """Persist or reconcile the immutable approval Event.
+
+        Returns the detached, immutable ``ReleaseRecord``. On exact replay
+        the stored original is returned without appending a new Event, a new
+        timestamp, an extended expiry or a new sequence. Same-command foreign
+        family, shortened-reference collision, malformed envelope or payload,
+        caller-context spoof, foreign store, foreign connection, absent write
+        transaction or any semantic mismatch refuses without writes.
+        """
+        from control_plane import executive_release_contract
+        self._require_owned_write_connection(connection)
+        # Revalidate the sealed evidence. The caller-built mapping, the
+        # ReleaseRecord alone, a structural seal, a principal string or a
+        # stored Event row is not authority — the typed trusted_context is.
+        validated = executive_release_contract.validate_approval_evidence(sealed_approval)
+        canonical = executive_release_contract.canonical_release_bytes(validated)
+        sealed_digest = hashlib.sha256(canonical).hexdigest()
+        self._require_trusted_context(connection, trusted_context, sealed_digest)
+        principal_projection = validated["principal_projection"]
+        principal_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(principal_projection)
+        ).hexdigest()
+        # Bind every verified identity from the trusted context to the
+        # accepted sealed evidence. Any mismatch refuses before persistence.
+        if trusted_context.principal_digest != principal_digest:
+            raise _release_refusal("trusted_context", "PRINCIPAL_MISMATCH")
+        if trusted_context.target_ref != validated["target_ref"]:
+            raise _release_refusal("trusted_context", "TARGET_MISMATCH")
+        if (
+            trusted_context.owner_installation_id
+            != validated["owner_installation_id"]
+        ):
+            raise _release_refusal("trusted_context", "OWNER_MISMATCH")
+        if trusted_context.policy_id != principal_projection["policy_id"]:
+            raise _release_refusal("trusted_context", "POLICY_MISMATCH")
+        grant = validated["grant"]
+        owner_seal = validated["owner_seal"]
+        if trusted_context._policy_generation != grant["policy_generation"]:
+            raise _release_refusal("trusted_context", "POLICY_GENERATION_MISMATCH")
+        if trusted_context._authority_policy_hash != grant["authority_policy_hash"]:
+            raise _release_refusal("trusted_context", "POLICY_HASH_MISMATCH")
+        if trusted_context._key_id != owner_seal["key_id"]:
+            raise _release_refusal("trusted_context", "KEY_ID_MISMATCH")
+        if trusted_context.trust_generation != owner_seal["trust_generation"]:
+            raise _release_refusal("trusted_context", "TRUST_GENERATION_MISMATCH")
+        if grant["principal_digest"] != principal_digest:
+            raise _release_refusal("grant", "PRINCIPAL")
+        if grant["target_ref"] != validated["target_ref"]:
+            raise _release_refusal("grant", "TARGET")
+        if grant["action"] != validated["action"]:
+            raise _release_refusal("grant", "ACTION")
+        if grant["transition_digest"] != validated["transition_digest"]:
+            raise _release_refusal("grant", "TRANSITION")
+        command_id = validated["approved_transition_ref"]
+        owner_installation_id = validated["owner_installation_id"]
+        # Same-command lookup inside the active write transaction.
+        existing = self.store.get_event_by_command_id(
+            command_id, connection=connection
+        )
+        if existing is not None:
+            # Exact replay: validate envelope + payload, return immutable
+            # original. No new append, no new timestamp, no expiry extension.
+            return self._validate_stored_approval(
+                connection,
+                existing,
+                expected_command_id=command_id,
+                expected_principal_digest=principal_digest,
+                expected_canonical=canonical,
+            )
+        # First append then read back inside the same write transaction. The
+        # BEGIN IMMEDIATE write lock + the UNIQUE ``command_id`` index
+        # serialise concurrent same-key calls so they leave exactly one Event.
+        actor = self._ACTOR_PREFIX + principal_digest
+        timestamp = int(validated["created_at_ms"])
+        payload_obj = validated.to_dict()
+        self.store.append_event(
+            connection,
+            aggregate_type=self._AGGREGATE_TYPE,
+            aggregate_id=owner_installation_id,
+            event_type=self._EVENT_TYPE,
+            actor=actor,
+            job_id=None,
+            attempt_id=None,
+            worker_id=None,
+            quota_class=None,
+            payload=payload_obj,
+            command_id=command_id,
+            timestamp_ms=timestamp,
+        )
+        written = self.store.get_event_by_command_id(
+            command_id, connection=connection
+        )
+        if written is None:  # pragma: no cover - same-transaction invariant
+            raise _release_refusal("event_envelope", "WRITE_LOST")
+        return self._validate_stored_approval(
+            connection,
+            written,
+            expected_command_id=command_id,
+            expected_principal_digest=principal_digest,
+            expected_canonical=canonical,
+        )
+
+    def read_approval(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        approved_transition_ref: str,
+    ) -> Any:
+        """Read-only lookup of a previously persisted approval.
+
+        Uses one bounded exact command lookup through the owner snapshot,
+        strict envelope validation and the closed payload schema. It writes
+        nothing, grants no renewed authority, mints no token, re-verifies no
+        seal and revalidates no current policy. Historical expiry or
+        revocation does not erase the original evidence — a stored Event
+        remains readable.
+        """
+        from control_plane import executive_release_contract
+        self._require_owned_snapshot_connection(connection)
+        if not isinstance(approved_transition_ref, str) or not approved_transition_ref:
+            raise _release_refusal("approved_transition_ref", "EMPTY")
+        token = approved_transition_ref
+        existing = self.store.get_event_by_command_id(token, connection=connection)
+        if existing is None:
+            raise _release_refusal("approval", "NOT_FOUND")
+        payload = existing.payload
+        if set(payload.keys()) != _RELEASE_APPROVAL_REQUIRED_KEYS:
+            raise _release_refusal("payload", "FIELDS")
+        # Validate the parsed payload, then derive the principal digest from
+        # the persisted projection to use as the expected actor identity.
+        validated = executive_release_contract.validate_approval_evidence(payload)
+        principal_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(
+                validated["principal_projection"]
+            )
+        ).hexdigest()
+        return self._validate_stored_approval(
+            connection,
+            existing,
+            expected_command_id=token,
+            expected_principal_digest=principal_digest,
+        )
+
+    # ------------------------------------------------------------------
+    # Admission read slice (P4 B2).
+    #
+    # Owns ``read_admission`` only. ``record_admission`` / ``record_terminal``
+    # and the global fence are intentionally absent here (see
+    # ``_evidence/P4_ADMISSION_INTERFACE_QUALIFICATION_R1.md`` and
+    # ``_evidence/P4-API-FREEZE-R2.md``). The test fixture may append a
+    # synthetic admission Event through ``RuntimeStore.append_event`` to
+    # exercise the read path; that never confers production authority.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _derive_request_ref(approved_transition_ref: str) -> str:
+        """Return the ``request_ref`` derived from ``approved_transition_ref``.
+
+        The format is the fixed ``p4-approval:<request_ref>`` envelope used
+        by ``ceo_request.app_request_ref``, where ``<request_ref>`` is the
+        exact ``req-<32 hex>`` shape. The derivation is purely structural —
+        no substitution, no truncation, no normalisation of characters. Any
+        deviation refuses.
+        """
+        prefix = "p4-approval:"
+        token = str(approved_transition_ref or "").strip()
+        if not token:
+            raise _release_refusal("approved_transition_ref", "EMPTY")
+        if not token.startswith(prefix):
+            raise _release_refusal("approved_transition_ref", "PREFIX")
+        request_ref = token[len(prefix):]
+        if not request_ref:
+            raise _release_refusal("approved_transition_ref", "EMPTY_REQUEST_REF")
+        if _APP_REQUEST_REF_RE.fullmatch(request_ref) is None:
+            raise _release_refusal("approved_transition_ref", "REQUEST_REF_SHAPE")
+        return request_ref
+
+    @staticmethod
+    def _admission_command_id(request_ref: str) -> str:
+        return "p4-admit:" + str(request_ref)
+
+    @staticmethod
+    def _is_hex64(value: Any) -> bool:
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and bool(_REQUEST_REF_HEX.fullmatch(value))
+        )
+
+    @staticmethod
+    def _principal_digest_from_approval(validated_approval: Any) -> str:
+        from control_plane import executive_release_contract
+
+        return hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(
+                executive_release_contract.validate_principal_projection(
+                    validated_approval["principal_projection"]
+                )
+            )
+        ).hexdigest()
+
+    def _validate_admission_envelope(
+        self,
+        connection: sqlite3.Connection,
+        event: Event,
+        *,
+        expected_command_id: str,
+        expected_owner_installation_id: str,
+        expected_principal_digest: str,
+    ) -> None:
+        if event.command_id != expected_command_id:
+            raise _release_refusal("command_id", "MISMATCH")
+        if event.event_type != EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE:
+            raise _release_refusal("event_envelope", "FAMILY")
+        if event.aggregate_type != EXECUTIVE_RELEASE_AGGREGATE_TYPE:
+            raise _release_refusal("event_envelope", "AGGREGATE")
+        if event.aggregate_id != expected_owner_installation_id:
+            raise _release_refusal("event_envelope", "AGGREGATE_ID")
+        if not event.actor.startswith(EXECUTIVE_RELEASE_ACTOR_PREFIX):
+            raise _release_refusal("actor", "PREFIX")
+        actor_principal = event.actor[len(EXECUTIVE_RELEASE_ACTOR_PREFIX):]
+        if actor_principal != expected_principal_digest:
+            raise _release_refusal("actor", "PRINCIPAL")
+        if (
+            event.job_id is not None
+            or event.attempt_id is not None
+            or event.worker_id is not None
+            or event.quota_class is not None
+        ):
+            raise _release_refusal("event_envelope", "JOB_LINK")
+        self.store._assert_owned_snapshot_connection(connection)
+
+    def _validate_preconditions_against_approval(
+        self,
+        preconditions: Any,
+        admission: Any,
+        approval_validated: Any,
+    ) -> None:
+        from control_plane import executive_release_contract
+        approval_evidence_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(approval_validated)
+        ).hexdigest()
+        if preconditions["owner_installation_id"] != admission["owner_installation_id"]:
+            raise _release_refusal("preconditions", "OWNER_BIND")
+        if preconditions["owner_installation_id"] != approval_validated["owner_installation_id"]:
+            raise _release_refusal("preconditions", "OWNER_BIND_APPROVAL")
+        if preconditions["target_ref"] != admission["target_ref"]:
+            raise _release_refusal("preconditions", "TARGET_BIND")
+        if preconditions["boot_id"] != admission["boot_id"]:
+            raise _release_refusal("preconditions", "BOOT_BIND")
+        if preconditions["approval_evidence_digest"] != approval_evidence_digest:
+            raise _release_refusal("preconditions", "APPROVAL_DIGEST")
+        if preconditions["grant_digest"] != approval_validated["effective_grant_digest"]:
+            raise _release_refusal("preconditions", "GRANT_DIGEST")
+        if (
+            preconditions["authority_policy_hash"]
+            != approval_validated["grant"]["authority_policy_hash"]
+        ):
+            raise _release_refusal("preconditions", "AUTHORITY_HASH")
+        if (
+            preconditions["admission_contract_digest"]
+            != admission["admission_contract_digest"]
+        ):
+            raise _release_refusal("preconditions", "CONTRACT_DIGEST")
+        _effect = approval_validated["normalized_requested_effect"]
+        for field, code in {
+            "from_installed_manifest_digest": "FROM_INSTALLED_MANIFEST",
+            "staged_artifact_digest": "STAGED_ARTIFACT",
+            "staged_content_metadata_digest": "STAGED_CONTENT_METADATA",
+            "compatibility_proof_digest": "COMPATIBILITY_PROOF",
+            "preservation_plan_digest": "PRESERVATION_PLAN",
+        }.items():
+            if preconditions[field] != _effect[field]:
+                raise _release_refusal("preconditions", code)
+        if admission["owner_installation_id"] != approval_validated["owner_installation_id"]:
+            raise _release_refusal("admission", "OWNER_BIND_APPROVAL")
+        if admission["effective_grant_digest"] != approval_validated["effective_grant_digest"]:
+            raise _release_refusal("admission", "GRANT_BIND")
+        if admission["target_ref"] != approval_validated["target_ref"]:
+            raise _release_refusal("admission", "TARGET_BIND")
+        if admission["target_observation_digest"] == "":
+            raise _release_refusal("admission", "OBSERVATION_DIGEST")
+
+    def _admission_history(
+        self, connection: sqlite3.Connection
+    ) -> dict[str, tuple[Event, dict[str, Any]]]:
+        # No single header column is an absence oracle: corruption can move
+        # an admission out of the command, family, or aggregate index. Search
+        # all three independent traces and validate every relevant row before
+        # claiming that the requested admission is absent.
+        rows = connection.execute(
+            "SELECT * FROM events WHERE command_id LIKE 'p4-admit:%'"
+            " OR event_type=? OR payload_json LIKE ? ORDER BY event_id",
+            (EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE,
+             '%mastermind.executive_release_admission_wrapper/v1%'),
+        ).fetchall()
+        found: dict[str, tuple[Event, dict[str, Any]]] = {}
+        from control_plane import executive_release_contract
+        for row in rows:
+            event = _event_from_row(row)
+            payload = event.payload
+            if not isinstance(payload, dict):
+                raise _release_refusal("payload", "TYPE")
+            if set(payload) != _RELEASE_ADMISSION_WRAPPER_REQUIRED_KEYS:
+                raise _release_refusal("payload", "FIELDS")
+            if payload.get("schema") != _RELEASE_ADMISSION_WRAPPER_SCHEMA:
+                raise _release_refusal("wrapper", "SCHEMA")
+            admission = executive_release_contract.validate_admission(payload["admission"])
+            candidate_ref = self._derive_request_ref(admission["approved_transition_ref"])
+            if (event.command_id != self._admission_command_id(candidate_ref)
+                    or event.event_type != EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE):
+                raise _release_refusal("event_envelope", "FAMILY")
+            if event.aggregate_type != EXECUTIVE_RELEASE_AGGREGATE_TYPE:
+                raise _release_refusal("event_envelope", "AGGREGATE")
+            if event.aggregate_id != admission["owner_installation_id"]:
+                raise _release_refusal("event_envelope", "AGGREGATE_ID")
+            if candidate_ref in found:
+                raise _release_refusal("admission_history", "AMBIGUOUS")
+            found[candidate_ref] = (event, payload)
+        return found
+
+    def _find_canonical_admission_event(
+        self, connection: sqlite3.Connection, request_ref: str
+    ) -> tuple[Event, dict[str, Any]] | None:
+        return self._admission_history(connection).get(request_ref)
+
+    def _validate_canonical_admission(
+        self,
+        connection: sqlite3.Connection,
+        event: Event,
+        *,
+        approved_transition_ref: str,
+        request_fingerprint: str,
+    ) -> Any:
+        self._require_owned_snapshot_connection(connection, allow_write=True)
+        request_ref = self._derive_request_ref(approved_transition_ref)
+        canonical = self._find_canonical_admission_event(connection, request_ref)
+        if canonical is None or canonical[0].event_id != event.event_id:
+            raise _release_refusal("admission_history", "AMBIGUOUS")
+        return self.read_admission(
+            connection,
+            approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        )
+
+    @classmethod
+    def _canonical_context_evidence(
+        cls,
+        purpose: str,
+        record: Mapping[str, Any],
+    ) -> bytes:
+        from control_plane import executive_release_contract
+        return executive_release_contract.canonical_release_bytes(
+            {"purpose": purpose, "record": dict(record)}
+        )
+
+    @classmethod
+    def _admission_context_record(
+        cls,
+        *,
+        approval: Any,
+        request_fingerprint: str,
+        preconditions: Any,
+        target_observation_digest: str,
+        prepared_deadline_ms: int,
+        root_qualification_digest: str,
+    ) -> dict[str, Any]:
+        from control_plane import executive_release_contract
+        if not cls._is_hex64(root_qualification_digest):
+            raise _release_refusal("root_qualification_digest", "FORMAT")
+        if root_qualification_digest != root_qualification_digest.lower():
+            raise _release_refusal("root_qualification_digest", "LOWERCASE")
+        if type(prepared_deadline_ms) is not int or prepared_deadline_ms <= 0:
+            raise _release_refusal("prepared_deadline_ms", "FORMAT")
+        approval_evidence_digest = hashlib.sha256(
+            executive_release_contract.canonical_release_bytes(approval)
+        ).hexdigest()
+        return {
+            "schema": "mastermind.executive_release_admission_context/v1",
+            "approval_evidence_digest": approval_evidence_digest,
+            "request_fingerprint": request_fingerprint,
+            "preconditions_digest": hashlib.sha256(
+                executive_release_contract.canonical_release_bytes(preconditions)
+            ).hexdigest(),
+            "target_observation_digest": target_observation_digest,
+            "owner_installation_id": approval["owner_installation_id"],
+            "target_ref": approval["target_ref"],
+            "boot_id": preconditions["boot_id"],
+            "principal_digest": cls._principal_digest_from_approval(approval),
+            "grant_digest": approval["effective_grant_digest"],
+            "policy_id": approval["principal_projection"]["policy_id"],
+            "policy_generation": int(approval["grant"]["policy_generation"]),
+            "authority_policy_hash": approval["grant"]["authority_policy_hash"],
+            "key_id": approval["owner_seal"]["key_id"],
+            "trust_generation": int(approval["owner_seal"]["trust_generation"]),
+            "prepared_deadline_ms": int(prepared_deadline_ms),
+            "root_qualification_digest": root_qualification_digest,
+        }
+
+    @classmethod
+    def _closing_context_record(
+        cls, *, approval: Any, admission: Any, terminal_status: Any,
+        journal_observation_digest: str,
+    ) -> dict[str, Any]:
+        from control_plane import executive_release_contract as contract
+        if not cls._is_hex64(journal_observation_digest):
+            raise _release_refusal("journal_observation_digest", "FORMAT")
+        return {
+            "schema": "mastermind.executive_release_closing_context/v1",
+            "approval_evidence_digest": cls._canonical_record_digest(approval),
+            "request_fingerprint": contract.request_fingerprint_for(approval),
+            "terminal_status_digest": cls._canonical_record_digest(terminal_status),
+            "terminal_receipt_digest": cls._canonical_record_digest(
+                terminal_status["terminal_receipt"]
+            ),
+            "admission_digest": cls._canonical_record_digest(admission),
+            "journal_observation_digest": journal_observation_digest,
+            "owner_installation_id": approval["owner_installation_id"],
+            "target_ref": approval["target_ref"],
+            "principal_digest": cls._principal_digest_from_approval(approval),
+            "grant_digest": approval["effective_grant_digest"],
+            "key_id": approval["owner_seal"]["key_id"],
+            "trust_generation": int(approval["owner_seal"]["trust_generation"]),
+        }
+
+    @classmethod
+    def _cancellation_context_record(
+        cls, *, approval: Any, admission: Any, reservation: Any,
+        cancellation: Any, journal_observation_digest: str,
+    ) -> dict[str, Any]:
+        from control_plane import executive_release_contract as contract
+        if not cls._is_hex64(journal_observation_digest):
+            raise _release_refusal("journal_observation_digest", "FORMAT")
+        root_digest = cls._canonical_record_digest(reservation)
+        return {
+            "schema": "mastermind.executive_release_cancellation_context/v1",
+            "approval_evidence_digest": cls._canonical_record_digest(approval),
+            "request_fingerprint": contract.request_fingerprint_for(approval),
+            "admission_digest": cls._canonical_record_digest(admission),
+            "reservation_digest": root_digest,
+            "cancellation_digest": cls._canonical_record_digest(cancellation),
+            "root_qualification_digest": root_digest,
+            "journal_observation_digest": journal_observation_digest,
+            "owner_installation_id": approval["owner_installation_id"],
+            "target_ref": approval["target_ref"],
+            "principal_digest": cls._principal_digest_from_approval(approval),
+            "grant_digest": approval["effective_grant_digest"],
+            "key_id": approval["owner_seal"]["key_id"],
+            "trust_generation": int(approval["owner_seal"]["trust_generation"]),
+        }
+
+    def _validated_context(
+        self,
+        connection: sqlite3.Connection,
+        trusted_context: Any,
+        *,
+        purpose: str,
+        evidence_digest: str,
+    ) -> tuple[Any, Mapping[str, Any]]:
+        expected_type = {
+            "admission": TrustedReleaseAdmissionContext,
+            "closing": TrustedReleaseClosingContext,
+            "cancellation": TrustedReleaseCancellationContext,
+        }[purpose]
+        expected_capability = {
+            "admission": _RELEASE_ADMISSION_CAPABILITY,
+            "closing": _RELEASE_CLOSING_CAPABILITY,
+            "cancellation": _RELEASE_CANCELLATION_CAPABILITY,
+        }[purpose]
+        self._require_owned_write_connection(connection)
+        if type(trusted_context) is not expected_type:
+            raise _release_refusal("trusted_context", "TYPE")
+        if trusted_context._capability is not expected_capability:
+            raise _release_refusal("trusted_context", "CAPABILITY")
+        if trusted_context.store is not self.store:
+            raise _release_refusal("trusted_context", "FOREIGN_STORE")
+        if trusted_context._connection is not connection:
+            raise _release_refusal("trusted_context", "FOREIGN_CONNECTION")
+        if trusted_context.created_process_id != os.getpid():
+            raise _release_refusal("trusted_context", "FOREIGN_PROCESS")
+        if trusted_context.purpose != purpose:
+            raise _release_refusal("trusted_context", "PURPOSE")
+        actual_digest = hashlib.sha256(
+            self._canonical_context_evidence(purpose, trusted_context.record)
+        ).hexdigest()
+        if actual_digest != trusted_context.evidence_digest:
+            raise _release_refusal("trusted_context", "EVIDENCE_MISMATCH")
+        if actual_digest != evidence_digest:
+            raise _release_refusal("trusted_context", "EVIDENCE_MISMATCH")
+        return trusted_context, trusted_context.record
+
+    def read_admission(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        approved_transition_ref: str,
+        request_fingerprint: str,
+    ) -> Any:
+        """Read-only lookup of the previously persisted admission Event.
+
+        Returns ``None`` only when the bounded ``p4-admit:<request_ref>``
+        Event is genuinely absent from the canonical RuntimeStore. When an
+        Event is present, it is fully validated against the original
+        ``p4-approval:<request_ref>`` Event (re-read from the same owner
+        snapshot) and the closed, versioned internal wrapper. The returned
+        value is the immutable public ``validate_admission`` projection
+        (``ReleaseRecord``) — no internal digest leaks.
+
+        The method writes nothing, mints no token, allocates no
+        ``maintenance_sequence``, creates no Job/Attempt, and does not
+        consult current wall clock or policy. Historical records remain
+        readable. Drift / foreign / malformed / truncated / noncanonical
+        inputs refuse with a bounded field/code diagnostic.
+
+        Caller reference / fingerprint coercion or whitespace normalisation
+        is rejected — the bound string must be the exact typed value and
+        grammar expected by the grammar-only derivation; whitespace, case
+        folds and adjacent-padded copies refuse before any readback.
+        """
+        from control_plane import executive_release_contract
+
+        self._require_owned_snapshot_connection(connection, allow_write=True)
+
+        # Exact typed string grammar: no coercion, no whitespace strip.
+        if not isinstance(approved_transition_ref, str):
+            raise _release_refusal("approved_transition_ref", "EMPTY")
+        token = approved_transition_ref
+        if not token:
+            raise _release_refusal("approved_transition_ref", "EMPTY")
+        if not token.startswith("p4-approval:"):
+            raise _release_refusal("approved_transition_ref", "PREFIX")
+        request_ref = self._derive_request_ref(token)
+        admission_command_id = self._admission_command_id(request_ref)
+        if not isinstance(request_fingerprint, str):
+            raise _release_refusal("request_fingerprint", "EMPTY")
+        fingerprint = request_fingerprint
+        if not fingerprint:
+            raise _release_refusal("request_fingerprint", "EMPTY")
+        if not self._is_hex64(fingerprint):
+            raise _release_refusal("request_fingerprint", "FORMAT")
+
+        candidate = self._find_canonical_admission_event(connection, request_ref)
+        if candidate is None:
+            return None
+        admission_event, wrapper = candidate
+        if not isinstance(wrapper, dict):
+            raise _release_refusal("payload", "TYPE")
+        if set(wrapper.keys()) != _RELEASE_ADMISSION_WRAPPER_REQUIRED_KEYS:
+            raise _release_refusal("payload", "FIELDS")
+        if wrapper.get("schema") != _RELEASE_ADMISSION_WRAPPER_SCHEMA:
+            raise _release_refusal("wrapper", "SCHEMA")
+
+        root_qualification_digest = wrapper["root_qualification_digest"]
+        if not self._is_hex64(root_qualification_digest):
+            raise _release_refusal("root_qualification_digest", "FORMAT")
+        if root_qualification_digest != root_qualification_digest.lower():
+            raise _release_refusal("root_qualification_digest", "LOWERCASE")
+        approval_evidence_digest_field = wrapper["approval_evidence_digest"]
+        if not self._is_hex64(approval_evidence_digest_field):
+            raise _release_refusal("approval_evidence_digest", "FORMAT")
+
+        # Strict inner projection validation. ``validate_admission`` already
+        # enforces the cross-joins between operation_key, request_ref,
+        # approved_transition_ref and admission_event_command_id, and the
+        # digest/uuid formats.
+        admission = executive_release_contract.validate_admission(wrapper["admission"])
+        preconditions = executive_release_contract.validate_precondition_manifest(
+            wrapper["preconditions"]
+        )
+
+        if admission["approved_transition_ref"] != token:
+            raise _release_refusal("approved_transition_ref", "MISMATCH")
+        if admission["admission_event_command_id"] != admission_command_id:
+            raise _release_refusal("admission_event_command_id", "MISMATCH")
+
+        # Re-read the original approval Event from the same owner snapshot
+        # and validate it through the strict approval path. That path
+        # cross-validates canonical bytes, principal/grant/action/target
+        # bindings and the persisted envelope; any drift there refuses
+        # before the admission projection is consulted.
+        approval_event = self.store.get_event_by_command_id(
+            token, connection=connection
+        )
+        if approval_event is None:
+            raise _release_refusal("approval", "NOT_FOUND")
+        approval_payload = approval_event.payload
+        if not isinstance(approval_payload, dict):
+            raise _release_refusal("payload", "TYPE")
+        if set(approval_payload.keys()) != _RELEASE_APPROVAL_REQUIRED_KEYS:
+            raise _release_refusal("payload", "FIELDS")
+        approval_validated = executive_release_contract.validate_approval_evidence(
+            approval_payload
+        )
+        principal_digest = self._principal_digest_from_approval(approval_validated)
+        approval_validated = self._validate_stored_approval(
+            connection,
+            approval_event,
+            expected_command_id=token,
+            expected_principal_digest=principal_digest,
+        )
+
+        # The wrapper must carry the exact digest of the canonical original
+        # approval payload. Recomputing it here, against the strictly
+        # validated record, refuses drift at the wrapper boundary.
+        approval_canonical = executive_release_contract.canonical_release_bytes(
+            approval_validated
+        )
+        approval_evidence_digest = hashlib.sha256(approval_canonical).hexdigest()
+        if approval_evidence_digest != approval_evidence_digest_field:
+            raise _release_refusal("approval_evidence_digest", "MISMATCH")
+        canonical_fingerprint = (
+            executive_release_contract.request_fingerprint_for(approval_validated)
+        )
+        if canonical_fingerprint != fingerprint:
+            raise _release_refusal("request_fingerprint", "MISMATCH")
+        if canonical_fingerprint != admission["request_fingerprint"]:
+            raise _release_refusal("request_fingerprint", "MISMATCH")
+
+        self._validate_admission_envelope(
+            connection,
+            admission_event,
+            expected_command_id=admission_command_id,
+            expected_owner_installation_id=admission["owner_installation_id"],
+            expected_principal_digest=principal_digest,
+        )
+
+        if int(admission["maintenance_sequence"]) != int(admission_event.sequence):
+            raise _release_refusal("maintenance_sequence", "MISMATCH")
+        self._validate_preconditions_against_approval(
+            preconditions, admission, approval_validated
+        )
+
+        # Canonical round-trip on the persisted wrapper bytes. Any drift
+        # (manual edit, key reordering, non-canonical encoding, foreign
+        # fields) refuses before the public projection is returned.
+        raw_row = connection.execute(
+            "SELECT payload_json,created_at_ms FROM events WHERE event_id=?",
+            (int(admission_event.event_id),),
+        ).fetchone()
+        if raw_row is None:
+            raise _release_refusal("payload", "PERSISTED_LOST")
+        stored_raw = str(raw_row["payload_json"])
+        wrapper_canonical = executive_release_contract.canonical_release_bytes(
+            wrapper
+        ).decode("utf-8")
+        if stored_raw != wrapper_canonical:
+            raise _release_refusal("payload", "NONCANONICAL")
+        if int(raw_row["created_at_ms"]) <= 0:
+            raise _release_refusal("event_envelope", "TIMESTAMP")
+
+        context_record = wrapper["admission_context"]
+        if not isinstance(context_record, dict) or set(context_record) != _RELEASE_ADMISSION_CONTEXT_KEYS:
+            raise _release_refusal("admission_context", "FIELDS")
+        deadline = context_record["prepared_deadline_ms"]
+        admission_timestamp = connection.execute(
+            "SELECT created_at_ms FROM events WHERE event_id=?",
+            (int(admission_event.event_id),),
+        ).fetchone()
+        if (admission_timestamp is None or type(deadline) is not int
+                or deadline <= int(admission_timestamp[0])
+                or deadline > approval_validated["expires_at_ms"]):
+            raise _release_refusal("admission_context", "DEADLINE")
+        expected_context = self._admission_context_record(
+            approval=approval_validated,
+            request_fingerprint=fingerprint,
+            preconditions=preconditions,
+            target_observation_digest=admission["target_observation_digest"],
+            prepared_deadline_ms=deadline,
+            root_qualification_digest=root_qualification_digest,
+        )
+        if context_record != expected_context:
+            raise _release_refusal("admission_context", "ORIGINAL_EVIDENCE_MISMATCH")
+        expected_evidence_digest = hashlib.sha256(
+            self._canonical_context_evidence("admission", expected_context)
+        ).hexdigest()
+        if wrapper["evidence_digest"] != expected_evidence_digest:
+            raise _release_refusal("evidence_digest", "MISMATCH")
+        # The public projection is returned alone — no internal digest
+        # leaks. The frozen ``ReleaseRecord`` is itself detached and
+        # immutable, so the caller cannot mutate the returned evidence.
+        return admission
+
+    def record_admission(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        sealed_approval: Mapping[str, Any],
+        request_fingerprint: str,
+        preconditions: Mapping[str, Any],
+        target_observation_digest: str,
+        trusted_context: TrustedReleaseAdmissionContext,
+    ) -> Any:
+        """Persist one global maintenance admission from canonical evidence."""
+        from control_plane import executive_release_contract
+        self._require_owned_write_connection(connection)
+        validated_input = executive_release_contract.validate_approval_evidence(
+            sealed_approval
+        )
+        canonical_fingerprint = (
+            executive_release_contract.request_fingerprint_for(validated_input)
+        )
+        if not isinstance(request_fingerprint, str) or (
+            request_fingerprint != canonical_fingerprint
+        ):
+            raise _release_refusal("request_fingerprint", "MISMATCH")
+        canonical_preconditions = (
+            executive_release_contract.validate_precondition_manifest(preconditions)
+        )
+        if type(trusted_context) is not TrustedReleaseAdmissionContext:
+            raise _release_refusal("trusted_context", "TYPE")
+        validated_context_record = trusted_context.record
+        if not isinstance(target_observation_digest, str) or not self._is_hex64(
+            target_observation_digest
+        ):
+            raise _release_refusal("target_observation_digest", "FORMAT")
+        approval_event = self.store.get_event_by_command_id(
+            validated_input["approved_transition_ref"], connection=connection
+        )
+        if approval_event is None:
+            raise _release_refusal("approval", "NOT_FOUND")
+        approval = self._validate_stored_approval(
+            connection,
+            approval_event,
+            expected_command_id=validated_input["approved_transition_ref"],
+            expected_principal_digest=self._principal_digest_from_approval(
+                validated_input
+            ),
+            expected_canonical=executive_release_contract.canonical_release_bytes(
+                validated_input
+            ),
+        )
+        self._validate_preconditions_against_approval(
+            canonical_preconditions,
+            {
+                "owner_installation_id": approval["owner_installation_id"],
+                "target_ref": approval["target_ref"],
+                "boot_id": canonical_preconditions["boot_id"],
+                "admission_contract_digest": canonical_preconditions[
+                    "admission_contract_digest"
+                ],
+                "effective_grant_digest": approval["effective_grant_digest"],
+                "target_observation_digest": target_observation_digest,
+            },
+            approval,
+        )
+        expected_context = self._admission_context_record(
+            approval=approval,
+            request_fingerprint=canonical_fingerprint,
+            preconditions=canonical_preconditions,
+            target_observation_digest=target_observation_digest,
+            prepared_deadline_ms=validated_context_record["prepared_deadline_ms"],
+            root_qualification_digest=validated_context_record["root_qualification_digest"],
+        )
+        expected_digest = hashlib.sha256(
+            self._canonical_context_evidence("admission", expected_context)
+        ).hexdigest()
+        self._validated_context(
+            connection, trusted_context, purpose="admission", evidence_digest=expected_digest
+        )
+        if dict(validated_context_record) != expected_context:
+            raise _release_refusal("trusted_context", "ORIGINAL_EVIDENCE_MISMATCH")
+        request_ref = approval["request_ref"]
+        admission_command_id = self._admission_command_id(request_ref)
+        existing = self._find_canonical_admission_event(connection, request_ref)
+        if existing is not None:
+            original = self._validate_canonical_admission(
+                connection,
+                existing[0],
+                approved_transition_ref=approval["approved_transition_ref"],
+                request_fingerprint=canonical_fingerprint,
+            )
+            wrapper = existing[1]
+            if (wrapper["preconditions"] != canonical_preconditions.to_dict()
+                    or wrapper["admission_context"] != dict(validated_context_record)
+                    or wrapper["root_qualification_digest"] != validated_context_record["root_qualification_digest"]
+                    or original["target_observation_digest"] != target_observation_digest):
+                raise _release_refusal("admission", "REPLAY_EVIDENCE_MISMATCH")
+            return original
+        self._blocking_unresolved_admission(connection)
+        if validated_context_record["schema"] != (
+            "mastermind.executive_release_admission_context/v1"
+        ):
+            raise _release_refusal("trusted_context", "SCHEMA")
+        now = int(self.store.now_ms())
+        if (
+            now >= validated_context_record["prepared_deadline_ms"]
+            or validated_context_record["prepared_deadline_ms"]
+            > approval["expires_at_ms"]
+        ):
+            raise _release_refusal("prepared_deadline_ms", "EXPIRED")
+        sequence = int(
+            connection.execute(
+                "SELECT COALESCE(MAX(sequence),0)+1 FROM events"
+                " WHERE aggregate_type=? AND aggregate_id=?",
+                (
+                    EXECUTIVE_RELEASE_AGGREGATE_TYPE,
+                    approval["owner_installation_id"],
+                ),
+            ).fetchone()[0]
+        )
+        admission = {
+            "schema": "mastermind.executive_release_admission/v1",
+            "operation_key": approval["operation_key"],
+            "approved_transition_ref": approval["approved_transition_ref"],
+            "target_ref": approval["target_ref"],
+            "owner_installation_id": approval["owner_installation_id"],
+            "boot_id": canonical_preconditions["boot_id"],
+            "request_fingerprint": canonical_fingerprint,
+            "effective_grant_digest": approval["effective_grant_digest"],
+            "maintenance_sequence": sequence,
+            "admission_event_command_id": admission_command_id,
+            "target_observation_digest": target_observation_digest,
+            "admission_contract_digest": canonical_preconditions[
+                "admission_contract_digest"
+            ],
+        }
+        validated_admission = executive_release_contract.validate_admission(
+            admission
+        )
+        wrapper = {
+            "schema": _RELEASE_ADMISSION_WRAPPER_SCHEMA,
+            "admission": validated_admission.to_dict(),
+            "preconditions": canonical_preconditions.to_dict(),
+            "approval_evidence_digest": hashlib.sha256(
+                executive_release_contract.canonical_release_bytes(approval)
+            ).hexdigest(),
+            "root_qualification_digest": validated_context_record[
+                "root_qualification_digest"
+            ],
+        }
+        payload = dict(wrapper)
+        payload["admission_context"] = expected_context
+        payload["evidence_digest"] = expected_digest
+        with self._atomic_release_event(connection):
+            self.store.append_event(
+                connection,
+                aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
+                aggregate_id=approval["owner_installation_id"],
+                event_type=EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE,
+                actor=EXECUTIVE_RELEASE_ACTOR_PREFIX
+                + self._principal_digest_from_approval(approval),
+                payload=payload,
+                command_id=admission_command_id,
+                timestamp_ms=now,
+            )
+            written = self.store.get_event_by_command_id(
+                admission_command_id, connection=connection
+            )
+            if written is None:
+                raise _release_refusal("event_envelope", "WRITE_LOST")
+            stored = self._validate_canonical_admission(
+                connection,
+                written,
+                approved_transition_ref=approval["approved_transition_ref"],
+                request_fingerprint=canonical_fingerprint,
+            )
+            if stored["maintenance_sequence"] != sequence:
+                raise _release_refusal("maintenance_sequence", "WRITE_LOST")
+        return stored
+
+    def _blocking_unresolved_admission(
+        self,
+        connection: sqlite3.Connection,
+    ) -> Any:
+        active_attempts = connection.execute(
+            "SELECT 1 FROM attempts WHERE status IN "
+            "('CLAIMED','RUNNING','CHECKPOINTED','CANCEL_REQUESTED') LIMIT 1"
+        ).fetchone()
+        if active_attempts is not None:
+            raise _release_refusal("runtime_quiescence", "ACTIVE_ATTEMPT")
+        unresolved = self.read_unresolved_admission(connection)
+        if unresolved is not None:
+            raise _release_refusal("global_fence", "ACTIVE_ADMISSION")
+        return None
+
+    def _read_admission_material(
+        self, connection: sqlite3.Connection, *, approved_transition_ref: str,
+        request_fingerprint: str,
+    ) -> dict[str, Any]:
+        from control_plane import executive_release_contract as contract
+        admission = self.read_admission(
+            connection, approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        )
+        if admission is None:
+            raise _release_refusal("admission", "NOT_FOUND")
+        approval_event = self.store.get_event_by_command_id(
+            approved_transition_ref, connection=connection
+        )
+        if approval_event is None or not isinstance(approval_event.payload, dict):
+            raise _release_refusal("approval", "NOT_FOUND")
+        validated_approval = contract.validate_approval_evidence(approval_event.payload)
+        approval = self._validate_stored_approval(
+            connection, approval_event,
+            expected_command_id=approved_transition_ref,
+            expected_principal_digest=self._principal_digest_from_approval(validated_approval),
+        )
+        ref = self._derive_request_ref(approved_transition_ref)
+        candidate = self._find_canonical_admission_event(connection, ref)
+        if candidate is None:
+            raise _release_refusal("admission", "LOST")
+        event, wrapper = candidate
+        return {
+            "approval": approval,
+            "admission": admission,
+            "preconditions": contract.validate_precondition_manifest(wrapper["preconditions"]),
+            "root_qualification_digest": wrapper["root_qualification_digest"],
+            "event": event,
+        }
+
+    def read_admission_evidence(
+        self, connection: sqlite3.Connection, *, approved_transition_ref: str,
+        request_fingerprint: str,
+    ) -> Mapping[str, Any] | None:
+        """Read the original admission evidence on an owned Runtime snapshot.
+
+        Unlike the public admission projection, this owner-consumer seam
+        includes the opaque root reservation digest. It remains available
+        after terminal closure, so START and closure callers can compare
+        their root observation with the original persisted admission. It
+        mints no capability and does not grant release authority.
+        """
+        self._require_owned_snapshot_connection(connection, allow_write=True)
+        if self.read_admission(
+            connection, approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        ) is None:
+            return None
+        material = self._read_admission_material(
+            connection, approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        )
+        return MappingProxyType({
+            key: material[key] for key in (
+                "approval", "admission", "preconditions", "root_qualification_digest"
+            )
+        })
+
+    def _closure_history(
+        self, connection: sqlite3.Connection,
+    ) -> dict[str, tuple[str, Event, dict[str, Any]]]:
+        """Validate every relevant closing Event before allowing fence release."""
+        from control_plane import executive_release_contract as contract
+        rows = connection.execute(
+            "SELECT * FROM events WHERE command_id LIKE 'p4-close:%'"
+            " OR command_id LIKE 'p4-cancel:%'"
+            " OR event_type IN ('EXECUTIVE_RELEASE_CLOSED',"
+            " 'EXECUTIVE_RELEASE_PRESTART_CANCELLED')"
+            " OR payload_json LIKE '%mastermind.executive_release_closing/v1%'"
+            " OR payload_json LIKE '%mastermind.executive_release_prestart_cancellation_closure/v1%'"
+            " ORDER BY event_id"
+        ).fetchall()
+        found: dict[str, tuple[str, Event, dict[str, Any]]] = {}
+        for row in rows:
+            event = _event_from_row(row)
+            payload = event.payload
+            if not isinstance(payload, dict):
+                raise _release_refusal("closure", "PAYLOAD_TYPE")
+            kind = (
+                "terminal" if payload.get("schema") == "mastermind.executive_release_closing/v1"
+                else "cancellation" if payload.get("schema") == "mastermind.executive_release_prestart_cancellation_closure/v1"
+                else None
+            )
+            if kind is None:
+                raise _release_refusal("closure", "SCHEMA")
+            expected_keys = (
+                {"schema", "terminal_status", "closing_context", "evidence_digest"}
+                if kind == "terminal" else
+                {"schema", "reservation", "cancellation", "cancellation_context", "evidence_digest"}
+            )
+            if set(payload) != expected_keys:
+                raise _release_refusal("closure", "FIELDS")
+            source = payload["terminal_status"] if kind == "terminal" else payload["cancellation"]
+            if not isinstance(source, dict):
+                raise _release_refusal("closure", "SOURCE_TYPE")
+            approval_ref = source.get("approved_transition_ref")
+            ref = self._derive_request_ref(approval_ref)
+            fingerprint = source.get("request_fingerprint")
+            if not self._is_hex64(fingerprint):
+                raise _release_refusal("request_fingerprint", "FORMAT")
+            material = self._read_admission_material(
+                connection, approved_transition_ref=approval_ref,
+                request_fingerprint=fingerprint,
+            )
+            approval, admission = material["approval"], material["admission"]
+            admitted_at = connection.execute(
+                "SELECT created_at_ms FROM events WHERE event_id=?",
+                (material["event"].event_id,),
+            ).fetchone()
+            if admitted_at is None:
+                raise _release_refusal("admission", "TIMESTAMP_LOST")
+            closure_at = row["created_at_ms"]
+            if (type(closure_at) is not int or closure_at <= 0
+                    or closure_at < int(admitted_at[0])):
+                raise _release_refusal("closure", "TIMESTAMP")
+            if kind == "terminal":
+                expected_command = "p4-close:" + ref
+                expected_family = "EXECUTIVE_RELEASE_CLOSED"
+                status = contract.validate_release_terminal_status(
+                    source, expected_approval=approval
+                )
+                if status["state"] not in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+                    raise _release_refusal("terminal_status", "NONTERMINAL")
+                if status["started_at_ms"] < int(admitted_at[0]):
+                    raise _release_refusal("started_at_ms", "BEFORE_ADMISSION")
+                if (contract.canonical_release_bytes(status["admission"])
+                        != contract.canonical_release_bytes(admission)
+                        or contract.canonical_release_bytes(status["preconditions"])
+                        != contract.canonical_release_bytes(material["preconditions"])):
+                    raise _release_refusal("terminal_status", "ORIGINAL_EVIDENCE_MISMATCH")
+                context = payload["closing_context"]
+                if not isinstance(context, dict) or set(context) != _RELEASE_TERMINAL_CONTEXT_KEYS:
+                    raise _release_refusal("closing_context", "FIELDS")
+                expected_context = self._closing_context_record(
+                    approval=approval, admission=admission, terminal_status=status,
+                    journal_observation_digest=context["journal_observation_digest"],
+                )
+                purpose = "closing"
+            else:
+                expected_command = "p4-cancel:" + ref
+                expected_family = "EXECUTIVE_RELEASE_PRESTART_CANCELLED"
+                reservation = contract.validate_release_prestart_reservation(
+                    payload["reservation"], expected_approval=approval
+                )
+                if self._canonical_record_digest(reservation) != material["root_qualification_digest"]:
+                    raise _release_refusal("root_qualification_digest", "MISMATCH")
+                cancellation = contract.validate_release_prestart_cancellation(
+                    source, expected_reservation=reservation,
+                    expected_admission=admission, expected_approval=approval,
+                )
+                if cancellation["cancelled_at_ms"] < int(admitted_at[0]):
+                    raise _release_refusal("cancelled_at_ms", "BEFORE_ADMISSION")
+                context = payload["cancellation_context"]
+                if not isinstance(context, dict) or set(context) != _RELEASE_CANCELLATION_CONTEXT_KEYS:
+                    raise _release_refusal("cancellation_context", "FIELDS")
+                expected_context = self._cancellation_context_record(
+                    approval=approval, admission=admission, reservation=reservation,
+                    cancellation=cancellation,
+                    journal_observation_digest=context["journal_observation_digest"],
+                )
+                purpose = "cancellation"
+            if (event.command_id != expected_command or event.event_type != expected_family
+                    or event.aggregate_type != EXECUTIVE_RELEASE_AGGREGATE_TYPE
+                    or event.aggregate_id != admission["owner_installation_id"]
+                    or event.actor != EXECUTIVE_RELEASE_ACTOR_PREFIX + self._principal_digest_from_approval(approval)
+                    or event.sequence <= material["event"].sequence
+                    or any(getattr(event, key) is not None for key in (
+                        "job_id", "attempt_id", "worker_id", "quota_class"))):
+                raise _release_refusal("closure", "ENVELOPE")
+            digest = hashlib.sha256(
+                self._canonical_context_evidence(purpose, expected_context)
+            ).hexdigest()
+            if context != expected_context or payload["evidence_digest"] != digest:
+                raise _release_refusal("closure", "CONTEXT_EVIDENCE")
+            if str(row["payload_json"]) != contract.canonical_release_bytes(payload).decode("utf-8"):
+                raise _release_refusal("closure", "NONCANONICAL")
+            if ref in found:
+                raise _release_refusal("closure_history", "AMBIGUOUS")
+            found[ref] = (kind, event, payload)
+        return found
+
+    def read_unresolved_admission(self, connection: sqlite3.Connection) -> Any:
+        """Return the one global unresolved admission, or genuine absence."""
+        from control_plane import executive_release_contract
+        self._require_owned_snapshot_connection(connection, allow_write=True)
+        history = self._admission_history(connection)
+        closures = self._closure_history(connection)
+        if set(closures) - set(history):
+            raise _release_refusal("closure_history", "ORPHAN")
+        unresolved_refs = set(history) - set(closures)
+        if not unresolved_refs:
+            return None
+        if len(unresolved_refs) != 1:
+            raise _release_refusal("admission_history", "AMBIGUOUS")
+        request_ref = next(iter(unresolved_refs))
+        _, wrapper = history[request_ref]
+        approval_ref = "p4-approval:" + request_ref
+        material = self._read_admission_material(
+            connection, approved_transition_ref=approval_ref,
+            request_fingerprint=wrapper["admission"]["request_fingerprint"],
+        )
+        return {
+            key: material[key] for key in (
+                "approval", "admission", "preconditions", "root_qualification_digest"
+            )
+        }
+
+    def record_terminal(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        approved_transition_ref: str,
+        request_fingerprint: str,
+        terminal_status: Mapping[str, Any],
+        trusted_context: TrustedReleaseClosingContext,
+    ) -> Any:
+        """Accept one qualified durable root terminal; never infer NOT_FOUND."""
+        from control_plane import executive_release_contract as contract
+        self._require_owned_write_connection(connection)
+        ref = self._derive_request_ref(approved_transition_ref)
+        if not self._is_hex64(request_fingerprint):
+            raise _release_refusal("request_fingerprint", "FORMAT")
+        material = self._read_admission_material(
+            connection, approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        )
+        approval, admission = material["approval"], material["admission"]
+        status = contract.validate_release_terminal_status(
+            terminal_status, expected_approval=approval
+        )
+        if status["state"] not in {"SUCCEEDED", "ROLLED_BACK", "FAILED_NOT_APPLIED"}:
+            raise _release_refusal("terminal_status", "NONTERMINAL")
+        admitted_at = connection.execute(
+            "SELECT created_at_ms FROM events WHERE event_id=?",
+            (material["event"].event_id,),
+        ).fetchone()
+        if admitted_at is None or status["started_at_ms"] < int(admitted_at[0]):
+            raise _release_refusal("started_at_ms", "BEFORE_ADMISSION")
+        if (contract.canonical_release_bytes(status["admission"])
+                != contract.canonical_release_bytes(admission)
+                or contract.canonical_release_bytes(status["preconditions"])
+                != contract.canonical_release_bytes(material["preconditions"])):
+            raise _release_refusal("terminal_status", "ORIGINAL_EVIDENCE_MISMATCH")
+        if type(trusted_context) is not TrustedReleaseClosingContext:
+            raise _release_refusal("trusted_context", "TYPE")
+        record = trusted_context.record
+        if not isinstance(record, Mapping) or set(record) != _RELEASE_TERMINAL_CONTEXT_KEYS:
+            raise _release_refusal("trusted_context", "FIELDS")
+        expected_context = self._closing_context_record(
+            approval=approval, admission=admission, terminal_status=status,
+            journal_observation_digest=record["journal_observation_digest"],
+        )
+        digest = hashlib.sha256(
+            self._canonical_context_evidence("closing", expected_context)
+        ).hexdigest()
+        self._validated_context(
+            connection, trusted_context, purpose="closing", evidence_digest=digest
+        )
+        if dict(record) != expected_context:
+            raise _release_refusal("trusted_context", "ORIGINAL_EVIDENCE_MISMATCH")
+        closures = self._closure_history(connection)
+        if ref in closures:
+            kind, _, payload = closures[ref]
+            if (kind != "terminal" or payload["terminal_status"] != status.to_dict()
+                    or payload["closing_context"] != expected_context):
+                raise _release_refusal("terminal_status", "REPLAY_MISMATCH")
+            return status
+        unresolved = self.read_unresolved_admission(connection)
+        if unresolved is None or unresolved["admission"] != admission:
+            raise _release_refusal("global_fence", "NOT_EXACT_OWNER")
+        payload = {
+            "schema": "mastermind.executive_release_closing/v1",
+            "terminal_status": status.to_dict(),
+            "closing_context": expected_context,
+            "evidence_digest": digest,
+        }
+        command = "p4-close:" + ref
+        with self._atomic_release_event(connection):
+            self.store.append_event(
+                connection,
+                aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
+                aggregate_id=admission["owner_installation_id"],
+                event_type="EXECUTIVE_RELEASE_CLOSED",
+                actor=EXECUTIVE_RELEASE_ACTOR_PREFIX + self._principal_digest_from_approval(approval),
+                payload=payload,
+                command_id=command,
+            )
+            checked = self._closure_history(connection).get(ref)
+            if checked is None or checked[0] != "terminal":
+                raise _release_refusal("closure", "WRITE_LOST")
+        return status
+
+    def record_cancellation(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        approved_transition_ref: str,
+        request_fingerprint: str,
+        reservation: Mapping[str, Any],
+        cancellation: Mapping[str, Any],
+        trusted_context: TrustedReleaseCancellationContext,
+    ) -> Any:
+        """Close a no-START admission only with qualified root tombstone evidence."""
+        from control_plane import executive_release_contract as contract
+        self._require_owned_write_connection(connection)
+        ref = self._derive_request_ref(approved_transition_ref)
+        if not self._is_hex64(request_fingerprint):
+            raise _release_refusal("request_fingerprint", "FORMAT")
+        material = self._read_admission_material(
+            connection, approved_transition_ref=approved_transition_ref,
+            request_fingerprint=request_fingerprint,
+        )
+        approval, admission = material["approval"], material["admission"]
+        valid_reservation = contract.validate_release_prestart_reservation(
+            reservation, expected_approval=approval
+        )
+        root_digest = self._canonical_record_digest(valid_reservation)
+        if root_digest != material["root_qualification_digest"]:
+            raise _release_refusal("root_qualification_digest", "MISMATCH")
+        valid_cancellation = contract.validate_release_prestart_cancellation(
+            cancellation,
+            expected_reservation=valid_reservation,
+            expected_admission=admission,
+            expected_approval=approval,
+        )
+        admitted_at = connection.execute(
+            "SELECT created_at_ms FROM events WHERE event_id=?",
+            (material["event"].event_id,),
+        ).fetchone()
+        if admitted_at is None or valid_cancellation["cancelled_at_ms"] < int(admitted_at[0]):
+            raise _release_refusal("cancelled_at_ms", "BEFORE_ADMISSION")
+        if type(trusted_context) is not TrustedReleaseCancellationContext:
+            raise _release_refusal("trusted_context", "TYPE")
+        record = trusted_context.record
+        if not isinstance(record, Mapping) or set(record) != _RELEASE_CANCELLATION_CONTEXT_KEYS:
+            raise _release_refusal("trusted_context", "FIELDS")
+        expected_context = self._cancellation_context_record(
+            approval=approval, admission=admission, reservation=valid_reservation,
+            cancellation=valid_cancellation,
+            journal_observation_digest=record["journal_observation_digest"],
+        )
+        digest = hashlib.sha256(
+            self._canonical_context_evidence("cancellation", expected_context)
+        ).hexdigest()
+        self._validated_context(
+            connection, trusted_context, purpose="cancellation", evidence_digest=digest
+        )
+        if dict(record) != expected_context:
+            raise _release_refusal("trusted_context", "ORIGINAL_EVIDENCE_MISMATCH")
+        closures = self._closure_history(connection)
+        if ref in closures:
+            kind, _, payload = closures[ref]
+            if (kind != "cancellation"
+                    or payload["reservation"] != valid_reservation.to_dict()
+                    or payload["cancellation"] != valid_cancellation.to_dict()
+                    or payload["cancellation_context"] != expected_context):
+                raise _release_refusal("cancellation", "REPLAY_MISMATCH")
+            return valid_cancellation
+        unresolved = self.read_unresolved_admission(connection)
+        if unresolved is None or unresolved["admission"] != admission:
+            raise _release_refusal("global_fence", "NOT_EXACT_OWNER")
+        payload = {
+            "schema": "mastermind.executive_release_prestart_cancellation_closure/v1",
+            "reservation": valid_reservation.to_dict(),
+            "cancellation": valid_cancellation.to_dict(),
+            "cancellation_context": expected_context,
+            "evidence_digest": digest,
+        }
+        with self._atomic_release_event(connection):
+            self.store.append_event(
+                connection,
+                aggregate_type=EXECUTIVE_RELEASE_AGGREGATE_TYPE,
+                aggregate_id=admission["owner_installation_id"],
+                event_type="EXECUTIVE_RELEASE_PRESTART_CANCELLED",
+                actor=EXECUTIVE_RELEASE_ACTOR_PREFIX + self._principal_digest_from_approval(approval),
+                payload=payload,
+                command_id="p4-cancel:" + ref,
+            )
+            checked = self._closure_history(connection).get(ref)
+            if checked is None or checked[0] != "cancellation":
+                raise _release_refusal("closure", "WRITE_LOST")
+        return valid_cancellation
 
 
 __all__ = [
@@ -24361,6 +26896,11 @@ __all__ = [
     "BoundedRuntimeReadObservation",
     "BoundedRoleResultRootMetadata",
     "BoundedRoleResultSnapshot",
+    "EXECUTIVE_RELEASE_ACTOR_PREFIX",
+    "EXECUTIVE_RELEASE_AGGREGATE_TYPE",
+    "EXECUTIVE_RELEASE_APPROVED_EVENT_TYPE",
+    "EXECUTIVE_RELEASE_ADMITTED_EVENT_TYPE",
+    "ReleaseMaintenanceRegistry",
     "RuntimeReadObservationReceipt",
     "RuntimeRoleResultOverBudget",
     "CooRetryMutationOutcome",
@@ -24383,6 +26923,11 @@ __all__ = [
     "RuntimeStore",
     "SCHEMA_VERSION",
     "StateConflict",
+    "TrustedReleaseContext",
+    "TrustedReleaseAdmissionContext",
+    "TrustedReleaseClosingContext",
+    "TrustedReleaseCancellationContext",
+    "ReleaseMaintenanceError",
     "HOST_EXECUTION_BINDING_V2",
     "HOST_EXECUTION_BINDING_V3",
     "HOST_EXECUTION_BINDING_VERSION_KEY",

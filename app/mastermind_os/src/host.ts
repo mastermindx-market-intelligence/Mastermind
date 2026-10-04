@@ -35,6 +35,8 @@ export interface AuthState {
 }
 export interface RawClient {
   getState(): AuthState;
+  /** Existing source epoch, when exposed by the fixed client; never a principal or grant. */
+  invalidationGeneration?(): number;
   subscribe(listener: (state: AuthState) => void): () => void;
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
@@ -95,11 +97,16 @@ export function bindMissionHost(
 ): MissionHost {
   let epoch = 0;
   let previous = JSON.stringify(client.getState());
+  let previousClientGeneration = client.invalidationGeneration?.();
   client.subscribe((state) => {
     const next = JSON.stringify(state);
-    if (next !== previous) {
+    const generation = client.invalidationGeneration?.();
+    // Native identity boundaries may retain the same public display state.
+    // Legacy/web clients without an epoch still deduplicate identical updates.
+    if (next !== previous || generation !== previousClientGeneration) {
       epoch++;
       previous = next;
+      previousClientGeneration = generation;
     }
   });
   const check = (signal: AbortSignal, started: number) => {
@@ -302,6 +309,7 @@ export async function createNativeClient(
   }
   return {
     getState: () => ({ ...current }),
+    invalidationGeneration: () => epoch,
     subscribe(listener) {
       listeners.add(listener);
       return () => {

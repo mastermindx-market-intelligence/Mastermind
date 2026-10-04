@@ -214,6 +214,7 @@ _CONFIG_OPTIONAL = frozenset(
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
+        "coo_principal_armed",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -251,6 +252,9 @@ _CONFIG_OPTIONAL = frozenset(
         "dialogue_bridge_armed",
         "dialogue_wake_retry_policy",
         "subscription_canary_realm",
+        "privileged_readiness_armed",
+        "privileged_broker_socket_path",
+        "python_runtime_provenance_digest",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -324,6 +328,11 @@ def _parser() -> argparse.ArgumentParser:
                 help="Content profile key (web or mac). Omit for legacy single-profile.",
             )
 
+    readiness = sub.add_parser("check-current-worker-login", help="Read assigned worker login status for one current Attempt.")
+    readiness.add_argument("job_id")
+    readiness.add_argument("attempt_id")
+    readiness.add_argument("fence_generation", type=int)
+
     job = sub.add_parser("job", help="Inspect one Job.")
     job.add_argument("job_id")
     attempt = sub.add_parser("attempt", help="Inspect one Attempt.")
@@ -339,6 +348,9 @@ def _parser() -> argparse.ArgumentParser:
     cancel.add_argument("job_id")
     requeue = sub.add_parser("requeue", help="Explicitly requeue one LOST proof Job.")
     requeue.add_argument("job_id")
+    recovery = sub.add_parser("recover-proof-capacity", help="Requalify one explicitly requeued missing-owner proof quota.")
+    recovery.add_argument("job_id")
+    recovery.add_argument("lost_attempt_id")
     verify = sub.add_parser("verify-backup", help="Verify one named backup in backup root.")
     verify.add_argument("name")
 
@@ -759,6 +771,17 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    arm = config.get("privileged_readiness_armed", False)
+    broker_socket = config.get("privileged_broker_socket_path")
+    if type(arm) is not bool:
+        raise ServiceError("privileged_readiness_armed must be boolean")
+    if (arm and broker_socket != "/var/run/mastermind-executive/privileged.sock") or (not arm and broker_socket is not None):
+        raise ServiceError("privileged readiness requires the armed canonical broker socket")
+    from ops.executive_os.coo_principal_host import validate_control_coo
+    try:
+        validate_control_coo(config)
+    except ValueError:
+        raise ServiceError("COO principal requires explicit Workspace and v2 App composition") from None
     ceo_ingress_present = keys & _CEO_INGRESS_CONFIG_KEYS
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
@@ -1039,6 +1062,13 @@ def load_control_config(
         if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
             raise ServiceError(
                 "control config operator_harness_binary_digest must be SHA-256"
+            )
+    if "python_runtime_provenance_digest" in config:
+        digest = config["python_runtime_provenance_digest"]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ServiceError(
+                "control config python_runtime_provenance_digest must be lowercase "
+                "64-hex SHA-256"
             )
     if "operator_harness_version" in config:
         version = config["operator_harness_version"]
@@ -1489,7 +1519,18 @@ def _service_from_config(
     workspace_acquisition_loader: Callable[[], Any] | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
     workspace_bindings_path: Path | None = None,
+    coo_source: Any | None = None,
+    claimed_operator_adapter_factory: Callable[..., Any] | None = None,
+    remote_operator_binding_source: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
+    # This is trusted host composition, never a JSON/model-selected factory.
+    if (claimed_operator_adapter_factory is not None
+            and not callable(claimed_operator_adapter_factory)):
+        raise ServiceError("claimed operator factory must be callable")
+    if (remote_operator_binding_source is not None
+            and (not callable(remote_operator_binding_source)
+                 or claimed_operator_adapter_factory is not None)):
+        raise ServiceError("remote operator binding source conflicts with factory")
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_operator_supervisor import (
         ExecutiveOperatorSupervisor,
@@ -1573,6 +1614,8 @@ def _service_from_config(
         model=worker_model,
         effort=str(raw.get("effort") or "xhigh"),
         cost_class=str(raw.get("cost_class") or "standard"),
+        privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
+        privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
@@ -1608,6 +1651,14 @@ def _service_from_config(
     canary: dict[str, Any] = dict(initial_canary or {})
     initially_ready = initial_canary is not None
 
+    recovery_controller = {}
+
+    def proof_capacity_recovery_observer(attempt):
+        controller = recovery_controller.get("current")
+        if controller is None or not controller.absence_verified(attempt):
+            raise ServiceError("proof capacity has no fresh broker absence")
+        return dict(controller.uid_sweep_receipt(attempt))
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -1642,6 +1693,9 @@ def _service_from_config(
                 )
 
             claim_binding_id = str(realm["binding_id"])
+        controller = RemoteWorkerProcessController(
+            client, expected_worker_uid=int(raw["worker_uid"]))
+        recovery_controller["current"] = controller
         return ExecutiveSupervisor(
             runtime,
             adapter,
@@ -1657,7 +1711,7 @@ def _service_from_config(
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
-            process_controller=RemoteWorkerProcessController(client),
+            process_controller=controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
                 if exact_target_source is not None else None
@@ -1667,15 +1721,34 @@ def _service_from_config(
         )
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
-        def adapter_factory(turn_input_loader):
+        def primary_factory(attempt, requested, turn_input_loader, *, recovery):
+            # A fixed primary client must never carry another claimed worker.
+            # Multi-worker composition supplies its current owner-bound factory.
+            if (attempt.worker_id != config.worker_id
+                    or requested.worker_id != config.worker_id
+                    or requested.provider != "openai-codex"
+                    or requested.harness_kind != "codex-app-server"):
+                raise ServiceError("claim differs from the configured operator worker")
             return RemoteCodexOperatorAdapter(
                 client,
                 turn_input_loader=turn_input_loader,
             )
 
+        factory = claimed_operator_adapter_factory
+        workspace_source = None
+        if remote_operator_binding_source is not None:
+            from control_plane.remote_attempt_transport import (
+                build_claimed_remote_operator_factory,
+                build_claimed_remote_workspace_identity_source,
+            )
+            factory = build_claimed_remote_operator_factory(runtime, remote_operator_binding_source)
+            workspace_source = build_claimed_remote_workspace_identity_source(
+                runtime, remote_operator_binding_source
+            )
         return ExecutiveOperatorSupervisor(
             runtime,
-            adapter_factory=adapter_factory,
+            claimed_adapter_factory=(factory if factory is not None else primary_factory),
+            workspace_identity_source=workspace_source,
             prompt_source=sealed_supervisor,
         )
 
@@ -1710,6 +1783,7 @@ def _service_from_config(
         )
 
     from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
+    from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import (
         WEB_CEO_V3_PROFILE,
         validate_installed_mcp_profile_current,
@@ -1752,6 +1826,8 @@ def _service_from_config(
             GitHubWebCommissionSourceProvider,
         )
 
+        commission_source_provider = GitHubWebCommissionSourceProvider()
+
         reader_kwargs = dict(
             repo_root=Path(raw["proof_source_repository"]),
             macro_root=Path(raw["ceo_ingress_app_macro_root"]),
@@ -1761,7 +1837,11 @@ def _service_from_config(
             code_root=Path(__file__).resolve().parents[1],
             expected_source_sha=str(raw["proof_base_sha"]),
         )
-        if installed_profile in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}:
+        if installed_profile in {
+            WEB_CEO_V2_PROFILE,
+            WEB_CEO_V3_PROFILE,
+            WEB_CEO_SESSIONS_PROFILE,
+        }:
             from integrations.executive_mcp.web_ceo import (
                 WebCeoV2InstalledExecutiveReaders,
             )
@@ -1858,15 +1938,99 @@ def _service_from_config(
                 # Namespace custody belongs to that service and validates the
                 # exact Runtime supplied by its App request handler.
                 bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
+        coo_factories = {}
+        from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+        from control_plane.coo_principal_host import CooHostProvider
+        if validate_control_coo(raw):
+            if type(coo_source) is not CooInstalledSource or "workspace_read_provider_factory" not in workspace_factories:
+                raise ServiceError("COO principal requires the sealed source and existing Workspace owner")
+            def coo_factory(runtime):
+                return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
+            coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
+                principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+        session_factories = {}
+        if installed_profile in {WEB_CEO_SESSIONS_PROFILE, WEB_CEO_V3_PROFILE}:
+            from integrations.session_bridge.installed import build_runtime_session_bridge
+            from integrations.session_bridge.native_backends import ExecutiveSummonAdapter
+            from integrations.session_bridge.schemas import BridgeError
+            from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
+            from control_plane import executive_ceo_ingress as session_ingress, ceo_request
+
+            def session_bridge_factory(runtime):
+                # Validate the supplied live Runtime through the incumbent
+                # namespace owner before constructing any projection or writer.
+                service._namespace_custody.bound_runtime(runtime)
+                binding = service._ceo_ingress_app_binding
+
+                def require_session_admission(_envelope=None):
+                    if (binding is not service._ceo_ingress_app_binding
+                            or not binding.armed or service._closing
+                            or service._service_state not in {"READY", "AWAITING_CANARY"}):
+                        raise BridgeError("ingress_unavailable", "Executive admission is unavailable")
+
+                async def submit_summon(payload):
+                    require_session_admission()
+                    request = dict(payload)
+                    request_ref = ceo_request.app_request_ref(request.pop("operation_key"))
+                    try:
+                        observed = await session_ingress._observe_trusted_grounding(readers)
+                        require_session_admission()
+                        receipt = await session_ingress.handle_frame(
+                            {"schema": session_ingress.SUBMIT_SCHEMA_V2,
+                             "request_ref": request_ref, "observed_grounding": observed,
+                             "request": request},
+                            runtime=runtime, grounding_provider=readers,
+                            workspace_root=config.proof_workspace_root,
+                            service_state=service._service_state,
+                            ceo_ingress_armed=binding.armed,
+                            strict_v2_admission=True,
+                            execution_binding_provider=service._require_current_coo_binding,
+                            dialogue_source_provider=commission_source_provider,
+                            admission_guard=require_session_admission,
+                        )
+                    except session_ingress.CeoIngressError as exc:
+                        # Canonical owner classifies its durable effect/refusal.
+                        raise BridgeError(exc.code, exc.message) from None
+                    # After the mutation owner returns, drift cannot be described
+                    # as a zero-effect refusal. The private transport preserves it.
+                    try:
+                        require_session_admission()
+                    except BridgeError:
+                        raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                    return receipt
+
+                adapter = ExecutiveSummonAdapter(submit_summon)
+                async def summon(principal, arguments):
+                    if not {READ_SCOPE, SUBMIT_SCOPE} <= set(principal.scopes):
+                        raise BridgeError("authority_refused", "Executive submit scopes are required")
+                    return await adapter(arguments)
+
+                def codex_owner_configured():
+                    from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
+                    # Configuration and serving listener are necessary capability
+                    # gates. A carrier receipt still proves no native attention.
+                    observation = getattr(service, "_dialogue_observation_server", None)
+                    return (
+                        raw.get("dialogue_bridge_armed") is True
+                        and getattr(raw.get("dialogue_wake_retry_policy"), "armed", False) is True
+                        and observation is not None
+                        and observation.is_serving()
+                        and w3c_plist_configured(release_sha=config.proof_base_sha)
+                    )
+
+                return build_runtime_session_bridge(
+                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    summon_handler=summon, codex_owner_configured=codex_owner_configured)
+            session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
             read_schema=app_read_schema,
-            **content_factories, **workspace_factories,
+            **content_factories, **workspace_factories, **coo_factories, **session_factories,
         )
         ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
-            GitHubWebCommissionSourceProvider()
+            commission_source_provider
         )
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
@@ -1920,9 +2084,17 @@ def _service_from_config(
                     "terminal-return Relay socket must be distinct from every "
                     "activated listener"
                 )
+    readiness_factory = None
+    if config.privileged_readiness_armed:
+        from control_plane.executive_privileged_authority import PrivilegedReadinessController
+        def readiness_factory(runtime):
+            return PrivilegedReadinessController(runtime, release_sha=config.proof_base_sha)
     service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        privileged_readiness_controller_factory=readiness_factory,
+        proof_capacity_recovery_observer=proof_capacity_recovery_observer,
+        proof_capacity_recovery_worker_uid=int(raw["worker_uid"]),
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
@@ -2045,6 +2217,11 @@ async def _serve_from_config(config_path: Path) -> None:
             "content_observer"
         ]
 
+    coo_source = None
+    from ops.executive_os.coo_principal_host import CooInstalledSource, DEFAULT_INSTALL_PATH, validate_control_coo
+    if validate_control_coo(raw):
+        coo_source = CooInstalledSource.from_path(DEFAULT_INSTALL_PATH,
+            Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
     service = _service_from_config(
         raw,
         canary_loader=load_canary,
@@ -2052,6 +2229,7 @@ async def _serve_from_config(config_path: Path) -> None:
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
+        **({"coo_source": coo_source} if coo_source is not None else {}),
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
@@ -2073,8 +2251,13 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         if args.command.startswith("content-observer-") and hasattr(args, 'profile_key') and args.profile_key:
             return args.command, {"profile_key": args.profile_key}
         return args.command, {}
+    if args.command == "recover-proof-capacity":
+        return args.command, {"job_id": args.job_id, "lost_attempt_id": args.lost_attempt_id}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
+    if args.command == "check-current-worker-login":
+        return args.command, {"job_id": args.job_id, "attempt_id": args.attempt_id,
+                              "fence_generation": args.fence_generation}
     if args.command == "run-coo-cycle":
         return args.command, {"root_job_id": args.root_job_id}
     if args.command == "attempt":
