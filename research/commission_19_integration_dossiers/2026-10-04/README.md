@@ -6,6 +6,8 @@ Protected procedure: Mastermind `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f`. Curr
 
 ## Accepted scope and proof levels
 
+The [cross-report adjudications](CROSS_REPORT_ADJUDICATIONS.md) preserve the reviewed interface decisions and outstanding P0 proof obligations. They do not claim a complete executable integration freeze.
+
 | Dossier | Concrete conclusion | Remaining exit evidence |
 |---|---|---|
 | [C2 native expectations](C02_NATIVE_EXPECTATIONS.md) | Prospective capture has useful lineage but deliberately absent comparability/rights fields; a legacy revision reader is not proof of SRC-A1 consumption | Qualified real comparable pair, exact reader receipt, measured coverage and rights |
