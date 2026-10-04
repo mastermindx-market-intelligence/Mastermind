@@ -70,7 +70,7 @@ FLEET_FABRIC_TIMEOUT_MS = 8_000
 # CLI adapters. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
 TAILNET_GATEWAY_NAME = "tailnet-gateway.mjs"
-TAILNET_FABRIC_ACCOUNT = "fabric"
+TAILNET_FABRIC_ACCOUNTS = frozenset(("fabric-read", "fabric-design"))
 
 ACCOUNT_LABEL_MAX = 64
 ACCOUNT_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,63})?$")
@@ -435,7 +435,7 @@ def _build_runtime_roots(account: str) -> dict:
     base = user_root / ".local" / "share" / "studio-direct-mcp" / "private" / account
     gateway_name = (
         TAILNET_GATEWAY_NAME
-        if account == TAILNET_FABRIC_ACCOUNT
+        if account in TAILNET_FABRIC_ACCOUNTS
         else PRIVATE_GATEWAY_NAME
     )
     return {
@@ -546,17 +546,22 @@ def _fleet_status_config(user_root: Path) -> dict | None:
 
 
 def _validate_tailnet_public_url(account: str, value: str | None) -> str | None:
-    if account != TAILNET_FABRIC_ACCOUNT:
+    if account not in TAILNET_FABRIC_ACCOUNTS:
         if value not in (None, ""):
-            raise SystemExit("--public-url is reserved for --account fabric")
+            raise SystemExit(
+                "--public-url is reserved for --account fabric-read|fabric-design"
+            )
         return None
     if not isinstance(value, str) or not value:
-        raise SystemExit("--account fabric requires --public-url https://<host>.ts.net")
+        raise SystemExit(
+            "--account fabric-read|fabric-design requires "
+            "--public-url https://<host>.ts.net"
+        )
     try:
         parsed = urlsplit(value)
         port = parsed.port
     except (TypeError, ValueError) as exc:
-        raise SystemExit("fabric --public-url must be an exact HTTPS tailnet origin") from exc
+        raise SystemExit("fabric route --public-url must be an exact HTTPS tailnet origin") from exc
     hostname = parsed.hostname
     if (
         parsed.scheme != "https"
@@ -569,7 +574,7 @@ def _validate_tailnet_public_url(account: str, value: str | None) -> str | None:
         or parsed.query
         or parsed.fragment
     ):
-        raise SystemExit("fabric --public-url must be an exact HTTPS tailnet origin")
+        raise SystemExit("fabric route --public-url must be an exact HTTPS tailnet origin")
     normalized = f"https://{hostname}"
     if port is not None:
         normalized += f":{port}"
@@ -587,7 +592,8 @@ def _build_config(
     *,
     public_url: str | None = None,
 ) -> dict:
-    # publicUrl is omitted: the private adapter rejects a public origin.
+    # Ordinary private seats omit publicUrl; reserved fabric routes bind one
+    # exact tailnet HTTPS origin while the gateway itself remains loopback-only.
     config = {
         "accountLabel": account,
         "host": host,
