@@ -819,20 +819,6 @@ def compose_control_room(
     """
     degraded: list[str] = []
 
-    # C1 runtime-capability evidence is injected owner output only. The
-    # compositor never acquires or refreshes Studio/Terminal evidence. Accept
-    # only the existing typed CAP1 envelope; absent evidence remains absent.
-    runtime_capability_status_out: dict[str, Any] | None = None
-    if runtime_capability_status is not None:
-        if sol_capability_status is None:
-            degraded.append("runtime_capability_status: owner module not shipped")
-        elif not isinstance(
-            runtime_capability_status, sol_capability_status.CapabilityStatusEnvelope
-        ):
-            degraded.append("runtime_capability_status: typed CAP1 envelope required")
-        else:
-            runtime_capability_status_out = runtime_capability_status.to_dict()
-
     # --- boot packet / Agent OS brief --------------------------------------
     brief: Mapping[str, Any] | None = None
     mastermind_sha: str | None = None
@@ -1073,6 +1059,20 @@ def compose_control_room(
             "bindings": card_bindings,
             "disagreements": _disagreements(agent_os_entry, jobs, prs),
         })
+
+    # C1 runtime-capability evidence is injected owner output only. The
+    # compositor never acquires or refreshes Studio/Terminal evidence. Accept
+    # only the existing typed CAP1 envelope; absent evidence remains absent.
+    runtime_capability_status_out: dict[str, Any] | None = None
+    if runtime_capability_status is not None:
+        if sol_capability_status is None:
+            degraded.append("runtime_capability_status: owner module not shipped")
+        elif not isinstance(
+            runtime_capability_status, sol_capability_status.CapabilityStatusEnvelope
+        ):
+            degraded.append("runtime_capability_status: typed CAP1 envelope required")
+        else:
+            runtime_capability_status_out = runtime_capability_status.to_dict()
 
     # --- placement selection (CAP-C1) ---------------------------------------
     # Optional pure input: a wire dict already produced by
