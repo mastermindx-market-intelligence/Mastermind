@@ -116,6 +116,11 @@ in the Mastermind OS file `01M3NRCX55B452A12819WNE1RH`:
 - **CV01 `SD8-0` / CV01M `SI5-0`** on Page 12 define the Conversations
   destination: the durable company office, exact permitted project conversations,
   scoped filtering, and source/access recovery.
+- **AT05/AT05M `L0Z-0` / `MNM-0`** and **AT06/AT06M `L3N-0` / `MNN-0`**
+  define Knowledge and Search with qualified coverage and exact source destinations.
+- **KD01/KD01M `SPU-0` / `STU-0`** show the source reader and original scoped
+  draft. UX09 specifies the added-draft state, conditional Undo, full mobile
+  append payload and expanded source details; the last two remain reader amendments.
 
 Apply the ink and graphite surfaces, ivory reading hierarchy, champagne primary
 actions, original sculptural artwork and progressive disclosure consistently
@@ -139,11 +144,13 @@ verification record remains
 Read the [Daily Experience Builder Flow Specification](../../docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md)
 before wiring the mockups. It grounds the intended experience in protected
 product law and implementation source `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
-A continuation comparison through protected `28be2ce2d481fd542ec869344e178e5cec4d7d75`
-found no app-source delta; dated candidate observations remain separate in §18.2.
+Continuation comparisons through protected `3ac05a00dacde2c06893f5f15082b703d2c04463`
+found no app-source delta. The latest receipt-provenance/backend evidence is
+qualified separately from app adoption and installation; the specification
+preserves the original census and dated candidate observations.
 
 [Paper page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0)
-connects the route family through eight editable workflow notes:
+connects the route family through ten editable workflow notes:
 
 - UX00 `PBO-0`: daily loop, roles and directory.
 - UX01 `PBP-0`: complete, partial, historical and unprojected Today states.
@@ -153,6 +160,8 @@ connects the route family through eight editable workflow notes:
 - UX05 `PBR-0`: route/owner/capability boundaries and first build slice.
 - UX06 `SMO-0`: exact conversation selection, scoped filtering and empty/access states.
 - UX07 `SMP-0`: Options + Send, draft continuity, delivery stages and recovery.
+- UX08 `SXT-0`: Search/Knowledge, exact-source opening, coverage and return context.
+- UX09 `SXU-0`: explicit excerpt/source-label insertion, draft/Undo states and source details.
 
 The daily product shows what needs the Chairman's judgment and what the team
 owns. Meta-CEO remains one durable company office; project conversations retain
@@ -168,13 +177,29 @@ a newer draft; unresolved delivery stays with its original operation. Inbox keep
 routine team review with the project owner and opens the exact reserved decision
 packet directly. The specification records the actual control IDs and return rules.
 
+For source reuse, follow UX08 from Search or Knowledge into KD01, then UX09.
+Reading leaves the original draft unchanged. A separately supported Add action
+inserts the visibly previewed excerpt and source label into that same draft,
+keeping Project Sol, project/topic scope and newer edits intact. Nothing is
+sent. Return restores the actual permitted origin and focus; changed sources,
+partial coverage, repeated Add, missing draft support and permission loss have
+explicit states. Undo is shown only when the existing draft owner can reverse
+the exact unchanged insertion; otherwise the person edits the draft.
+
 The specification includes actual Paper action anchors, source-owner mappings,
-transition and recovery matrices, twelve illustrative fixtures and fifteen
-implementation acceptance scenarios, with continuation checks for directory
-identity, message stages, draft revision, IME and actual focus restoration.
+transition and recovery matrices, illustrative fixtures and fifteen
+implementation acceptance scenarios, extended for directory identity, message
+stages, source reading/reuse, draft revision, IME and actual focus restoration.
 The current protected app remains a
-read-only consumer; message send, project creation, decision recording, full
-history and execution continuation are target capabilities with separate owner
+read-only consumer; general Search/Knowledge/source reuse, message send, project
+creation, decision recording, full history and execution continuation are target capabilities with separate owner
 and implementation gates. The #1046/#1150 draft custody and source-release
 boundaries are not cleared by this design work. No working prototype links,
 installed UX or live command behavior are claimed from Paper screenshots.
+
+The source-reader copy operation recorded in the design handoff returned an
+unreadable response and remains unresolved on its original carrier. No verified
+KD02 product variant is claimed. UX09 contains the reviewable added-state,
+mobile-payload and details specifications; the original reader targets remain
+paused for those amendments until that exact operation is reconciled. Other
+completed screens and notes are unaffected.
