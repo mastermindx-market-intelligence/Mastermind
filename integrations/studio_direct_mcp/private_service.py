@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 DIR_MODE = 0o700
 FILE_MODE = 0o600
@@ -66,8 +67,10 @@ FLEET_STATUS_TIMEOUT_MS = 15_000
 FLEET_FABRIC_LAUNCHER_REL = Path(".local/bin/pool")
 FLEET_FABRIC_TIMEOUT_MS = 8_000
 
-# CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
+# CLI adapters. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
+TAILNET_GATEWAY_NAME = "tailnet-gateway.mjs"
+TAILNET_FABRIC_ACCOUNT = "fabric"
 
 ACCOUNT_LABEL_MAX = 64
 ACCOUNT_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,63})?$")
@@ -84,21 +87,24 @@ STAGE_FILES = (
     "fleet-status.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
+    "tailnet-gateway.mjs",
     "package.json",
     "package-lock.json",
 )
 
 # Historical installs are admitted only through exact known file sets. The
-# immediately preceding v0.1.6 install has every current file except the new
-# read-only fleet-status consumer; earlier generations also predate Paper,
-# output paging, and typed Git.
-LEGACY_STAGE_FILES_V4 = tuple(name for name in STAGE_FILES if name != "fleet-status.mjs")
+# immediately preceding current generation lacks only the tailnet fabric
+# adapter; earlier generations also predate fleet status, Paper, output paging,
+# and typed Git.
+LEGACY_STAGE_FILES_V5 = tuple(name for name in STAGE_FILES if name != TAILNET_GATEWAY_NAME)
+LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
 LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != "git-publish.mjs")
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
         frozenset(LEGACY_STAGE_FILES_V3),
         frozenset(LEGACY_STAGE_FILES_V2),
@@ -427,6 +433,11 @@ def _build_runtime_roots(account: str) -> dict:
     """Build per-account paths using the real HOME environment variable."""
     user_root = _user_root()
     base = user_root / ".local" / "share" / "studio-direct-mcp" / "private" / account
+    gateway_name = (
+        TAILNET_GATEWAY_NAME
+        if account == TAILNET_FABRIC_ACCOUNT
+        else PRIVATE_GATEWAY_NAME
+    )
     return {
         "base": base,
         "state": base / "state",
@@ -434,7 +445,7 @@ def _build_runtime_roots(account: str) -> dict:
         "config": base / "config.json",
         "manifest": base / "manifest.json",
         "plist": user_root / "Library" / "LaunchAgents" / f"com.mastermind.studio-direct-private.{account}.plist",
-        "gateway": base / PRIVATE_GATEWAY_NAME,
+        "gateway": base / gateway_name,
         "node_modules": base / "node_modules",
     }
 
@@ -534,6 +545,37 @@ def _fleet_status_config(user_root: Path) -> dict | None:
     return config
 
 
+def _validate_tailnet_public_url(account: str, value: str | None) -> str | None:
+    if account != TAILNET_FABRIC_ACCOUNT:
+        if value not in (None, ""):
+            raise SystemExit("--public-url is reserved for --account fabric")
+        return None
+    if not isinstance(value, str) or not value:
+        raise SystemExit("--account fabric requires --public-url https://<host>.ts.net")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise SystemExit("fabric --public-url must be an exact HTTPS tailnet origin") from exc
+    hostname = parsed.hostname
+    if (
+        parsed.scheme != "https"
+        or not isinstance(hostname, str)
+        or not hostname.endswith(".ts.net")
+        or len(hostname) <= len(".ts.net")
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise SystemExit("fabric --public-url must be an exact HTTPS tailnet origin")
+    normalized = f"https://{hostname}"
+    if port is not None:
+        normalized += f":{port}"
+    return normalized
+
+
 def _build_config(
     account: str,
     host: str,
@@ -542,6 +584,8 @@ def _build_config(
     backend_abs: Path,
     state_dir: Path,
     user_root: Path,
+    *,
+    public_url: str | None = None,
 ) -> dict:
     # publicUrl is omitted: the private adapter rejects a public origin.
     config = {
@@ -561,6 +605,8 @@ def _build_config(
         "gitPublish": _typed_git_config(user_root),
         "paperDesign": _paper_design_config(user_root),
     }
+    if public_url is not None:
+        config["publicUrl"] = public_url
     fleet_status = _fleet_status_config(user_root)
     if fleet_status is not None:
         config["fleetStatus"] = fleet_status
@@ -780,6 +826,7 @@ def _verify_prior_install(
     host: str,
     port: int,
     roots: dict,
+    public_url: str | None,
 ) -> None:
     if (
         prior.get("source") != str(source)
@@ -826,6 +873,18 @@ def _verify_prior_install(
             "refusing restage: existing config hash diverges; "
             "stop the service first"
         )
+    try:
+        existing_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("refusing restage: existing config invalid") from exc
+    if (
+        not isinstance(existing_config, dict)
+        or existing_config.get("accountLabel") != account
+        or existing_config.get("publicUrl") != public_url
+    ):
+        raise SystemExit(
+            "refusing restage: existing public URL/channel diverges; stop first"
+        )
     if roots["plist"].is_symlink() or not roots["plist"].is_file():
         raise SystemExit(
             "refusing restage: existing plist missing; stop the service first"
@@ -859,6 +918,7 @@ def _preflight_stage(
     host: str,
     port: int,
     roots: dict,
+    public_url: str | None,
 ) -> None:
     _check_source_files(source)
     _assert_no_symlink_ancestors(roots["base"])
@@ -868,7 +928,7 @@ def _preflight_stage(
     if prior is not None:
         _verify_prior_install(
             prior, source, node_abs, backend_abs,
-            account, label, host, port, roots,
+            account, label, host, port, roots, public_url,
         )
     else:
         _assert_first_install_clean(roots)
@@ -905,6 +965,7 @@ def _write_install(
     result_key: str,
     previous_source: str | None = None,
     dependency_tree_hash: str | None = None,
+    public_url: str | None = None,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -928,6 +989,7 @@ def _write_install(
                 backend_abs,
                 roots["state"],
                 user_root,
+                public_url=public_url,
             ),
             indent=2,
             sort_keys=True,
@@ -992,10 +1054,13 @@ def cmd_stage(args) -> int:
     backend_abs = _resolve_abs("--backend", args.backend)
     port = int(args.port)
     _validate_port(port)
+    public_url = _validate_tailnet_public_url(
+        account, getattr(args, "public_url", None)
+    )
 
     roots = _build_runtime_roots(account)
     prior = _preflight_stage(
-        source, node_abs, backend_abs, account, label, host, port, roots
+        source, node_abs, backend_abs, account, label, host, port, roots, public_url
     )
     # The Paper-owned immutable runtime must exist and match before this
     # lifecycle writes a config/plist that advertises the Paper capability.
@@ -1010,6 +1075,7 @@ def cmd_stage(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="staged",
         dependency_tree_hash=retained_dependency_hash,
+        public_url=public_url,
     )
 
 def _verify_staged_install(
@@ -1043,6 +1109,13 @@ def _verify_staged_install(
         raise SystemExit("not staged: config hash missing from manifest")
     if _sha256_file(roots["config"]) != stored_config_hash:
         raise SystemExit("not staged: config hash mismatch")
+    try:
+        installed_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("not staged: config invalid") from exc
+    if not isinstance(installed_config, dict) or installed_config.get("accountLabel") != account:
+        raise SystemExit("not staged: config channel mismatch")
+    _validate_tailnet_public_url(account, installed_config.get("publicUrl"))
 
     if roots["plist"].is_symlink() or not roots["plist"].is_file():
         raise SystemExit("not staged: plist missing")
@@ -1080,7 +1153,12 @@ def _verify_staged_install(
     expected_argv = _expected_argv(node, roots["gateway"], roots["config"])
     if list(plist.get("ProgramArguments") or []) != expected_argv:
         raise SystemExit("plist is not our exact install")
-    if Path(expected_argv[1]).name != PRIVATE_GATEWAY_NAME:
+    expected_gateway_name = (
+        TAILNET_GATEWAY_NAME
+        if account == TAILNET_FABRIC_ACCOUNT
+        else PRIVATE_GATEWAY_NAME
+    )
+    if Path(expected_argv[1]).name != expected_gateway_name:
         raise SystemExit("plist is not our exact install")
 
     return manifest
@@ -1102,6 +1180,9 @@ def cmd_upgrade(args) -> int:
     backend_abs = _resolve_abs("--backend", args.backend)
     port = int(args.port)
     _validate_port(port)
+    public_url = _validate_tailnet_public_url(
+        account, getattr(args, "public_url", None)
+    )
 
     roots = _build_runtime_roots(account)
     if _launchd_inspect(label) is not None:
@@ -1129,6 +1210,7 @@ def cmd_upgrade(args) -> int:
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
+        public_url=public_url,
     )
 
 
@@ -1265,6 +1347,7 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--source", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
+        s.add_argument("--public-url")
         s.set_defaults(func=globals()[f"cmd_{name}"])
 
     for name in ("seal-runtime", "start", "status", "stop"):
