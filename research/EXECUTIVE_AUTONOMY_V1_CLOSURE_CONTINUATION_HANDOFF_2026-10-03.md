@@ -177,6 +177,14 @@ NEXT: single watcher watch13 adds #1227 head/comments/reviews. Quiet otherwise.
 - Agent OS batch amendment DELIVERED: Macro PR #8433 (branch claude/ssd-executive-autonomy-v1-closure-agentos-xh-20261004, head 5fd2db2e; label merge-on-green; validate 1504 records / 0 errors): WS P4 arm state, P5 XH chain + human gates, next_action, 2 landmines, 2 do_not_redo lines; new DSC:A2-ENROLLMENT-PLIST-IS-ACCEPTED-BY-SERVICE-CONTROL-VALIDATE-PLIST. Sweeper owns the merge interval; this seat owns the outcome (MERGED check on the next watcher cycle, no polling).
 - Then quiet; watcher watch16 (b332mduno).
 
+### 4q Cycle 10:00Z–10:20Z — watch16 edge (#1143 46th comment = writer's XH-1 RESULT); #1191 CI red on 76438086; seat integration read of fix 134109ec posted; Macro #8433 MERGED.
+- Consumed #1143 issuecomment-5978615495 (writer session via the shared account, 09:42:28Z): #1191 head 76438086 on base 17b9fa13; fix 134109ec claims all three XH-1 blockers closed; 687 tests PASS locally; Sol/Astra read-only reviews PASS; MastermindX1 re-review requested; one writer-owned CI watcher (150 s) on run 37192040589; PR stays draft; host reconciliation confirms CEO_SUBMIT_ARMED without replay; Slack Checkout shows incomplete org/address fields (no upgrade receipt, no token input); recovery frontier ALL_SCOPED_LANES_BLOCKED, MISSION_COMPLETE=false; the writer's Agent OS handoff is owed through its own Macro session (not this seat's artifact).
+- Observed (not testimony): `gh pr view 1191` → head 76438086, draft, reviewDecision CHANGES_REQUESTED (MastermindX1 08:52Z, pre-fix), review request MastermindX1 open, CodeQL/analyzers SUCCESS, repository `test` run 37192040589 **FAILURE** (completed 09:54:10Z). The failing test name was not recovered: the CI wait guard fenced the second and third `gh run view` reads (REDUNDANT POLL, 300 s window) — no further attempt; the repair and its diagnosis are the writer's lane.
+- Seat integration read (read-only) of fix 134109ec at FETCH_HEAD=refs/pull/1191/head: blocker 1 (A2) PASS — host-prep delegates to `autonomy-control.sh a2-disable-prepare` before any host mutation, DISPATCHED is persisted on the global marker before the single disable, completion only by positive observation, sticky marker + read-only reconcile; inherited members and signatures verified in autonomy_control.py at head; LOCKED-phase crash is by design unrecoverable by the tool (host-owner act → XH-3 human-only list). Blocker 2 (Session Bridge) PASS — per-invocation writer with `before_commit`; `call_service` (service.py:1048-1051) invokes the async hook only after READY for the exact fingerprint and awaits it before COMMIT; COMMIT_STARTED appended once under a command id inside the store transaction with the harness-binding lock; reconcile refuses resend when the fact exists. Blocker 3 (Company) PASS — one `_packet_carrier` seam. Posted as #1191 issuecomment-5978847556 (seat-identified; not the independent review; nothing asks for a new head).
+- Macro #8433 MERGED 09:51:04Z (Agent OS amendment, rung MERGED; the records are live on main).
+- Watcher: watch16 consumed; watch17 armed with #1191 (head:comments:reviews:draft:state) added to the same aggregate watcher, 30-min cadence.
+- Seat lane: none executable beyond this read. Next material edges: writer repair push on #1191 (new head → re-read only the delta), MastermindX1 review, #1241 merge, release install receipt.
+
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
 |---|---|---|---|---|
@@ -202,6 +210,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Human gates: root/admin ceremony for install (host owner); ChatGPT app catalog rescan (Chairman/platform); Fable connector OAuth (Chairman).
 
 ## 6 Do-not-redo
+- Do not re-post the #1191 integration read (issuecomment-5978847556); re-read only the delta of a NEW #1191 head. Do not read run 37192040589 again (CI wait guard fenced it twice); the writer's watcher owns that run.
 - Do not re-post the #1227 review (pullrequestreview-5404908792); re-review only a NEW head, and only against the D8/`test` gate plus any changed hunk. Do not open a competing fix branch for #1227's docstring — the author owns the carrier.
 - #1218 repaired + MERGED (a2646f45, 04:14Z) by the Sol C3 lane; Control successor a2646f45 installed by the host owner (receipt location to confirm). Never re-open the D8 repair.
 - Reader backend_unavailable diagnosis CLOSED on #1143 04:42Z (no source fix).
@@ -220,6 +229,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 10:20Z: #1191 76438086 CI red (writer-owned); seat integration read of 134109ec posted (5978847556; three blockers PASS on design). Macro #8433 MERGED. Watcher watch17 (+#1191). Nothing owed by this seat; XH-1 acceptance waits on green CI + MastermindX1 supersession.
 - 09:40Z: CEO-submit ARMED on a2646f45 by the host owner (seat-verified from ceo-submit-state-v1.json: transaction autonomy-f236038098b1, digest 4c27e71c…; harness DISARMED). #1241 PASS + merge queue 28be2ce2. XH-1…XH-5 plan on #1143. Human gates: Slack token ceremony; Apps SDK refresh. Nothing owed by this seat. Agent OS amendment = Macro PR #8433 (merge-on-green; confirm MERGED next cycle). Watcher watch16.
 - 09:00Z: #1241 integration read posted (5978317957; no blocking finding; review owned by mastermindx-3). QUIET. Watcher watch15. Wakes: edge on #1143/#811/#1241/master(mission paths); ruling naming this seat; Remote Control toggle (human).
 - 08:55Z: #1227 CLOSED unmerged (superseded by #1191 3149fe6f; review criteria adopted there as blocker 1). Reviewing #1241 (successor activation carrier; independent review requested, unowned). Watcher watch14 (#1241 replaces #1227).
