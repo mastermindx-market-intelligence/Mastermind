@@ -1151,7 +1151,7 @@ class GatewaySession {
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
           'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_select_host, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
-          'When fleet routing is configured, studio_select_host performs a one-way session binding before Desktop Commander tool use; it never performs automatic placement or retries. ' +
+          'When fleet routing is configured, studio_select_host performs a one-way session binding before Desktop Commander tool use; automatic placement and retries are not part of this binding operation. ' +
           'studio_output_page reads retained output without repeating the original action and follows an established remote host binding when present. ' +
           'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
           'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +

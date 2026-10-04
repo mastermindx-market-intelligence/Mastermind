@@ -142,6 +142,7 @@ export function resolveFleetRoutingConfig(raw) {
     );
   }
   return Object.freeze({
+    enabled: true,
     requestTimeoutMs: timeout,
     routes: Object.freeze(routes.sort((a, b) => a.hostRef.localeCompare(b.hostRef))),
   });
