@@ -95,6 +95,42 @@ def _load(raw: bytes, expected_sha256: str) -> dict:
     _require(type(result) is dict, "response_not_object")
     return result
 
+def _selected_semantics(node: dict, policy: dict) -> None:
+    """Bind a selected direct owner fact to its displayed period/unit/clocks.
+
+    This fixed-fixture consistency check does not certify a source signature,
+    economic comparability, a new metric definition or publication permission.
+    """
+    p = node["provenance"]
+    fact = p["selected_raw_fact"]
+    context = fact["context"]
+    period = node["period"]
+    _require(p.get("kind") == "direct", "fixture_requires_direct_fact")
+    _require(context.get("entity_identifier") == ENTITY["source_entity_id"], "context_issuer_mismatch")
+    if period["kind"] == "duration":
+        _require(context.get("instant") is None and context.get("start") == period["start"] and context.get("end") == period["end"], "source_period_mismatch")
+    else:
+        _require(context.get("start") is None and context.get("end") is None and context.get("instant") == period["end"], "source_period_mismatch")
+    unit = fact.get("unit")
+    _require(type(unit) is dict, "source_unit_shape")
+    # Both fixed direct metrics are captured USD amounts. Do not infer an FX
+    # conversion or relabel a ratio unit as a currency amount.
+    _require(node.get("unit") == "USD" and p.get("unit") == "USD", "owner_unit_mismatch")
+    _require(unit.get("measures") == ["iso4217:USD"] and unit.get("denominator_measures") == [], "source_unit_mismatch")
+    _require(type(fact.get("concept_qname")) is str and fact["concept_qname"] == p.get("concept_qname"), "source_concept_mismatch")
+    clocks = fact["clocks"]
+    accepted = _instant(clocks.get("accepted_at"))
+    recorded = _instant(clocks.get("recorded_at"))
+    _require(accepted == _instant(p.get("accepted_at")) and recorded == _instant(p.get("recorded_at")), "selected_clock_mismatch")
+    source_ready = _instant(p.get("source_ready_at"))
+    system_ready = _instant(p.get("system_ready_at"))
+    _require(accepted <= source_ready <= _instant(policy["source_snapshot_at"]), "source_readiness_inconsistent")
+    required_system = [recorded, source_ready]
+    for field in ("governance_available_at", "filing_metadata_available_at", "mapping_available_at"):
+        if p.get(field) is not None:
+            required_system.append(_instant(p[field]))
+    _require(max(required_system) <= system_ready <= _instant(policy["recorded_at"]), "system_readiness_inconsistent")
+
 def owner_snapshot(raw: bytes, expected_sha256: str, request: dict) -> dict:
     """Extract a complete, reference-bearing view; hashes do not grant admission."""
     requested, policy = _request(request)
@@ -164,6 +200,7 @@ def owner_snapshot(raw: bytes, expected_sha256: str, request: dict) -> dict:
             _require(selected.get("dimensions_known") is True, "unknown_dimension_scope")
             context = selected.get("context")
             _require(type(context) is dict and context.get("explicit_dimensions") == {} and context.get("typed_dimensions") == {}, "nonconsolidated_scope")
+            _selected_semantics(node, policy)
         else:
             _require(node.get("value") is None and selected is None, "refusal_value_or_selected_fact_leak")
             _require(type(node.get("reason")) is str and bool(node["reason"]), "refusal_reason_missing")

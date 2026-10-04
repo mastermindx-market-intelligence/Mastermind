@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T00:20:32.925951+00:00",
+  "prepared_at": "2026-10-04T02:27:51.773379+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "db70d8d8c3cb1f4dfd99ba71fb5c966ba57021a00e85a99698bcdb6f8636402e",
-      "bytes": 9625
+      "sha256": "02417bb5bcae3e7777aff7b281319dfc8a016e1ff7115bd37688d5f602f3898f",
+      "bytes": 10619
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -18,6 +18,10 @@
     "BASELINE_REPLAY_RESULT.md": {
       "sha256": "ee8a08c712aa55f68c78968a0c8218530293e1398518c242a3ebc0f50aa071c1",
       "bytes": 8833
+    },
+    "CI_5992_DIAGNOSIS.md": {
+      "sha256": "88ea87137cc6724a6d91f9fdbab3fc1c4d51850ad99bc30495e15990d03ba064",
+      "bytes": 3737
     },
     "COMPARATOR_DEFINITION_CANDIDATE.json": {
       "sha256": "9da89d63dbf96b25092944c73d672d8ec9000d8c013cb8454abe325b269c8b87",
@@ -28,8 +32,8 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "bc014582d2bc4c9f624f02b8305b5a4caf31df2e0fef22b9d8cc7fbf6a637a42",
-      "bytes": 4246
+      "sha256": "610935ddd91a8ea06e37850887c0ee8d15f924943c19df9239ac23a433a71cfc",
+      "bytes": 4705
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",
@@ -38,6 +42,10 @@
     "TRIAL_OWNER_ADMISSION.md": {
       "sha256": "a00b086febd2329af4a723283c236cc3abdc07cf5464422f48404650ced868d3",
       "bytes": 3181
+    },
+    "VERIFIED_READER_RESULT.md": {
+      "sha256": "352d0099ee1aee29670ffe9e3f67f2ef3de6161d8e81d57797578c6d8f96ed8b",
+      "bytes": 4837
     },
     "W0_ADMISSION_CANDIDATE.md": {
       "sha256": "e3e2f21f29478ce82092ed43d9974ad9c844f2ee64a8d8c127e7ea2c19007373",
@@ -48,8 +56,8 @@
       "bytes": 9800
     },
     "baseline_replay.py": {
-      "sha256": "4f3516830dba112649b46b965c90e481c7c25ca1f81225658ef3b8ae36e8f472",
-      "bytes": 15946
+      "sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
+      "bytes": 18353
     },
     "evidence/BASELINE_REPLAY_GREEN.json": {
       "sha256": "31f664348c7113a8721aae092a230802f2b63cba763bb4a21cde949405e0f55a",
@@ -86,6 +94,18 @@
     "evidence/R1-red-test.json": {
       "sha256": "5a1a7d37b10b9b7bd84cacaaacb84eee40f1df0bcea5bbfa654bd6aec268a919",
       "bytes": 2708
+    },
+    "evidence/SOURCE_BINDING_RED.json": {
+      "sha256": "2a7baa6b6848b15dbd299070c9205633b94892e651834b9f74eadf61a134ed6b",
+      "bytes": 1332
+    },
+    "evidence/VERIFIED_READER_PARITY.json": {
+      "sha256": "849318780345de0d02dfe1b26defd8eae287be31243ba7ce891d1f7eeecce983",
+      "bytes": 2245
+    },
+    "evidence/VERIFIED_READER_TESTS.json": {
+      "sha256": "b3d48c77558804db28baaefbb169fa93a207704e8c0316fe314a461901c121be",
+      "bytes": 3611
     },
     "evidence/aapl_same_filing_annual_revenue.receipt.json": {
       "sha256": "d91c48201a58856cc6fc4b1df0e7414e48b9f8fb10691fe623dae776fb1d943f",
@@ -243,6 +263,10 @@
       "sha256": "63a20dac4603a1c17a821a838493c97741c8e67052072c7f055bdba071e3e372",
       "bytes": 12833
     },
+    "test_baseline_source_binding.py": {
+      "sha256": "f64930184a8dfb35855c1bae1b50c843a66b974933c016df486bbc217113655f",
+      "bytes": 3289
+    },
     "test_candidate_schema.py": {
       "sha256": "4b2f00610d1f52fe2247446feef726bc4bb4714381fa0bb115582c3e07a22da1",
       "bytes": 11733
@@ -251,9 +275,17 @@
       "sha256": "8c2bdd6a8e4ae6cf11e7b59a2aa96e930b7fd29fba622cb0dcb8cf6f873d9a2b",
       "bytes": 10203
     },
+    "test_verified_baseline_reader.py": {
+      "sha256": "4c4611e72b21c0ef4ccccfda0e7d07a51cde65c91c87bc083e655680b0ce40e5",
+      "bytes": 8783
+    },
     "test_verify_evidence.py": {
       "sha256": "bd80da3ba5869559923061525a8cb0000a592cba1cd9b2d3d0414612afe7f4b2",
       "bytes": 2741
+    },
+    "verified_baseline_reader.py": {
+      "sha256": "b4375a1bf7a64a15a49788f7e9edd2b8b8435e4f0f982b3c5ec70119efe629d8",
+      "bytes": 7824
     },
     "verify_evidence.py": {
       "sha256": "b6d8d2ae66354b8f58734fc03d04fadec6fd26269a21f4993b2f97ca15a34034",

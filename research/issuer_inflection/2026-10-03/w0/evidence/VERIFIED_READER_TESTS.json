@@ -1,0 +1,68 @@
+{
+  "kind": "development_reader_test_receipts",
+  "same_source_binding_driver_red_green": true,
+  "results": [
+    {
+      "kind": "source_bound_fixture_consumer_test",
+      "source_candidate_before_changes": "b95a7ddcb24f74a81b9486620c219217518d6f20",
+      "test_file": "test_baseline_source_binding.py",
+      "test_sha256": "f64930184a8dfb35855c1bae1b50c843a66b974933c016df486bbc217113655f",
+      "consumer_module_sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
+      "verified_reader_sha256": "b4375a1bf7a64a15a49788f7e9edd2b8b8435e4f0f982b3c5ec70119efe629d8",
+      "recorded_before_execution_at": "2026-10-04T02:26:29.641566+00:00",
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "research/issuer_inflection/2026-10-03/w0/test_baseline_source_binding.py"
+      ],
+      "expected_tests": 15,
+      "i3_acceptance": false,
+      "production_proof": false,
+      "completed_at": "2026-10-04T02:26:29.759289+00:00",
+      "exit_code": 0,
+      "output": "...............\n----------------------------------------------------------------------\nRan 15 tests in 0.047s\n\nOK\n",
+      "output_sha256": "0fb2ed0dae1e86e97b13586ac8bc3146a94290dcbcc64847e54c84cb2af00e0e"
+    },
+    {
+      "kind": "source_bound_fixture_consumer_test",
+      "source_candidate_before_changes": "b95a7ddcb24f74a81b9486620c219217518d6f20",
+      "test_file": "test_baseline_replay.py",
+      "test_sha256": "63a20dac4603a1c17a821a838493c97741c8e67052072c7f055bdba071e3e372",
+      "consumer_module_sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
+      "verified_reader_sha256": "b4375a1bf7a64a15a49788f7e9edd2b8b8435e4f0f982b3c5ec70119efe629d8",
+      "recorded_before_execution_at": "2026-10-04T02:26:29.759603+00:00",
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "research/issuer_inflection/2026-10-03/w0/test_baseline_replay.py"
+      ],
+      "expected_tests": 42,
+      "i3_acceptance": false,
+      "production_proof": false,
+      "completed_at": "2026-10-04T02:26:29.936986+00:00",
+      "exit_code": 0,
+      "output": "..........................................\n----------------------------------------------------------------------\nRan 42 tests in 0.108s\n\nOK\n",
+      "output_sha256": "f48e339dd0e20a2f04a504a3665e34e29314fcf83ce08181fcb84c7d1f516ccd"
+    },
+    {
+      "kind": "source_bound_fixture_consumer_test",
+      "source_candidate_before_changes": "b95a7ddcb24f74a81b9486620c219217518d6f20",
+      "test_file": "test_verified_baseline_reader.py",
+      "test_sha256": "4c4611e72b21c0ef4ccccfda0e7d07a51cde65c91c87bc083e655680b0ce40e5",
+      "consumer_module_sha256": "3501ec52a3843046d11696daee21317b2bae92ef809ca741bf942d3540e572d9",
+      "verified_reader_sha256": "b4375a1bf7a64a15a49788f7e9edd2b8b8435e4f0f982b3c5ec70119efe629d8",
+      "recorded_before_execution_at": "2026-10-04T02:26:29.937969+00:00",
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "research/issuer_inflection/2026-10-03/w0/test_verified_baseline_reader.py"
+      ],
+      "expected_tests": 26,
+      "i3_acceptance": false,
+      "production_proof": false,
+      "completed_at": "2026-10-04T02:26:30.491020+00:00",
+      "exit_code": 0,
+      "output": "..........................\n----------------------------------------------------------------------\nRan 26 tests in 0.435s\n\nOK\n",
+      "output_sha256": "39d97767ea10e6ddcaf520053573273f8811ca78c1c4124e64af55e69e96b643"
+    }
+  ],
+  "existing_owner_bytes_modified": false,
+  "guard_modified": false
+}
