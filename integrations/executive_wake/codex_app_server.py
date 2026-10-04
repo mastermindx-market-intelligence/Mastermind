@@ -10,7 +10,10 @@ from __future__ import annotations
 import dataclasses
 from typing import Protocol, Sequence, runtime_checkable
 
-from control_plane.operator_harness_contract import ATTENTION_TURN_INSTRUCTION
+from control_plane.operator_harness_contract import (
+    ATTENTION_TURN_INSTRUCTION,
+    AttentionCompanyReadProjection,
+)
 from control_plane.wake_ack_ingress import TrustedWorkerWakeAckProjection
 from control_plane.wake_dispatcher import (
     TransportOutcome,
@@ -39,6 +42,11 @@ class CodexWakeDeliveryObservation:
         repr=False,
     )
 
+    company_read_projection: AttentionCompanyReadProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
     def __post_init__(self) -> None:
         if not str(self.native_handle or "").strip():
             raise ValueError("Codex wake observation requires a native handle")
@@ -55,6 +63,15 @@ class CodexWakeDeliveryObservation:
                 raise ValueError("Codex wake ACK projection must be trusted and typed")
             if not self.delivered:
                 raise ValueError("Codex wake ACK projection requires exact delivery")
+        company = self.company_read_projection
+        if company is not None:
+            if not isinstance(company, AttentionCompanyReadProjection):
+                raise ValueError("Codex Company read projection must be typed")
+            if not self.delivered:
+                raise ValueError("Codex Company read projection requires exact delivery")
+            if (company.provider_session_id != self.native_handle
+                    or company.nudge_id != self.nudge_id):
+                raise ValueError("Codex Company read projection identity mismatch")
 
 
 @runtime_checkable
@@ -215,10 +232,19 @@ class CodexAppServerWakeDispatcher:
                 "delivered",
                 nudge_id=wake.nudge_id,
             )
-            if observation.target_ack_projection is not None:
+            company = observation.company_read_projection
+            # Optional read evidence cannot downgrade a known completed turn.
+            # The Runtime consumer still owns the fresh current-binding join.
+            if company is not None and (
+                company.binding_id != wake.binding_id
+                or company.binding_generation != wake.binding_generation
+            ):
+                company = None
+            if observation.target_ack_projection is not None or company is not None:
                 return WakeTransportCompletion(
                     receipt=receipt,
                     target_ack_projection=observation.target_ack_projection,
+                    company_read_projection=company,
                 )
             return receipt
         if observation.accepted:

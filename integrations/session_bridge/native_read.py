@@ -72,18 +72,28 @@ def _canonical(value: Any) -> str:
 
 class NativeReplyReader:
     def __init__(self, resolver: NativeReplyReadResolver, *, socket_path: Path,
-                 service_call=call_service, clock=time.time):
+                 service_call=call_service, clock=time.time, projected_principal=False):
         if (not callable(getattr(resolver, "resolve_read", None))
                 or not callable(service_call) or not callable(clock)):
             raise TypeError("canonical reader dependencies are required")
         path = Path(socket_path)
         if not path.is_absolute():
             raise ValueError("canonical service socket must be absolute")
+        if type(projected_principal) is not bool:
+            raise TypeError("projected principal mode must be explicit")
+        # Only the installed authenticated private-peer composition selects this.
+        # Public tool calls retain the exact VerifiedPrincipal boundary.
+        self._projected_principal = projected_principal
         self._resolver, self._socket_path = resolver, path
         self._service_call, self._clock = service_call, clock
 
     def _current_principal(self, principal):
-        projection = principal_projection(principal)
+        if self._projected_principal:
+            if type(principal) is not NeutralPrincipalProjection:
+                raise ValueError
+            projection = principal
+        else:
+            projection = principal_projection(principal)
         now = self._clock()
         if (type(now) not in (int, float) or not math.isfinite(now)
                 or type(projection.issued_at) is not int

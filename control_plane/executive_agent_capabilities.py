@@ -216,6 +216,10 @@ except (KeyError,OSError,TypeError,UnicodeError,ValueError):
  raise SystemExit("runtime container bootstrap refused")
 '''
 WORKER_BROWSER_MCP_ARGS = ("-I", "-S", "-c", WORKER_BROWSER_MCP_BOOTSTRAP)
+COMPANY_MCP_COMMAND = "/usr/bin/python3"
+COMPANY_MCP_BOOTSTRAP = 'import hashlib,json,os,pathlib,re,stat,subprocess\nR=pathlib.Path("/Library/Application Support/MastermindExecutive")\nC=R/"config/company-consultation-edge.json"\nE={"PATH":"/usr/bin:/bin","LANG":"en_US.UTF-8"}\ndef sealed(p,d=False):\n for n in (p,*p.parents):\n  i=n.lstat(); D=d or n!=p\n  if i.st_uid!=0 or ((n==p or n==R or R in n.parents) and i.st_gid!=0) or i.st_mode&0o022 or stat.S_ISLNK(i.st_mode) or not (stat.S_ISDIR(i.st_mode) if D else stat.S_ISREG(i.st_mode)) or (not D and i.st_nlink!=1): raise ValueError()\n  if b"+" in subprocess.check_output(["/usr/bin/stat","-f","%Sp",str(n)],env=E): raise ValueError()\ntry:\n sealed(C)\n if stat.S_IMODE(C.stat().st_mode)!=0o444: raise ValueError()\n v=json.loads(C.read_bytes()); S=v["release_sha"]\n if set(v)!={"schema","release_sha","control_uid","worker_uid","entry_sha256","receipt_sha256"} or v["schema"]!="mastermind.company_mcp_edge/v1" or type(S)!=str or re.fullmatch("[0-9a-f]{40}",S) is None or type(v["worker_uid"])!=int or v["worker_uid"]<=0 or os.geteuid()!=v["worker_uid"]: raise ValueError()\n P=R/"releases"/S/"ops/executive_os/company_mcp_edge.py"; sealed(P)\n if hashlib.sha256(P.read_bytes()).hexdigest()!=v["entry_sha256"]: raise ValueError()\n B=pathlib.Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"); sealed(B)\n os.execve(B,[str(B),"-I","-S","-B",str(P),"stdio"],E)\nexcept (KeyError,OSError,TypeError,ValueError):\n raise SystemExit("Company edge bootstrap refused")\n'
+COMPANY_MCP_ARGS = ("-I", "-S", "-B", "-c", COMPANY_MCP_BOOTSTRAP)
+COMPANY_EXECUTION_PROFILE = "operator.appserver.interactive.company-mcp.v1"
 _RESOURCE_KEYS = frozenset(
     {
         "artifact_root",
@@ -1162,16 +1166,17 @@ class ExecutionCapabilityRegistry:
                 )
             else:
                 command_value = str(value.get("command") or "").strip()
-                if (
-                    capability_id != "playwright-worker-browser-b1"
-                    or command_value != WORKER_BROWSER_MCP_COMMAND
-                ):
+                reviewed = {
+                    "playwright-worker-browser-b1": (WORKER_BROWSER_MCP_COMMAND, WORKER_BROWSER_MCP_ARGS),
+                    "company-consultation-mcp-v1": (COMPANY_MCP_COMMAND, COMPANY_MCP_ARGS),
+                }.get(capability_id)
+                if reviewed is None or command_value != reviewed[0]:
                     raise CapabilityPolicyError(
                         f"MCP grant {capability_id!r} stdio command is not reviewed"
                     )
                 raw_args = value.get("args")
                 if (
-                    raw_args != list(WORKER_BROWSER_MCP_ARGS)
+                    raw_args != list(reviewed[1])
                     or len(
                         json.dumps(
                             raw_args,
@@ -1222,6 +1227,16 @@ class ExecutionCapabilityRegistry:
                 value.get("tool_schema_digest"),
                 field=f"mcp_servers.{capability_id}.tool_schema_digest",
             )
+            if capability_id == "company-consultation-mcp-v1" and (
+                config_name != "company-consultation-v1" or transport != "stdio"
+                or auth_status != "unsupported"
+                or server_identity != COMPANY_CONSULTATION_SERVER_IDENTITY
+                or server_version != COMPANY_CONSULTATION_SERVER_VERSION
+                or enabled_tools != tuple(sorted(COMPANY_CONSULTATION_ENABLED_TOOLS))
+                or approval_mode != "approve"
+                or tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError("Company MCP grant differs from its reviewed binding")
             normalized_grant = {
                 "capability_id": capability_id,
                 "config_name": config_name,
