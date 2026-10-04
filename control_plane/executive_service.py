@@ -1885,6 +1885,8 @@ class ExecutiveControlService:
             Callable[[Runtime, SupervisorProtocol], OperatorSupervisorProtocol]
             | None
         ) = None,
+        proof_capacity_recovery_observer: Callable[[Any], Mapping[str, Any]] | None = None,
+        proof_capacity_recovery_worker_uid: int | None = None,
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         autonomy_guard: Callable[[], None] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
@@ -1926,6 +1928,15 @@ class ExecutiveControlService:
         self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
         self._operator_supervisor_factory = operator_supervisor_factory
+        if (proof_capacity_recovery_observer is not None
+                and (not callable(proof_capacity_recovery_observer)
+                     or type(proof_capacity_recovery_worker_uid) is not int
+                     or proof_capacity_recovery_worker_uid <= 0)):
+            raise ValueError("proof recovery requires a fixed observer and worker UID")
+        if proof_capacity_recovery_observer is None and proof_capacity_recovery_worker_uid is not None:
+            raise ValueError("proof recovery UID requires its observer")
+        self._proof_capacity_recovery_observer = proof_capacity_recovery_observer
+        self._proof_capacity_recovery_worker_uid = proof_capacity_recovery_worker_uid
         self._operator_identity_verifier = operator_identity_verifier
         self._autonomy_guard = autonomy_guard
         if self.config.coo_autonomy_armed and not callable(self._autonomy_guard):
@@ -5346,6 +5357,60 @@ class ExecutiveControlService:
             result["workspace_rotation"] = rotation
             return result
 
+
+    def _is_maintenance_recovery_job(self, job: Job, lost_attempt_id: str) -> bool:
+        # An exact predecessor permit only recovers capacity. Ordinary dispatch
+        # and requeue retain the unchanged current-base proof predicate.
+        from ops.executive_os.acceptance_maintenance import (
+            MaintenanceError, recovery_permitted,
+        )
+        if (self.config.ceo_submit_armed or self.config.coo_autonomy_armed
+                or self.config.coo_operator_harness_armed):
+            return False
+        try:
+            permitted = recovery_permitted(
+                job, lost_attempt_id, self.config.proof_base_sha,
+                self.config.worker_id, self.config.quota_class,
+            )
+        except (MaintenanceError, OSError, ValueError):
+            return False
+        projected = dataclasses.replace(
+            job, constraints=dict(job.constraints, base_sha=self.config.proof_base_sha))
+        return permitted and self._is_fixed_proof_job(projected)
+
+    async def _recover_proof_capacity(self, job_id: str, lost_attempt_id: str) -> dict[str, Any]:
+        runtime = self._require_runtime()
+        target = {"worker_id": self.config.worker_id, "quota_class": self.config.quota_class}
+        async with self._dispatch_lock:
+            async with self._workspace_lock:
+                prior = runtime.workers.proof_capacity_recovery_result(
+                    job_id, lost_attempt_id, **target)
+                if prior is not None:
+                    return prior
+                if any(not task.done() for task in self._dispatch_tasks.values()):
+                    raise StateConflict("proof capacity recovery requires no active dispatch")
+                job = runtime.jobs.get_job(job_id)
+                if job is None or not (
+                    self._is_fixed_proof_job(job)
+                    or self._is_maintenance_recovery_job(job, lost_attempt_id)
+                ):
+                    raise StateConflict("proof capacity recovery accepts only its fixed harmless proof job")
+                observer = self._proof_capacity_recovery_observer
+                if observer is None:
+                    raise StateConflict("proof capacity recovery has no fixed broker observer")
+                snapshot = runtime.workers.proof_capacity_recovery_snapshot(
+                    job_id, lost_attempt_id, **target)
+                attempt = runtime.attempts.get_attempt(lost_attempt_id)
+                started = datetime.now(timezone.utc)
+                sweep = await self._run_physical(observer, attempt)
+                finished = datetime.now(timezone.utc)
+                if self._closing or self._service_state != "READY":
+                    raise StateConflict("proof recovery lost READY service custody")
+                return runtime.workers.recover_proof_capacity(
+                    job_id, lost_attempt_id, **target, expected_snapshot=snapshot,
+                    uid_sweep=sweep, expected_worker_uid=self._proof_capacity_recovery_worker_uid,
+                    observation_started_at=started, observation_finished_at=finished)
+
     def _submit_service_intent(self, payload: Any) -> dict[str, Any]:
         """Submit through the existing sink with v2 host composition attached."""
 
@@ -5423,8 +5488,20 @@ class ExecutiveControlService:
                 )
         return receipt
 
+    def _coo_binding_for_root(self, root: Job) -> dict[str, Any]:
+        from ops.executive_os.acceptance_maintenance import MaintenanceError, frozen_binding
+        raw = self._require_current_coo_binding()
+        normalized = _normalise_constraints(raw)
+        normalized["work_placement_union"] = _normalise_work_placement_union(raw["work_placement_union"])
+        try:
+            effective = frozen_binding(root, normalized, self._require_runtime().store)
+        except (MaintenanceError, OSError, ValueError) as exc:
+            raise StateConflict("queued-root maintenance qualification failed") from exc
+        return dict(raw, base_sha=effective["base_sha"],
+                    operator_harness_armed=effective["operator_harness_armed"])
+
     def _is_bound_coo_root(self, root: Job) -> bool:
-        raw_binding = self._require_current_coo_binding()
+        raw_binding = self._coo_binding_for_root(root)
         binding = _normalise_constraints(raw_binding)
         binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
         provenance = root.orchestration_provenance
@@ -5457,7 +5534,7 @@ class ExecutiveControlService:
             or job.orchestration_role not in {"plan", "work", "review", "repair"}
         ):
             raise StateConflict("COO dispatch target is outside the direct strict-v2 subtree")
-        binding = self._require_current_coo_binding()
+        binding = self._coo_binding_for_root(root)
         if (
             job.orchestration_role == "plan"
             and binding["operator_harness_armed"] is True
@@ -5550,7 +5627,7 @@ class ExecutiveControlService:
             job.orchestration_role == "plan"
             and job.attempt_count == 0
             and (
-                observation["head"] != self.config.proof_base_sha
+                observation["head"] != self._coo_binding_for_root(root)["base_sha"]
                 or observation["launch_clean"] is not True
             )
         ):
@@ -5560,11 +5637,56 @@ class ExecutiveControlService:
         self._require_shared_git_handoff(workspace)
         return observation
 
+    def _maintenance_workspace_pending(self, root: Job) -> bool:
+        """Only the exact PASS-qualified untouched root may materialize its path."""
+        from ops.executive_os.acceptance_maintenance import descriptor_for
+        if root.worktree is None or self._path_exists(Path(root.worktree)):
+            return False
+        descriptor = descriptor_for(self.config.proof_base_sha)
+        if descriptor is None or descriptor["root_job_id"] != root.job_id:
+            return False
+        self._require_bound_coo_job(root)
+        path = Path(root.worktree)
+        if (path.parent != self.config.proof_workspace_root
+                or not re.fullmatch(r"auto-[0-9a-f]{32}", path.name)
+                or root.branch != "codex/" + path.name
+                or root.status is not JobStatus.QUEUED
+                or root.attempt_count != 0 or root.current_attempt_id is not None):
+            raise StateConflict("preserved root workspace admission drifted")
+        runtime = self._require_runtime()
+        with runtime.store.read() as connection:
+            if (connection.execute("SELECT 1 FROM jobs WHERE parent_job_id=? LIMIT 1", (root.job_id,)).fetchone()
+                    or connection.execute("SELECT 1 FROM attempts WHERE job_id=? LIMIT 1", (root.job_id,)).fetchone()):
+                raise StateConflict("preserved root already has execution history")
+        return True
+
+    async def _prepare_maintenance_root_workspace(self, root: Job) -> None:
+        # The normal serialized COO owner calls the existing credentialless
+        # workspace allocator; no intake, lease, or dispatch is duplicated.
+        async with self._workspace_lock:
+            if not self._maintenance_workspace_pending(root):
+                return
+            if any(not task.done() for task in self._dispatch_tasks.values()):
+                raise StateConflict("another dispatch owns workspace preparation")
+            binding = self._coo_binding_for_root(root)
+            workspace = Path(root.worktree)
+            receipt = await self._run_physical(
+                prepare_credentialless_clone,
+                self.config.proof_source_repository, self.config.proof_workspace_root,
+                job_id=workspace.name, base_sha=binding["base_sha"], branch=root.branch,
+                shared_gid=self.config.proof_shared_gid,
+                shared_write_paths=tuple(root.allowed_write_paths),
+            )
+            if (receipt.workspace_path != str(workspace) or receipt.branch != root.branch
+                    or receipt.base_sha != binding["base_sha"] or receipt.remote_count != 0):
+                raise StateConflict("preserved root workspace receipt drifted")
+            self._require_initial_coo_workspace(root)
+
     def _require_initial_coo_workspace(self, root: Job) -> dict[str, Any]:
         """Reuse one read-only initial-workspace rule at selection and execution."""
         observation = self._require_coo_workspace(root)
         if (
-            observation["head"] != self.config.proof_base_sha
+            observation["head"] != self._coo_binding_for_root(root)["base_sha"]
             or observation["launch_clean"] is not True
         ):
             raise ServiceError(
@@ -5698,7 +5820,7 @@ class ExecutiveControlService:
                 job = runtime.jobs.get_job(job_id)
                 if job is None:
                     raise StateConflict(f"job {job_id!r} does not exist")
-                self._require_bound_coo_job(job)
+                root = self._require_bound_coo_job(job)
                 if live and live != {job_id}:
                     live_jobs = [runtime.jobs.get_job(value) for value in live]
                     if (
@@ -5728,9 +5850,16 @@ class ExecutiveControlService:
                     JobStatus.RUNNING,
                     JobStatus.CHECKPOINTED,
                 }:
-                    raise StateConflict(
-                        f"job {job_id} cannot cycle-dispatch from {job.status.value}"
+                    # Resolve only an already-terminal command-bound ambiguity.
+                    # No supervisor, placement selection, lease replay or provider
+                    # start is involved, including after a service restart.
+                    terminal = runtime.attempts.terminal_cycle_dispatch_outcome(
+                        job_id, command_id=command_id
                     )
+                    await self._project_terminal_return(
+                        job_id, expected_attempt_id=terminal.attempt.attempt_id
+                    )
+                    return terminal
                 if job.status is JobStatus.QUEUED:
                     self._require_coo_workspace(job)
                 if (
@@ -5745,7 +5874,7 @@ class ExecutiveControlService:
                     self._require_operator_supervisor()
                     if (
                         job.orchestration_role == "plan"
-                        and self.config.coo_operator_harness_armed
+                        and self._coo_binding_for_root(root)["operator_harness_armed"]
                     )
                     else self._require_supervisor()
                 )
@@ -5811,6 +5940,7 @@ class ExecutiveControlService:
                 if job.parent_job_id == root_id
             ]
             if not children:
+                await self._prepare_maintenance_root_workspace(root)
                 self._require_initial_coo_workspace(root)
             live = {
                 value
@@ -5879,13 +6009,13 @@ class ExecutiveControlService:
             raise ServiceError("bounded COO root scan limit was exceeded")
         for row in rows:
             root = runtime.jobs.get_job(str(row["job_id"]))
-            if root is None or not self._is_bound_coo_root(root):
+            if root is None:
                 continue
-            blocked = any(
-                event.event_type == "COO_CYCLE_BLOCKED"
-                for event in runtime.events.list_events(job_id=root.job_id)
-            )
-            if blocked:
+            # Terminal history survives source/profile rotation. Validate its
+            # canonical block before asking whether it could dispatch now.
+            if runtime.jobs.validated_cycle_block(root.job_id) is not None:
+                continue
+            if not self._is_bound_coo_root(root):
                 continue
             if (
                 root.status is JobStatus.QUEUED
@@ -5903,7 +6033,8 @@ class ExecutiveControlService:
                     ).fetchone()
                 if child is None and attempt is None:
                     try:
-                        self._require_initial_coo_workspace(root)
+                        if not self._maintenance_workspace_pending(root):
+                            self._require_initial_coo_workspace(root)
                     except (OSError, ServiceError, StateConflict) as exc:
                         if prestart_refusals is not None:
                             prestart_refusals[root.job_id] = exc
@@ -7058,6 +7189,11 @@ class ExecutiveControlService:
                     requeue_lost=False,
                 )
             )
+        if command == "recover-proof-capacity":
+            self._exact_args(args, {"job_id", "lost_attempt_id"})
+            return await self._recover_proof_capacity(
+                self._id(args["job_id"], "job_id"),
+                self._id(args["lost_attempt_id"], "lost_attempt_id"))
         if command == "requeue":
             self._exact_args(args, {"job_id"})
             job_id = self._id(args["job_id"], "job_id")

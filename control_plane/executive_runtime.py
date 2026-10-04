@@ -5912,6 +5912,203 @@ class WorkerRegistry:
             ]
         return [worker for item in worker_ids if (worker := self.get_worker(item))]
 
+
+    @staticmethod
+    def _proof_recovery_command(job_id: str, lost_attempt_id: str) -> str:
+        return f"proof-capacity-recover:{job_id}:{lost_attempt_id}"
+
+    @staticmethod
+    def _validate_proof_recovery_receipt(
+        receipt: Any, *, job_id: str, lost_attempt_id: str, worker_id: str, quota_class: str,
+    ) -> dict[str, Any]:
+        """Validate durable replay with the same closed receipt law as a fresh write."""
+        from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+        keys = {"schema_version", "job_id", "lost_attempt_id", "worker_id", "quota_class",
+                "status", "previous_snapshot", "uid_sweep",
+                "observation_started_at", "observation_finished_at"}
+        numeric = {"job_version", "attempt_version", "worker_version", "quota_version",
+                   "quota_updated_at_ms", "fence_generation", "attempt_started_at_ms",
+                   "lost_event_id", "requeue_event_id"}
+        target = {"job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                  "worker_id": worker_id, "quota_class": quota_class}
+        try:
+            snapshot = receipt["previous_snapshot"]
+            sweep = receipt["uid_sweep"]
+            startup = sweep["preceding_broker_startup_sweep"]
+            observed = datetime.fromisoformat(sweep["observed_at"])
+            booted = datetime.fromisoformat(startup["observed_at"])
+            began = datetime.fromisoformat(receipt["observation_started_at"])
+            ended = datetime.fromisoformat(receipt["observation_finished_at"])
+            valid = (
+                isinstance(receipt, dict) and set(receipt) == keys
+                and receipt["schema_version"] == "mastermind.executive_proof_capacity_recovery/v1"
+                and receipt["status"] == "AVAILABLE"
+                and all(receipt[k] == v for k, v in target.items())
+                and isinstance(snapshot, dict) and set(snapshot) == set(target) | numeric
+                and all(snapshot[k] == v for k, v in target.items())
+                and all(type(snapshot[k]) is int and snapshot[k] > 0 for k in numeric)
+                and snapshot["lost_event_id"] < snapshot["requeue_event_id"]
+                and uid_sweep_receipt_is_passing(sweep)
+                and uid_sweep_receipt_is_passing(startup)
+                and sweep.get("reason") == "status_absence"
+                and startup.get("reason") == "broker_startup"
+                and type(sweep.get("worker_uid")) is int and sweep["worker_uid"] > 0
+                and sweep["worker_uid"] == startup.get("worker_uid")
+                and type(sweep.get("broker_pid")) is int and sweep["broker_pid"] > 1
+                and sweep["broker_pid"] == startup.get("broker_pid")
+                and all(t.utcoffset() is not None for t in (observed, booted, began, ended))
+                and snapshot["attempt_started_at_ms"] < booted.timestamp() * 1000
+                and booted <= observed and began <= observed <= ended
+            )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            valid = False
+        if not valid:
+            raise StateConflict("proof recovery receipt is malformed or belongs to another target")
+        return receipt
+
+    def proof_capacity_recovery_result(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        """Reconcile the one immutable recovery event before observing or writing."""
+        def read(conn):
+            row = conn.execute("SELECT * FROM events WHERE command_id=?", (
+                self._proof_recovery_command(job_id, lost_attempt_id),
+            )).fetchone()
+            if row is None:
+                return None
+            if (row["event_type"] != "PROOF_CAPACITY_RECOVERED"
+                    or row["aggregate_type"] != "quota_class"
+                    or row["aggregate_id"] != f"{worker_id}:{quota_class}"
+                    or row["job_id"] != job_id or row["attempt_id"] != lost_attempt_id
+                    or row["worker_id"] != worker_id or row["quota_class"] != quota_class):
+                raise StateConflict("proof recovery command belongs to another target")
+            return self._validate_proof_recovery_receipt(
+                _json_loads(row["payload_json"], fallback={}), job_id=job_id,
+                lost_attempt_id=lost_attempt_id, worker_id=worker_id, quota_class=quota_class)
+        if connection is not None:
+            return read(connection)
+        with self.store.read() as conn:
+            return read(conn)
+
+    def proof_capacity_recovery_snapshot(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        """Bind the explicit requeue and unheld error quota before broker I/O."""
+        def read(conn):
+            job = conn.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            attempt = conn.execute("SELECT * FROM attempts WHERE attempt_id=?",
+                                   (lost_attempt_id,)).fetchone()
+            quota = conn.execute(
+                "SELECT * FROM worker_quota_classes WHERE worker_id=? AND quota_class=?",
+                (worker_id, quota_class)).fetchone()
+            worker = conn.execute("SELECT * FROM workers WHERE worker_id=?",
+                                  (worker_id,)).fetchone()
+            error = {"reason": "process identity absent during supervisor restart",
+                     "verified_process_absent": True}
+            if (job is None or attempt is None or quota is None or worker is None
+                    or job["status"] != "QUEUED" or job["current_attempt_id"] is not None
+                    or job["assigned_worker_id"] is not None
+                    or job["assigned_quota_class"] is not None
+                    or job["orchestration_role"] is not None
+                    or attempt["job_id"] != job_id or attempt["worker_id"] != worker_id
+                    or attempt["quota_class"] != quota_class or attempt["status"] != "LOST"
+                    or attempt["execution_mode"] != "SEALED_WORKER"
+                    or attempt["lease_token"] is not None
+                    or _json_loads(attempt["error_json"], fallback={}) != error
+                    or quota["status"] != "ERROR" or quota["held_attempt_id"] is not None
+                    or quota["fence_counter"] != attempt["fence_generation"]
+                    or worker["identity_status"] != "ONLINE"):
+                raise StateConflict("proof recovery requires the exact requeued missing-owner quota")
+            lost = conn.execute(
+                "SELECT * FROM events WHERE event_type='ATTEMPT_LOST' AND attempt_id=?",
+                (lost_attempt_id,)).fetchall()
+            requeue = conn.execute(
+                "SELECT * FROM events WHERE event_type='JOB_REQUEUED' AND job_id=? "
+                "ORDER BY event_id DESC LIMIT 1", (job_id,)).fetchone()
+            latest = conn.execute(
+                "SELECT attempt_id FROM attempts WHERE job_id=? ORDER BY attempt_number DESC LIMIT 1",
+                (job_id,)).fetchone()
+            if (len(lost) != 1 or lost[0]["job_id"] != job_id
+                    or lost[0]["worker_id"] != worker_id or lost[0]["quota_class"] != quota_class
+                    or lost[0]["actor"] != "supervisor"
+                    or _json_loads(lost[0]["payload_json"], fallback={}) != error
+                    or requeue is None or requeue["attempt_id"] != lost_attempt_id
+                    or _json_loads(requeue["payload_json"], fallback={}) != {"previous_status": "LOST"}
+                    or requeue["event_id"] <= lost[0]["event_id"]
+                    or latest is None or latest["attempt_id"] != lost_attempt_id
+                    or conn.execute(
+                        "SELECT 1 FROM worker_quota_classes WHERE worker_id=? AND held_attempt_id IS NOT NULL",
+                        (worker_id,)).fetchone() is not None):
+                raise StateConflict("proof recovery has no exact missing-owner requeue evidence")
+            return {
+                "job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                "worker_id": worker_id, "quota_class": quota_class,
+                "job_version": job["version"], "attempt_version": attempt["version"],
+                "worker_version": worker["version"], "quota_version": quota["version"],
+                "quota_updated_at_ms": quota["updated_at_ms"],
+                "fence_generation": quota["fence_counter"],
+                "attempt_started_at_ms": attempt["started_at_ms"],
+                "lost_event_id": lost[0]["event_id"], "requeue_event_id": requeue["event_id"],
+            }
+        if connection is not None:
+            return read(connection)
+        with self.store.read() as conn:
+            return read(conn)
+
+    def recover_proof_capacity(
+        self, job_id: str, lost_attempt_id: str, *, worker_id: str, quota_class: str,
+        expected_snapshot: Mapping[str, Any], uid_sweep: Mapping[str, Any],
+        expected_worker_uid: int, observation_started_at: datetime,
+        observation_finished_at: datetime,
+    ) -> dict[str, Any]:
+        """Explicit resource requalification; never changes LOST or requeue history."""
+        with self.store.transaction() as conn:
+            prior = self.proof_capacity_recovery_result(
+                job_id, lost_attempt_id, worker_id=worker_id, quota_class=quota_class,
+                connection=conn)
+            if prior is not None:
+                return prior
+            snapshot = self.proof_capacity_recovery_snapshot(
+                job_id, lost_attempt_id, worker_id=worker_id, quota_class=quota_class,
+                connection=conn)
+            if snapshot != dict(expected_snapshot):
+                raise StateConflict("proof recovery state changed during broker observation")
+            receipt = {
+                "schema_version": "mastermind.executive_proof_capacity_recovery/v1",
+                "job_id": job_id, "lost_attempt_id": lost_attempt_id,
+                "worker_id": worker_id, "quota_class": quota_class, "status": "AVAILABLE",
+                "previous_snapshot": snapshot, "uid_sweep": dict(uid_sweep),
+                "observation_started_at": observation_started_at.isoformat(),
+                "observation_finished_at": observation_finished_at.isoformat(),
+            }
+            self._validate_proof_recovery_receipt(
+                receipt, job_id=job_id, lost_attempt_id=lost_attempt_id,
+                worker_id=worker_id, quota_class=quota_class)
+            if (type(expected_worker_uid) is not int
+                    or uid_sweep["worker_uid"] != expected_worker_uid):
+                raise StateConflict("proof recovery receipt names a foreign worker UID")
+            timestamp = self.store.now_ms()
+            changed = conn.execute(
+                """UPDATE worker_quota_classes
+                   SET status='AVAILABLE',last_seen_at_ms=?,updated_at_ms=?,version=version+1
+                   WHERE worker_id=? AND quota_class=? AND status='ERROR'
+                     AND held_attempt_id IS NULL AND fence_counter=? AND version=?
+                     AND updated_at_ms=?""",
+                (timestamp, timestamp, worker_id, quota_class, snapshot["fence_generation"],
+                 snapshot["quota_version"], snapshot["quota_updated_at_ms"])).rowcount
+            if changed != 1:
+                raise StateConflict("proof recovery quota compare-and-set failed")
+            self.store.append_event(
+                conn, aggregate_type="quota_class", aggregate_id=f"{worker_id}:{quota_class}",
+                event_type="PROOF_CAPACITY_RECOVERED", actor="executive-control-service",
+                job_id=job_id, attempt_id=lost_attempt_id, worker_id=worker_id,
+                quota_class=quota_class, payload=receipt,
+                command_id=self._proof_recovery_command(job_id, lost_attempt_id),
+                timestamp_ms=timestamp)
+            return receipt
+
     def set_worker_status(
         self,
         worker_id: str,
@@ -15760,6 +15957,99 @@ class AttemptRegistry:
             _validate_exact_worker_target_replay(payload, target)
             if payload["exact_worker_target"] != target.evidence():
                 raise StateConflict("exact worker target first-issuance observation differs")
+
+    def terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=False)
+
+    def reconciled_terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        """Observe already reconciled terminal history; never make it dispatchable."""
+        return self._terminal_cycle_dispatch_outcome(job_id, command_id=command_id, reconciled=True)
+
+    def _terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str, reconciled: bool
+    ) -> OrchestrationDispatchOutcome:
+        """Read an exact terminal lost-return outcome without reacquiring a lease.
+
+        A restarted service has a new lease owner. Historical terminal evidence
+        must not impersonate the old owner or pass through fresh claim routing.
+        The existing COO ambiguity owner still commits reconciliation.
+        """
+        with self.store.read() as connection:
+            job = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            marker = connection.execute(
+                "SELECT * FROM events WHERE command_id=?",
+                (f"{command_id}:effect-unknown",),
+            ).fetchone()
+            resolution = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (f"{command_id}:reconciled",),
+            ).fetchone()
+            if (
+                job is None or marker is None
+                or (resolution is not None) != reconciled
+                or JobStatus(job["status"]) not in _TERMINAL_JOB_STATUSES
+                or job["orchestration_role"] is None
+            ):
+                raise StateConflict("terminal dispatch requires an exact lost-return marker")
+            pending = _validated_coo_dispatch_effect_event(
+                connection, marker, expected_root_id=job["root_job_id"]
+            )
+            if resolution is not None:
+                resolved = _validated_coo_dispatch_effect_event(
+                    connection, resolution, expected_root_id=job["root_job_id"],
+                )
+                if any(resolved[key] != pending[key] for key in
+                       ("selected_job_id", "attempt_id", "dispatch_command_id")):
+                    raise StateConflict("terminal dispatch reconciliation differs from original claim")
+            attempt = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?",
+                (pending["attempt_id"],),
+            ).fetchone()
+            claim = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (command_id,)
+            ).fetchone()
+            if attempt is None or claim is None:
+                raise StateConflict("terminal dispatch lost its historical claim")
+            payload = _strict_canonical_json_loads(
+                claim["payload_json"], name="terminal dispatch claim"
+            )
+            expected_command = (
+                f"coo-cycle:{job['root_job_id']}:dispatch:{job_id}:attempt:"
+                f"{attempt['attempt_number']}"
+            )
+            if (
+                pending["selected_job_id"] != job_id
+                or pending["dispatch_command_id"] != command_id
+                or command_id != expected_command
+                or claim["aggregate_type"] != "job"
+                or claim["aggregate_id"] != job_id
+                or claim["worker_id"] != attempt["worker_id"]
+                or claim["quota_class"] != attempt["quota_class"]
+                or not isinstance(payload, dict)
+                or payload.get("cycle_command_id") != command_id
+                or payload.get("dispatch_job_id") != job_id
+                or attempt["job_id"] != job_id
+                or job["current_attempt_id"] != attempt["attempt_id"]
+                or AttemptStatus(attempt["status"]) not in _TERMINAL_ATTEMPT_STATUSES
+                or attempt["status"] != job["status"]
+                or attempt["lease_token"] is not None
+                or connection.execute(
+                    "SELECT 1 FROM worker_quota_classes WHERE held_attempt_id=?",
+                    (attempt["attempt_id"],),
+                ).fetchone() is not None
+            ):
+                raise StateConflict("terminal dispatch historical identity drifted")
+            return OrchestrationDispatchOutcome(
+                command_id=command_id,
+                job_id=job_id,
+                attempt=_attempt_from_row(attempt),
+                outcome="TERMINAL",
+            )
 
     def dispatch_cycle_job(
         self,

@@ -210,3 +210,35 @@ def test_durable_reconciliation_envelope_must_match_live_outcome(monkeypatch, fi
         evidence["outcome"][field] = value
     with pytest.raises(acceptance.AcceptanceError, match="outcome differs"):
         runner._assert_owner_loss_reconciliation(outcome, evidence, startup, 202)
+
+
+@pytest.mark.parametrize("fault", [
+    None, "job_id", "lost_attempt_id", "worker_id", "quota_class", "status",
+    "schema_version", "snapshot", "fence",
+])
+def test_requeued_capacity_receipt_requires_exact_lost_identity(fault):
+    runner = object.__new__(acceptance.Acceptance)
+    lost = dict(attempt_id="ATT-lost", worker_id="codex-01", quota_class="codex-native",
+                fence_generation=3)
+    receipt = dict(schema_version="mastermind.executive_proof_capacity_recovery/v1",
+                   job_id="JOB-2", lost_attempt_id="ATT-lost", worker_id="codex-01",
+                   quota_class="codex-native", status="AVAILABLE",
+                   previous_snapshot={"fence_generation": 3})
+    if fault == "snapshot":
+        receipt["previous_snapshot"] = []
+    elif fault == "fence":
+        receipt["previous_snapshot"]["fence_generation"] = 2
+    elif fault:
+        receipt[fault] = "foreign"
+    calls = []
+    def request(command, *values, persist=None):
+        calls.append((command, values, persist))
+        return {"result": receipt}
+    runner._control_request = request
+    if fault:
+        with pytest.raises(acceptance.AcceptanceError, match="recovery receipt"):
+            runner._recover_requeued_proof_capacity("JOB-2", lost)
+    else:
+        runner._recover_requeued_proof_capacity("JOB-2", lost)
+    assert calls == [("recover-proof-capacity", ("JOB-2", "ATT-lost"),
+                      "requeued-capacity-recovery.json")]

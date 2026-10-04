@@ -1,8 +1,8 @@
-"""Additive Web CEO v3 profile with read-only MDM telemetry.
+"""Additive Web CEO v3 profile with Session Bridge and read-only MDM telemetry.
 
-Legacy, web_ceo_v1 and web_ceo_v2 contracts remain unchanged.  V3 adds one
-sensor-only tool; it does not add lifecycle, placement, retry or MDM command
-authority.
+Legacy, web_ceo_v1, web_ceo_v2 and web_ceo_sessions_v1 contracts remain
+unchanged. V3 composes the already-reviewed Session Bridge tools plus one
+sensor-only MDM tool; it creates no lifecycle, placement, retry or command plane.
 """
 from __future__ import annotations
 
@@ -13,13 +13,14 @@ from typing import Any
 
 from integrations.executive_mcp import schemas as legacy
 from integrations.executive_mcp import web_ceo as v2
+from integrations.executive_mcp import web_ceo_sessions as sessions
 from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
 from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
 from integrations.executive_mcp.web_ceo_release import WEB_CEO_RELEASE_PROFILE
 
 WEB_CEO_V3_PROFILE = "web_ceo_v3"
 WEB_CEO_V3_SERVER_NAME = legacy.SERVER_NAME
-WEB_CEO_V3_SERVER_VERSION = "1.3.1"
+WEB_CEO_V3_SERVER_VERSION = "1.4.0"
 MDM_TOOL_NAME = "executive_mdm"
 
 
@@ -89,15 +90,17 @@ MDM_TOOL_SPEC = legacy.ToolSpec(
     read_only=True,
 )
 
-if v2.WEB_CEO_V2_TOOL_SPECS[-1].name != legacy.MODIFYING_TOOL:
-    raise RuntimeError("Web CEO v2 modifying-tool position changed")
+if sessions.WEB_CEO_SESSIONS_TOOL_SPECS[-1].name != legacy.MODIFYING_TOOL:
+    raise RuntimeError("Web CEO sessions modifying-tool position changed")
 
 _V3_BASE_TOOL_SPECS = tuple(
     FABRIC_V3_TOOL_SPEC if spec.name == v2.FABRIC_TOOL_NAME else spec
-    for spec in v2.WEB_CEO_V2_TOOL_SPECS[:-1]
+    for spec in sessions.WEB_CEO_SESSIONS_TOOL_SPECS[:-1]
 )
 WEB_CEO_V3_TOOL_SPECS = (
-    _V3_BASE_TOOL_SPECS + (MDM_TOOL_SPEC,) + v2.WEB_CEO_V2_TOOL_SPECS[-1:]
+    _V3_BASE_TOOL_SPECS
+    + (MDM_TOOL_SPEC,)
+    + sessions.WEB_CEO_SESSIONS_TOOL_SPECS[-1:]
 )
 _BY_NAME = {spec.name: spec for spec in WEB_CEO_V3_TOOL_SPECS}
 
@@ -117,7 +120,7 @@ def validate_web_ceo_v3_tool_arguments(
     tool_name: str, arguments: Any
 ) -> dict[str, Any]:
     if tool_name != MDM_TOOL_NAME:
-        return v2.validate_web_ceo_v2_tool_arguments(tool_name, arguments)
+        return sessions.validate_web_ceo_sessions_tool_arguments(tool_name, arguments)
     if arguments is None:
         arguments = {}
     if not isinstance(arguments, Mapping):
@@ -192,7 +195,7 @@ def web_ceo_v3_schema_snapshot_sha256() -> str:
 
 
 # Filled from the deterministic snapshot by the implementation test.
-WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "f653991fa38963e01e80ac515d727c32d73fda7d39b90cef3622b4c5a160be94"
+WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "6b428b51fd335d348da386f016d6d221191e9d9aa448aac063f2dd254d5d8b5c"
 
 
 def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:

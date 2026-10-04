@@ -309,6 +309,26 @@ class WorkerLaunchSpec:
         )
 
 
+def validate_orchestration_grant_digest(value: Any) -> str:
+    """Validate provenance representation; Runtime owns the grant binding."""
+    if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+        raise WorkerRecoveryContractError(
+            "effective_grant_digest must be an exact lowercase SHA-256 digest"
+        )
+    return value
+
+
+@dataclasses.dataclass(frozen=True)
+class OrchestrationLaunchSpec(WorkerLaunchSpec):
+    """LaunchSpec carrying the immutable v4 grant without widening legacy bytes."""
+
+    effective_grant_digest: str = ""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        validate_orchestration_grant_digest(self.effective_grant_digest)
+
+
 @dataclasses.dataclass(frozen=True)
 class WorkerProcessRef:
     run_id: str

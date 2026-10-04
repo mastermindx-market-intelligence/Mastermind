@@ -348,6 +348,9 @@ def _parser() -> argparse.ArgumentParser:
     cancel.add_argument("job_id")
     requeue = sub.add_parser("requeue", help="Explicitly requeue one LOST proof Job.")
     requeue.add_argument("job_id")
+    recovery = sub.add_parser("recover-proof-capacity", help="Requalify one explicitly requeued missing-owner proof quota.")
+    recovery.add_argument("job_id")
+    recovery.add_argument("lost_attempt_id")
     verify = sub.add_parser("verify-backup", help="Verify one named backup in backup root.")
     verify.add_argument("name")
 
@@ -1648,6 +1651,14 @@ def _service_from_config(
     canary: dict[str, Any] = dict(initial_canary or {})
     initially_ready = initial_canary is not None
 
+    recovery_controller = {}
+
+    def proof_capacity_recovery_observer(attempt):
+        controller = recovery_controller.get("current")
+        if controller is None or not controller.absence_verified(attempt):
+            raise ServiceError("proof capacity has no fresh broker absence")
+        return dict(controller.uid_sweep_receipt(attempt))
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -1682,6 +1693,9 @@ def _service_from_config(
                 )
 
             claim_binding_id = str(realm["binding_id"])
+        controller = RemoteWorkerProcessController(
+            client, expected_worker_uid=int(raw["worker_uid"]))
+        recovery_controller["current"] = controller
         return ExecutiveSupervisor(
             runtime,
             adapter,
@@ -1697,9 +1711,7 @@ def _service_from_config(
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
-            process_controller=RemoteWorkerProcessController(
-                client, expected_worker_uid=int(raw["worker_uid"])
-            ),
+            process_controller=controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
                 if exact_target_source is not None else None
@@ -1937,7 +1949,7 @@ def _service_from_config(
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
         session_factories = {}
-        if installed_profile == WEB_CEO_SESSIONS_PROFILE:
+        if installed_profile in {WEB_CEO_SESSIONS_PROFILE, WEB_CEO_V3_PROFILE}:
             from integrations.session_bridge.installed import build_runtime_session_bridge
             from integrations.session_bridge.native_backends import ExecutiveSummonAdapter
             from integrations.session_bridge.schemas import BridgeError
@@ -2081,6 +2093,8 @@ def _service_from_config(
         config,
         supervisor_factory=supervisor_factory,
         privileged_readiness_controller_factory=readiness_factory,
+        proof_capacity_recovery_observer=proof_capacity_recovery_observer,
+        proof_capacity_recovery_worker_uid=int(raw["worker_uid"]),
         operator_supervisor_factory=operator_supervisor_factory,
         operator_identity_verifier=(
             verify_operator_identity if expected_operator_arm else None
@@ -2237,6 +2251,8 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         if args.command.startswith("content-observer-") and hasattr(args, 'profile_key') and args.profile_key:
             return args.command, {"profile_key": args.profile_key}
         return args.command, {}
+    if args.command == "recover-proof-capacity":
+        return args.command, {"job_id": args.job_id, "lost_attempt_id": args.lost_attempt_id}
     if args.command in {"job", "dispatch", "cancel", "requeue"}:
         return args.command, {"job_id": args.job_id}
     if args.command == "check-current-worker-login":

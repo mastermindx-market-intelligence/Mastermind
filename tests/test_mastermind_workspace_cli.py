@@ -139,6 +139,9 @@ def test_installer_pins_host_root_and_refuses_missing_mount(
     _git(fixture, "init", "-q")
     _git(fixture, "config", "user.name", "Workspace Installer Test")
     _git(fixture, "config", "user.email", "workspace-installer@example.invalid")
+    # The installed multi-repository owner now validates its canonical origin.
+    # Preserve this test's shell-literal/argv/mount assertions with a valid binding.
+    _git(fixture, "remote", "add", "origin", "https://github.com/mastermindx-market-intelligence/Mastermind.git")
     _git(fixture, "add", ".")
     _git(fixture, "commit", "-qm", "fixture")
 

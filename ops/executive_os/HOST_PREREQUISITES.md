@@ -1115,6 +1115,8 @@ sudo /bin/bash "$AUTONOMY_CONTROL" arm \
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
 
+The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
+
 The first status must be exactly `UNARMED`; the post-transaction status must be
 exactly `ARMED_READY`. Arm stops both services before committing either config,
 starts worker then control, and removes its durable transaction marker only
