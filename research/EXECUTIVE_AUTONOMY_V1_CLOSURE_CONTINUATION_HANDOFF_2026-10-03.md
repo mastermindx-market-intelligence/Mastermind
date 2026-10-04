@@ -138,6 +138,11 @@ CONSUMED: a new modifying carrier **#1227** owns the pre-enrollment-disabled rep
 EFFECT ON THIS OPERATION: the live-canary chain upstream of Phase 5 is now: #1191 source → #1227 (disabled-state precondition) → human A2 enrollment ceremony (`enroll --enable-w3c`) → successor service-control Agent-Relay verbs (reviewed) → relay start by the service owner → target re-census → natural exact Codex child → short-lived canary grant via the ruled config-publication owner → real parent/child/return/same-parent cycle. Phase-2 note: #1227 and the successor slice touch `ops/executive_os/`, the same domain as the parked install-set carriers (#1157/#1166/#1169; overlap census printed in the session log) — Phase-1 dispositions unchanged; any later rebase of the parked trio must be re-checked against #1227's merged head. Nothing owed by this seat; no note posted (no delta to add).
 NEXT: quiet. Watcher watch10 armed. Wakes: watch10 edge; a ruling naming this seat; Remote Control toggle (human).
 
+### 4l Cycle 07:15Z — successor activation design packet consumed (#1143 5977583603, 07:09:40Z); watcher cadence backed off
+CONSUMED (design evidence only, no source write, nothing owed by this seat): after #1227, the smallest successor extends `ops/executive_os/service-control.sh` (blob 2ec47ed3) with fixed `AGENT_RELAY_LABEL`/`AGENT_RELAY_PLIST` and closed `start-agent-relay` / `stop-agent-relay` (root/macOS gate → fixed-plist validation → existing `ensure_running` / `stop_one` → positive readback; never touches Control/Worker/SOL_STATE/MCP/Backup; no caller-supplied label/plist/domain/verb); nine test assertions (existing start/stop/restart/readside traces byte-unchanged; exact-label only; missing/unsafe plist refuses before enable; unknown pre-start registration refuses; async readback without repeated effect; one disable+bootout stop; unknown post-effect fails never retries; no enrollment/token/config writes; plist identity proven by the enrollment `verify` owner first). Historical `tests/test_agent_relay_activation.py` (blob ce955d8a) is identity evidence only — its topology (repointed RELAY_LABEL, relay in ordinary start/stop) must not return. "Do not start this carrier until #1227 is merged/closed/reconciled."
+WATCHER: the convergence writer posts design packets every ~10 min; none names this seat. Cadence backed off 10 → 30 min (CLAUDE.md Class-M law: 60-min default, 15-min floor, urgent no-change backoff 15→30→60), budget 4 h, same three endpoints. Edges are consumed in batches; the ledger records them as design evidence unless one names this seat or changes a gate.
+NEXT: quiet. Wakes: watch11 edge; a ruling naming this seat; Remote Control toggle (human).
+
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
 |---|---|---|---|---|
@@ -180,6 +185,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 07:17Z: QUIET; watcher cadence 30 min. Nothing owed by this seat. Wakes: watch11 edge; rulings naming this seat; Remote Control toggle (human).
 - 07:08Z: QUIET. Live-canary chain now: #1191 → #1227 → human A2 enrollment → successor service-control Agent-Relay verbs → relay start → re-census → natural Codex child → canary grant. Nothing owed by this seat. Wakes: watch10 edge; rulings naming this seat; Remote Control toggle (human).
 - 06:58Z: QUIET. Live canary blocked upstream by two human/A2-owner gates (Relay enrollment ceremony; disabled-state precondition producer). Nothing owed by this seat. Wakes: watch9 edge; rulings naming this seat; Remote Control toggle (human).
 - 06:32Z: QUIET. #811 PARKED at the tripwire (custody note posted). Nothing owed by this seat; no time-bound act remains. Wakes: watch8 edge; rulings naming this seat; Remote Control toggle (human).
