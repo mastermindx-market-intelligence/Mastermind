@@ -3,7 +3,7 @@
 **Stage:** `DESIGN_CONTRACT` — reviewable design and builder contract; not live product qualification.
 **Target repository path:** `docs/design/MASTERMIND_OS_DAILY_FLOW_SPEC.md`.
 **Original protected implementation census:** `mastermindx-market-intelligence/Mastermind@a2646f458f9ff41ddcedd89b338be4a4349e6cd6`.
-**Continuation compatibility pin:** `28be2ce2d481fd542ec869344e178e5cec4d7d75`; bounded comparison found no app-source delta (§18.2).
+**Continuation compatibility pin:** `3ac05a00dacde2c06893f5f15082b703d2c04463`; the latest bounded comparison from `28be2ce2d481fd542ec869344e178e5cec4d7d75` adds backend receipt/recovery evidence and no app-source changes (§18.3). The prior compatibility census remains recorded in §18.2.
 **Design source:** approved Atelier visual direction, the current five-destination OS shell, and the daily-flow design decisions made in this Chairman-requested commission on 4 October 2026.
 **Paper:** file `01M3NRCX55B452A12819WNE1RH`, page `p-E-0`, “13 · Daily Experience · Flow + Builder Notes”.
 **Illustration rule:** every person, count, message, decision, outcome, project, status, and timestamp in a mockup is illustrative unless separately qualified by its current canonical owner.
@@ -11,8 +11,8 @@
 ### Builder reading order
 
 1. Read UX00 and §1 for the daily loop, durable responsibilities, and current implementation boundary.
-2. Use §2 and the actual action maps in §§6.4 and 11.1 to connect the exact screen family. Start with the read-only slice in §15.
-3. Apply UX01–UX04 and UX06–UX07 with §§10–14 for source states, draft continuity, message outcomes, recovery, keyboard and return behavior. The intended default composer is Options + Send; hidden historical controls are not instructions to restore their former behavior.
+2. Use §2 and the actual action maps in §§6.4 and 11.1–11.2 to connect the exact screen family. Start with the read-only slice in §15.
+3. Apply UX01–UX04 and UX06–UX09 with §§10–14 for source states, draft continuity, message outcomes, recovery, keyboard and return behavior. UX08/UX09 specify Search/Knowledge → exact source → explicit unsent append → original return (§§11.2–11.6). The intended default composer is Options + Send; hidden historical controls are not instructions to restore their former behavior.
 4. Build the slice-appropriate fixtures and run §§16–17 against the real application. Record the tested source revision and actual results; the Paper review is design evidence only.
 
 ## 1. Purpose and completion boundary
@@ -54,11 +54,12 @@ Conversation reads one current permitted managed-turn window; send, provider con
 Mission v3 adds bounded result navigation and exact-tuple result reads; execution, review, transport, acceptance, and freshness remain separate [S8, S9].
 Live v2/v3 acceptance is pinned to `NOT_PROJECTED`; historical v1 acceptance support is a regression input, not a current acceptance capability [S10].
 The protected source does not implement project creation, Inbox decision commands, durable conversation history, session replay, or execution resume [S3, S7, S11].
+General Search, Knowledge collections, general evidence-source opening, a composer, and Add to draft remain absent at the continuation pin. The implemented exact-result reader is a bounded five-key read, not a general source or search capability [S28–S30].
 
 ## 2. Paper directory and screen lineage
 
 New UX artboards are explanatory flow/state contracts; existing AT/CH screens remain the visual component lineage.
-All eight IDs below were read back from the exact Paper file. Continuation notes UX06/UX07 extend the original six on the same page. The page is an editable storyboard and builder note set; the accepted Paper catalog exposes no prototype-link operation, so working click-through behavior is not claimed.
+The directory identifies ten workflow notes UX00–UX09, all read back from the exact Paper page. UX08/UX09 extend the earlier eight notes. Their static review and remaining product amendments are recorded in §§11.6 and 19. The page is an editable storyboard and builder note set; the accepted Paper catalog exposes no prototype-link operation, so working click-through behavior is not claimed.
 Desktop and mobile variants share the same source-state and effect semantics.
 
 | Label | Content | Paper ID | Existing screen lineage |
@@ -71,6 +72,8 @@ Desktop and mobile variants share the same source-state and effect semantics.
 | UX05 | Builder slice, capability gates, acceptance scenarios | `PBR-0` | all applicable lineage |
 | UX06 | Conversation selection, source and empty-state contract | `SMO-0` | CV01 `SD8-0` / CV01M `SI5-0` |
 | UX07 | Composer stages, detour continuity and original-message recovery | `SMP-0` | CH1/CH2/CH3/CH6/CH7 |
+| UX08 | Search/Knowledge, exact source reading and return | `SXT-0` | AT05 `L0Z-0` / `MNM-0`; AT06 `L3N-0` / `MNN-0`; KD01 `SPU-0` / `STU-0` |
+| UX09 | Unsent source append, added-state, mobile payload/details and conditional Undo | `SXU-0` | KD01 and original CH1/CH6 scoped draft; KD02 product variant unverified |
 
 Avoid rendering the full provenance explanation as the daily headline.
 Use a short understandable status near the content, with owner, clock, scope, reason, and limits available in details.
@@ -90,6 +93,7 @@ Use [Page 13 — Daily Experience](https://app.paper.design/file/01M3NRCX55B452A
 | CV01 Conversations | `SD8-0` / `SI5-0` | primary Conversations destination; durable office or exact permitted project selection; bounded metadata filter |
 | AT05 Knowledge | `L0Z-0` / `MNM-0` | reusable permitted knowledge; exact source detail; explicit Add to draft is not Send |
 | AT06 Global search | `L3N-0` / `MNN-0` | Search/keyboard shortcut; visible scope; result opens exact permitted object; Close returns prior view |
+| KD01 Source reader | `SPU-0` / `STU-0` | exact permitted source from Search or Knowledge; explicit Add to draft; Back/Close restore the actual origin; open mobile label/details amendment in §11.6 |
 | AT07 Settings & Sources | `L6N-0` / `MNO-0` | account/source detail and recovery; contextual entry retains originating view; no automatic reconnect authority |
 | AT08 Meta-CEO office | `L9V-0` / `MNS-0` | one company conversation; To/Company scope; response identifies next owner and result |
 | AT09 Resources & Systems | `LCJ-0` / `MO4-0` | project More; capacity/system facts from their owners; optional inspection |
@@ -398,6 +402,91 @@ CH1, CH2, CH3 and CH6 depict the same sent message, **“Keep this moving. What�
 
 These IDs identify design controls, not effective command ports. Supplemental unavailable/read-only variants preserve unsupported Send as disabled with explanation. Options opens only supported composition/context choices and has no effect by itself; it cannot adopt a plan, switch an uncertain operation's owner, create a runtime, or manufacture retry authority. Return restores actual previous focus; mobile return from an evidence/context read must not focus the textarea and open the keyboard unless that was the user's actual prior focus.
 
+### 11.2 Search/Knowledge → exact source — UX08
+
+This is a **DESIGN_REQUIRED** connected journey. The protected app supplies bounded Mission Evidence and an exact-result reader; it has no general Search/Knowledge feed, general source reader, composer or Add-to-draft capability [S28–S30]. A static result row, source excerpt or button is not evidence that its owner feed or command is implemented. Qualify each read and composition capability through the existing owner before enabling it.
+
+Search opens AT06/AT06M (`L3N-0` / `MNN-0`) with the actual query and visible scope. Its filters are **All, Projects, Conversations, Knowledge**; there is no People category in this commission. Knowledge opens AT05/AT05M (`L0Z-0` / `MNM-0`) with **All, Decisions, Artifacts, Discoveries** and independently reported coverage. Search may find permitted metadata; selecting a result does not prove its source content was read or that the result is current. Result kinds open their exact existing project, conversation, decision or source destination. Knowledge decision rows navigate to the exact decision packet, retaining their Knowledge origin; they do not record a choice.
+
+| User action | Desktop control / mobile control | Connected design destination and retained context |
+| --- | --- | --- |
+| Search: open source | `M3A-0` / `MYR-0` | KD01 `SPU-0` / `STU-0`; exact source pointer, query/filter/result and actual origin retained |
+| Knowledge: review source | `LZX-0` / corresponding mobile source control `MWX-0` | KD01; exact Knowledge selection and filter retained; no content or reuse inferred from row selection |
+| Knowledge: search | `LT8-0` / `MW9-0` | AT06/AT06M with explicit scope and Knowledge as return origin |
+| Knowledge: review decision | `LZN-0` / `MWP-0` | AT20 `OU0-0` / AT20M `P0I-0`; current exact packet and decision owner guards |
+| Knowledge: Sources | `M0O-0` / `SVU-0` | AT07 `L6N-0` / AT07M `MNO-0`; preserve Knowledge origin |
+| Search: Sources | `MD0-0` / `MZC-0` | AT07/AT07M with Search origin retained; no automatic reconnect |
+| Search: Close | `L3R-0` / `MS9-0` | actual originating permitted view; no fixed return to Today |
+| KD01: Add to draft | `SWW-0` / `SXN-0` | one explicit permitted insertion into the eligible original scoped draft; never Send |
+| KD01: source details | source provenance panel / `SXF-0` | reviewable source identity, exact excerpt, label, revision, clocks, coverage and permission state; no new read authority |
+| KD01: Back / Close | `SVH-0` / `SRA-0`; mobile `SUZ-0` / `SUT-0` | actual permitted Search, Knowledge or conversation origin; nested return keeps the full origin chain |
+
+Wire each control to its exact containing row and owner-supplied source pointer. IDs identify this design snapshot and do not serve as canonical source identities. Back from a reader reached through Knowledge returns to Knowledge; Back from a reader reached through Search returns to that Search state; closing Search then returns to its own origin. A reader reached from a conversation detour preserves that same conversation. Sources is a scoped diagnostic detour, not a new account, reconnect, content-access or execution grant.
+
+### 11.3 Source identity, clocks, permissions and states
+
+An exact source pointer retains the existing owner's canonical ref and revision/digest where supplied, the permitted project scope, and the source kind. Do not treat a display title, search query, selected row, project reference, work reference, Job, Attempt and conversation identity as interchangeable. For the implemented result reader, preserve the exact five-key tuple including `result_envelope_digest`; the bounded navigation index is unvalidated until the independently permitted detail read passes the closed decoder [S29]. A generic source reader needs its own existing-owner contract; do not fabricate an endpoint from a Paper route.
+
+Display source-currentness/freshness and observation recency independently. Source time describes the source event or publication; revision identifies the admitted version; observed-at describes the bounded read. A successful fetch or recent observation is not proof of latest revision, complete coverage, ongoing permission, acceptance or release [S28, S30]. Missing clocks stay unavailable. Stale or freshness-unverified material may be read/reused only when the owner permits it and its limitation remains visible; no append silently upgrades its freshness. The illustrative source label below is a human-readable label, not the complete canonical pointer.
+
+| State | Required visible behavior and capability boundary |
+| --- | --- |
+| query empty | show permitted orientation or an honest prompt; no invented recent history or global completeness |
+| searching / source loading | preserve query, origin and eligible draft; result selection is not yet admitted content |
+| partial coverage | show known permitted rows and a concise coverage limit; no company-wide total or zero-result conclusion |
+| bounded query-empty / local-filter-empty | distinguish no results in the admitted scope from a filter hiding known results; Clear filter does not broaden permission |
+| unavailable / disconnected | show which Search, Knowledge or source read is unavailable; no manufactured empty collection |
+| metadata allowed, content refused | show only independently permitted metadata; clear protected excerpt and disable Add; metadata access does not authorize reading |
+| freshness unverified / historical | label the supplied revision and clocks; do not show Fresh solely from a recent read |
+| exact source available | show admitted identity, excerpt, label and source limits; reading alone does not select it for composition |
+| source changed before Add | visibly identify the changed revision/content, require a new review of the exact payload, and keep the original draft; no silent substitution |
+| Add unavailable / no eligible draft | explain the missing composition or target capability; choose an existing permitted conversation through CV01/CV01M where supported; no automatic conversation/project creation |
+| source added, still unsent | review the inserted payload and source label alongside the preserved draft and To/About; repeated Add cannot duplicate that same insertion |
+| permission or auth generation changed | immediately clear rendered/in-flight protected content and prevent append; retained draft follows the current approved policy only |
+
+Acquisition/search metadata, source-content access and draft-composition permission are separate owner checks. Before opening, adding or restoring protected source text, validate the applicable current permission and binding. An auth-generation boundary invalidates old and in-flight source detail before reacquisition, even when the public auth display is unchanged [S30]. A source revocation does not erase arbitrary newer user text by guesswork; follow the existing approved retention/redaction policy and never restore revoked text from another cache.
+
+### 11.4 Explicit source append, unsent payload and conditional Undo — UX09
+
+The illustrative eligible draft remains **To Project Sol · About Mastermind OS · Topic Work visibility**, with original unsent text **“What evidence is still missing?”**. The exact excerpt is **“Source freshness still needs verification against the current source.”** The full source label is **“Work visibility review pack · v2 · Mastermind OS · Freshness unverified”**. These are design fixtures, not current source observations.
+
+Opening the reader, reviewing details, highlighting an excerpt, choosing a row, or returning cannot attach or send it. Explicit **Add to draft** validates the current exact source payload and the original eligible scoped draft, then appends the following plaintext quote and source label while visibly preserving the original text:
+
+```text
+What evidence is still missing?
+
+“Source freshness still needs verification against the current source.”
+Source: Work visibility review pack · v2 · Mastermind OS · Freshness unverified
+```
+
+The insertion contains the reviewed source representation; it does not establish current freshness, adopt a plan, record a decision or dispatch a message. Preserve its exact owner/ref/revision association using the existing draft facility when that facility supports it. Do not add a transcript, search/memory cache, attachment registry, command queue, background operation or new persistence plane to manufacture that association. If the build has no approved composition capability, Add remains unavailable and this payload is a review specimen only. Draft retention means the authorized open view unless an existing approved persistence path independently qualifies more.
+
+Use one bounded insertion with the original draft identity/revision and reviewed source identity. Repeated activation for that same retained insertion must not duplicate it. A changed source revision or intervening user edit is visible and requalified before another explicit insertion; do not deduplicate unrelated user text merely because its words match. A late source response cannot append to a different recipient/project or overwrite text typed after the reader opened. If no eligible draft exists, an explicit supported choice through CV01/CV01M may select an existing permitted conversation; it is navigation only and never mints a conversation, project, session or Runtime root.
+
+The added-state review, mobile payload/details and **Undo** behavior are specified on UX09 (`SXU-0`); there is no verified KD02 product variant. Show “Added to draft · Not sent” only after the existing draft facility confirms the insertion. Show Undo only when the existing draft owner can reverse the exact unchanged insertion under its supported revision policy. It removes only that insertion and preserves prior text. If that capability is absent, or newer typing, source change, target change or revision mismatch makes removal ambiguous, offer **Edit draft** instead; never erase newer text, a submitted snapshot or an original pending operation. Do not invent Undo history, a registry or a durable mutation ledger to implement this conditional affordance.
+
+UX09's note specimens are after-append text `SZO-0`, Return `SZQ-0`, conditional Undo `SZS-0`, mobile exact-payload amendment `T0E-0` and expanded-source details `T0K-0`. They explain required states and connections; they are not effective product controls or proof that the KD01 amendment or a KD02 added-state variant exists.
+
+An unresolved prior Send remains tied to its immutable submitted snapshot and existing owner operation. Adding to the separate next unsent draft does not retry, replace, resolve or retarget that original. The new backend receipt `work_ref` preserves original launch provenance; it is not evidence of the current selected Program/Mission association or message delivery [S27, S31].
+
+### 11.5 Dynamic origin, focus, IME and mobile payload review
+
+Use the existing view-state facility to retain the actual origin route, exact project/conversation binding, To/About, draft identity/revision, query/filter, selected result, reading anchor, scroll and focused control. Nested reader→Sources→reader→Search/Knowledge returns follow the actual chain. A fixed “Back to conversation” target is valid only when that conversation was the real permitted origin. Revalidate permission and binding before restoring protected content; if the origin vanished, present an honest permitted directory/unavailable state without guessing a replacement. Original operation recovery remains reachable independently.
+
+Opening the source reader moves focus to its accessible heading or appropriate dialog entry; Back/Close restores the actual prior control where it still exists, or a sensible permitted fallback. Add announces one concise unsent insertion status and keeps the payload reviewable without silently sending or changing To/About. Background rereads do not steal focus. Search Escape/Close restores the prior origin rather than always focusing a composer. Mobile reader return opens the keyboard only when the composer actually had prior focus and its current permission permits restoration. Preserve the reading anchor and safe-area access to Back/Close/Add; details must be reachable without depending on truncated text.
+
+IME composition Enter never selects a Search result, triggers Add, closes the reader, or sends. Outside composition, Enter in the query searches and Enter on the focused result opens it; result arrows stay within the list, while Tab follows normal controls. Shift+Enter in a draft adds a newline. Reader quote text is readable source content, not an editable substitute for the original draft. Verify actual 320/390 px wrapping, expanded text, keyboard, focus order, status announcements and 44 px targets in the implementation. Desktop/mobile mockups do not establish executed accessibility acceptance.
+
+### 11.6 Paper effect custody and open mobile amendment
+
+The KD01 desktop/mobile roots are `SPU-0` / `STU-0`. Read-only review requires the mobile reader to visibly label both the exact excerpt and the full source label from §11.4, and expose reviewable source/payload details through `SXF-0`. Final parent review also found that the status time/icons (`SVB-0` / `SV4-0`) and Close label (`SX6-0`, in `SUT-0`) are present as nodes but not visibly legible in the screenshot; restore their explicit light-on-ink rendering and recheck the header. These are **open product-screen amendments**: modifications to those roots are deferred under the unresolved duplication fence. Do not claim that the current mobile product screen already satisfies these requirements. UX09 supplies the added-state/mobile-payload/details/Undo specification while the product amendments remain outstanding.
+
+The direct Mastermind Paper `duplicate_nodes` operation `mm-knowledge-flow-added-state-shells-20261004-001`, attempted against `SPU-0` / `STU-0`, returned non-JSON error text beginning `McpServerE…`; the old response wrapper failed to retain the full raw reply. Its effect remains **EFFECT_UNKNOWN**. Two same-carrier `get_basic_info`/`get_children` observations found no duplicates and 68 total boards; unchanged counts are bounded observation, not authoritative known-no-effect evidence. No KD02 product variant was observed or verified. No retry, replacement operation ID or carrier change is authorized by those observations.
+
+The protected bridge has no operation-receipt/status store: its operation ID is correlation only, and edit-dispatch exceptions or upstream tool errors may have partial effects [S32]. Reconcile on the original direct carrier if definitive original evidence becomes available. Until then freeze that logical duplication and overlapping product targets; the fence is not a file/page-wide lease, and disjoint admitted guide artboards can continue [S33]. The static review and source diagnostic do not close this effect uncertainty or certify the requested mobile amendment.
+
+A separate final note-text operation, `mm-knowledge-guide-mobile-chrome-amendment-20261004-001`, also returned `McpServerError: Connection timed out.` with `isError: true`, `error_code: UNAVAILABLE` and `type: mcp_network_error`. It attempted to change only UX09 leaf `T0J-0` to “Show full payload above Add; keep the draft visible. Make status and Close legible.” The improved wrapper preserved this full error response. Original-carrier `get_node_info` still observed “Show this full payload above Add; keep the original draft visible.” This operation also remains **EFFECT_UNKNOWN**; the unchanged text is not definitive no effect. No retry or carrier switch occurred. Fence that logical text change and leaf; retain the already reviewed UX09 layout and previously confirmed conditional-Undo/payload edits. The mobile header finding is recorded in this document even though its final Paper note amendment is unconfirmed. Owned working indicators were subsequently released through the original carrier; releasing an indicator does not settle either content effect.
+
 ## 12. Command stage truth and action inventory
 
 The labels below describe distinct facts; builders may not compress them into a generic success state.
@@ -421,6 +510,8 @@ The labels below describe distinct facts; builders may not compress them into a 
 | Open destination/project | navigation/read | enabled where exact source qualifies | no execution |
 | Review decision | navigation/read | preview when feed absent | exact owner item; incomplete packet cannot approve |
 | Open evidence | read | existing permitted evidence | current scope and permission |
+| Search/Knowledge source opening | read/navigation | general capability absent | exact source owner/pointer; metadata selection is not content reading |
+| Add source to draft / conditional Undo | local composition | absent in protected source | existing permitted draft owner only; preserve exact insertion/revision and prior text; no Send |
 | Refresh current window | read | implemented | content permission; no history/send |
 | Ask Meta-CEO | navigation | binding-dependent design | one durable office; no chat minting |
 | Continue conversation | navigation/read | permitted current window only | exact current binding; no work resume |
@@ -579,9 +670,24 @@ These are **unexecuted design acceptance requirements**, supplementing the exist
 
 Run action-stage checks only after that owner capability is qualified; until then verify the honest unavailable/read-only presentation. Paper visual acceptance establishes no transport, receipt or accessibility execution.
 
+### 17.2 Search/Knowledge extensions to the same fifteen scenarios
+
+These checks are **required and unexecuted in the application**. They extend the same fifteen scenarios; static Paper/source review does not mark them passed.
+
+| Existing scenarios | Required Search/Knowledge → source → append → return checks |
+| --- | --- |
+| 1, 4, 5 | Search filters are All/Projects/Conversations/Knowledge with no People; Knowledge filters are All/Decisions/Artifacts/Discoveries. Partial coverage, query-empty, filter-empty, unavailable and complete scope remain distinct. Exact result/source identity is admitted by its owner, never inferred from a selected title. |
+| 4, 5, 11 | Search source controls and Knowledge review open the exact permitted KD01 reader; Knowledge decision opens the exact AT20/AT20M packet; Sources preserves origin. Source owner/ref/revision, source time, observed-at, coverage and freshness stay separate; recent fetch is not currentness or acceptance. |
+| 6, 7, 8, 9 | Reading/selection never attaches or sends. Explicit Add appends exactly §11.4's plaintext quote and full source label to the preserved “What evidence is still missing?” draft, retaining To Project Sol/About Mastermind OS/Topic Work visibility. Read-only builds have no effective Add/Send and cannot synthesize acknowledgments. |
+| 6, 10, 14 | No eligible draft offers a supported explicit choice of an existing permitted conversation through CV01/CV01M; it never auto-creates a conversation, project, provider session or Runtime root. A late source read does not append into a newly selected recipient/project. |
+| 8, 12, 14 | Repeated Add cannot duplicate the same insertion; changed source before Add is visible and re-reviewed; intervening draft edits are preserved. Show Undo only when the existing draft owner can reverse that exact unchanged insertion/revision; otherwise offer Edit draft and preserve newer text. An unknown prior Send remains bound separately and is never resent/resolved by Add, Undo or navigation. |
+| 5, 12, 13 | Metadata permission does not imply content permission; content loss clears protected excerpt and prevents Add before replacement reads. Draft retention uses current approved policy only. Original receipt work_ref is provenance, not current Mission association; timeout/not_found/error/unchanged count does not establish no effect. |
+| 13, 14, 15 | Return follows actual nested origin, query/filter/selection, permitted draft/reading anchor/scroll and actual focus. Origin removal or permission loss yields an honest permitted fallback. Search Close never assumes Today; mobile Back/Close never opens keyboard unless composer actually had prior focus. |
+| 8, 14, 15 | IME Enter cannot select/Add/close/send; Shift+Enter retains draft newline behavior. At 320/390 px show exact excerpt and full label, reachable details, reviewable inserted payload, safe-area controls and 44 px targets. Verify semantic focus/status behavior in the build; KD01 mobile amendment and UX09-only added-state/Undo are not fabricated product passes. |
+
 ## 18. Protected-source references
 
-Original references S1–S21 are primary repository sources pinned to `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`; preserve this original census rather than silently repinning it. S22–S25 below record the continuation separately.
+Original references S1–S21 are primary repository sources pinned to `a2646f458f9ff41ddcedd89b338be4a4349e6cd6`; preserve this original census rather than silently repinning it. S22–S25 below record the earlier continuation separately. S26–S33 record the current bounded continuation at protected `3ac05a00dacde2c06893f5f15082b703d2c04463`.
 The census did not execute these sources or qualify installation, registration, permissions, callbacks, or live effects.
 
 | Ref | Exact source | Relevant fact |
@@ -632,6 +738,27 @@ Dated reads on 2026-10-04 observe #1046 open/draft/unmerged at `274a8a80c4f9e14b
 | S24 | [PR1150](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1150), [LAUNCH port at8aca L298–455](https://github.com/mastermindx-market-intelligence/Mastermind/blob/8aca50467f774f52b31cd9147a305936034f46bc/app/mastermind_os/src/orchestration/executive-launch-command-port.ts#L298-L455) | dated launch-only candidate; unchanged port; no Send/STOP |
 | S25 | [App at274a L1225–1270](https://github.com/mastermindx-market-intelligence/Mastermind/blob/274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f/app/mastermind_os/src/App.tsx#L1225-L1270), [auth fixture L114–129](https://github.com/mastermindx-market-intelligence/Mastermind/blob/274a8a80c4f9e14b3d00b92fda3a9ac03a20e15f/app/mastermind_os/src/App.auth-generation.test.tsx#L114-L129) | current candidate Work immediate-clear implementation and fixture |
 
+### 18.3 Current protected delta and launch-recovery evidence — 4 October 2026
+
+The next bounded protected comparison `28be…3ac` is ahead by exactly one commit with 12 backend/evidence/test files and **no app changes** [S26]. Together with the preserved §18.2 comparison, this leaves the original daily app capability census unchanged. The current source adds optional original `work_ref` to strict receipt-v2, reconstructed on duplicate/status reads from original durable provenance. A legacy omission stays omitted; a present malformed field fails validation. Current UI configuration cannot relabel it, and conflict under the same intent creates no additional Job. This is original workstream provenance, not a current Program/Mission association, new registry, query plane, grant, dispatch path or proof of execution [S27].
+
+The committed component evidence freezes #1150 at historical `37d02586eeb97d92e6fb9ed6dbc7cd142dd6449c`; do not confuse that probe snapshot with the later candidate observation in §18.2. Its eight disposable authenticated journeys exercise V2/V3 profiles, generic-v1/strict-v2 receipts and accepted/lost replies. Lost-reply recovery reads the original intent status without resubmission or fresh source admission. Each creates one queued root with zero attempts/workers; these fixtures prove neither installed OAuth/storage/producer composition nor worker execution or actual Mission presentation [S31].
+
+Unmodified frozen #1150 accepts V2/server 1.2.0 recovery but retains unknown for V3/server 1.4.0 recovery because of its closed E1 version guard. The exact pending pointer remains, blocking duplicate submit. The proposed consumer patch permits only 1.2.0 and 1.4.0 and passes eight journeys/52 negatives on disposable copies; it is **unadopted**, not protected app implementation. Installed 1.3.1 remains unqualified and unsupported by that patch. Source merge of the backend contribution does not establish installed adoption. The evidence README's contributor-time “needs merge” prose is preserved history, not the current state of the backend files now at protected `3ac…` [S27, S31].
+
+The current app still lacks general Search, Knowledge collections, source-to-draft reuse and a composer [S28]. Scoped Evidence renders qualified tuple metadata and artifact text; general source-reader links are absent. The implemented Mission v3 result reader validates the exact five-key selector and a fixed typed envelope; it is not a generic source route [S29]. Its source currentness, independent access resources, limited window coverage, auth-generation invalidation and limited Mission-pair return remain the applicable first-slice constraints [S30].
+
+| Ref | Exact current primary evidence | Qualified fact |
+| --- | --- | --- |
+| S26 | [Protected 28be…3ac comparison](https://github.com/mastermindx-market-intelligence/Mastermind/compare/28be2ce2d481fd542ec869344e178e5cec4d7d75...3ac05a00dacde2c06893f5f15082b703d2c04463) | one commit, 12 backend/evidence/test files, no app changes |
+| S27 | [Receipt evidence L9–24](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/research/evidence/mastermind_os_backend_app_contract_20261004/README.md#L9-L24), [receipt construction L891–947](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/control_plane/ceo_intent.py#L891-L947), [durable reconstruction L1156–1177](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/control_plane/ceo_intent.py#L1156-L1177) | optional original strict-v2 work_ref; original provenance not current Mission association |
+| S28 | [Current navigation L29–52](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/App.tsx#L29-L52), [closed host surface L23–83](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/host.ts#L23-L83), [Conversation L802–890](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/App.tsx#L802-L890) | no general Search/Knowledge/composer/reuse capability; current permitted window display |
+| S29 | [Evidence L696–778](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/App.tsx#L696-L778), [result index L100–185](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/App.tsx#L100-L185), [exact result read L1674–1765](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/App.tsx#L1674-L1765), [fixed GET surface L527–585](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/web-auth.ts#L527-L585) | tuple metadata versus exact bounded detail; no general source-opening endpoint |
+| S30 | [Currentness/access L8–43](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/README.md#L8-L43), [window DTO L178–218](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/workspace-contract.ts#L178-L218), [auth invalidation L987–1106](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/App.tsx#L987-L1106), [pair-only return L1210–1229](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/app/mastermind_os/src/App.tsx#L1210-L1229) | bounded owner currentness; independent acquisition/content; no send/history; permission clear and limited return |
+| S31 | [Recovery/patch evidence L28–75](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/research/evidence/mastermind_os_backend_app_contract_20261004/README.md#L28-L75), [journey refusal/admission/recovery L200–270](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/tests/test_executive_mcp_launch_journey.py#L200-L270), [remaining obligations L116–121](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/research/evidence/mastermind_os_backend_app_contract_20261004/README.md#L116-L121) | disposable actual-backend evidence; V3 unknown preserved; patch unadopted; installed/message/STOP/no-effect settlement remain separate |
+| S32 | [Bridge read allowlist L32–43](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/integrations/paper_desktop/bridge.py#L32-L43), [no ledger/actions L426–437](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/integrations/paper_desktop/bridge.py#L426-L437), [dispatch/partial-effect semantics L489–521](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/integrations/paper_desktop/bridge.py#L489-L521), [MCP typed serialization L39–102](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/integrations/paper_desktop/mcp_server.py#L39-L102), [snapshot/effect limits L300–315](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/docs/PAPER_DESIGN_INTEGRATION.md#L300-L315) | operation ID correlation only; no receipt-read store; generic lost/error reply does not establish no effect |
+| S33 | [Paper workflow scoped fence L89–95](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/skills/paper-design-workflow/SKILL.md#L89-L95), [same-carrier reconciliation L128–129](https://github.com/mastermindx-market-intelligence/Mastermind/blob/3ac05a00dacde2c06893f5f15082b703d2c04463/skills/paper-design-workflow/SKILL.md#L128-L129) | unknown operation freezes overlapping targets; no replay/carrier swap; disjoint targets remain eligible |
+
 ## 19. Review outcome and remaining proof
 
 The original six workflow artboards exist on the exact Paper page, with their IDs recorded above. Actual screenshots and editable JSX were inspected. Today, Meta-CEO, project navigation, welcome context and new-project intake were refined in the canonical screen family. The directory, AT00, MC90 and CH91 point builders to this flow contract. The UX04 project-conversation example was reconciled to Project Sol rather than the company Meta-CEO. The AT15 example now keeps review recorded/correction next distinct from acceptance; Inspect next turn is an optional read.
@@ -640,8 +767,14 @@ Continuation adds CV01/CV01M and UX06/UX07, and refines the Inbox pair and CH1/C
 
 Independent reviews accepted CV01/CV01M, the Inbox pair and the connected semantic contract. The CH editor inspected all five affected chat frames; the principal additionally inspected final CH2 and CH7. Independent note review identified two wording corrections, now applied and visually rechecked: current complete-empty scope does not imply empty conversation history, and return may reopen the keyboard only when the composer had actual prior focus. Final extraction confirms the separate sent message and unsent draft, exact To/About scope, supported Options, distinct delivery stages and original-operation recovery.
 
-AT00, UX00, the main directory, MC90 and CH91 now point to all eight workflow notes. The UX00 directory was expanded to 1600 × 1200 and its spacing adjusted so its complete guide list fits; the next row begins at y=1250. Existing advanced-operation references were retained. This proves readable design and named connections, not a directory feed, working links or enabled command ports.
+At the earlier continuation, AT00, UX00, the main directory, MC90 and CH91 pointed to all eight then-existing workflow notes. The UX00 directory was expanded to 1600 × 1200 and its spacing adjusted so its complete guide list fit; the next row began at y=1250. Existing advanced-operation references were retained. This preserves that reviewed snapshot and does not claim that every directory anchor has already been updated for UX08/UX09.
 
 Independent visual/semantic review accepted Today desktop/mobile, Meta-CEO desktop/mobile and UX00–UX04 at their reviewed states; the principal inspected UX05 and the final refinements. This proves editable design, fit and contract clarity, not functioning navigation or action. Enabled message/create/decision specimens describe a qualified target state; the present read-only slice must retain unavailable/preview behavior until its owner capability is actually accepted. There is no synthetic send, save, success receipt, deployment, background worker or production acceptance in this commission.
 
 Builders must map every implemented field to the current DTO, preserve the exact source/permission/operation fences and run the fifteen slice-appropriate scenarios. The first missing capability is a real integrated journey in the application, followed by separately qualified action composition. No protected merge, source-custody transfer, runtime actuation or installed qualification follows from design completion.
+
+The current continuation refines Search and Knowledge on desktop/mobile and adds KD01 `SPU-0` / `STU-0`: six product artboards created or refined. It adds UX08 `SXT-0` and UX09 `SXU-0`, bringing Page 13 to ten notes. Screenshots, edited text and the source audit establish static findings and named connections, not implemented reads, append, Undo, focus/IME behavior or transport. Both new guides render fully at 1600 × 1120. The conditional-Undo clarification was applied to `T00-0`, visually rechecked and read back exactly; the augmented draft `SZO-0` matches §11.4. AT00, UX00, the main directory, MC90 and CH91 now name UX00–UX09 and the source-reader family. Their updated entries were read and visually reviewed; UX00's complete guide list fits, and the other guide roots retain fit-content sizing.
+
+The exact excerpt/full-label/mobile-details amendment remains open on the KD01 product roots under §11.6's original-carrier unknown-effect fence. KD02 was neither observed nor verified; added-state, mobile payload/details and conditional Undo remain UX09 requirements and note specimens only.
+
+Required implementation proof includes the same fifteen scenarios with §17.2's new Search/Knowledge checks, exact permitted source reading and unsent append, source-change and permission negatives, conditional insertion/Undo behavior, dynamic origin and real keyboard/focus/IME/mobile review. The application is still read-only at protected `3ac…`. The two unresolved Paper operations are separate design-effect custody issues; neither can be closed by document edits, unchanged observations, green component evidence or the completed work on disjoint guides.
