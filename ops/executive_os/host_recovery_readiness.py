@@ -69,6 +69,14 @@ SYSTEM_DAEMON_PLIST_DIR = Path("/Library/LaunchDaemons")
 SSHD_SYSTEM_PLIST = Path("/System/Library/LaunchDaemons/ssh.plist")
 ROOT_VOLUME = "/"
 DEFAULT_LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
+# The fleet Desktop Commander installer historically used one host-user suffix
+# even though launchd labels are already scoped to the local Mac.  Preserve the
+# fixed-label observer while recognizing that one reviewed compatibility form;
+# do not scan LaunchAgents or accept caller-supplied label patterns.
+_SUFFIXABLE_USER_SESSION_LABELS = frozenset(
+    {"com.mastermind.desktop-commander.remote"}
+)
+_SESSION_SUFFIX_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 COMMAND_TIMEOUT_SECONDS = 10
 MAX_COMMAND_OUTPUT_BYTES = 1 * 1024 * 1024
 _FIXED_ENV = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C"}
@@ -292,13 +300,33 @@ def _observe_architecture(
     return None
 
 
+def _launch_agent_short_user(launch_agents_dir: Path) -> str | None:
+    """Derive one bounded local short-user suffix from the canonical path shape."""
+
+    if (
+        launch_agents_dir.name != "LaunchAgents"
+        or launch_agents_dir.parent.name != "Library"
+    ):
+        return None
+    short_user = launch_agents_dir.parent.parent.name
+    if _SESSION_SUFFIX_RE.fullmatch(short_user) is None:
+        return None
+    return short_user
+
+
 def _observe_user_session_agents(launch_agents_dir: Path) -> int | None:
     try:
         if not launch_agents_dir.is_dir():
             return None
+        short_user = _launch_agent_short_user(launch_agents_dir)
         present = 0
         for label in USER_SESSION_CRITICAL_LABELS:
-            if (launch_agents_dir / f"{label}.plist").is_file():
+            candidates = [launch_agents_dir / f"{label}.plist"]
+            if label in _SUFFIXABLE_USER_SESSION_LABELS and short_user is not None:
+                candidates.append(
+                    launch_agents_dir / f"{label}.{short_user}.plist"
+                )
+            if any(path.is_file() for path in candidates):
                 present += 1
     except OSError:
         return None
