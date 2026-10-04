@@ -112,6 +112,26 @@ def _mode(path: Path, default: int = 0o600) -> int:
         return default
 
 
+def _preflight_destination(path: Path, home: Path) -> None:
+    """Reject unsafe existing target/parent shapes before the first apply write."""
+    home = home.expanduser().resolve()
+    current = path.parent
+    while True:
+        if current.exists() or current.is_symlink():
+            info = current.lstat()
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise OrchestratorPolicyError(
+                    f"refuse unsafe provider directory in target chain: {current}"
+                )
+        if current == home or current.parent == current:
+            break
+        current = current.parent
+    if path.exists() or path.is_symlink():
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise OrchestratorPolicyError(f"refuse unsafe provider file: {path}")
+
+
 def _safe_dir(path: Path) -> None:
     if path.exists():
         info = path.lstat()
@@ -320,8 +340,14 @@ def _canonical_guard(source: Path | None = None) -> bytes:
 
 
 def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
-    paths = _paths(home)
+    resolved_home = Path(home).expanduser().resolve()
+    paths = _paths(resolved_home)
     guard = _canonical_guard(guard_source)
+
+    # Reject known unsafe path shapes before any managed file can change. Unexpected
+    # I/O failure can still interrupt a multi-file apply and is handled separately.
+    for target in paths.values():
+        _preflight_destination(target, resolved_home)
 
     codex_doc = _regular_bytes(paths["codex_doc"], missing=b"").decode("utf-8")
     claude_doc = _regular_bytes(paths["claude_doc"], missing=b"").decode("utf-8")

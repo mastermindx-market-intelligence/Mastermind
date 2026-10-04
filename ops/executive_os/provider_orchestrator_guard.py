@@ -60,8 +60,11 @@ INTERVAL_RE = re.compile(r"(?i)(?:--interval|(?<!\w)-i)[=\s]+(\d+)")
 SLEEP_RE = re.compile(r"(?i)\bsleep\s+(\d+)\b")
 DO_DONE_RE = re.compile(r"(?:^|[;&|\n)])\s*do\b(.*?)\bdone\b", re.S | re.I)
 
+# Cooldown only direct CI-status reads. General `gh pr view` / `gh pr status`
+# stays available for post-mutation/effect reconciliation; a rate guard must never
+# prevent the readback needed to prove a write's outcome.
 PR_READ_RE = re.compile(
-    CMD_POS + r"gh\s+pr\s+(?:checks|view|status)\s+(?P<id>\d+)\b",
+    CMD_POS + r"gh\s+pr\s+checks\s+(?P<id>\d+)\b",
     re.I,
 )
 RUN_READ_RE = re.compile(

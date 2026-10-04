@@ -160,6 +160,64 @@ def test_apply_is_idempotent_and_backups_keep_original_content(tmp_path: Path) -
     ).read_bytes() == originals["claude_settings"]
 
 
+def test_apply_handles_prose_only_host_with_missing_codex_hooks(tmp_path: Path) -> None:
+    """M1/mini4/MBP class: instructions exist but mechanical hooks are absent."""
+    home = tmp_path / "home"
+    (home / ".codex").mkdir(parents=True)
+    (home / ".claude").mkdir(parents=True)
+    legacy = """<!-- mastermind-ceo-async-ci-v1 -->
+old async law
+<!-- /mastermind-ceo-async-ci-v1 -->
+<!-- mastermind-ceo-context-discipline-v1 -->
+old context law
+<!-- /mastermind-ceo-context-discipline-v1 -->
+"""
+    (home / ".codex" / "AGENTS.md").write_text(
+        "# Storage rule\n\nKeep external SSD placement.\n\n" + legacy,
+        encoding="utf-8",
+    )
+    (home / ".claude" / "CLAUDE.md").write_text(
+        "# Storage rule\n\nKeep external SSD placement.\n\n" + legacy,
+        encoding="utf-8",
+    )
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "WorktreeCreate": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python3 /opt/worktree-create.py",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert not (home / ".codex" / "hooks.json").exists()
+
+    result = apply_policy(home)
+
+    assert result["state"] == "READY"
+    codex_hooks = json.loads((home / ".codex" / "hooks.json").read_text())
+    assert len(codex_hooks["hooks"]["PreToolUse"]) == 1
+    claude = json.loads((home / ".claude" / "settings.json").read_text())
+    assert claude["hooks"]["WorktreeCreate"][0]["hooks"][0]["command"] == (
+        "python3 /opt/worktree-create.py"
+    )
+    for path in (home / ".codex" / "AGENTS.md", home / ".claude" / "CLAUDE.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "Keep external SSD placement." in text
+        assert "mastermind-ceo-async-ci-v1" not in text
+        assert text.count(BEGIN) == text.count(END) == 1
+
+
 def test_apply_replaces_legacy_managed_blocks_instead_of_stacking_policy(tmp_path: Path) -> None:
     home = tmp_path / "home"
     _seed_home(home)
@@ -220,6 +278,31 @@ def test_verify_detects_managed_policy_content_drift(tmp_path: Path) -> None:
 
     assert result["state"] == "DRIFT"
     assert "claude_doc.managed_block" in result["issues"]
+
+
+def test_unsafe_provider_parent_is_refused_before_any_mutation(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    outside = tmp_path / "outside-hooks"
+    outside.mkdir()
+    (home / ".claude" / "hooks").symlink_to(outside, target_is_directory=True)
+    before = {
+        path: path.read_bytes()
+        for path in (
+            home / ".codex" / "AGENTS.md",
+            home / ".claude" / "CLAUDE.md",
+            home / ".codex" / "hooks.json",
+            home / ".claude" / "settings.json",
+        )
+    }
+
+    with pytest.raises(OrchestratorPolicyError, match="unsafe provider directory"):
+        apply_policy(home)
+
+    for path, payload in before.items():
+        assert path.read_bytes() == payload
+    assert not (home / ".codex" / "hooks").exists()
+    assert list(outside.iterdir()) == []
 
 
 def test_partial_apply_reports_modified_files_and_requires_same_home_verify(
@@ -374,6 +457,19 @@ def test_guard_blocks_repeat_single_status_read_but_not_first(
     assert output["permissionDecision"] == "deny"
     assert "redundant status read" in output["permissionDecisionReason"]
     assert "continue another independent authorized project lane" in output["permissionDecisionReason"]
+
+
+def test_general_pr_view_remains_available_for_effect_readback(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A CI rate guard must not block post-mutation reconciliation reads."""
+    command = "gh pr view 8413 --json state,headRefOid,labels"
+
+    guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+
+    assert capsys.readouterr().out == ""
 
 
 def test_repeat_cooldown_is_repo_scoped_for_same_pr_number(
