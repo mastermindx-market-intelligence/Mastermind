@@ -37,6 +37,72 @@ def _nonfinite(_value):
     raise ValueError("nonfinite JSON value")
 
 
+def company_answer_attestation_sha256(data: object) -> str | None:
+    """Hash only closed immutable answer facts from an available requester read.
+
+    Wake status, owed-turn labels and unrelated lifecycle history may advance
+    after the native read. The full receipt hash still attests that historical
+    envelope; this separate digest binds the exact answer and admitted events.
+    Neither digest grants consumption authority.
+    """
+    try:
+        if (not isinstance(data, dict)
+                or data.get("schema") != "mastermind.company_inbox.v1"
+                or data.get("role") != "REQUESTER"
+                or data.get("state") != "ANSWER_AVAILABLE"
+                or data.get("body_status") != "AVAILABLE"
+                or "blocker" not in data or data["blocker"] is not None
+                or not isinstance(data.get("consultation_ref"), str)
+                or _REF.fullmatch(data["consultation_ref"]) is None):
+            return None
+        answer = data.get("answer")
+        if (not isinstance(answer, dict) or set(answer) != {"text", "evidence_refs"}
+                or not isinstance(answer["text"], str) or not answer["text"]
+                or not isinstance(answer["evidence_refs"], list)
+                or any(not isinstance(ref, str) or not ref for ref in answer["evidence_refs"])):
+            return None
+        digests = ("actor_digest", "counterpart_digest", "peer_digest",
+                   "question_digest", "evidence_revision_digest")
+        if any(not isinstance(data.get(key), str)
+               or re.fullmatch(r"[0-9a-f]{64}", data[key]) is None for key in digests):
+            return None
+        if (not isinstance(data.get("deadline"), str) or not data["deadline"]
+                or len(data["deadline"]) > 64
+                or not isinstance(data.get("obligation_id"), str)
+                or re.fullmatch(r"WAKE-[0-9a-f]{32}", data["obligation_id"]) is None):
+            return None
+        refs = data.get("evidence_refs")
+        if not isinstance(refs, list) or len(refs) > 5:
+            return None
+        admitted = {}
+        kinds = {"INTENT", "ANSWER_AVAILABLE", "ANSWER_AVAILABLE_HISTORICAL",
+                 "ANSWER_REFUSED", "CONSUMED_BY_REQUESTER"}
+        for ref in refs:
+            if (not isinstance(ref, dict) or set(ref) != {"kind", "event_ids"}
+                    or not isinstance(ref["kind"], str) or ref["kind"] not in kinds
+                    or ref["kind"] in admitted or not isinstance(ref["event_ids"], list)
+                    or any(type(i) is not int or i <= 0 for i in ref["event_ids"])
+                    or ref["event_ids"] != sorted(set(ref["event_ids"]))):
+                return None
+            admitted[ref["kind"]] = ref["event_ids"]
+        if (len(admitted.get("INTENT", [])) != 1
+                or len(admitted.get("ANSWER_AVAILABLE", [])) != 1
+                or "CONSUMED_BY_REQUESTER" in admitted):
+            return None
+        stable = {
+            "schema": "mastermind.native_company_answer_attestation.v1",
+            **{key: data[key] for key in (*digests, "consultation_ref", "deadline", "obligation_id")},
+            "intent_event_id": admitted["INTENT"][0],
+            "answer_event_id": admitted["ANSWER_AVAILABLE"][0],
+            "answer_sha256": hashlib.sha256(canonical_company_consultation_json(answer)).hexdigest(),
+        }
+        if len(canonical_company_consultation_json(data)) > COMPANY_CONSULTATION_MAX_RESPONSE_BYTES:
+            return None
+        return hashlib.sha256(canonical_company_consultation_json(stable)).hexdigest()
+    except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError, CompanyConsultationToolError):
+        return None
+
+
 def project_company_read(
     params: object, *, server_name: str, thread_id: str, turn_id: str,
 ) -> dict[str, Any] | None:
@@ -100,14 +166,18 @@ def project_company_read(
                 or not isinstance(answer["text"], str) or not answer["text"]
                 or not isinstance(answer["evidence_refs"], list)):
             return None
+        answer_attestation = company_answer_attestation_sha256(data)
+        if answer_attestation is None:
+            return None
         result_digest = hashlib.sha256(canonical).hexdigest()
         evidence = {"completedAtMs": params["completedAtMs"], "threadId": thread_id,
                     "turnId": turn_id, "id": item["id"], "server": server_name,
                     "tool": item["tool"], "status": item["status"],
                     "arguments": arguments, "result_sha256": result_digest}
-        return {"schema": "mastermind.native_company_read_receipt.v1",
+        return {"schema": "mastermind.native_company_read_receipt.v2",
                 "consultation_ref": arguments["consultation_ref"],
                 "result_sha256": result_digest,
+                "answer_attestation_sha256": answer_attestation,
                 "native_item_sha256": hashlib.sha256(
                     canonical_company_consultation_json(evidence)).hexdigest()}
     except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError, CompanyConsultationToolError):

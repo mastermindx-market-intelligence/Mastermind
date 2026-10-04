@@ -2156,6 +2156,7 @@ def _company_projection(**overrides):
         consultation_ref="consult-" + "a" * 32,
         result_sha256="b" * 64,
         native_item_sha256="c" * 64,
+        answer_attestation_sha256="d" * 64,
     )
     values.update(overrides)
     return AttentionCompanyReadProjection(**values)

@@ -30,6 +30,7 @@ _COMPANY = {
     "provider_session_id": "thread-a", "provider_native_turn_id": "turn-a",
     "nudge_id": NUDGE_ID, "consultation_ref": "consult-" + "c" * 32,
     "result_sha256": "1" * 64, "native_item_sha256": "2" * 64,
+    "answer_attestation_sha256": "3" * 64,
 }
 
 

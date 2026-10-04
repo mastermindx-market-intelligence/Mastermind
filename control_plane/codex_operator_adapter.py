@@ -3058,6 +3058,7 @@ class CodexOperatorAdapter:
                     consultation_ref=receipt["consultation_ref"],
                     result_sha256=receipt["result_sha256"],
                     native_item_sha256=receipt["native_item_sha256"],
+                    answer_attestation_sha256=receipt["answer_attestation_sha256"],
                 )
         return AttentionTurnObservation(
             process_generation_id=state.generation.process_generation_id,

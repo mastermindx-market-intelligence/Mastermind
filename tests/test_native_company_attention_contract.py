@@ -33,6 +33,7 @@ def _projection(**overrides: object) -> AttentionCompanyReadProjection:
         consultation_ref=CONSULT,
         result_sha256=SHA,
         native_item_sha256=SHA,
+        answer_attestation_sha256=SHA,
         **IDS,
     )
     fields.update(overrides)

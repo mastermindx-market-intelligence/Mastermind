@@ -1231,6 +1231,7 @@ class AttentionCompanyReadProjection:
     consultation_ref: str
     result_sha256: str
     native_item_sha256: str
+    answer_attestation_sha256: str
 
     def __post_init__(self) -> None:
         for name in ("target_attempt_id", "process_generation_id",
@@ -1246,7 +1247,7 @@ class AttentionCompanyReadProjection:
         if (type(self.consultation_ref) is not str
                 or re.fullmatch(r"consult-[0-9a-f]{32}", self.consultation_ref) is None):
             raise ValueError("Company read consultation reference is malformed")
-        for name in ("result_sha256", "native_item_sha256"):
+        for name in ("result_sha256", "native_item_sha256", "answer_attestation_sha256"):
             value = getattr(self, name)
             if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
                 raise ValueError(f"AttentionCompanyReadProjection.{name} is malformed")

@@ -17,7 +17,7 @@ from control_plane.native_company_receipt import project_company_read
 # constants
 # --------------------------------------------------------------------------
 
-RECEIPT_SCHEMA = "mastermind.native_company_read_receipt.v1"
+RECEIPT_SCHEMA = "mastermind.native_company_read_receipt.v2"
 ENV_SCHEMA = "mastermind.company_consultation_mcp_result.v1"
 ENV_TOOL = "company.consultation"
 ENV_IDENTITY = "mastermind-company-consultation-mcp"
@@ -70,7 +70,13 @@ def make_data(**over):
         "body_status": "AVAILABLE",
         "blocker": None,
         "answer": {"text": "Here is the answer.", "evidence_refs": ["ev-1", "ev-2"]},
-        "inbox_id": "inbox-77",
+        "schema": "mastermind.company_inbox.v1", "role": "REQUESTER",
+        "actor_digest": "a" * 64, "counterpart_digest": "b" * 64,
+        "peer_digest": "c" * 64, "question_digest": "d" * 64,
+        "evidence_revision_digest": "e" * 64,
+        "deadline": "2026-10-04T04:00:00Z", "obligation_id": "WAKE-" + "f" * 32,
+        "evidence_refs": [{"kind": "INTENT", "event_ids": [1]},
+                          {"kind": "ANSWER_AVAILABLE", "event_ids": [2]}],
     }
     data.update(over)
     return data
@@ -251,6 +257,7 @@ def test_valid_full_fixture_returns_exact_receipt():
         "consultation_ref",
         "result_sha256",
         "native_item_sha256",
+        "answer_attestation_sha256",
     }
     assert receipt["schema"] == RECEIPT_SCHEMA
     assert receipt["consultation_ref"] == REF
@@ -665,6 +672,7 @@ def test_output_privacy():
         "consultation_ref",
         "result_sha256",
         "native_item_sha256",
+        "answer_attestation_sha256",
     }
 
     blob = json.dumps(receipt, sort_keys=True)
