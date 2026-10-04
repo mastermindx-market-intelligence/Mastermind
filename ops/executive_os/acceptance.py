@@ -2935,7 +2935,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         self.validate_install()
         self.initialize_runtime_and_fixtures()
         control_pid, worker_pid = self.start_and_attest_services()
-        if self.maintenance is not None:
+        if self.maintenance is not None and self.maintenance.predecessor_recovery_required:
             descriptor = self.maintenance.descriptor
             self._control_request(
                 "recover-proof-capacity", descriptor["recovery_job_id"],

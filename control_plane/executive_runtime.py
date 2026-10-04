@@ -15958,6 +15958,81 @@ class AttemptRegistry:
             if payload["exact_worker_target"] != target.evidence():
                 raise StateConflict("exact worker target first-issuance observation differs")
 
+    def terminal_cycle_dispatch_outcome(
+        self, job_id: str, *, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        """Read an exact terminal lost-return outcome without reacquiring a lease.
+
+        A restarted service has a new lease owner. Historical terminal evidence
+        must not impersonate the old owner or pass through fresh claim routing.
+        The existing COO ambiguity owner still commits reconciliation.
+        """
+        with self.store.read() as connection:
+            job = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            marker = connection.execute(
+                "SELECT * FROM events WHERE command_id=?",
+                (f"{command_id}:effect-unknown",),
+            ).fetchone()
+            if (
+                job is None or marker is None
+                or connection.execute(
+                    "SELECT 1 FROM events WHERE command_id=?",
+                    (f"{command_id}:reconciled",),
+                ).fetchone() is not None
+                or JobStatus(job["status"]) not in _TERMINAL_JOB_STATUSES
+                or job["orchestration_role"] is None
+            ):
+                raise StateConflict("terminal dispatch requires an exact lost-return marker")
+            pending = _validated_coo_dispatch_effect_event(
+                connection, marker, expected_root_id=job["root_job_id"]
+            )
+            attempt = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?",
+                (pending["attempt_id"],),
+            ).fetchone()
+            claim = connection.execute(
+                "SELECT * FROM events WHERE command_id=?", (command_id,)
+            ).fetchone()
+            if attempt is None or claim is None:
+                raise StateConflict("terminal dispatch lost its historical claim")
+            payload = _strict_canonical_json_loads(
+                claim["payload_json"], name="terminal dispatch claim"
+            )
+            expected_command = (
+                f"coo-cycle:{job['root_job_id']}:dispatch:{job_id}:attempt:"
+                f"{attempt['attempt_number']}"
+            )
+            if (
+                pending["selected_job_id"] != job_id
+                or pending["dispatch_command_id"] != command_id
+                or command_id != expected_command
+                or claim["aggregate_type"] != "job"
+                or claim["aggregate_id"] != job_id
+                or claim["worker_id"] != attempt["worker_id"]
+                or claim["quota_class"] != attempt["quota_class"]
+                or not isinstance(payload, dict)
+                or payload.get("cycle_command_id") != command_id
+                or payload.get("dispatch_job_id") != job_id
+                or attempt["job_id"] != job_id
+                or job["current_attempt_id"] != attempt["attempt_id"]
+                or AttemptStatus(attempt["status"]) not in _TERMINAL_ATTEMPT_STATUSES
+                or attempt["status"] != job["status"]
+                or attempt["lease_token"] is not None
+                or connection.execute(
+                    "SELECT 1 FROM worker_quota_classes WHERE held_attempt_id=?",
+                    (attempt["attempt_id"],),
+                ).fetchone() is not None
+            ):
+                raise StateConflict("terminal dispatch historical identity drifted")
+            return OrchestrationDispatchOutcome(
+                command_id=command_id,
+                job_id=job_id,
+                attempt=_attempt_from_row(attempt),
+                outcome="TERMINAL",
+            )
+
     def dispatch_cycle_job(
         self,
         job_id: str,

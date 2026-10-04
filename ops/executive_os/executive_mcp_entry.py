@@ -431,13 +431,24 @@ def main(argv=None):
         elif profile == WEB_CEO_V3_PROFILE:
             from integrations.mosyle_mdm.client import MosyleInventoryClient
             from integrations.mosyle_mdm.credential import FileMosyleCredentialSource
+            from integrations.session_bridge.installed import InstalledSessionBridgeClient
+
             mdm_reader = MosyleInventoryClient(
                 FileMosyleCredentialSource(
                     expected_uid=os.geteuid(), expected_gid=os.getegid()
                 )
             )
+            session_client = InstalledSessionBridgeClient(
+                settings.ceo_ingress_socket_path
+            )
             app = build_web_ceo_v3_mcp_app(
-                settings, audit_sink=sink, mdm_reader=mdm_reader, **mounts
+                settings,
+                audit_sink=sink,
+                mdm_reader=mdm_reader,
+                session_target_projector=session_client.targets,
+                session_reply_handler=session_client.send,
+                session_summon_handler=session_client.summon,
+                **mounts,
             )
         elif profile == WEB_CEO_SESSIONS_PROFILE:
             from integrations.session_bridge.installed import InstalledSessionBridgeClient

@@ -1,8 +1,9 @@
 """Preserve a quiescent runtime while the existing host acceptance proves a release.
 
 This is an opt-in acceptance owner, not a scheduler or an admission API. Its
-root-sealed descriptor permits one predecessor proof quota recovery. Only a
-passing acceptance can publish an exact queued-root compatibility receipt.
+v1 descriptor permits one predecessor proof quota recovery. V2 preserves a
+terminal dispatch through a prior PASS chain without granting that recovery.
+Only passing acceptance publishes an exact queued-root compatibility receipt.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from control_plane.fs_security import has_macos_acl
 
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 SCHEMA = "mastermind.executive_acceptance_maintenance/v1"
+SCHEMA_V2 = "mastermind.executive_acceptance_maintenance/v2"
 _TRUSTED_UID = 0
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -39,6 +41,16 @@ _DESCRIPTOR_KEYS = {"schema_version", "predecessor_sha", "successor_sha", "root_
                     "recovery_job_id", "recovery_attempt_id", "recovery_job_sha256",
                     "worker_id", "quota_class", "baseline_sha256", "backup_sha256",
                     "inventory_sha256", "prior_canary_sha256"}
+
+_DESCRIPTOR_V2_KEYS = (_DESCRIPTOR_KEYS - {
+    "recovery_job_id", "recovery_attempt_id", "recovery_job_sha256",
+}) | {
+    "frozen_base_sha", "prior_descriptor_sha256", "prior_carry_sha256",
+    "prior_summary_sha256", "template_proof_job_id", "template_proof_job_sha256",
+    "terminal_job_id", "terminal_attempt_id", "terminal_marker_event_id",
+    "terminal_marker_event_sha256", "terminal_state_sha256",
+    "assignment_seal_sha256", "predecessor_quota_sha256",
+}
 
 class MaintenanceError(RuntimeError):
     pass
@@ -102,21 +114,31 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
     if not path.exists() and not path.is_symlink():
         return None
     value = sealed_json(path)
-    if set(value) != _DESCRIPTOR_KEYS or value.get("schema_version") != SCHEMA:
+    schema = value.get("schema_version")
+    keys = _DESCRIPTOR_KEYS if schema == SCHEMA else (
+        _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else set()
+    )
+    if not keys or set(value) != keys:
         raise MaintenanceError("maintenance descriptor schema mismatch")
     if (value["successor_sha"] != sha or not isinstance(value["predecessor_sha"], str)
             or _SHA.fullmatch(value["predecessor_sha"]) is None
             or value["predecessor_sha"] == sha):
         raise MaintenanceError("maintenance descriptor release mismatch")
-    for key in ("root_identity_sha256", "root_event_sha256", "recovery_job_sha256",
-                "baseline_sha256", "backup_sha256", "inventory_sha256", "prior_canary_sha256"):
+    if schema == SCHEMA_V2 and (
+        not isinstance(value["frozen_base_sha"], str)
+        or _SHA.fullmatch(value["frozen_base_sha"]) is None
+    ):
+        raise MaintenanceError("maintenance frozen base is invalid")
+    for key in (key for key in keys if key.endswith("_sha256")):
         if not isinstance(value[key], str) or _DIGEST.fullmatch(value[key]) is None:
             raise MaintenanceError("maintenance descriptor digest is invalid")
-    for key in ("root_job_id", "recovery_job_id", "recovery_attempt_id", "worker_id", "quota_class"):
+    for key in (key for key in keys if key.endswith(("_job_id", "_attempt_id"))
+                or key in {"worker_id", "quota_class"}):
         if not isinstance(value[key], str) or not value[key] or len(value[key]) > 128:
             raise MaintenanceError("maintenance descriptor identity is invalid")
-    if type(value["root_event_id"]) is not int or value["root_event_id"] <= 0:
-        raise MaintenanceError("maintenance descriptor event is invalid")
+    for key in (key for key in keys if key.endswith("_event_id")):
+        if type(value[key]) is not int or value[key] <= 0:
+            raise MaintenanceError("maintenance descriptor event is invalid")
     return value
 
 def root_identity(job: Any) -> str:
@@ -146,7 +168,7 @@ def frozen_binding(job: Any, current: dict, store: Any) -> dict:
     if (job.constraints.get("operator_harness_armed") is not False
             or type(current.get("operator_harness_armed")) is not bool):
         raise MaintenanceError("preserved root harness admission drifted")
-    expected = dict(current, base_sha=descriptor["predecessor_sha"],
+    expected = dict(current, base_sha=descriptor.get("frozen_base_sha", descriptor["predecessor_sha"]),
                     operator_harness_armed=False)
     if any(job.constraints.get(k) != v for k, v in expected.items()):
         raise MaintenanceError("preserved root non-base binding drifted")
@@ -170,22 +192,56 @@ def summary_document(sha: str) -> tuple[dict, bytes]:
     except (ArmAdmissionError, HostControlError, OSError, KeyError, ValueError) as exc:
         raise MaintenanceError("maintenance acceptance summary is invalid") from exc
 
-def validate_carry_receipt(sha: str, summary_sha256: str) -> None:
+def validate_carry_receipt(
+    sha: str, summary_sha256: str, *, _seen: frozenset[str] = frozenset()
+) -> None:
+    if sha in _seen or len(_seen) >= 8:
+        raise MaintenanceError("maintenance carry chain is cyclic or too deep")
     descriptor = descriptor_for(sha)
     if descriptor is None:
         return
     receipt = sealed_json(bundle_path(sha)/"carry-forward.json")
     if (set(receipt) != {"schema_version", "passed", "descriptor_sha256",
                          "acceptance_summary_sha256", "baseline_preserved"}
-            or receipt["schema_version"] != SCHEMA or receipt["passed"] is not True
+            or receipt["schema_version"] != descriptor["schema_version"] or receipt["passed"] is not True
             or receipt["baseline_preserved"] is not True
             or receipt["descriptor_sha256"] != digest(descriptor)
             or receipt["acceptance_summary_sha256"] != summary_sha256):
         raise MaintenanceError("preserved root has no matching maintenance PASS receipt")
+    validate_prior_carry_binding(descriptor, _seen=_seen)
+
+
+def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = frozenset()) -> None:
+    if descriptor["schema_version"] == SCHEMA_V2:
+        prior, _summary, material = prior_carry_material(
+            descriptor["predecessor_sha"], _seen=_seen | {descriptor["successor_sha"]}
+        )
+        if any(descriptor[key] != material[key] for key in material):
+            raise MaintenanceError("maintenance predecessor carry changed")
+        if any(descriptor[key] != prior[key] for key in
+               ("root_job_id", "root_identity_sha256", "root_event_id", "root_event_sha256")):
+            raise MaintenanceError("maintenance predecessor root binding changed")
+
+
+def prior_carry_material(sha: str, *, _seen: frozenset[str] = frozenset()) -> tuple[dict, dict, dict]:
+    prior = descriptor_for(sha)
+    if prior is None:
+        raise MaintenanceError("terminal carry requires a prior preservation descriptor")
+    summary, raw = summary_document(sha)
+    summary_digest = hashlib.sha256(raw).hexdigest()
+    validate_carry_receipt(sha, summary_digest, _seen=_seen)
+    carry = sealed_json(bundle_path(sha)/"carry-forward.json")
+    return prior, summary, {
+        "prior_descriptor_sha256": digest(prior),
+        "prior_carry_sha256": digest(carry),
+        "prior_summary_sha256": summary_digest,
+        "frozen_base_sha": prior.get("frozen_base_sha", prior["predecessor_sha"]),
+    }
+
 
 def recovery_permitted(job: Any, attempt_id: str, sha: str, worker_id: str, quota_class: str) -> bool:
     descriptor = descriptor_for(sha)
-    if descriptor is None:
+    if descriptor is None or descriptor["schema_version"] != SCHEMA:
         return False
     active = sealed_json(bundle_path(sha) / "run-started.json")
     return bool(active == {"schema_version": SCHEMA, "descriptor_sha256": digest(descriptor)}
@@ -265,7 +321,9 @@ def verify_preserved(before: dict, after: dict, descriptor: dict, proof_ids: lis
         raise MaintenanceError("maintenance proof job lineage mismatch")
     if any(r["status"] != "COMPLETED" or r["orchestration_role"] is not None for r in new["jobs"]):
         raise MaintenanceError("maintenance proof did not complete")
-    predecessor_proof = next(r for r in bt["jobs"] if r["job_id"] == descriptor["recovery_job_id"])
+    v2 = descriptor["schema_version"] == SCHEMA_V2
+    template_id = descriptor["template_proof_job_id" if v2 else "recovery_job_id"]
+    predecessor_proof = next(r for r in bt["jobs"] if r["job_id"] == template_id)
     proof_fields = ("objective", "department", "priority", "authority_level", "attempt_limit",
                     "requested_authorities_json", "allowed_write_paths_json", "validation_commands_json")
     for job in new["jobs"]:
@@ -302,7 +360,7 @@ def verify_preserved(before: dict, after: dict, descriptor: dict, proof_ids: lis
     for event in new["events"]:
         if event["event_type"] not in event_families:
             raise MaintenanceError("event outside acceptance event families")
-        if (event["event_type"] == "PROOF_CAPACITY_RECOVERED"
+        if (not v2 and event["event_type"] == "PROOF_CAPACITY_RECOVERED"
                 and event["job_id"] == descriptor["recovery_job_id"]
                 and event["attempt_id"] == descriptor["recovery_attempt_id"]
                 and event["worker_id"] == descriptor["worker_id"] and event["quota_class"] == descriptor["quota_class"]):
@@ -323,9 +381,9 @@ def verify_preserved(before: dict, after: dict, descriptor: dict, proof_ids: lis
                 raise MaintenanceError("maintenance fence event is invalid")
             fences.setdefault((event["worker_id"],event["quota_class"]), []).append(
                 (event["event_id"], fence))
-    if sum(e["event_type"] == "PROOF_CAPACITY_RECOVERED" for e in new["events"]) != 2:
+    if sum(e["event_type"] == "PROOF_CAPACITY_RECOVERED" for e in new["events"]) != (1 if v2 else 2):
         raise MaintenanceError("maintenance recovery event count mismatch")
-    if len(recovery) != 1:
+    if len(recovery) != (0 if v2 else 1):
         raise MaintenanceError("maintenance predecessor recovery is not unique")
     lost = next(r for r in attempts.values() if r["job_id"] == proof_ids[1] and r["status"] == "LOST")
     current_recoveries = [r for r in new["events"] if r["event_type"] == "PROOF_CAPACITY_RECOVERED"
@@ -428,6 +486,127 @@ def require_stopped() -> None:
         if probe.returncode == 0:
             raise MaintenanceError("maintenance preparation requires stopped Executive services")
 
+def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
+    """Read the existing control-owned revocation receipt; grant no new effect."""
+    import pwd
+    from ops.executive_os.autonomy_control import _root_json, CONTROL_USER, HostControlError
+    from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
+
+    path = Path(config["receipts_root"])/attempt.attempt_id/"assignment-seal-receipt.json"
+    control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
+    try:
+        value, raw = _root_json(
+            path, modes=frozenset({0o600}), uid=control_uid,
+        )
+    except (HostControlError, OSError, KeyError, ValueError) as exc:
+        raise MaintenanceError("terminal assignment receipt is unavailable") from exc
+    if (
+        value.get("schema_version") != "mastermind.executive_assignment_seal/v1"
+        or value.get("passed") is not True or value.get("job_id") != job.job_id
+        or value.get("control_uid") != control_uid
+        or value.get("attempt_id") != attempt.attempt_id
+        or not uid_sweep_receipt_is_passing(value.get("uid_sweep"))
+        or value["uid_sweep"].get("worker_uid") != config["worker_uid"]
+        or not isinstance(value.get("paths"), dict)
+    ):
+        raise MaintenanceError("terminal assignment receipt is invalid")
+    expected = {
+        "workspace": str(Path(job.worktree).resolve(strict=True)),
+        "run": str((Path(config["worker_runs_root"])/attempt.attempt_id).resolve(strict=True)),
+    }
+    if set(value["paths"]) != set(expected) or any(
+        not isinstance(value["paths"][key], dict)
+        or value["paths"][key].get("worker_traversal_revoked") is not True
+        or not isinstance(value["paths"][key].get("after"), dict)
+        or value["paths"][key]["after"].get("path") != path
+        for key, path in expected.items()
+    ):
+        raise MaintenanceError("terminal assignment path binding drifted")
+    for key, name in expected.items():
+        target = Path(name)
+        info = target.lstat()
+        identity = dict(path=name, device=info.st_dev, inode=info.st_ino,
+                        uid=info.st_uid, gid=info.st_gid, mode=stat.S_IMODE(info.st_mode),
+                        mtime_ns=info.st_mtime_ns)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != control_uid
+                or stat.S_IMODE(info.st_mode) != 0o700
+                or has_macos_acl(target, expected_identity=info)
+                or value["paths"][key]["after"] != identity):
+            raise MaintenanceError("terminal assignment filesystem identity drifted")
+    return {"assignment_seal_sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def terminal_carry_fields(runtime: Any, root: Any, config: dict, before: dict, predecessor: str) -> tuple[Any, dict]:
+    """Qualify one inert failed planner using existing Runtime evidence owners."""
+    from control_plane.executive_runtime import RuntimeProofError
+    prior, summary, material = prior_carry_material(predecessor)
+    if (
+        prior["root_job_id"] != root.job_id
+        or prior["root_identity_sha256"] != root_identity(root)
+        or root.constraints.get("base_sha") != material["frozen_base_sha"]
+    ):
+        raise MaintenanceError("terminal carry root differs from prior qualified root")
+    tables = before["tables"]
+    children = [row for row in tables["jobs"] if row["root_job_id"] == root.job_id and row["job_id"] != root.job_id]
+    if len(children) != 1:
+        raise MaintenanceError("terminal carry requires one exact failed planner")
+    job = runtime.jobs.get_job(children[0]["job_id"])
+    attempts = runtime.attempts.list_attempts(job.job_id)
+    if (
+        job.parent_job_id != root.job_id or job.depth != 1
+        or job.orchestration_role != "plan" or job.status.value != "FAILED"
+        or job.attempt_count != 1 or len(attempts) != 1
+        or attempts[0].status.value != "FAILED"
+        or attempts[0].attempt_id != job.current_attempt_id
+    ):
+        raise MaintenanceError("terminal carry planner is not one failed attempt")
+    attempt = attempts[0]
+    if any(getattr(attempt, key) is not None for key in
+           ("pid", "pgid", "process_start_identity", "boot_id", "provider_session_id")):
+        raise MaintenanceError("terminal carry contains provider process identity")
+    if any(row["attempt_id"] == attempt.attempt_id for table in
+           ("harness_session_epochs", "process_generations") for row in tables[table]):
+        raise MaintenanceError("terminal carry contains native harness history")
+    try:
+        pending = runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
+        if pending is None or pending["selected_job_id"] != job.job_id:
+            raise MaintenanceError("terminal carry has no exact pending dispatch")
+        outcome = runtime.attempts.terminal_cycle_dispatch_outcome(
+            job.job_id, command_id=pending["dispatch_command_id"],
+        )
+        if outcome.attempt.attempt_id != attempt.attempt_id:
+            raise MaintenanceError("terminal carry observation changed")
+    except RuntimeProofError as exc:
+        raise MaintenanceError("terminal carry Runtime evidence is invalid") from exc
+    markers = [row for row in tables["events"] if row["command_id"] == pending["command_id"]]
+    admissions = [row for row in tables["events"] if row["event_id"] == prior["root_event_id"]]
+    if len(markers) != 1 or len(admissions) != 1:
+        raise MaintenanceError("terminal carry admission or marker is not unique")
+    marker, admission = markers[0], admissions[0]
+    if digest(admission) != prior["root_event_sha256"]:
+        raise MaintenanceError("terminal carry root admission drifted")
+    proof = runtime.jobs.get_job(summary["success_job_id"])
+    if (proof is None or proof.status.value != "COMPLETED"
+            or proof.orchestration_role is not None
+            or proof.constraints.get("base_sha") != predecessor):
+        raise MaintenanceError("terminal carry proof template is not the accepted predecessor proof")
+    quotas = [row for row in tables["worker_quota_classes"]
+              if row["worker_id"] == config["worker_id"] and row["quota_class"] == config["quota_class"]]
+    if len(quotas) != 1 or quotas[0]["status"] != "AVAILABLE" or quotas[0]["held_attempt_id"] is not None:
+        raise MaintenanceError("terminal carry requires available predecessor proof capacity")
+    fields = {
+        **material, **terminal_assignment(config, job, attempt),
+        "template_proof_job_id": proof.job_id, "template_proof_job_sha256": digest(proof.to_dict()),
+        "terminal_job_id": job.job_id, "terminal_attempt_id": attempt.attempt_id,
+        "terminal_marker_event_id": marker["event_id"], "terminal_marker_event_sha256": digest(marker),
+        "terminal_state_sha256": digest({"job": children[0], "attempts": [
+            row for row in tables["attempts"] if row["job_id"] == job.job_id
+        ]}),
+        "predecessor_quota_sha256": digest(quotas[0]),
+    }
+    return proof, fields
+
+
 def prepare(args: argparse.Namespace) -> Path:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise MaintenanceError("maintenance preparation requires root on macOS")
@@ -444,22 +623,31 @@ def prepare(args: argparse.Namespace) -> Path:
     from control_plane.executive_runtime import Runtime
     runtime = Runtime.at(config["runtime_root"], create=False)
     root = runtime.jobs.get_job(args.root_job_id)
-    proof = runtime.jobs.get_job(args.recovery_job_id)
-    if (root is None or proof is None or root.status.value != "QUEUED"
+    terminal_carry = getattr(args, "carry_terminal_dispatch", False)
+    if terminal_carry and (args.recovery_job_id or args.recovery_attempt_id):
+        raise MaintenanceError("terminal carry cannot grant predecessor recovery")
+    if not terminal_carry and (not args.recovery_job_id or not args.recovery_attempt_id):
+        raise MaintenanceError("v1 maintenance requires an exact predecessor recovery")
+    proof = None if terminal_carry else runtime.jobs.get_job(args.recovery_job_id)
+    if (root is None or (not terminal_carry and proof is None) or root.status.value != "QUEUED"
             or root.orchestration_role != "aggregation" or root.attempt_count != 0
             or root.current_attempt_id is not None or root.parent_job_id is not None
             or root.root_job_id != root.job_id or root.depth != 0
-            or root.constraints.get("base_sha") != args.predecessor_sha
+            or (not terminal_carry and root.constraints.get("base_sha") != args.predecessor_sha)
             or root.constraints.get("operator_harness_armed") is not False
             or not root.orchestration_provenance_digest):
         raise MaintenanceError("preserved root is not an untouched strict-v2 queued root")
     tables = before["tables"]
     if (any(r["status"] not in _TERMINAL for r in tables["attempts"])
             or any(r["held_attempt_id"] is not None for r in tables["worker_quota_classes"])
-            or any(r["parent_job_id"] == root.job_id for r in tables["jobs"])):
+            or (not terminal_carry and any(r["parent_job_id"] == root.job_id for r in tables["jobs"]))):
         raise MaintenanceError("maintenance runtime is not quiescent")
-    runtime.workers.proof_capacity_recovery_snapshot(
-        proof.job_id,args.recovery_attempt_id,worker_id=config["worker_id"],quota_class=config["quota_class"])
+    extra = {}
+    if terminal_carry:
+        proof, extra = terminal_carry_fields(runtime, root, config, before, args.predecessor_sha)
+    else:
+        runtime.workers.proof_capacity_recovery_snapshot(
+            proof.job_id,args.recovery_attempt_id,worker_id=config["worker_id"],quota_class=config["quota_class"])
     events = [r for r in tables["events"] if r["job_id"]==root.job_id and r["event_type"]=="JOB_CREATED"]
     if len(events) != 1:
         raise MaintenanceError("preserved root admission is not unique")
@@ -477,7 +665,7 @@ def prepare(args: argparse.Namespace) -> Path:
     if final_bundle.exists() or final_bundle.is_symlink():
         raise MaintenanceError("maintenance descriptor already exists; reconcile the existing operation")
     bundle = Path(tempfile.mkdtemp(prefix=".preparing-"+args.successor_sha+"-",dir=parent))
-    write_sealed(bundle/"preparing.json",{"schema_version":SCHEMA})
+    write_sealed(bundle/"preparing.json",{"schema_version":SCHEMA_V2 if terminal_carry else SCHEMA})
     backup = bundle/"prestate.sqlite3"
     fd = os.open(backup,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
     os.close(fd)
@@ -493,13 +681,16 @@ def prepare(args: argparse.Namespace) -> Path:
     write_sealed(bundle/"prior-secret-canary.json",prior_canary_value)
     write_sealed(bundle/"baseline.json",before)
     write_sealed(bundle/"inventory.json",artifacts)
-    descriptor = dict(schema_version=SCHEMA,predecessor_sha=args.predecessor_sha,
+    descriptor = dict(schema_version=SCHEMA_V2 if terminal_carry else SCHEMA,predecessor_sha=args.predecessor_sha,
         successor_sha=args.successor_sha,root_job_id=root.job_id,root_identity_sha256=root_identity(root),
         root_event_id=events[0]["event_id"],root_event_sha256=digest(events[0]),
-        recovery_job_id=proof.job_id,recovery_attempt_id=args.recovery_attempt_id,
-        recovery_job_sha256=digest(proof.to_dict()),worker_id=config["worker_id"],quota_class=config["quota_class"],
+        worker_id=config["worker_id"],quota_class=config["quota_class"],
         baseline_sha256=digest(before),backup_sha256=_file_digest(backup),inventory_sha256=digest(artifacts),
         prior_canary_sha256=digest(prior_canary_value))
+    descriptor.update(extra if terminal_carry else {
+        "recovery_job_id": proof.job_id, "recovery_attempt_id": args.recovery_attempt_id,
+        "recovery_job_sha256": digest(proof.to_dict()),
+    })
     write_sealed(bundle/"descriptor.json",descriptor,public=True)
     os.chmod(bundle,0o755)
     directory_fd = os.open(bundle,os.O_RDONLY)
@@ -525,6 +716,7 @@ class Maintenance:
         self.descriptor = descriptor_for(sha)
         if self.descriptor is None or digest(self.descriptor) != expected_digest:
             raise MaintenanceError("maintenance descriptor digest mismatch")
+        validate_prior_carry_binding(self.descriptor)
         require_disarmed(config)
         require_stopped()
         self.database = Path(config["runtime_root"])/"data/control_plane/executive.sqlite3"
@@ -539,8 +731,23 @@ class Maintenance:
                 or snapshot(self.database) != self.before):
             raise MaintenanceError("maintenance prestate drifted")
         verify_inventory(self.inventory)
+        if self.descriptor["schema_version"] == SCHEMA_V2:
+            from control_plane.executive_runtime import Runtime
+            runtime = Runtime.at(config["runtime_root"], create=False)
+            root = runtime.jobs.get_job(self.descriptor["root_job_id"])
+            if root is None:
+                raise MaintenanceError("terminal carry root disappeared")
+            _proof, fields = terminal_carry_fields(
+                runtime, root, config, self.before, self.descriptor["predecessor_sha"],
+            )
+            if any(self.descriptor[key] != value for key, value in fields.items()):
+                raise MaintenanceError("terminal carry semantic evidence changed")
         write_sealed(self.bundle/"run-started.json",
-                     {"schema_version":SCHEMA,"descriptor_sha256":digest(self.descriptor)},public=True)
+                     {"schema_version":self.descriptor["schema_version"],"descriptor_sha256":digest(self.descriptor)},public=True)
+
+    @property
+    def predecessor_recovery_required(self) -> bool:
+        return self.descriptor["schema_version"] == SCHEMA
 
     def verify(self, proof_ids: list[str]) -> None:
         verify_preserved(self.before,snapshot(self.database),self.descriptor,proof_ids)
@@ -550,7 +757,7 @@ class Maintenance:
         self.verify(proof_ids)
         _value, raw = summary_document(self.descriptor["successor_sha"])
         write_sealed(self.bundle/"carry-forward.json",dict(
-            schema_version=SCHEMA,passed=True,baseline_preserved=True,
+            schema_version=self.descriptor["schema_version"],passed=True,baseline_preserved=True,
             descriptor_sha256=digest(self.descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest()),public=True)
 
 def main() -> int:
@@ -558,8 +765,10 @@ def main() -> int:
     parser.add_argument("--predecessor-sha",required=True)
     parser.add_argument("--successor-sha",required=True)
     parser.add_argument("--root-job-id",required=True)
-    parser.add_argument("--recovery-job-id",required=True)
-    parser.add_argument("--recovery-attempt-id",required=True)
+    parser.add_argument("--recovery-job-id")
+    parser.add_argument("--recovery-attempt-id")
+    parser.add_argument("--carry-terminal-dispatch", action="store_true",
+                        help="Preserve one failed planner and prior PASS chain; grant no predecessor recovery.")
     args = parser.parse_args()
     try:
         bundle = prepare(args)

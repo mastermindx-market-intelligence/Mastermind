@@ -120,8 +120,10 @@ from control_plane.worker_execution_contract import (
     BinaryAttestation,
     CancelReceipt,
     CollectionReceipt,
+    OrchestrationLaunchSpec,
     ValidationReceipt,
     validate_subscription_canary_claim,
+    validate_orchestration_grant_digest,
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRecoveryBinding,
@@ -1042,6 +1044,7 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "secret_canary_verdict",
         "require_secret_canary",
         "subscription_canary_claim",
+        "effective_grant_digest",
     }
 )
 _PROVIDER_OWNED_LAUNCH_FIELDS = frozenset(
@@ -1069,6 +1072,8 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     if unknown:
         raise BrokerProtocolError(f"launch_spec has unknown fields: {sorted(unknown)}")
     try:
+        if "effective_grant_digest" in value:
+            validate_orchestration_grant_digest(value["effective_grant_digest"])
         validate_subscription_canary_claim(value.get("subscription_canary_claim", {}))
     except WorkerRecoveryContractError as exc:
         raise BrokerProtocolError(str(exc)) from exc
@@ -1265,6 +1270,13 @@ def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec
     keyword["subscription_canary_claim"] = validate_subscription_canary_claim(
         value.get("subscription_canary_claim", {}),
     )
+    # The authenticated control owns the sealed grant and its semantic binding.
+    # Retain that provenance in recovery material without widening legacy specs
+    # or letting the worker preempt the supervisor-owned launch attestation.
+    if "effective_grant_digest" in value:
+        return OrchestrationLaunchSpec(
+            **keyword, effective_grant_digest=value["effective_grant_digest"]
+        )
     return WorkerLaunchSpec(**keyword)
 
 
