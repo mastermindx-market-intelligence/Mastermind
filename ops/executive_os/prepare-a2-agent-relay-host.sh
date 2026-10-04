@@ -204,28 +204,6 @@ assert_relay_unloaded() {
   [ "$status" -eq 113 ] || refuse "Agent Relay must be proven unloaded before enrollment"
 }
 
-prepare_disarmed_relay() {
-  local disabled
-  # Recheck immediately before the one lifecycle effect. A live or enrolled
-  # Relay belongs to its existing service owner; preparation never boots it out.
-  for reserved in "$TOKEN_PATH" "$CONFIG_PATH" "$PLIST_PATH"; do
-    [ ! -e "$reserved" ] && [ ! -L "$reserved" ] \
-      || refuse "existing enrollment or service artifact must be reconciled first"
-  done
-  assert_relay_unloaded
-  /bin/launchctl disable "system/$RELAY_LABEL" \
-    || refuse "Agent Relay disabled override could not be established"
-  assert_relay_unloaded
-  disabled="$(/bin/launchctl print-disabled system)" \
-    || refuse "Agent Relay disabled override could not be read"
-  printf '%s\n' "$disabled" | /usr/bin/awk -v label="$RELAY_LABEL" '
-    index($0, "\"" label "\"") {
-      count++
-      if ($0 ~ /^[[:space:]]*"com\.mastermind\.executive\.agent-relay"[[:space:]]*=>[[:space:]]*(true|disabled)[[:space:]]*,?[[:space:]]*$/) valid++
-    }
-    END {exit !(count == 1 && valid == 1)}
-  ' || refuse "Agent Relay disabled override is absent or ambiguous"
-}
 
 assert_exec_identity
 for reserved in "$TOKEN_PATH" "$CONFIG_PATH" "$PLIST_PATH"; do
@@ -240,6 +218,12 @@ preflight_directory "$RELAY_HOME" "$RELAY_UID" "$RELAY_GID" 700
 ensure_numeric_unused Groups PrimaryGroupID "$RELAY_GID" "$RELAY_GROUP"
 ensure_numeric_unused Users UniqueID "$RELAY_UID" "$RELAY_USER"
 
+# Installed reviewed control/worker configs must exist before host mutation.
+# The canonical global transaction records any uncertain disable; this script
+# never retries that effect. Reconcile its exact marker through the same owner.
+/bin/bash "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" \
+  a2-disable-prepare --expected-sha "$RELEASE_SHA"
+
 ensure_group
 ensure_user
 for forbidden_group in _mastermind_exec _mastermind_worker _mastermind_ops \
@@ -252,6 +236,6 @@ ensure_directory "$CONFIG_ROOT" root wheel 0 0 755
 ensure_directory "$RUNTIME_ROOT" root wheel 0 0 711
 ensure_directory "$RELAY_HOME" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 700
 
-prepare_disarmed_relay
+assert_relay_unloaded
 
 /bin/echo "A2 Agent Relay host preparation complete: exact principal, directories and disabled unloaded Relay"

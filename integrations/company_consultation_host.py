@@ -272,6 +272,15 @@ class CompanyConsultationHost:
             ))
         return CompanyConsultationPeerResolver(tuple(peers)), parties
 
+    def _packet_carrier(self, context):
+        """Bind both request and stored-read paths through one canonical owner."""
+        return TargetedAgentDialogueConsultationPacketCarrier(
+            binding_resolver=context,
+            targets=ExecutiveConsultationPacketTargetResolver(
+                self.runtime, workspace_id=self.workspace_id, channel_id=self.channel_id,
+            ), socket_path=self.relay_socket_path,
+        )
+
     async def dispatch_requester_answer(self, projection) -> None:
         """Internal service port; it carries no cached Company caller authority."""
         if self._requester_answer_wake_dispatch is None:
@@ -290,12 +299,7 @@ class CompanyConsultationHost:
             raise StateConflict("native consumption requires a stored Company read")
         evidence = stored.record.native_company_read
         context = _StoredReadContext(self, evidence)
-        packets = TargetedAgentDialogueConsultationPacketCarrier(
-            binding_resolver=context,
-            targets=ExecutiveConsultationPacketTargetResolver(
-                self.runtime, workspace_id=self.workspace_id, channel_id=self.channel_id,
-            ), socket_path=self.relay_socket_path,
-        )
+        packets = self._packet_carrier(context)
         caller = context.resolve()
         def no_recipient(ref):
             raise NoSuchRecipient(ref)
@@ -338,13 +342,7 @@ class CompanyConsultationHost:
                     actor_ref=_dialogue_binding(party.target).actor_ref,
                     recipient_binding=_binding_fields(party.binding),
                 )
-            packets = TargetedAgentDialogueConsultationPacketCarrier(
-                binding_resolver=context,
-                targets=ExecutiveConsultationPacketTargetResolver(
-                    self.runtime, workspace_id=self.workspace_id, channel_id=self.channel_id,
-                ),
-                socket_path=self.relay_socket_path,
-            )
+            packets = self._packet_carrier(context)
             caller = _dialogue_binding(context.caller.target)
             dispatcher = RuntimeConsultationDispatcher(
                 runtime=self.runtime, repository_root=self.repository_root,

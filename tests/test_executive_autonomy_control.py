@@ -130,7 +130,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_sha": SHA,
     }
 
-    # The command set is EXACTLY the closed nine: no generic recovery/debug verb
+    # The command set is EXACTLY the closed eleven: no generic recovery/debug verb
     # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
@@ -148,7 +148,15 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "ceo-submit-reconcile",
         "dialogue-canary-publish",
         "dialogue-canary-reconcile",
+        "a2-disable-prepare",
+        "a2-disable-prepare-reconcile",
     }
+    for command in ("a2-disable-prepare", "a2-disable-prepare-reconcile"):
+        assert vars(parser.parse_args([command, "--expected-sha", SHA])) == {
+            "command": command, "expected_sha": SHA,
+        }
+        with pytest.raises(SystemExit):
+            parser.parse_args([command, "--expected-sha", SHA, "--service-label", "foreign"])
 
     # A CEO verb carries no COO authority flag: the arm admission surface of the
     # legacy verb must not be reachable from the CEO domain.

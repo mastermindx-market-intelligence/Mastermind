@@ -214,12 +214,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     from .native_backends import CanonicalReplyCoordinator, CanonicalTargetReader, ExactTargetRouter
 
     projector = RuntimeFabricTargetProjector(runtime)
-    writer = AgentDialogueContinueWriter(
-        RuntimeExecutiveReplyBindingResolver(projector), socket_path=dialogue_socket_path)
     codex = RuntimeCodexTargetProjector(
         projector, owner_configured=codex_owner_configured)
-    codex_writer = AgentDialogueContinueWriter(
-        RuntimeExecutiveReplyBindingResolver(codex), socket_path=dialogue_socket_path)
     from .runtime_return import RuntimeSessionReturn
     from .native_read import NativeReplyReader
     returns = RuntimeSessionReturn(runtime, fabric=projector, codex=codex,
@@ -235,12 +231,15 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     # A canonical reply receipt is never promoted into attention/consumption.
     # The existing Dialogue/Wake loop remains the attention owner; this bridge
     # cannot inject a raw provider prompt or launch another worker.
-    coordinator = CanonicalReplyCoordinator(
-        reply_writer=writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
-    codex_coordinator = CanonicalReplyCoordinator(
-        reply_writer=codex_writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
-    router = ExactTargetRouter(
-        fabric_reply=coordinator, codex_reply=codex_coordinator, claude_reply=unavailable)
+    def coordinator(targets, principal, arguments):
+        # Bind authorization to this invocation; no cached caller or second
+        # writer can enter COMMIT without the original request's durable fence.
+        writer = AgentDialogueContinueWriter(
+            RuntimeExecutiveReplyBindingResolver(targets), socket_path=dialogue_socket_path,
+            before_commit=lambda **facts: returns.begin_continuation_commit(
+                principal, arguments, **facts))
+        return CanonicalReplyCoordinator(
+            reply_writer=writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
 
     def targets(principal, kind):
         values = reader(kind)
@@ -257,6 +256,9 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
             return {"target_ref": arguments["target_ref"], "reply_committed": True,
                     "carrier": committed, "attention": {"state": "EFFECT_UNKNOWN"},
                     "read_ref": read_ref}
+        router = ExactTargetRouter(
+            fabric_reply=coordinator(projector, principal, arguments),
+            codex_reply=coordinator(codex, principal, arguments), claude_reply=unavailable)
         result = await _maybe(router(
             arguments["target_ref"], arguments["instruction"],
             arguments["stop_condition"], arguments["operation_key"]))

@@ -532,3 +532,138 @@ def test_send_retry_rejects_foreign_or_changed_provenance_before_io(setup, monke
     with pytest.raises(BridgeError):
         reconcile(s, principal=principal, args=args)
     assert not s.service.calls
+
+
+def commit_facts(s):
+    predecessor = original_predecessor(s)
+    context = AgentDialogueContinueWriter._context(s.binding)
+    message = AgentDialogueContinueWriter._message(
+        request_message=predecessor, context=context, instruction=s.args["instruction"],
+        stop_condition=s.args["stop_condition"], operation_key=s.args["operation_key"])
+    return dict(binding=s.binding, context=context, request_message=predecessor, message=message)
+
+
+def begin_commit(s, **changes):
+    facts = {**commit_facts(s), **changes}
+    return s.owner.begin_continuation_commit(s.projection, s.args, **facts)
+
+
+def test_commit_start_is_durable_private_and_sticky_until_canonical_recovery(setup):
+    s = setup
+    bind(s)
+    s.service.items = [{"message": original_predecessor(s), "primary_ts": "1788000000.123456"}]
+    begin_commit(s)
+    events = s.runtime.events.list_events(aggregate_type="session_bridge_continue")
+    assert [e.event_type for e in events] == [module._EVENT, module._COMMIT_EVENT]
+    assert s.args["instruction"] not in repr(events[-1].payload)
+    assert NATIVE not in repr(events[-1].payload)
+    with pytest.raises(BridgeError, match="cannot be admitted again"):
+        begin_commit(s)
+    with pytest.raises(BridgeError, match="could not be reconciled"):
+        reconcile(s)
+    assert all(c["operation"] == "read_thread" for c in s.service.calls)
+    s.service.items.append({"message": commit_facts(s)["message"], "primary_ts": "1788000001.123456"})
+    assert reconcile(s)["action"] == "DUPLICATE"
+    assert len(s.runtime.events.list_events(aggregate_type="session_bridge_continue")) == 2
+
+
+def test_concurrent_commit_admits_exactly_one(setup):
+    s = setup
+    bind(s)
+    def attempt(_):
+        try:
+            begin_commit(s)
+            return "admitted"
+        except BridgeError:
+            return "unknown"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(attempt, range(2))) == ["admitted", "unknown"]
+    events = s.runtime.events.list_events(aggregate_type="session_bridge_continue")
+    assert sum(e.event_type == module._COMMIT_EVENT for e in events) == 1
+
+
+@pytest.mark.parametrize("fault", ["binding", "message", "predecessor", "input", "writer"])
+def test_commit_final_drift_creates_no_admission(setup, monkeypatch, fault):
+    s = setup
+    bind(s)
+    facts = commit_facts(s)
+    if fault == "binding":
+        facts["binding"] = dataclasses.replace(s.binding, target_generation="changed")
+    elif fault == "message":
+        facts["message"] = {**facts["message"], "fingerprint": "0"*64}
+    elif fault == "predecessor":
+        changed = {**facts["request_message"], "message_key": "asd-changed-predecessor"}
+        changed.pop("fingerprint")
+        facts["request_message"] = build_message_v2(changed)
+    elif fault == "input":
+        s.args = {**s.args, "instruction": "A changed instruction."}
+    else:
+        s.facts.generation_number += 1
+    with pytest.raises(BridgeError):
+        s.owner.begin_continuation_commit(s.projection, s.args, **facts)
+    assert len(s.runtime.events.list_events(aggregate_type="session_bridge_continue")) == 1
+    assert not s.service.calls
+
+
+@pytest.mark.parametrize("fault", ["payload", "duplicate", "foreign_command"])
+def test_corrupt_commit_fact_stays_unknown_even_with_canonical_reply(setup, fault):
+    s = setup
+    bind(s)
+    facts = commit_facts(s)
+    s.service.items = [
+        {"message": original_predecessor(s), "primary_ts": "1788000000.123456"},
+        {"message": facts["message"], "primary_ts": "1788000001.123456"},
+    ]
+    if fault == "duplicate":
+        begin_commit(s)
+    event = s.runtime.events.list_events(aggregate_type="session_bridge_continue")[0]
+    payload = s.owner._commit_payload(event, facts["message"])
+    if fault == "payload":
+        payload["message_sha256"] = "0"*64
+    with s.runtime.store.transaction() as connection:
+        s.runtime.store.append_event(connection,
+            aggregate_type="session_bridge_continue", aggregate_id=event.aggregate_id,
+            event_type=module._COMMIT_EVENT, actor=module._ACTOR,
+            job_id=event.job_id, attempt_id=event.attempt_id, worker_id=event.worker_id,
+            payload=payload, command_id=(module._COMMIT_PREFIX + event.aggregate_id
+                if fault == "payload" else "foreign-commit-start"))
+    with pytest.raises(BridgeError):
+        reconcile(s)
+
+
+def test_installed_send_lost_commit_never_retries_effect_and_recovers_exact_reply(setup, monkeypatch):
+    from integrations.session_bridge import installed, runtime_owner, dialogue_reply
+    from integrations.slack_agent_dialogue.service import DialogueServiceError
+    s = setup
+    commits = []
+    s.service.items = [{"message": original_predecessor(s), "primary_ts": "1788000000.123456"}]
+    async def exact_service(path, request, **kwargs):
+        if request["operation"] == "read_thread":
+            return await s.service(path, request)
+        assert set(kwargs) == {"before_write"}
+        await kwargs["before_write"]()
+        commits.append(copy.deepcopy(request["args"]["message"]))
+        raise DialogueServiceError("SEND_EFFECT_UNKNOWN")
+    original_writer = dialogue_reply.AgentDialogueContinueWriter
+    monkeypatch.setattr(dialogue_reply, "AgentDialogueContinueWriter",
+        lambda *a, **kw: original_writer(*a, **kw, service_call=exact_service))
+    monkeypatch.setattr(runtime_owner, "RuntimeFabricTargetProjector", lambda runtime: s.owner.fabric)
+    monkeypatch.setattr(runtime_owner, "RuntimeCodexTargetProjector",
+        lambda *a, **kw: s.owner.codex)
+    monkeypatch.setattr(module, "RuntimeSessionReturn", lambda *a, **kw: s.owner)
+    bridge = installed.build_runtime_session_bridge(s.runtime,
+        dialogue_socket_path=Path("/private/tmp/runtime-return.sock"))
+    async def run():
+        frame = dict(schema=installed.PRIVATE_SCHEMA, tool="session_send",
+            principal=installed.principal_frame(s.principal), arguments=s.args)
+        first = await bridge.handle_frame(frame)
+        assert not first["ok"] and first["error"]["code"] == "carrier_effect_unknown", first
+        assert len(commits) == 1
+        second = await bridge.handle_frame(frame)
+        assert not second["ok"] and second["error"]["code"] == "carrier_effect_unknown", second
+        assert len(commits) == 1
+        s.service.items.append({"message": commits[0], "primary_ts": "1788000001.123456"})
+        recovered = await bridge.handle_frame(frame)
+        assert recovered["ok"] and recovered["data"]["carrier"]["action"] == "DUPLICATE", recovered
+        assert len(commits) == 1
+    asyncio.run(run())

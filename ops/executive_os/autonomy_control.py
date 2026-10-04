@@ -179,7 +179,8 @@ _ARM_ADMISSION_CODES = frozenset(
 )
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -719,6 +720,9 @@ def _parser() -> argparse.ArgumentParser:
         "dialogue-canary-reconcile", help="Restore one interrupted grant publication's exact preimages."
     )
     canary_reconcile.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    for command in sorted(A2_DISABLE_COMMANDS):
+        a2 = sub.add_parser(command, help="Prepare or reconcile the fixed unloaded A2 disable.")
+        a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
     return parser
 
 
@@ -3926,6 +3930,10 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
 
     @staticmethod
     def _read_control_launchd_disabled_override() -> bool:
+        return ProductionCeoSubmitHost._read_launchd_disabled_override(CONTROL_LABEL)
+
+    @staticmethod
+    def _read_launchd_disabled_override(target_label: str, *, allow_absent: bool = False):
         """Read one exact persistent launchd override with a closed parser.
 
         ``print-disabled`` is a global table. Before a CEO-submit transaction may
@@ -3942,7 +3950,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         except UnicodeDecodeError as exc:
             raise TransactionEffectUnknown() from exc
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if len(lines) < 3 or lines[0] != "disabled services = {" or lines[-1] != "}":
+        if len(lines) < 2 or lines[0] != "disabled services = {" or lines[-1] != "}":
             raise TransactionEffectUnknown()
         observed: dict[str, bool] = {}
         for line in lines[1:-1]:
@@ -3954,9 +3962,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             if label in observed or state not in _CONTROL_LAUNCHD_DISABLED_SPELLINGS:
                 raise TransactionEffectUnknown()
             observed[label] = _CONTROL_LAUNCHD_DISABLED_SPELLINGS[state]
-        if CONTROL_LABEL not in observed:
+        if target_label not in observed:
+            if allow_absent:
+                return None
             raise TransactionEffectUnknown()
-        return observed[CONTROL_LABEL]
+        return observed[target_label]
 
     def _persist_control_launchd_preimage(
         self, transaction: TransactionContext, disabled: bool
@@ -4625,6 +4635,10 @@ def main(
 
     if args.command in {"dialogue-canary-publish", "dialogue-canary-reconcile"}:
         from ops.executive_os.dialogue_wake_canary_control import run_command
+        return run_command(args, host=host)
+
+    if args.command in A2_DISABLE_COMMANDS:
+        from ops.executive_os.a2_disable_preparation_control import run_command
         return run_command(args, host=host)
 
     transaction_host = ProductionTransactionHost() if host is None else host

@@ -32,6 +32,9 @@ from .schemas import BridgeError, validate_tool_arguments
 _SCHEMA = "mastermind.session_bridge.continue_request.v1"
 _EVENT = "SESSION_BRIDGE_CONTINUE_REQUESTED"
 _ACTOR = "executive-session-bridge"
+_COMMIT_EVENT = "SESSION_BRIDGE_CONTINUE_COMMIT_STARTED"
+_COMMIT_SCHEMA = "mastermind.session_bridge.continue_commit.v1"
+_COMMIT_PREFIX = "session-bridge-continue-commit:"
 _PREFIX = "session-bridge-continue:"
 _READ = re.compile(r"^session-reply-([0-9a-f]{64})$")
 _IDENTITY = ("policy_id", "issuer_digest", "resource", "subject_digest", "client_ref")
@@ -247,11 +250,98 @@ class RuntimeSessionReturn:
             raise BridgeError("operation_carrier_conflict",
                               "continuation binding is unavailable") from None
 
+    @staticmethod
+    def _commit_payload(event, message):
+        return {
+            "schema": _COMMIT_SCHEMA, "request_event_id": event.event_id,
+            "request_event_sha256": _digest(event.to_dict()),
+            "message_key": message["message_key"], "fingerprint": message["fingerprint"],
+            "message_sha256": _digest(message),
+        }
+
+    def _commit_started(self, event, message, *, connection=None):
+        """Validate the sole commit-start fact on the existing request aggregate."""
+        events = self.runtime.store.list_events(
+            aggregate_type="session_bridge_continue", aggregate_id=event.aggregate_id,
+            connection=connection)
+        others = [item for item in events if item.event_id != event.event_id]
+        command = _COMMIT_PREFIX + event.aggregate_id
+        indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
+        if not others and indexed is None:
+            return False
+        if (len(others) != 1 or indexed is None or others[0].to_dict() != indexed.to_dict()
+                or indexed.event_type != _COMMIT_EVENT or indexed.actor != _ACTOR
+                or indexed.command_id != command
+                or (indexed.job_id, indexed.attempt_id, indexed.worker_id) !=
+                   (event.job_id, event.attempt_id, event.worker_id)
+                or indexed.payload != self._commit_payload(event, message)):
+            raise ValueError("continuation commit fact changed")
+        return True
+
+    def begin_continuation_commit(self, principal, arguments, *,
+                                  binding, context, request_message, message):
+        """Record the READY-to-COMMIT boundary once; retries only reconcile.
+
+        This is an evidence transition on the existing aggregate, not permission
+        to retry Relay or evidence that the provider accepted the message.
+        """
+        args = validate_tool_arguments("session_send", arguments)
+        try:
+            with self.runtime.store.transaction() as connection:
+                prior = self._existing_request(args, _principal(principal, submit=True))
+                if prior is None:
+                    raise ValueError("original request unavailable")
+                event, value = prior
+                target, current_binding = self._target(args["target_ref"])
+                _, _, facts = self._request(value["read_ref"])
+                expected_context = AgentDialogueContinueWriter._context(current_binding)
+                expected = AgentDialogueContinueWriter._message(
+                    request_message=request_message, context=expected_context,
+                    instruction=args["instruction"], stop_condition=args["stop_condition"],
+                    operation_key=args["operation_key"])
+                predecessor = validate_message_v2(request_message)
+                final_message = validate_message_v2(message)
+                if (dataclasses.asdict(binding) != dataclasses.asdict(current_binding)
+                        or _digest(dataclasses.asdict(current_binding)) != value["binding_sha256"]
+                        or current_binding.continuation_operation_key != args["operation_key"]
+                        or target.generation != value["target_generation"]
+                        or _epoch(target.epoch) != value["epoch"]
+                        or context != expected_context
+                        or predecessor["message_key"] != value["predecessor_message_key"]
+                        or predecessor["message_type"] not in {"ACK", "PROGRESS", "BLOCKED", "RESULT"}
+                        or any(predecessor[k] != value["context"][k] for k in (
+                            "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))
+                        or (predecessor["message_type"] == "BLOCKED"
+                            and predecessor["body"].get("needed_from") != "sol")
+                        or final_message != expected
+                        or expected["message_key"] != value["request_message_key"]):
+                    raise ValueError("final continuation binding changed")
+                # The transaction excludes a second local writer between this
+                # current Runtime binding check and the one durable admission.
+                locked_facts = self.runtime.current_harness_binding_source(
+                    value["attempt_id"], connection=connection)
+                if (_generation(locked_facts) != _generation(facts)
+                        or (locked_facts.job_id, locked_facts.attempt_id, locked_facts.worker_id)
+                           != (value["job_id"], value["attempt_id"], value["worker_id"])):
+                    raise ValueError("final writer changed")
+                if self._commit_started(event, expected, connection=connection):
+                    raise ValueError("continuation COMMIT may already have occurred")
+                self.runtime.store.append_event(
+                    connection, aggregate_type="session_bridge_continue",
+                    aggregate_id=event.aggregate_id, event_type=_COMMIT_EVENT, actor=_ACTOR,
+                    job_id=event.job_id, attempt_id=event.attempt_id, worker_id=event.worker_id,
+                    payload=self._commit_payload(event, expected),
+                    command_id=_COMMIT_PREFIX + event.aggregate_id)
+        except Exception:
+            raise BridgeError("carrier_effect_unknown",
+                              "continuation COMMIT cannot be admitted again") from None
+
     async def reconcile_existing_send(self, principal, arguments):
         """Read the original carrier; a duplicate never re-enters effect owners.
 
-        REQUESTED provenance alone proves no effect. Only the exact canonical
-        CONTINUE permits a duplicate receipt. An unreadable or changed carrier
+        REQUESTED provenance alone claims no effect. A COMMIT_STARTED fact
+        forbids a second COMMIT. Only the exact canonical CONTINUE permits a
+        duplicate receipt. An unreadable or changed carrier
         cannot fall through to a resend.
         """
         args = validate_tool_arguments("session_send", arguments)
@@ -300,7 +390,10 @@ class RuntimeSessionReturn:
             after = self._existing_request(args, _principal(principal, submit=True))
             if after is None or after[0].to_dict() != event.to_dict():
                 raise ValueError("original authorization changed")
+            started = self._commit_started(event, expected)
             if not requests:
+                if started:
+                    raise ValueError("original COMMIT outcome is still unknown")
                 return None  # current writer must still authorize any new effect
             return {
                 "reply_committed": True, "action": "DUPLICATE",

@@ -329,6 +329,7 @@ if args == ["print", label]:
     loaded |= state.get("relay_disabled", False) and os.environ.get("A2_FAKE_LOADED_AFTER_DISABLE") == "1"
     raise SystemExit(0 if loaded else 113)
 if args == ["disable", label]:
+    raise SystemExit("direct shell disable is forbidden")
     with Path(str(state_path) + ".effects").open("a") as log:
         log.write("disable " + label + "\n")
     if os.environ.get("A2_FAKE_DISABLE_FAIL") == "1":
@@ -352,6 +353,28 @@ else:
     raise SystemExit(99)
 """.replace("PYTHON", sys.executable),
     )
+
+    owner_script = release_root / "ops" / "executive_os" / "autonomy-control.sh"
+    owner_script.parent.mkdir(parents=True)
+    _write_executable(owner_script, f'#!/bin/bash\nexec "{sys.executable}" "{fake_bin / "autonomy-owner"}" "$@"\n')
+    _write_executable(fake_bin / "autonomy-owner", r"""#!PYTHON
+import json
+import os
+import sys
+from pathlib import Path
+state_path = Path(os.environ["A2_FAKE_STATE"])
+state = json.loads(state_path.read_text())
+assert sys.argv[1:] == ["a2-disable-prepare", "--expected-sha", "a"*40]
+if os.environ.get("A2_FAKE_OWNER_UNKNOWN") == "1":
+    print('{"status":"EFFECT_UNKNOWN"}')
+    raise SystemExit(2)
+if not state.get("relay_disabled"):
+    with Path(str(state_path) + ".effects").open("a") as log:
+        log.write("disable system/com.mastermind.executive.agent-relay\n")
+    state["relay_disabled"] = True
+    state_path.write_text(json.dumps(state, sort_keys=True))
+print('{"status":"A2_DISABLE_PREPARED"}')
+""".replace("PYTHON", sys.executable))
 
     artifact = tmp_path / "prepare-a2-agent-relay-host.sh"
     source = PREP.read_text(encoding="utf-8")
@@ -529,47 +552,35 @@ def test_refuses_a_mismatched_existing_directory_before_creating_any_identity(
     assert not paths["runtime"].exists()
 
 
-@pytest.mark.parametrize("setting,value,expected", [
-    ("A2_FAKE_LOADED", "1", "proven unloaded"),
-    ("A2_FAKE_PRINT_STATUS", "1", "proven unloaded"),
-    ("A2_FAKE_DISABLE_FAIL", "1", "could not be established"),
-    ("A2_FAKE_LOADED_AFTER_DISABLE", "1", "proven unloaded"),
-    ("A2_FAKE_DISABLED_READ", "error", "could not be read"),
-    ("A2_FAKE_DISABLED_READ", "absent", "absent or ambiguous"),
-    ("A2_FAKE_DISABLED_READ", "false", "absent or ambiguous"),
-    ("A2_FAKE_DISABLED_READ", "duplicate", "absent or ambiguous"),
-    ("A2_FAKE_DISABLED_READ", "malformed", "absent or ambiguous"),
+@pytest.mark.parametrize("setting,value", [
+    ("A2_FAKE_LOADED", "1"), ("A2_FAKE_PRINT_STATUS", "1"),
 ])
-def test_pre_enrollment_disabled_override_fails_closed(
-    setting, value, expected, tmp_path, monkeypatch,
+def test_unloaded_preflight_refuses_before_owner_or_identity_mutation(
+    setting, value, tmp_path, monkeypatch,
 ):
     artifact, state_path, paths = _fake_host_script(tmp_path)
     monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
     monkeypatch.setenv(setting, value)
-    before = json.loads(state_path.read_text())
+    before = state_path.read_bytes()
     completed = subprocess.run(
         ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
         check=False, capture_output=True, text=True)
-    assert completed.returncode == 65, completed.stderr
-    assert expected in completed.stderr
-    assert not (paths["config"] / "agent-relay.token").exists()
-    assert not (paths["config"] / "agent-relay.json").exists()
-    assert not paths["plist"].exists()
-    effects = Path(str(state_path) + ".effects")
-    if setting in {"A2_FAKE_LOADED", "A2_FAKE_PRINT_STATUS"}:
-        assert json.loads(state_path.read_text()) == before
-        assert not effects.exists()
-    else:
-        assert effects.read_text().splitlines() == [
-            "disable system/com.mastermind.executive.agent-relay"]
+    assert completed.returncode == 65
+    assert "proven unloaded" in completed.stderr
+    assert state_path.read_bytes() == before
+    assert not Path(str(state_path) + ".effects").exists()
 
 
-def test_accepts_explicit_disabled_launchd_spelling(tmp_path, monkeypatch):
+def test_unknown_owner_result_stops_before_identity_and_directory_changes(tmp_path, monkeypatch):
     artifact, state_path, paths = _fake_host_script(tmp_path)
     monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
-    monkeypatch.setenv("A2_FAKE_DISABLED_READ", "disabled")
+    monkeypatch.setenv("A2_FAKE_OWNER_UNKNOWN", "1")
+    before = state_path.read_bytes()
     completed = subprocess.run(
         ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
         check=False, capture_output=True, text=True)
-    assert completed.returncode == 0, completed.stderr
-    assert json.loads(state_path.read_text())["relay_disabled"] is True
+    assert completed.returncode == 2
+    assert "EFFECT_UNKNOWN" in completed.stdout
+    assert state_path.read_bytes() == before
+    assert not paths["runtime"].exists()
+    assert not Path(str(state_path) + ".effects").exists()

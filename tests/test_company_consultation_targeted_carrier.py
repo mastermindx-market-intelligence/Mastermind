@@ -600,6 +600,6 @@ def test_production_composition_cannot_grant_an_arbitrary_resolver():
                 else getattr(supplied_func, "id", None)
             )
             assert supplied_name == canonical, (str(relative), node.lineno, supplied_name)
-    # The live MCP request and stored native-read consumption paths each bind
-    # the same canonical resolver. Neither is proof of installation or acceptance.
-    assert compositions == 2
+    # Request and stored-read paths share one private composition seam.
+    # Construction is not proof of installation or acceptance.
+    assert compositions == 1
