@@ -103,6 +103,14 @@ DECIDED (seat, under the ruling):
 FACTS: Slack root thread re-read OK 05:38Z (hook recovered): no replies after my 1791090788.888659 — the ruling lives on #1143 only. #811 head cb8f1586 (46 comments, last 04:52Z mine). master a2646f45. L5 census lane running (lease acquired, no output yet).
 NEXT: read #1191/#1145 as incumbent writers on the composition files → post ONE consumption note on #1143 (ruling consumed; phases re-sequenced; incumbent writer + exact remaining proof) → re-arm the carrier watcher → amend Macro #8410 P4/P5 wait conditions to cite the ruling if still open.
 
+### 4f Cycle 05:42–05:47Z — consumption note posted, L5 judged, records PR #2
+FACTS:
+- #1143 consumption note posted 05:42:56Z (issuecomment-5977021747): ruling consumed; Phases 4/5 + multi-worker HELD_BY_CHAIRMAN_RULING; #811 parked at the tripwire; incumbent-writer census (draft #1191 head 8d980ad0 touches installed.py + phase1c and does NOT inject native owners — its installed.py hunk keeps `claude_reader=lambda: []`; #1145 phase1c only); exact remaining proof (a)–(d); this session offered as the step-1 exact target (not self-registered).
+- Macro #8410 (WS/DEC/DSC) MERGED 05:26:24Z via the sweeper → rung MERGED for the Agent OS records. Macro #8414 opened 05:46Z (branch `claude/ssd-executive-autonomy-v1-closure-agentos-ruling-20261004`, head 10d491ae): P3/P4/P5 held under the ruling, landmine + do-not-race #1191; validate 0 errors; `merge-on-green` applied 05:46:02Z.
+- L5 `C1-CR-GAPS` DELIVERED 05:43Z (oc-free, PASS, sentinel present, lane worktree clean): 80 fields / 57 RENDERED / 6 READ_NOT_RENDERED / 17 NOT_READ. Seat re-ran the greps for placement_selection, prs[].branch, agent_os.depends_on, agent_os.reason_code → all NOT_READ as claimed; `.source`/`workstream` hits are attention-row reads, consistent with the lane's per-object verdicts. **ACCEPT as reference only** (the product slice is held by the ruling). Strongest later candidates: `jobs[].workstream`, `prs[].branch`, `agent_os.source`/`reason_code`, `attention[].owner_seat`/`root_job_id`/`depth` (fixture-backed, no doc promise).
+- Carrier watcher: WATCH_ARMED 1143=32 811=cb8f158682ac84b68d434a663a604a435251a6e9:46 master=a2646f458f9f at 2026-10-04T05:45:35Z (10-min cadence, 3 h budget, exits on #1143 count / #811 head+count / master change). Timer for the 06:30Z #811 tripwire still armed.
+NEXT: consume the #1143 owner's writer ruling for the composition slice; at 06:30Z record #811 custody state only (parked); no host act; no lane on installed.py/phase1c.
+
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
 |---|---|---|---|---|
@@ -145,6 +153,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 05:47Z: HELD under the Chairman convergence ruling; waiting on the #1143 owner's writer ruling for the composition slice (do not race #1191). Records: Macro #8414 armed merge-on-green. 06:30Z tripwire = custody-state note only. No host act.
 - 05:40Z: CHAIRMAN CONVERGENCE RULING consumed (#1143 5976964871): Phases 4/5 + multi-worker HELD_BY_CHAIRMAN_RULING; seat stays on the parenting-loop critical path as integrator; incumbent-writer census on installed.py/phase1c before any commission; one #1143 consumption note; watcher re-arm; no host act.
 - 05:27Z: Phase 4 still HELD on the coexistence ruling. Macro #8410 armed `merge-on-green` (sweeper → MERGED). §9 candidate refuted → select a replacement slice from the Control Room DEVIATIONS pool (verify first). Independent lanes unchanged: #811 tripwire 06:30Z; watch4; Slack re-read at the next cycle. No host act.
 - 05:15Z: Phase 4 HELD on the coexistence ruling (options a/b/c requested). Independent lanes: #811 tripwire 06:30Z (custody transfer + bounded pool lane if silent); Agent OS WS/DEC/DSC Macro PR; consume next watcher edge. No host act.
