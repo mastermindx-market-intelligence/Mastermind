@@ -186,6 +186,7 @@ def test_installed_tunnel_path_is_exact_and_user_owned(
     value["ThrottleInterval"] = 10
     _write(path, value)
     path.chmod(0o600)
+    os.chown(path, os.geteuid(), os.getegid())
     monkeypatch.setattr(mod, "_canonical_path", lambda target: path)
 
     mod._require_installed_path(path, "tunnel")
@@ -193,6 +194,7 @@ def test_installed_tunnel_path_is_exact_and_user_owned(
     other = tmp_path / "lookalike.plist"
     _write(other, value)
     other.chmod(0o600)
+    os.chown(other, os.geteuid(), os.getegid())
     with pytest.raises(
         mod.NetworkLaunchdContractError, match="canonical installed tunnel path"
     ):
@@ -205,6 +207,7 @@ def test_installed_tunnel_path_refuses_wrong_mode(
     path = tmp_path / "com.mastermind.executive.tunnel.plist"
     _write(path, _tunnel(tmp_path))
     path.chmod(0o644)
+    os.chown(path, os.geteuid(), os.getegid())
     monkeypatch.setattr(mod, "_canonical_path", lambda target: path)
 
     with pytest.raises(mod.NetworkLaunchdContractError, match="mode must be 0600"):
