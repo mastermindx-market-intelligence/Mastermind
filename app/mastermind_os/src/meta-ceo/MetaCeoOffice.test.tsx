@@ -22,10 +22,10 @@ function input(): OfficeInput {
 describe("Daily Office consumer", () => {
   it("puts the qualified answer before movement and exposes missing producers", () => {
     render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
-    expect(screen.getByRole("heading", { name: "Today, through one Meta-CEO." })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Keep the whole company moving with intention." })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("One");
     expect(screen.getByText(/Company total is not established/)).toBeTruthy();
-    expect(screen.getByText(/Work is awaiting source-custody reconciliation/)).toBeTruthy();
+    expect(screen.getByText(/Work details are unavailable/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^send$/i })).toBeNull();
   });
 

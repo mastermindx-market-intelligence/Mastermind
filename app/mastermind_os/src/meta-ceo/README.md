@@ -1,7 +1,7 @@
 # Meta-CEO read-first product slice
 
-This composition implements the content hierarchy of Paper's current Daily
-Office (DJ1/DJ1M) and Meta-CEO office (MC2/MC2M) inside the existing React product.
+This composition implements Paper's Meta-CEO office (AT08/AT08M) inside the
+existing React product. DJ1/DJ1M and MC2/MC2M retain the behavior references.
 It is a source candidate. The incumbent shell does not import it yet; route,
 browser, native, authentication and production acceptance remain separate gates.
 
@@ -47,19 +47,40 @@ or command import. A changed context invalidates the preview synchronously.
 ## Paper to React crosswalk
 
 Canonical file: `01M3NRCX55B452A12819WNE1RH`, Mastermind OS.
-Observed target snapshot: `d30579fa90752a3623d8562574b7f224916666d55b77fc04a17b8e7c04fd1a17`.
-This identifies the guarded design observation, not a collaboration lock.
+Initial behavior snapshot: `d30579fa90752a3623d8562574b7f224916666d55b77fc04a17b8e7c04fd1a17`.
+Fresh visual observation: `2ccdbcd528a0990e8be40376b658f19d8059b50407d4f1ddc24b666a5468114d`.
+During implementation the live Start Here directory added page 12, Canonical
+Atelier, and retained the earlier boards as behavior references. AT00 / KSB-0
+now directs visual composition. These are guarded observations, not locks.
 
 | Current design | Consumer surface |
 | --- | --- |
-| DJ1 / GVE-0; MC2 / G0S-0 | Answer-first heading, movement, returns, next action, journal gap, bottom direction preview |
+| AT08 / L9V-0; AT08M / MNS-0 | Spacious office heading, direction row, answer and movement, attention companion, champagne preview action |
+| DJ1 / GVE-0; MC2 / G0S-0 | Answer-first behavior, returns, next owner, journal gap and inert direction preview |
 | BG2 / GE2-0 | Typed source qualification, provenance, independent receipts |
 | BG3 / GJE-0; BG5 / H2Y-0 | Existing readers, missing producers, new-only component files, preview `NONE` |
 | BG6 / HB7-0 | Future five-route shell integration; no legacy route removed in this change |
 
+`atelier-office.jpg` is the original decorative asset used by AT08, acquired from
+`https://app.paper.design/file-assets/01M3NRCX55B452A12819WNE1RH/0JC5MFZZJX2JDQMABG8XK2BF63.jpg`.
+It is decorative and carries no product-state claim. Illustrative Paper names,
+counts, direction and approval facts are never copied into live values.
+
 `office.css` uses the current Noir palette with scoped classes. The sidebar and
 global navigation remain with the incumbent shell. Display font fallbacks do not
 establish font-asset or pixel parity; real browser comparison is still required.
+
+## Host integration gaps
+
+The current Programs host drops its source-observation envelope. Result keeps
+source digests but has no observation timestamp; auth display state is not a
+session identity. Keep missing provenance UNKNOWN or UNAVAILABLE. Do not invent
+revisions, timestamps or session bindings to make the component show CURRENT.
+A Mission-only adapter can retain its decoded owner observation and exact
+selection, check the host invalidation epoch across acquisition, and label its
+local acquisition time explicitly. Full Result integration additionally needs
+an unmodified producer-compatible Mission v3 / Result pair or an authenticated
+host test; the mutated pairs in unit tests qualify mismatch logic only.
 
 ## Verification and integration
 

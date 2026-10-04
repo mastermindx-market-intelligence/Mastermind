@@ -36,11 +36,17 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
 
   return <main className="meta-ceo-office">
     <header className="office-heading">
-      <div><p className="office-eyebrow">Today · Meta-CEO office</p>
-        <h1>Today, through one Meta-CEO.</h1>
-        <p>Direction, movement, returned evidence, and the next accountable action.</p></div>
-      <span className="office-state" data-state="UNKNOWN">Read + preview only</span>
+      <div><p className="office-eyebrow">One company. One office.</p>
+        <h1>Keep the whole company <br />moving with intention.</h1>
+        <p>A clear view of direction, movement and the next accountable action.</p></div>
+      <div className="office-heading-aside"><div className="office-art" aria-hidden="true" />
+        <span className="office-state" data-state="UNKNOWN">Read + preview only</span></div>
     </header>
+
+    <section className="office-direction" aria-label="Current direction">
+      <div><p className="office-eyebrow">Current direction</p><span className="office-muted">Source unavailable</span></div>
+      <p>The adopted direction has not been supplied by its owner.</p>
+    </section>
 
     {unknownEffect && <div className="office-effect-alert" role="alert">
       <strong>EFFECT_UNKNOWN</strong><p>Reconcile the original operation. Resend, failover and target change remain held.</p>
@@ -48,11 +54,23 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
 
     <div className="office-top-grid">
       <section className="office-panel office-answer" aria-label="Meta-CEO answer">
-        <div className="office-section-label"><p className="office-eyebrow">Meta-CEO · answer first</p><SourceBadge source={projection.mission.source} /></div>
+        <div className="office-section-label"><p className="office-eyebrow">The next accountable move</p><SourceBadge source={projection.mission.source} /></div>
         <h2>{mission ? `${title}: ${mission.execution.state ?? "execution state unknown"}.` : "The current operating answer is not yet available."}</h2>
         <p>{mission?.program.next_action ?? "A qualified owner read is needed before an accountable next action can be stated."}</p>
         <p className="office-muted">{current ? "Source-backed summary of the selected project." : "Currentness is not established. Retained facts keep their source qualification."}</p>
-        <div className="office-tags"><span>Company total is not established</span><span>Direction producer unavailable</span></div>
+        <section className="office-movement" aria-labelledby="office-moving-title">
+        <div className="office-section-label"><h2 id="office-moving-title">Moving with Meta-CEO</h2><span className="office-muted">Supplied mission view</span></div>
+        <p>Work details are unavailable. Mission coverage and accountable owners are reported below.</p>
+        {mission ? <>
+          <p className="office-muted">Coverage · {mission.children.coverage} · total {mission.children.total_count ?? "not established"}</p>
+          <ul className="office-lanes">{mission.children.items.map(child => <li key={child.job_id}>
+            <div><strong>{child.job_id}</strong><p>{child.orchestration_role ?? "Role unknown"} · Owner {child.worker_id ?? "not supplied"}</p></div>
+            <span>{child.status ?? "UNKNOWN"}</span>
+          </li>)}</ul>
+          {mission.children.items.length === 0 && <p>No mission lanes were supplied. This is not a company-wide zero.</p>}
+        </> : <p className="office-empty">Mission lanes are unavailable.</p>}
+        <p className="office-muted">Company total is not established.</p>
+        </section>
       </section>
       <section className={`office-panel office-attention${needsChairman ? " has-attention" : ""}`} aria-labelledby="office-attention-title">
         <p className="office-eyebrow">Needs you</p>
@@ -62,19 +80,9 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
       </section>
     </div>
 
-    <div className="office-main-grid">
-      <section className="office-panel" aria-labelledby="office-moving-title">
-        <div className="office-section-label"><h2 id="office-moving-title">Moving with Meta-CEO</h2><span className="office-muted">Supplied mission view</span></div>
-        <p>Work is awaiting source-custody reconciliation. Mission lanes retain their exact owner identities below.</p>
-        {mission ? <>
-          <p className="office-muted">Coverage · {mission.children.coverage} · total {mission.children.total_count ?? "not established"}</p>
-          <ul className="office-lanes">{mission.children.items.map(child => <li key={child.job_id}>
-            <div><strong>{child.job_id}</strong><p>{child.orchestration_role ?? "Role unknown"} · Owner {child.worker_id ?? "not supplied"}</p></div>
-            <span>{child.status ?? "UNKNOWN"}</span>
-          </li>)}</ul>
-          {mission.children.items.length === 0 && <p>No mission lanes were supplied. This is not a company-wide zero.</p>}
-        </> : <p className="office-empty">Mission lanes are unavailable.</p>}
-      </section>
+    <details className="office-context">
+      <summary>Returns, critical path and journal</summary>
+      <div className="office-main-grid">
       <section className="office-panel" aria-labelledby="office-returns-title">
         <div className="office-section-label"><h2 id="office-returns-title">Returns to review</h2><SourceBadge source={projection.result.source} /></div>
         <p>A return is not acceptance.</p>
@@ -87,22 +95,26 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
       </section>
       <section className="office-panel" aria-labelledby="office-path-title">
         <h2 id="office-path-title">Critical path</h2>
-        <p>The dependency producer has not supplied a critical path. The owner’s next action remains visible.</p>
+        <p>The critical path is unavailable. The owner’s next action remains visible.</p>
         <dl className="office-next"><dt>Next accountable owner</dt><dd>{mission?.principal.accountable_seat ?? "Not supplied"}</dd>
           <dt>Next action</dt><dd>{mission?.program.next_action ?? "Not supplied"}</dd>
           <dt>Return condition</dt><dd>Not supplied by the current owner read</dd></dl>
       </section>
       <section className="office-panel" aria-labelledby="office-journal-title">
         <h2 id="office-journal-title">What changed — and why</h2>
-        <p>The durable journal producer is unavailable in this slice. A current snapshot does not establish a change history.</p>
+        <p>The durable journal is unavailable. A current snapshot does not establish a change history.</p>
         <p className="office-ref">{projection.context.selection?.workRef ?? "Project not selected"} · {projection.context.selection?.rootJobId ?? "Root not selected"}</p>
         <p className="office-muted">Agent OS retains decisions, discoveries and handoffs.</p>
       </section>
-    </div>
+      </div>
+    </details>
 
-    <section className="office-panel office-receipts" aria-label="Independent receipts">
+    <details className="office-context">
+      <summary>Delivery, effect and acceptance receipts</summary>
+      <section className="office-receipts" aria-label="Independent receipts">
       {Object.entries(projection.receipts).map(([name, value]) => <div key={name}><p className="office-eyebrow">{name}</p><strong>{value ?? "NOT_PROJECTED"}</strong></div>)}
-    </section>
+      </section>
+    </details>
     <section className="office-sources" aria-label="Source qualification">
       {sources.map(([name, read]) => <div key={name}><span>{name}</span><SourceBadge source={read.source} /><span className="office-muted">{read.source.coverage}</span></div>)}
       <button ref={sourcesButton} type="button" aria-expanded={sourcesOpen} onClick={() => setSourcesOpen(!sourcesOpen)}>Review sources</button>
