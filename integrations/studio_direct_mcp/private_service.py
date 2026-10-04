@@ -63,6 +63,8 @@ PAPER_APP_REL = Path("Applications/Paper.app")
 # Studio Direct control owner instead of letting a model compose shell probes.
 FLEET_STATUS_LAUNCHER_REL = Path(".local/bin/studio-direct")
 FLEET_STATUS_TIMEOUT_MS = 15_000
+FLEET_FABRIC_LAUNCHER_REL = Path(".local/bin/pool")
+FLEET_FABRIC_TIMEOUT_MS = 8_000
 
 # CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
@@ -510,7 +512,7 @@ def _fleet_status_config(user_root: Path) -> dict | None:
     launcher = user_root / FLEET_STATUS_LAUNCHER_REL
     if not launcher.exists():
         return None
-    return {
+    config = {
         "enabled": True,
         "launcherPath": str(launcher),
         "launcherSha256": _stable_regular_file_hash(
@@ -518,6 +520,18 @@ def _fleet_status_config(user_root: Path) -> dict | None:
         ),
         "timeoutMs": FLEET_STATUS_TIMEOUT_MS,
     }
+    fabric_launcher = user_root / FLEET_FABRIC_LAUNCHER_REL
+    if fabric_launcher.exists():
+        config.update(
+            {
+                "fabricLauncherPath": str(fabric_launcher),
+                "fabricLauncherSha256": _stable_regular_file_hash(
+                    fabric_launcher, label="Subagent Fabric pool launcher"
+                ),
+                "fabricTimeoutMs": FLEET_FABRIC_TIMEOUT_MS,
+            }
+        )
+    return config
 
 
 def _build_config(
