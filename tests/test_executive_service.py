@@ -1341,7 +1341,7 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
     short_socket_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The future composition crosses the socket without replacing either resolver."""
+    """The production carrier crosses the socket without replacing either resolver."""
 
     from contextlib import contextmanager
     from control_plane.dialogue_wake_canary_activation import (
@@ -1765,53 +1765,9 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
 
     operator = Operator()
 
-    def carrier_factory(**kwargs):
-        repository = WakeLedgerRepository(kwargs["runtime"])
-        if kwargs["historical_only"]:
-            def historical_context(attempt):
-                historical = kwargs["historical_context_for"](attempt)
-                client = CodexCurrentWriterWakeClient(
-                    operator_adapter=historical.operator_adapter,
-                    generation=historical.generation,
-                    attempt_id=historical.target_attempt_id,
-                    runtime_binding=historical.runtime_binding,
-                )
-                return HistoricalWakeContext(
-                    dispatchers=WakeDispatcherRegistry(
-                        {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-                    ),
-                    runtime_binding=historical.runtime_binding,
-                    target_registry=registry,
-                )
-
-            return PersistedWakeCarrier(
-                repository=repository,
-                dispatchers=WakeDispatcherRegistry(),
-                current_binding_for=lambda _route: None,
-                retry_policy=kwargs["retry_policy"],
-                canary_profile=kwargs["canary_profile"],
-                historical_context_for=historical_context,
-                physical_source=kwargs.get("physical_source"),
-            )
-        client = CodexCurrentWriterWakeClient(
-            operator_adapter=kwargs["resolved"].operator_adapter,
-            generation=kwargs["generation"],
-            attempt_id=kwargs["resolved"].target_attempt_id,
-            runtime_binding=kwargs["current_binding"],
-            pre_submit_guard=kwargs["pre_submit_guard"],
-        )
-        return PersistedWakeCarrier(
-            repository=repository,
-            dispatchers=WakeDispatcherRegistry(
-                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-            ),
-            current_binding_for=lambda _route: kwargs["current_binding"],
-            retry_policy=kwargs["retry_policy"],
-            target_registry=kwargs["resolved"].registry,
-            canary_profile=kwargs["canary_profile"],
-            historical_context_for=kwargs["historical_context_for"],
-            physical_source=kwargs.get("physical_source"),
-        )
+    # Exercise the installed composer, including historical conversion and the
+    # final native pre-submit guard. An injected copy hid missing production wiring.
+    carrier_factory = service_cli._build_executive_dialogue_wake_carrier
 
     clock = 1_700_000_100
 
@@ -1827,7 +1783,6 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         canary_profile=DialogueWakeCanaryProfile(grant),
         canary_now_epoch_seconds=now_epoch_seconds,
         installed_release_sha=grant.installed_release_sha,
-        operation_key=grant.operation_key,
     )
     actual_current_facts = bridge._current_canary_facts
 
@@ -9370,6 +9325,41 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         ).resolve(strict=False)
         assert observation_loaded["dialogue_observation_peer_uid"] == 457
         assert observation_loaded["dialogue_bridge_armed"] is False
+        assert observation_loaded["dialogue_wake_canary_activation"] is None
+
+        from tests.test_dialogue_wake_canary_activation import valid_wire
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationGrant, DialogueWakeCanaryProfile,
+        )
+        grant_wire = valid_wire(installed_release_sha=raw["proof_base_sha"])
+        for suffix, grant_value in (("null", None), ("exact", grant_wire)):
+            canary_path = tmp_path / f"control-dialogue-canary-{suffix}.json"
+            canary_path.write_text(json.dumps({
+                **raw, **observation_fields,
+                "dialogue_wake_canary_activation": grant_value}))
+            canary_path.chmod(0o400)
+            parsed_config = service_cli.load_control_config(canary_path)
+            parsed_grant = parsed_config["dialogue_wake_canary_activation"]
+            if grant_value is None:
+                assert parsed_grant is None
+            else:
+                assert type(parsed_grant) is DialogueWakeCanaryActivationGrant
+                assert parsed_grant.to_dict() == grant_value
+        for index, bad_grant in enumerate((
+            {}, {**grant_wire, "production_armed": True},
+            {**grant_wire, "expires_at_epoch_seconds": grant_wire["valid_from_epoch_seconds"] + 901},
+        )):
+            bad_path = tmp_path / f"control-dialogue-canary-invalid-{index}.json"
+            bad_path.write_text(json.dumps({
+                **raw, **observation_fields, "dialogue_wake_canary_activation": bad_grant}))
+            bad_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="canary activation is invalid"):
+                service_cli.load_control_config(bad_path)
+        orphan_path = tmp_path / "control-dialogue-canary-orphan.json"
+        orphan_path.write_text(json.dumps({**raw, "dialogue_wake_canary_activation": None}))
+        orphan_path.chmod(0o400)
+        with pytest.raises(ServiceError, match="requires the observation configuration"):
+            service_cli.load_control_config(orphan_path)
 
         armed_observation_path = tmp_path / "control-observation-armed.json"
         armed_observation_path.write_text(
@@ -9529,6 +9519,23 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             observation_kwargs["dialogue_wake_handler"],
             ExecutiveDialogueWakeBridge,
         )
+        handler = observation_kwargs["dialogue_wake_handler"]
+        assert type(handler.canary_profile) is DialogueWakeCanaryProfile
+        assert handler.canary_profile.grant is None
+        assert handler._operation_key is None
+        assert handler._installed_release_sha == raw["proof_base_sha"]
+
+        # The same installed factory accepts only the already-parsed root grant.
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
+            composition_patch.setattr(service_cli, "ExecutiveControlService", capture_service)
+            service_cli._service_from_config(
+                {**armed_observation_loaded, "dialogue_wake_canary_activation":
+                    DialogueWakeCanaryActivationGrant.from_dict(grant_wire)},
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")))
+        handler = captured["kwargs"]["dialogue_wake_handler"]
+        assert handler.canary_profile.grant.to_dict() == grant_wire
+        assert handler._operation_key is None
 
         captured.clear()
         with monkeypatch.context() as composition_patch:

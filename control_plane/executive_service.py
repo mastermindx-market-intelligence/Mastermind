@@ -411,10 +411,10 @@ class ExecutiveDialogueWakeBridge:
         if canary_profile is not None and not callable(canary_current_facts_for) and (
             not isinstance(installed_release_sha, str)
             or not installed_release_sha
-            or not isinstance(operation_key, str)
-            or not operation_key
+            or (operation_key is not None
+                and (not isinstance(operation_key, str) or not operation_key))
         ):
-            raise TypeError("canary composition requires attested release and operation")
+            raise TypeError("canary composition requires an attested release and optional exact operation")
         if canary_profile is not None and not callable(canary_now_epoch_seconds):
             raise TypeError("canary_now_epoch_seconds is required for current submission")
         if historical_target_for is not None and not callable(historical_target_for):
@@ -1036,8 +1036,8 @@ class ExecutiveDialogueWakeBridge:
         if grant is None:
             raise StateConflict("current canary grant is unavailable")
         if (
-            request.parent.get("operation_key") != self._operation_key
-            or self._operation_key != grant.operation_key
+            request.parent.get("operation_key") != grant.operation_key
+            or (self._operation_key is not None and self._operation_key != grant.operation_key)
             or request.candidate.root_job_id != grant.source_root_job_id
             or request.candidate.job_id != grant.source_job_id
             or request.candidate.attempt_id != grant.source_attempt_id
@@ -1095,7 +1095,7 @@ class ExecutiveDialogueWakeBridge:
                 raise StateConflict("current canary writer identity disagrees")
             facts = DialogueWakeCanaryCurrentFacts(
                 installed_release_sha=str(self._installed_release_sha),
-                operation_key=str(self._operation_key),
+                operation_key=grant.operation_key,
                 source_root_job_id=request.candidate.root_job_id,
                 source_job_id=request.candidate.job_id,
                 source_attempt_id=request.candidate.attempt_id,

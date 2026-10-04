@@ -44,17 +44,38 @@ def test_company_plist_projection_is_optional_and_uses_existing_worker_identity(
 
 
 @pytest.mark.parametrize("armed", [None, False, True])
-def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(tmp_path, monkeypatch, armed):
+@pytest.mark.parametrize("dialogue_armed", [False, True])
+def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(
+    tmp_path, monkeypatch, armed, dialogue_armed,
+):
     from integrations import company_consultation_host
     from ops.executive_os.a2_agent_relay_enrollment import SLACK_WORKSPACE_ID, SLACK_CHANNEL_ID
     raw = _raw(tmp_path)
     raw.update(control_uid=450, worker_uid=451, worker_gid=451)
+    if dialogue_armed:
+        from control_plane.wake_ledger import WakeRetryPolicy
+        raw.update(
+            dialogue_bridge_armed=True,
+            dialogue_wake_retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
+            dialogue_observation_socket_path=cli._CANONICAL_DIALOGUE_OBSERVATION_SOCKET,
+            dialogue_observation_launchd_socket_name="DialogueObservation",
+            dialogue_observation_peer_uid=457,
+            dialogue_wake_canary_activation=None,
+        )
     if armed is not None:
         raw["company_consultation"] = _settings(armed)
-    captured, hosts, activated = {}, [], []
+    captured, hosts, activated, answer_owners = {}, [], [], []
     class Capture:
         def __init__(self, config, **kwargs):
             captured.update(kwargs)
+        def _require_company_answer_attention(self):
+            pass
+    async def dispatch_answer(self, runtime, projection, **kwargs):
+        assert callable(kwargs["before_effect"])
+        answer_owners.append(self)
+        return "existing-delivery"
+    monkeypatch.setattr(service_module.ExecutiveDialogueWakeBridge,
+                        "dispatch_requester_answer", dispatch_answer)
     def activate(name):
         activated.append(name)
         if name == "CompanyConsultation":
@@ -73,7 +94,13 @@ def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(tmp
         assert hosts == []  # Runtime is opened only by service startup.
         runtime = object()
         binding.host_factory(runtime)
-        assert callable(hosts[0].pop("requester_answer_wake_dispatch"))
+        dispatch = hosts[0].pop("requester_answer_wake_dispatch")
+        assert asyncio.run(dispatch(object())) == "existing-delivery"
+        assert len(answer_owners) == 1 and answer_owners[0].canary_profile is None
+        if dialogue_armed:
+            dialogue_owner = captured["dialogue_wake_handler"]
+            assert dialogue_owner.canary_profile.grant is None
+            assert answer_owners[0] is not dialogue_owner
         assert hosts == [dict(runtime=runtime, repository_root=raw["proof_source_repository"],
                              worker_uid=451, relay_socket_path=cli._CANONICAL_AGENT_RELAY_SOCKET,
                              workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID)]
