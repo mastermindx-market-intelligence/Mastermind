@@ -1,0 +1,2015 @@
+{
+  "schema": "commission16.research_source_manifest.v1",
+  "research_date": "2026-10-04",
+  "scope": "Research documentation only; source evidence and claims, no runtime or vendor-qualification proof.",
+  "input": {
+    "name": "deep-research-report (12).md",
+    "bytes": 62820,
+    "sha256": "c76c42dd8b0feeaad09183dee3261c492ac0f6ced41ae24fc9720a5dfda4d310"
+  },
+  "repositories": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "branch": "master",
+      "protected": true,
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "branch": "main",
+      "protected": false,
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/mastermind-terminal",
+      "branch": "master",
+      "protected": true,
+      "commit": "1c708450187755160e1a5889b69598a2fcb1f0d1"
+    }
+  ],
+  "runtime_observation": {
+    "source": "read-only Executive executive_state",
+    "generated_at": "2026-10-04T07:19:02Z",
+    "Mastermind_commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+    "macro_commit": "88804ed7079700c598bb8e04aa64307d1335402d",
+    "qualification": "installed projection only; no alternative-data production-health assertion"
+  },
+  "tree_survey": {
+    "Mastermind": {
+      "entries": 3138,
+      "truncated": false
+    },
+    "mastermind-terminal": {
+      "entries": 3994,
+      "truncated": false
+    },
+    "macro": {
+      "whole_recursive_tree": "transport exceeded usable size; replaced with exact-pin subtrees",
+      "surveyed_roots": [
+        {
+          "root": "engine",
+          "tree_sha": "bf16dd360e5382c9e653dd16d60fb3ad02b80b88",
+          "entries": 1759,
+          "truncated": false
+        },
+        {
+          "root": "collectors",
+          "tree_sha": "15fbd0153d16cdf7495772c34257b1b3e3dedae0",
+          "entries": 327,
+          "truncated": false
+        },
+        {
+          "root": "research",
+          "tree_sha": "dc91306f1bb5c0c878f8bb3a59ce6b4fa1194691",
+          "entries": 4782,
+          "truncated": false
+        },
+        {
+          "root": "docs",
+          "tree_sha": "d8543fa1ede23d31a8e292013c7f59353bf0201a",
+          "entries": 261,
+          "truncated": false
+        },
+        {
+          "root": "contracts",
+          "tree_sha": "932e694be22020555e6baba4cce9d8ea11da3f20",
+          "entries": 356,
+          "truncated": false
+        },
+        {
+          "root": "lib",
+          "tree_sha": "8c1ac77609ebd5af6ecdc6fe9c5a2db70087346d",
+          "entries": 64,
+          "truncated": false
+        },
+        {
+          "root": "config",
+          "tree_sha": "f983e873e06d21d6e1ff688c611a6a9c392a273a",
+          "entries": 164,
+          "truncated": false
+        },
+        {
+          "root": "scripts",
+          "tree_sha": "2f9615bdff8e1befae184d266f38c655a2cf0097",
+          "entries": 1481,
+          "truncated": false
+        }
+      ],
+      "artifact_directories": [
+        {
+          "path": "data/altdata",
+          "entry_count": 13
+        },
+        {
+          "path": "site/altdata",
+          "entry_count": 8
+        },
+        {
+          "path": "data/quiver",
+          "entry_count": 45
+        }
+      ]
+    }
+  },
+  "publication_recheck": {
+    "date": "2026-10-04",
+    "heads": [
+      {
+        "key": "master",
+        "name": "master",
+        "sha": "521720b09be2921e996d9396b522b1c4ca62041c",
+        "protected": true
+      },
+      {
+        "key": "macro",
+        "name": "main",
+        "sha": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+        "protected": false
+      },
+      {
+        "key": "terminal",
+        "name": "master",
+        "sha": "1c708450187755160e1a5889b69598a2fcb1f0d1",
+        "protected": true
+      }
+    ],
+    "deltas": [
+      {
+        "repository": "mastermindx-market-intelligence/Mastermind",
+        "from_commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+        "to_commit": "521720b09be2921e996d9396b522b1c4ca62041c",
+        "ahead_by": 1,
+        "changed_paths": [
+          {
+            "path": "research/TREND_PERSISTENCE_PREREG_C1.md",
+            "status": "added",
+            "blob_sha": "8f280bd41430dc0b49551783a1066b42b068ce8d"
+          }
+        ]
+      },
+      {
+        "repository": "mastermindx-market-intelligence/macro",
+        "from_commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+        "to_commit": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+        "ahead_by": 1,
+        "changed_paths": [
+          {
+            "path": "agentos/handoffs/TREND-PERSISTENCE-2026-10-04.md",
+            "status": "modified",
+            "blob_sha": "ad2be1e64634a24c729b5cee549e9f332b88a323"
+          },
+          {
+            "path": "agentos/workstreams/WS-TREND-PERSISTENCE.md",
+            "status": "modified",
+            "blob_sha": "db2c868ec37daeee49becf80105c4012ee0de3dd"
+          }
+        ]
+      }
+    ],
+    "finding": "Only the Mastermind C1 preregistration and two Macro Trend Persistence records changed; no primary-inspected operational code/artifact changed. Frozen confirmation and current-label limits incorporated."
+  },
+  "file_receipts": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "brain/research_desk.py",
+      "blob_sha": "702e398f107831e862efafd6e5df35ca703361a4",
+      "local_copy_matches_blob": true,
+      "sha256": "e60e3a40707660d341469006e013127f05c14f11f1bd882ad6682317bd459590",
+      "bytes": 14899,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/research_desk.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "brain/bottleneck.py",
+      "blob_sha": "f0ab5274df108cc7d56674c2c238eb2698ef7fdd",
+      "local_copy_matches_blob": true,
+      "sha256": "8ff22b6a7618fbd50f14b9d1c85d2e7152dff27b414c9cfbbc61164a0e153eb0",
+      "bytes": 2268,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/bottleneck.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "brain/signal_history.py",
+      "blob_sha": "0925120d57f41fdfe9dff7e808ad99442e2ef4a1",
+      "local_copy_matches_blob": true,
+      "sha256": "faf39ca71d896c4aa425eb7866859e758f3ffbecc881cb26c8dbec01e71b78a2",
+      "bytes": 6249,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/signal_history.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "config/contracts.yml",
+      "blob_sha": "1c03d4bbffdd0256cfbe060787934440c26344d4",
+      "local_copy_matches_blob": true,
+      "sha256": "f39d5ec8f20d3ec7253103d212ed0ff7bca6b5140c871bd6130209aaccdb2765",
+      "bytes": 18685,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/config/contracts.yml"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "research/TREND_PERSISTENCE_PROTOCOL.md",
+      "blob_sha": "740ac5ea117831e127c2258fe58d7fe369618c99",
+      "local_copy_matches_blob": true,
+      "sha256": "ab0ed7fe45e6107a17e686431118805a9776d68dd9ac566659c36aee59240412",
+      "bytes": 12188,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/research/TREND_PERSISTENCE_PROTOCOL.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "data_layer/macro_refresh.py",
+      "blob_sha": "3e50fc3445ae97bc85dbe9499aa7ce73a648bc20",
+      "local_copy_matches_blob": true,
+      "sha256": "1cf62e30d710a5d01fe0b62789009d94bd2f52e70cbca0ae18ee3419dd09bbee",
+      "bytes": 37327,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/data_layer/macro_refresh.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "docs/DELIVERY_WORKFLOW.md",
+      "blob_sha": "1aa822c511d1af89f3ec580b2178f62ad75502a3",
+      "local_copy_matches_blob": true,
+      "sha256": "16ae0f3f71af87d67b89f66fb47a6f4d25a5c8b7ca2413797d8c7e18126510e0",
+      "bytes": 6302,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/DELIVERY_WORKFLOW.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "docs/source_thematic_rotation_framework.md",
+      "blob_sha": "fc20d514ac22b5587fc9f1bd191a4b8e648a8ea9",
+      "local_copy_matches_blob": true,
+      "sha256": "ac7162221ef23898035c64431c2d11f0cc42e70599e58fb46024c50f302b9aa8",
+      "bytes": 20921,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/source_thematic_rotation_framework.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "portfolio/lenses.py",
+      "blob_sha": "2b8f593991d963de3d5d5d97c5970c36115cc411",
+      "local_copy_matches_blob": true,
+      "sha256": "d690b040dd46be79760142113326c7c3c317e3515055a568dd6eda50e826747a",
+      "bytes": 66708,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/lenses.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "portfolio/held_risk.py",
+      "blob_sha": "4ec5eb6047848d46b0d780dfdf9f3967fd0d1796",
+      "local_copy_matches_blob": true,
+      "sha256": "28aec4f1e9a6c57d1b7aecdb511967303eebfaefc6a4ba22d3a0d3381fb54856",
+      "bytes": 69967,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/held_risk.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "loop/fundamentals.py",
+      "blob_sha": "b8ede9c1dc3d5c9adca9100a47a07db2c382267b",
+      "local_copy_matches_blob": true,
+      "sha256": "19eb4c8c9df43990438a96a44794d90c4e8518013daf15e57552eb4b2d1d7941",
+      "bytes": 22742,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/fundamentals.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "loop/single_name_panel.py",
+      "blob_sha": "9967191353f96dd8feebf6f16941e47f2a69ed15",
+      "local_copy_matches_blob": true,
+      "sha256": "f0ab2d97e35d25e86795e9ca36fdbcce3f854280d54a4c99bf67cdac5ebb32af",
+      "bytes": 9828,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/single_name_panel.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "data/census/CENSUS.md",
+      "blob_sha": "dcf51d160ba9b470c91309b2dc19cf2d0048b458",
+      "local_copy_matches_blob": true,
+      "sha256": "19f5242ded7a99220f13c0789e8cf4ba6e82d4966bfc9111f86b0f7592dcdb98",
+      "bytes": 10131,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/data/census/CENSUS.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "path": "docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md",
+      "blob_sha": "d700d50d62c9ee585aafb9737e3a35e7734e42e4",
+      "local_copy_matches_blob": true,
+      "sha256": "4d37cf93ef8a6c579ff2d24eed0e0e63bfb25b0925f42bc7025409685f61442c",
+      "bytes": 67681,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/mastermind-terminal",
+      "commit": "1c708450187755160e1a5889b69598a2fcb1f0d1",
+      "path": "docs/COMPANY_INTELLIGENCE_WORKSPACE.md",
+      "blob_sha": "d0a1ce9243be506e728a4fad9a92c8d4695e41a2",
+      "local_copy_matches_blob": true,
+      "sha256": "ad997079086ad240497f3fd1885f29c2181d244e4d6ff1664c83f7c4cafd5644",
+      "bytes": 2783,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/1c708450187755160e1a5889b69598a2fcb1f0d1/docs/COMPANY_INTELLIGENCE_WORKSPACE.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/mastermind-terminal",
+      "commit": "1c708450187755160e1a5889b69598a2fcb1f0d1",
+      "path": "terminal/app/api/company-intelligence/[symbol]/route.ts",
+      "blob_sha": "9a9f9c3f9bb45be065408567da078d776570b7ce",
+      "local_copy_matches_blob": true,
+      "sha256": "18eb04098530fe89135fb69a2b7062e24ae1e1b85fd70b9e300bfa3d9e3d5564",
+      "bytes": 3034,
+      "inspection": "pinned source content inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/1c708450187755160e1a5889b69598a2fcb1f0d1/terminal/app/api/company-intelligence/%5Bsymbol%5D/route.ts"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "collectors/_first_seen_store.py",
+      "blob_sha": "3a28fb75d693fb046fe68832276c111f390996ae",
+      "local_copy_matches_blob": true,
+      "sha256": "a0181f69793e599f6fbd82091c10afe2d65ec1096f6fc13636752a5a509ae1de",
+      "bytes": 5625,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/_first_seen_store.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "collectors/base.py",
+      "blob_sha": "420f96134b7835987d5e0d9a48ee52ac2c4f0148",
+      "local_copy_matches_blob": true,
+      "sha256": "ae889f1c006c1fa423f12a7c36292fb09e649a54d6b9576939242b519b2a0d94",
+      "bytes": 32074,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/base.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "collectors/edgar.py",
+      "blob_sha": "f51e88d60b025de36f7af9af65b0311752be39f2",
+      "local_copy_matches_blob": true,
+      "sha256": "d6e3be060fc7ade17e31551795f25806ac414fe5ec7988c31039acc9c7dbba7c",
+      "bytes": 40532,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/edgar.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "collectors/finnhub_altdata.py",
+      "blob_sha": "3e2ef2dba29f4cde03a7c088cd0e98fa7792dcbe",
+      "local_copy_matches_blob": true,
+      "sha256": "8385ce818364cbf4fad5b81a994412bce7b6eeaa598af0998df1677bf9966696",
+      "bytes": 15483,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/finnhub_altdata.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "collectors/github_repos.py",
+      "blob_sha": "388e575481e0c1fa70eb544cf1a458d9fb0cf83b",
+      "local_copy_matches_blob": true,
+      "sha256": "930b795c2f32e7c789e91fa3e3ee23f5dcf7b1d24b6395eba2a03ba153d51007",
+      "bytes": 4138,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/github_repos.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "collectors/huggingface.py",
+      "blob_sha": "a22c9ee30ceafe082c6da4c1bce0ba634c30bf3d",
+      "local_copy_matches_blob": true,
+      "sha256": "d62600606b11cb1b375e4d3c96d6e719b5a0ea42f56ba32e258cf0d301a6e107",
+      "bytes": 4711,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/huggingface.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "collectors/quiver.py",
+      "blob_sha": "d150098dc3d94d4ce361752f4c4812919e898385",
+      "local_copy_matches_blob": true,
+      "sha256": "dad9d518f44434b8710004e6499bd8887347564f97bb808d90d5b8529830f1db",
+      "bytes": 13605,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/quiver.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "config/dataset_registry.yml",
+      "blob_sha": "70a08e25ea45927bed001b3cb1c48e286680525e",
+      "local_copy_matches_blob": true,
+      "sha256": "693dc751238c8d42a41e30ef3edb631665f85849830141aaf5a70bb9877df70b",
+      "bytes": 48542,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/dataset_registry.yml"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "config/fundamental_forensics/metrics/v1/mappings/core.yaml",
+      "blob_sha": "8caa0c2de99e4456ace2ad5af11c2c4c9c232ec6",
+      "local_copy_matches_blob": true,
+      "sha256": "ccfceb0f0181877a14992691a410e28ebf53fb6abf24765d0bd820fcbc9d9bc0",
+      "bytes": 11599,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/fundamental_forensics/metrics/v1/mappings/core.yaml"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "config/fundamental_forensics/metrics/v1/metric_catalog.yaml",
+      "blob_sha": "ab777e3c0e30142f474419dde546949565197a7f",
+      "local_copy_matches_blob": true,
+      "sha256": "195f8df1a278e79e63051718c2e491a64bbac2b9425db5fcfe687a3b558b45a0",
+      "bytes": 19167,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/fundamental_forensics/metrics/v1/metric_catalog.yaml"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "config/identity_seams.yml",
+      "blob_sha": "d9de4f2570e94ec80994e0a9c9224c69b253d719",
+      "local_copy_matches_blob": true,
+      "sha256": "506e451a1d91fd0e0082d8558dbe83c1bb1c9289465bdc3a9b90ebc3375f6a6e",
+      "bytes": 24995,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/identity_seams.yml"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "contracts/evidence_foundation/README.md",
+      "blob_sha": "a47e898309813636cf167c517492aa569aa296ca",
+      "local_copy_matches_blob": true,
+      "sha256": "8c9196806cd44dc03d0debaa7e5c7d8a360d35212a8275ac5b8f71b9fb9454c0",
+      "bytes": 12632,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/contracts/evidence_foundation/README.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "data/altdata/brain_track_record.json",
+      "blob_sha": "28668aa27a27b7d1e3a796b6980eff4d016aca41",
+      "local_copy_matches_blob": true,
+      "sha256": "d3f18d80e539e300b44ffd4017fd9ca857e3ede97724f2a51600be51ba8d2d67",
+      "bytes": 1482,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/data/altdata/brain_track_record.json"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "data/altdata/track_record.json",
+      "blob_sha": "8e59e1a9a7df5f441496abc6d56349759a94e39f",
+      "local_copy_matches_blob": true,
+      "sha256": "84c3225e7dde6189ded4b40617667567f2d05632625784f93ad33ba754b3bc76",
+      "bytes": 3689,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/data/altdata/track_record.json"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/altdata_brain.py",
+      "blob_sha": "97cba32f0d7f1f8e5de5ff5c9d13a5eefc58d3d0",
+      "local_copy_matches_blob": true,
+      "sha256": "2926798abe566d3c146d31100e3f320429f7c7ff25c5740b45eba8138f988b96",
+      "bytes": 42062,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_brain.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/altdata_emit.py",
+      "blob_sha": "51f81091f6a4ebf0079d68337b034234ea940d0d",
+      "local_copy_matches_blob": true,
+      "sha256": "464fecb91a0f502618a652b84a203967e867ad3a8640debaee5b2e725781f18b",
+      "bytes": 13144,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_emit.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/altdata_ledger.py",
+      "blob_sha": "a84ea31856ca93503251d086c03d85713b11e6e9",
+      "local_copy_matches_blob": true,
+      "sha256": "109e024db89f9f83722a80a0d34da715ab6a2e03eceb9a8398d66967355786d2",
+      "bytes": 18288,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_ledger.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/altdata_models.py",
+      "blob_sha": "af7bb95f283efc28e84304c29c6e780632ec49c4",
+      "local_copy_matches_blob": true,
+      "sha256": "305531130df1e16b7d4cd3922114c80bdec369931e33d4f4816a5ab9808f340f",
+      "bytes": 38565,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_models.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/altdata_signals.py",
+      "blob_sha": "8ed3ec47320dadfcb9d65e8aa75466005215aa30",
+      "local_copy_matches_blob": true,
+      "sha256": "836cc67d51a45b9c88c3fcb5de838bf7b4267a7282c8fcded3927fe0ac6f1a7f",
+      "bytes": 14951,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_signals.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/fundamental_forensics/financial_intelligence_packet.py",
+      "blob_sha": "99fb3da6920d0804dbb9a3b36609826b78a38ee4",
+      "local_copy_matches_blob": true,
+      "sha256": "cbea8f589a8962f0aba2135bc745924a89e7a2d05c2b5d16483de4fc65d99e90",
+      "bytes": 81668,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/fundamental_forensics/financial_intelligence_packet.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/fundamental_forensics/metric_registry.py",
+      "blob_sha": "0d65c8f27ea131d25b9d7c279be4c5ae0157efcb",
+      "local_copy_matches_blob": true,
+      "sha256": "cdfb5aa5f3c748771bbd3078d579e3ca627fa534d0275c9101c1be0a75e4699e",
+      "bytes": 96294,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/fundamental_forensics/metric_registry.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/fundamental_forensics/models.py",
+      "blob_sha": "3fd60a7baf995317ee32808a2b6b9b5c91de4215",
+      "local_copy_matches_blob": true,
+      "sha256": "cd8e5e62d4e29378453b89ea6b2f5cfd4028ed5ea4502a9d43f98f0819c3aa97",
+      "bytes": 14519,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/fundamental_forensics/models.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/research_vault/catalog.py",
+      "blob_sha": "828f812d6907bcafd67006e1934108287c681cfc",
+      "local_copy_matches_blob": true,
+      "sha256": "3eaad967f5f9d6b7d7b49a1bcc98b50cce1953c5af2e19cbcafb91cf7134f905",
+      "bytes": 28904,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/research_vault/catalog.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "engine/source_registry.py",
+      "blob_sha": "57ade8634ae9a4fa076e4b41195c4911a7809efb",
+      "local_copy_matches_blob": true,
+      "sha256": "629d8c8aeb3a331457b5448e1bd2084199d9ac60fcbd2c3bedb64e116ee8c6a5",
+      "bytes": 38366,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/source_registry.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "lib/dataos/identity.py",
+      "blob_sha": "d9d5018aac47910bf2c802b1a74114a99511f74f",
+      "local_copy_matches_blob": true,
+      "sha256": "dadb53d3f15725d518f79238fe97a39148379baeeec763d3da9f95434b4097f0",
+      "bytes": 44639,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/identity.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "lib/dataos/quality.py",
+      "blob_sha": "2a8949baedf2957b78ff2c5fa1983ac59871e60a",
+      "local_copy_matches_blob": true,
+      "sha256": "e56dfb5baa8f53ccf8141dbfa357d266faed519043e258a56d657abe264f9706",
+      "bytes": 15792,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/quality.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "lib/dataos/registry.py",
+      "blob_sha": "91c4a8eed34b118902dd2a80678b71472e328dca",
+      "local_copy_matches_blob": true,
+      "sha256": "b57ec16a61086b8d35beb2f81af30efc4af55f1ac07ec95cfcfd87beefeef0a5",
+      "bytes": 16599,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/registry.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "lib/dataos/temporal.py",
+      "blob_sha": "094b149a8b9158f19cb99c4005568c12db96ed41",
+      "local_copy_matches_blob": true,
+      "sha256": "4415404186f0b0d2870f42d9e4a0b95be87937863adf30cf015ed34e8bf92b67",
+      "bytes": 12847,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/temporal.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "lib/ticker_aliases.py",
+      "blob_sha": "7d1aacd5c32209f9e47461f50287db25e2404a65",
+      "local_copy_matches_blob": true,
+      "sha256": "6a6da16e40de28e9ac3eb9f319ca6b1a137a479656101b590b9264211e3e70fd",
+      "bytes": 3461,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/ticker_aliases.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/ALTDATA_CONVERGENCE_FIRST_COHORT_ADJUDICATION_2026-08-13.md",
+      "blob_sha": "e4b6537278f88a8fef447f4ae83a86326c0d8710",
+      "local_copy_matches_blob": true,
+      "sha256": "307d6ec8b893dd9d99d2a16a15c0f72ac0d3614e265afdcd069c0a41cee9a018",
+      "bytes": 12179,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/ALTDATA_CONVERGENCE_FIRST_COHORT_ADJUDICATION_2026-08-13.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/ALTDATA_REBOOT.md",
+      "blob_sha": "95be63c823aaf50ab46873a9c72265282747ccb6",
+      "local_copy_matches_blob": true,
+      "sha256": "d0d89d09ced2b59a7041b52f03ded147228948da04aa1f5d78ebee53a35d00ca",
+      "bytes": 14286,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/ALTDATA_REBOOT.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/MASTERMIND_DATA_OS_ARCHITECTURE.md",
+      "blob_sha": "bece3c18cd55ea6591defdb1e505b5ce1822ae82",
+      "local_copy_matches_blob": true,
+      "sha256": "b26feb4e360e69321178643591eabddec6786da0f2631762d46e9bd46d051a63",
+      "bytes": 83032,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/MASTERMIND_DATA_OS_ARCHITECTURE.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/MASTERMIND_DATA_OS_V1_IMPLEMENTATION_PLAN.md",
+      "blob_sha": "b925610fb8cd92362d41460e74814730e969e65c",
+      "local_copy_matches_blob": true,
+      "sha256": "748714e178178644e17b81bc45d6cb73fafcd27917b6fff81ced26d953eb7a83",
+      "bytes": 115467,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/MASTERMIND_DATA_OS_V1_IMPLEMENTATION_PLAN.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/MASTERMIND_FINANCIAL_INTELLIGENCE_FABRIC_MASTERPLAN_2026-08-16.md",
+      "blob_sha": "61ac3b360be155a512f81d66e3175a4ccb80b48c",
+      "local_copy_matches_blob": true,
+      "sha256": "cc3d013dbc43f35e8890e816a2a065111c1655e6a36d588d5a8a2dcf6ca71c00",
+      "bytes": 69641,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/MASTERMIND_FINANCIAL_INTELLIGENCE_FABRIC_MASTERPLAN_2026-08-16.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/RESEARCH_VAULT_MASTERPLAN.md",
+      "blob_sha": "fd2c3f509c725c4332f7202c645d988b483ad684",
+      "local_copy_matches_blob": true,
+      "sha256": "6904a99188c2c6ff3452978f1f6b66bdacd956537667711c4c8a7b36a52ddf99",
+      "bytes": 34381,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/RESEARCH_VAULT_MASTERPLAN.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/alpha_intelligence/expectation_market_dynamics/OWNER_AND_REUSE_MATRIX.md",
+      "blob_sha": "ebd787cae2da3a7c72820199c59e38544f7483b7",
+      "local_copy_matches_blob": true,
+      "sha256": "65aaa7fa739d5c621d41d856d66005dce3266cf375e6e2b26905ae0f2fed26dc",
+      "bytes": 3652,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/alpha_intelligence/expectation_market_dynamics/OWNER_AND_REUSE_MATRIX.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "research/financial_intelligence_fabric/FIF_3A3_REUSE_MAP.md",
+      "blob_sha": "9d4ca1f12a65f60aa8dea3dddf1d2c0c97038daa",
+      "local_copy_matches_blob": true,
+      "sha256": "2140dc246004955ef7ad98eca39f5f165f8fa90d79560b28d23ded38f06ae943",
+      "bytes": 3950,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/financial_intelligence_fabric/FIF_3A3_REUSE_MAP.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+      "path": "site/qledger/track_record.json",
+      "blob_sha": "735273741e518130c59ab8c80c133aac5004649a",
+      "local_copy_matches_blob": true,
+      "sha256": "a37e4789365885582aceb95eeb7e949a3ae37152cf8f018260321ae1fb623532",
+      "bytes": 276908,
+      "inspection": "pinned content inspected by census lane; critical claims independently reread by principal",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/site/qledger/track_record.json"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "521720b09be2921e996d9396b522b1c4ca62041c",
+      "path": "research/TREND_PERSISTENCE_PREREG_C1.md",
+      "blob_sha": "8f280bd41430dc0b49551783a1066b42b068ce8d",
+      "local_copy_matches_blob": true,
+      "sha256": "f22b0cee218c381dd3fd078d67301c985eb9415faa0e75ffdc57d520374bf4cc",
+      "bytes": 47329,
+      "inspection": "exact final-source delta fetched; relevant freeze/identity/status sections inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/521720b09be2921e996d9396b522b1c4ca62041c/research/TREND_PERSISTENCE_PREREG_C1.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+      "path": "agentos/workstreams/WS-TREND-PERSISTENCE.md",
+      "blob_sha": "db2c868ec37daeee49becf80105c4012ee0de3dd",
+      "local_copy_matches_blob": true,
+      "sha256": "54580c2a1c0860f93ae314b40952fb6478e31081f2733e493c4ad86e89fb35d8",
+      "bytes": 5603,
+      "inspection": "exact final-source delta fetched; relevant freeze/identity/status sections inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc/agentos/workstreams/WS-TREND-PERSISTENCE.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+      "path": "agentos/handoffs/TREND-PERSISTENCE-2026-10-04.md",
+      "blob_sha": "ad2be1e64634a24c729b5cee549e9f332b88a323",
+      "local_copy_matches_blob": true,
+      "sha256": "e7baa5ea6149285ed3202ce03a276453536d3959875741f9994cab5ff98a1383",
+      "bytes": 11920,
+      "inspection": "exact final-source delta fetched; relevant freeze/identity/status sections inspected",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc/agentos/handoffs/TREND-PERSISTENCE-2026-10-04.md"
+    }
+  ],
+  "repository_reference_groups": [
+    {
+      "id": "R01",
+      "title": "Repository identity, protected procedure and source cut",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/sol_skills/INDEX.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/sol_skills/INDEX.md",
+          "note": "Atomic-load law, compatible schema/version and capability vocabulary."
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/sol_skills/COLD_START.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/sol_skills/COLD_START.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/sol_skills/ACTIVE_EXECUTION.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/sol_skills/ACTIVE_EXECUTION.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/sol_skills/SESSION_RELIABILITY.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/sol_skills/SESSION_RELIABILITY.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/sol_skills/WEB_CEO_DELEGATION.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/sol_skills/WEB_CEO_DELEGATION.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "AGENTS.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/AGENTS.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/DELIVERY_WORKFLOW.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/DELIVERY_WORKFLOW.md",
+          "note": ""
+        }
+      ],
+      "qualification": "Branch API/source-tree receipts establish the pins listed in the report and manifest. Installed Executive state is a separate read-only observation, not an operational health certificate."
+    },
+    {
+      "id": "R02",
+      "title": "Static census",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "data/census/CENSUS.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/data/census/CENSUS.md",
+          "note": ""
+        }
+      ],
+      "qualification": "Generated July 16, 2026 at 131290a. Its dated inventory is not a current fleet census."
+    },
+    {
+      "id": "R03",
+      "title": "Existing portfolio altdata consumer",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "portfolio/lenses.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/lenses.py",
+          "note": "_altdata_row, approximately lines 245–298."
+        }
+      ],
+      "qualification": "Existing scored/legacy context route; not a qualified operational KPI forecast."
+    },
+    {
+      "id": "R04",
+      "title": "Existing earnings-expectation consumer",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "portfolio/held_risk.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/portfolio/held_risk.py",
+          "note": "_lane_earnings_expectation, approximately lines 734–820."
+        }
+      ],
+      "qualification": "Current expectation-state, SUE/PEAD and revision fields do not prove a historical consensus archive."
+    },
+    {
+      "id": "R05",
+      "title": "Fundamental availability and upstream EDGAR proxy",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "loop/fundamentals.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/fundamentals.py",
+          "note": "asof_date filter and coverage qualifications."
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "collectors/edgar.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/edgar.py",
+          "note": "Lines 467–477 and 682–719: frames omit filed time; annual availability uses period end plus a default 120-day lag."
+        }
+      ],
+      "qualification": "Read-side filtering is observed. Authentic historical filing availability and discarded restatements are not established by the proxy."
+    },
+    {
+      "id": "R06",
+      "title": "Existing price, delisting and membership substrate",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "loop/single_name_panel.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/loop/single_name_panel.py",
+          "note": "Deep/delisted union and membership spans, approximately lines 104–148."
+        }
+      ],
+      "qualification": "Source capability is distinct from complete current underlying data."
+    },
+    {
+      "id": "R07",
+      "title": "Trend persistence and validation ownership",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "research/TREND_PERSISTENCE_PROTOCOL.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/research/TREND_PERSISTENCE_PROTOCOL.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "research/TREND_PERSISTENCE_PREREG_C1.md",
+          "commit": "521720b09be2921e996d9396b522b1c4ca62041c",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/521720b09be2921e996d9396b522b1c4ca62041c/research/TREND_PERSISTENCE_PREREG_C1.md",
+          "note": "Final source-delta read: frozen study/owner boundary; not C16 validation."
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "agentos/workstreams/WS-TREND-PERSISTENCE.md",
+          "commit": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc/agentos/workstreams/WS-TREND-PERSISTENCE.md",
+          "note": "Final source-delta read: frozen study/owner boundary; not C16 validation."
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "agentos/handoffs/TREND-PERSISTENCE-2026-10-04.md",
+          "commit": "59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/59a0789c0e5ffcce15e682b6f3880f3eacc6f6fc/agentos/handoffs/TREND-PERSISTENCE-2026-10-04.md",
+          "note": "Final source-delta read: frozen study/owner boundary; not C16 validation."
+        }
+      ],
+      "qualification": "Current research records revision/theme-history gaps and existing judge/holdout boundaries. It does not license a competing evaluation ledger."
+    },
+    {
+      "id": "R08",
+      "title": "Protected Portfolio V3 specification",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md",
+          "note": ""
+        }
+      ],
+      "qualification": "SPEC_ONLY applies to the protected specification. Candidate implementation is separately evidenced in R09."
+    },
+    {
+      "id": "R09",
+      "title": "V3 candidate carriers",
+      "sources": [],
+      "qualification": "Mastermind PR #673 and #669 API heads are recorded below and in the manifest. #673 contains Decision Snapshot implementation paths; neither open draft is protected production authority."
+    },
+    {
+      "id": "R10",
+      "title": "Existing first-seen daily signal history",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "brain/signal_history.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/signal_history.py",
+          "note": ""
+        }
+      ],
+      "qualification": "KEEP-FIRST by (asof,ticker), not a full intraday source-vintage or consumption archive."
+    },
+    {
+      "id": "R11",
+      "title": "Research and deterministic reasoning boundaries",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "brain/research_desk.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/research_desk.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "brain/bottleneck.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/brain/bottleneck.py",
+          "note": ""
+        }
+      ],
+      "qualification": "Existing research/intelligence owners to compose with; no new LLM authority."
+    },
+    {
+      "id": "R12",
+      "title": "Macro data-plane refresh topology",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "data_layer/macro_refresh.py",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/data_layer/macro_refresh.py",
+          "note": ""
+        }
+      ],
+      "qualification": "Host-dependent managed checkout/symlink and R2/freshness behavior. No refresh was run."
+    },
+    {
+      "id": "R13",
+      "title": "Current collection and altdata kernel",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "collectors/quiver.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/quiver.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "collectors/finnhub_altdata.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/finnhub_altdata.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "collectors/github_repos.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/github_repos.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "collectors/huggingface.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/huggingface.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "collectors/_first_seen_store.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/collectors/_first_seen_store.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "engine/altdata_models.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_models.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "engine/altdata_signals.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_signals.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "engine/altdata_emit.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_emit.py",
+          "note": ""
+        }
+      ],
+      "qualification": "Current app ratings and developer telemetry, first-seen/failure handling and context features. Raw convergence admission is separately examined in R14."
+    },
+    {
+      "id": "R14",
+      "title": "Existing altdata design, ledger and adverse adjudication",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/ALTDATA_REBOOT.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/ALTDATA_REBOOT.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "engine/altdata_ledger.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/altdata_ledger.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/ALTDATA_CONVERGENCE_FIRST_COHORT_ADJUDICATION_2026-08-13.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/ALTDATA_CONVERGENCE_FIRST_COHORT_ADJUDICATION_2026-08-13.md",
+          "note": ""
+        }
+      ],
+      "qualification": "Historical HOLD and current ledger are preserved. Raw count admission versus co-firing-adjusted display remains a separate existing-owner issue."
+    },
+    {
+      "id": "R15",
+      "title": "Current checked-in altdata results",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "data/altdata/track_record.json",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/data/altdata/track_record.json",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "data/altdata/brain_track_record.json",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/data/altdata/brain_track_record.json",
+          "note": ""
+        }
+      ],
+      "qualification": "October 3 artifact evidence: 288 graded, 0.545 survival, 0.413 direction; brain 0 graded/27 open. These are not this commission’s recomputed results."
+    },
+    {
+      "id": "R16",
+      "title": "Family evaluation, clock epochs and independent-date counts",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "site/qledger/track_record.json",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/site/qledger/track_record.json",
+          "note": "Inspected event/flow/mid/slow horizon summaries and pooling refusal, including approximately lines 1245–1395."
+        }
+      ],
+      "qualification": "Source cut October 3, 2026. Raw observations, dates, horizons, losses and epochs cannot be pooled indiscriminately."
+    },
+    {
+      "id": "R17",
+      "title": "Data OS registry, temporal and quality owners",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "config/dataset_registry.yml",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/dataset_registry.yml",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "lib/dataos/registry.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/registry.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "lib/dataos/temporal.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/temporal.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "lib/dataos/quality.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/quality.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/MASTERMIND_DATA_OS_ARCHITECTURE.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/MASTERMIND_DATA_OS_ARCHITECTURE.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/MASTERMIND_DATA_OS_V1_IMPLEMENTATION_PLAN.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/MASTERMIND_DATA_OS_V1_IMPLEMENTATION_PLAN.md",
+          "note": ""
+        }
+      ],
+      "qualification": "Twenty-one registry rows; no selected operational KPI enrollment found. The existing profile-dependent known_at helper is not an actual-system replay guarantee."
+    },
+    {
+      "id": "R18",
+      "title": "Existing native identity seams",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "lib/dataos/identity.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/dataos/identity.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "config/identity_seams.yml",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/identity_seams.yml",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "lib/ticker_aliases.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/lib/ticker_aliases.py",
+          "note": ""
+        }
+      ],
+      "qualification": "Issuer/security/vendor alias primitives exist. Evidence Foundation imposes the additional current join/refusal boundary in R20."
+    },
+    {
+      "id": "R19",
+      "title": "Financial Intelligence Fabric and target metric ownership",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/MASTERMIND_FINANCIAL_INTELLIGENCE_FABRIC_MASTERPLAN_2026-08-16.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/MASTERMIND_FINANCIAL_INTELLIGENCE_FABRIC_MASTERPLAN_2026-08-16.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/financial_intelligence_fabric/FIF_3A3_REUSE_MAP.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/financial_intelligence_fabric/FIF_3A3_REUSE_MAP.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "engine/fundamental_forensics/metric_registry.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/fundamental_forensics/metric_registry.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "engine/fundamental_forensics/financial_intelligence_packet.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/fundamental_forensics/financial_intelligence_packet.py",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "config/fundamental_forensics/metrics/v1/metric_catalog.yaml",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/fundamental_forensics/metrics/v1/metric_catalog.yaml",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "config/fundamental_forensics/metrics/v1/mappings/core.yaml",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/config/fundamental_forensics/metrics/v1/mappings/core.yaml",
+          "note": ""
+        }
+      ],
+      "qualification": "Reuse target definitions, source occurrences, native identifiers and packets. A forecast is not a filed financial fact."
+    },
+    {
+      "id": "R20",
+      "title": "Evidence Foundation native-reference and refusal contract",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "contracts/evidence_foundation/README.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/contracts/evidence_foundation/README.md",
+          "note": "Identity/clocks/rights/independence and exact-subject limits, especially lines 37–78 and 123–158."
+        }
+      ],
+      "qualification": "No universal identity replacement. A declared CIK bridge is not a resolution receipt; current cross-type/native-only cases can remain refused."
+    },
+    {
+      "id": "R21",
+      "title": "Expectation-market program and source reuse",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/alpha_intelligence/expectation_market_dynamics/OWNER_AND_REUSE_MATRIX.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/alpha_intelligence/expectation_market_dynamics/OWNER_AND_REUSE_MATRIX.md",
+          "note": ""
+        }
+      ],
+      "qualification": "Existing equity_revisions and financial/expectation owners; no third consensus history. Candidate PRs #8402 and #8337 are recorded in R27."
+    },
+    {
+      "id": "R22",
+      "title": "Actual Research Vault product identity",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "research/RESEARCH_VAULT_MASTERPLAN.md",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/research/RESEARCH_VAULT_MASTERPLAN.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/macro",
+          "path": "engine/research_vault/catalog.py",
+          "commit": "79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f",
+          "url": "https://github.com/mastermindx-market-intelligence/macro/blob/79251a22d731cf3f7e8d8ba2185bfcd0e9bb098f/engine/research_vault/catalog.py",
+          "note": ""
+        }
+      ],
+      "qualification": "The application is inside Macro. This census does not inspect the complete private document corpus or equate it with executive-dr-vault."
+    },
+    {
+      "id": "R23",
+      "title": "Existing Terminal company-intelligence boundary",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/mastermind-terminal",
+          "path": "docs/COMPANY_INTELLIGENCE_WORKSPACE.md",
+          "commit": "1c708450187755160e1a5889b69598a2fcb1f0d1",
+          "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/1c708450187755160e1a5889b69598a2fcb1f0d1/docs/COMPANY_INTELLIGENCE_WORKSPACE.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/mastermind-terminal",
+          "path": "terminal/app/api/company-intelligence/[symbol]/route.ts",
+          "commit": "1c708450187755160e1a5889b69598a2fcb1f0d1",
+          "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/1c708450187755160e1a5889b69598a2fcb1f0d1/terminal/app/api/company-intelligence/%5Bsymbol%5D/route.ts",
+          "note": ""
+        }
+      ],
+      "qualification": "Existing generation-bound Macro/R2 BFF and fixture distinction. No new page or browser data store is proposed."
+    },
+    {
+      "id": "R24",
+      "title": "Adjacent temporal and observability research",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "research/BITEMPORAL_POINT_IN_TIME_TRUTH_AUDIT_2026-10-04.md",
+          "commit": "01fc1846471e482a4d68842ad53c6294478001e2",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/01fc1846471e482a4d68842ad53c6294478001e2/research/BITEMPORAL_POINT_IN_TIME_TRUTH_AUDIT_2026-10-04.md",
+          "note": ""
+        },
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "research/DATA_OBSERVABILITY_LIVE_CENSUS_COMMISSION_8_HARDENED_2026-10-04.md",
+          "commit": "7cbb03a85cfa96b2a880c297b01fd1c8df3038d4",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/7cbb03a85cfa96b2a880c297b01fd1c8df3038d4/research/DATA_OBSERVABILITY_LIVE_CENSUS_COMMISSION_8_HARDENED_2026-10-04.md",
+          "note": ""
+        }
+      ],
+      "qualification": "Open candidate research #1221 and #1224; inspected introductions/relevant boundaries, not adopted as protected implementations."
+    },
+    {
+      "id": "R25",
+      "title": "Adjacent regional parity commission",
+      "sources": [],
+      "qualification": "Mastermind #1229 is an open research carrier. Its existence and scope establish a collision/coordination boundary, not regional data readiness."
+    },
+    {
+      "id": "R26",
+      "title": "Existing thematic architecture",
+      "sources": [
+        {
+          "repository": "mastermindx-market-intelligence/Mastermind",
+          "path": "docs/source_thematic_rotation_framework.md",
+          "commit": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+          "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/a2646f458f9ff41ddcedd89b338be4a4349e6cd6/docs/source_thematic_rotation_framework.md",
+          "note": ""
+        }
+      ],
+      "qualification": "Retain existing theme/research owners and explicit current-history qualifications in R07."
+    },
+    {
+      "id": "R27",
+      "title": "Bounded census manifest and candidate-carrier receipts",
+      "sources": [],
+      "qualification": "SOURCE_MANIFEST.json records exact inspected files, API-derived PR metadata, source pins and surveyed roots. Indexed search results were navigation, not source authority."
+    }
+  ],
+  "candidate_carriers": [
+    {
+      "number": 673,
+      "title": "[PORTFOLIO-V3][S0][DRAFT] Decision Snapshot through read-only evidence inspector",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/673",
+      "state": "open",
+      "draft": true,
+      "head_sha": "0b960590c77101b3f3b5545896423f9ad07b7d56",
+      "base_sha": "e1f752a58df8f874efa12e30957d911627a0c4f8",
+      "updated_at": "2026-09-17T08:39:49Z",
+      "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "number": 669,
+      "title": "[PORTFOLIO-V3][RECORDS-REPAIR][HOLD] Close S0 review findings",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/669",
+      "state": "open",
+      "draft": true,
+      "head_sha": "41e94c1d6023d3dda86f64cbd15e0cbf515bb241",
+      "base_sha": "5c44d87b8bd9f21698b3faa05c9b2673651cb8a8",
+      "updated_at": "2026-09-15T21:07:15Z",
+      "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "number": 1221,
+      "title": "docs(research): harden bitemporal PIT truth audit",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1221",
+      "state": "open",
+      "draft": false,
+      "head_sha": "01fc1846471e482a4d68842ad53c6294478001e2",
+      "base_sha": "84df29801d4078724c2b603a136de5aa1532cdfe",
+      "updated_at": "2026-10-04T03:07:05Z",
+      "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "number": 1224,
+      "title": "docs(research): harden data observability live census commission",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1224",
+      "state": "open",
+      "draft": false,
+      "head_sha": "7cbb03a85cfa96b2a880c297b01fd1c8df3038d4",
+      "base_sha": "84df29801d4078724c2b603a136de5aa1532cdfe",
+      "updated_at": "2026-10-04T03:25:55Z",
+      "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "number": 1229,
+      "title": "[RESEARCH] Commission 18 — global/regional data parity and coverage confidence",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1229",
+      "state": "open",
+      "draft": false,
+      "head_sha": "b502668857526d7da9fd69b9801493d387df951c",
+      "base_sha": "a2646f458f9ff41ddcedd89b338be4a4349e6cd6",
+      "updated_at": "2026-10-04T07:16:28Z",
+      "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "number": 1230,
+      "title": "research: Trend Persistence Wave C-2 instrument (sector group persistence) + tests",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1230",
+      "state": "open",
+      "draft": false,
+      "head_sha": "688b2f56735ebdb8cb909c69653cd1be7acc7a55",
+      "base_sha": "521720b09be2921e996d9396b522b1c4ca62041c",
+      "updated_at": "2026-10-04T07:26:50Z",
+      "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "number": 7518,
+      "title": "feat(fif-3a4): cross-filing lineage evidence overlay",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/7518",
+      "state": "open",
+      "draft": false,
+      "head_sha": "a58ef81168687ff6aedcb37ed0070dab05cdbe9b",
+      "base_sha": "70bad6168662d2acafa3db39e5c528e872a47451",
+      "updated_at": "2026-10-04T07:21:03Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 8404,
+      "title": "feat(stsi): add typed v2 dossier contracts with truthful source clocks",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8404",
+      "state": "open",
+      "draft": true,
+      "head_sha": "75ef1f60315fd3425603dfaf3c23b457b15f5463",
+      "base_sha": "01c9a44f6987c8c37f5a28ee50a51e74b83e4992",
+      "updated_at": "2026-10-04T06:52:10Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 7426,
+      "title": "feat(company-intelligence): materialize v3 workspace clock index",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/7426",
+      "state": "open",
+      "draft": true,
+      "head_sha": "7bc04876747d773861b47519061279ae033a148d",
+      "base_sha": "75956e5b00f99b860e9e97dde36f46ef04ecc72b",
+      "updated_at": "2026-10-04T06:09:48Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 8402,
+      "title": "research(k3e): harden Commission 2 PIT analyst expectations audit",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8402",
+      "state": "open",
+      "draft": false,
+      "head_sha": "63208615f081804e388c8c30a8d2c0fe6ec86dd4",
+      "base_sha": "f9ed175800257b228166dabe8b3ac9a55e74e237",
+      "updated_at": "2026-10-04T03:08:42Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 6803,
+      "title": "HOLD FOR SOL: Temporal-grain W1A exact-parity and GAKD harness",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/6803",
+      "state": "open",
+      "draft": true,
+      "head_sha": "3052eaf9d691b30128e20b16ad30c75f3ae95280",
+      "base_sha": "dfcb3042aea4a9653f2b5ecc5200a61af5bd2366",
+      "updated_at": "2026-10-04T02:43:39Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 8337,
+      "title": "feat(k3e): inspect expectation captures at explicit cutoffs",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8337",
+      "state": "open",
+      "draft": true,
+      "head_sha": "13910854fbd652dcdf975301bdc8c6728c2e4767",
+      "base_sha": "ebb0545977bbe1224f88400b727acb26e56a19a7",
+      "updated_at": "2026-10-03T11:38:33Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 8183,
+      "title": "fix(dataos): bind selected price reads to exact source evidence",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8183",
+      "state": "open",
+      "draft": true,
+      "head_sha": "3ad47339cc11b54a61ba677490bcd41fab32cc61",
+      "base_sha": "d0c90d4defe430dba270079e1251262114c6acb9",
+      "updated_at": "2026-10-03T10:00:00Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 8076,
+      "title": "[DRAFT] Audit Massive PIT universe against Data OS identity",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8076",
+      "state": "open",
+      "draft": true,
+      "head_sha": "d8cdd0f6ad87fbf9d42140bd6524638b3b224009",
+      "base_sha": "fa85c3b4efe8140aab6c6bff4b813070cf6aa16d",
+      "updated_at": "2026-09-27T04:54:13Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "number": 8024,
+      "title": "[DRAFT] Audit EDGAR earnings canonical filing identity",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8024",
+      "state": "open",
+      "draft": true,
+      "head_sha": "d297c1da4d7c1e68e4c3ca0ce8b53d26e627ecae",
+      "base_sha": "0c794fa7097b3fce92b5ae498f993ebbf603308f",
+      "updated_at": "2026-09-27T04:50:35Z",
+      "repository": "mastermindx-market-intelligence/macro"
+    }
+  ],
+  "external_reference_groups": [
+    {
+      "id": "S01",
+      "title": "Facteus Arbiter",
+      "urls": [
+        "https://facteus.com/products/arbiter"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Product dictionary observed; current-ownership PRO_FORMA and source-dependent fill require original mapping/panel vintages. Contract and delivery unverified.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S02",
+      "title": "Earnest Orion",
+      "urls": [
+        "https://www.earnestanalytics.com/datasets/orion-credit-card-data"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Orion history and daily Direct updates are advertised for this product; other Earnest products have different scope.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S03",
+      "title": "Bloomberg Second Measure",
+      "urls": [
+        "https://secondmeasure.com/"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Advertised coverage/history and lag choices; no authenticated file or original-vintage entitlement inspected.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S04",
+      "title": "Similarweb endpoint-specific traffic history",
+      "urls": [
+        "https://developers.similarweb.com/reference/visits-desktop",
+        "https://support.similarweb.com/hc/en-us/articles/360002219177-Similarweb-s-Data-Accuracy"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Desktop visits endpoint and modeled-data methodology; other products’ history is not interchangeable.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S05",
+      "title": "Similarweb previous data-version guide",
+      "urls": [
+        "https://support.similarweb.com/hc/en-us/articles/20413352711709-Accessing-Previous-Data-Version-via-Similarweb-API"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Guide schedules VERSION_4.0 retirement on December 31, 2024. Current old-version access was not tested.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S06",
+      "title": "Sensor Tower finance and app products",
+      "urls": [
+        "https://sensortower.com/solutions/finance",
+        "https://sensortower.com/product/mobile-app/advanced-usage-insights",
+        "https://sensortower.com/responsibly-sourced-data"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "PIT Scheduled Data Feed is advertised. This is not delivery, entitlement or forecast-quality proof.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S07",
+      "title": "Sensor Tower combined app pipeline",
+      "urls": [
+        "https://sensortower.com/product/mobile-app/app-performance-insights"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "2024 data.ai acquisition and 2025 combined modeling/pipeline context. Treat provider independence and method continuity explicitly.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S08",
+      "title": "Placer API and data version",
+      "urls": [
+        "https://docs.placer.ai/reference/faqs-1",
+        "https://docs.placer.ai/changelog/data-version-20-api-updates",
+        "https://www.placer.ai/products/api"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Processing lag and data-version changes documented. Source schema/API version is distinct from immutable observation vintages.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S09",
+      "title": "Advan documentation",
+      "urls": [
+        "https://docs.advanresearch.com/"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Weekly Patterns+ product-specific history, delivery and restatement/geofence semantics. Original delivered archives remain unverified.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S10",
+      "title": "Revelio product, FAQ and methodology",
+      "urls": [
+        "https://www.reveliolabs.com/data",
+        "https://www.reveliolabs.com/faq",
+        "https://www.data-dictionary.reveliolabs.com/methodology.html"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Cadence varies across public descriptions; standard pro-forma/PIT hierarchy and modeled workforce quantities need product-level diligence.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S11",
+      "title": "LinkUp RAW and package cadence",
+      "urls": [
+        "https://www.linkup.com/products/raw",
+        "https://data.support.linkup.com/kb/article/95-data-dictionary-macro-packages/"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Employer-site raw collection and different package delivery semantics; a removed posting does not establish a filled role.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S12",
+      "title": "Lightcast postings methods/API",
+      "urls": [
+        "https://kb.lightcast.io/en/articles/6957446-job-posting-analytics-jpa-methodology",
+        "https://docs.lightcast.io/lightcast-api/reference/overview-global-job-postings"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Periodic full-history reclassification/deduplication is a material original-vintage concern; advertised endpoint coverage is not historic taxonomy availability.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S13",
+      "title": "Public employer-board interfaces",
+      "urls": [
+        "https://docs.greenhouse.io/job-board.html",
+        "https://github.com/lever/postings-api",
+        "https://developers.ashbyhq.com/docs/public-job-posting-api"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Current published-job interfaces observed; no universal deleted-post history or downstream license inferred.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S14",
+      "title": "Panjiva source selection and API schema",
+      "urls": [
+        "https://panjiva.com/api-guide/data-selection/data-sources",
+        "https://panjiva.com/api-guide/spec"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Global-source versus individual-source history and record grain differ. Delivery/correction entitlements require verification.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S15",
+      "title": "ImportGenius and Datamyne",
+      "urls": [
+        "https://w3.importgenius.com/pricing",
+        "https://w3.importgenius.com/faq",
+        "https://www.datamyne.com/our-product/faq/what-is-the-source-of-Datamyne-global-trade-data/"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Product-specific history and receipt-based update claims; these do not establish physical-event latency or first-release versions.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S16",
+      "title": "ImportYeti and CBP confidentiality",
+      "urls": [
+        "https://www.importyeti.com/our-data",
+        "https://docs.importyeti.com/docs/getting-started",
+        "https://docs.importyeti.com/docs/reference",
+        "https://www.importyeti.com/policies/data-use",
+        "https://www.help.cbp.gov/s/article/Article-1108",
+        "https://trade.cbp.dhs.gov/aes/vessel-confidentiality-web/viewDHSPAStatement"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Website/API coverage differs; purchased-data policy has exclusions. CBP confidentiality means absence need not mean zero trade. No legal clearance claimed.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S17",
+      "title": "Census International Trade",
+      "urls": [
+        "https://www.census.gov/data/developers/data-sets/international-trade.html",
+        "https://www.census.gov/foreign-trade/data/index.html"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Headline monthly API history and port-series history differ. Aggregate statistics do not establish issuer revenue.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S18",
+      "title": "UN Comtrade",
+      "urls": [
+        "https://uncomtrade.org/docs/data-availability/",
+        "https://uncomtrade.org/docs/un-comtrade-api/",
+        "https://comtradeapi.un.org/"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Detailed documentation access was partial: official search/endpoint catalog evidence only for some pages. No authenticated series or original-vintage behavior tested.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S19",
+      "title": "Kpler and Spire Maritime",
+      "urls": [
+        "https://www.kpler.com/blog/kpler-completes-acquisition-of-spire-maritime-strengthening-maritime-intelligence-capabilities",
+        "https://developers.kpler.com/",
+        "https://servicedocs-sm.kpler.com/"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Acquisition completion announced April 25, 2025. Use current product/field entitlement; AIS is not a cargo-ownership or revenue ledger.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S20",
+      "title": "Pathmatics advertising measurement",
+      "urls": [
+        "https://sensortower.com/product/digital-advertising/pathmatics",
+        "https://sensortower.com/blog/how-does-pathmatics-work"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Modeled spend/impressions and observed creative context; no uniform cross-channel history, invoiced spend or acquisition-efficiency proof.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S21",
+      "title": "Keepa product, offers and rankings",
+      "urls": [
+        "https://keepa.com/api-docs/product-object.html",
+        "https://keepa.com/api-docs/product.html",
+        "https://keepa.com/api-docs/best-sellers.html"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Field-specific histories, refresh limits and rank/category semantics. monthlySold is a bracketed lower bound and often absent, not exact units.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S22",
+      "title": "GS1 product identity",
+      "urls": [
+        "https://www.gs1.org/1/gtinrules/en/rule/268/primary-brand",
+        "https://ref.gs1.org/standards/gtin-management/"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Brand and product changes can require a new GTIN; product succession needs explicit semantics.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S23",
+      "title": "USDA advertised grocery features",
+      "urls": [
+        "https://www.ams.usda.gov/market-news/grocerystore",
+        "https://www.ams.usda.gov/market-news/grocery-store-feature-reports-dairy-market-news"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Weekly advertised retail prices are a category/promotion control, not realized company sales or complete inventory.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S24",
+      "title": "Authorized Amazon seller data",
+      "urls": [
+        "https://developer-docs.amazon/sp-api/lang-us/docs/amazon-seller-data-access",
+        "https://developer-docs.amazon/sp-api/docs/reports-api"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Seller/authorized third-party scope; no general competitor inventory entitlement. Distributor data requires its own authorization.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S25",
+      "title": "GitHub starring API",
+      "urls": [
+        "https://docs.github.com/en/rest/activity/starring"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Official documentation states July 2026 access changes and count/history interfaces. Endpoint enforcement and authenticated results were not tested.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S26",
+      "title": "Hugging Face download counting",
+      "urls": [
+        "https://huggingface.co/docs/hub/models-download-stats"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Qualifying GET/HEAD requests depend on library/file rules; downloads are not deduplicated users, deployments or paid adoption.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S27",
+      "title": "Opportunity Insights tracker methods and revisions",
+      "urls": [
+        "https://github.com/OpportunityInsights/EconomicTracker/blob/main/docs/oi_tracker_data_documentation.md",
+        "https://github.com/OpportunityInsights/EconomicTracker/blob/main/docs/oi_tracker_data_revisions.md"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Current methods include weekly spending cadence and provisional recent observations. Moving public URLs are research-date citations, not pinned vintages.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S28",
+      "title": "Census retail controls",
+      "urls": [
+        "https://www.census.gov/retail/index.html",
+        "https://api.census.gov/data/timeseries/eits/mrts.html"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Official retail series and API; current query results do not themselves preserve each original release.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S29",
+      "title": "Apple and Google owner reporting",
+      "urls": [
+        "https://developer.apple.com/documentation/analytics-reports",
+        "https://support.google.com/googleplay/android-developer/answer/6135870?hl=en"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Authorized own-app reporting/calibration. Do not infer public competitor usage or revenue access.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S30",
+      "title": "McDonald’s 2025 Form 10-K",
+      "urls": [
+        "https://www.sec.gov/Archives/edgar/data/63908/000006390826000035/mcd-20251231.htm"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Issuer-defined comparable-sales population and franchise/accounting scope illustrate why generic panel revenue bridges fail.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S31",
+      "title": "BLS transaction-data research",
+      "urls": [
+        "https://www.bls.gov/opub/mlr/2026/article/the-value-of-transactional-data-to-a-consumer-spending-survey.htm"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "January 2026 primary study informs sampling and classification discipline; it does not validate a named commercial feed.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S32",
+      "title": "Giannone, Reichlin and Small — real-time nowcasting",
+      "urls": [
+        "https://www.federalreserve.gov/pubs/feds/2005/200542/200542pap.pdf"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Federal Reserve working paper informs release timing and ragged-edge modeling. Application to company KPIs here is a proposed research design.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S33",
+      "title": "FRED real-time periods",
+      "urls": [
+        "https://fred.stlouisfed.org/docs/api/fred/realtime_period.html"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Official temporal example: current knowledge and earlier available information differ.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S34",
+      "title": "Petersen — finance panel standard errors",
+      "urls": [
+        "https://www.kellogg.northwestern.edu/faculty/petersen/htm/papers/standarderror.html"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Author-hosted research on firm/time dependence; choose inference for the actual sample and available clusters.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S35",
+      "title": "Clark and West — nested forecast comparisons",
+      "urls": [
+        "https://www.kansascityfed.org/documents/5368/pdf-RWP05-05.pdf"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Nested MSPE comparison under stated assumptions; not a universal MAE or small-panel test.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S36",
+      "title": "Harvey and Liu — false and missed discoveries",
+      "urls": [
+        "https://people.duke.edu/~charvey/Research/Published_Papers/P143_False_and_missed.pdf"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Primary paper on multiple testing and power. C16 does not import one universal finance t-statistic hurdle.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S37",
+      "title": "Chernozhukov et al. — double/debiased machine learning",
+      "urls": [
+        "https://arxiv.org/abs/1608.00060"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Orthogonalization/cross-fitting discipline does not replace a defensible causal identification strategy.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S38",
+      "title": "Chen and Li — job-posting duration and performance",
+      "urls": [
+        "https://link.springer.com/article/10.1007/s11142-023-09797-2"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Historical research distinguishes skill-specific vacancy-duration associations; not proof of causality or future Mastermind alpha.",
+      "delivered_sample_verified": false
+    },
+    {
+      "id": "S39",
+      "title": "SEC App Annie enforcement",
+      "urls": [
+        "https://www.sec.gov/newsroom/press-releases/2021-176"
+      ],
+      "access_date": "2026-10-04",
+      "qualification": "Primary enforcement record motivates verifying data-use representations and source rights. No current vendor is alleged to repeat that conduct.",
+      "delivered_sample_verified": false
+    }
+  ],
+  "limitations": [
+    "No authenticated commercial delivery, executed license, vendor account endpoint or raw personal/transaction sample inspected.",
+    "No experimental backtest, prospective forecast or investment outcome produced.",
+    "Checked-in artifacts and source paths do not prove current runtime operation.",
+    "Detailed UN Comtrade/selected official pages had partial retrieval; unsupported precise vintage claims are withheld.",
+    "Search/path absence is bounded evidence, not proof of universal absence.",
+    "Current external documents and vendor advertisements are not immutable original-vintage archives."
+  ]
+}
