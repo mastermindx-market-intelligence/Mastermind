@@ -61,6 +61,47 @@ The above is one reviewed compatibility unit with an explicit migration. It is n
 by the current six-tool backend. Required changes to closed root/provenance law are owned by the
 existing admission/Runtime owners and remain a release gate, not a prompt-authorized exception.
 
+## Current staged implementation — H4-A before H4-B
+
+The current #1240 successor source now implements **H4-A only** in the existing pure
+`coo_principal_request.py` / `coo_principal_envelope.py` owners.
+
+H4-A establishes these source contracts without opening Runtime:
+
+- the orchestration public request contains exactly `operation_key`, `objective`,
+  `department`, `priority`, `workstream` and `business_impact`;
+- it deliberately accepts **no** caller `execution_profile`, attempt budget, write paths,
+  validation commands, tree/root/plan, branch/worktree, provider/account/model/host, release,
+  service, session or raw dispatch selector;
+- common business fields reuse the existing CEO-request validators; business impact is closed to
+  the current v2 `routine / material / critical` values;
+- bounded worker submission and governed orchestration use the **same stable request_ref and
+  intent_id** for one `work_ref + operation_key`, so changing action kind cannot mint a second
+  logical operation;
+- the action kind is separately fingerprinted. Semantic changes under one key preserve request
+  identity but move the action fingerprint, supplying the later sink with conflict/reconciliation
+  evidence rather than retry identity;
+- `derive_principal_orchestration_envelope` binds the existing
+  `PrincipalAdmissionContext`, grounding, business semantics and orchestration fingerprint under
+  the distinct source-only schema
+  `mastermind.executive_principal_orchestration.v1`;
+- the H4-A envelope has **no execution_contract**, no workspace root and no placement information.
+
+H4-A is intentionally **pre-sink / inert**. The current `ceo_intent.validate_intent` rejects this
+new orchestration schema. A regression test requires that refusal. Therefore H4-A cannot create a
+Job/root through today's CEO or bounded-principal sink even if a model can construct the public
+business request.
+
+**H4-B** is the next shared-owner compatibility unit after #1041 reaches an accepted current-base
+interface. H4-B must authenticate/authorize the role-correct principal action kind, derive the
+current host execution/profile/source/proof/placement binding from existing owners, and connect
+the H4-A envelope to #1041's existing root/domain constructor atomically. It must preserve the same
+request/intent identity and reject cross-kind or semantic drift rather than creating another root.
+
+**H4-C** later exposes only that accepted operation/status through the COO MCP/package after H1
+native profile/schema qualification. No raw CooCycle method, worker selector or provider/account
+selector becomes model-visible.
+
 ## Normal execution and consumption
 
 The principal selects an outcome and quality/evidence constraints inside its mission. Model Router

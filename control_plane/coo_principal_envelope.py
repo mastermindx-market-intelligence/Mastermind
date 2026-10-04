@@ -18,13 +18,18 @@ from typing import Any
 
 from control_plane import ceo_intent, ceo_request
 from control_plane.coo_principal_request import (
+    ORCHESTRATION_ACTION_KIND,
+    normalize_principal_orchestration_request,
     normalize_principal_request,
+    orchestration_request_fingerprint,
+    orchestration_request_ref,
     principal_intent_id,
     principal_request_ref,
 )
 
 
 INTENT_SCHEMA = "mastermind.executive_principal_intent.v1"
+ORCHESTRATION_INTENT_SCHEMA = "mastermind.executive_principal_orchestration.v1"
 ACTOR = "coo-principal"
 SEAT = "coo"
 
@@ -198,11 +203,74 @@ def derive_principal_envelope(
     }
 
 
+def derive_principal_orchestration_envelope(
+    public_request: object,
+    *,
+    context: PrincipalAdmissionContext,
+    grounding: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return one source-only governed-orchestration pre-sink bundle.
+
+    The envelope is intentionally not accepted by today's Executive sink.  It
+    carries no caller-authored execution profile, tree, placement or Runtime
+    identity.  A later reviewed host/sink unit must derive those facts from
+    existing owners before any aggregation root can be committed.
+    """
+
+    if not isinstance(context, PrincipalAdmissionContext):
+        raise TypeError("context must be PrincipalAdmissionContext")
+
+    try:
+        normalized = normalize_principal_orchestration_request(
+            public_request,
+            expected_work_ref=context.work_ref,
+        )
+        request_ref = orchestration_request_ref(normalized)
+        intent_id = principal_intent_id(request_ref)
+        request_fingerprint = orchestration_request_fingerprint(normalized)
+    except ValueError as exc:
+        raise CooPrincipalEnvelopeError(str(exc)) from exc
+
+    if normalized["workstream"] != context.work_ref:
+        raise CooPrincipalEnvelopeError(
+            "normalized workstream differs from principal admission context"
+        )
+
+    envelope = {
+        "schema": ORCHESTRATION_INTENT_SCHEMA,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "actor": ACTOR,
+        "seat": SEAT,
+        "principal_binding_digest": context.principal_binding_digest,
+        "mission_authority_ref": context.mission_authority_ref,
+        "authority_generation_digest": context.authority_generation_digest,
+        "objective": str(normalized["objective"]),
+        "department": str(normalized["department"]),
+        "priority": int(normalized["priority"]),
+        "business_impact": str(normalized["business_impact"]),
+        "workstream": str(normalized["workstream"]),
+        "grounding": _grounding(grounding),
+    }
+
+    return {
+        "request_ref": request_ref,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "normalized_request": normalized,
+        "envelope": envelope,
+    }
+
+
 __all__ = [
     "ACTOR",
     "INTENT_SCHEMA",
+    "ORCHESTRATION_INTENT_SCHEMA",
     "SEAT",
     "CooPrincipalEnvelopeError",
     "PrincipalAdmissionContext",
     "derive_principal_envelope",
+    "derive_principal_orchestration_envelope",
 ]
