@@ -54,6 +54,7 @@ from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AdapterFailureClass,
     AttentionTurnObservation,
+    AttentionCompanyReadProjection,
     AuthIdentityConfidence,
     AuthRealmFact,
     CandidateResult,
@@ -2902,10 +2903,8 @@ class CodexOperatorAdapter:
             )
         state.attention_native_turn_id = native_turn_id
         try:
-            completion = state.client.wait_notification(
-                _ATTENTION_COMPLETION_METHOD,
-                timeout=float(timeout),
-            )
+            notifications = self._attention_notifications(state, timeout=float(timeout))
+            completion = notifications[-1]
         except JsonRpcError as exc:
             if str(exc).startswith(_ATTENTION_COMPLETION_TIMEOUT_PREFIX):
                 return AttentionTurnObservation(
@@ -2949,7 +2948,23 @@ class CodexOperatorAdapter:
             completion=completion,
             terminal_status=terminal_status,
             native_turn_id=native_turn_id,
+            preceding_notifications=notifications[:-1],
         )
+
+    def _attention_notifications(
+        self, state: _GenerationState, *, timeout: float,
+    ) -> list[dict[str, Any]]:
+        # Use the existing queue owner's atomic prefix operation. A drain after
+        # completion would mix late frames with the completed attention turn.
+        if self._company_read_server(state) is not None:
+            return state.client.wait_notifications_through(
+                _ATTENTION_COMPLETION_METHOD, timeout=timeout,
+                predicate=lambda value: self._matches_attention_completion(
+                    value, provider_session_id=state.provider_session_id,
+                    native_turn_id=state.attention_native_turn_id,
+                ),
+            )
+        return [state.client.wait_notification(_ATTENTION_COMPLETION_METHOD, timeout=timeout)]
 
     @staticmethod
     def _matches_attention_completion(
@@ -2972,13 +2987,14 @@ class CodexOperatorAdapter:
             and str(completed_turn.get("id") or "").strip() == native_turn_id
         )
 
-    @staticmethod
     def _terminal_attention_observation(
+        self,
         state: _GenerationState,
         *,
         completion: object,
         terminal_status: str,
         native_turn_id: str,
+        preceding_notifications: Sequence[Mapping[str, Any]] = (),
     ) -> AttentionTurnObservation:
         pending = state.attention_request
         if pending is None:
@@ -3015,6 +3031,34 @@ class CodexOperatorAdapter:
                 terminal_ack_trailer=True,
             )
         )
+        company = None
+        server = self._company_read_server(state)
+        receipts = []
+        if server is not None and len(preceding_notifications) <= 4096:
+            for notification in preceding_notifications:
+                if notification.get("method") == "item/completed":
+                    receipt = project_company_read(
+                        notification.get("params"), server_name=server,
+                        thread_id=state.provider_session_id, turn_id=native_turn_id,
+                    )
+                    if receipt is not None:
+                        receipts.append(receipt)
+            # A single exact read is bounded evidence. Ambiguous repeated reads
+            # never select a result by position or invent consumption credit.
+            if len(receipts) == 1:
+                receipt = receipts[0]
+                company = AttentionCompanyReadProjection(
+                    target_attempt_id=pending.attempt_id,
+                    process_generation_id=state.generation.process_generation_id,
+                    binding_id=pending.binding_id,
+                    binding_generation=pending.binding_generation,
+                    provider_session_id=state.provider_session_id,
+                    provider_native_turn_id=native_turn_id,
+                    nudge_id=pending.nudge_id,
+                    consultation_ref=receipt["consultation_ref"],
+                    result_sha256=receipt["result_sha256"],
+                    native_item_sha256=receipt["native_item_sha256"],
+                )
         return AttentionTurnObservation(
             process_generation_id=state.generation.process_generation_id,
             provider_session_id=state.provider_session_id,
@@ -3023,6 +3067,7 @@ class CodexOperatorAdapter:
             accepted=True,
             delivered=True,
             wake_ack_projection=wake_ack_projection,
+            company_read_projection=company,
         )
 
     def _reconcile_late_attention_completion(
@@ -3036,10 +3081,8 @@ class CodexOperatorAdapter:
             return None
         while True:
             try:
-                completion = state.client.wait_notification(
-                    _ATTENTION_COMPLETION_METHOD,
-                    timeout=0.0,
-                )
+                notifications = self._attention_notifications(state, timeout=0.0)
+                completion = notifications[-1]
             except Exception:
                 # Absence, transport loss, and malformed reader behavior are all
                 # fail-closed: none is evidence that the provider completed.
@@ -3056,6 +3099,7 @@ class CodexOperatorAdapter:
                         completion=completion,
                         terminal_status=terminal_status,
                         native_turn_id=native_turn_id,
+                        preceding_notifications=notifications[:-1],
                     )
 
     def read_events(

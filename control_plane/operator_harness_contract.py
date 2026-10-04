@@ -14,7 +14,7 @@ Pure architecture freeze.  This module must not:
 contract is the rich-operator interface.  Implementations belong to a later
 commission; P1B must not invent types or method semantics that are missing here.
 
-Interface version: ``mastermind.operator_harness/v1``.
+Interface version: ``mastermind.operator_harness/v2``.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, get_type_hints, runtime_checkable
 
 
-OPERATOR_HARNESS_INTERFACE_VERSION = "mastermind.operator_harness/v1"
+OPERATOR_HARNESS_INTERFACE_VERSION = "mastermind.operator_harness/v2"
 ATTENTION_TURN_INSTRUCTION = (
     "Mastermind Wake: recover Executive/Agent OS state for opaque identities and "
     "continue within existing authority. This nudge "
@@ -1218,6 +1218,41 @@ class WorkerLocalWakeAckProjection:
 
 
 @dataclass(frozen=True)
+class AttentionCompanyReadProjection:
+    """Digest-only native read evidence; neither Wake ACK nor consumption."""
+
+    target_attempt_id: str
+    process_generation_id: str
+    binding_id: str
+    binding_generation: int
+    provider_session_id: str
+    provider_native_turn_id: str
+    nudge_id: str
+    consultation_ref: str
+    result_sha256: str
+    native_item_sha256: str
+
+    def __post_init__(self) -> None:
+        for name in ("target_attempt_id", "process_generation_id",
+                     "provider_session_id", "provider_native_turn_id", "nudge_id"):
+            value = getattr(self, name)
+            if type(value) is not str or COMMAND_ID_RE.fullmatch(value) is None:
+                raise ValueError(f"AttentionCompanyReadProjection.{name} is malformed")
+        if (type(self.binding_id) is not str or not self.binding_id.startswith("bind-")
+                or COMMAND_ID_RE.fullmatch(self.binding_id) is None):
+            raise ValueError("Company read binding id is malformed")
+        if type(self.binding_generation) is not int or self.binding_generation < 1:
+            raise ValueError("Company read binding generation is malformed")
+        if (type(self.consultation_ref) is not str
+                or re.fullmatch(r"consult-[0-9a-f]{32}", self.consultation_ref) is None):
+            raise ValueError("Company read consultation reference is malformed")
+        for name in ("result_sha256", "native_item_sha256"):
+            value = getattr(self, name)
+            if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise ValueError(f"AttentionCompanyReadProjection.{name} is malformed")
+
+
+@dataclass(frozen=True)
 class AttentionTurnObservation:
     """Closed evidence from one attention-only turn on the current writer.
 
@@ -1233,6 +1268,10 @@ class AttentionTurnObservation:
     accepted: bool
     delivered: bool
     wake_ack_projection: WorkerLocalWakeAckProjection | None = field(
+        default=None,
+        repr=False,
+    )
+    company_read_projection: AttentionCompanyReadProjection | None = field(
         default=None,
         repr=False,
     )
@@ -1268,6 +1307,14 @@ class AttentionTurnObservation:
                 or projection.nudge_id != self.nudge_id
             ):
                 raise ValueError("attention ACK projection identity disagrees with observation")
+        company = self.company_read_projection
+        if company is not None:
+            if not isinstance(company, AttentionCompanyReadProjection) or not self.delivered:
+                raise ValueError("Company read projection requires typed exact delivery")
+            if any(getattr(company, name) != getattr(self, name) for name in
+                   ("process_generation_id", "provider_session_id",
+                    "provider_native_turn_id", "nudge_id")):
+                raise ValueError("Company read projection identity disagrees with observation")
 
 
 @dataclass(frozen=True)
@@ -2885,6 +2932,7 @@ __all__ = [
     "AuthRealmRequirement",
     "AdapterFailureClass",
     "AttentionTurnObservation",
+    "AttentionCompanyReadProjection",
     "AttemptBoundary",
     "AttemptExecutionMode",
     "CANONICAL_SESSION_FIELD",
