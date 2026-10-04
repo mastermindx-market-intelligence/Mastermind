@@ -4,12 +4,12 @@
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "parent_carrier": "Mastermind#1183",
   "audited_commit": "11a64ce93328d5248967987be0d2a51883765797",
-  "prepared_at": "2026-10-04T03:43:30.652427+00:00",
+  "prepared_at": "2026-10-04T05:36:43.392348+00:00",
   "status": "AWAITING_INDEPENDENT_AND_OWNER_ADMISSION",
   "files": {
     "ADMISSION_STATUS.md": {
-      "sha256": "d34678ebef246f6cade987b781f99feaf9b09d5de6954f0bf2acb34c7258c05b",
-      "bytes": 15977
+      "sha256": "8a6616468b3debe3b06e3f418ec108f767bba753c27b7315f1c2fa19c898dbed",
+      "bytes": 16580
     },
     "BASELINE_REPLAY_METHOD.json": {
       "sha256": "08fc591ae58894c6fd8489caabf86ccc9563f86287e9d7004f6e8e475cbac1f6",
@@ -27,6 +27,14 @@
       "sha256": "9da89d63dbf96b25092944c73d672d8ec9000d8c013cb8454abe325b269c8b87",
       "bytes": 3090
     },
+    "CORPUS_PRESELECTION_CANDIDATE.md": {
+      "sha256": "89bf90ea422ea9361b81e861991c8a06a94912048671964be25bb52702cfecc3",
+      "bytes": 7346
+    },
+    "CORPUS_PRESELECTION_VALIDATION.md": {
+      "sha256": "24a348c98a6eaa7f57c614b1bdc5e50e0d86f03b2256f428913a17c643411a91",
+      "bytes": 961
+    },
     "PREVIEW_EXECUTION_HOLD.md": {
       "sha256": "32ba096d0c57c8b15968d9d4b2a2e4cb6c8c83cd9c75c5e869cf761e966686f6",
       "bytes": 3692
@@ -36,8 +44,8 @@
       "bytes": 4086
     },
     "README.md": {
-      "sha256": "8094b94bee874477cbad20e3aa537f4572a14b86aac8d798f21b022af35074e6",
-      "bytes": 5345
+      "sha256": "b31606b945d2628ec35fce64809cdc037deb0876c5c339c3bf01d263fdddae6f",
+      "bytes": 5721
     },
     "SEMANTIC_ADMISSION.md": {
       "sha256": "4513287a795f14e4841919a203235e8372f8b4246d18d6508428bd18b913f24d",

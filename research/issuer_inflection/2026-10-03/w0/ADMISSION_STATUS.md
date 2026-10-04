@@ -82,3 +82,7 @@ CI #5992 is confirmed FAILED, not pending. All 150 identity-literal findings ori
 ## Latest source-only continuation
 
 The browser-preview source was drafted, but its first build was platform-blocked before execution. Only static Python/JavaScript syntax checks ran. See PREVIEW_EXECUTION_HOLD.md and evidence/PREVIEW_SOURCE_STATIC_CHECK.json. No new runnable/browser capability is asserted; all owner/admission/release gates above remain. The source and scope stay on #1195 under the existing operation.
+
+## Corpus freeze progress
+
+A metadata-only 30-issuer preselection is now frozen in `CORPUS_PRESELECTION_CANDIDATE.md`: 12 beta-validation candidates across four proxies, 12 prospective temporal-holdout candidates across five, and six reserves. AAPL/P&G are excluded as development-exposed; homebuilder/IMCE remains development-family/reserve, not untouched holdout. No candidate body/outcome was inspected and no trial was registered. This satisfies preselection progress only; actual event/revision IDs, source/rights qualification and Research/Brain serialized registration/readback remain W0 gates.

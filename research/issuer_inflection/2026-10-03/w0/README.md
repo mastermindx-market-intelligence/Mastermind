@@ -43,3 +43,7 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 ## Unexecuted browser-preview source
 
 `PREVIEW_EXECUTION_HOLD.md` records the new three-file display draft and the blocked build. Python/JavaScript syntax was checked without importing or running the renderer. No HTML/browser result exists in this evidence set. Do not retry the blocked build absent actual platform recovery; this draft is not a Terminal/Macro integration or W1 acceptance.
+
+## Corpus preselection
+
+`CORPUS_PRESELECTION_CANDIDATE.md` freezes a 30-issuer metadata-only candidate universe and deterministic split/reserve law before any holdout body or outcome inspection. It is not registered; `CORPUS_PRESELECTION_VALIDATION.md` records the leakage/identity checks. Source/rights/event eligibility and actual registry write/readback remain mandatory.
