@@ -201,8 +201,11 @@ decision:
   unlocked at preboot over Remote Login, never that anything can reach it. The
   checker opens no socket and performs no reachability probe, so external
   network path, bastion, and tunnel reachability remain a separate acceptance
-  journey with its own evidence. A green `preboot_remote_unlock` plus an
-  unreachable network is still an unrecoverable host.
+  journey with its own evidence. The reviewed operator-side journey is
+  `docs/FLEET_EXTERNAL_RECOVERY.md`; before unattended travel its external
+  route probe must be current alongside this local readiness report. A green
+  `preboot_remote_unlock` plus an unreachable network is still an
+  unrecoverable host.
 - **`auto_restart_after_power_loss` stays independent.** Preboot unlock decides
   whether a returning host can be opened; `autorestart` decides whether it
   returns at all. Neither substitutes for the other, and a host missing both
