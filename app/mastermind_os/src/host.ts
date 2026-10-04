@@ -274,10 +274,17 @@ export async function createNativeClient(
   };
   const listeners = new Set<(state: AuthState) => void>();
   let epoch = 0;
+  let readGeneration = new AbortController();
+  const invalidateReads = () => {
+    epoch++;
+    const previous = readGeneration;
+    readGeneration = new AbortController();
+    previous.abort();
+  };
   let control = 0;
   const update = (raw: unknown) => {
     current = authState(raw);
-    epoch++;
+    invalidateReads();
     for (const listener of listeners) listener({ ...current });
   };
   await listen("mastermind-auth-state", (event) => {
@@ -302,10 +309,41 @@ export async function createNativeClient(
     args?: Record<string, unknown>,
   ) {
     const started = epoch;
-    if (signal.aborted) throw new Error("READ_CANCELLED");
-    const raw = await invoke(command, args);
-    if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
-    return raw;
+    const generation = readGeneration.signal;
+    if (signal.aborted || generation.aborted) throw new Error("READ_CANCELLED");
+    // Tauri invoke has no AbortSignal parameter. Settle this read locally on
+    // cancellation without claiming the native request stopped or issuing any
+    // second native command. Both late outcomes remain observed below.
+    return new Promise<unknown>((resolve, reject) => {
+      let settled = false;
+      const finish = (failed: boolean, value: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        generation.removeEventListener("abort", onAbort);
+        if (failed) reject(value);
+        else resolve(value);
+      };
+      const onAbort = () => finish(true, new Error("READ_CANCELLED"));
+      const onFailure = (error: unknown) => {
+        if (signal.aborted || started !== epoch) onAbort();
+        else finish(true, error);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      generation.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted || generation.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        Promise.resolve(invoke(command, args)).then((raw) => {
+          if (signal.aborted || started !== epoch) onAbort();
+          else finish(false, raw);
+        }, onFailure);
+      } catch (error) {
+        onFailure(error);
+      }
+    });
   }
   return {
     getState: () => ({ ...current }),
@@ -317,10 +355,11 @@ export async function createNativeClient(
       };
     },
     async signIn() {
-      epoch++;
+      invalidateReads();
       const ticket = ++control;
+      const started = epoch;
       const result = await invoke("sign_in");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     async signOut() {
       const ticket = ++control;
@@ -330,8 +369,9 @@ export async function createNativeClient(
         acquisition: false,
         content: false,
       });
+      const started = epoch;
       const result = await invoke("sign_out");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
     readWork: ({ signal }) => read("read_work", signal),
