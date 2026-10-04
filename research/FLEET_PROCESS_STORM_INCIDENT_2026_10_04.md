@@ -77,7 +77,7 @@ Canonical runtime now reads back as `a9eb2ea9...`.
 
 The existing publisher is `ext/support_bundle.py`, schema `remote-support-code.v1`. It owns the fixed source closure, publication flock, content digest, sealed release tree, copied-byte rehash, and final release verification.
 
-A hardened immutable code release was published on Mini2 without changing its independently drifted routing policy and without launching a provider task:
+A hardened immutable code release was published and independently verified on every canonical lane target (Mini1, Mini2, Mini3, Ubuntu0, Ubuntu1, and Ubuntu2) without launching a provider task. Publication was code-only; target routing policies were not mutated:
 
 ```text
 support digest:
@@ -93,7 +93,7 @@ fixed source files:
 21
 ```
 
-Normal `remote_sub.sh` computes the support digest, publishes the immutable bundle on the selected host, and launches `remote_sub_exec.py` from `support-releases/$SUPPORT_DIGEST/ext` before provider execution.
+Normal `remote_sub.sh` computes the support digest, publishes the immutable bundle on the selected host, and launches `remote_sub_exec.py` from `support-releases/$SUPPORT_DIGEST/ext` before provider execution. Pre-publishing the accepted digest removes the first-next-launch publication dependency from the current lane fleet.
 
 ## M1 execution quarantine
 
