@@ -82,6 +82,27 @@ local acquisition time explicitly. Full Result integration additionally needs
 an unmodified producer-compatible Mission v3 / Result pair or an authenticated
 host test; the mutated pairs in unit tests qualify mismatch logic only.
 
+`mission-adapter.ts` supplies that pure Mission presentation seam. Call
+`captureMissionOfficeRead` before the existing host read, using the host's actual
+`invalidationGeneration()` and the exact current selection. After the host read
+and existing decoder complete, call `completeMissionOfficeRead` with a fresh
+host/selection context and the local acquisition-completion timestamp. It does
+not acquire, cache, authorize or submit anything itself.
+
+An `observed` result supplies a snapshot and context that must be committed
+together. A `discarded` result never replaces the current view: auth/target
+changes and a newer accepted owner revision fence the old response. Invalid or
+unavailable current-context observations clear the source revision and protected
+value. This prevents an old failure or response from overwriting newer evidence.
+
+The reference is the owner's Control Room document digest, explicitly labelled
+as such. The revision is a tagged, ordered tuple of the decoded owner observation,
+including Control Room and runtime identity/generation/digests. Local acquisition
+time, title and UI counters do not contribute to revision identity. The source
+inspector labels that local time separately from an owner-reported clock.
+Programs, Result, Conversation and all unsupplied session/binding identity remain
+with their existing qualification gates; this adapter does not fill those gaps.
+
 ## Verification and integration
 
 From `app/mastermind_os`, run:

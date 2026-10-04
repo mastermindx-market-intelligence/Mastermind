@@ -15,8 +15,10 @@ export interface ProjectionContext {
 export interface SourceClaim {
   owner: string;
   ref: string | null;
+  ref_kind?: "CONTROL_ROOM_DOCUMENT_DIGEST";
   revision: string | null;
   observed_at: string | null;
+  observed_at_kind?: "LOCAL_ACQUISITION";
   state: SourceState;
   coverage: string;
 }

@@ -122,8 +122,8 @@ export function MetaCeoOffice({ projection, draft, onDraftChange }: MetaCeoOffic
     {sourcesOpen && <aside className="office-panel office-evidence" aria-label="Source evidence" onKeyDown={event => { if (event.key === "Escape") { setSourcesOpen(false); sourcesButton.current?.focus(); } }}>
       <h2>Exact source provenance</h2>
       {sources.map(([name, read]) => <div key={name}><h3>{name} · {read.source.owner}</h3>
-        <p className="office-ref">{read.source.ref ?? "Ref unavailable"} · revision {read.source.revision ?? "unknown"}</p>
-        <p>Observed {read.source.observed_at ?? "time unknown"} · {read.reason ?? "Owner read supplied"}</p></div>)}
+        <p className="office-ref">{read.source.ref_kind === "CONTROL_ROOM_DOCUMENT_DIGEST" ? "Control Room document digest · " : ""}{read.source.ref ?? "Ref unavailable"} · revision {read.source.revision ?? "unknown"}</p>
+        <p>{read.source.observed_at_kind === "LOCAL_ACQUISITION" ? "Locally acquired " : "Observed "}{read.source.observed_at ?? "time unknown"} · {read.reason ?? "Owner read supplied"}</p></div>)}
       {mission && <details><summary>Owner evidence and missingness</summary><pre>{JSON.stringify({
         program: mission.program.evidence, principal: mission.principal.evidence,
         execution: mission.execution.evidence, transport: mission.transport.evidence,

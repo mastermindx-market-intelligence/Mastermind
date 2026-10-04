@@ -55,6 +55,17 @@ describe("Daily Office consumer", () => {
     expect((screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement).value).toBe("Keep the exact session context.");
   });
 
+  it("labels a receipt digest and local acquisition time without calling them an owner clock or session ref", () => {
+    const reads = input();
+    reads.mission!.source.ref_kind = "CONTROL_ROOM_DOCUMENT_DIGEST";
+    reads.mission!.source.observed_at_kind = "LOCAL_ACQUISITION";
+    render(<MetaCeoOffice projection={projectOffice(reads, context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Review sources" }));
+    const evidence = screen.getByRole("complementary", { name: "Source evidence" });
+    expect(evidence.textContent).toContain("Control Room document digest");
+    expect(evidence.textContent).toContain("Locally acquired 2026-10-03T10:00:00Z");
+  });
+
   it("clears an obsolete private preview synchronously on auth-generation change", () => {
     const { rerender } = render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "Private draft", context }} onDraftChange={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Review direction preview" }));
