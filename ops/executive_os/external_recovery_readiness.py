@@ -154,6 +154,7 @@ class RouteSpec:
     gateway_host_key_alias: str | None
     target_host: str
     target_user: str
+    target_host_key_alias: str | None
     identity_file: Path
 
 
@@ -210,6 +211,7 @@ def build_route_spec(
     target_host: str,
     target_user: str,
     identity_file: str,
+    target_host_key_alias: str | None = None,
     home: Path | None = None,
 ) -> RouteSpec:
     if route_ref is not None and _ROUTE_REF_RE.fullmatch(route_ref) is None:
@@ -225,6 +227,11 @@ def build_route_spec(
         ),
         target_host=_token(target_host, _HOST_RE),
         target_user=_token(target_user, _USER_RE),
+        target_host_key_alias=(
+            None
+            if target_host_key_alias is None
+            else _token(target_host_key_alias, _HOST_RE)
+        ),
         identity_file=_identity_file(identity_file, home=home),
     )
 
@@ -272,6 +279,8 @@ def target_command(spec: RouteSpec) -> list[str]:
     proxy.extend(["-W", "%h:%p", f"{spec.gateway_user}@{spec.gateway_host}"])
 
     command = _common_ssh(spec.identity_file)
+    if spec.target_host_key_alias is not None:
+        command.extend(["-o", f"HostKeyAlias={spec.target_host_key_alias}"])
     command.extend(
         [
             "-o",
@@ -441,6 +450,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--gateway-host-key-alias")
     parser.add_argument("--target-host", required=True)
     parser.add_argument("--target-user", required=True)
+    parser.add_argument("--target-host-key-alias")
     parser.add_argument("--identity-file", required=True)
     return parser
 
@@ -456,6 +466,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             target_host=args.target_host,
             target_user=args.target_user,
             identity_file=args.identity_file,
+            target_host_key_alias=args.target_host_key_alias,
         )
         report = probe_external_recovery(spec)
         sys.stdout.buffer.write(canonical_json(report))
