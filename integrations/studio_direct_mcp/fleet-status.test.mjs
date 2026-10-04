@@ -368,8 +368,13 @@ async function fabricFixture(owner) {
     .map((mode) => {
       const view = fabricView(mode, [
         fabricRow('m2', mode, {roles:['seat'], seat:true, eligible:mode === 'grok'}),
+        fabricRow('mb', mode, {roles:['candidate'], eligible:false, candidateExcluded:true}),
         fabricRow('mini1', mode, {roles:['lanes'], eligible:mode === 'go-codex'}),
         fabricRow('bm1', mode, {roles:['lanes-shadow'], eligible:false, candidateExcluded:true}),
+        // Current travel policy can temporarily turn the MacBook shadow key
+        // from lanes-shadow into candidate; it must still never project as a
+        // second physical computer.
+        fabricRow('bmb', mode, {roles:['candidate'], eligible:false, candidateExcluded:true}),
       ]);
       return `${mode}) printf '%s\\n' '${JSON.stringify(view)}' ;;\n`;
     })
@@ -407,11 +412,15 @@ test('physical fleet projection is advisory, bounded, and hides owner internals'
   assert.deepEqual(result.issues, []);
   assert.equal(result.physicalFleet.schema, 'mastermind.studio_fleet_hosts.v1');
   assert.equal(result.physicalFleet.scope, 'subagent-fabric-registered-hosts');
-  assert.equal(result.physicalFleet.hostCount, 2);
+  assert.equal(result.physicalFleet.hostCount, 3);
   assert.deepEqual(
     result.physicalFleet.hosts.map((row) => row.hostRef),
-    ['m2', 'mini1'],
+    ['m2', 'mb', 'mini1'],
   );
+  const macbook = result.physicalFleet.hosts.find((row) => row.hostRef === 'mb');
+  assert.equal(macbook.title, 'MacBook Pro — Mobile Computer');
+  assert.equal(result.physicalFleet.hosts.some((row) => row.hostRef === 'bmb'), false);
+  assert.equal(result.physicalFleet.hosts.some((row) => row.hostRef === 'bm1'), false);
 
   const m2 = result.physicalFleet.hosts.find((row) => row.hostRef === 'm2');
   assert.equal(m2.title, 'M2 Studio — Lead Computer');

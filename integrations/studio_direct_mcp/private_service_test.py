@@ -649,6 +649,40 @@ class TestBuildConfig(unittest.TestCase):
 
 
 class TestTailnetFabricConfig(unittest.TestCase):
+    def test_both_fabric_routes_stage_with_tailnet_gateway_and_verify_exact_install(self):
+        for account, port in (("fabric-read", 45117), ("fabric-design", 45118)):
+            with self.subTest(account=account), tempfile.TemporaryDirectory() as raw:
+                tmp = Path(raw)
+                home = tmp / "home"
+                home.mkdir(parents=True, exist_ok=True)
+                (home / "Library" / "LaunchAgents").mkdir(parents=True, exist_ok=True)
+                src = _make_source(tmp)
+                node = _make_node(tmp)
+                backend = _make_backend(tmp)
+                paper_sha = _seed_paper_runtime(home)
+                args = _stage_args(src, node, backend, account, port)
+                args.public_url = "https://m2.example-tailnet.ts.net"
+                with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                     mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                     mock.patch.object(svc, "_run", CmdRecorder()):
+                    rc, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+                    self.assertEqual(rc, 0)
+                    roots = svc._build_runtime_roots(account)
+                    _seed_node_modules(roots)
+                    manifest = svc._verify_staged_install(
+                        account,
+                        _label_for(account),
+                        roots,
+                        require_runtime_seal=False,
+                    )
+                self.assertEqual(manifest["account"], account)
+                self.assertEqual(roots["gateway"].name, "tailnet-gateway.mjs")
+                plist = plistlib.loads(roots["plist"].read_bytes())
+                self.assertEqual(
+                    Path(plist["ProgramArguments"][1]).name,
+                    "tailnet-gateway.mjs",
+                )
+
     def test_only_fabric_routes_may_bind_exact_tailnet_origin(self):
         for account in ("fabric-read", "fabric-design"):
             with self.subTest(account=account):

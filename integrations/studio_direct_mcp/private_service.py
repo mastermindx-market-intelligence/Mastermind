@@ -1161,7 +1161,7 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
     expected_gateway_name = (
         TAILNET_GATEWAY_NAME
-        if account == TAILNET_FABRIC_ACCOUNT
+        if account in TAILNET_FABRIC_ACCOUNTS
         else PRIVATE_GATEWAY_NAME
     )
     if Path(expected_argv[1]).name != expected_gateway_name:

@@ -34,6 +34,7 @@ const HOST_TITLES = Object.freeze({
   ubuntu2: 'Ubuntu 2 — Compute Worker',
   pc: 'Windows/WSL PC — CI + Local Models',
 });
+const SCHEDULER_SHADOW_HOST_REFS = new Set(['bm1', 'bmb']);
 
 export const STUDIO_FLEET_STATUS_TOOL = Object.freeze({
   name: 'studio_fleet_status',
@@ -427,7 +428,10 @@ function projectFabricRow(row, mode) {
 function mergeFabricRows(projectedRows) {
   const hosts = new Map();
   for (const row of projectedRows) {
-    if (row.roles.includes('lanes-shadow')) continue;
+    // bm1/bmb are durable scheduler aliases for the M1/MacBook physical hosts.
+    // Their temporary role can change (for example during a travel hold), so
+    // suppress them by their established registry refs as well as role.
+    if (SCHEDULER_SHADOW_HOST_REFS.has(row.hostRef) || row.roles.includes('lanes-shadow')) continue;
     const existing = hosts.get(row.hostRef);
     if (!existing) {
       hosts.set(row.hostRef, {
