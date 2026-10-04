@@ -182,6 +182,9 @@ def test_installed_codex_send_uses_same_dialogue_writer_without_provider_attenti
     writer_type = dialogue_reply.AgentDialogueContinueWriter
     monkeypatch.setattr(dialogue_reply, "AgentDialogueContinueWriter",
                         lambda resolver, **kwargs: writer_type(resolver, service_call=relay, **kwargs))
+    returns_type = runtime_return.RuntimeSessionReturn
+    monkeypatch.setattr(runtime_return, "RuntimeSessionReturn",
+                        lambda *args, **kwargs: returns_type(*args, service_call=relay, **kwargs))
     gate = [True]
     owner = installed.build_runtime_session_bridge(
         seed.runtime, dialogue_socket_path=Path("/tmp/fixture-relay.sock"),
@@ -214,8 +217,13 @@ def test_installed_codex_send_uses_same_dialogue_writer_without_provider_attenti
         gate[0] = False
         assert (await call("session_targets", {"kind": "codex"}))["data"] == []
         result = await call("session_send", args)
-        assert result["error"]["code"] == "binding_unavailable"
-        assert len(calls) == before
+        # An exact committed retry is a read, even after owner disarm. It
+        # cannot revive the target, submit another CONTINUE or repeat attention.
+        assert result["ok"] is True, result
+        assert result["data"]["carrier"]["action"] == "DUPLICATE"
+        assert result["data"]["attention"] == {"state": "EFFECT_UNKNOWN"}
+        assert len(calls) == before + 1
+        assert len(committed) == 1
     asyncio.run(run())
 
 

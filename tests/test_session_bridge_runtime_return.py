@@ -404,3 +404,131 @@ def test_native_reply_survives_only_its_own_continue_wake(setup, fault):
         assert s.service.items[1]["message"]["reply_to_message_key"] == s.service.items[0]["message"]["message_key"]
         assert read(s, ref)["text"] == "The bounded finding is confirmed."
         assert len([call for call in s.service.calls if call["operation"] == "send_message"]) == 1
+
+def original_predecessor(s):
+    return build_message_v2({
+        "schema": MESSAGE_SCHEMA_V2, "message_key": s.binding.reply_to_message_key,
+        "message_type": "RESULT", "work_ref": s.binding.work_ref,
+        "commission_ref": dict(s.binding.commission_ref), "session_ref": s.binding.session_ref,
+        "actor_ref": dict(s.binding.current_writer), "reply_to_message_key": None,
+        "applies_to": dict(s.binding.applies_to), "summary": "Original bounded result.",
+        "body": {"status": "PASS", "result": "Original fixture result."},
+        "evidence_refs": [], "requires_response": False, "created_at": "2026-10-01T20:00:00Z",
+    })
+
+
+def reconcile(s, principal=None, args=None):
+    return asyncio.run(s.owner.reconcile_existing_send(
+        s.projection if principal is None else principal, s.args if args is None else args))
+
+
+@pytest.mark.parametrize("target_gone", [False, True])
+def test_exact_send_retry_after_wake_and_child_reply_is_read_only(setup, monkeypatch, target_gone):
+    s = setup
+    use_real_physical_projection(s)
+    def advance(request):
+        seed_wake(s, advanced_identity(s,
+            parent_fingerprint=s.target.physical.identity.parent_fingerprint,
+            predecessor_message_key=request["message_key"],
+            predecessor_message_fingerprint=request["fingerprint"], target_seat="coo"))
+    ref = populate(s, before_reply=advance)
+    s.service.items.insert(0, {"message": original_predecessor(s), "primary_ts": "1788000000.123456"})
+    before_events = s.runtime.events.list_events()
+    sends = sum(c["operation"] == "send_message" for c in s.service.calls)
+    original = s.service.items[1]["message"]
+    if target_gone:
+        def gone(*args, **kwargs):
+            raise AssertionError("reconciliation must not resolve or revive a live target")
+        monkeypatch.setattr(s.owner, "_target", gone)
+        monkeypatch.setattr(Runtime, "current_harness_binding_source", gone)
+    assert bind(s) == ref
+    receipt = reconcile(s)
+    assert receipt == {"reply_committed": True, "action": "DUPLICATE",
+        "message_key": original["message_key"], "fingerprint": original["fingerprint"],
+        "thread_ts": s.binding.thread_ts}
+    assert s.runtime.events.list_events() == before_events
+    assert sum(c["operation"] == "send_message" for c in s.service.calls) == sends
+
+
+def test_provenance_alone_does_not_claim_committed_continuation(setup):
+    s = setup
+    assert reconcile(s) is None and not s.service.calls
+    bind(s)
+    s.service.items = [{"message": original_predecessor(s), "primary_ts": "1788000000.123456"}]
+    assert reconcile(s) is None
+    assert [c["operation"] for c in s.service.calls] == ["read_thread"]
+
+
+@pytest.mark.parametrize("fault", [
+    "duplicate", "body", "predecessor", "context", "other_reply", "missing_predecessor",
+    "fingerprint", "historical", "mutated", "transport", "principal_expiry",
+])
+def test_uncertain_send_retry_never_falls_through_to_effects(setup, fault):
+    s = setup
+    populate(s)
+    s.service.items.insert(0, {"message": original_predecessor(s), "primary_ts": "1788000000.123456"})
+    request = copy.deepcopy(s.service.items[1]["message"])
+    if fault == "duplicate":
+        s.service.items.append(copy.deepcopy(s.service.items[1]))
+    elif fault in {"body", "predecessor", "context", "other_reply", "fingerprint"}:
+        if fault == "body": request["body"]["instruction"] = "Different bounded request."
+        elif fault == "predecessor": request["reply_to_message_key"] = "asd-other-predecessor"
+        elif fault == "context": request["work_ref"] = "WS:FOREIGN"
+        elif fault == "other_reply": request["message_key"] = "asd-other-continue"
+        if fault == "fingerprint":
+            request["fingerprint"] = "0" * 64
+        else:
+            request.pop("fingerprint")
+            request = build_message_v2(request)
+        s.service.items[1]["message"] = request
+    elif fault == "missing_predecessor":
+        s.service.items.pop(0)
+    original_service = s.owner.service_call
+    async def faulty_service(path, payload):
+        if fault == "transport":
+            raise OSError("read unavailable")
+        result = await original_service(path, payload)
+        if fault == "historical": result["result"]["historical_messages"] = [{}]
+        elif fault == "mutated": result["result"]["mutated_count"] = 1
+        elif fault == "principal_expiry":
+            s.projection = dataclasses.replace(s.projection, expires_at=1)
+            # Revalidation checks the same authenticated object, so advance the clock.
+            module.time.time = lambda: 9999999999
+        return result
+    s.owner.service_call = faulty_service
+    sends = sum(c["operation"] == "send_message" for c in s.service.calls)
+    # Clock monkeypatch is scoped separately to avoid mutating the global time module.
+    original_clock = module.time.time
+    try:
+        with pytest.raises(BridgeError, match="could not be reconciled"):
+            reconcile(s)
+    finally:
+        module.time.time = original_clock
+    assert sum(c["operation"] == "send_message" for c in s.service.calls) == sends
+
+
+@pytest.mark.parametrize("fault", ["principal", "input", "target", "root", "envelope"])
+def test_send_retry_rejects_foreign_or_changed_provenance_before_io(setup, monkeypatch, fault):
+    s = setup
+    bind(s)
+    principal, args = s.projection, s.args
+    if fault == "principal":
+        principal = dataclasses.replace(principal, subject_digest="4" * 64)
+    elif fault == "input":
+        args = {**args, "instruction": "Changed payload."}
+    elif fault == "target":
+        args = {**args, "target_ref": "codex:" + "8" * 64}
+    else:
+        lookup = s.runtime.events.get_event_by_command_id
+        def changed(command):
+            event = lookup(command)
+            if event is None:
+                return event
+            value = copy.deepcopy(event.payload)
+            if fault == "root": value["root_event_sha256"] = "0" * 64
+            else: value["extra"] = "untrusted"
+            return dataclasses.replace(event, payload=value)
+        monkeypatch.setattr(s.runtime.events, "get_event_by_command_id", changed)
+    with pytest.raises(BridgeError):
+        reconcile(s, principal=principal, args=args)
+    assert not s.service.calls

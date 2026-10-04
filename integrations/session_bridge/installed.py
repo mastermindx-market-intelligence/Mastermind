@@ -249,7 +249,14 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
         return values
 
     async def send(principal, arguments):
+        committed = await returns.reconcile_existing_send(principal, arguments)
         read_ref = returns.bind_request(principal, arguments)
+        if committed is not None:
+            # Reconciliation reads the original carrier only; it never revives a
+            # worker or repeats attention after a lost response/reconnection.
+            return {"target_ref": arguments["target_ref"], "reply_committed": True,
+                    "carrier": committed, "attention": {"state": "EFFECT_UNKNOWN"},
+                    "read_ref": read_ref}
         result = await _maybe(router(
             arguments["target_ref"], arguments["instruction"],
             arguments["stop_condition"], arguments["operation_key"]))

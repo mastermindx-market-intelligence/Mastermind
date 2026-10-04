@@ -163,6 +163,9 @@ class RuntimeSessionReturn:
         """Record exact provenance; never assert that a carrier was committed."""
         args = validate_tool_arguments("session_send", arguments)
         identity = _principal(principal, submit=True)
+        prior = self._existing_request(args, identity)
+        if prior is not None:
+            return prior[1]["read_ref"]
         try:
             target, binding = self._target(args["target_ref"])
         except BridgeError:
@@ -224,7 +227,91 @@ class RuntimeSessionReturn:
                     payload=payload, command_id=command_id)
         return read_ref
 
-    def _request(self, read_ref: str):
+    def _existing_request(self, args, identity):
+        """Authenticate immutable provenance without requiring a live worker."""
+        read_ref = "session-reply-" + _request_key(args["operation_key"])
+        event = self.runtime.events.get_event_by_command_id(
+            _PREFIX + _request_key(args["operation_key"]))
+        if event is None:
+            return None
+        try:
+            event, value = self._stored_request(read_ref)
+            if (value["principal"] != identity
+                    or value["target_ref"] != args["target_ref"]
+                    or value["operation_key"] != args["operation_key"]
+                    or value["input_sha256"] != _digest({
+                        k: args[k] for k in ("instruction", "stop_condition")})):
+                raise ValueError("original request changed")
+            return event, value
+        except Exception:
+            raise BridgeError("operation_carrier_conflict",
+                              "continuation binding is unavailable") from None
+
+    async def reconcile_existing_send(self, principal, arguments):
+        """Read the original carrier; a duplicate never re-enters effect owners.
+
+        REQUESTED provenance alone proves no effect. Only the exact canonical
+        CONTINUE permits a duplicate receipt. An unreadable or changed carrier
+        cannot fall through to a resend.
+        """
+        args = validate_tool_arguments("session_send", arguments)
+        identity = _principal(principal, submit=True)
+        prior = self._existing_request(args, identity)
+        if prior is None:
+            return None
+        event, value = prior
+        try:
+            context = {**value["context"], "actor_ref": {
+                "kind": "executive_surface", "seat": "ceo", "reasoning_surface": "chatgpt"}}
+            response = await self.service_call(self.socket_path, {
+                "version": CONTROL_VERSION_V2, "operation": "read_thread",
+                "args": {"context": context, "thread_ts": value["thread_ts"]}})
+            if not isinstance(response, dict) or response.get("ok") is not True:
+                raise ValueError("carrier unavailable")
+            result = response.get("result")
+            if (not isinstance(result, dict)
+                    or result.get("thread_ts") != value["thread_ts"]
+                    or result.get("historical_messages") != []
+                    or type(result.get("mutated_count")) is not int
+                    or result["mutated_count"] != 0
+                    or not isinstance(result.get("messages"), list)
+                    or len(result["messages"]) > 256):
+                raise ValueError("carrier changed")
+            messages = [validate_message_v2(item["message"]) for item in result["messages"]]
+            predecessors = [m for m in messages
+                            if m["message_key"] == value["predecessor_message_key"]]
+            if (len(predecessors) != 1
+                    or predecessors[0]["message_type"] not in {"ACK", "PROGRESS", "BLOCKED", "RESULT"}
+                    or any(predecessors[0][k] != value["context"][k] for k in (
+                        "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))
+                    or (predecessors[0]["message_type"] == "BLOCKED"
+                        and predecessors[0]["body"].get("needed_from") != "sol")):
+                raise ValueError("original predecessor unavailable")
+            expected = AgentDialogueContinueWriter._message(
+                request_message=predecessors[0], context=context,
+                instruction=args["instruction"], stop_condition=args["stop_condition"],
+                operation_key=args["operation_key"])
+            requests = [m for m in messages
+                        if m["message_key"] == value["request_message_key"]
+                        or (m["reply_to_message_key"] == value["predecessor_message_key"]
+                            and m["actor_ref"]["kind"] == "executive_surface")]
+            if requests and (len(requests) != 1 or requests[0] != expected):
+                raise ValueError("original continuation changed")
+            after = self._existing_request(args, _principal(principal, submit=True))
+            if after is None or after[0].to_dict() != event.to_dict():
+                raise ValueError("original authorization changed")
+            if not requests:
+                return None  # current writer must still authorize any new effect
+            return {
+                "reply_committed": True, "action": "DUPLICATE",
+                "message_key": expected["message_key"], "fingerprint": expected["fingerprint"],
+                "thread_ts": value["thread_ts"],
+            }
+        except Exception:
+            raise BridgeError("carrier_effect_unknown",
+                              "original continuation could not be reconciled") from None
+
+    def _stored_request(self, read_ref: str):
         match = _READ.fullmatch(read_ref) if isinstance(read_ref, str) else None
         if match is None:
             raise ValueError("invalid read reference")
@@ -246,6 +333,10 @@ class RuntimeSessionReturn:
         if (len(roots) != 1 or roots[0].event_id != value["root_event_id"]
                 or _digest(roots[0].to_dict()) != value["root_event_sha256"]):
             raise ValueError("original root changed")
+        return event, value
+
+    def _request(self, read_ref: str):
+        event, value = self._stored_request(read_ref)
         facts = self.runtime.current_harness_binding_source(value["attempt_id"])
         if (_generation(facts) != value["generation"]
                 or (facts.job_id, facts.worker_id) != (value["job_id"], value["worker_id"])):
