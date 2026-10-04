@@ -243,7 +243,7 @@ class TestIdentity(unittest.TestCase):
             "/opt/homebrew/Cellar/tunnel-client/0.0.14/libexec/tunnel-client",
         )
         self.assertEqual(svc.TRANSPORT_TTL, "5h")
-        self.assertEqual(svc.MAX_CONCURRENT_REQUESTS, 4)
+        self.assertEqual(svc.MAX_CONCURRENT_REQUESTS, 8)
         self.assertEqual(svc.ACCOUNT_PORTS[C1], 45018)
 
     def test_argv_uses_separate_flag_tokens(self):
@@ -252,7 +252,7 @@ class TestIdentity(unittest.TestCase):
         self.assertEqual(argv[1], "run")
         self.assertIn("--profile-file", argv)
         self.assertEqual(argv[argv.index("--mcp.connection-max-ttl") + 1], "5h")
-        self.assertEqual(argv[argv.index("--mcp.max-concurrent-requests") + 1], "4")
+        self.assertEqual(argv[argv.index("--mcp.max-concurrent-requests") + 1], "8")
         self.assertEqual(argv[argv.index("--mcp.startup-wait-timeout") + 1], "30s")
         self.assertNotIn("--mcp.connection-max-ttl5h", argv)
         self.assertNotIn("--log.http-raw-unsafe", argv)
@@ -922,7 +922,7 @@ class TestStartStatusStop(unittest.TestCase):
             self.assertFalse(payload["ready"])
             self.assertFalse(payload["controlPlanePollReady"])
             self.assertEqual(payload["transportTTL"], "5h")
-            self.assertEqual(payload["maxConcurrentRequests"], 4)
+            self.assertEqual(payload["maxConcurrentRequests"], 8)
             self.assertEqual(payload["pid"], 4321)
             self.assertFalse(payload["managedAliasRunning"])
             self.assertEqual(payload["tunnelId"], C1_TUNNEL)
