@@ -17,6 +17,7 @@ SCRIPT = ROOT / "ops" / "executive_os" / "service-control.sh"
 CONTROL_LABEL = "com.mastermind.executive.control"
 WORKER_LABEL = "com.mastermind.executive.worker.codex"
 RELAY_LABEL = "com.mastermind.executive.sol-state-relay"
+AGENT_RELAY_LABEL = "com.mastermind.executive.agent-relay"
 MCP_LABEL = "com.mastermind.executive.mcp"
 BACKUP_LABEL = "com.mastermind.executive.backup"
 
@@ -96,6 +97,7 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
     control_plist = tmp_path / "control.plist"
     worker_plist = tmp_path / "worker.plist"
     relay_plist = tmp_path / "relay.plist"
+    agent_relay_plist = tmp_path / "agent-relay.plist"
     text = text.replace(
         'CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"',
         f'CONTROL_PLIST="{control_plist}"',
@@ -108,13 +110,19 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
         'RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"',
         f'RELAY_PLIST="{relay_plist}"',
     )
+    text = text.replace(
+        'AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"',
+        f'AGENT_RELAY_PLIST="{agent_relay_plist}"',
+    )
     assert str(control_plist) in text and str(worker_plist) in text
+    assert str(agent_relay_plist) in text
     copy_path = tmp_path / "service-control.sh"
     copy_path.write_text(text, encoding="utf-8")
     copy_path.chmod(0o755)
     control_plist.write_text("control-plist", encoding="utf-8")
     worker_plist.write_text("worker-plist", encoding="utf-8")
     relay_plist.write_text("relay-plist", encoding="utf-8")
+    agent_relay_plist.write_text("agent-relay-plist", encoding="utf-8")
     return copy_path, control_plist, worker_plist
 
 
@@ -130,8 +138,11 @@ def _run(
     *,
     fake_uid: str = "0",
     fake_os: str = "Darwin",
+    remove_agent_relay_plist: bool = False,
 ) -> tuple[int, str, str, list[str], str, Path, Path]:
     script, control_plist, worker_plist = _prepare_script(tmp_path)
+    if remove_agent_relay_plist:
+        (tmp_path / "agent-relay.plist").unlink()
     plan_path = tmp_path / "launchctl.plan"
     log_path = tmp_path / "launchctl.log"
     _write_plan(plan_path, plan)
@@ -530,6 +541,74 @@ def test_start_readside_partial_failure_is_terminal_and_does_not_touch_worker(
         and WORKER_LABEL in line
         for line in log
     )
+
+
+def test_start_agent_relay_starts_only_fixed_agent_relay(tmp_path: Path) -> None:
+    agent_plist = tmp_path / "agent-relay.plist"
+    plan = _ensure_running_bootstrap(AGENT_RELAY_LABEL, agent_plist)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=running" in out
+    assert not any(
+        label in call
+        for label in (CONTROL_LABEL, WORKER_LABEL, RELAY_LABEL, MCP_LABEL, BACKUP_LABEL)
+        for call in log
+    )
+
+
+def test_start_agent_relay_is_idempotent_when_already_running(tmp_path: Path) -> None:
+    plan = _ensure_running_already(AGENT_RELAY_LABEL)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert "existing=1" in out
+    assert not any("bootstrap" in call or "kickstart" in call for call in log)
+
+
+def test_stop_agent_relay_stops_only_fixed_agent_relay(tmp_path: Path) -> None:
+    plan = _stop_ok(AGENT_RELAY_LABEL)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=absent" in out
+    assert not any(
+        label in call
+        for label in (CONTROL_LABEL, WORKER_LABEL, RELAY_LABEL, MCP_LABEL, BACKUP_LABEL)
+        for call in log
+    )
+
+
+@pytest.mark.parametrize("action", ["start-agent-relay", "stop-agent-relay"])
+def test_agent_relay_lifecycle_refuses_missing_plist_before_launchctl(
+    tmp_path: Path, action: str,
+) -> None:
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path,
+        action,
+        [],
+        remove_agent_relay_plist=True,
+    )
+
+    assert code == 65
+    assert "missing or unsafe launchd plist" in err
+    assert remaining == ""
+    assert log == []
 
 
 def test_stop_readside_stops_control_then_relay_and_preserves_mcp_worker_backup(
