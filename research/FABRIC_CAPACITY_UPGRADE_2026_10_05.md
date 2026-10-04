@@ -102,11 +102,12 @@ Before publication, protected master was fetched and remained the same pinned
 | Existing carrier | Ownership / next qualification |
 | --- | --- |
 | Mastermind #600 | Existing Fable integration umbrella and ready-frontier/native-return program. |
-| Mastermind #1041, observed head `b3816bb75fa328ec6df1f92a77e8377016efdc8e` | Bounded COO hierarchy, root/provider budget and domain scheduling. Active source owner; no parallel recursive scheduler. |
+| Mastermind #1041, observed head `b3816bb75fa328ec6df1f92a77e8377016efdc8e` | Historical V1.x hierarchy candidate, NOT an approved release dependency. Fable/Opus audit comment5976714813 recommends closing unmerged: schema conflict, extra charge ledger, live depth change and serialized dispatch. Preserve incumbent disposition; do not merge wholesale or transfer custody. |
 | Mastermind #981 and #1013 | Native Codex principal/child role and attended orchestration bundle. Source installation and exact-parent proof remain distinct. |
 | Mastermind #955 | Authenticated Claude Executive client edge; preserve existing auth/enrollment gates. |
 | Mastermind #1217 | Universal Studio/Paper/fabric client projection; avoid a competing MCP projector. |
-| Mastermind #1228 | Canonical native user-scope orchestration policy deployment. Consume accepted policy, do not hot-edit every provider home from this operation. |
+| Mastermind #1228 | Existing native policy-deployment owner, currently held for reproduced migration, cross-session cooldown and hook-verification defects in review5408319347/comment5984558903. Repairs and source-custody refusals remain with the incumbent. No hot-editing provider homes or alternate installer here. |
+| Mastermind #1143 | Live interconnect launch/return acceptance. Last owner observation is queue-only with configuration-generation disagreement; do not toggle/replay an arm. |
 | Mastermind #947 | MiniMax route seam; this operation does not edit its policy or existing router-test file. |
 | Macro #7103 / #7116 | Subscription catalog and existing multi-window quota economics. #7116 already intersects shared/model/short/weekly/monthly/concurrency budgets and measures cost per accepted output. Its unpublished two-file repair, denied publication and CI base gates must be reconciled by the incumbent; no alternate host/transport or replacement quota engine here. |
 | Macro #8255 / #8311 | Reset economics and ordered real provider observations. Do not predict reset gifts or duplicate their ledger/normalizer. |
@@ -156,13 +157,18 @@ Current public product evidence, retrieved 2026-10-05:
 
 1. Accept the disjoint task-fit and model-planning repairs with exact-head tests,
    independent review and required hosted checks. Preserve all incumbent work.
-2. Have #1228's existing installer consume the accepted orchestration policy in
-   selected native profiles. Qualify Codex #981/#1013 and Claude #955 against the
-   existing Executive tools and exact-parent return path; publishing a profile is
-   not installation or active selection.
-3. Release #1041's actual root/domain/leaf conservation and process-cleanup proof.
-   Until then, retain the installed depth and child limits. Domain coordination
-   must not create fresh per-child copies of root/provider/review budgets.
+2. Have #1228's incumbent repair its three reproduced defects and reconcile its
+   original action/custody gates before its installer consumes accepted policy.
+   Preserve observed M2 settings as prior evidence, not all-profile runtime proof.
+   Qualify Codex #981/#1013 and Claude #955 through #1143's existing launch/return
+   acceptance; publishing a profile is not installation, trust or active selection.
+3. Preserve the current depth-one Runtime/COO baseline and close the real V1
+   capacity/worker-transport parallelism gap first. Do NOT release #1041 wholesale:
+   its incumbent Fable/Opus disposition recommends closure unmerged. A later
+   bounded hierarchy extension must be explicitly reconciled through the same
+   Runtime/COO/Capacity owners, use the existing accounting rather than a second
+   charge ledger, preserve schema ownership and prove conservation/cleanup.
+   Desired multi-level planning labels are not already-admitted Job depth.
 4. Reconcile #7103/#7116's original source/custody/denial/CI gates. Feed accepted,
    authenticated quota observations and cost cohorts into the existing capacity
    path, not a new pool-side quota ledger. Keep interactive-only products outside
@@ -177,13 +183,60 @@ Current public product evidence, retrieved 2026-10-05:
    root-budget exhaustion and orphan cleanup. Compare accepted work per scarce
    model budget and wall time against the baseline before increasing load.
 
+## Post-publication boundary reconciliation
+
+Candidate fab47ba8 was published as Mastermind PR#1248. A fresh incumbent-comment
+read materially corrected the initial dependency plan: #1041 is a historical
+V1.x proposal with a should-close-unmerged disposition, not the next release to
+activate. #1228 has three reproduced source defects and an unresolved native
+profile/source-access gate. These comments are evidence of incumbent disposition,
+not protected new law or authority to close/edit their branches. This records
+correction changes no runtime, classification, quota or native broker bytes.
+
+Existing source baseline (per the #1228 owner): depth1, fanout8, total reserved
+children16. One fully reviewed item reserves9 slots; two reviewed items plus a
+planner require19. Raising a YAML integer alone is invalid under the exact-value
+loader and is not the authorized fix. Separate planning topology, native harness
+nesting, actual Job depth and shared provider quotas. Retain the four optional
+planning shapes rather than imposing a mandatory management chain.
+
+A separate disposable before/after discriminator used the actual original and
+patched broker plus the same synthetic three-account configuration. Original
+pool planning advertised30 slots while actual full-model admissions stopped at15;
+model-aware candidate planning advertised15 and the unchanged admission path also
+stopped at15. This confirms the concrete planning defect without touching a live
+lease store or invoking a provider. Read-only inspection of the installed `pool`
+wrapper shows `plan` forwards all arguments to the existing broker, so the new
+flags do not require a competing wrapper. This is static forwarding evidence,
+not a selected-client or production canary.
+
+One exact-head review was requested through the existing Codex GitHub route:
+comment5984828074. Response5984828564 asks the submitting account to create/link
+Codex with GitHub. No review, worker START or reviewer findings were returned.
+The request's explicit stop-on-unavailable condition applies; no alternate
+account/model/transport or second review worker was used. Independent source
+acceptance remains open. CI for fab47ba8 was running at this boundary; queued or
+running checks are not failure and not acceptance.
+
 ## Compact frontier / DO_NOT_REDO
 
-Current workspace and branch belong only to this operation. No worker/observer
-has been commissioned yet; no source custody transferred. The installed native
-broker remains at the before hash. Original #7116 refusals are not retried.
-Do not recreate quota economics, the #1041 hierarchy, a native MCP server,
-provider account registry, prompt queue, reset ledger or deployment owner.
-Next: complete broader source regression and adversarial review, publish this
-candidate and request exact-head review through the existing GitHub owner; then
-advance independent qualification preparation while required returns are pending.
+The operation retains its managed workspace/branch. Source implementation/tests,
+the inert patch artifact and proposed law are published on PR#1248. The native
+broker remains at the before hash; no installation, provider call, Job submission,
+authentication change or runtime arm occurred. The review request is terminal at
+the account-linking gate, not active computation. The documentation correction
+must be committed/read back on the same PR; no code-test rerun is claimed for a
+docs-only update.
+
+DO_NOT_REDO: do not recreate #7116 quota economics or its denied publication,
+#1041's conflicting hierarchy/ledger, native MCP, account registry, reset ledger
+or #1228 installer. Do not repeat the incumbent native-profile/fleet/source
+refusals through another carrier. Do not re-run prior M2 prompt/guard proofs as
+if they establish fleet adoption. Do not submit another Codex review until the
+same account-linking gate is actually resolved.
+
+Next: publish the corrected same-PR records, reconcile required checks and make
+the integration delta available to the existing #600 owner. Acceptance then needs
+an authorized independent review on the exact final candidate. Runtime rollout
+separately requires incumbent fixes, supported observed quota input and admitted
+native launch/reviewed-return proof. The full Chairman mission remains incomplete.
