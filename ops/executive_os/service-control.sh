@@ -9,13 +9,14 @@ WORKER_LABEL="com.mastermind.executive.worker.codex"
 RELAY_LABEL="com.mastermind.executive.sol-state-relay"
 MCP_LABEL="com.mastermind.executive.mcp"
 BACKUP_LABEL="com.mastermind.executive.backup"
+MCP_PLIST="/Library/LaunchDaemons/$MCP_LABEL.plist"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|start-readside|stop-readside|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-readside|stop-readside|status}" >&2
   exit 64
 }
 
@@ -279,6 +280,15 @@ case "$1" in
     stop_one "$WORKER_LABEL"
     start_one "$WORKER_LABEL" "$WORKER_PLIST"
     start_one "$CONTROL_LABEL" "$CONTROL_PLIST"
+    ;;
+  restart-gateway)
+    require_root
+    validate_plist "$MCP_PLIST"
+    # The gateway is independently long-lived across read-side restore.
+    # Cycle only its fixed LaunchDaemon so an accepted release can refresh
+    # the MCP tool catalog without changing worker/control/relay state.
+    stop_one "$MCP_LABEL"
+    start_one "$MCP_LABEL" "$MCP_PLIST"
     ;;
   start-readside)
     require_root

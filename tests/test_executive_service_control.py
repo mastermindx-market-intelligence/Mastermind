@@ -96,6 +96,7 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
     control_plist = tmp_path / "control.plist"
     worker_plist = tmp_path / "worker.plist"
     relay_plist = tmp_path / "relay.plist"
+    mcp_plist = tmp_path / "mcp.plist"
     text = text.replace(
         'CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"',
         f'CONTROL_PLIST="{control_plist}"',
@@ -108,6 +109,13 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
         'RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"',
         f'RELAY_PLIST="{relay_plist}"',
     )
+    # The production gateway lifecycle action is introduced by this change.
+    # Keep this harness source-compatible with the RED preimage where the
+    # fixed MCP plist coordinate does not exist yet.
+    text = text.replace(
+        'MCP_PLIST="/Library/LaunchDaemons/$MCP_LABEL.plist"',
+        f'MCP_PLIST="{mcp_plist}"',
+    )
     assert str(control_plist) in text and str(worker_plist) in text
     copy_path = tmp_path / "service-control.sh"
     copy_path.write_text(text, encoding="utf-8")
@@ -115,6 +123,7 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
     control_plist.write_text("control-plist", encoding="utf-8")
     worker_plist.write_text("worker-plist", encoding="utf-8")
     relay_plist.write_text("relay-plist", encoding="utf-8")
+    mcp_plist.write_text("mcp-plist", encoding="utf-8")
     return copy_path, control_plist, worker_plist
 
 
@@ -351,6 +360,23 @@ def test_restart_runs_full_stop_then_start_sequence_in_fixed_order(
     assert code == 0, err
     assert remaining == ""
     assert log == [key for key, *_ in plan]
+
+
+def test_restart_gateway_cycles_only_fixed_mcp_and_confirms_running(
+    tmp_path: Path,
+) -> None:
+    mcp_plist = tmp_path / "mcp.plist"
+    plan = _stop_ok(MCP_LABEL) + _start_via_bootstrap(MCP_LABEL, mcp_plist)
+    code, out, err, log, remaining, *_ = _run(tmp_path, "restart-gateway", plan)
+    assert code == 0, err
+    assert remaining == ""
+    assert f"service={MCP_LABEL} state=absent" in out
+    assert f"service={MCP_LABEL} state = running" in out
+    assert log == [key for key, *_ in plan]
+    assert not any(CONTROL_LABEL in call for call in log)
+    assert not any(WORKER_LABEL in call for call in log)
+    assert not any(RELAY_LABEL in call for call in log)
+    assert not any(BACKUP_LABEL in call for call in log)
 
 
 def test_partial_two_service_stop_failure_remains_failed_without_rollback(
