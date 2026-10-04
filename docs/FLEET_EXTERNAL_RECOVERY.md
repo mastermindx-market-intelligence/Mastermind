@@ -138,6 +138,30 @@ A passing post-reboot readiness report proves the host is again eligible for
 recovery use. It does not explain or erase the workload pressure that caused
 the reboot.
 
+### Provider process-storm containment
+
+If incident evidence shows one already-owned provider execution growing an
+abnormal process tree, contain that failure inside the existing process owner
+rather than adding a host-wide killer daemon.
+
+The process owner should:
+
+- keep the provider in its existing private process group/session;
+- sample live owned membership while the provider is still running instead of
+  waiting only for timeout or leader exit;
+- enforce a reviewed finite member ceiling;
+- terminate through the same identity-verified cleanup path already used for
+  timeout/cancellation;
+- report a distinct runtime-safety refusal rather than an admission/full-capacity
+  code that could trigger automatic spill or retry; and
+- preserve terminal whole-session reconciliation so descendants cannot survive
+  merely because the provider leader exits.
+
+A process-cardinality fuse is one containment layer, not proof that host memory
+pressure is impossible. Keep host-capacity, memory/swap and disk-headroom
+admission with their existing owners; do not duplicate them inside this
+recovery runbook.
+
 ## Acceptance discipline
 
 A departure/readiness claim for an externally managed home Mac is valid only
