@@ -123,6 +123,10 @@ O.12 SWEEP: my 05:42Z note items 3(b)/(c) (CodexQueuedWakeClient + attention_wak
 OWED TO THIS SEAT: nothing. The config-publication-owner ruling is the host owner's; the source slice is the #1191 writer's; Remote Control is a human toggle.
 NEXT: quiet. LAST CONSUMED EDGE = #1143 06:11:32Z (5977204986). Wakes: watch7 edge; 06:30Z #811 tripwire (custody-state note only); any ruling that names this seat.
 
+### 4i 06:30Z #811 custody tripwire — custody state recorded, #811 PARKED
+FACTS: #811 head cb8f1586 unchanged (last commit 2026-10-02T08:26:45Z), draft, CONFLICTING vs a2646f45; no writer commit/comment since my 04:52:20Z disposition; Slack root thread: no replies after 1791090788.888659 (re-read 06:30Z, hook OK). Tripwire note posted on #811 (issuecomment-5977329795): no custody transfer, no repair lane, PARKED under the Chairman convergence ruling; re-open = hold lifts or the #1143 owner names #811 on the critical path. Watcher re-armed as watch8 after the post. Timer bmwggokm8 consumed (no new timer: nothing else is time-bound).
+NEXT: quiet. Wakes: watch8 edge (#1143 / #811 / master); any ruling naming this seat; Remote Control toggle (human).
+
 ## 4b Phase-1 disposition table (five-way; evidence = audit packets L1a/L1b/L2 + seat spot-checks)
 | carrier | author | disposition | basis | train? |
 |---|---|---|---|---|
@@ -165,6 +169,7 @@ Watcher: watch3 (S/watch3.out; #1143 comments + #811 head/comments + master; 10-
 - Do not re-ACK; do not post a second Slack root for this operation.
 
 ## 8 Next action
+- 06:32Z: QUIET. #811 PARKED at the tripwire (custody note posted). Nothing owed by this seat; no time-bound act remains. Wakes: watch8 edge; rulings naming this seat; Remote Control toggle (human).
 - 06:16Z: QUIET. Architecture correction consumed; my 3(b)/(c) retracted. Nothing owed by this seat; 06:30Z tripwire = custody-state note only; no host act; no lane on installed.py/phase1c.
 - 05:52Z: QUIET under the Chairman convergence ruling. Owed to this seat: nothing until a carrier edge. Pending human gates named on #1143: Remote Control toggle for session 527c6117… (path 4a) or a Codex/Runtime target with a current RuntimeBinding (path 4b); writer ruling for installed.py/phase1c (do not race #1191).
 - 05:47Z: HELD under the Chairman convergence ruling; waiting on the #1143 owner's writer ruling for the composition slice (do not race #1191). Records: Macro #8414 armed merge-on-green. 06:30Z tripwire = custody-state note only. No host act.
