@@ -140,6 +140,9 @@ def test_a2_public_capability_refuses_changed_or_unreadable_artifact(monkeypatch
 
 @pytest.mark.parametrize("revoke_on_read", [False, True])
 def test_installed_codex_send_uses_same_dialogue_writer_without_provider_attention(tmp_path, monkeypatch, revoke_on_read):
+    from types import SimpleNamespace
+    from integrations.session_bridge import runtime_return
+    monkeypatch.setattr(runtime_return, "time", SimpleNamespace(time=lambda: 1791000100))
     from tests.test_company_consultation_target_resolution import _seed
     from tests.test_session_bridge_installed import principal_frame
     from integrations.session_bridge import dialogue_reply, installed
@@ -199,6 +202,7 @@ def test_installed_codex_send_uses_same_dialogue_writer_without_provider_attenti
             return
         assert result["ok"] is True, result
         assert result["data"]["carrier"]["reply_committed"] is True
+        assert result["data"]["read_ref"].startswith("session-reply-")
         assert result["data"]["attention"] == {"state": "UNAVAILABLE"}
         assert committed[0]["message_type"] == "CONTINUE"
         assert committed[0]["reply_to_message_key"] == binding.reply_to_message_key
