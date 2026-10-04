@@ -54,6 +54,7 @@ from control_plane import chairman_control_room as ccr
 from control_plane import executive_orchestration_principal as principal
 from control_plane import executive_placement_selection as eps
 from control_plane import executive_steward as es
+from control_plane import sol_capability_status as cap
 from control_plane import surface_bindings as sb
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "chairman_control_room"
@@ -335,11 +336,19 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
         # EAF A2 additive report-only attention frontier.  Additive only, and
         # deliberately omittable: it re-reads no source and owns no truth store.
         "attention_frontier",
+        # C1 additive injected owner-evidence seam. The compositor carries
+        # already-collected CAP1 evidence and never probes Studio itself.
+        "runtime_capability_status",
     }
     # No facts document was supplied (the common case) -> no section, no
     # degraded entry named for it (CAP-C1).
     assert doc["placement_selection"] is None
     assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+    assert doc["runtime_capability_status"] is None
+    assert not any(
+        entry.startswith("runtime_capability_status:")
+        for entry in doc["degraded"]
+    )
     assert set(doc["sources"].keys()) == {
         "mastermind_sha", "mastermind_branch", "macro_sha", "macro_root",
         "executive_inbox_schema", "agent_os_brief_schema",
@@ -347,6 +356,42 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
         "active_builds_schema", "active_builds_collected_at",
         "runtime_db_present", "bindings_path_present",
     }
+
+
+def test_runtime_capability_status_accepts_only_typed_cap1_envelope(
+    boot_packet, inbox, active_builds, bindings
+):
+    status = cap.project_sol_capability_status(
+        (),
+        observed_at="2026-08-21T00:09:59Z",
+        capability_generation="ccr-test-generation",
+    )
+
+    accepted = _compose(
+        boot_packet,
+        inbox,
+        active_builds,
+        bindings,
+        runtime_capability_status=status,
+    )
+    assert accepted["runtime_capability_status"] == status.to_dict()
+    assert not any(
+        entry.startswith("runtime_capability_status:")
+        for entry in accepted["degraded"]
+    )
+
+    refused = _compose(
+        boot_packet,
+        inbox,
+        active_builds,
+        bindings,
+        runtime_capability_status=status.to_dict(),
+    )
+    assert refused["runtime_capability_status"] is None
+    assert (
+        "runtime_capability_status: typed CAP1 envelope required"
+        in refused["degraded"]
+    )
 
 
 def test_no_overall_or_combined_status_field_anywhere(boot_packet, inbox, active_builds, bindings):

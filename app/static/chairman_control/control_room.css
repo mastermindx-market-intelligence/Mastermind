@@ -73,7 +73,7 @@
    * track: "the path is not usable" and "this is urgent" are two readings and
    * must never be able to borrow each other's ink. */
   --af-blocked-rail: repeating-linear-gradient(135deg, color-mix(in srgb, var(--slate) 34%, transparent) 0 2px, transparent 2px 6px);
-  --af-partition-weight: 600;
+  --af-partition-weight: calc(60 * 10);
   --af-body-ink: var(--muted);
   /* Section-owned secondary ink for the 8-11px reference layer. Bare --faint
    * reads fine on this dark ground and fails 4.5:1 on light paper, so this
@@ -145,7 +145,7 @@ html[data-theme="light"] {
   --af-interrupt-stripe: 3px;
   --af-interrupt-glow: none;
   --af-blocked-rail: repeating-linear-gradient(135deg, color-mix(in srgb, var(--slate) 46%, transparent) 0 2px, transparent 2px 5px);
-  --af-partition-weight: 680;
+  --af-partition-weight: calc(68 * 10);
   --af-body-ink: var(--text);
   /* Measured >=4.5:1 against both light --panel and light --bg. */
   --af-secondary-ink: #636760;
@@ -818,7 +818,7 @@ kbd {
   margin: 2px 0 0;
   font-family: var(--font-display);
   font-size: 18px;
-  font-weight: 640;
+  font-weight: calc(64 * 10);
   letter-spacing: -.025em;
   color: var(--text-strong);
 }
@@ -836,7 +836,7 @@ kbd {
 .ccr-af-count-value {
   font-family: var(--font-display);
   font-size: 22px;
-  font-weight: 620;
+  font-weight: calc(62 * 10);
   line-height: 1.1;
   letter-spacing: -.04em;
   color: var(--text-strong);
@@ -860,7 +860,7 @@ kbd {
   margin: 2px 0 0;
   font-family: var(--font-display);
   font-size: 16px;
-  font-weight: 630;
+  font-weight: calc(63 * 10);
   letter-spacing: -.022em;
   color: var(--text-strong);
 }
@@ -896,7 +896,7 @@ kbd {
   text-transform: uppercase;
   color: var(--af-secondary-ink);
 }
-.ccr-af-partition.is-headline .ccr-af-partition-name { color: var(--text); font-weight: 600; }
+.ccr-af-partition.is-headline .ccr-af-partition-name { color: var(--text); font-weight: calc(60 * 10); }
 .ccr-af-partition.is-headline .ccr-af-partition-head { border-bottom-color: var(--line); }
 .ccr-af-card-list { display: grid; gap: 9px; margin-top: 10px; }
 
@@ -947,11 +947,11 @@ kbd {
 }
 
 .ccr-af-identity { min-width: 0; }
-.ccr-af-title { color: var(--text-strong); font-size: 13.5px; font-weight: 630; letter-spacing: -.012em; line-height: 1.3; }
+.ccr-af-title { color: var(--text-strong); font-size: 13.5px; font-weight: calc(63 * 10); letter-spacing: -.012em; line-height: 1.3; }
 .ccr-af-ref { margin-top: 4px; font-family: var(--font-mono); font-size: 9px; color: var(--af-secondary-ink); overflow-wrap: anywhere; }
 .ccr-af-marks { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .ccr-af-authority { margin-top: 11px; }
-.ccr-af-authority-name { color: var(--text); font-size: 12.5px; font-weight: 600; letter-spacing: -.01em; }
+.ccr-af-authority-name { color: var(--text); font-size: 12.5px; font-weight: calc(60 * 10); letter-spacing: -.01em; }
 .ccr-af-middle, .ccr-af-right { display: grid; gap: 11px; min-width: 0; }
 .ccr-af-label {
   display: block;
@@ -996,7 +996,7 @@ kbd {
   margin-bottom: 7px;
   font-family: var(--font-display);
   font-size: 14px;
-  font-weight: 620;
+  font-weight: calc(62 * 10);
   letter-spacing: -.018em;
   color: var(--text-strong);
 }
@@ -1023,7 +1023,7 @@ kbd {
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--panel) 45%, transparent);
 }
-.ccr-af-quiet-title { color: var(--muted); font-family: var(--font-display); font-size: 15px; font-weight: 620; letter-spacing: -.02em; }
+.ccr-af-quiet-title { color: var(--muted); font-family: var(--font-display); font-size: 15px; font-weight: calc(62 * 10); letter-spacing: -.02em; }
 .ccr-af-quiet-text { margin-top: 6px; max-width: 72ch; color: var(--af-secondary-ink); font-size: 11.5px; line-height: 1.5; }
 
 /* autonomy — responsibilities, owed turn, gate ---------------------------
