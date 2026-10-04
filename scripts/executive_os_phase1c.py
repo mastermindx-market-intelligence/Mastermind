@@ -22,6 +22,7 @@ import os
 import re
 import stat
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -57,6 +58,12 @@ def _build_executive_dialogue_wake_carrier(
     current_binding,
     retry_policy,
     generation,
+    source_guard=None,
+    canary_profile=None,
+    pre_submit_guard=None,
+    historical_context_for=None,
+    historical_only=False,
+    physical_source=None,
 ):
     """Compose existing Wake owners outside the control-plane dependency layer."""
 
@@ -70,27 +77,82 @@ def _build_executive_dialogue_wake_carrier(
     )
     from integrations.executive_wake.registry import WakeDispatcherRegistry
     from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
         PersistedWakeCarrier,
     )
+
+    def historical_context(attempt):
+        if not callable(historical_context_for):
+            raise ServiceError("historical Wake resolver is unavailable")
+        historical = historical_context_for(attempt)
+        grant = None if canary_profile is None else canary_profile.grant
+        if grant is None:
+            raise ServiceError("historical Wake grant is unavailable")
+        from control_plane.session_targets import load_session_targets
+        registry = load_session_targets()
+        binding = historical.runtime_binding
+        old_target = registry.get(binding.session_alias)
+        if (binding.session_alias != grant.target_session_alias
+                or binding.binding_id != grant.binding_id
+                or binding.binding_generation != grant.binding_generation
+                or historical.target_attempt_id != grant.target_attempt_id
+                or historical.generation.process_generation_id != grant.process_generation_id
+                or old_target.target_seat != grant.target_seat
+                or old_target.wake_transport != "codex-app-server"):
+            raise ServiceError("historical Wake target disagrees")
+        registry = registry.with_root_job_bindings({
+            **registry.root_job_bindings,
+            grant.source_root_job_id: {
+                **registry.root_job_bindings.get(grant.source_root_job_id, {}),
+                grant.target_seat: binding.session_alias}})
+        client = CodexCurrentWriterWakeClient(
+            operator_adapter=historical.operator_adapter,
+            generation=historical.generation,
+            attempt_id=historical.target_attempt_id,
+            runtime_binding=binding,
+        )
+        return HistoricalWakeContext(
+            dispatchers=WakeDispatcherRegistry(
+                {"codex-app-server": CodexAppServerWakeDispatcher(client)}),
+            runtime_binding=binding, target_registry=registry,
+        )
+
+    canary_kwargs = {}
+    if canary_profile is not None:
+        canary_kwargs = dict(
+            canary_profile=canary_profile, physical_source=physical_source,
+            historical_context_for=historical_context)
+    if historical_only:
+        if canary_profile is None:
+            raise ServiceError("historical Wake requires its original canary profile")
+        return PersistedWakeCarrier(
+            repository=WakeLedgerRepository(runtime),
+            dispatchers=WakeDispatcherRegistry(),
+            current_binding_for=lambda _route: None,
+            retry_policy=retry_policy, **canary_kwargs,
+        )
 
     wake_client = CodexCurrentWriterWakeClient(
         operator_adapter=resolved.operator_adapter,
         generation=generation,
         attempt_id=resolved.target_attempt_id,
         runtime_binding=current_binding,
+        pre_submit_guard=pre_submit_guard,
     )
+    def current_binding_for(_route):
+        if source_guard is not None:
+            source_guard()
+        return project_runtime_binding(runtime, resolved.target_attempt_id, target)
+
     return PersistedWakeCarrier(
         repository=WakeLedgerRepository(runtime),
         dispatchers=WakeDispatcherRegistry(
             {"codex-app-server": CodexAppServerWakeDispatcher(wake_client)}
         ),
-        current_binding_for=lambda _route: project_runtime_binding(
-            runtime,
-            resolved.target_attempt_id,
-            target,
-        ),
+        current_binding_for=current_binding_for,
         retry_policy=retry_policy,
         target_registry=resolved.registry,
+        **canary_kwargs,
     )
 
 
@@ -211,6 +273,7 @@ _CONFIG_OPTIONAL = frozenset(
     {
         "content_observer",
         "content_observer_profile_path",
+        "company_consultation",
         "workspace_acquisition",
         "workspace_resource_policy",
         "workspace_control_room",
@@ -251,6 +314,7 @@ _CONFIG_OPTIONAL = frozenset(
         "dialogue_observation_peer_uid",
         "dialogue_bridge_armed",
         "dialogue_wake_retry_policy",
+        "dialogue_wake_canary_activation",
         "subscription_canary_realm",
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
@@ -737,6 +801,36 @@ def _bind_exact_worker_target_source(raw, attestation, *, _producer_capability, 
                                    capability=_producer_capability)
 
 
+_CANONICAL_COMPANY_CONSULTATION_SOCKET = "/var/run/mastermind-executive/company-consultation.sock"
+_COMPANY_CONSULTATION_SOCKET_NAME = "CompanyConsultation"
+
+
+def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, Any] | None:
+    """One closed optional host binding, shared by loader, installer and factory."""
+    value = config.get("company_consultation")
+    if "company_consultation" not in config:
+        return None
+    if (type(value) is not dict
+            or set(value) != {"armed", "socket_path", "launchd_socket_name"}
+            or type(value["armed"]) is not bool
+            or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
+            or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
+        raise ServiceError("Company consultation control binding is invalid")
+    if not value["armed"]:
+        return None
+    for key in ("control_uid", "worker_uid", "worker_gid"):
+        if type(config.get(key)) is not int or config[key] <= 0:
+            raise ServiceError("Company consultation requires fixed service identities")
+    if config["worker_uid"] == config["control_uid"]:
+        raise ServiceError("Company consultation requires a distinct worker principal")
+    return {
+        "SockPathName": _CANONICAL_COMPANY_CONSULTATION_SOCKET,
+        "SockType": "stream", "SockPassive": True,
+        "SockPathOwner": config["control_uid"], "SockPathGroup": config["worker_gid"],
+        "SockPathMode": 0o660,
+    }
+
+
 def load_control_config(
     path: str | Path, *, enforce_current_uid: bool = True
 ) -> dict[str, Any]:
@@ -771,6 +865,7 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    company_consultation_launchd_entry(config)
     arm = config.get("privileged_readiness_armed", False)
     broker_socket = config.get("privileged_broker_socket_path")
     if type(arm) is not bool:
@@ -915,7 +1010,17 @@ def load_control_config(
             value,
             expected_release_sha=str(config["proof_base_sha"]),
         )
+    if "dialogue_wake_canary_activation" in config and not observation_present:
+        raise ServiceError("dialogue Wake canary requires the observation configuration")
     if observation_present:
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationError, parse_dialogue_wake_canary_activation,
+        )
+        try:
+            config["dialogue_wake_canary_activation"] = parse_dialogue_wake_canary_activation(
+                config.get("dialogue_wake_canary_activation"))
+        except DialogueWakeCanaryActivationError as exc:
+            raise ServiceError("control config dialogue Wake canary activation is invalid") from exc
         config["dialogue_observation_peer_uid"] = _integer(
             config["dialogue_observation_peer_uid"],
             "dialogue_observation_peer_uid",
@@ -1522,7 +1627,13 @@ def _service_from_config(
     coo_source: Any | None = None,
     claimed_operator_adapter_factory: Callable[..., Any] | None = None,
     remote_operator_binding_source: Callable[..., Any] | None = None,
+    dialogue_canary_profile: Any | None = None,
 ) -> ExecutiveControlService:
+    from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
+    if dialogue_canary_profile is None:
+        dialogue_canary_profile = DialogueWakeCanaryProfile(None)
+    if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
+        raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     if (claimed_operator_adapter_factory is not None
             and not callable(claimed_operator_adapter_factory)):
@@ -2007,16 +2118,9 @@ def _service_from_config(
 
                 def codex_owner_configured():
                     from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
-                    # Configuration and serving listener are necessary capability
-                    # gates. A carrier receipt still proves no native attention.
-                    observation = getattr(service, "_dialogue_observation_server", None)
-                    return (
-                        raw.get("dialogue_bridge_armed") is True
-                        and getattr(raw.get("dialogue_wake_retry_policy"), "armed", False) is True
-                        and observation is not None
-                        and observation.is_serving()
-                        and w3c_plist_configured(release_sha=config.proof_base_sha)
-                    )
+                    # Canonical CONTINUE is carrier-only. The current Runtime
+                    # projector proves native ownership; Wake arming is separate.
+                    return w3c_plist_configured(release_sha=config.proof_base_sha)
 
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
@@ -2035,8 +2139,11 @@ def _service_from_config(
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
-        and raw["dialogue_bridge_armed"] is True
+        and (raw["dialogue_bridge_armed"] is True
+             or dialogue_canary_profile.grant is not None)
     ):
+        from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
+
         def dialogue_wake_turn_input_loader(_turn):
             raise ServiceError(
                 "dialogue Wake adapter cannot load provider turns"
@@ -2062,9 +2169,55 @@ def _service_from_config(
                     turn_input_loader=dialogue_wake_turn_input_loader,
                 ),
                 carrier_factory=_build_executive_dialogue_wake_carrier,
+                # An absent grant stays an explicit disarmed profile; it must
+                # never select the generic carrier path after grant removal.
+                canary_profile=dialogue_canary_profile,
+                installed_release_sha=config.proof_base_sha,
+                canary_now_epoch_seconds=lambda: int(time.time()),
             ),
             "dialogue_observation_activated_socket": observation_listener,
         }
+    company_binding = None
+    company_socket = company_consultation_launchd_entry(raw)
+    if company_socket is not None:
+        from control_plane.executive_service import CompanyConsultationBinding
+        from integrations.company_consultation_host import CompanyConsultationHost
+        from ops.executive_os.a2_agent_relay_enrollment import SLACK_WORKSPACE_ID, SLACK_CHANNEL_ID
+
+        company_repository = Path(raw["proof_source_repository"])
+        company_worker_uid = int(raw["worker_uid"])
+        answer_bridge = dialogue_observation_kwargs.get("dialogue_wake_handler")
+        if answer_bridge is None or answer_bridge.canary_profile is not None:
+            # Company answer obligations keep their incumbent generic owner;
+            # the closed parenting canary handles only Dialogue turn sources.
+            from control_plane.wake_ledger import WakeRetryPolicy
+            def company_wake_turn_input_loader(_turn):
+                raise ServiceError("Company answer Wake cannot load provider turns")
+            answer_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=raw.get("dialogue_wake_retry_policy", WakeRetryPolicy(armed=False)),
+                operator_adapter=RemoteCodexOperatorAdapter(
+                    client, turn_input_loader=company_wake_turn_input_loader,
+                ),
+                carrier_factory=_build_executive_dialogue_wake_carrier,
+            )
+        def company_host_factory(runtime):
+            async def dispatch_answer(projection):
+                service._require_company_answer_attention()
+                return await answer_bridge.dispatch_requester_answer(
+                    runtime, projection, before_effect=service._require_company_answer_attention,
+                )
+            return CompanyConsultationHost(
+                runtime=runtime, repository_root=company_repository,
+                worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
+                requester_answer_wake_dispatch=dispatch_answer)
+        company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
+        activated_listeners.append(company_listener)
+        company_binding = CompanyConsultationBinding(
+            socket_path=Path(company_socket["SockPathName"]), worker_uid=company_worker_uid,
+            group_gid=int(raw["worker_gid"]), host_factory=company_host_factory,
+            activated_socket=company_listener)
     if config.terminal_return_socket_path is not None:
         for activated_listener in activated_listeners:
             getsockname = getattr(activated_listener, "getsockname", None)
@@ -2104,6 +2257,7 @@ def _service_from_config(
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
         workspace_control_room=workspace_control_room,
+        company_consultation_binding=company_binding,
         **ceo_ingress_kwargs,
         **dialogue_observation_kwargs,
         **terminal_return_kwargs,
@@ -2222,8 +2376,15 @@ async def _serve_from_config(config_path: Path) -> None:
     if validate_control_coo(raw):
         coo_source = CooInstalledSource.from_path(DEFAULT_INSTALL_PATH,
             Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
+    from ops.executive_os.dialogue_wake_canary_control import load_verified_profile
+    dialogue_canary_profile = load_verified_profile(
+        control_sha256=control_attestation["config_sha256"],
+        release_sha=raw["proof_base_sha"],
+        grant=raw.get("dialogue_wake_canary_activation"),
+    )
     service = _service_from_config(
         raw,
+        dialogue_canary_profile=dialogue_canary_profile,
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         initial_canary=initial_canary,

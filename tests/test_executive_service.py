@@ -1336,75 +1336,19 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
     assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
 
 
-def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
-    tmp_path: Path,
-    short_socket_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The future composition crosses the socket without replacing either resolver."""
-
-    from contextlib import contextmanager
-    from control_plane.dialogue_wake_canary_activation import (
-        DialogueWakeCanaryActivationGrant,
-        DialogueWakeCanaryProfile,
-        SCHEMA as CANARY_SCHEMA,
-        effective_dialogue_wake_canary_route,
-    )
+def _strict_dialogue_runtime(tmp_path, monkeypatch, *, provider_session_id="PROVIDER-SESSION-1"):
+    """Admit the real CEO root, current OHF writer and immutable dialogue source."""
     from control_plane.ceo_intent import submit_intent
     from control_plane.operator_harness_contract import (
-        AttentionTurnObservation,
-        CapabilityIdentity,
-        CapabilityManifest,
-        ObservedCapabilityIdentity,
-        OperationId,
-        ProcessIdentityObservation,
-        ProcessLiveness,
-        ProviderWriterState,
-        ReconcileObservation,
-        TurnStartObservation,
-        WorkerLocalWakeAckProjection,
+        CapabilityIdentity, CapabilityManifest, ObservedCapabilityIdentity,
+        OperationId, ProcessIdentityObservation,
     )
-    from control_plane.executive_orchestration_principal import (
-        OperatorPrincipalObservation,
-    )
+    from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
     from control_plane.runtime_binding_projection import project_runtime_binding
     from control_plane.session_targets import (
-        SCHEMA as TARGET_SCHEMA,
-        SessionTarget,
-        SessionTargetRegistry,
-        route_digest,
-        route_obligation,
+        SCHEMA as TARGET_SCHEMA, SessionTarget, SessionTargetRegistry,
     )
-    from control_plane.wake_ledger import (
-        AckMode,
-        LedgerPhase,
-        SourceReadHealth,
-        SourceResolution,
-        SourceResolutionCode,
-        TrustedAckContext,
-        WakeLedgerError,
-        WakeRetryPolicy,
-        acknowledge,
-        ack_record,
-        attempt_record,
-        make_delivery_attempt,
-        requested_record,
-        resolved_record,
-    )
-    from control_plane.wake_persist import WakeLedgerRepository
-    from control_plane.wake_events import mint_obligation_id
-    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
-    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.contract_v2 import (
-        PARENT_SCHEMA_V2,
-        build_message_v2,
-        build_parent_v2,
-    )
-    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
-        HistoricalWakeContext,
-        PersistedWakeCarrier,
-    )
+    from integrations.slack_agent_dialogue.contract_v2 import PARENT_SCHEMA_V2, build_parent_v2
     from tests import test_wake_ack_ingress as ack_fixtures
 
     source = _terminal_dialogue_source()
@@ -1508,14 +1452,14 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         operation_id=start_operation,
         fence_generation=sealed.fence_generation,
         lease_token=dispatch.lease_token,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process=process,
     )
     principal = OperatorPrincipalObservation(
         attempt_id=sealed.attempt_id,
         worker_id="worker-a",
         process_generation_id=generation.process_generation_id,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process_identity={
             "pid": process.pid,
             "pgid": process.pgid,
@@ -1630,6 +1574,122 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         worker_id=material["worker_id"],
         evidence_digest=material["evidence_digest"],
     )
+    return SimpleNamespace(
+        attestation=attestation,
+        execution_binding=execution_binding,
+        facts_reader=facts_reader,
+        mcp_capability=mcp_capability,
+        principal=principal,
+        profile=profile,
+        source=source,
+        runtime=runtime,
+        root=root,
+        dispatch=dispatch,
+        sealed=sealed,
+        epoch=epoch,
+        generation=generation,
+        process=process,
+        parent=parent,
+        target=target,
+        ceo_target=ceo_target,
+        registry=registry,
+        binding=binding,
+        candidate=candidate,
+    )
+
+
+def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production carrier crosses the socket without replacing either resolver."""
+
+    from contextlib import contextmanager
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+        effective_dialogue_wake_canary_route,
+    )
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        AttentionTurnObservation,
+        CapabilityIdentity,
+        CapabilityManifest,
+        ObservedCapabilityIdentity,
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+        TurnStartObservation,
+        WorkerLocalWakeAckProjection,
+    )
+    from control_plane.executive_orchestration_principal import (
+        OperatorPrincipalObservation,
+    )
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import (
+        AckMode,
+        LedgerPhase,
+        SourceReadHealth,
+        SourceResolution,
+        SourceResolutionCode,
+        TrustedAckContext,
+        WakeLedgerError,
+        WakeRetryPolicy,
+        acknowledge,
+        ack_record,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+        resolved_record,
+    )
+    from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.wake_events import mint_obligation_id
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_message_v2,
+        build_parent_v2,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
+        PersistedWakeCarrier,
+    )
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    fixture = _strict_dialogue_runtime(tmp_path, monkeypatch)
+    attestation = fixture.attestation
+    execution_binding = fixture.execution_binding
+    facts_reader = fixture.facts_reader
+    mcp_capability = fixture.mcp_capability
+    principal = fixture.principal
+    profile = fixture.profile
+    source = fixture.source
+    runtime = fixture.runtime
+    root = fixture.root
+    dispatch = fixture.dispatch
+    sealed = fixture.sealed
+    epoch = fixture.epoch
+    generation = fixture.generation
+    process = fixture.process
+    parent = fixture.parent
+    target = fixture.target
+    ceo_target = fixture.ceo_target
+    registry = fixture.registry
+    binding = fixture.binding
+    candidate = fixture.candidate
     obligation = mint_obligation(
         wake_kind="dialogue_turn_pending",
         source_kind="agent_dialogue_attention",
@@ -1765,53 +1825,9 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
 
     operator = Operator()
 
-    def carrier_factory(**kwargs):
-        repository = WakeLedgerRepository(kwargs["runtime"])
-        if kwargs["historical_only"]:
-            def historical_context(attempt):
-                historical = kwargs["historical_context_for"](attempt)
-                client = CodexCurrentWriterWakeClient(
-                    operator_adapter=historical.operator_adapter,
-                    generation=historical.generation,
-                    attempt_id=historical.target_attempt_id,
-                    runtime_binding=historical.runtime_binding,
-                )
-                return HistoricalWakeContext(
-                    dispatchers=WakeDispatcherRegistry(
-                        {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-                    ),
-                    runtime_binding=historical.runtime_binding,
-                    target_registry=registry,
-                )
-
-            return PersistedWakeCarrier(
-                repository=repository,
-                dispatchers=WakeDispatcherRegistry(),
-                current_binding_for=lambda _route: None,
-                retry_policy=kwargs["retry_policy"],
-                canary_profile=kwargs["canary_profile"],
-                historical_context_for=historical_context,
-                physical_source=kwargs.get("physical_source"),
-            )
-        client = CodexCurrentWriterWakeClient(
-            operator_adapter=kwargs["resolved"].operator_adapter,
-            generation=kwargs["generation"],
-            attempt_id=kwargs["resolved"].target_attempt_id,
-            runtime_binding=kwargs["current_binding"],
-            pre_submit_guard=kwargs["pre_submit_guard"],
-        )
-        return PersistedWakeCarrier(
-            repository=repository,
-            dispatchers=WakeDispatcherRegistry(
-                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-            ),
-            current_binding_for=lambda _route: kwargs["current_binding"],
-            retry_policy=kwargs["retry_policy"],
-            target_registry=kwargs["resolved"].registry,
-            canary_profile=kwargs["canary_profile"],
-            historical_context_for=kwargs["historical_context_for"],
-            physical_source=kwargs.get("physical_source"),
-        )
+    # Exercise the installed composer, including historical conversion and the
+    # final native pre-submit guard. An injected copy hid missing production wiring.
+    carrier_factory = service_cli._build_executive_dialogue_wake_carrier
 
     clock = 1_700_000_100
 
@@ -1827,7 +1843,6 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         canary_profile=DialogueWakeCanaryProfile(grant),
         canary_now_epoch_seconds=now_epoch_seconds,
         installed_release_sha=grant.installed_release_sha,
-        operation_key=grant.operation_key,
     )
     actual_current_facts = bridge._current_canary_facts
 
@@ -9370,6 +9385,41 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         ).resolve(strict=False)
         assert observation_loaded["dialogue_observation_peer_uid"] == 457
         assert observation_loaded["dialogue_bridge_armed"] is False
+        assert observation_loaded["dialogue_wake_canary_activation"] is None
+
+        from tests.test_dialogue_wake_canary_activation import valid_wire
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationGrant, DialogueWakeCanaryProfile,
+        )
+        grant_wire = valid_wire(installed_release_sha=raw["proof_base_sha"])
+        for suffix, grant_value in (("null", None), ("exact", grant_wire)):
+            canary_path = tmp_path / f"control-dialogue-canary-{suffix}.json"
+            canary_path.write_text(json.dumps({
+                **raw, **observation_fields,
+                "dialogue_wake_canary_activation": grant_value}))
+            canary_path.chmod(0o400)
+            parsed_config = service_cli.load_control_config(canary_path)
+            parsed_grant = parsed_config["dialogue_wake_canary_activation"]
+            if grant_value is None:
+                assert parsed_grant is None
+            else:
+                assert type(parsed_grant) is DialogueWakeCanaryActivationGrant
+                assert parsed_grant.to_dict() == grant_value
+        for index, bad_grant in enumerate((
+            {}, {**grant_wire, "production_armed": True},
+            {**grant_wire, "expires_at_epoch_seconds": grant_wire["valid_from_epoch_seconds"] + 901},
+        )):
+            bad_path = tmp_path / f"control-dialogue-canary-invalid-{index}.json"
+            bad_path.write_text(json.dumps({
+                **raw, **observation_fields, "dialogue_wake_canary_activation": bad_grant}))
+            bad_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="canary activation is invalid"):
+                service_cli.load_control_config(bad_path)
+        orphan_path = tmp_path / "control-dialogue-canary-orphan.json"
+        orphan_path.write_text(json.dumps({**raw, "dialogue_wake_canary_activation": None}))
+        orphan_path.chmod(0o400)
+        with pytest.raises(ServiceError, match="requires the observation configuration"):
+            service_cli.load_control_config(orphan_path)
 
         armed_observation_path = tmp_path / "control-observation-armed.json"
         armed_observation_path.write_text(
@@ -9529,6 +9579,26 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             observation_kwargs["dialogue_wake_handler"],
             ExecutiveDialogueWakeBridge,
         )
+        handler = observation_kwargs["dialogue_wake_handler"]
+        assert type(handler.canary_profile) is DialogueWakeCanaryProfile
+        assert handler.canary_profile.grant is None
+        assert handler._operation_key is None
+        assert handler._installed_release_sha == raw["proof_base_sha"]
+
+        # The factory must consume only the trusted profile produced by the
+        # publication/verification owner. A raw config grant alone is not
+        # sufficient authority to arm the canary lane.
+        trusted_grant = DialogueWakeCanaryActivationGrant.from_dict(grant_wire)
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
+            composition_patch.setattr(service_cli, "ExecutiveControlService", capture_service)
+            service_cli._service_from_config(
+                {**armed_observation_loaded, "dialogue_wake_canary_activation": trusted_grant},
+                dialogue_canary_profile=DialogueWakeCanaryProfile(trusted_grant),
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")))
+        handler = captured["kwargs"]["dialogue_wake_handler"]
+        assert handler.canary_profile.grant.to_dict() == grant_wire
+        assert handler._operation_key is None
 
         captured.clear()
         with monkeypatch.context() as composition_patch:
@@ -10768,6 +10838,74 @@ def test_maintenance_workspace_materializes_exact_frozen_root_once(tmp_path, sho
             assert calls[0]["base_sha"]==old_base
             assert calls[0]["branch"]==root.branch
             assert "commission_dependency" not in calls[0]
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+@pytest.mark.parametrize("fault", [
+    None, "parent", "root", "depth", "role", "provenance", "worktree", "branch",
+    "profile", "base", "quota", "binary", "native_to_closed",
+])
+def test_ceo_only_root_keeps_sealed_binding_after_same_release_arm(
+    tmp_path, short_socket_root, monkeypatch, fault
+):
+    from ops.executive_os import acceptance_maintenance as maintenance
+
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt = service._submit_service_intent(_coo_intent(service.config, "same-base"))
+            root = service.runtime.jobs.get_job(receipt["job_id"])
+            admitted = root.to_dict()
+            service.config = dataclasses.replace(
+                service.config, coo_autonomy_armed=True, coo_operator_harness_armed=True
+            )
+            service._coo_execution_binding = service._load_coo_execution_binding()
+            # Same-release roots cannot borrow the maintenance carry exception.
+            def no_maintenance(sha):
+                raise AssertionError("same-base root consulted maintenance evidence")
+            monkeypatch.setattr(maintenance, "descriptor_for", no_maintenance)
+            changes = {
+                "parent": {"parent_job_id": "JOB-other"},
+                "root": {"root_job_id": "JOB-other"},
+                "depth": {"depth": 1},
+                "role": {"orchestration_role": "plan"},
+                "provenance": {"orchestration_provenance": {
+                    **root.orchestration_provenance, "creator": "other"
+                }},
+                "worktree": {"worktree": None},
+                "branch": {"branch": None},
+                "profile": {"constraints": dict(root.constraints, execution_profile_digest="c"*64)},
+                "quota": {"constraints": dict(root.constraints, operator_eligible_quota_classes=["other"])},
+                "binary": {"constraints": dict(root.constraints, operator_harness_binary_digest="c"*64)},
+            }
+            if fault == "base":
+                # A base mismatch must still take the existing maintenance path.
+                monkeypatch.setattr(maintenance, "descriptor_for", lambda sha: None)
+                root = dataclasses.replace(root, constraints=dict(root.constraints, base_sha="c"*40))
+            elif fault == "native_to_closed":
+                root = dataclasses.replace(root, constraints=dict(root.constraints, operator_harness_armed=True))
+                service.config = dataclasses.replace(
+                    service.config, coo_autonomy_armed=False, coo_operator_harness_armed=False
+                )
+                service._coo_execution_binding = service._load_coo_execution_binding()
+            elif fault:
+                root = dataclasses.replace(root, **changes[fault])
+            if fault:
+                assert not service._is_bound_coo_root(root)
+                return
+            assert service._is_bound_coo_root(root)
+            assert service._coo_binding_for_root(root)["operator_harness_armed"] is False
+            planner = service.runtime.jobs.create_cycle_planner(
+                root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+            )
+            assert planner.constraints["execution_profile_id"] == root.constraints["execution_profile_id"]
+            assert planner.constraints["eligible_quota_classes"] == root.constraints["eligible_quota_classes"]
+            assert "harness_binary_digest" not in planner.constraints
+            assert "harness_version" not in planner.constraints
+            assert service._require_bound_coo_job(planner).job_id == root.job_id
+            assert service.runtime.jobs.get_job(root.job_id).to_dict() == admitted
         finally:
             await service.close()
     asyncio.run(scenario())

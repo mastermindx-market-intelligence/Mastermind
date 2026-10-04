@@ -198,6 +198,7 @@ def test_app_acl_respects_bootstrap_root_owned_socket_directory(
     ('legacy', 'build_executive_mcp_app', True),
     ('web_ceo_v2', 'build_web_ceo_v2_mcp_app', True),
     ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True),
+    ('web_ceo_sessions_v1', 'build_web_ceo_sessions_mcp_app', True),
     ('release_control_v1', 'build_release_control_mcp_app', False),
     ('personal_read', 'build_personal_read_mcp_app', False),
     ('web_ceo_release_v1', 'build_web_ceo_release_mcp_app', True),
@@ -248,7 +249,7 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     def wrong(*a, **k):
         pytest.fail('wrong MCP builder selected')
     for name in ('build_executive_mcp_app', 'build_web_ceo_v2_mcp_app',
-                 'build_web_ceo_v3_mcp_app', 'build_personal_read_mcp_app',
+                 'build_web_ceo_v3_mcp_app', 'build_web_ceo_sessions_mcp_app', 'build_personal_read_mcp_app',
                  'build_release_control_mcp_app', 'build_web_ceo_release_mcp_app'):
         monkeypatch.setattr(server, name, selected if name == builder_name else wrong)
     launches = []
@@ -264,6 +265,9 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     if profile == 'web_ceo_v3':
         from integrations.mosyle_mdm.client import MosyleInventoryClient
         assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
+    if profile in {'web_ceo_v3', 'web_ceo_sessions_v1'}:
+        from integrations.session_bridge.return_tools import NativeReplyReadTool
+        assert type(kwargs.pop('session_reply_read_tool')) is NativeReplyReadTool
         assert callable(kwargs.pop('session_target_projector'))
         assert callable(kwargs.pop('session_reply_handler'))
         assert callable(kwargs.pop('session_summon_handler'))

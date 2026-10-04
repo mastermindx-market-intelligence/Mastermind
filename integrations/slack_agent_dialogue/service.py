@@ -808,6 +808,19 @@ class AgentDialogueService:
             }:
                 raise DialogueServiceError("INTERNAL_ERROR")
             return {"attestation": RELAY_PARENT_ATTESTATION, **result}
+        if operation == "read_bound_parent":
+            values = _exact_mapping(args, {"context", "thread_ts"})
+            if not isinstance(values["thread_ts"], str):
+                raise DialogueServiceError("REQUEST_INVALID")
+            result = self.engine_result(
+                await engine.read_bound_parent(
+                    context=_context_v2(values["context"]),
+                    thread_ts=values["thread_ts"],
+                )
+            )
+            if not isinstance(result, dict) or set(result) != {"thread_ts", "parent"}:
+                raise DialogueServiceError("INTERNAL_ERROR")
+            return {"attestation": RELAY_PARENT_ATTESTATION, **result}
         if operation == "ensure_thread":
             values = _exact_mapping(args, {"context", "created_at"})
             if not isinstance(values["created_at"], str):
