@@ -23,7 +23,7 @@ function base(overrides = {}) {
 
 test('tailnet fabric gateway fixes channel, loopback bind, and shared backend', () => {
   const {config, auth} = resolveTailnetGatewayConfig(base());
-  assert.deepEqual(Object.keys(TAILNET_PROFILES).sort(), ['fabric-design','fabric-read']);
+  assert.deepEqual(Object.keys(TAILNET_PROFILES).sort(), ['fabric-design','fabric-read','fleet-host']);
   assert.equal(config.host, REQUIRED_HOST);
   assert.equal(config.port, 45117);
   assert.equal(config.publicUrl, 'https://mac-studio.example-tailnet.ts.net');
@@ -68,7 +68,7 @@ test('tailnet origin is exact https ts.net root without credentials or query', (
 test('tailnet gateway refuses unknown account, bind, test mode, reserved port, and caller tool policy', () => {
   assert.throws(
     () => resolveTailnetGatewayConfig(base({accountLabel:'chatgpt1'})),
-    /accountLabel must be fabric-read or fabric-design/,
+    /accountLabel must be fabric-read, fabric-design, or fleet-host/,
   );
   assert.throws(
     () => resolveTailnetGatewayConfig(base({host:'0.0.0.0'})),
@@ -109,6 +109,30 @@ test('design route grants only the two Paper mutation tools beyond read', () => 
   ]) {
     assert.equal(read.includes(forbidden), false);
     assert.equal(design.includes(forbidden), false);
+  }
+});
+
+test('fleet-host route exposes Desktop Commander but not Paper, Git, or nested routing', () => {
+  const tools = resolveTailnetGatewayConfig(base({accountLabel:'fleet-host'})).config.toolAllowlist;
+  for (const required of [
+    'studio_ping',
+    'studio_output_page',
+    'read_file',
+    'write_file',
+    'start_process',
+    'read_process_output',
+    'get_recent_tool_calls',
+  ]) {
+    assert.equal(tools.includes(required), true, required);
+  }
+  for (const forbidden of [
+    'studio_select_host',
+    'studio_fleet_status',
+    'paper_read',
+    'paper_edit',
+    'studio_git_commit_current_changes',
+  ]) {
+    assert.equal(tools.includes(forbidden), false, forbidden);
   }
 });
 
