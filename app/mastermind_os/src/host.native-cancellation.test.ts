@@ -23,6 +23,7 @@ const flush = async () => {
 type Read = (client: RawClient, signal: AbortSignal) => Promise<unknown>;
 const reads: [string, Read][] = [
   ["read_programs", (c, signal) => c.readPrograms({ signal })],
+  ["read_work", (c, signal) => c.readWork({ signal })],
   [
     "read_mission",
     (c, signal) =>
