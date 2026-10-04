@@ -10,9 +10,9 @@
 // the external Host header.
 //
 // Tailscale identity/app-capability headers are deliberately ignored here.
-// Tailnet ACL/Serve controls transport reachability; Studio Direct's fixed
-// principal identifies the single reviewed "fabric" channel. No header can
-// select another account, host, Paper file, credential, or authority plane.
+// Tailnet ACL/Serve controls transport reachability; Studio Direct binds each
+// request to one of the two closed fabric principals below. No header can
+// widen a route, select a host/Paper target, or create another authority plane.
 
 import { fileURLToPath } from 'node:url';
 import { resolve as resolvePath } from 'node:path';
