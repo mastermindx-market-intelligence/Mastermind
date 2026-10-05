@@ -683,6 +683,44 @@ def test_guard_denies_explicit_empty_identity_over_inherited_value(
     assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
 
 
+def test_guard_denies_dynamic_root_identity_expansion(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ROOT_ID", "root-1")
+    monkeypatch.delenv("POOL_ORCHESTRATOR_ID", raising=False)
+    monkeypatch.delenv("POOL_PARENT_RUN_ID", raising=False)
+    monkeypatch.delenv("POOL_TASK_CLASS", raising=False)
+    command = (
+        "POOL_ORCHESTRATOR_ID=$ROOT_ID POOL_PARENT_RUN_ID=parent-1 "
+        "POOL_TASK_CLASS=review pool run grok bounded /tmp grok-4.6"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
+
+
+def test_guard_denies_dynamic_command_substitution_root(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "POOL_ORCHESTRATOR_ID=$(uuidgen) POOL_PARENT_RUN_ID=parent-1 "
+        "POOL_TASK_CLASS=review pool run grok bounded /tmp grok-4.6"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
+
+
 def test_guard_denies_direct_remote_sub_wrapper_without_root_identity(
     mastermind_scope: Path,
     capsys: pytest.CaptureFixture[str],
