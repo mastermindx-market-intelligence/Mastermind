@@ -834,6 +834,24 @@ def test_guard_denies_direct_remote_sub_wrapper_without_root_identity(
     assert "Fabric root-budget guard" in output["permissionDecisionReason"]
 
 
+def test_guard_denies_direct_slot_launcher_without_root_identity(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "python3 /opt/mastermind/ext/slot.py grok -- "
+        "grok -p bounded --output-format plain"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "Fabric root-budget guard" in output["permissionDecisionReason"]
+
+
 def test_guard_allows_fabric_launch_with_explicit_root_identity(
     mastermind_scope: Path,
     capsys: pytest.CaptureFixture[str],
