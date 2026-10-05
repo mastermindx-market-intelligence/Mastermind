@@ -114,7 +114,8 @@ installation is corrupt:
    Desktop Commander recovery, prefer one system-domain LaunchDaemon that runs
    the existing fixed runner as the owning user. Preserve the existing device
    identity/session store; this is a launch-domain migration, not a second
-   remote bridge or credential;
+   remote bridge or credential. Use the reviewed template at
+   `ops/executive_os/com.mastermind.desktop-commander.remote.__USER__.plist.template`;
 7. when that system owner is installed, remove the active per-user LaunchAgent
    definition so a later Aqua login cannot create a duplicate bridge. Keep a
    rollback copy, but do not leave both persistence definitions active;
