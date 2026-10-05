@@ -89,18 +89,55 @@ the Company MCP tool schema, send Slack, arm Wake or mutate Runtime. Its returne
 `CompanyDialogueGateway` still rejects that binding as `BINDING_UNAVAILABLE`. This refusal is an
 explicit regression test and is the safety fence between H6-A and H6-B.
 
-**H6-B** is a separate reviewed compatibility unit. Only after H1 supplies an exact admitted
-principal/profile generation may H6-B synchronize the neutral principal actor/message contract,
-principal-only Company MCP tool surface, gateway binding validation, Relay authorization, current
-carrier fresh-read, effect reconciliation, Wake applicability and provider/profile schema
-attestation. The existing worker tool catalog and worker actor semantics remain unchanged.
+H6-B is now split into a source-safe **B1** and a later owner-composition **B2**.
+
+**H6-B1**, on the current #1240 source branch, adds the neutral/provider-facing contract without
+making it operational:
+
+- Dialogue V2 gains a distinct `executive_principal` actor carrying current principal-binding,
+  mission-authority generation, capability-profile and root identities. It is *not* the existing
+  `executive_surface/coo` actor and therefore does not widen that actor's worker-style message set.
+- That actor may emit only `RULING / CONTINUE / STOP`; `RULING` is additionally constrained in
+  the neutral contract to `WITHIN_COMMISSION`. Reserved/higher-seat authority cannot be supplied
+  through an alternate provider projection.
+- Engine reply direction accepts the principal only as the opposite side of a
+  `worker_attempt`; it cannot rule on another executive surface.
+- A separate `mastermind-company-dialogue-principal` MCP facet exposes exactly four tools:
+  `read_thread`, `ruling`, `continue`, and `stop`. The existing six worker tools and their
+  schema/tool digests remain byte-stable.
+- No model-visible principal tool accepts actor, child, root, workstream, session, thread, provider,
+  account, host, RuntimeBinding or placement selectors. Ruling is fixed to current commission;
+  continuation injects `scope_change=false`.
+- One deterministic message key is derived from the exact child-return/carrier identity, excluding
+  the message body and principal generation. An identical replay therefore reconciles to the same
+  key/fingerprint; changed semantics, a changed principal generation, or switching CONTINUE↔STOP
+  on the same child return produces the existing `MESSAGE_KEY_CONFLICT`, never a second edge.
+- Effectful calls use the existing Relay `READY -> COMMIT` exact-send protocol and the verified
+  Relay-authored parent. The gateway requires a host callback at the exact pre-COMMIT boundary.
+  That callback must return a typed durable-fence receipt whose digest matches the exact public
+  commit-intent facts. A missing/no-op/mismatched fence refuses before COMMIT.
+- A lost response after the durable fence/COMMIT boundary returns `EFFECT_UNKNOWN` with the same
+  reconciliation message key. The gateway does not retry or switch carriers.
+
+B1 still has **no durable effect owner factory** and is not wired into a production capability
+profile, so source existence cannot activate it. Local source regressions cover the principal
+contract, binding, engine, worker-MCP compatibility, replay/conflict and fence semantics. The
+host's missing local MCP SDK leaves server-runtime assertions for dependency-complete CI.
+
+**H6-B2** must compose the B1 `before_commit` contract with the accepted existing Runtime/effect
+owner and reconciliation reader, then bind that exact principal server/tool-schema generation into
+H1 admission and current Company/Wake applicability. B2 must not create another effect ledger,
+dialogue store or wake system. Only after that composition and independent review may a real native
+principal use the modifying tools.
 
 ## Message operation and effect reconciliation
 
-The existing gateway resolves bound context for each call and keeps the generated message key for
-reconciliation [S19]. Preserve that key across a lost response; invoking the gateway afresh must
-not accidentally create a second semantic ruling with a new UUID. The existing engine's prepared
-send/single-flight/commit path owns collision and post-effect reconciliation [S21].
+The principal gateway does not generate a fresh UUID for each retry. It derives one semantic reply
+slot from the bound work/commission/session/operation, exact child Attempt, thread root and child
+return message. The existing engine's prepared-send/single-flight rules own duplicate/conflict
+semantics; the merged #1191 Relay exact-send path owns READY/COMMIT and post-COMMIT uncertainty.
+The injected B2 durable owner must fence the exact B1 commit-intent digest before COMMIT and later
+reconcile the same message key. A source-level or no-op callback is not sufficient proof.
 
 Before an effectful ruling, fresh-read the exact bound carrier after the latest local evidence-
 producing action, apply current mandate/decision authority and verify the returned child revision.
@@ -161,11 +198,17 @@ requires a real complete principal → counterpart → return → continuation �
 same Executive/Agent OS mission identity, no Chairman message shuttling and no duplicate
 wake/job/session effects. A worker-only reporting loop or successful Slack post is insufficient.
 
-Current source candidate: H6-A pure principal/child binding plus adversarial tests. It is
-BUILT_NOT_PROVEN and intentionally unusable by the current worker-only gateway.
+Current source candidate: **H6-A + H6-B1**. The pure principal/child resolver, neutral
+principal actor ceiling, principal-only four-tool schema, exact-send gateway, one-edge replay
+identity and typed pre-COMMIT fence contract are built and source-tested. They are
+`BUILT_NOT_PROVEN / PRODUCTION_INERT`: no production profile or factory supplies the required
+durable fence receipt, and no native principal can be claimed from these files.
 
-Held for H6-B: neutral principal actor/message validation, principal-only Company MCP schema/tool
-exposure, live carrier fresh-read and send permission, exact Wake applicability, H1 native
-profile/schema admission and Macro source publication authority. These are engineering gates under
-existing owners, not permission to invent a Claude inbox, thread registry or wake daemon. H6 is
-not complete until the real reciprocal CONTINUE/STOP canary satisfies the original DONE WHEN.
+Held for **H6-B2 / acceptance**: compose the pre-COMMIT callback with the accepted existing
+Runtime/effect owner and reconciliation read; qualify exact Company/Wake applicability; bind the
+resulting principal server/tool-schema digest into the H1 native profile; prove installation and
+native selection; then run the real reciprocal principal → child → return → CONTINUE → return →
+STOP cycle and verify zero duplicate message/Wake/Job/session effects. Macro Agent OS publication
+authority remains separate. These are engineering gates under existing owners, not permission to
+invent a Claude inbox, thread registry, effect ledger or wake daemon. H6 is not complete until the
+real canary satisfies the original DONE WHEN.

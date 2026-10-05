@@ -681,13 +681,19 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
         "__init__.py",
         "adapter.py",
         "consultation.py",
+        "principal_adapter.py",
+        "principal_schemas.py",
         "schemas.py",
         "server.py",
     }
     for filename, modules in imports.items():
         mcp_imports = {module for module in modules if module == "mcp" or module.startswith("mcp.")}
         assert bool(mcp_imports) is (filename == "server.py")
-    adapter_imports = imports["adapter.py"]
+    adapter_imports = (
+        imports["adapter.py"]
+        | imports["principal_adapter.py"]
+        | imports["principal_schemas.py"]
+    )
     forbidden_roots = {
         "slack_sdk",
         "sqlite3",
@@ -720,6 +726,8 @@ def guarded_import(name, *args, **kwargs):
 builtins.__import__ = guarded_import
 import integrations.mastermind_company_mcp.schemas
 import integrations.mastermind_company_mcp.adapter
+import integrations.mastermind_company_mcp.principal_schemas
+import integrations.mastermind_company_mcp.principal_adapter
 """
     completed = subprocess.run(
         [sys.executable, "-c", script],
@@ -748,6 +756,48 @@ def test_mcp_server_advertises_only_the_frozen_six_tools():
 
     gateway, _resolver, _service = _gateway()
     server = build_mcp_server(gateway)
+    capabilities = server.get_capabilities(
+        notification_options=NotificationOptions(), experimental_capabilities={}
+    )
+    assert capabilities.tools is not None
+    assert capabilities.resources is None
+    assert capabilities.prompts is None
+    assert capabilities.completions is None
+    assert {handler.__name__ for handler in server.request_handlers} == {
+        "PingRequest",
+        "ListToolsRequest",
+        "CallToolRequest",
+    }
+    assert server.notification_handlers == {}
+
+
+def test_principal_mcp_server_advertises_only_the_distinct_four_tools():
+    pytest.importorskip("mcp")
+    from mcp.server.lowlevel import NotificationOptions
+
+    from integrations.mastermind_company_mcp.principal_schemas import (
+        PRINCIPAL_TOOL_SPECS,
+    )
+    from integrations.mastermind_company_mcp.server import (
+        build_principal_mcp_server,
+        build_principal_tools,
+    )
+
+    tools = build_principal_tools()
+    assert [tool.name for tool in tools] == [
+        "read_thread",
+        "ruling",
+        "continue",
+        "stop",
+    ]
+    for tool, spec in zip(tools, PRINCIPAL_TOOL_SPECS, strict=True):
+        assert tool.description == spec.description
+        assert tool.inputSchema == spec.input_schema
+        assert tool.annotations.readOnlyHint is spec.read_only
+        assert tool.annotations.destructiveHint is False
+        assert tool.annotations.openWorldHint is False
+
+    server = build_principal_mcp_server(object())  # builder has no call-time effect
     capabilities = server.get_capabilities(
         notification_options=NotificationOptions(), experimental_capabilities={}
     )

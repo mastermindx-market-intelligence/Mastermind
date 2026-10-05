@@ -350,6 +350,11 @@ def _reply_direction_is_valid(
 
     request_actor = request["actor_ref"]
     reply_actor = reply["actor_ref"]
+    if reply_actor["kind"] == "executive_principal":
+        return (
+            reply_actor["seat"] == "coo"
+            and request_actor["kind"] == "worker_attempt"
+        )
     if (
         reply_actor["kind"] != "executive_surface"
         or reply_actor["seat"] not in {"ceo", "chairman"}
