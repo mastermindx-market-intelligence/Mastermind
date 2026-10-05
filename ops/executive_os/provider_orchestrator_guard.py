@@ -80,6 +80,16 @@ REPO_ARG_RE = re.compile(
     re.I,
 )
 
+FABRIC_LAUNCH_RE = re.compile(
+    CMD_POS + r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b",
+    re.I,
+)
+_FABRIC_IDENTITY_NAMES = (
+    "POOL_ORCHESTRATOR_ID",
+    "POOL_PARENT_RUN_ID",
+    "POOL_TASK_CLASS",
+)
+
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -220,14 +230,47 @@ def repeat_poll_reason(key: str, *, now: float | None = None) -> str | None:
     return None
 
 
+def _command_or_environment_value(command: str, name: str) -> str:
+    current = os.environ.get(name, "").strip()
+    if current:
+        return current
+    pattern = re.compile(
+        rf"(?:^|[\s;&|]){re.escape(name)}=(?:'([^']+)'|\"([^\"]+)\"|([^\s;&|]+))"
+    )
+    match = pattern.search(command)
+    if not match:
+        return ""
+    return next((value for value in match.groups() if value is not None), "").strip()
+
+
+def guard_fabric_launch(command: str) -> None:
+    if FABRIC_LAUNCH_RE.search(command) is None:
+        return
+    missing = [
+        name
+        for name in _FABRIC_IDENTITY_NAMES
+        if not _command_or_environment_value(command, name)
+    ]
+    if missing:
+        deny(
+            "Mastermind Fabric root-budget guard: provider launch is missing "
+            + ", ".join(missing)
+            + ". Every pool run/remote launch must preserve the existing root "
+            "orchestrator identity, true parent run, and task class so fair-share, "
+            "descendant accounting, and routing economics cannot be reset by a new "
+            "chat or helper."
+        )
+
+
 def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> None:
     if not is_mastermind_scope(payload):
         return
     command = str(tool_input.get("command") or "")
-    if "gh " not in command:
+    clean = strip_heredocs(command)
+    guard_fabric_launch(clean)
+    if "gh " not in clean:
         return
 
-    clean = strip_heredocs(command)
     background = tool_input.get("run_in_background") is True
     watches = list(CI_WATCH_RE.finditer(clean))
 
