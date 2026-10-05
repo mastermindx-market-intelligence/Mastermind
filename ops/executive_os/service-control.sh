@@ -202,10 +202,26 @@ agent_relay_registration_state() {
   esac
 }
 
+agent_relay_precondition_unknown() {
+  local stage="$1"
+  /bin/echo "service=$AGENT_RELAY_LABEL state=unknown stage=$stage" >&2
+  return 1
+}
+
 agent_relay_effect_unknown() {
   local stage="$1"
   /bin/echo "service=$AGENT_RELAY_LABEL state=effect_unknown stage=$stage" >&2
   return 75
+}
+
+agent_relay_observation_failure() {
+  local stage="$1"
+  local effect_started="$2"
+  if [ "$effect_started" -eq 0 ]; then
+    agent_relay_precondition_unknown "$stage"
+  else
+    agent_relay_effect_unknown "$stage"
+  fi
 }
 
 agent_relay_status() {
@@ -222,23 +238,24 @@ agent_relay_status() {
 }
 
 start_agent_relay() {
-  local disabled registration action rc=0 check
+  local disabled registration action rc=0 check effect_started=0
 
-  disabled="$(agent_relay_disabled_state)" || agent_relay_effect_unknown "preflight-disabled"
+  disabled="$(agent_relay_disabled_state)" || agent_relay_observation_failure "preflight-disabled" "$effect_started"
   if [ "$disabled" = "disabled" ]; then
+    effect_started=1
     rc=0
     /bin/launchctl enable "system/$AGENT_RELAY_LABEL" || rc=$?
-    disabled="$(agent_relay_disabled_state)" || agent_relay_effect_unknown "enable-reconcile"
+    disabled="$(agent_relay_disabled_state)" || agent_relay_observation_failure "enable-reconcile" "$effect_started"
     [ "$disabled" = "enabled" ] || agent_relay_effect_unknown "enable-reconcile"
     if [ "$rc" -ne 0 ]; then
       /bin/echo "service=$AGENT_RELAY_LABEL effect=enable recovered=1"
     fi
   fi
 
-  registration="$(agent_relay_registration_state)" || agent_relay_effect_unknown "pre-start-registration"
+  registration="$(agent_relay_registration_state)" || agent_relay_observation_failure "pre-start-registration" "$effect_started"
   if [ "$registration" = "running" ]; then
-    disabled="$(agent_relay_disabled_state)" || agent_relay_effect_unknown "start-final-disabled"
-    [ "$disabled" = "enabled" ] || agent_relay_effect_unknown "start-final-disabled"
+    disabled="$(agent_relay_disabled_state)" || agent_relay_observation_failure "start-final-disabled" "$effect_started"
+    [ "$disabled" = "enabled" ] || agent_relay_observation_failure "start-final-disabled" "$effect_started"
     /bin/echo "service=$AGENT_RELAY_LABEL state=running existing=1 disabled=enabled"
     return 0
   fi
@@ -246,21 +263,23 @@ start_agent_relay() {
   case "$registration" in
     registered)
       action="kickstart"
+      effect_started=1
       rc=0
       /bin/launchctl kickstart "system/$AGENT_RELAY_LABEL" || rc=$?
       ;;
     absent)
       action="bootstrap"
+      effect_started=1
       rc=0
       /bin/launchctl bootstrap system "$AGENT_RELAY_PLIST" || rc=$?
       ;;
-    *) agent_relay_effect_unknown "pre-start-registration" ;;
+    *) agent_relay_observation_failure "pre-start-registration" "$effect_started" ;;
   esac
 
   for ((check = 0; check <= 30; check++)); do
-    registration="$(agent_relay_registration_state)" || agent_relay_effect_unknown "$action-reconcile"
+    registration="$(agent_relay_registration_state)" || agent_relay_observation_failure "$action-reconcile" "$effect_started"
     if [ "$registration" = "running" ]; then
-      disabled="$(agent_relay_disabled_state)" || agent_relay_effect_unknown "start-final-disabled"
+      disabled="$(agent_relay_disabled_state)" || agent_relay_observation_failure "start-final-disabled" "$effect_started"
       [ "$disabled" = "enabled" ] || agent_relay_effect_unknown "start-final-disabled"
       if [ "$rc" -ne 0 ]; then
         /bin/echo "service=$AGENT_RELAY_LABEL effect=$action recovered=1"
@@ -280,35 +299,37 @@ start_agent_relay() {
 }
 
 stop_agent_relay() {
-  local disabled registration rc=0 check
+  local disabled registration rc=0 check effect_started=0
 
   # Pre-enrollment disabled+absent state belongs to A2 preparation. This
   # lifecycle owner may begin a stop only for an exactly registered service.
   require_registered "$AGENT_RELAY_LABEL"
 
-  disabled="$(agent_relay_disabled_state)" || agent_relay_effect_unknown "pre-stop-disabled"
+  disabled="$(agent_relay_disabled_state)" || agent_relay_observation_failure "pre-stop-disabled" "$effect_started"
   if [ "$disabled" = "enabled" ]; then
+    effect_started=1
     rc=0
     /bin/launchctl disable "system/$AGENT_RELAY_LABEL" || rc=$?
-    disabled="$(agent_relay_disabled_state)" || agent_relay_effect_unknown "disable-reconcile"
+    disabled="$(agent_relay_disabled_state)" || agent_relay_observation_failure "disable-reconcile" "$effect_started"
     [ "$disabled" = "disabled" ] || agent_relay_effect_unknown "disable-reconcile"
     if [ "$rc" -ne 0 ]; then
       /bin/echo "service=$AGENT_RELAY_LABEL effect=disable recovered=1"
     fi
   fi
 
-  registration="$(agent_relay_registration_state)" || agent_relay_effect_unknown "pre-bootout-registration"
+  registration="$(agent_relay_registration_state)" || agent_relay_observation_failure "pre-bootout-registration" "$effect_started"
   if [ "$registration" = "absent" ]; then
     /bin/echo "service=$AGENT_RELAY_LABEL state=absent disabled=disabled"
     return 0
   fi
 
+  effect_started=1
   rc=0
   /bin/launchctl bootout "system/$AGENT_RELAY_LABEL" >/dev/null 2>&1 || rc=$?
   for ((check = 0; check <= 30; check++)); do
-    registration="$(agent_relay_registration_state)" || agent_relay_effect_unknown "bootout-reconcile"
+    registration="$(agent_relay_registration_state)" || agent_relay_observation_failure "bootout-reconcile" "$effect_started"
     if [ "$registration" = "absent" ]; then
-      disabled="$(agent_relay_disabled_state)" || agent_relay_effect_unknown "stop-final-disabled"
+      disabled="$(agent_relay_disabled_state)" || agent_relay_observation_failure "stop-final-disabled" "$effect_started"
       [ "$disabled" = "disabled" ] || agent_relay_effect_unknown "stop-final-disabled"
       if [ "$rc" -ne 0 ]; then
         /bin/echo "service=$AGENT_RELAY_LABEL effect=bootout recovered=1"
