@@ -645,6 +645,62 @@ def test_guard_denies_fabric_launch_without_stable_root_identity(
     assert "POOL_TASK_CLASS" in output["permissionDecisionReason"]
 
 
+def test_guard_denies_partially_annotated_fabric_launch(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "POOL_TASK_CLASS=review pool remote mini2 glm /tmp/packet.txt "
+        "/Users/mini2/lanes/repos/Mastermind glm-5.3"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
+    assert "POOL_PARENT_RUN_ID" in output["permissionDecisionReason"]
+
+
+def test_guard_denies_explicit_empty_identity_over_inherited_value(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "parent-1")
+    monkeypatch.setenv("POOL_TASK_CLASS", "review")
+    command = (
+        "POOL_ORCHESTRATOR_ID='' pool remote mini2 glm /tmp/packet.txt "
+        "/Users/mini2/lanes/repos/Mastermind glm-5.3"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
+
+
+def test_guard_denies_direct_remote_sub_wrapper_without_root_identity(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "/opt/mastermind/ext/remote_sub.sh ubuntu2 grok /tmp/packet.txt "
+        "/home/ubuntu2/lanes/repo grok-4.6"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "Fabric root-budget guard" in output["permissionDecisionReason"]
+
+
 def test_guard_allows_fabric_launch_with_explicit_root_identity(
     mastermind_scope: Path,
     capsys: pytest.CaptureFixture[str],
@@ -656,6 +712,21 @@ def test_guard_allows_fabric_launch_with_explicit_root_identity(
         "POOL_ORCHESTRATOR_ID=root-1 POOL_PARENT_RUN_ID=root-1 "
         "POOL_TASK_CLASS=review pool remote mini2 glm /tmp/packet.txt "
         "/Users/mini2/lanes/repos/Mastermind glm-5.3"
+    )
+    guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
+def test_guard_allows_env_prefixed_fabric_launch_with_complete_identity(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "env POOL_ORCHESTRATOR_ID=root-1 POOL_PARENT_RUN_ID=parent-1 "
+        "POOL_TASK_CLASS=review pool run grok bounded /tmp grok-4.6"
     )
     guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
     assert capsys.readouterr().out == ""
