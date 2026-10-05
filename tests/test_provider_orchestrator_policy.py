@@ -211,6 +211,15 @@ def test_apply_handles_prose_only_host_with_missing_codex_hooks(tmp_path: Path) 
     home = tmp_path / "home"
     (home / ".codex").mkdir(parents=True)
     (home / ".claude").mkdir(parents=True)
+    native_override = """## Native Codex CEO routing override
+
+For local Mastermind CEO/orchestrator sessions, route routine worker parallelism through Fabric.
+
+Native Codex child cap is **0 by default**. At most one exception may exist.
+
+This is routing policy only. It grants no Fabric admission, provider capacity, source custody, effect clearance, or permission.
+
+"""
     legacy = """<!-- mastermind-ceo-async-ci-v1 -->
 old async law
 <!-- /mastermind-ceo-async-ci-v1 -->
@@ -229,7 +238,9 @@ Sol operating executive -> Fabric workers.
 <!-- /mastermind-fabric-routing-operational-v1 -->
 """
     (home / ".codex" / "AGENTS.md").write_text(
-        "# Storage rule\n\nKeep external SSD placement.\n\n" + legacy,
+        "# Storage rule\n\nKeep external SSD placement.\n\n"
+        + native_override
+        + legacy,
         encoding="utf-8",
     )
     (home / ".claude" / "CLAUDE.md").write_text(
@@ -279,6 +290,7 @@ Sol operating executive -> Fabric workers.
         assert "mastermind-ceo-async-ci-v1" not in text
         assert "<!-- mastermind-ceo-forward-execution -->" not in text
         assert "<!-- /mastermind-ceo-forward-execution -->" not in text
+        assert "## Native Codex CEO routing override" not in text
         assert "mastermind-orchestration-burn-guard-v1" not in text
         assert "mastermind-fabric-routing-operational-v1" not in text
         assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
@@ -286,6 +298,28 @@ Sol operating executive -> Fabric workers.
         assert "Capacity is a ceiling, not a target." in text
         assert "Sol is the default day-to-day project executive" in text
         assert text.count(BEGIN) == text.count(END) == 1
+
+
+def test_apply_refuses_ambiguous_unmarked_native_override(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    path = home / ".codex" / "AGENTS.md"
+    original = path.read_text(encoding="utf-8")
+    path.write_text(
+        original
+        + "\n## Native Codex CEO routing override\n\n"
+        + "This is some unrelated text without the known migration sentinels.\n"
+        + "\n## Following section\nkeep me\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        OrchestratorPolicyError,
+        match="refuse ambiguous Native Codex CEO routing override migration",
+    ):
+        apply_policy(home)
+
+    assert "This is some unrelated text" in path.read_text(encoding="utf-8")
 
 
 def test_apply_replaces_legacy_managed_blocks_instead_of_stacking_policy(tmp_path: Path) -> None:
