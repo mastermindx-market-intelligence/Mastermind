@@ -63,11 +63,46 @@ no network, subprocess, timer, persistence, MCP or scheduling owner and exposes 
 Wake operation. It therefore closes the **material-change filter and deterministic dedupe identity**
 only. It still does not register a process, poll GitHub, own a return route, or wake/resume Claude.
 
-**H5-B2** remains the process-owner composition: bind B1 to one existing accepted Class-E/Class-T
-waiter/process, register-or-reuse that exact candidate, persist only through that owner's existing
-handle/checkpoint mechanism, and deliver a material result through an accepted return target. The
-future owner must feed its owner-native snapshots through H5-A+B1 rather than reproduce CI semantics
-inside a Claude plugin.
+## H5-B2-A current source slice — material return into existing Wake Fabric
+
+The bounded owner census ruled out three tempting but incorrect compositions:
+
+- Agent Dialogue's Class-E/Class-T turn observer is Slack/thread specific and would couple GitHub
+  release state to dialogue semantics;
+- Worker Capacity observation is provider-capacity specific and owns no generic scheduler;
+- Executive Inbox admission accepts only Runtime-projected or Agent-OS decision attention, so
+  projecting GitHub CI as Inbox attention would forge the source owner.
+
+The source-safe composition is lower-level: the existing Wake Fabric gains one closed
+`github_ci_candidate_observation` source kind and one `ci_candidate_material` wake kind.
+`control_plane/github_ci_candidate_wake.py` projects only an H5-B1 decision that has already
+validated as material/terminal. Quiescent samples cannot mint an obligation. The source reference is
+`github_ci_candidate:<decision canonical digest>`, so a material event is source-anchored and route
+changes cannot change its Wake identity.
+
+The GitHub-CI source cannot mint dialogue/runtime/consultation wake kinds and cannot claim a Job or
+Attempt as its source. An optional root Job is correlation/routing only. The current H5 adapter is
+COO-bound and leaves SessionTargetRegistry/Wake Fabric to resolve the actual session target; it does
+not accept a session alias, native handle, provider, account or transport.
+
+This slice adds **no sampler, GitHub client, timer, persistence, watcher registry, retry loop, Wake
+delivery call, merge, rerun or deploy operation**. It closes the material-result → existing-Wake
+obligation seam only.
+
+## H5-B2-B remaining process-owner composition
+
+B2-B still must bind H5-A+B1+B2-A to one accepted Class-E/Class-T sampling/process owner that can:
+
+- register-or-reuse one exact candidate observation;
+- obtain complete owner-native GitHub check snapshots;
+- reconcile ambiguous registration/return state by the exact candidate rather than duplicating it;
+- feed only material B1 decisions into B2-A;
+- route/deliver the resulting obligation through existing SessionTargetRegistry/Wake Fabric; and
+- retire only that candidate observation when terminal.
+
+No production-proven generic GitHub-CI sampler/registration API has been located in the bounded
+current source. That absence blocks unattended/native H5 claims; it does not justify creating a
+Claude plugin database or misusing a dialogue/capacity observer.
 
 ## Resolve the existing owner first
 

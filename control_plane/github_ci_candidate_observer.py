@@ -26,6 +26,7 @@ from control_plane.github_release_assessment import (
 
 SCHEMA = "mastermind.github_ci_candidate_observer.v1"
 _ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._/-]{0,255}\Z")
+_OBSERVER_ID_RE = re.compile(r"\Agithub-ci-observer-[0-9a-f]{32}\Z")
 _SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 _SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
@@ -244,6 +245,75 @@ def _decision(
         current_digest=current.canonical_digest,
         canonical_digest=_digest(payload),
     )
+
+
+def validate_candidate_observer_decision(
+    decision: CandidateObserverDecision,
+) -> CandidateObserverDecision:
+    """Validate one exact material-change decision before another owner consumes it."""
+
+    if type(decision) is not CandidateObserverDecision:
+        raise CandidateObserverError("observer decision has wrong exact type")
+    if (
+        decision.schema != SCHEMA
+        or not isinstance(decision.observer_id, str)
+        or _OBSERVER_ID_RE.fullmatch(decision.observer_id) is None
+        or type(decision.disposition) is not CandidateObserverDisposition
+        or not isinstance(decision.reason, str)
+        or not decision.reason
+        or type(decision.candidate_state) is not CandidateCIState
+        or type(decision.terminal) is not bool
+        or type(decision.wake_reasoning) is not bool
+        or (
+            decision.previous_digest is not None
+            and (
+                not isinstance(decision.previous_digest, str)
+                or _SHA256_RE.fullmatch(decision.previous_digest) is None
+            )
+        )
+        or not isinstance(decision.current_digest, str)
+        or _SHA256_RE.fullmatch(decision.current_digest) is None
+        or not isinstance(decision.canonical_digest, str)
+        or _SHA256_RE.fullmatch(decision.canonical_digest) is None
+    ):
+        raise CandidateObserverError("observer decision is malformed")
+
+    expected_terminal = decision.candidate_state in {
+        CandidateCIState.GREEN,
+        CandidateCIState.FAILED,
+        CandidateCIState.STALE,
+    }
+    if decision.terminal is not expected_terminal:
+        raise CandidateObserverError("observer decision terminal state is inconsistent")
+
+    if decision.disposition is CandidateObserverDisposition.TERMINAL_RETURN:
+        if not decision.terminal or not decision.wake_reasoning:
+            raise CandidateObserverError("terminal return must wake reasoning")
+        if decision.reason != f"TERMINAL_{decision.candidate_state.value}":
+            raise CandidateObserverError("terminal return reason is inconsistent")
+    elif decision.disposition is CandidateObserverDisposition.MATERIAL_RETURN:
+        if decision.terminal or not decision.wake_reasoning:
+            raise CandidateObserverError("material return must be nonterminal and wake reasoning")
+        if decision.reason not in {
+            "OBSERVER_EVIDENCE_UNKNOWN",
+            "OBSERVER_EVIDENCE_RECOVERED",
+        }:
+            raise CandidateObserverError("material return reason is inconsistent")
+    else:
+        if decision.terminal or decision.wake_reasoning:
+            raise CandidateObserverError("quiescent decision cannot wake reasoning")
+        if decision.reason not in {
+            "BASELINE_PENDING",
+            "NO_MATERIAL_CHANGE",
+            "UNKNOWN_UNCHANGED",
+        }:
+            raise CandidateObserverError("quiescent reason is inconsistent")
+
+    rendered = decision.to_dict()
+    claimed = rendered.pop("canonical_digest", None)
+    if claimed != decision.canonical_digest or _digest(rendered) != decision.canonical_digest:
+        raise CandidateObserverError("observer decision canonical digest is invalid")
+    return decision
 
 
 def observe_candidate_transition(
