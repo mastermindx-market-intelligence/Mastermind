@@ -1,0 +1,266 @@
+--- a/ops/executive_os/provider_orchestrator_policy.py
++++ b/ops/executive_os/provider_orchestrator_policy.py
+@@ -66,31 +66,69 @@
+ 
+ ### Operating shape
+ 
+-- Sol is the default day-to-day project executive for decomposition, dispatch, ordinary repair,
+-  integration, delivery, and return consumption inside the accepted charter.
+-- Astra is optional strategic/meta principal capacity for architecture, materially conflicting
+-  evidence, novel recovery, or strategic acceptance. Direct Astra -> routine worker fan-out is
+-  exceptional for major programs rather than the default shape.
+-- A qualified Fabric domain coordinator is optional only when it owns a complete bounded subsystem
+-  outcome and removes real integration load. It may not exist merely to relay summaries.
+-- Do not force a ceremonial hierarchy. If one principal plus bounded Fabric leaves is sufficient,
+-  omit the extra COO/coordinator. Insert Sol below Astra only when Sol owns real decomposition,
+-  integration, return consumption, or multiple workstreams; never use Sol as a message relay.
+-- When Astra hands sustained delivery to Sol, transmit a compact frozen mission/frontier capsule and
+-  exact artifact refs rather than cloning the parent transcript. Astra returns to strategic exceptions
+-  and acceptance instead of shadow-executing the same worker mechanics.
+-- Classify every delegated child under the current protected task-complexity/routing law. Prefer
+-  deterministic execution for mechanical work, then the least-scarce admitted worker for bounded
+-  labor. Frontier capacity requires a concrete FRONTIER_WITNESS; program prestige, child/reviewer
+-  status, free slots, or unused premium quota are not witnesses.
+-- Consequential builder output receives independent review when current law requires it. Review is
+-  not permission for the reviewer to self-start repair or become a second source writer.
+-- Routine independently executable labor routes through the existing Executive/Subagent Fabric.
+-  Native provider children are not the routine worker pool. A native-child exception requires a
+-  concrete principal-judgment or unique-native-access reason under the current provider rules.
++MODEL_DUTY_POLICY: role-reserve-v1-20261005
++
++- Sol is the default day-to-day project executive; use Sol 6.1 or qualified Opus 5.5
++  for project CEO work when the exact admitted model/harness fits the assignment.
++  They own decomposition, dispatch, ordinary repair, integration, delivery and returns.
++- Grok, full GLM 5.3, Opus, or Sol are preferred qualified COO/domain coordinators.
++  They may also perform genuinely medium/hard bounded specialist work. A model's
++  frontier marketing label does not make every such task a Meta-CEO assignment.
++- Astra is optional strategic/meta principal capacity. Reserve Astra and Fable for
++  coordinating operating executives, exceptional cross-system decisions, extreme research,
++  or a demonstrated capability gap that the operating tier cannot reliably close.
++  Do not use them for routine worker dispatch, CI waiting or repetitive delivery mechanics.
++- These are task-fit preferences, not an automatic strength ranking: current exact-model
++  evidence can favor Opus/Sol even on difficult work. No model is infallible; critical work
++  still needs independent challenge, deterministic validation and the applicable human gates.
++- The human Chairman remains the constitutional decision owner. AI Meta-CEO or Chairman-level
++  assistance never acquires human-only approvals, strategy authority, credentials or custody.
++- Do not force a ceremonial hierarchy. Add a COO only when it owns a complete bounded outcome
++  and removes real integration load. One principal plus Fabric leaves remains valid for a
++  small mission. No extra management layer, second principal or background daemon is implied.
++
++- Transfer a compact frozen mission/frontier capsule and exact artifact refs, not the
++  parent transcript. Record a concrete FRONTIER_WITNESS for exceptional principal work;
++  the meta principal returns on consequential decisions rather than shadowing every tool call.
++
++### Model exclusions and subscription reserves
++
++- Sonnet and Terra are excluded from new automatic worker/fallback selection. Do not restore
++  either merely because it is idle, cheap on another surface, or nearing a reset. Historical
++  catalog/pricing entries may remain for audit; catalog presence is not routing eligibility.
++- Reserve Codex/Claude subscription allowances for Astra/Sol/Fable/Opus principal reasoning,
++  qualified orchestration and genuinely difficult bounded work. Do not consume those shared
++  allowances on routine workers, including native Luna/Haiku. Existing native-child caps,
++  explicit-model requirements and Opus-only exception gates remain in force.
++- Routine labor prefers qualified GLM Flash, Qwen Flash and MiniMax offers. Luna or Haiku may
++  be economical last-resort workers only through separately funded, already-admitted offers
++  outside those reserved Codex/Claude subscription allowances. Unknown funding is not eligible.
++- Funding follows the verified provider realm and subscription/product, not the CLI executable
++  or wrapper name. An external-funded offer can use a Codex/Claude harness without spending its
++  native subscription; that must be proven by the existing binding owner, never guessed.
++- Preserve Grok/full GLM for qualified COO work and medium/hard bounded tasks by default.
++  Expiring, otherwise-unused allowance can influence preferences only after the existing quota
++  and routing owners establish an eligible surplus and capability fit. Expiry preference never overrides
++  Sonnet/Terra exclusions, reserved-subscription restrictions, safety, paid-spend limits or admission.
++  A predicted reset is not current balance; a rolling throttle reopening is not monthly expiry.
++- No eligible offer means an explicit capacity/funding hold on the existing task, not a silent
++  switch to a banned model, paid balance, another account, raw native child or new budget root.
++  These restrictions affect new selection; do not kill or migrate STARTed/effect-unknown work.
++
++### Conserved execution
++
++- Classify every delegated child under the current protected task-complexity/routing law.
++  Prefer deterministic execution for mechanical work, then the least-scarce admitted worker.
++  Business importance, parent prestige, child/reviewer status and spare slots do not prove
++  reasoning difficulty. A stronger principal needs a concrete task/capability witness.
+ - Every descendant preserves the original root identity, effective grant, source/effect fences,
+   admitted depth, provider/host limits, and root budget. Never mint a new root/session to reset
+-  accounting, and never treat free slots as a utilization target.
++  accounting. Include review, repair, integration and parent return before widening fan-out.
++- Consequential output receives independent review when required. A review cannot silently
++  become a second modifying worker. A qualified visual helper is still a counted descendant.
++- Keep the shallowest useful graph and use only current admitted bindings. Role names are not
++  native model slugs or new Runtime roles. Do not silently upgrade selected parent models,
++  change credentials, enable paid spillover, or imitate an unavailable graph with raw spawns.
+ 
+ ### Forward-execution and burn guards
+ 
+--- a/ops/executive_os/provider_orchestrator_guard.py
++++ b/ops/executive_os/provider_orchestrator_guard.py
+@@ -14,6 +14,7 @@
+ import os
+ from pathlib import Path
+ import re
++import shlex
+ import sys
+ import tempfile
+ import time
+@@ -96,11 +97,19 @@
+ 
+ 
+ def family(model: str) -> str:
++    """Recognize native aliases, not a substring claiming an allowed family.
++
++    This is a restrictive local guard, not provider attestation or admission.
++    Unknown, composite, path-qualified or suffixed names remain unrecognized.
++    """
+     lowered = (model or "").strip().lower()
+-    for name in ("fable", "opus", "sonnet", "haiku"):
+-        if name in lowered:
+-            return name
+-    return lowered
++    if lowered in ("fable", "opus", "sonnet", "haiku"):
++        return lowered
++    match = re.fullmatch(
++        r"claude-(fable|opus|sonnet|haiku)-[0-9]+(?:[.-][0-9]+)*",
++        lowered,
++    )
++    return match.group(1) if match else lowered
+ 
+ 
+ def _emit(payload: dict[str, object]) -> None:
+@@ -295,11 +304,136 @@
+         )
+ 
+ 
++def _literal_launches(command: str) -> list[tuple[str, str, list[str]]]:
++    """Extract common literal launch forms without executing shell expansion.
++
++    This best-effort provider-edge check is not a shell sandbox, a funding
++    attestation, or a replacement for typed Runtime/Model Router admission.
++    Unrecognized command forms do not receive an authorization receipt.
++    """
++    if len(command) > 32768:
++        return []
++    try:
++        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n")
++        lexer.whitespace = " \t\r"
++        tokens = list(lexer)
++    except ValueError:
++        return []
++    if len(tokens) > 2048:
++        return []
++    segments: list[list[str]] = [[]]
++    for token in tokens:
++        if token and all(c in ";&|()\n" for c in token):
++            segments.append([])
++        else:
++            segments[-1].append(token)
++    result: list[tuple[str, str, list[str]]] = []
++    for segment in segments:
++        i = 0
++        while i < len(segment):
++            token = segment[i]
++            base = token.rsplit("/", 1)[-1]
++            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
++                i += 1
++            elif base in {"command", "exec", "then", "do", "else"}:
++                i += 1
++                while i < len(segment) and segment[i].startswith("-"):
++                    i += 1
++            elif base == "env":
++                i += 1
++                while i < len(segment) and segment[i].startswith("-"):
++                    option = segment[i]
++                    i += 2 if option in {"-u", "--unset"} else 1
++            else:
++                break
++        if i >= len(segment):
++            continue
++        executable = segment[i].rsplit("/", 1)[-1]
++        args = segment[i + 1:]
++        if executable == "pool" and args:
++            action = args[0]
++            if action == "remote" and "--dry-run" in args[5:]:
++                continue
++            if action == "run" and len(args) >= 3:
++                result.append(("fabric", args[1], args[4:5] if len(args) >= 5 else []))
++            elif action == "remote" and len(args) >= 4:
++                result.append(("fabric", args[2], args[5:6] if len(args) >= 6 else []))
++            continue
++        if executable in {"sub.sh", "remote_sub.sh"}:
++            offset = 0 if executable == "sub.sh" else 1
++            if executable == "remote_sub.sh" and "--dry-run" in args[4:]:
++                continue
++            if len(args) >= offset + 2:
++                result.append(("fabric", args[offset], args[offset + 3:offset + 4]))
++            continue
++        if executable not in {"codex", "claude", "cursor-agent", "agent"}:
++            continue
++        # Respect the CLI end-of-options delimiter before examining model flags.
++        if "--" in args:
++            args = args[:args.index("--")]
++        # A help token in the prompt is data, not a command-line help request.
++        prompt_at = next((j for j, x in enumerate(args) if x in {"-p", "--print", "--prompt"}), len(args))
++        if any(x in {"-h", "--help", "--version"} for x in args[:prompt_at]):
++            continue
++        models: list[str] = []
++        for j, arg in enumerate(args):
++            if arg.startswith("--model="):
++                models.append(arg.split("=", 1)[1])
++            elif arg in {"--model", "-m"} and j + 1 < len(args):
++                models.append(args[j + 1])
++            elif executable == "codex" and arg in {"-c", "--config"} and j + 1 < len(args):
++                setting = args[j + 1]
++                if setting.startswith("model="):
++                    models.append(setting.split("=", 1)[1].strip("\"'"))
++        inference = bool(models) or (
++            executable == "codex" and any(x in {"exec", "e", "review"} for x in args)
++        ) or (executable != "codex" and any(x in {"-p", "--print", "--prompt"} for x in args))
++        if inference:
++            result.append(("direct", executable, models))
++    return result
++
++
++def guard_selected_model_launches(command: str) -> None:
++    """Deny explicit policy violations; never select, admit or reserve a model."""
++    for route, executable, models in _literal_launches(command):
++        for model in models:
++            match = re.search(r"(?:^|[./:-])(sonnet|terra|luna|haiku)(?:$|[._:/\[\]-])", model, re.I)
++            selected = match.group(1).lower() if match else None
++            if selected in {"sonnet", "terra"}:
++                deny(
++                    "Mastermind model-exclusion policy: Sonnet and Terra are excluded "
++                    "from new automatic launches. Idle capacity, expiry pressure and "
++                    "a cheaper serving surface do not override this exclusion."
++                )
++            if not model or any(x in model for x in ("$", "`", "\n", "\r")):
++                deny(
++                    "Mastermind model-reserve policy: unresolved model selection. "
++                    "The admitted owner must supply a literal qualified model; an "
++                    "environment expression is not proof of family or funding."
++                )
++            if route == "direct" and executable in {"codex", "claude"} and selected in {"luna", "haiku"}:
++                deny(
++                    "Mastermind subscription-reserve policy: an unqualified direct "
++                    "Codex/Claude cheap-model launch may consume reserved principal "
++                    "allowance. Only an already-admitted, separately funded Fabric "
++                    "offer may use an economical fallback. The CLI is not funding proof."
++                )
++        multimodel = executable in {"cursor", "grok", "go-codex", "go-claude", "cursor-agent", "agent"}
++        native = route == "direct" and executable in {"codex", "claude"}
++        if not models and (multimodel or native):
++            deny(
++                "Mastermind model-reserve policy: implicit model selection on a "
++                "multi-model/native launch is unqualified. Preserve existing admission "
++                "and supply the explicit selected model rather than guessing the default."
++            )
++
++
+ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> None:
+     if not is_project_scope(payload):
+         return
+     command = str(tool_input.get("command") or "")
+     clean = strip_heredocs(command)
++    guard_selected_model_launches(clean)
+     guard_fabric_launch(clean)
+     if "gh " not in clean:
+         return
