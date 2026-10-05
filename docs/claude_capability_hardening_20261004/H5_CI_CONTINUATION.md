@@ -12,9 +12,33 @@ the bounded source paths inspected. That is a concrete unresolved integration fa
 that no such owner exists on another accepted surface. `executive_release_observation.py` observes
 installed release/service identity; it must not be mislabeled as a GitHub CI observer.
 
+## H5-A current source slice — pure candidate classifier, not an observer
+
+The current branch now adds a source-only classifier inside the existing
+`control_plane/github_release_assessment.py` owner. It consumes a caller-supplied, owner-native
+snapshot for one repository / PR / exact candidate head and deterministically returns one of:
+
+- `GREEN`: every exact required check's latest applicable generation is accepted success;
+- `PENDING`: current-head checks are missing or still queued/running under a complete snapshot;
+- `FAILED`: a current required check has a terminal disallowed conclusion;
+- `UNKNOWN`: pagination/source identity/freshness/supersession evidence is incomplete or unsafe;
+- `STALE`: the observed PR head no longer equals the frozen expected candidate.
+
+The input binds the required-check policy revision, GitHub-owned complete source references, exact
+check-run IDs, optional workflow-run IDs, attempt/sequence generations, producer identity and
+applicability. Older failed attempts do not poison a later successful retry; a superseded latest
+generation cannot become green. Skipped/neutral checks are accepted only when the required-check
+policy explicitly permits that identity and the check is genuinely non-applicable.
+
+This slice performs **zero polling, registration, persistence, wake, rerun, merge, deploy or lease
+mutation**. It therefore closes the deterministic classification seam only. It does not satisfy the
+H5 requirement for one reusable live Class-E/Class-T observer, material-change return path or native
+Claude continuation. The future observer owner should feed its owner-native snapshots through this
+classifier rather than reproduce check semantics in a Claude plugin.
+
 ## Resolve the existing owner first
 
-The first implementation unit obtains the canonical process/CI owner's current accepted contract
+The next implementation unit obtains the canonical process/CI owner's current accepted contract
 and one actual available read-only observer handle. Verify these operations by their exact API,
 not proposed names: register-or-reuse; read current observation; reconcile registration after
 response loss; deliver a material result through the established return route; retire the obsolete
