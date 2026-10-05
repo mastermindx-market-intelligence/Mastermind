@@ -368,3 +368,290 @@ Industry/group fields should enter only after PIT repair. High occupancy is seco
 | Regime interaction | panic/rebound changes continuation | sparse crashes | predefined regime state | all above | no interaction/calibration gain | stable stratified improvement |
 | Economic links | strength propagates with lag | common factors, stale links, multiple testing | factor/group residuals, PIT graph | 30m–20D residual return | effect dies under PIT/lag/FDR | robust edge across link types/eras |
 | Microstructure V2 | OFI/depth adds beyond bars | latency, tick size, costs | all V1 features | resilience/short-horizon outcome | negligible incremental value | material OOS gain justifies cost |
+
+
+## 8. Empirical preregistration proposal
+
+This is a proposal for the next data-science owner to freeze after data QA. It is intentionally conservative.
+
+### Universe
+
+**Primary:** point-in-time S&P 1500 common-stock membership, preserving leavers and ticker history.
+
+**Secondary robustness:** broader U.S. common-stock universe with predeclared price and dollar-volume thresholds. It must not replace the primary after seeing results.
+
+ETFs, ADRs, preferreds, warrants, closed-end funds and other non-common-stock instruments should be separately classified rather than allowed to drift into the primary universe.
+
+### Historical period
+
+Minute aggregates are documented back to 2003-09-10. Proposed research calendar:
+
+- **burn-in / seasonality estimation:** 2003-09-10 through 2004-12-31;
+- **development:** 2005-01-03 through 2018-12-31;
+- **validation:** 2019-01-02 through 2022-12-30;
+- **untouched final holdout:** 2023-01-03 through 2026-06-02.
+
+The 2026-06-02 endpoint aligns with the current membership substrate boundary and avoids pretending later PIT coverage is already repaired. If the final data repair changes the valid end date, change the calendar **before any candidate-label relationship is computed** and re-freeze it.
+
+No dynamic-theme confirmatory test should use this historical split unless PIT membership exists for the entire relevant interval.
+
+### Formation snapshots
+
+Primary fixed RTH snapshots:
+
+- 10:00 ET;
+- 11:00 ET;
+- 13:00 ET;
+- 15:00 ET.
+
+The open and close should be studied separately because auction/opening/closing dynamics differ. Do not add more snapshots after seeing candidate performance.
+
+Shock-event experiments are separate from snapshot experiments.
+
+### Labels
+
+Keep distinct targets.
+
+**Return**
+- next 30m residual return;
+- next 60m residual return;
+- remainder-of-day residual return;
+- next-session residual return;
+- 5D residual return;
+- 20D residual return.
+
+**Holdability**
+- forward residual MAE;
+- forward maximum drawdown;
+- time below formation residual level;
+- MFE/MAE;
+- gain retention.
+
+**Leadership**
+- top-decile rank survival;
+- time to first leadership loss;
+- loss-and-reclaim probability.
+
+**Resilience**
+- recovery within 5/15/30/60m;
+- recovery time with censoring;
+- post-shock residual MAE.
+
+**Exhaustion**
+- future leadership-break hazard while current medium-horizon RS remains above the eligibility threshold.
+
+No generic “leader worked” target.
+
+### Baselines and model comparisons
+
+For each endpoint, compare nested models:
+
+- M0: raw momentum horizons;
+- M1: M0 + beta + realized/downside vol + size/liquidity + gap/event + distance-to-high;
+- M2: M1 + residual-return definition;
+- M3: M2 + one candidate family;
+- M4: M2 + all candidate families that individually survived development;
+- M5: prespecified interactions only (group × stock; regime × candidate).
+
+Primary estimators should be transparent rank-linear/logistic/survival models. A nonlinear model may be a secondary robustness lane, not the only evidence.
+
+### Inference
+
+The independent unit is session/date for snapshot tests and distinct shock episode for event tests.
+
+Required:
+
+- per-date cross-sectional rank IC;
+- date-clustered or event-clustered uncertainty;
+- HAC/Newey-West where the time series of per-date statistics overlaps;
+- block bootstrap by session/week;
+- purged walk-forward folds with embargo at least as long as the longest forward label;
+- one untouched holdout;
+- family-wise or false-discovery control within declared feature families;
+- monotonic bucket analysis;
+- leave-one-sector-out and leave-one-era-out concentration checks;
+- explicit mega-cap contribution diagnostics.
+
+Thousands of stock-minutes do not create thousands of independent observations.
+
+### Minimum meaningful effect
+
+Do not advance on p-values alone.
+
+Proposed development floors:
+
+- incremental mean per-date rank IC: at least **+0.01** versus the strong baseline for return/rank endpoints;
+- forward-MAE improvement: at least **5% relative reduction in MAE error** or a predeclared economically equivalent tail-capture improvement;
+- rank-survival/recovery probability: at least **2 percentage points absolute** in a calibrated high-versus-low bucket contrast, with monotonic ordering;
+- exhaustion: median warning lead of at least **one full decision interval** before the conventional RS break and a meaningful discrimination/calibration gain versus RS-only.
+
+These are audit recommendations, not frozen law. The data-science owner should run power analysis under the actual date/event count before freezing.
+
+### Advancement rule
+
+A family advances only if it:
+
+1. beats M1/M2 on its primary endpoint in validation;
+2. clears the economic floor;
+3. has the expected monotonic direction;
+4. survives concentration checks;
+5. survives the relevant volatility/jump/event null;
+6. does not reverse in the final holdout;
+7. adds value on at least one target that is not merely a relabeling of the feature itself.
+
+The design must be allowed to advance **nothing**.
+
+## 9. Data feasibility architecture
+
+| Plane | Current feasibility | PIT / quality issue | Priority |
+|---|---|---|---|
+| Daily prices | existing Mastermind substrate | ticker reuse, total-return consistency | reuse |
+| Minute OHLCV | Massive whole-market flat files documented from 2003-09-10 | flat files unadjusted; missing minutes; qualifying-trade rules | **V1 after repair** |
+| Trades | Massive tick files, nanosecond timestamps | signing, conditions, scale | V2 |
+| Quotes | Massive top-of-book, nanosecond timestamps | depth is top-of-book only; very large storage | V2 |
+| Sector identity | current C1 labels not era-correct | historical GICS moves | repair |
+| Industry identity | not established as canonical PIT in this audit | taxonomy history | **repair before confirmatory use** |
+| Static baskets | viable only with evidenced historical membership | membership provenance | selective |
+| Dynamic themes | no complete canonical PIT history established | severe back-projection risk | **capture prospectively** |
+| Economic links | literature supports lane; internal PIT source not established | relationship start/end dates | defer/capture |
+| Direct flow | ETF/13F-type data can inform mechanisms | low frequency / ownership lag | mechanism only |
+
+### Corporate actions and symbol identity
+
+Massive currently documents all stock Flat Files as **unadjusted** for splits, dividends and other corporate actions. Its current splits/dividends APIs provide historical adjustment factors, but a sound research plane still needs a stable security master.
+
+Required fields include:
+
+- stable security/entity identifier;
+- effective-dated ticker;
+- exchange/listing;
+- split/stock-dividend factors;
+- cash-dividend treatment for total-return labels where relevant;
+- merger/delisting dates and proceeds where available;
+- symbol reuse;
+- halt/LULD flags where available;
+- session calendar and early closes.
+
+Do not join decades of minute files on today’s ticker alone.
+
+### Missing minutes and sessions
+
+Massive’s minute bars are built only from qualifying trades; a minute with no eligible trade may emit no bar. Therefore “missing bar” is not automatically zero return/zero volume.
+
+Primary RTH research should distinguish:
+
+- no eligible trade;
+- halt/LULD;
+- listing not active;
+- data gap;
+- early close/holiday;
+- true zero-volume state where defined.
+
+Premarket and after-hours are documented as covered, but should be separate experiments because bar sparsity and microstructure differ.
+
+## 10. Market-wide computation architecture
+
+Do not build per-symbol API fanout.
+
+### Historical
+
+1. ingest daily whole-market minute flat files in bulk;
+2. map raw ticker records through an effective-dated security master;
+3. apply corporate-action normalization consistently;
+4. write columnar partitions by **session date** with stable security IDs, because the core operation is cross-sectional ranking at common timestamps;
+5. maintain smaller security-index metadata for symbol-history lookups;
+6. precompute time-of-day volatility/volume seasonality using only prior data;
+7. compute market/group benchmarks once per timestamp, including leave-one-out sufficient statistics;
+8. update candidate features in vectorized cross-sectional batches;
+9. persist only research features/labels/provenance needed for reproducibility.
+
+### Live/shadow architecture if later validated
+
+Maintain incremental state per security and per group:
+
+- cumulative residual return;
+- cumulative expected variance;
+- realized positive/negative variance;
+- rank state;
+- shock-event state;
+- recovery clock;
+- volume seasonality state.
+
+At each fixed decision snapshot, rank the eligible universe once. Group aggregates should be owned by/flow into the existing rotation/group owner rather than creating a second rotation engine.
+
+A mature evidence snapshot should expose separate fields for residual strength, resilience, rank persistence, continuation probability, MAE risk, exhaustion hazard, coverage and provenance. Do **not** collapse them into a `LeadershipScore`.
+
+## 11. Theme-relative architecture
+
+Recommended progression:
+
+1. **Market** — immediately conceptually viable.
+2. **PIT sector** — viable after era-correct repair.
+3. **PIT industry / industry group** — highest-priority group retest because it is closer to the academic industry-momentum construct and has more cross-sectional units than eleven sectors.
+4. **Static basket** — only where historical membership evidence exists.
+5. **Dynamic theme** — prospective effective-dated capture; historical present-day backcasts are exploratory only.
+6. **Economic network** — PIT customer/supplier/complementarity graph with relationship effective dates and strict multiple-testing control.
+
+The “theme-first × stock-second” hypothesis should be tested at industry before dynamic themes. If PIT industry state adds nothing beyond stock residual strength, there is little justification for an expensive historical theme reconstruction solely to rescue the thesis.
+
+## 12. Exhaustion research proposal
+
+This lane deserves a dedicated experiment because it may have higher product value than detecting already-obvious leaders.
+
+### Eligibility
+
+At each fixed landmark, include only names that are still conventional leaders, e.g. top decile on 60D RS and above a minimum liquidity threshold.
+
+### Candidate deterioration vector
+
+- 5D residual-RS slope;
+- intraday RSZ slope;
+- negative-shock capture;
+- trailing recovery-time deterioration;
+- downside residual semivariance;
+- rank volatility / rank drawdown;
+- PIT group breadth change;
+- group leader-retention change.
+
+### Outcomes
+
+- time to 60D rank falling below a predeclared threshold;
+- relative-return decay over 5D/20D;
+- forward residual MAE;
+- failed-breakout event defined independently of the candidate features.
+
+### Required comparison
+
+1. current 60D RS only;
+2. 60D + 20D + 5D RS;
+3. model 2 + stock resilience/rank deterioration;
+4. model 3 + PIT group deterioration.
+
+A valid early-warning family must improve discrimination/calibration **and** provide positive lead time. A metric that changes only after 20D/60D RS has already rolled over is not an early warning.
+
+## 13. V2 microstructure gate
+
+Do not acquire/store a full quote lake merely because microstructure is theoretically attractive.
+
+Advance to V2 only if V1 shock resilience or exhaustion survives the final holdout and leaves a clear unexplained error mode.
+
+Then sample **event windows** around:
+
+- benchmark shocks;
+- leader pullbacks;
+- failed versus successful recoveries;
+- matched nonleader controls.
+
+Candidate V2 fields:
+
+- signed trade volume;
+- trade imbalance;
+- top-of-book OFI;
+- quoted/effective spread;
+- displayed depth;
+- depth imbalance;
+- bid replenishment after aggressive selling;
+- spread/depth recovery;
+- residual price impact per unit OFI/depth.
+
+The decisive test is incremental OOS value over the minute-bar model. If negligible, **KILL MICROSTRUCTURE V2**.
