@@ -137,12 +137,17 @@ function makeStore(
   const data = new Map<string, OperationPointer>(initial);
   return {
     read: (scope) => data.get(scope) ?? null,
-    write: (scope, pointer) => {
-      data.set(scope, pointer);
-    },
-    clear: (scope, pointer) => {
+    reserve: (scope, pointer) => {
       const existing = data.get(scope);
-      if (existing && samePointer(existing, pointer)) data.delete(scope);
+      if (existing) return { reserved: false, pointer: existing };
+      data.set(scope, pointer);
+      return { reserved: true };
+    },
+    clearIfEqual: (scope, pointer) => {
+      const existing = data.get(scope);
+      if (!existing || !samePointer(existing, pointer)) return false;
+      data.delete(scope);
+      return true;
     },
   };
 }
@@ -932,7 +937,7 @@ describe("T10 status-read refusal retains the pointer", () => {
       expect(portReceipt.reason).toBe(reason);
       expect(portReceipt.disposition).not.toBe("refused");
 
-      store.write(PRINCIPAL, pointer);
+      store.reserve(PRINCIPAL, pointer);
       const ctrl = new OperationController(binding.port, store);
       const recovered = await ctrl.recover();
       expect(recovered.status).toBe("unknown");
@@ -969,7 +974,7 @@ describe("T11 same-principal A→B reopen reconstructs workRef from the pointer"
     const ctrl = new OperationController(binding.port, store);
     await ctrl.begin(intent);
     expect(store.read(PRINCIPAL)).toEqual(pointer);
-    expect(store.read(PRINCIPAL)?.targetKey).toBe(WORKSTREAM);
+    expect((await store.read(PRINCIPAL))?.targetKey).toBe(WORKSTREAM);
   });
 
   it("T11 recover under WS:B keeps workRef WS:A and selectionMatches is false", async () => {

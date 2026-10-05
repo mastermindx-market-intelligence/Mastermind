@@ -1,3 +1,4 @@
+import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
@@ -278,6 +279,7 @@ export async function createNativeClient(
   invoke: Invoke,
   listen: Listen,
 ): Promise<RawClient> {
+  const executive = await createNativeExecutiveTransport(invoke, listen);
   let current: AuthState = {
     status: "unconfigured",
     reason: "NATIVE_HOST_UNAVAILABLE",
@@ -358,6 +360,7 @@ export async function createNativeClient(
     });
   }
   return {
+    executive: executive.transport,
     getState: () => ({ ...current }),
     invalidationGeneration: () => epoch,
     subscribe(listener) {
@@ -367,6 +370,7 @@ export async function createNativeClient(
       };
     },
     async signIn() {
+      executive.invalidate();
       invalidateReads();
       const ticket = ++control;
       const started = epoch;
@@ -374,6 +378,7 @@ export async function createNativeClient(
       if (ticket === control && started === epoch) update(result);
     },
     async signOut() {
+      executive.invalidate();
       const ticket = ++control;
       update({
         status: "signed_out",

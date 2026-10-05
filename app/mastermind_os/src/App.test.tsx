@@ -1475,18 +1475,24 @@ function memoryStore(): PendingPointerStore {
   const data = new Map<string, OperationPointer>();
   return {
     read: (scope) => data.get(scope) ?? null,
-    write: (scope, pointer) => {
-      data.set(scope, pointer);
-    },
-    clear: (scope, pointer) => {
+    reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
+        data.set(scope, pointer);
+        return { reserved: true };
+      },
+    clearIfEqual: (scope, pointer) => {
       const current = data.get(scope);
       if (
         current &&
         current.operationKey === pointer.operationKey &&
         current.kind === pointer.kind &&
         current.targetKey === pointer.targetKey
-      )
-        data.delete(scope);
+      ) {
+          data.delete(scope);
+          return true;
+        }
+        return false;
     },
   };
 }
@@ -1934,18 +1940,24 @@ describe("host-composition repair regressions (R2)", () => {
     ]);
     const store: PendingPointerStore = {
       read: (scope) => data.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const readOperation = vi
@@ -2021,11 +2033,17 @@ describe("host-composition repair regressions (R2)", () => {
     const data = new Map<string, OperationPointer>([["owner-a", seeded]]);
     const store: PendingPointerStore = {
       read: (scope) => data.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope) => {
+      clearIfEqual: (scope, pointer) => {
+        const current = data.get(scope);
+        if (!current || current.operationKey !== pointer.operationKey || current.kind !== pointer.kind || current.targetKey !== pointer.targetKey) return false;
         data.delete(scope);
+        return true;
       },
     };
     const readOperation = vi.fn(
@@ -2218,18 +2236,24 @@ describe("host-composition repair regressions (R2)", () => {
     const data = new Map<string, OperationPointer>();
     const store: PendingPointerStore = {
       read: (scope) => data.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const replacementRead = vi.fn(
@@ -2355,35 +2379,47 @@ describe("host-composition repair regressions (R4)", () => {
     const data1 = new Map<string, OperationPointer>([["owner-a", seeded]]);
     const store1: PendingPointerStore = {
       read: (scope) => data1.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data1.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data1.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data1.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data1.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const data2 = new Map<string, OperationPointer>();
     const store2: PendingPointerStore = {
       read: (scope) => data2.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data2.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data2.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data2.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data2.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const oldRead = vi.fn(
@@ -2554,7 +2590,7 @@ describe("host-composition repair regressions (R4)", () => {
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(replacement.submit).toHaveBeenCalledTimes(1));
     expect(old.submit).toHaveBeenCalledTimes(1);
-    expect(replacement.binding.store.read("owner-a")?.operationKey).toBe(
+    expect((await replacement.binding.store.read("owner-a"))?.operationKey).toBe(
       "op-1",
     );
     // The OLD route's receipt arrives while the newer launch is in flight:
@@ -2574,7 +2610,7 @@ describe("host-composition repair regressions (R4)", () => {
     });
     expect(window.location.search).not.toContain("WS%3ASTALE");
     expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
-    expect(replacement.binding.store.read("owner-a")?.operationKey).toBe(
+    expect((await replacement.binding.store.read("owner-a"))?.operationKey).toBe(
       "op-1",
     );
     // The newer launch's own ACCEPTED receipt settles its own pending,
@@ -2610,7 +2646,7 @@ describe("Pro/native command recovery integration", () => {
     render(<App />);
     await launchFromWork(user);
     await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
-    expect(made.binding.store.read("owner-a")?.operationKey).toBe("op-1");
+    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe("op-1");
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"));
@@ -2658,7 +2694,7 @@ describe("Pro/native Conversation recovery", () => {
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
-    expect(made.binding.store.read("owner-a")?.operationKey).toBe("op-1");
+    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe("op-1");
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(2));
     expect(made.submit).toHaveBeenCalledTimes(1);

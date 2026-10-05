@@ -15,7 +15,7 @@ describe("fixed Programs receipt companion", () => {
       return command === "auth_status" ? { status: "signed_in", reason: null, acquisition: true, content: true } : raw;
     }), async () => () => {});
     const observation = await bindMissionHost(client).readProgramsObservation!({ signal: new AbortController().signal });
-    expect(commands).toEqual(["auth_status", "read_programs"]);
+    expect(commands).toEqual(["executive_auth_status", "auth_status", "read_programs"]);
     expect(observation.observation).toEqual(fixture.source_observation);
     expect(observation.controlRoom).toEqual(fixture.control_room);
     raw.source_observation.state = "UNKNOWN";
