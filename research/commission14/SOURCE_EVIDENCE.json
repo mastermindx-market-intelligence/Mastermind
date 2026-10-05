@@ -377,7 +377,7 @@
     "Current committed artifacts and provider documentation are not operational or original-vintage proof."
   ],
   "final_macro_delta_evidence_file": "MACRO_FINAL_HEAD_DELTA.json",
-  "final_mastermind_delta_source": {
+  "mastermind_final_delta_source": {
     "path": "research/TREND_PERSISTENCE_PREREG_C1.md",
     "git_blob_sha": "8f280bd41430dc0b49551783a1066b42b068ce8d",
     "commit_pin": "521720b09be2921e996d9396b522b1c4ca62041c",
