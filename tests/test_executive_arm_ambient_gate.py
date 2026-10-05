@@ -129,7 +129,7 @@ def test_worker_account_must_match_canonical_slot_uid(monkeypatch):
 def test_control_uid_quiesce_service_precondition_is_observe_only(monkeypatch):
     monkeypatch.setattr(
         control.ProductionArmHost,
-        "_loaded",
+        "_loaded_observe_only",
         lambda _self, label: label == control.CONTROL_LABEL,
     )
     monkeypatch.setattr(
@@ -143,6 +143,49 @@ def test_control_uid_quiesce_service_precondition_is_observe_only(monkeypatch):
     with pytest.raises(control.ArmAdmissionError) as error:
         control.ProductionArmHost().require_services_already_stopped()
     assert error.value.code == "services_not_stopped"
+
+
+@pytest.mark.parametrize("returncode", [1, 5, 64, 77])
+def test_control_uid_quiesce_service_precondition_refuses_launchd_read_error(
+    monkeypatch, returncode
+):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(tuple(argv))
+        return SimpleNamespace(returncode=returncode)
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+    monkeypatch.setattr(
+        control.ProductionArmHost,
+        "_stop_services_for_admission",
+        lambda _self: pytest.fail("quiesce precondition must not stop services"),
+    )
+    monkeypatch.setattr(
+        control.os, "kill", lambda *_args: pytest.fail("quiesce precondition must not signal")
+    )
+
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().require_services_already_stopped()
+
+    assert error.value.code == "services_gate_failed"
+    assert calls == [("/bin/launchctl", "print", f"system/{control.CONTROL_LABEL}")]
+
+
+def test_control_uid_quiesce_service_precondition_accepts_only_proven_absence(monkeypatch):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(tuple(argv))
+        return SimpleNamespace(returncode=113)
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+    control.ProductionArmHost().require_services_already_stopped()
+
+    assert calls == [
+        ("/bin/launchctl", "print", f"system/{control.CONTROL_LABEL}"),
+        ("/bin/launchctl", "print", f"system/{control.WORKER_LABEL}"),
+    ]
 
 
 class _QuiesceCliHost:

@@ -2151,6 +2151,29 @@ class ProductionStatusHost:
         return completed.returncode == 0
 
     @staticmethod
+    def _loaded_observe_only(label: str) -> bool:
+        """Return loaded/absent only when launchd proves either state.
+
+        This helper is intentionally narrower than the historical ``_loaded``
+        predicate.  The quiesce-only command must not treat a permission, IPC,
+        or transient launchctl read failure as service absence before signaling
+        the fixed Control UID.
+        """
+        completed = subprocess.run(
+            ["/bin/launchctl", "print", f"system/{label}"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+        if completed.returncode == 0:
+            return True
+        if completed.returncode == 113:
+            return False
+        raise ArmAdmissionError("services_gate_failed")
+
+    @staticmethod
     def _control_ready(expected_sha: str) -> bool:
         release = SYSTEM_ROOT / "releases" / expected_sha
         control_home = RUNTIME_ROOT / "control" / "home"
@@ -2514,7 +2537,12 @@ class ProductionArmHost(ProductionStatusHost):
     def require_services_already_stopped(self) -> None:
         """Observe the fixed Control/worker labels without changing lifecycle state."""
         try:
-            loaded = (self._loaded(CONTROL_LABEL), self._loaded(WORKER_LABEL))
+            loaded = (
+                self._loaded_observe_only(CONTROL_LABEL),
+                self._loaded_observe_only(WORKER_LABEL),
+            )
+        except ArmAdmissionError:
+            raise
         except (OSError, subprocess.SubprocessError) as exc:
             raise ArmAdmissionError("services_gate_failed") from exc
         if any(loaded):

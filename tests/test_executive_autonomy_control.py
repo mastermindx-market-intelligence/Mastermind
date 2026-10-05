@@ -370,6 +370,7 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     for verb in (
         "status",
         "arm",
+        "arm-quiesce-control-uid",
         "disarm",
         "ceo-submit-status",
         "ceo-submit-arm",
@@ -377,6 +378,11 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
         "ceo-submit-reconcile",
     ):
         assert verb in wrapper
+    closed_prefix = "status|arm|arm-quiesce-control-uid|disarm|ceo-submit-status"
+    # The verb must be present in both the usage surface and the shell case
+    # whitelist; a Python-only parser entry is not an installed command path.
+    assert wrapper.count(closed_prefix) == 2
+
     for forbidden in ("eval ", "bash -c", "sh -c", "curl ", "security "):
         assert forbidden not in wrapper
 
