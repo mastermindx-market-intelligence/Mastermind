@@ -536,8 +536,22 @@ const RESULT_RESPONSE_CAP: usize = 16_384;
 const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
 const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
 const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
+const WORK_PATH: &str = "/workspace/work/current";
 const MISSION_V3_SCHEMA: &str = "mastermind.mission_workspace.v3";
 const RESULT_SCHEMA: &str = "mastermind.workspace_role_result.v1";
+const WORK_SCHEMA: &str = "mastermind.workspace_work_queue.v1";
+
+fn typed_unavailable(value: Value, schema: &str, require_null_result: bool) -> Result<Value> {
+    if !value.is_object()
+        || value.get("schema").and_then(Value::as_str) != Some(schema)
+        || value.get("availability").and_then(Value::as_str) != Some("UNAVAILABLE")
+        || (require_null_result && !value.get("result").map(|r| r.is_null()).unwrap_or(false))
+    {
+        Err("RESPONSE_INVALID".into())
+    } else {
+        Ok(value)
+    }
+}
 async fn read(
     app: AppHandle,
     resource: Resource,
@@ -595,6 +609,50 @@ pub async fn read_programs(app: AppHandle) -> Result<Value> {
     )
     .await
 }
+#[tauri::command]
+pub async fn read_work(app: AppHandle) -> Result<Value> {
+    let url = Url::parse(&format!("{ORIGIN}{WORK_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (
+            inner
+                .token(Resource::Acquisition)
+                .ok_or("AUTHENTICATION_REQUIRED")?
+                .value
+                .clone(),
+            inner.generation,
+        )
+    };
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send()
+        .await
+        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, MAX_RESPONSE)
+            .await
+            .and_then(|value| typed_unavailable(value, WORK_SCHEMA, false))
+    } else {
+        bounded_json(response, MAX_RESPONSE).await
+    };
+    if !state
+        .lock()?
+        .release_allowed(generation, Resource::Acquisition)
+    {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(WORK_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_mission(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     read(
@@ -680,24 +738,14 @@ pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<V
         .send()
         .await
         .map_err(|_| "SOURCE_UNAVAILABLE")?;
-    // The fixed result route is the one route allowed to surface a typed
-    // error body: a 503 whose body parses under the exact 16KiB cap and is
-    // the closed unavailable envelope with a null result. 401/403 and every
-    // other non-OK status keep the established refusal in bounded_json.
+    // Result and Work each admit only their own fixed typed-503 schema.
+    // Result keeps the exact 16KiB cap plus null-result rule; Work uses the
+    // public response cap and its Work schema. 401/403 and every other
+    // non-OK status keep the established refusal in bounded_json.
     let result = if response.status().as_u16() == 503 {
         read_json_body(response, RESULT_RESPONSE_CAP)
             .await
-            .and_then(|v| {
-                if !v.is_object()
-                    || v.get("schema").and_then(Value::as_str) != Some(RESULT_SCHEMA)
-                    || v.get("availability").and_then(Value::as_str) != Some("UNAVAILABLE")
-                    || !v.get("result").map(|r| r.is_null()).unwrap_or(false)
-                {
-                    Err("RESPONSE_INVALID".into())
-                } else {
-                    Ok(v)
-                }
-            })
+            .and_then(|value| typed_unavailable(value, RESULT_SCHEMA, true))
     } else {
         bounded_json(response, RESULT_RESPONSE_CAP).await
     };
@@ -964,6 +1012,34 @@ mod tests {
         assert!(!allowed_window_schema("mastermind.mission_workspace.v3"));
         assert!(!allowed_window_schema(""));
     }
+    #[test]
+    fn typed_unavailable_is_schema_specific_and_result_keeps_null_result_rule() {
+        let work = serde_json::json!({
+            "schema": WORK_SCHEMA,
+            "availability": "UNAVAILABLE",
+            "reason_codes": ["projection_refused"],
+        });
+        assert!(typed_unavailable(work.clone(), WORK_SCHEMA, false).is_ok());
+
+        let mut available = work.clone();
+        available["availability"] = "AVAILABLE".into();
+        assert!(typed_unavailable(available, WORK_SCHEMA, false).is_err());
+
+        let mut wrong = work.clone();
+        wrong["schema"] = RESULT_SCHEMA.into();
+        assert!(typed_unavailable(wrong, WORK_SCHEMA, false).is_err());
+
+        let result = serde_json::json!({
+            "schema": RESULT_SCHEMA,
+            "availability": "UNAVAILABLE",
+            "result": null,
+        });
+        assert!(typed_unavailable(result.clone(), RESULT_SCHEMA, true).is_ok());
+        let mut non_null = result;
+        non_null["result"] = serde_json::json!({});
+        assert!(typed_unavailable(non_null, RESULT_SCHEMA, true).is_err());
+    }
+
     #[test]
     fn structured_result_selectors_use_exact_new_contract() {
         let valid = serde_json::json!({"work_ref":"WS:AB", "root_job_id":"JOB-1", "job_id":"JOB-2", "attempt_id":format!("ATT-{}", "a".repeat(32)), "result_envelope_digest":"b".repeat(64)});
