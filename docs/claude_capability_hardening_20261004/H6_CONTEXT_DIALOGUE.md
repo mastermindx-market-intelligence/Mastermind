@@ -124,11 +124,38 @@ profile, so source existence cannot activate it. Local source regressions cover 
 contract, binding, engine, worker-MCP compatibility, replay/conflict and fence semantics. The
 host's missing local MCP SDK leaves server-runtime assertions for dependency-complete CI.
 
-**H6-B2** must compose the B1 `before_commit` contract with the accepted existing Runtime/effect
-owner and reconciliation reader, then bind that exact principal server/tool-schema generation into
-H1 admission and current Company/Wake applicability. B2 must not create another effect ledger,
-dialogue store or wake system. Only after that composition and independent review may a real native
-principal use the modifying tools.
+**H6-B2** is split again so effect ownership can be reviewed independently of admission.
+
+**H6-B2-A**, on the current #1240 source branch, composes the B1 `before_commit` contract with the
+existing Executive Runtime **events table** and the existing Agent Dialogue read carrier:
+
+- `PrincipalDialogueRuntimeCommitOwner` fresh-resolves the exact H6 principal→child binding at the
+  Relay READY→COMMIT boundary and rechecks the current Runtime Job/Attempt/Worker/quota/lease inside
+  one existing Runtime write transaction.
+- The first exact semantic reply appends one
+  `COMPANY_DIALOGUE_PRINCIPAL_COMMIT_STARTED` event under the existing Runtime event owner. The
+  command identity is derived from the deterministic principal message key. No new table, database,
+  queue, listener, retry owner or wake ledger is created.
+- An existing exact event is never authorization to send again. Exact replay returns a typed
+  pre-COMMIT refusal; conflicting payload under the same message key is a conflict. The source
+  therefore cannot manufacture a second COMMIT after a lost response.
+- Read-only reconciliation consumes the stored original public binding and reads that same Dialogue
+  thread. No fence event means `NOT_APPLIED`; one exact message key/fingerprint/type means
+  `APPLIED`; COMMIT-start with no observable message or an unreadable carrier remains
+  `EFFECT_UNKNOWN`; conflicting same-key evidence is `CONFLICT`.
+- The stored payload contains only the already-public binding/intent facts and their digests; it does
+  not persist OAuth secrets, provider-session IDs, lease tokens or ambient provider/account state.
+
+B2-A is still **source-only**. It defines no installed factory, capability grant, native principal
+launch, Company/Wake applicability or model/provider selection. Tests use a real temporary Executive
+Runtime and prove single-event replay refusal, current child/lease fencing, semantic conflict,
+sticky effect-unknown and exact applied reconciliation.
+
+**H6-B2-B** must compose this owner into the accepted host/application path, bind the exact principal
+server/tool-schema generation into H1 admission and current Company/Wake applicability, and expose a
+read-only reconciliation operation on that already-admitted principal surface. B2-B must not create
+another effect ledger, dialogue store or wake system. Only after that composition and independent
+review may a real native principal use the modifying tools.
 
 ## Message operation and effect reconciliation
 
@@ -198,17 +225,19 @@ requires a real complete principal → counterpart → return → continuation �
 same Executive/Agent OS mission identity, no Chairman message shuttling and no duplicate
 wake/job/session effects. A worker-only reporting loop or successful Slack post is insufficient.
 
-Current source candidate: **H6-A + H6-B1**. The pure principal/child resolver, neutral
-principal actor ceiling, principal-only four-tool schema, exact-send gateway, one-edge replay
-identity and typed pre-COMMIT fence contract are built and source-tested. They are
-`BUILT_NOT_PROVEN / PRODUCTION_INERT`: no production profile or factory supplies the required
-durable fence receipt, and no native principal can be claimed from these files.
+Current source candidate: **H6-A + H6-B1 + H6-B2-A**. The pure principal/child resolver,
+neutral principal actor ceiling, principal-only four-tool schema, exact-send gateway, one-edge replay
+identity, typed pre-COMMIT contract and existing-Runtime-backed single-COMMIT owner/reconciler are
+built and source-tested. They remain `BUILT_NOT_PROVEN / PRODUCTION_INERT`: the owner is not
+installed into a host application, the principal server has no admitted capability-profile grant,
+and no native principal can be claimed from these files.
 
-Held for **H6-B2 / acceptance**: compose the pre-COMMIT callback with the accepted existing
-Runtime/effect owner and reconciliation read; qualify exact Company/Wake applicability; bind the
-resulting principal server/tool-schema digest into the H1 native profile; prove installation and
-native selection; then run the real reciprocal principal → child → return → CONTINUE → return →
-STOP cycle and verify zero duplicate message/Wake/Job/session effects. Macro Agent OS publication
-authority remains separate. These are engineering gates under existing owners, not permission to
-invent a Claude inbox, thread registry, effect ledger or wake daemon. H6 is not complete until the
-real canary satisfies the original DONE WHEN.
+Held for **H6-B2-B / acceptance**: compose the Runtime fence owner into the accepted installed
+host/application path; qualify exact Company/Wake applicability; bind the resulting principal
+server/tool-schema digest into the H1 native profile; expose only its read-only reconciliation
+operation after qualification; prove installation and native selection; then run the real reciprocal
+principal → child → return → CONTINUE → return → STOP cycle and verify zero duplicate
+message/Wake/Job/session effects. Macro Agent OS publication authority remains separate. These are
+engineering gates under existing owners, not permission to invent a Claude inbox, thread registry,
+effect ledger or wake daemon. H6 is not complete until the real canary satisfies the original
+DONE WHEN.

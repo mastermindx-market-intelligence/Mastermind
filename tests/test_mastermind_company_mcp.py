@@ -682,6 +682,7 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
         "adapter.py",
         "consultation.py",
         "principal_adapter.py",
+        "principal_runtime_fence.py",
         "principal_schemas.py",
         "schemas.py",
         "server.py",
@@ -704,6 +705,23 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
         "control_plane.wake",
     }
     assert not (adapter_imports & forbidden_roots)
+
+    host_imports = imports["principal_runtime_fence.py"]
+    control_plane_imports = {
+        module for module in host_imports if module.startswith("control_plane.")
+    }
+    assert control_plane_imports == {"control_plane.executive_runtime"}
+    assert not (
+        host_imports
+        & {
+            "slack_sdk",
+            "sqlite3",
+            "subprocess",
+            "keyring",
+            "control_plane.turn_watcher",
+            "control_plane.wake",
+        }
+    )
     for path in sorted((root / "control_plane").glob("*.py")):
         assert not any(
             module.startswith("integrations.mastermind_company_mcp")
