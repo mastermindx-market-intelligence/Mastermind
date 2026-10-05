@@ -151,3 +151,220 @@ Positive-bar fraction or path efficiency can be inverse volatility/jump exposure
 ### MAJOR G — exhaustion needs a landmark/hazard design
 
 At fixed landmarks, condition on medium-horizon RS still being high and predict a future break. Candidate warnings must be known before the break: 5D/intraday residual-RS slope, shock MAE, recovery time, downside semivariance, rank instability, and PIT group breadth deterioration. The key endpoint is **lead time versus conventional RS roll-over**, not accuracy after breakdown.
+
+
+## 5. Formal candidate feature specification
+
+### 5.1 Base intraday return
+
+[
+r_{i,d,t}=log(P_{i,d,t}/P_{i,d,t-1}).
+]
+
+Regular trading hours should be primary in V1. Overnight gap and extended-hours state should be separate covariates, not silently mixed into the same minute-seasonality curve.
+
+### 5.2 Time-of-day standardized residual strength
+
+For residual (epsilon_{i,d,t}), estimate a pre-(d) expected variance curve:
+
+[
+hat{sigma}_{i,	au}^{2}=E[epsilon_{i,d,	au}^{2}mid mathcal{F}_{d-1}].
+]
+
+Then
+
+[
+RSZ_{i,d,t}=
+rac{sum_{	aule t}epsilon_{i,d,	au}}
+{sqrt{sum_{	aule t}hat{sigma}_{i,	au}^{2}}}.
+]
+
+Primary seasonality candidates:
+
+1. stock-specific robust curve when history/liquidity is sufficient;
+2. liquidity-bucket curve otherwise;
+3. EWMA scale overlay for current market-volatility regime.
+
+Do not use future-known “event adjustment.” Event-day status may be a contemporaneously known control only when its timestamp is PIT-safe.
+
+### 5.3 Residual semivariance
+
+[
+RV^+_{i}=sum_t epsilon_{i,t}^{2}mathbf{1}(epsilon_{i,t}>0),quad
+RV^-_{i}=sum_t epsilon_{i,t}^{2}mathbf{1}(epsilon_{i,t}<0).
+]
+
+[
+UpsideShare_i=rac{RV^+_i}{RV^+_i+RV^-_i}.
+]
+
+This family is not presumed distinct. It must add beyond total realized variance, downside variance and cumulative residual return.
+
+### 5.4 Shock definition
+
+For benchmark (b), compute time-of-day standardized benchmark residual return (z_{b,d,t}). A primary adverse shock candidate is:
+
+[
+Shock_{b,d,t}=1[z_{b,d,t}le -k],
+]
+
+with (k) fixed before the confirmatory run. Use a refractory window (R) so repeated threshold crossings inside one episode are one event. Theme/industry shocks must be leave-one-out with respect to stock (i).
+
+The event timestamp is the first threshold crossing. Features measured after the crossing may predict only horizons strictly after their measurement cutoff.
+
+### 5.5 Shock resilience
+
+For event (e=(b,d,t_0)):
+
+**Shock alpha**
+[
+ShockAlpha_{i,e,H}=sum_{h=0}^{H}epsilon_{i,t_0+h}.
+]
+
+**Residual MAE**
+[
+MAE^{res}_{i,e,H}=min_{0le hle H}sum_{u=0}^{h}epsilon_{i,t_0+u}.
+]
+
+**Recovery time**
+[
+T^{rec}_{i,e}=inf{h>0:sum_{u=0}^{h}epsilon_{i,t_0+u}ge 0}.
+]
+
+**Recovery half-life**
+[
+T^{1/2}_{i,e}=inf{h>0:C_{i,t_0+h}ge 	frac{1}{2}|C_{i,t_0+h^*}|},
+]
+where (h^*) is the time of maximum adverse residual displacement inside the initial shock window.
+
+**Recovery probability**
+[
+Pr(T^{rec}_{i,e}le Hmid X_{i,e})
+]
+for 5m, 15m, 30m, 60m and remainder-of-day horizons.
+
+The primary test should ask whether resilience measured on prior shocks predicts a later outcome, not whether a stock that already recovered is contemporaneously strong.
+
+### 5.6 Asymmetric beta
+
+Estimate on trailing pre-formation data:
+
+[
+eta_{up}=rac{Cov(r_i,r_bmid r_b>0)}{Var(r_bmid r_b>0)},qquad
+eta_{down}=rac{Cov(r_i,r_bmid r_b<0)}{Var(r_bmid r_b<0)}.
+]
+
+Candidate asymmetry:
+
+[
+Aeta_i=eta_{up}-eta_{down}.
+]
+
+This is a control/competitor to event resilience, not automatically a separate feature family.
+
+### 5.7 Continuous versus discrete residual strength
+
+For positive residual contributions (g_t=max(epsilon_t,0)):
+
+[
+GainConcentration_i=sum_tleft(rac{g_t}{sum_j g_j}ight)^2.
+]
+
+Also test largest-positive-bar share, sign-based information discreteness, and jump share:
+
+[
+JumpShare=rac{max(RV-BV,0)}{RV},
+]
+
+where (BV) is a jump-robust bipower-variation estimate.
+
+The critical matched test is: **same cumulative residual return, similar RV/downside RV/jump share/liquidity/event status; different continuity.**
+
+### 5.8 Rank persistence
+
+Let (q_{i,t}in[0,1]) be the cross-sectional residual-strength percentile.
+
+[
+RankPersistence_{i,H}(q^*)=rac{1}{N_H}sum_{tin H}mathbf{1}(q_{i,t}ge q^*).
+]
+
+Also predefine rank volatility, maximum rank drawdown, first-entry time into the top decile, loss/reclaim count, and area above a threshold. The test must control for endpoint rank and cumulative residual return.
+
+### 5.9 High occupancy
+
+Price high occupancy:
+
+[
+HighOcc_{i,H}(c)=rac{1}{N_H}sum_t mathbf{1}(P_{i,t}ge ccdot High_{i,H}(t)).
+]
+
+More defensible variants are residual-high occupancy and occupancy conditional on benchmark drawdowns. This family has a high prior probability of redundancy with distance-to-high and volatility and should receive a strict kill rule.
+
+### 5.10 Group state
+
+For PIT group (g), candidate state variables are group residual return/RSZ, breadth, new-high participation, residual-positive share, dispersion, coherence, leader retention, rank churn, downside capture and shock recovery.
+
+Novelty versus C1 must be explicit: finer taxonomy, PIT membership, intraday normalization, conditional shocks, or economic-network structure. Re-running broad-sector daily persistence with renamed variables is not novel.
+
+### 5.11 Exhaustion
+
+At landmark (t), eligible names satisfy a fixed medium-horizon leadership condition such as
+
+[
+Rank(RS^{60d}_{i,t})ge 0.90.
+]
+
+Define a future leadership break without using post-(t) information in features. Candidate hazard covariates:
+
+[
+Delta RS^{5d}, Delta RS^{intra}, DownCapture, T^{rec}, RV^-, RankVol, Delta Breadth_g, Delta LeaderRetention_g.
+]
+
+The family advances only if it predicts the break with positive lead time while 60D RS is still high.
+
+## 6. Feature redundancy map
+
+| Candidate | Likely hidden parent | Distinct only if… | Audit prior |
+|---|---|---|---|
+| Raw RS | momentum | — | baseline |
+| Residual RS | momentum + factor neutralization | OOS benefit survives simpler factor controls | test |
+| RSZ | residual momentum / volatility scaling | adds beyond residual return + RV | test as normalization, not alpha claim |
+| Upside variance share | semivariance | adds beyond RV and downside RV | low-medium |
+| Shock MAE/recovery | beta + vol + liquidity | conditional event response adds after controls | **high-value test** |
+| Asymmetric beta | conditional beta | adds beyond shock event features | medium/control |
+| Gain concentration/FIP | vol + jumps + event magnitude | matched residual-return/vol/jump test survives | medium |
+| Rank persistence | momentum path | endpoint RS controlled and path still matters | medium-high |
+| High occupancy | distance-to-high + vol | residual/conditional form survives | low |
+| RVOL | liquidity/event intensity | non-monotonic or interaction value survives | control |
+| Group breadth/state | group momentum | adds after stock momentum and PIT group return | uncertain after C1 |
+| OFI/depth/replenishment | microstructure | adds beyond minute-bar resilience | V2 only |
+
+### Minimal nonredundant V1 set
+
+The audit recommends resisting a large feature zoo. The smallest defensible first set is:
+
+1. cumulative market-residual return;
+2. time-of-day standardized residual return (normalization);
+3. realized variance and downside semivariance;
+4. prior-shock residual MAE and recovery-time summary;
+5. endpoint residual-rank + rank persistence;
+6. jump/gain concentration;
+7. liquidity/RVOL/gap/event controls;
+8. market regime.
+
+Industry/group fields should enter only after PIT repair. High occupancy is secondary. Raw “gain retention” should not return as a primary family.
+
+## 7. Falsification matrix
+
+| Family | Hypothesis | Major confounds | Mandatory controls | Endpoint | Kill condition | Advance condition |
+|---|---|---|---|---|---|---|
+| Hierarchical residual RS | Neutralized RS beats raw RS | factor estimation error, collinearity | raw momentum, beta, vol, size, liquidity | forward residual return/rank | no OOS IC/economic gain | stable incremental OOS gain |
+| Theme/group interaction | strong group × strong stock helps | stock momentum already contains group return | stock residual RS, group return/vol, PIT membership | return, MAE, rank survival | additive/interaction terms add nothing | robust gain across groups/eras |
+| Shock resilience | low capture/fast recovery predicts durability | low beta, low vol, liquidity, event size | beta, asymmetric beta, RV, spread proxy, gap/event | later return, MAE, recovery/rank survival | effect collapses after controls | monotone, OOS, not one regime |
+| Continuity | gradual residual gains are more durable | volatility/jumps/events | cumulative residual return, RV, semivariance, jump share | continuation/MAE | matched groups indistinguishable | robust matched OOS difference |
+| Rank persistence | persistent top rank matters | endpoint rank/momentum | endpoint RS, RV, liquidity | rank survival/return | path terms vanish | incremental survival/IC |
+| RVOL/participation | volume relation is non-monotonic | event days, liquidity | dollar volume, gap, RV, event status | continuation/MAE | simple RVOL dominates | refined participation adds OOS value |
+| Exhaustion | deterioration leads RS break | tautology/look-ahead | current 20D/60D RS, RV, regime | future break/hazard | no positive lead time | calibrated hazard + lead time |
+| Regime interaction | panic/rebound changes continuation | sparse crashes | predefined regime state | all above | no interaction/calibration gain | stable stratified improvement |
+| Economic links | strength propagates with lag | common factors, stale links, multiple testing | factor/group residuals, PIT graph | 30m–20D residual return | effect dies under PIT/lag/FDR | robust edge across link types/eras |
+| Microstructure V2 | OFI/depth adds beyond bars | latency, tick size, costs | all V1 features | resilience/short-horizon outcome | negligible incremental value | material OOS gain justifies cost |
