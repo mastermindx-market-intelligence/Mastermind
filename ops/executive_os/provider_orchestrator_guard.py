@@ -85,6 +85,7 @@ FABRIC_LAUNCH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:"
     r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b"
     r"|(?:[A-Za-z0-9_./-]+/)?(?:sub|remote_sub)\.sh\b"
+    r"|(?:python(?:3(?:\.\d+)?)?\s+)?(?:[A-Za-z0-9_./-]+/)?slot\.py\b"
     r")",
     re.I,
 )
