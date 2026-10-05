@@ -678,6 +678,49 @@ def test_start_agent_relay_resumes_partial_enabled_absent_without_replaying_enab
     assert log.count(f"bootstrap system {agent_plist}") == 1
 
 
+def test_start_agent_relay_read_only_preflight_failures_are_not_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    cases = [
+        [("print-disabled system", 5, "", "disabled-state unavailable")],
+        _agent_relay_disabled("enabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")],
+        _agent_relay_disabled("enabled")
+        + _observe_running(AGENT_RELAY_LABEL)
+        + [("print-disabled system", 5, "", "final-disabled unavailable")],
+    ]
+    for index, plan in enumerate(cases):
+        case_root = tmp_path / str(index)
+        case_root.mkdir()
+        code, _out, err, log, remaining, *_ = _run(case_root, "start-agent-relay", plan)
+        assert code != 75
+        assert "state=unknown" in err
+        assert "state=effect_unknown" not in err
+        assert remaining == ""
+        assert log == [key for key, *_ in plan]
+        assert not any(
+            call.startswith(("enable ", "bootstrap ", "kickstart ")) for call in log
+        )
+
+
+def test_start_agent_relay_post_enable_registration_failure_is_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _agent_relay_disabled("disabled")
+        + [(f"enable system/{AGENT_RELAY_LABEL}", 0, "", "")]
+        + _agent_relay_disabled("enabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")]
+    )
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "start-agent-relay", plan)
+    assert code == 75
+    assert "state=effect_unknown stage=pre-start-registration" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert log.count(f"enable system/{AGENT_RELAY_LABEL}") == 1
+    assert not any(call.startswith(("bootstrap ", "kickstart ")) for call in log)
+
+
 def test_start_agent_relay_does_not_replay_bootstrap_when_readback_is_unknown(
     tmp_path: Path,
 ) -> None:
@@ -778,6 +821,47 @@ def test_stop_agent_relay_resumes_partial_disabled_registered_without_replaying_
     assert f"service={AGENT_RELAY_LABEL} state=absent" in out
     assert not any(call.startswith("disable ") for call in log)
     assert log.count(f"bootout system/{AGENT_RELAY_LABEL}") == 1
+
+
+def test_stop_agent_relay_read_only_preflight_failures_are_not_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    cases = [
+        _observe_running(AGENT_RELAY_LABEL)
+        + [("print-disabled system", 5, "", "disabled-state unavailable")],
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("disabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")],
+    ]
+    for index, plan in enumerate(cases):
+        case_root = tmp_path / str(index)
+        case_root.mkdir()
+        code, _out, err, log, remaining, *_ = _run(case_root, "stop-agent-relay", plan)
+        assert code != 75
+        assert "state=unknown" in err
+        assert "state=effect_unknown" not in err
+        assert remaining == ""
+        assert log == [key for key, *_ in plan]
+        assert not any(call.startswith(("disable ", "bootout ")) for call in log)
+
+
+def test_stop_agent_relay_post_disable_registration_failure_is_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("enabled")
+        + [(f"disable system/{AGENT_RELAY_LABEL}", 0, "", "")]
+        + _agent_relay_disabled("disabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")]
+    )
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "stop-agent-relay", plan)
+    assert code == 75
+    assert "state=effect_unknown stage=pre-bootout-registration" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert log.count(f"disable system/{AGENT_RELAY_LABEL}") == 1
+    assert not any(call.startswith("bootout ") for call in log)
 
 
 def test_stop_agent_relay_does_not_replay_bootout_when_readback_is_unknown(
