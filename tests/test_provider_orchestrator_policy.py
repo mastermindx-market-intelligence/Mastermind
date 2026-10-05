@@ -852,6 +852,23 @@ def test_guard_denies_direct_slot_launcher_without_root_identity(
     assert "Fabric root-budget guard" in output["permissionDecisionReason"]
 
 
+def test_guard_does_not_treat_wrapper_inspection_as_launch(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    for command in (
+        "grep -n slot.py docs/runbook.md",
+        "cat /opt/mastermind/ext/sub.sh",
+        "/opt/mastermind/ext/sub.sh __glm_memory _ /tmp glm-5.3",
+        "/opt/mastermind/ext/sub.sh __launch_plan glm /tmp",
+    ):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
 def test_guard_allows_fabric_launch_with_explicit_root_identity(
     mastermind_scope: Path,
     capsys: pytest.CaptureFixture[str],
