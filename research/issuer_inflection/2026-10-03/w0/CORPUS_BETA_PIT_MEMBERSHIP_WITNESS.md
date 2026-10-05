@@ -1,12 +1,12 @@
 # Historical beta PIT-membership witness — metadata only
 
-**Result: 12/12 beta candidates are single-match S&P 500 members at the latest pre-freeze filing metadata dates in the unmerged #8392 candidate. This is NOT event assignment.**
+**Result: 12/12 beta candidates are single-match S&P 500 members at the latest pre-freeze filing metadata dates in the now-merged owner dataset. This is canonical metadata qualification, NOT trial event assignment or body admission.**
 
 Record SHA-256: `548cccc660880639259779104aa1186afe0cb65a7e97cd752a7b15435a9fddb7`
 
 ## Source boundaries
 
-- Earnings metadata candidate: Macro #8392 head `3ec016886c2fd359cacab5c3739dc2fc7fd76f26`, parquet SHA-256 `5309ece0...`; open/unmerged and not I3-admitted.
+- Earnings metadata owner: Macro #8392 merged as `d4e7c3788d674d43be57e0cbc017f858b832c9f1`; current-main parquet blob `ae24d76b...`, SHA-256 `5309ece0...`; source metadata is admitted, while trial assignment remains false.
 - Earnings owner event key: `(CIK, report_date)` from `engine/earnings_release/binding.py`; a filing remains exact `(CIK, accession)`.
 - PIT membership owner: `data/breadth/sp1500_pit_membership.parquet` blob `ec7085bc...`, current byte SHA-256 `7b34316c...`.
 - Selection witness: latest `acceptance_datetime` per frozen beta ticker, accession lexical tie-break. No body/outcome/model/price read.
@@ -32,8 +32,8 @@ Every row has exactly one active PIT interval and every source is `sp500` at the
 
 ## Still open
 
-- #8392 is unmerged and its repaired head has not yet returned current-head review/CI acceptance; these rows are not canonical source metadata yet.
-- Current industry/proxy metadata is static/current. Repository evidence explicitly says it is not PIT production proof. No admitted historical business-family classification has been found, so archetype balance at these historical events remains **unqualified**.
+- #8392 is merged and current main carries the exact inspected parquet bytes; these rows are canonical source metadata candidates. They are still not registered I3 validation events.
+- Historical business-family/archetype balance remains **unqualified**. `collectors/sp1500_pit_sectors.py` explicitly says every sector label it emits is as-of-now and `era_correct=False` for every row (`era_correct_count == 0`); it therefore cannot make these historical events sector-era-correct. Current proxy labels remain discovery-only.
 - The 12 prospective temporal-holdout candidates are not evaluated here. #8392 ends 2026-10-02, before the 2026-10-04 freeze, so none of its historical rows may become a prospective holdout event.
 - No filing body, exhibit, transcript, Q&A, outcome, price or sealed revision was read.
 - `event_identity_admitted=false`, `source_revision_assigned=false`, `trial_registered=false`.

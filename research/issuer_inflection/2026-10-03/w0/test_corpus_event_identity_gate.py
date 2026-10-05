@@ -10,23 +10,32 @@ class EventIdentityGateTests(unittest.TestCase):
         self.assertEqual(k['fields'],['cik','accession'])
         self.assertEqual(k['date_tolerance_days'],0)
         self.assertIs(k['date_join_permitted'],False)
-    def test_committed_store_is_legacy_and_cannot_key_events(self):
-        s=R['committed_store']
-        self.assertEqual(s['columns'],['ticker','cik','filing_date','acceptance_datetime','items'])
+    def test_owner_store_is_accession_complete_and_accepted(self):
+        s=R['accepted_owner_store']
+        self.assertIs(R['canonical_filing_metadata_admitted'],True)
+        self.assertIs(R['event_identity_source_admitted'],True)
+        self.assertEqual(s['columns'],['ticker','cik','accession','form','filing_date','acceptance_datetime','report_date','items'])
+        self.assertIs(s['accession_column_present'],True)
+        self.assertEqual(s['empty_accessions'],0)
+        self.assertEqual(s['duplicate_cik_accession_pairs'],0)
+        self.assertEqual(s['hosted_ci_conclusion'],'success')
+        self.assertEqual(s['fences_conclusion'],'success')
+    def test_all_frozen_names_have_owner_metadata(self):
+        for role,count in [('beta_validation_candidate',12),('prospective_temporal_holdout_candidate',12),('broad_reserve_candidate',6)]:
+            with self.subTest(role=role):
+                row=R['frozen_pool_coverage'][role]
+                self.assertEqual(row['candidate_count'],count)
+                self.assertEqual(row['present_tickers'],count)
+                self.assertEqual(row['missing'],[])
+    def test_historical_rows_are_not_prospective_holdout_events(self):
+        h=R['frozen_pool_coverage']['prospective_temporal_holdout_candidate']
+        self.assertIs(h['historical_rows_eligible_as_holdout_events'],False)
+        self.assertLess(h['max_filing_date'],'2026-10-04')
+    def test_legacy_store_is_preserved_as_historical_gate_evidence(self):
+        s=R['legacy_store_at_premerge_pin']
         self.assertIs(s['accession_column_present'],False)
         self.assertNotIn('accession',s['columns'])
-    def test_beta_pool_is_not_fully_covered(self):
-        b=R['frozen_pool_coverage']['beta_validation_candidate']
-        self.assertEqual((b['present_tickers'],b['candidate_count']),(11,12))
-        self.assertEqual(b['missing'],['CFG'])
-    def test_historical_holdout_metadata_is_not_holdout_assignment(self):
-        h=R['frozen_pool_coverage']['prospective_temporal_holdout_candidate']
-        self.assertEqual((h['present_tickers'],h['candidate_count']),(12,12))
-        self.assertIs(h['historical_rows_eligible_as_holdout_events'],False)
-    def test_reserve_gap_is_retained(self):
-        r=R['frozen_pool_coverage']['broad_reserve_candidate']
-        self.assertEqual(r['missing'],['EL'])
-    def test_no_body_or_event_assignment_is_claimed(self):
+    def test_no_body_or_trial_event_assignment_is_claimed(self):
         self.assertEqual(R['body_reads'],0)
         self.assertEqual(R['event_assignments'],0)
         self.assertEqual(R['source_revision_assignments'],0)

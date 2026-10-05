@@ -1,13 +1,20 @@
 {
   "all_beta_single_pit_membership": true,
+  "beta_event_identity_candidates_frozen": true,
   "body_reads": 0,
+  "canonical_event_metadata_admitted": true,
   "current_proxy_may_certify_historical_family": false,
-  "earnings_metadata_candidate": {
-    "admitted": false,
-    "head": "3ec016886c2fd359cacab5c3739dc2fc7fd76f26",
+  "earnings_metadata_owner": {
+    "admitted": true,
+    "current_main": "ae54a785984153d595de69a13c1dea4415557ed8",
+    "fences_run": 37227785191,
+    "hosted_ci_run": 37227785366,
+    "merge_commit": "d4e7c3788d674d43be57e0cbc017f858b832c9f1",
+    "merged": true,
     "parquet_blob": "ae24d76bc985a6baba998811da3b8cb84d831423",
     "parquet_sha256": "5309ece0cd66b33d69abb8055afa05333d00bcfb43ace87d7997b3655946446f",
-    "pr": "macro#8392"
+    "source_head": "ae96a7f264df2d0a0fb0e3b3ef8739e04b060cc5",
+    "source_pr": "macro#8392"
   },
   "event_identity_admitted": false,
   "event_owner_contract": {
@@ -19,6 +26,13 @@
     "path": "engine/earnings_release/binding.py"
   },
   "historical_business_family_qualified": false,
+  "historical_sector_owner_limit": {
+    "blob": "04e9570f3984b3a298ff0949d19e1a8c9dd77a5f",
+    "disposition": "current/as-of-now sector labels cannot certify historical business family",
+    "era_correct": false,
+    "era_correct_count": 0,
+    "path": "collectors/sp1500_pit_sectors.py"
+  },
   "latest_metadata_rule": "latest acceptance_datetime per frozen ticker; accession lexical tie-break; metadata only",
   "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
   "pit_membership": {

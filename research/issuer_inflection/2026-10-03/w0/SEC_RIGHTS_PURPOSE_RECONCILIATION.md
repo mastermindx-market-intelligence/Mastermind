@@ -11,7 +11,7 @@ They are not the same gate.
 
 ## Current source-law determination
 
-Current Macro source pin used for this reconciliation: `d4f32cfb3bc5d5041273294175ae1feba582e53b`.
+Current Macro source pin refreshed for this reconciliation: `ae54a785984153d595de69a13c1dea4415557ed8`.
 
 Canonical source-rights register:
 

@@ -1,96 +1,52 @@
-# Corpus event-identity gate — current owner metadata is not yet accession-complete
+# Corpus event-identity gate — owner metadata admitted, trial assignment still held
 
-**Disposition: METADATA COVERAGE PARTIAL / CANONICAL EVENT IDENTITY NOT ADMITTED.**
+**Disposition: CANONICAL FILING METADATA SOURCE ADMITTED / EVENT ASSIGNMENT NOT REGISTERED.**
 
 This is a metadata-only W0 qualification record. No filing body, exhibit, transcript, Q&A, outcome, model output, price or sealed holdout revision was read.
 
 ## Canonical owner law
 
-Current Macro pin observed for this qualification:
-
-`d4f32cfb3bc5d5041273294175ae1feba582e53b`
-
-The Earnings owner has a frozen correction-safe filing identity contract:
+The Earnings owner keeps the correction-safe filing identity contract:
 
 - `engine/earnings_release/filing_key.py` blob `c1bf8319f3b24eae5661603c17bc4dc829c975b4`;
-- one EDGAR filing is keyed **only** by exact `(CIK, accession)`;
-- `JOIN_DATE_TOLERANCE_DAYS = 0`;
-- filing date / acceptance-time proximity may never substitute for accession;
-- an amendment is a different filing even when it belongs to the same event.
+- one EDGAR filing is keyed only by exact `(CIK, accession)`;
+- date tolerance is zero; filing-date or acceptance-time proximity never substitutes for accession;
+- amendments remain distinct filings.
 
-Current collector code `collectors/edgar_earnings_8k.py` blob `19665592a256bb4ef8af6ebc2fdd0f74bfdf992f` has already been upgraded to emit `accession`, `form` and `report_date` in addition to ticker/CIK/date/clocks.
+## Owner source has now landed
 
-## Committed store is still pre-upgrade
+Macro #8392 merged as `d4e7c3788d674d43be57e0cbc017f858b832c9f1` from final source head `ae96a7f264df2d0a0fb0e3b3ef8739e04b060cc5`. Exact-head hosted CI `37227785366` and fences `37227785191` both concluded **success**.
 
-The actual committed metadata store on the same current Macro pin is:
+Current Macro main observed for the accepted readback: `ae54a785984153d595de69a13c1dea4415557ed8`. Its `data/edgar/earnings_8k_dates.parquet` is exact blob `ae24d76bc985a6baba998811da3b8cb84d831423`, SHA-256 `5309ece0cd66b33d69abb8055afa05333d00bcfb43ace87d7997b3655946446f`. Read-only replay from that Git object proves:
 
-`data/edgar/earnings_8k_dates.parquet`
+- 173,495 rows; 2,765 unique tickers;
+- exact columns `ticker,cik,accession,form,filing_date,acceptance_datetime,report_date,items`;
+- zero empty accessions;
+- zero duplicate `(CIK, accession)` pairs;
+- latest filing date `2026-10-02`; latest acceptance `2026-10-02T20:24:12.000Z`.
 
-- Git blob: `e1fdf2c9717b02a98f6fe7cfab7e88e51bf912d6`
-- file SHA-256: `3076d611cda61455ea65c8aaf7bcebcc37c341330c4b37048ce89ecc79bd2ae4`
-- rows: `98,975`
-- unique tickers: `1,314`
-- committed columns: exactly `ticker, cik, filing_date, acceptance_datetime, items`
-- **no accession column**
-- global latest filing date: `2026-07-02`
-- global latest acceptance time: `2026-07-02T20:31:36.000Z`
+The frozen 30-name discovery pool is now covered 30/30 in this accepted owner dataset:
 
-So the owner implementation has moved ahead of the durable dataset. Current committed rows cannot produce the canonical filing key and cannot be upgraded by I3 using date/fuzzy matching.
+| Role | Candidates present | Metadata rows | Latest filing date |
+|---|---:|---:|---|
+| beta validation | 12/12 | 948 | 2026-09-02 |
+| prospective temporal-holdout candidates | 12/12 | 1,069 | 2026-09-30 |
+| broad reserve | 6/6 | 558 | 2026-09-16 |
 
-## Frozen 30-name pool coverage
+This closes the earlier **owner-source metadata availability** gap. The old five-column 98,975-row store remains historical evidence of why the gate was previously held; it is no longer current source truth.
 
-| Role | Candidates | Tickers present in legacy store | Missing | Rows | Latest filing metadata |
-|---|---:|---:|---|---:|---|
-| beta validation candidates | 12 | 11 | `CFG` | 886 | 2026-06-03 |
-| prospective temporal-holdout candidates | 12 | 12 | none | 1,050 | 2026-05-21 |
-| broad reserve | 6 | 5 | `EL` | 468 | 2026-06-11 |
+## What this does not admit
 
-This is **coverage only**. None of those rows is an I3 event assignment because every row lacks accession.
+No I3 trial event has been assigned. `event_assignments=0`, `source_revision_assignments=0`, `trial_registered=false`, and body reads remain zero.
 
-Prospective temporal-holdout rows are historical metadata and cannot be repurposed as holdout events: their future event must occur strictly after the frozen selection time and be identity/rights-qualified before body inspection.
+For the 12 beta issuers, `CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md` deterministically selects the latest pre-freeze accepted metadata row (acceptance time, accession lexical tie-break) and proves one active S&P 500 PIT membership at that filing date. Those rows are now **canonical event-identity candidates**, not inspected validation examples.
 
-## No alternate committed accession store found
+Historical business-family/archetype balance remains deliberately unqualified. The estate's `collectors/sp1500_pit_sectors.py` explicitly states that every emitted sector label is as-of-now and `era_correct=False`; its receipt contract fixes `era_correct_count == 0`. Therefore I3 must not back-project today's sector/industry label onto these historical events.
 
-A current repository search found no committed `data/**` earnings-wire / filing-key artifact carrying the missing accession identity. The only accession hit under `data/edgar` was unrelated `dead_name_delisting.json`.
+Prospective temporal holdouts remain entirely unassigned: the accepted owner dataset ends `2026-10-02`, before the I3 freeze on `2026-10-04`, so none of its historical rows can become the future untouched holdout event.
 
-The estate therefore has:
+## Remaining corpus gate
 
-- broad historical date/acceptance metadata;
-- upgraded owner code capable of emitting accession on a future/backfilled run;
-- **no current committed accession-bearing earnings metadata store suitable for the frozen I3 corpus**.
+Before any beta body inspection or grading, the existing research owner must register the frozen event-selection artifact through the canonical experiment/trial plane, bind purpose-specific source rights, and preserve the limitation that historical archetype balance is unavailable unless a genuine event-time owner appears. An amended preregistration may treat the current proxy only as discovery metadata; it must not claim historical stratification that is not evidenced.
 
-## Required owner action before beta event assignment
-
-The existing Earnings/SEC owner—not I3—must refresh/backfill through the upgraded collector or another already-owned accession-bearing metadata seam, then publish/read back an immutable metadata cut containing at minimum:
-
-- canonical issuer/CIK;
-- exact accession;
-- form;
-- Item 2.02 membership;
-- filing date;
-- source acceptance datetime;
-- report date when present;
-- owner dataset/source revision identity and recorded/admission clock;
-- rights/source-family binding for the intended I3 research purpose.
-
-For historical beta assignment, event-date PIT membership and event-time/source-qualified business-family evidence remain separately required. For prospective holdout assignment, only future events after the freeze are eligible.
-
-I3 must not:
-
-- synthesize accessions from filing dates;
-- join on `(CIK, filing_date)` or a tolerance window;
-- fetch filing bodies merely to discover identity;
-- substitute `material_8k_events` rows that do not represent the earnings event;
-- treat 28/30 legacy metadata presence as 28 qualified validation units.
-
-Until the owner publishes an accession-complete metadata cut, every frozen corpus row retains `event_id=null`, `source_revision_id=null`, and source-event qualification false.
-
-## Live successor candidate — #8392
-
-Macro #8392 head `3ec016886c2fd359cacab5c3739dc2fc7fd76f26` is an **open owner candidate**, not admitted mainline source. Its exact parquet blob `ae24d76bc985a6baba998811da3b8cb84d831423` / SHA-256 `5309ece0cd66b33d69abb8055afa05333d00bcfb43ace87d7997b3655946446f` was inspected metadata-only through the authenticated repository API. It has 173,495 rows, all eight upgraded columns, zero empty accessions, zero duplicate `(CIK, accession)` pairs, and covers all 30 frozen I3 names.
-
-That head materially demonstrates that the existing owner can close the legacy-store identity gap, but it is not yet an I3 source because #8392 is open, current-head CI/review are unfinished, and Macro main continues moving. I3 dependency comment: #8392 `5983380209`.
-
-The candidate data ends `2026-10-02`, before the I3 freeze on `2026-10-04`; therefore none of its rows can be used as a prospective temporal-holdout event.
-
-`CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md` uses only that candidate metadata plus the existing PIT membership owner. All 12 beta names are single-match S&P 500 members at their latest candidate filing dates. This closes index-membership qualification **for the witness only**. Historical business-family/archetype balance remains unqualified because the available sector/industry map is current/static rather than point-in-time. No event has been assigned.
+I3 still must not synthesize accessions, date-join filings, inspect bodies to discover identity, or count metadata rows as validation units.
