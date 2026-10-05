@@ -17,7 +17,10 @@ from typing import Any
 from integrations.mastermind_company_mcp.schemas import ToolSpec
 from integrations.slack_agent_dialogue.contract import (
     DialogueContractError,
+    MAX_BOUNDED_TEXT_CHARS,
     MAX_EVIDENCE_REFS,
+    MAX_SUMMARY_CHARS,
+    MAX_TEXT_CHARS,
     validate_body,
     validate_evidence_ref,
 )
@@ -81,7 +84,7 @@ _EVIDENCE_REFS = {
     "items": {
         "type": "string",
         "minLength": 1,
-        "maxLength": 500,
+        "maxLength": MAX_SUMMARY_CHARS,
         "pattern": r"^https://(?:github\.com|linear\.app)/",
     },
 }
@@ -132,8 +135,8 @@ PRINCIPAL_TOOL_SPECS: tuple[ToolSpec, ...] = (
                     max_length=32,
                     pattern=r"^opt-[a-z0-9][a-z0-9-]{1,31}$",
                 ),
-                "decision": _string(max_length=900),
-                "rationale": _string(max_length=900),
+                "decision": _string(max_length=MAX_TEXT_CHARS),
+                "rationale": _string(max_length=MAX_TEXT_CHARS),
                 "evidence_refs": _EVIDENCE_REFS,
             },
             required=(
@@ -155,8 +158,8 @@ PRINCIPAL_TOOL_SPECS: tuple[ToolSpec, ...] = (
         ),
         input_schema=_object(
             {
-                "instruction": _string(max_length=900),
-                "stop_condition": _string(max_length=700),
+                "instruction": _string(max_length=MAX_TEXT_CHARS),
+                "stop_condition": _string(max_length=MAX_BOUNDED_TEXT_CHARS),
                 "evidence_refs": _EVIDENCE_REFS,
             },
             required=("instruction", "stop_condition"),
@@ -172,7 +175,7 @@ PRINCIPAL_TOOL_SPECS: tuple[ToolSpec, ...] = (
         ),
         input_schema=_object(
             {
-                "reason": _string(max_length=900),
+                "reason": _string(max_length=MAX_TEXT_CHARS),
                 "next_authority": {
                     "type": "string",
                     "enum": ["sol", "chairman", "canonical_ref"],

@@ -7,6 +7,7 @@ from common.agent_dialogue_contract import (
     DialogueContractError,
     ERROR_CODES,
     FABLE_MESSAGE_TYPES,
+    MAX_BOUNDED_TEXT_CHARS,
     MAX_EVIDENCE_REFS,
     MAX_FRAME_BYTES,
     MAX_OPTIONS,
