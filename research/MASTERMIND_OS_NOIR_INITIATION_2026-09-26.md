@@ -4,7 +4,15 @@ Operation: `mastermind-os-noir-design-system-20260926-sol-001`
 
 **MISSION_COMPLETE: false.** The first isolated, static qualification set now covers button, navigation, chip, work-row, evidence and composer patterns. Shared-library adoption, P-series refinement, Fabric and production proof remain incomplete. This document is implementation evidence, not source law, runtime admission, custody transfer or design acceptance.
 
-## Latest reviewed contribution — 4 October 2026
+## Latest reviewed contribution — 5 October 2026
+
+This continuation connects **Project → Work → selected returned evidence → actual return** and extends the approved Atelier identity through **private entry → browser sign-in → permitted daily context**. It adds four canonical entry product frames, refines the Work and Evidence desktop/mobile pairs, and adds UX13–UX15. The current builder directory has **sixteen guides, UX00–UX15**. Full details appear in **Work, evidence and private-entry continuation — 5 October 2026** below.
+
+The inspected protected source is now `7eac3ec252475600147ec9a376b8ca16403ac4c5`. A bounded comparison from `5b244a2bbe4c2a94ec25a887eb4a0d8fafe1ea2f` found five commits, 34 changed files and 27 app paths. Work is a real qualified read; launch/session/recovery composition and a launch-only adapter are conditional source capabilities. Standard bootstrap supplies no command binding, and the supplied launch binding has no Send/STOP. The daily-flow specification reconciles current claims and adds primary references S42–S56 while retaining historical censuses.
+
+This contribution establishes editable design, source inspection and builder documentation. It performs no app-source implementation, runtime action, login, merge or installed acceptance. Both earlier Paper unknown-effect fences remain unresolved and untouched. The original qualification mission and older dated frontiers below remain historical records, not a new claim that their separate dependencies are complete.
+
+## Prior reviewed contribution — 4 October 2026
 
 The current continuation adds the Sources/access recovery and Projects-finding flows to the approved Noir Atelier family: six product artboards created/refined, three new notes (UX10–UX12), and exact builder control/source/return contracts. The thirteen-note directory is current. Full evidence and saved commit references appear in **Sources/access and Projects daily-flow continuation — 4 October 2026** at the end of this record.
 
@@ -958,3 +966,78 @@ Builder reading order for this continuation: UX10 → SA01 → UX11 for Sources;
 
 The completed contribution is six product artboards created/refined and three new guide artboards, plus connected indexes and repository documentation. It is not frontend implementation, a working Paper prototype, production acceptance, installed auth qualification, source merge or deployment. The next application task is the integrated source-qualified daily slice described in the handoff; the deferred KD01 amendments remain dependent on original-operation reconciliation.
 <!-- SOURCES_PROJECTS_FLOW_2026_10_04_END -->
+
+<!-- ENTRY_WORK_FLOW_2026_10_05_BEGIN -->
+## Work, evidence and private-entry continuation — 5 October 2026
+
+### Intent, source and bounded execution
+
+The Chairman's “Great job, continue” carries forward the approved project-wide Atelier direction and the request for simple, robust daily flows with builder context in files and Paper notes. This phase closes two concrete gaps: routine team review looked like a Chairman obligation in Work, and private entry/browser handoff still lived only in an older reference family. Evidence inspection also lacked a clear mobile return and readable source detail.
+
+The existing carrier remains draft PR #1010, branch `sol/noir-qualification-20260926`, recovered at `e46cd1dcd989a4171dc8d0341707eadc6c2872a9`. Current protected source was recovered as `7eac3ec252475600147ec9a376b8ca16403ac4c5`; INDEX blob `38a18571229e487f525b1c9780f7993220a5da93`, Skillpack 1.0.1/bootstrap 1. Required procedure/Paper blobs match the previously accepted versions. The exact `5b244a2…` → `7eac3ec…` comparison contains five commits, 34 changed files and 27 app paths. No whole-repository or installed-behavior audit is claimed.
+
+Native bounded lanes divided source census/document reconciliation from target-scoped Work/Evidence design. The principal owned new entry frames, UX14/UX15, shared index edits and final file persistence. The Work/Evidence lane owned AT10/AT18 and UX13; no concurrent writer touched those targets. No external worker, watcher, runtime session, command, login or app-source change was created. The direct Paper carrier retained exact-file guards and target-scoped writes. The unrelated foreground file was not changed.
+
+### Delivered design family
+
+All product frames are on canonical Page 12 `p-D-0` in file `01M3NRCX55B452A12819WNE1RH`. Notes are on Page 13 `p-E-0`.
+
+| Family | Desktop / mobile | Delivered purpose |
+| --- | --- | --- |
+| AU01 Private entry — new | `TEP-0` / `TGL-0` | public Atelier identity and original sculpture, one configured Sign in, no prior private content |
+| AU02 Browser sign-in — new | `THK-0` / `TIQ-0` | one waiting state, external-browser instruction, supported Cancel sign-in, clear public return |
+| AT10 Work — refined | `LF7-0` / `MOG-0` | Returned / Review / Acceptance / Release, explicit optional result read and accountable next actor |
+| AT18 Evidence — refined | `OE8-0` / `OKF-0` | five project tabs, selected review finding, source identity and independent clocks, actual-origin Back |
+| UX13 — new | `TDM-0`, 1600 × 1120 at 1680,7500 | exact Project → Work → returned result → source → actual return, states and identity limits |
+| UX14 — new | `TJP-0`, 1600 × 1120 at 0,8750 | entry/browser flow, blocked/incomplete/setup/partial states, generation/cancel/return rules |
+| UX15 — new | `TMP-0`, 1600 × 1120 at 1680,8750 | protected implementation capability map and concrete integration corrections |
+
+A fresh exact-file directory read confirms **74 Page 12 artboards** and **16 Page 13 guides, UX00–UX15**. The phase adds four product frames and three guides while refining four existing product frames. Desktop products remain 1600 × 1040, mobile 390 × 844. AU01/AU01M sit at 2150,8120 / 3830,8120; AU02/AU02M at 4300,8120 / 5980,8120. Created boards were explicitly positioned after Paper's automatic placement; no existing board was displaced.
+
+### Work and evidence: read the return, preserve accountability
+
+AT10's former Review return / Review returned result actions became **Inspect return** (`MBY-0`, 170 × 44) and **Open returned result** (`MZW-0`, 342 × 44). These are optional reads. Team-owned/no-Chairman-action remains visible; Sol reviews the retained freshness correction. The rail `TD5-0` now has four separate facts: result/evidence returned, Review changes requested, Acceptance pending owner ruling, Release pending installed verification. Mobile `MZI-0` shows the same distinction. A routine review does not become an Inbox approval.
+
+AT18 replaces its older eight-entry project strip with **Overview / Plan / Work / Evidence / More** (`TLJ-0`). Back to work `TLV-0` / `TM0-0` is 44 px high and illustrates the actual Work origin; UX13 requires deriving its label and destination from the real permitted origin. Source inspection `OJG-0` / `OM7-0` is also 44 px high. The review finding is visibly selected (`OHJ-0` / `OHP-0`, `OLM-0` / `OLP-0`) instead of competing with a different highlighted row.
+
+The retained **RESULT-FRESHNESS-01 · sample** shows Sol as review owner, Implementation / GitHub as evidence owner, partial coverage, revision/digest not supplied, source time unavailable and the existing 16:40 illustrative observation time. New desktop rows `TMF-0` / `TMJ-0` and mobile block `TMN-0` expose the missing facts without inventing a canonical tuple or clock. A supported exact-source read returns first to selected evidence; evidence returns first to its actual Work origin; Work returns to the admitted project. Missing permission/identity gives an explained state, not a guessed source.
+
+Final desktop typography adopts the inspected AT10 sidebar (`LFF-0` cloned to `TOQ-0`, 232 × 1040, Projects selected), 16 px evidence titles, 12 px meaningful secondary text and 14 px source values. Repeated explanatory prose was shortened while preserving Project continuity Current, Implementation evidence Partial and Lifecycle source Unavailable. Mobile replaces its inherited malformed status icons with the exact official component (`TO8-0`), then corrects body height to 682 px: 62 + 64 + 682 + 36 = the 844 px frame. The complete final desktop/mobile screenshots retain the required content and safe area.
+
+### Private entry: one clear action and an honest return
+
+AU01/AU02 share Manrope headings, Inter body text, ink/graphite panels, champagne actions and the approved original sculpture. No new account/provider selection, credential field or private preview is invented. Mobile reuses official status/safe-area components and keeps Sign in or Cancel reachable. The phone mockups define responsive presentation, not an installed native iOS capability.
+
+Sign in `TGA-0` / `THA-0` is a configured direct gesture. Web opens one popup and reuses it for acquisition then content authorization. Native opens its system-browser flow. AU02's waiting block `TIB-0` / `TJD-0` is a status, not another request button. Cancel `TII-0` / `TJI-0` is 48 px high and uses existing sign-out to clear transaction/tokens and invalidate the current auth generation. Web closes the popup; native does not promise browser closure. The copy does not imply cancellation of unrelated work.
+
+UX14 provides blocked, closed/timed-out, setup-unavailable and partial-access specimens with meaningful next steps. Setup absence disables Sign in and names operator setup; it does not produce a login loop. Partial resource access preserves independently permitted reads. After authentication, the target flow revalidates and reacquires the actual allowed origin before restoring route/focus; existing callback completion alone does not supply that rich return or draft restoration. Independent source review found one precision issue—generation is invalidated/advanced, not cleared/reset—which the principal corrected and visually rechecked.
+
+### Current implementation findings carried into the builder files
+
+The source lane reconciled current statements in the daily-flow specification and app README, then the principal added the exact new flow/board/action maps. References **S42–S56** bring the specification to **56 pinned primary source references**. Historical source and candidate observations remain at their original revisions.
+
+- Work is now an implemented fixed qualified read. Its rows carry `root_job_id`, not work reference, project title, milestone or named accountable person. No clickable project drilldown or producer-clock detail is established by the current UI.
+- Generated-at and producer observed-at are distinct. SAME observations establish receipt consistency, not present-moment liveness. Partial/no-producer/stale-evidence/typed-unavailable states remain explicit; acceptance stays NOT_PROJECTED. Queue-level worker effect cannot be assigned to every root.
+- Launch/session components, a recovery controller and an Executive launch adapter exist conditionally. Standard `main.tsx` still calls `bindMissionHost(client)` without the optional owner binding. No mounted authenticated command client/store/route is supplied.
+- Matched launch acceptance means queued Job admission with `dispatched=false`; it does not mean running orchestration, named-project creation, product acceptance or release. The form's Project value maps to department. Form/adapter goal limits and a no-op integrated Cancel remain concrete build issues.
+- The supplied launch binding maps Send and STOP to null. Session switching clears local draft; per-project draft restoration and Enter/Shift+Enter/IME behavior remain requirements. Startup does not proactively show an existing pending pointer.
+- Auth/binding/selection invalidation may release a local form latch without proving known no effect. The original scoped pointer survives. Native read Cancel ends the local read wait and consumes late completion; it does not cancel underlying Rust HTTP or work. Work and Result each admit their own validated typed-503 document.
+
+UX15 is a compact builder map for these facts, not another owner registry. The full specification §§8.2 and 11.8 define the new flows; §18.5 contains the exact current source census; §17.5 adds required checks to the **same fifteen main scenarios**. Those scenarios remain unchanged and unexecuted in the application.
+
+### Verification, custody and completion boundary
+
+The principal independently reviewed final Work and Evidence desktop/mobile, all four entry frames, UX13–UX15 and the updated index groups. UX14/UX15 and AU01/AU02 also received an independent exact-source/text review. Static screenshots confirm legible layout, selected finding, meaningful actions and visible mobile safe areas at the supplied sizes. They do not prove click-through navigation, owner reads, browser auth, keyboard/IME, 320 px, expanded text or installed acceptance.
+
+All **71 dispatched Paper mutations** returned `APPLIED_RESPONSE_OBSERVED`: 32 principal entry/guide/index/release operations and 39 Work/Evidence operations. Raw mutation replies were retained before parsing; the native lane's numbered receipts are 001–039. A principal position attempt stopped at a failed fresh read guard before mutation dispatch, then proceeded after a successful guard. Intermittent read-only failures/blank renders recovered with intact tree/JSX and final screenshots. No ambiguous mutation was replayed, no new effect-unknown operation was reported, and no alternative carrier was used. Optional side-padding updates did not visibly change retained styles and were not claimed as successful layout changes.
+
+The final exact releases include `mm-daily-entry-release-owned-20261005-001`, `mm-evidence-exact-height-release-20261005-001` and `mm-evidence-canonical-desktop-release-20261005-001`. These release working indicators only. AT00, UX00, main directory, CH91 and MC90 now identify UX00–UX15; AU01/AU02 are indexed; current source footers identify `7eac…` and conditional command limits. UX11's pending-read wording was updated and fully rechecked. The complete UX00 guide list remains two lines and legible.
+
+Both original Knowledge unknown-effect fences remain unchanged: `mm-knowledge-flow-added-state-shells-20261004-001` on KD01 roots and `mm-knowledge-guide-mobile-chrome-amendment-20261004-001` on UX09 `T0J-0`. The current bridge source supplies no new operation-receipt lookup. New board counts, source review, successful disjoint writes and indicator release do not settle them. The principal exact-compared specification §11.6 with the saved `e46cd1d…` text and retained it byte-for-byte. No KD02 is fabricated or verified.
+
+The contribution is reviewable design and source-grounded handoff on the existing draft carrier. It does not merge protected source, change source custody, enable commands, log in, create runtime work, deploy or qualify the installed app. The concrete next application work is the admitted read/navigation slice, with the current Work join/detail, auth-return, draft/keyboard and recovery gaps explicitly named; action enablement remains separately owner-qualified.
+### Saved handoff for this phase
+
+The extended daily-flow specification is saved in `1ed83a336aff7277f3a513fa2737c841118bb253`, blob `016b218532f3c2bcd55dd9c5ff8f4c9965770272`. The sixteen-guide/current-source app README is saved in `c0894ff6dc8cea6b40970f919b99dd9b748216fd`, blob `4b214e341f820a78df3586ea64e146cad7b54342`. This cumulative record remains on the same draft PR #1010 / `sol/noir-qualification-20260926`; no replacement carrier or protected merge is created. Final exact-content readback and PR head are recorded in the continuation return.
+
+<!-- ENTRY_WORK_FLOW_2026_10_05_END -->
