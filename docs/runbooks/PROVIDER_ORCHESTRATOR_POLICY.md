@@ -19,7 +19,7 @@ Run from a protected/reviewed Mastermind checkout:
 python3 ops/executive_os/provider_orchestrator_policy.py verify --home "$HOME"
 ```
 
-`READY` means the exact reviewed guard digest, policy content, and both provider hook registrations match **as synchronous command handlers**. It does not prove that the provider loaded or trusted the hook, that native-agent settings have the intended values, or that Executive/Fabric runtime admission is live. `DRIFT` is read-only evidence; it does not authorize overwriting an
+`READY` means the exact reviewed guard digest, policy content, managed native-agent configuration values, and both provider hook registrations match **as synchronous command handlers**. It does not prove that the provider process actually loaded/trusted the hook or reloaded those settings, nor that Executive/Fabric runtime admission is live. `DRIFT` is read-only evidence; it does not authorize overwriting an
 unrelated provider home. `REFUSED` means preflight found a malformed/unsafe target before
 an apply could complete. `APPLY_INCOMPLETE_VERIFY_REQUIRED` is different: at least one
 managed file changed before a later write failed. Keep the same host/carrier, inspect the
@@ -53,6 +53,7 @@ verify all four observations separately:
 5. Codex effective config reads `agents.enabled=false` and `max_concurrent_threads_per_session=1`.
 6. Claude effective settings read `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=2` and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`.
 7. A real `pool run` / `pool remote` launch without `POOL_ORCHESTRATOR_ID`, `POOL_PARENT_RUN_ID`, or `POOL_TASK_CLASS` is denied before dispatch; the same bounded launch with the existing stable root/parent/class is admitted to the Fabric's own routing/admission checks.
+8. In a provider session that already inherits `POOL_ORCHESTRATOR_ID`, a child command that attempts to replace or empty that root is denied; changing child parent/task-class metadata does not mint a new root budget.
 
 Do not launch a real workflow merely to prove the guard; use an already-existing run/PR or a
 synthetic hook payload where possible. Never cancel/re-dispatch shared CI as part of this canary.
