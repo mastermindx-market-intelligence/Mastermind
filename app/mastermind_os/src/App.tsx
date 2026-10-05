@@ -5,6 +5,13 @@ import type {
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
+import { Projects } from "./projects/Projects";
+import { Inbox } from "./inbox/Inbox";
+import { Knowledge } from "./knowledge/Knowledge";
+import { ConversationWindow } from "./conversations/ConversationWindow";
+import { useObservedConversation } from "./conversations/useObservedConversation";
 import {
   OperationController,
   type OperationKind,
@@ -55,6 +62,10 @@ import {
 } from "./work";
 export const navigation = [
   "Today",
+  "Projects",
+  "Inbox",
+  "Conversations",
+  "Knowledge",
   "Work",
   "Programs",
   "Fleet & Capacity",
@@ -67,6 +78,10 @@ export const navigation = [
 type View = (typeof navigation)[number];
 const primaryNavigation: readonly View[] = [
   "Today",
+  "Projects",
+  "Inbox",
+  "Conversations",
+  "Knowledge",
   "Work",
   "Programs",
   "Fleet & Capacity",
@@ -80,6 +95,10 @@ const missionNavigation: readonly View[] = [
 ];
 const navGlyph: Record<View, string> = {
   Today: "⌂",
+  Projects: "◫",
+  Inbox: "▤",
+  Conversations: "◌",
+  Knowledge: "□",
   Work: "▤",
   Programs: "◫",
   "Fleet & Capacity": "◇",
@@ -1121,11 +1140,14 @@ export function App() {
     resultRequest = useRef(0),
     missionRequest = useRef(0),
     programRequest = useRef(0),
+    programSelection = useRef(selection),
     workRequest = useRef(0),
     missionSelectionState =
-      native && !window.MastermindMissionHost?.readPrograms
+      native && !window.MastermindMissionHost?.readPrograms && !window.MastermindMissionHost?.readProgramsObservation
         ? "NATIVE"
-        : index.state,
+        : selection?.workRef !== programSelection.current?.workRef || selection?.rootJobId !== programSelection.current?.rootJobId
+          ? "PENDING"
+          : index.state,
     selectionRefused =
       index.state === "AVAILABLE" &&
       !!selection &&
@@ -1135,6 +1157,8 @@ export function App() {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  const office = useOfficeProjection(authRevision, selection);
+  const observedConversation = useObservedConversation(authRevision, selection, authState?.content);
   const resultContext = useMemo(
     () => ({ selection, authRevision, missionV3 }),
     [selection, authRevision, missionV3],
@@ -1233,6 +1257,8 @@ export function App() {
         ) return;
         previousAuth.current = serialized;
         previousHostGeneration.current = generation;
+        office.invalidateAuth();
+        observedConversation.invalidateAuth();
         commandSlot.current?.controller.invalidate();
         const pending = pendingCommand.current;
         if (pending) {
@@ -1300,12 +1326,13 @@ export function App() {
       !controller.signal.aborted &&
       started === invalidation.current &&
       hostGeneration === (host?.invalidationGeneration?.() ?? 0);
-    if (active !== "Conversation")
+    if (active !== "Conversation" && active !== "Conversations")
       return () => {
         attached = false;
         controller.abort();
       };
     const run = async () => {
+      const conversationRead = observedConversation.begin();
       setWindowPending(true);
       let pairMission: Missionv3Document | null = null;
       if (authState?.acquisition && selection && readV3) {
@@ -1323,6 +1350,7 @@ export function App() {
       }
       if (!stillCurrent()) return;
       if (!authState?.content || !readWindow) {
+        observedConversation.accept(conversationRead, pairMission, null);
         setWindowPending(false);
         return;
       }
@@ -1333,10 +1361,12 @@ export function App() {
         setAssociation(
           observedMissionAssociation(value, pairMission, selection),
         );
+        observedConversation.accept(conversationRead, pairMission, value);
       } catch {
         if (!stillCurrent()) return;
         setWindowDocument(null);
         setAssociation(null);
+        observedConversation.accept(conversationRead, pairMission, null);
       } finally {
         if (stillCurrent()) setWindowPending(false);
       }
@@ -1393,7 +1423,11 @@ export function App() {
     let attached = true;
     const current = ++programRequest.current,
       controller = new AbortController();
-    if (native && !window.MastermindMissionHost?.readPrograms) {
+    // A changed selection must wait for its own collection read before the
+    // Mission effect can use the preceding selection's AVAILABLE index.
+    programSelection.current = selection;
+    const officeRead = office.beginPrograms();
+    if (native && !window.MastermindMissionHost?.readPrograms && !window.MastermindMissionHost?.readProgramsObservation) {
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -1418,7 +1452,8 @@ export function App() {
       };
     }
     const read = window.MastermindMissionHost?.readPrograms;
-    if (typeof read !== "function") {
+    const readObservation = window.MastermindMissionHost?.readProgramsObservation;
+    if (typeof read !== "function" && typeof readObservation !== "function") {
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -1435,10 +1470,18 @@ export function App() {
       reason: "SOURCE_READ_PENDING",
     });
     Promise.resolve()
-      .then(() => read({ signal: controller.signal }))
-      .then((raw) => {
-        if (attached && programRequest.current === current)
+      .then(async () => {
+        if (readObservation) {
+          const observation = await readObservation({ signal: controller.signal });
+          return { raw: observation.controlRoom, observation };
+        }
+        return { raw: await read!({ signal: controller.signal }), observation: null };
+      })
+      .then(({ raw, observation }) => {
+        if (attached && programRequest.current === current && !controller.signal.aborted) {
           setIndex(programsFromControlRoom(raw));
+          office.acceptPrograms(officeRead, observation);
+        }
       })
       .catch(() => {
         if (
@@ -1456,7 +1499,7 @@ export function App() {
       attached = false;
       controller.abort();
     };
-  }, [native, authRevision, authState?.acquisition]);
+  }, [native, authRevision, authState?.acquisition, selection?.workRef, selection?.rootJobId]);
   useEffect(() => {
     let attached = true;
     const current = ++workRequest.current;
@@ -1505,6 +1548,8 @@ export function App() {
   useEffect(() => {
     const restoreSelection = () => {
       const next = selectionFromLocation();
+      office.clearSelection(next);
+      observedConversation.clear();
       selectionSeq.current += 1;
       commandSlot.current?.controller.invalidate();
       bumpInvalidation();
@@ -1529,6 +1574,7 @@ export function App() {
     let attached = true;
     const current = ++missionRequest.current,
       controller = new AbortController();
+    const officeRead = office.beginMission();
     if (
       native &&
       !window.MastermindMissionHost?.readMissionV3 &&
@@ -1609,6 +1655,7 @@ export function App() {
         if (!attached || missionRequest.current !== current) return;
         const v3 = readV3 ? decodeMissionv3(raw, selection) : null;
         const decoded = readV3 ? v3 : decodeMission(raw, selection);
+        office.acceptMission(officeRead, decoded);
         if (decoded) {
           if (v3) {
             // Existing presentation components consume the same observation's
@@ -1665,16 +1712,23 @@ export function App() {
         candidate.mission.root_job_id === selection.rootJobId)
         ? candidate
         : null,
-    conversationActive = active === "Conversation",
-    conversationState = windowPending
+    conversationActive = active === "Conversation" || active === "Conversations",
+    legacyConversationState = windowPending
       ? "SOURCE_READ_PENDING"
       : association
         ? "OBSERVED_MISSION_ASSOCIATION"
         : windowDocument && authState?.content
           ? "UNBOUND"
           : "UNAVAILABLE",
+    conversationState = active === "Conversations"
+      ? observedConversation.projection.conversation.source.state
+      : legacyConversationState,
     headerState = conversationActive
       ? conversationState
+      : active === "Inbox" || active === "Knowledge"
+        ? office.projection.mission.source.state
+      : active === "Projects"
+        ? office.projection.programs.source.state
       : active === "Today"
         ? index.state === "PENDING"
           ? "SOURCE_READ_PENDING"
@@ -1688,12 +1742,22 @@ export function App() {
           : active === "Fleet & Capacity"
             ? "NOT_PROJECTED"
             : (d?.read_state.state ?? "UNAVAILABLE"),
-    headerSummary = conversationActive
-      ? association
-        ? "Observed window for this Mission from separately authorized owner observations."
-        : windowDocument && authState?.content
-          ? "A global current permitted window. No relationship to the selected Mission is proven."
-          : "No Mission-linked conversation is currently established."
+    headerSummary = active === "Conversations"
+      ? observedConversation.projection.conversation.source.state === "CURRENT"
+        ? "Observed owner window for the exact selected Mission; session identity and send authority remain separate."
+        : "Conversation content is shown only from a qualified paired Mission and Current Window observation."
+      : active === "Conversation"
+        ? association
+          ? "Observed window for this Mission from separately authorized owner observations."
+          : windowDocument && authState?.content
+            ? "A global current permitted window. No relationship to the selected Mission is proven."
+            : "No Mission-linked conversation is currently established."
+      : active === "Inbox"
+        ? "Owner-defined attention for the selected Mission; company-wide attention is not inferred."
+      : active === "Knowledge"
+        ? "Supplied Mission references retain exact provenance; canonical record content is not reconstructed."
+      : active === "Projects"
+        ? "Exact Project identities from the supplied owner collection; company-wide coverage is not established."
       : active === "Today"
         ? d && d.read_state.state !== "CURRENT"
           ? `Selected mission projection is ${label(d.read_state.state)}; source qualification is not current.`
@@ -1719,14 +1783,20 @@ export function App() {
                   ? `This mission projection is ${label(d.read_state.state)}; source qualification is not current.`
                   : "A qualified reconciliation state; no mission root is established."
               : "No producer document is currently admitted.",
-    visibleNotice = conversationActive
-      ? association
-        ? "Observed window for this Mission. Independent owner observations."
-        : windowDocument && authState?.content
-          ? "This current permitted window is not linked to the selected Mission."
-          : windowPending
-            ? "Reading the current permitted window…"
-            : "No Mission-linked conversation is currently established."
+    visibleNotice = active === "Conversations"
+      ? windowPending
+        ? "Reading the paired Mission and current permitted window…"
+        : observedConversation.projection.conversation.source.state === "CURRENT"
+          ? "Observed conversation window for the selected Mission; no recipient or send authority is inferred."
+          : "No qualified observed conversation is currently established."
+      : active === "Conversation"
+        ? association
+          ? "Observed window for this Mission. Independent owner observations."
+          : windowDocument && authState?.content
+            ? "This current permitted window is not linked to the selected Mission."
+            : windowPending
+              ? "Reading the current permitted window…"
+              : "No Mission-linked conversation is currently established."
       : active === "Work"
         ? workState.kind === "PENDING"
           ? "Reading the source-qualified Work queue…"
@@ -1740,6 +1810,8 @@ export function App() {
           : notice,
     open = (w: string, r: string | null) => {
       if (r) {
+        office.clearSelection({ workRef: w, rootJobId: r });
+        observedConversation.clear();
         selectionSeq.current += 1;
         commandSlot.current?.controller.invalidate();
         bumpInvalidation();
@@ -2080,91 +2152,33 @@ export function App() {
   );
   let content: React.ReactNode;
   if (active === "Today")
-    content = (
-      <div className="today-view">
-        <section className="hero today-hero">
-          <div>
-            <span className="eyebrow">TODAY</span>
-            <h2>
-              {index.state === "PENDING"
-                ? "Reading the bounded company projection…"
-                : index.state === "AVAILABLE"
-                  ? index.programs.length
-                    ? `${index.programs.length} Programs are source-qualified.`
-                    : "No Programs were projected by this source."
-                  : "Current company movement is unavailable."}
-            </h2>
-            <p>
-              Only bounded source facts are shown here. Missing source coverage
-              never becomes an all-clear.
-            </p>
-          </div>
-          <State
-            value={
-              index.state === "PENDING" ? "SOURCE_READ_PENDING" : index.state
-            }
-          />
-        </section>
-        <div className="today-grid">
-          <section className="card">
-            <div className="section-title">
-              <div>
-                <h2>What is moving</h2>
-                <p className="muted">
-                  Program state and next action from the existing bounded
-                  Programs projection.
-                </p>
-              </div>
-            </div>
-            {index.state === "PENDING" ? (
-              <Empty>Reading the bounded Control Room projection…</Empty>
-            ) : index.programs.length ? (
-              <div className="programs today-programs">
-                {index.programs.slice(0, 5).map((p) => (
-                  <button
-                    key={p.workRef}
-                    disabled={!p.rootJobId}
-                    onClick={() => open(p.workRef, p.rootJobId)}
-                  >
-                    <b>{p.title || p.workRef}</b>
-                    <span>
-                      {label(p.state)} ·{" "}
-                      {display(p.nextAction, "No next action projected")}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : index.state === "AVAILABLE" ? (
-              <Empty>
-                No Programs were projected. This is not evidence of zero work.
-              </Empty>
-            ) : (
-              <Empty>
-                Program source unavailable. No current movement was inferred.
-              </Empty>
-            )}
-          </section>
-          <section className="card attention-card">
-            <div className="section-title">
-              <div>
-                <h2>Chairman attention</h2>
-                <p className="muted">
-                  Reserved-power decisions require their own qualified source.
-                </p>
-              </div>
-              <State value="NOT_PROJECTED" />
-            </div>
-            <p>
-              This frontend contract does not yet include a Chairman-decision
-              feed. Absence here is not evidence that zero decisions exist.
-            </p>
-            <button className="primary" onClick={() => setActive("Programs")}>
-              Open Programs
-            </button>
-          </section>
-        </div>
-      </div>
-    );
+    content = <>
+      <MetaCeoOffice key={JSON.stringify([authRevision, selection])}
+        projection={office.projection} draft={office.draft} onDraftChange={office.changeDraft} />
+      <button type="button" className="primary" onClick={() => setActive("Programs")}>Open Programs</button>
+    </>;
+  else if (active === "Inbox")
+    content = <Inbox projection={office.projection}
+      onNavigateMission={office.projection.mission.source.state === "CURRENT"
+        ? (target, mode) => { if (mode === "current") open(target.workRef, target.rootJobId); }
+        : undefined} />;
+  else if (active === "Conversations")
+    content = <>
+      <ConversationWindow projection={observedConversation.projection} draft={observedConversation.draft}
+        onDraftChange={observedConversation.changeDraft} />
+      <button type="button" disabled={windowPending || !authState?.content}
+        onClick={() => { bumpInvalidation(); setWindowRevision((n) => n + 1); }}>
+        Refresh observed window
+      </button>
+      {sessionPanel}
+    </>;
+  else if (active === "Knowledge")
+    content = <Knowledge projection={office.projection} />;
+  else if (active === "Projects")
+    content = <Projects programs={office.projection.programs} selectedProject={selection}
+      onNavigateMission={office.projection.programs.source.state === "CURRENT"
+        ? (target, mode) => { if (mode === "current") open(target.workRef, target.rootJobId); }
+        : undefined} />;
   else if (active === "Programs")
     content = (
       <section className="card">
