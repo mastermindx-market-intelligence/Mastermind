@@ -2,6 +2,9 @@
 
 **Result: 12/12 beta candidates are single-match S&P 500 members at the latest pre-freeze filing metadata dates in the now-merged owner dataset. This is canonical metadata qualification, NOT trial event assignment or body admission.**
 
+Frozen beta event-identity candidate SHA-256: `d64bf572890c411e3cb9f2cf8adacdee48b6f2481c2f0ce9defe737072274a9b`
+Selection schema: `issuer_inflection.beta_event_identity_candidate/v1`
+
 Record SHA-256: `548cccc660880639259779104aa1186afe0cb65a7e97cd752a7b15435a9fddb7`
 
 ## Source boundaries

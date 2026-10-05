@@ -322,6 +322,22 @@
     }
   ],
   "schema": "issuer_inflection.beta_pit_membership_witness/v1",
+  "selection_body_reads": 0,
+  "selection_fields": [
+    "ticker",
+    "cik",
+    "owner_event_key",
+    "accession",
+    "filing_date",
+    "acceptance_datetime",
+    "report_date",
+    "pit_membership_count",
+    "pit_sources"
+  ],
+  "selection_is_preregistration_candidate": true,
+  "selection_outcome_reads": 0,
+  "selection_schema": "issuer_inflection.beta_event_identity_candidate/v1",
+  "selection_sha256": "d64bf572890c411e3cb9f2cf8adacdee48b6f2481c2f0ce9defe737072274a9b",
   "selection_state": "WITNESS_NOT_ASSIGNMENT",
   "source_revision_assigned": false,
   "trial_registered": false

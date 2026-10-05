@@ -25,6 +25,13 @@ class BetaPitWitnessTests(unittest.TestCase):
             self.assertEqual(row['owner_event_key'],f"{row['cik']}|{row['report_date']}")
             self.assertTrue(row['accession'])
             self.assertLess(row['filing_date'],'2026-10-04')
+    def test_selection_hash_freezes_exact_prebody_candidates(self):
+        self.assertEqual(R['selection_schema'],'issuer_inflection.beta_event_identity_candidate/v1')
+        self.assertEqual(R['selection_sha256'],'d64bf572890c411e3cb9f2cf8adacdee48b6f2481c2f0ce9defe737072274a9b')
+        self.assertIs(R['selection_is_preregistration_candidate'],True)
+        self.assertEqual(R['selection_body_reads'],0)
+        self.assertEqual(R['selection_outcome_reads'],0)
+
     def test_metadata_candidates_are_not_trial_assignments(self):
         self.assertEqual(R['body_reads'],0)
         self.assertIs(R['event_identity_admitted'],False)

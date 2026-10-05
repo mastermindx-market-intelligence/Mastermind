@@ -50,7 +50,7 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 
 `CORPUS_EVENT_IDENTITY_GATE.md` now records the accepted accession-complete Earnings/SEC metadata substrate. Macro #8392 merged with green CI/fences and current main carries the same 173,495-row parquet bytes, exact `(CIK, accession)` filing identity, 0 empty accessions, 0 duplicate filing keys and 30/30 frozen-name coverage. The six-test gate distinguishes **source metadata admitted** from **trial event assignment**, which remains false with zero body reads.
 
-`CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md` replays the frozen deterministic rule on the accepted owner bytes and proves 12/12 beta event-identity candidates also satisfy existing point-in-time S&P membership at their filing dates. Historical business-family metadata is still not era-correct—the existing PIT-sector collector explicitly has `era_correct=False` for every row—so the witness does not claim historical archetype balance or inspect any body/outcome.
+`CORPUS_BETA_PIT_MEMBERSHIP_WITNESS.md` replays the frozen deterministic rule on the accepted owner bytes and proves 12/12 beta event-identity candidates also satisfy existing point-in-time S&P membership at their filing dates. The exact pre-body candidate selection is SHA-256 `d64bf572890c411e3cb9f2cf8adacdee48b6f2481c2f0ce9defe737072274a9b`; it is a preregistration artifact, not a registered trial. Historical business-family metadata is still not era-correct—the existing PIT-sector collector explicitly has `era_correct=False` for every row—so the witness does not claim historical archetype balance or inspect any body/outcome.
 
 
 ## Equal-duration descriptive comparison

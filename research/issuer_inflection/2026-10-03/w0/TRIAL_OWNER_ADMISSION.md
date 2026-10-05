@@ -1,6 +1,6 @@
 # Existing trial/capture owner — exact recovered interface and admission gap
 
-Source refreshed against protected Mastermind 84df29801d4078724c2b603a136de5aa1532cdfe; canonical registry module brain/experiment_registry.py blob 21e19915d99340659b78e8b7ff7f86e3e48a5f74. Tested Macro input/capture contract remains 37122b69fffa98cb160022c4831df0338ef3e7e3, research/MASTERMIND_FEEDBACK_CONTRACT_PROGRAM.md.
+Source refreshed against protected Mastermind `7eac3ec252475600147ec9a376b8ca16403ac4c5`; canonical registry module `brain/experiment_registry.py` remains blob `21e19915d99340659b78e8b7ff7f86e3e48a5f74`, and `data/experiments/registry.json` remains blob `b79bffd072b240bc0384c1653ca5b7fbf56624ed` with 14 records and no I3/issuer-inflection record. Current Macro semantic registry identifies `portfolio-learning-accountability` as the operating research-only program that owns outcome grading, calibration, benchmark ledgers and the experiment registry, with Mastermind as implementation owner.
 
 The existing research registry is **`brain.experiment_registry`**, backed by `data/experiments/registry.json`. It owns stable experiment IDs, gate/maturity criteria, status, owner and artifact paths. `brain/improvement_agenda.py` consumes its matured/evaluation projections. I3 must register through the admitted existing owner, with immutable method/corpus/evidence hashes referenced from `artifact_paths`, rather than create another registry.
 
@@ -17,3 +17,14 @@ Source-side Neural Web exposure references already exist at `data/brain/nw_conte
 **Recovery owner remains Astra/C4.** Existing experiment/feedback owners must return actual interface/custody admission; no live worker is assigned by this document. The W0 technical-review packet asks whether this binding/extension is sufficient, and records the missing runtime evidence as a release/grade gate. No registry repair, duplicate sink, artificial DecisionPacket or portfolio outcome is commissioned implicitly.
 
 Current evidence files in this directory are development capture only. They retain real execution times, exact requests/receipts and failed setup attempts; `trial_registered=false`, `production_emitted=false`. AAPL has already been inspected and is not held out.
+
+
+## Current technical feasibility evidence
+
+C2 produced a detached/disposable owner-aligned hardening proof without changing the canonical registry. The proof kept the same JSON file and public API, added one sibling POSIX lock across strict mutation read → mutate → atomic durable replace → readback, refused corrupt/unreadable preimages, and preserved tolerant display reads. It reported 101/101 owner+atomicity tests, 131/131 adjacent non-SDK consumer tests, 16/16 concurrent distinct adds surviving, and one winner across 12 same-ID add attempts. Its managed-workspace acquisition for a canonical repair was platform-blocked before dispatch, so the patch remains **NOT_CANONICALLY_IMPLEMENTED** and must not be copied into #1195.
+
+This resolves feasibility but not authority/custody. The owner-program dependency request is Mastermind #773 comment `5978424457`; no accepted return has been observed. The current registry source still has whole-file mutation and empty-on-error reads, and current status law still permits `MATURED → OPEN` despite the module prose describing monotonicity. I3 treats registry status as administrative/display state until the owner reconciles that law; scientific preregistration identity must bind immutable method/cohort/split/source-rights/outcome/exposure/correction/amendment artifacts instead.
+
+## Frozen I3 pre-registration candidate
+
+The metadata-only beta event selection is now frozen before body/outcome inspection as `issuer_inflection.beta_event_identity_candidate/v1`, SHA-256 `d64bf572890c411e3cb9f2cf8adacdee48b6f2481c2f0ce9defe737072274a9b`. It contains the 12 accepted owner metadata identities plus exact PIT membership evidence. Historical business-family balance is explicitly unqualified; prospective temporal holdouts remain unassigned and future-only. This hash is a candidate artifact for the existing registry owner to reference later; it is **not** an experiment ID, registry record, or trial admission.
