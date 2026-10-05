@@ -188,6 +188,24 @@ def test_apply_is_idempotent_and_backups_keep_original_content(tmp_path: Path) -
     ).read_bytes() == originals["claude_settings"]
 
 
+def test_managed_policy_retains_efficiency_and_hierarchy_laws() -> None:
+    text = policy.POLICY_BODY
+    required = (
+        "accepted capability delta per original-root budget",
+        "Sol is the default day-to-day project executive",
+        "Do not force a ceremonial hierarchy",
+        "compact frozen mission/frontier capsule",
+        "FRONTIER_WITNESS",
+        "Capacity is a ceiling, not a utilization target",
+        "NO_DELTA_LOOP",
+        "worker breaker",
+        "Before starting a second semantic vertical",
+        "Finalization ceremony is pre-yield only",
+    )
+    for phrase in required:
+        assert phrase in text
+
+
 def test_apply_handles_prose_only_host_with_missing_codex_hooks(tmp_path: Path) -> None:
     """M1/mini4/MBP class: instructions exist but mechanical hooks are absent."""
     home = tmp_path / "home"
