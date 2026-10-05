@@ -1729,6 +1729,24 @@ PRIVILEGED_PLIST="/Library/LaunchDaemons/$PRIVILEGED_LABEL.plist"
 /usr/bin/plutil -replace Sockets.DialogueObservation.SockPathOwner -integer "$CONTROL_UID" "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.DialogueObservation.SockPathGroup -integer 457 "$CONTROL_PLIST"
 /usr/bin/plutil -replace Sockets.DialogueObservation.SockPathMode -integer 432 "$CONTROL_PLIST"
+# The optional Company socket belongs to this same service and Runtime.
+# Disabled releases/configs have no Company socket or connectable backlog.
+"$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$CONTROL_CONFIG" "$CONTROL_PLIST" <<'PY'
+import json, pathlib, plistlib, sys
+release, config_path, plist_path = map(pathlib.Path, sys.argv[1:])
+sys.path.insert(0, str(release))
+from scripts.executive_os_phase1c import company_consultation_launchd_entry
+config = json.loads(config_path.read_text(encoding="utf-8"))
+entry = company_consultation_launchd_entry(config)
+with plist_path.open("rb") as stream:
+    document = plistlib.load(stream)
+sockets = document["Sockets"]
+sockets.pop("CompanyConsultation", None)
+if entry is not None:
+    sockets["CompanyConsultation"] = entry
+with plist_path.open("wb") as stream:
+    plistlib.dump(document, stream, sort_keys=False)
+PY
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/control/stdout.log "$CONTROL_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/control/stderr.log "$CONTROL_PLIST"
 /usr/sbin/chown root:wheel "$CONTROL_PLIST"

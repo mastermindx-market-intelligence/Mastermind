@@ -165,12 +165,15 @@ export function resolveGitPublishConfig(value) {
     value,
     new Set([
       'enabled', 'workspaceCli', 'gitBinary', 'sourceRepository', 'allowedRemoteUrls',
-      'commandTimeoutMs', 'pushTimeoutMs',
+      'commandTimeoutMs', 'pushTimeoutMs', 'repository',
     ]),
     'config.gitPublish',
   );
   if (value.enabled !== true) {
     throw new TypeError('config.gitPublish.enabled must be true when gitPublish is configured');
+  }
+  if (value.repository !== undefined && !['mastermind', 'macro', 'terminal'].includes(value.repository)) {
+    throw new TypeError('config.gitPublish.repository is not a closed repository alias');
   }
   const allowedRemoteUrls = value.allowedRemoteUrls;
   if (!Array.isArray(allowedRemoteUrls) || allowedRemoteUrls.length < 1 || allowedRemoteUrls.length > 8) {
@@ -193,6 +196,7 @@ export function resolveGitPublishConfig(value) {
     sourceRepository: requireAbsoluteString(value.sourceRepository, 'config.gitPublish.sourceRepository'),
     allowedRemoteUrls: Object.freeze(normalizedRemotes),
     lane: ALLOWED_LANE,
+    ...(value.repository !== undefined ? { repository: value.repository } : {}),
     commandTimeoutMs: clampTimeout(value.commandTimeoutMs, DEFAULT_COMMAND_TIMEOUT_MS, 'config.gitPublish.commandTimeoutMs'),
     pushTimeoutMs: clampTimeout(value.pushTimeoutMs, DEFAULT_PUSH_TIMEOUT_MS, 'config.gitPublish.pushTimeoutMs'),
   });
@@ -358,10 +362,15 @@ export function createGitPublisher(config, dependencies = {}) {
     const operation = validateOperationId(operationId);
     const { stdout } = await run(
       cfg.workspaceCli,
-      ['status', '--operation-id', operation, '--lane', cfg.lane],
+      ['status', '--operation-id', operation, '--lane', cfg.lane,
+        ...(cfg.repository === undefined ? [] : ['--repository', cfg.repository])],
       { timeoutMs: cfg.commandTimeoutMs },
     );
     const result = parseJson(stdout, 'mmx-workspace status');
+    if (cfg.repository !== undefined && (result?.schema_version !== 'mastermind.workspace_cli/v2' ||
+        result?.repository !== cfg.repository || result?.effect !== 'NOT_APPLIED')) {
+      throw new Error('workspace repository binding does not match the selected repository');
+    }
     const receipt = result?.receipt;
     if (result?.action !== 'status' || !receipt || typeof receipt !== 'object') {
       throw new Error('mmx-workspace status receipt is invalid');
@@ -378,6 +387,9 @@ export function createGitPublisher(config, dependencies = {}) {
     const workspacePath = await realpath(rawWorkspacePath);
     const branch = oneLine(receipt.branch, 'workspace branch');
     if (!BRANCH_RE.test(branch)) throw new Error('workspace branch is outside the sol/web-* publication boundary');
+    if (cfg.repository !== undefined && branch !== `sol/web-${operation.toLowerCase()}`) {
+      throw new Error('workspace repository binding has a foreign operation branch');
+    }
 
     const [{ stdout: topOut }, { stdout: branchOut }, { stdout: headOut }, { stdout: statusOut }, { stdout: remoteOut }] = await Promise.all([
       git(workspacePath, ['rev-parse', '--show-toplevel']),

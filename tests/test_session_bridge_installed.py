@@ -402,6 +402,10 @@ def test_real_installed_factory_projects_runtime_wake_and_binds_continuation(tmp
     # and Wake ledger; only the pre-existing synthetic worker/provider fixture.
     seed = _seed(tmp_path, monkeypatch, physical=True, root_source=True)
 
+    from types import SimpleNamespace
+    from integrations.session_bridge import runtime_return
+    monkeypatch.setattr(runtime_return, "time", SimpleNamespace(time=lambda: 1791000100))
+
     async def run():
         async with factory_service(
             tmp_path, short_socket_root, monkeypatch, profile=WEB_CEO_SESSIONS_PROFILE
@@ -511,3 +515,56 @@ def test_neutral_ingress_boundary_refuses_before_effect(
             assert response["error"]["code"] == code
             assert calls == []
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_public_read_uses_installed_private_projection_and_original_principal(foreign):
+    import dataclasses
+    from control_plane.principal_projection import NeutralPrincipalProjection
+    from integrations.session_bridge.installed import InstalledSessionBridgeClient, InstalledSessionBridgeProvider
+    from integrations.session_bridge.return_tools import NativeReplyReadTool
+    from tests.test_session_bridge_native_read import Resolver, reader, PRINCIPAL as READ_PRINCIPAL, READ_REF
+    resolver = Resolver()
+    read_owner = reader(resolver, projected_principal=True)
+    def forbidden(*args):
+        raise AssertionError("Read must not use a modifying owner")
+    provider = InstalledSessionBridgeProvider(target_projector=forbidden,
+        reply_handler=forbidden, summon_handler=forbidden, reply_read_handler=read_owner)
+    class Ingress(FakeCeoIngress):
+        async def send_frame(self, socket_path, frame):
+            self.calls.append((str(socket_path), frame))
+            return CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=True,
+                result=await provider.handle_frame(frame))
+    fake = Ingress(None)
+    tool = NativeReplyReadTool(InstalledSessionBridgeClient(
+        "/private/tmp/ceo-ingress.sock", client=fake))
+    principal = (dataclasses.replace(READ_PRINCIPAL, subject_digest="9" * 64)
+                 if foreign else READ_PRINCIPAL)
+    result = asyncio.run(tool.handle(principal, "session_reply_read", {"read_ref": READ_REF}))
+    assert result["ok"] is (not foreign)
+    if foreign:
+        assert result["error"]["code"] == "reply_unavailable"
+        assert not resolver.service.calls
+    else:
+        assert result["data"]["parent_consumed"] is False
+        assert result["data"]["reply_committed"] is True
+        assert [c["operation"] for c in resolver.service.calls] == ["read_thread"]
+    assert resolver.calls and all(type(p) is NeutralPrincipalProjection for p, _ in resolver.calls)
+    assert len(fake.calls) == 1
+    frame = fake.calls[0][1]
+    assert set(frame) == {"schema", "tool", "principal", "arguments"}
+    assert "Bearer " not in repr(frame) and "authorization" not in repr(frame).lower()
+
+
+def test_projected_reader_rejects_direct_verified_principal_and_public_tool_rejects_projection():
+    from integrations.business_mcp_auth.principal_projection import principal_projection
+    from integrations.session_bridge.return_tools import NativeReplyReadTool
+    from tests.test_session_bridge_native_read import Resolver, reader, PRINCIPAL as READ_PRINCIPAL, READ_REF
+    resolver = Resolver()
+    projected = reader(resolver, projected_principal=True)
+    with pytest.raises(BridgeError):
+        asyncio.run(projected(READ_PRINCIPAL, {"read_ref": READ_REF}))
+    result = asyncio.run(NativeReplyReadTool(reader(resolver)).handle(
+        principal_projection(READ_PRINCIPAL), "session_reply_read", {"read_ref": READ_REF}))
+    assert result["error"]["code"] == "reply_unavailable"
+    assert not resolver.calls and not resolver.service.calls

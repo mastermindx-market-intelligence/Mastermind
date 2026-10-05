@@ -69,7 +69,7 @@ test('local-only allowlist lists no backend tools and never spawns backend', asy
     assert.equal(gw.stats().backend.spawns, 0);
 
     const ping = await client.callTool({name:'studio_ping', arguments:{}});
-    assert.equal(ping.structuredContent.gatewayVersion, '0.1.9');
+    assert.equal(ping.structuredContent.gatewayVersion, '0.1.10');
     assert.equal(gw.stats().backend.spawns, 0);
 
     await assert.rejects(

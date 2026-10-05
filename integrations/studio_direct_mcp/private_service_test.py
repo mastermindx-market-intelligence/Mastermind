@@ -191,6 +191,7 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         public_url=None,
         fleet_route=None,
         clear_fleet_routes=False,
+        enable_repository_workspaces=False,
     )
 
 
@@ -231,6 +232,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     config = json.loads(roots["config"].read_text(encoding="utf-8"))
     config.pop("paperDesign", None)
     config.pop("fleetStatus", None)
+    config.pop("repositoryWorkspaces", None)
     if not typed_git:
         config.pop("gitPublish", None)
     roots["config"].write_text(json.dumps(config, indent=2, sort_keys=True), encoding="utf-8")
@@ -245,6 +247,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
         "fleet-routing.mjs", "tailnet-gateway.mjs", "fleet-status.mjs",
         "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
+    removed = (*removed, "workspace-access.mjs")
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -273,6 +276,7 @@ class TestIdentity(unittest.TestCase):
                 "gateway.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
+                "workspace-access.mjs",
                 "paper-design.mjs",
                 "fleet-status.mjs",
                 "fleet-routing.mjs",
@@ -313,6 +317,14 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
+        feature_head_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V8}
+        self.assertTrue(svc._valid_manifest({**base, "files": feature_head_legacy}, "test-account", _label_for("test-account")))
+        self.assertNotIn("workspace-access.mjs", svc.LEGACY_STAGE_FILES_V8)
+        master_head_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V7}
+        self.assertTrue(svc._valid_manifest({**base, "files": master_head_legacy}, "test-account", _label_for("test-account")))
+        self.assertIn("workspace-access.mjs", svc.LEGACY_STAGE_FILES_V7)
+        self.assertNotIn("fleet-routing.mjs", svc.LEGACY_STAGE_FILES_V7)
+        self.assertNotIn("tailnet-gateway.mjs", svc.LEGACY_STAGE_FILES_V7)
         router_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V6}
         self.assertTrue(svc._valid_manifest({**base, "files": router_legacy}, "test-account", _label_for("test-account")))
         self.assertNotIn("fleet-routing.mjs", svc.LEGACY_STAGE_FILES_V6)

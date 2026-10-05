@@ -74,6 +74,8 @@ test('routing config is exact tailnet-only and bounded', () => {
   const resolved = resolveFleetRoutingConfig(config());
   assert.deepEqual(resolved.routes.map((route) => route.hostRef), ['mini4', 'ubuntu1']);
   assert.equal(resolved.routes[0].url, 'https://mini4.example-tailnet.ts.net/mcp');
+  assert.equal(resolved.enabled, true);
+  assert.deepEqual(resolveFleetRoutingConfig(resolved), resolved);
 
   for (const url of [
     'http://mini4.example-tailnet.ts.net/mcp',

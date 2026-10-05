@@ -1299,7 +1299,8 @@ def test_missing_agent_relay_plist_requires_explicit_prepared_only_evidence():
     assert prepared["matching_installation"] is True
 
 
-def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
+@pytest.mark.parametrize("explicitly_disabled", [False, True])
+def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay(explicitly_disabled):
     module = subject()
     filesystem = _stale_prepared_only_agent_relay_fixture(module)
 
@@ -1309,7 +1310,7 @@ def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
                 entries = "".join(
                     f'    "{label}" => true\n'
                     for label in module.LABELS
-                    if label != "com.mastermind.executive.agent-relay"
+                    if explicitly_disabled or label != "com.mastermind.executive.agent-relay"
                 )
                 return {
                     "status": "ok",
@@ -1336,7 +1337,7 @@ def test_collect_stale_exec_accepts_inert_prepared_only_agent_relay():
         if service["label"] == "com.mastermind.executive.agent-relay"
     )
     assert agent["loaded"] is False
-    assert agent["disabled"] is None
+    assert agent["disabled"] is (True if explicitly_disabled else None)
     assert receipt["mutation_count"] == 0
 
 
