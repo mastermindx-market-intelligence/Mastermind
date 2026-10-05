@@ -110,9 +110,26 @@ installation is corrupt:
    runner, an attended operator may start that exact runner directly as the
    owning user to regain temporary control-plane access; do not invent a new
    service, credential, launch label or persistence path;
-6. once a normal GUI login later exists, the installed `RunAtLoad + KeepAlive`
-   LaunchAgent resumes normal ownership. A temporary attended runner must not
-   be treated as a replacement service definition.
+6. for a headless Mac that has been deliberately qualified for pre-login
+   Desktop Commander recovery, prefer one system-domain LaunchDaemon that runs
+   the existing fixed runner as the owning user. Preserve the existing device
+   identity/session store; this is a launch-domain migration, not a second
+   remote bridge or credential;
+7. when that system owner is installed, remove the active per-user LaunchAgent
+   definition so a later Aqua login cannot create a duplicate bridge. Keep a
+   rollback copy, but do not leave both persistence definitions active;
+8. prove the pre-login owner while no normal GUI login exists: the system job is
+   `running`, its Desktop Commander process has the expected uid and parent
+   identity, it carries no inherited `SSH_CLIENT`/`SSH_CONNECTION`, the
+   remote device is reachable, and one controlled SIGTERM produces a new
+   launchd-owned pid that reconnects without operator intervention;
+9. direct vendor stdout/stderr to `/dev/null` or another reviewed bounded sink.
+   Vendor console output can contain complete tool arguments/results and must
+   not become an unbounded recovery log.
+
+A host without that qualified system owner remains on the older attended
+recovery path until a GUI session exists. Do not claim a normal user LaunchAgent
+can provide pre-login recovery.
 
 ### Low-swap / watchdog incident handling
 
