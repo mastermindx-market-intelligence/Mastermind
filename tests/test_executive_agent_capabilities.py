@@ -9,6 +9,7 @@ from control_plane.executive_agent_capabilities import (
     CAPABILITY_POLICY_SCHEMA,
     CAPABILITY_POLICY_SCHEMA_V3,
     CAPABILITY_POLICY_SCHEMA_V4,
+    CAPABILITY_POLICY_SCHEMA_V5,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
     adapter_supports_execution_surface,
@@ -817,3 +818,195 @@ def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp
         messages.add(str(excinfo.value))
 
     assert messages == {_DUPLICATE_JSON_KEY_REASON}
+
+
+# ---------------------------------------------------------------------------
+# V5 supervisor-private validation resources (Codespaces validation C0a)
+# ---------------------------------------------------------------------------
+
+_V5_RESOURCE_ID = "codespace-devbox-sandbox-v1"
+_V5_IMAGE_DIGEST = "519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7"
+_V4_FIXTURE_PATH = Path(
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json"
+)
+
+
+def _v5_policy() -> dict:
+    raw = json.loads(_V4_FIXTURE_PATH.read_text(encoding="utf-8"))
+    raw["schema_version"] = CAPABILITY_POLICY_SCHEMA_V5
+    raw["policy_version"] = "2026-10-03.codespaces-validation-c0-fixture"
+    raw["validation_resources"] = {
+        _V5_RESOURCE_ID: {
+            "kind": "codespace-devbox-sandbox-v1",
+            "recipes": ["compileall"],
+            "image_digest": _V5_IMAGE_DIGEST,
+            "network": "none",
+            "cpu_millis": 1000,
+            "memory_bytes": 512 * 1024 * 1024,
+            "pids_limit": 64,
+            "workspace_tmpfs_bytes": 256 * 1024 * 1024,
+            "tmp_tmpfs_bytes": 64 * 1024 * 1024,
+            "timeout_seconds": 120,
+            "max_stdout_bytes": 4 * 1024 * 1024,
+            "max_stderr_bytes": 1024 * 1024,
+            "max_snapshot_files": 4096,
+            "max_snapshot_bytes": 64 * 1024 * 1024,
+        }
+    }
+    for profile in raw["profiles"].values():
+        profile["validation_resource_grants"] = []
+    raw["profiles"]["sealed.worker.write.no-extensions.v1"][
+        "validation_resource_grants"
+    ] = [_V5_RESOURCE_ID]
+    return raw
+
+
+def test_v5_validation_resource_is_supervisor_private_and_v4_plus(tmp_path):
+    path = _write(tmp_path, _v5_policy())
+    registry = ExecutionCapabilityRegistry.load(path)
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V5
+    assert tuple(registry.validation_resources) == (_V5_RESOURCE_ID,)
+    grant = registry.validation_resources[_V5_RESOURCE_ID]
+    assert grant.kind == "codespace-devbox-sandbox-v1"
+    assert grant.recipes == ("compileall",)
+    assert grant.image_digest == _V5_IMAGE_DIGEST
+    assert grant.network == "none"
+    assert grant.cpu_millis == 1000
+    assert grant.memory_bytes == 512 * 1024 * 1024
+    assert grant.pids_limit == 64
+    assert len(grant.grant_digest) == 64
+
+    sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
+    assert sealed.validation_resource_grants == (grant,)
+    # Supervisor validation capacity is not a provider/worker capability.
+    assert sealed.required_capability_names == ()
+    manifest = sealed.capability_manifest(harness_binary_digest="a" * 64)
+    assert manifest.required == ()
+    assert manifest.allowed_ambient == ()
+
+    # V5 inherits the complete V4 Skill-package plane instead of forking it.
+    skill_profile = registry.resolve("operator.appserver.readonly.mastermind-operator.v1")
+    assert skill_profile.skill_grants
+    assert skill_profile.validation_resource_grants == ()
+    assert registry.capability_packages
+
+
+def test_v5_validation_resource_changes_only_v5_identity(tmp_path):
+    baseline = _v5_policy()
+    changed = _v5_policy()
+    changed["validation_resources"][_V5_RESOURCE_ID]["max_snapshot_bytes"] += 1024
+
+    a_dir = tmp_path / "a"
+    b_dir = tmp_path / "b"
+    a_dir.mkdir()
+    b_dir.mkdir()
+    a = ExecutionCapabilityRegistry.load(_write(a_dir, baseline))
+    b = ExecutionCapabilityRegistry.load(_write(b_dir, changed))
+    assert a.policy_digest != b.policy_digest
+    assert (
+        a.resolve("sealed.worker.write.no-extensions.v1").profile_digest
+        != b.resolve("sealed.worker.write.no-extensions.v1").profile_digest
+    )
+
+    # An unrelated V5 profile with no validation grant remains unchanged when
+    # only the resource contract changes.
+    assert (
+        a.resolve("operator.appserver.readonly.v1").profile_digest
+        == b.resolve("operator.appserver.readonly.v1").profile_digest
+    )
+
+
+def test_v3_and_v4_do_not_accept_validation_resource_fields(tmp_path):
+    v3 = _raw_policy()
+    v3["validation_resources"] = {}
+    v3_dir = tmp_path / "v3"
+    v3_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="root fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(v3_dir, v3))
+
+    v4 = json.loads(_V4_FIXTURE_PATH.read_text(encoding="utf-8"))
+    v4["validation_resources"] = {}
+    v4_root_dir = tmp_path / "v4-root"
+    v4_root_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="root fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(v4_root_dir, v4))
+
+    v4 = json.loads(_V4_FIXTURE_PATH.read_text(encoding="utf-8"))
+    v4["profiles"]["sealed.worker.write.no-extensions.v1"][
+        "validation_resource_grants"
+    ] = []
+    v4_profile_dir = tmp_path / "v4-profile"
+    v4_profile_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="profile .* fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(v4_profile_dir, v4))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("network", "default", "network must be none"),
+        ("recipes", ["pytest"], "recipes are unsupported"),
+        ("image_digest", "latest", "lowercase SHA-256"),
+        ("cpu_millis", True, "integer from"),
+        ("cpu_millis", 5000, "integer from"),
+        ("memory_bytes", 1, "integer from"),
+        ("pids_limit", 1024, "integer from"),
+        ("timeout_seconds", 0, "integer from"),
+        ("max_stdout_bytes", 8 * 1024 * 1024, "integer from"),
+        ("max_stderr_bytes", 2 * 1024 * 1024, "integer from"),
+        ("max_snapshot_files", 9000, "integer from"),
+        ("max_snapshot_bytes", 300 * 1024 * 1024, "integer from"),
+    ],
+)
+def test_v5_validation_resource_refuses_unsafe_contract_drift(
+    tmp_path, field, value, match
+):
+    raw = _v5_policy()
+    raw["validation_resources"][_V5_RESOURCE_ID][field] = value
+    with pytest.raises(CapabilityPolicyError, match=match):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+@pytest.mark.parametrize(
+    "dynamic_field",
+    ["codespace_name", "url", "token", "host", "path", "repository", "machine"],
+)
+def test_v5_validation_resource_has_no_model_selectable_dynamic_target(
+    tmp_path, dynamic_field
+):
+    raw = _v5_policy()
+    raw["validation_resources"][_V5_RESOURCE_ID][dynamic_field] = "attacker-value"
+    with pytest.raises(CapabilityPolicyError, match="fields drifted"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_v5_validation_resource_profile_reference_is_closed(tmp_path):
+    raw = _v5_policy()
+    raw["profiles"]["sealed.worker.write.no-extensions.v1"][
+        "validation_resource_grants"
+    ] = ["missing-resource"]
+    unknown_dir = tmp_path / "unknown"
+    unknown_dir.mkdir()
+    with pytest.raises(CapabilityPolicyError, match="unknown validation resources"):
+        ExecutionCapabilityRegistry.load(_write(unknown_dir, raw))
+
+    raw = _v5_policy()
+    raw["profiles"]["operator.appserver.readonly.v1"][
+        "validation_resource_grants"
+    ] = [_V5_RESOURCE_ID]
+    operator_dir = tmp_path / "operator"
+    operator_dir.mkdir()
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="supervisor-private sealed-worker grants",
+    ):
+        ExecutionCapabilityRegistry.load(_write(operator_dir, raw))
+
+
+def test_v5_default_schema_and_checked_in_policy_remain_v3():
+    assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
+    assert CAPABILITY_POLICY_SCHEMA_V5 == "mastermind.executive_agent_capabilities/v5"
+    registry = ExecutionCapabilityRegistry.load()
+    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert registry.validation_resources == {}
+    assert all(not profile.validation_resource_grants for profile in registry.profiles.values())
