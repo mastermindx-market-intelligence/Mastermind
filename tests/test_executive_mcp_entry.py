@@ -194,17 +194,18 @@ def test_app_acl_respects_bootstrap_root_owned_socket_directory(
         listener.close()
 
 
-@pytest.mark.parametrize('profile,builder_name,mounted', [
-    ('legacy', 'build_executive_mcp_app', True),
-    ('web_ceo_v2', 'build_web_ceo_v2_mcp_app', True),
-    ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True),
-    ('web_ceo_sessions_v1', 'build_web_ceo_sessions_mcp_app', True),
-    ('release_control_v1', 'build_release_control_mcp_app', False),
-    ('personal_read', 'build_personal_read_mcp_app', False),
-    ('web_ceo_release_v1', 'build_web_ceo_release_mcp_app', True),
+@pytest.mark.parametrize('profile,builder_name,mounted,os_enabled', [
+    ('legacy', 'build_executive_mcp_app', True, False),
+    ('web_ceo_v2', 'build_web_ceo_v2_mcp_app', True, False),
+    ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True, False),
+    ('web_ceo_v3', 'build_web_ceo_v3_mcp_app', True, True),
+    ('web_ceo_sessions_v1', 'build_web_ceo_sessions_mcp_app', True, False),
+    ('release_control_v1', 'build_release_control_mcp_app', False, False),
+    ('personal_read', 'build_personal_read_mcp_app', False, False),
+    ('web_ceo_release_v1', 'build_web_ceo_release_mcp_app', True, False),
 ])
 def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
-    tmp_path, monkeypatch, profile, builder_name, mounted,
+    tmp_path, monkeypatch, profile, builder_name, mounted, os_enabled,
 ):
     from types import SimpleNamespace
     from integrations.executive_mcp import server
@@ -227,6 +228,8 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
         'audit_root': '/var/log/mastermind-executive/mcp-auth',
         'executive_mcp_profile': profile,
     }
+    if os_enabled:
+        raw['os_executive_transport'] = True
     config = tmp_path / 'installed.json'
     config.write_text(json.dumps(raw))
     from tests.test_executive_mcp_app_composition import fixture
@@ -263,6 +266,7 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     assert settings.read_from_ceo_ingress is True
     assert settings.ceo_ingress_socket_path == raw['ceo_ingress_socket_path']
     if profile == 'web_ceo_v3':
+        assert kwargs.pop('enable_os_executive_transport') is os_enabled
         from integrations.mosyle_mdm.client import MosyleInventoryClient
         assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
     if profile in {'web_ceo_v3', 'web_ceo_sessions_v1'}:
@@ -292,3 +296,17 @@ def test_combined_profile_does_not_expand_frozen_v2_selector():
     assert validate_installed_mcp_profile_current('web_ceo_release_v1') == 'web_ceo_release_v1'
     with pytest.raises(ValueError):
         validate_installed_mcp_profile('web_ceo_release_v1')
+
+
+@pytest.mark.parametrize('value', [None, 0, 1, 'true', {}, []])
+def test_os_transport_opt_in_requires_real_boolean(value):
+    from tests.test_executive_workspace_mount import document
+    raw = document(); raw['executive_mcp_profile'] = 'web_ceo_v3'; raw['os_executive_transport'] = value
+    with pytest.raises(ValueError, match='boolean opt-in'): _module().validate_document(raw)
+
+
+@pytest.mark.parametrize('profile', ['legacy', 'web_ceo_v2', 'web_ceo_sessions_v1', 'release_control_v1', 'personal_read', 'web_ceo_release_v1'])
+def test_os_transport_cannot_enable_other_profiles(profile):
+    from tests.test_executive_workspace_mount import document
+    raw = document(); raw['executive_mcp_profile'] = profile; raw['os_executive_transport'] = True
+    with pytest.raises(ValueError, match='boolean opt-in'): _module().validate_document(raw)

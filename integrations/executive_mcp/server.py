@@ -682,24 +682,24 @@ _OS_RESPONSE_HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; "
         "connect-src 'self' https://dev-eo0jf8us5mup7wd5.us.auth0.com; "
-        "img-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
+        "img-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
 }
 
 
 class OsStaticApp:
-    """Three verified release assets, never a pathname supplied by a request."""
+    """A closed verified release layout, never a request-supplied pathname."""
     def __init__(self, assets):
         # The sealed launcher supplies already-hashed immutable bytes. The
         # static owner itself also closes the route set before outer routing.
-        if type(assets) is not dict or len(assets) != 3 or "/os/" not in assets:
+        from integrations.mastermind_executive_app.os_assets import os_asset_mimes
+        if type(assets) is not dict or "/os/" not in assets or any(
+            type(path) is not str or not path.startswith("/os/") for path in assets
+        ):
             raise ValueError("fixed OS asset set required")
-        expected = {"/os/": "text/html; charset=utf-8"}
-        for suffix, mime in (("css", "text/css; charset=utf-8"), ("js", "text/javascript; charset=utf-8")):
-            paths = [path for path in assets if isinstance(path, str)
-                     and re.fullmatch(r"/os/assets/index-[A-Za-z0-9_-]+\." + suffix, path)]
-            if len(paths) != 1:
-                raise ValueError("fixed OS asset set required")
-            expected[paths[0]] = mime
+        relative = {"index.html" if path == "/os/" else path[4:]: path for path in assets}
+        if len(relative) != len(assets):
+            raise ValueError("fixed OS asset set required")
+        expected = {relative[name]: mime for name, mime in os_asset_mimes(relative).items()}
         for path, value in assets.items():
             if (type(value) is not tuple or len(value) != 2 or type(value[0]) is not bytes
                     or not 0 < len(value[0]) <= 4 * 1024 * 1024 or value[1] != expected.get(path)):

@@ -3,7 +3,10 @@
 The default-off `enable_os_executive_transport` option on the existing v3
 builder adds three fixed POST routes to the same listener and authenticated
 App. It requires the exact `OsStaticApp`, v3 1.4.0, and installed ingress
-read composition. Existing MCP routes and tool security schemas are unchanged.
+read composition. The sealed installed launcher exposes this only through
+`os_executive_transport: true` on `web_ceo_v3`; missing/false leaves it off,
+and non-boolean values or another enabled profile are refused. Existing MCP
+routes and tool security schemas are unchanged.
 
 | Route | Closed request |
 | --- | --- |
@@ -51,17 +54,52 @@ zero attempts, and zero workers. Adversarial tests cover unauthorized
 body reads, malformed or foreign outcomes, and post-await auth drift.
 Independent Sol review accepted this boundary after the fixes.
 
-The frontend `os-executive-host` component composes the existing launch
-binding from this verified DTO and the existing private auth owner's
-generation. It invalidates before auth changes and suppresses late
-context, submit, and status replies. It remains a component until the
-platform transport, durable store, and mount wiring are composed.
+`main.tsx` now calls `composeMissionHost`: the existing web or native private
+auth owner supplies the fixed transport; `createOsExecutiveHost` qualifies
+OwnerContext from the verified DTO and its private authentication generation;
+the existing `createExecutiveLaunchBinding` supplies projects/profiles and
+launch mapping; `bindMissionHost` receives that binding. It mounts while
+signed out and becomes eligible only after context verification. SEND/STOP
+and session providers remain unavailable because no qualified producer exists.
+
+`VITE_MM_EXECUTIVE_RESOURCE` (web) and `MM_EXECUTIVE_RESOURCE` (native Rust)
+are optional immutable HTTPS resource configuration. Both use the existing
+platform public client, callback, and fresh third PKCE transaction. Missing or
+invalid resource leaves Executive unavailable. Exact read + submit scopes
+are required; denial preserves the independent workspace tokens. Native bearer
+tokens never enter the webview. Auth changes/expiry invalidate before late
+context/submit/status results can publish. No token parsing asserts an owner.
+
+`VITE_MM_LAUNCH_CONFIG` is a closed JSON build manifest with `v: 1`, original
+`workstream`, `priority`, `projects`, and `profiles`; bounded-code profiles also
+require allowed write paths and validation. The decoder validates and freezes
+it. There is no catalog, URL, provider, or missing-config fallback. Actual
+resource/grant/workstream values must come from the qualified installation.
+
+The principal-scoped IndexedDB store persists only version, operation key,
+kind, and original target. The controller awaits `read`, atomic `reserve`, and
+atomic `clearIfEqual`; reserve never overwrites even an equal pointer. Only a
+committed reservation may submit. Failed/unavailable persistence stops before
+submit. Recovery calls status using the stored original operation only. Auth
+invalidation hides old visible state but preserves its original-scope hint;
+clear failures keep an unknown outcome. Tests compose the actual mount,
+verified context, launch port, controller, and IndexedDB adapter to prove one
+submit across competing connections and lost-response/reopen recovery. A
+separate real Chrome shutdown/restart proof verifies on-disk persistence.
+
+Both web/native frontend builds and the Rust suite pass. The sealed asset
+contract accepts exactly the legacy three files or all nine Noir files:
+index, hashed CSS/JS/image/two fonts, and the three fixed font-license files.
+No partial six-file bundle is accepted. Immutable hashes, path/seal checks,
+closed MIME/routes, no-store responses, and query rejection remain enforced.
+CSP permits fonts only from self. The actual nine-file production bundle is
+served and checked through `OsStaticApp` in the source integration proof.
 
 ## Installed gates
 
 Source validation is not installed acceptance. Enabling the route still
 requires a qualified OS Executive resource/client registration, matching
 immutable client configuration, the approved public DNS/TLS route,
-authenticated platform integration, and durable reopen proof. No connector
+authenticated platform installation, and live original-operation reopen proof. No connector
 audience is repurposed, no registration is created here, and no live job
 or fabricated app pointer is used as evidence.

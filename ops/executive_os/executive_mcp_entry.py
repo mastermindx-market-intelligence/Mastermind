@@ -43,11 +43,14 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport'}):
         raise ValueError('installed MCP configuration fields differ')
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
+    enabled = raw.get('os_executive_transport', False)
+    if type(enabled) is not bool or (enabled and profile != 'web_ceo_v3'):
+        raise ValueError('OS Executive transport requires an explicit v3 boolean opt-in')
     from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
     if profile == PERSONAL_READ_PROFILE and ({'workspace', 'steward', 'coo'} & set(raw)):
         raise ValueError('Personal read profile refuses optional mounts')
@@ -87,8 +90,6 @@ def require_sealed_path(path: Path, *, directory: bool = False) -> None:
 
 PUBLIC_ORIGIN = 'https://mcp.mastermind-x.com'
 OS_ASSET_SCHEMA = 'mastermind.os_assets.v1'
-OS_MIMES = {'html': 'text/html; charset=utf-8', 'css': 'text/css; charset=utf-8',
-            'js': 'text/javascript; charset=utf-8'}
 
 
 def optional_policies(raw):
@@ -223,18 +224,21 @@ def build_os_asset_manifest(source):
     root = Path(source) / 'app/mastermind_os/dist'
     if root.is_symlink() or not root.is_dir() or (root/'assets').is_symlink():
         raise ValueError('OS asset directory differs')
-    names = []
+    names, directories = [], set()
     for path in root.rglob('*'):
         if path.is_symlink():
             raise ValueError('OS assets cannot be symlinks')
         if path.is_file() and path != root/'asset-manifest.json':
             names.append(path.relative_to(root).as_posix())
-        elif path.is_dir() and path != root/'assets':
-            raise ValueError('OS asset directory differs')
-    css = [n for n in names if re.fullmatch(r'assets/index-[A-Za-z0-9_-]+\.css', n)]
-    js = [n for n in names if re.fullmatch(r'assets/index-[A-Za-z0-9_-]+\.js', n)]
-    if len(names) != 3 or len(css) != 1 or len(js) != 1 or 'index.html' not in names:
-        raise ValueError('OS asset set differs')
+        elif path.is_dir():
+            directories.add(path.relative_to(root).as_posix())
+    from integrations.mastermind_executive_app.os_assets import os_asset_mimes
+    mimes = os_asset_mimes(names)
+    expected_directories = {'assets'} | ({'licenses', 'licenses/fonts'} if len(names) == 9 else set())
+    if directories != expected_directories:
+        raise ValueError('OS asset directory differs')
+    css = [name for name, mime in mimes.items() if mime == 'text/css; charset=utf-8']
+    js = [name for name, mime in mimes.items() if mime == 'text/javascript; charset=utf-8']
     files = []
     for name in sorted(names):
         data = (root/name).read_bytes()
@@ -242,7 +246,7 @@ def build_os_asset_manifest(source):
             raise ValueError('OS asset budget exceeded')
         files.append({'path': name, 'byte_count': len(data),
                       'sha256': hashlib.sha256(data).hexdigest(),
-                      'mime': OS_MIMES[name.rsplit('.', 1)[1]]})
+                      'mime': mimes[name]})
     text = (root/'index.html').read_text(encoding='utf-8')
     references = set(re.findall(r'(?:src|href)=["\']([^"\']+)["\']', text))
     if references != {'/os/'+css[0], '/os/'+js[0]}:
@@ -450,6 +454,7 @@ def main(argv=None):
                 session_reply_handler=session_client.send,
                 session_summon_handler=session_client.summon,
                 session_reply_read_tool=NativeReplyReadTool(session_client),
+                enable_os_executive_transport=raw.get('os_executive_transport', False),
                 **mounts,
             )
         elif profile == WEB_CEO_SESSIONS_PROFILE:
