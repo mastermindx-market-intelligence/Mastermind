@@ -103,3 +103,23 @@ immutable client configuration, the approved public DNS/TLS route,
 authenticated platform installation, and live original-operation reopen proof. No connector
 audience is repurposed, no registration is created here, and no live job
 or fabricated app pointer is used as evidence.
+
+
+## Sealed installation audience
+
+The v3 launcher now requires both `os_executive_transport: true` and
+`os_executive_resource: "https://mcp.mastermind-x.com/os/executive"` to enable
+OS command routes. The exact resource is a separate immutable policy variant;
+primary and additional connector-tunnel resources remain unchanged. The
+launcher copies the existing paired policy grants, issuer, subject restrictions,
+client restrictions and audit identity; it changes only this resource string.
+It never creates an Auth0 registration or expands a principal grant.
+
+The OS HTTP adapter selects exactly that one configured submit-policy pair.
+Connector-audience tokens cannot authenticate on OS command routes. Existing
+connector MCP authentication still uses its original resource variants. A
+missing, duplicate, foreign, tunnel, query/fragment, userinfo or alternate-port
+OS resource is refused; other profiles cannot opt in. Web and native build
+resource values must equal the same exact OS audience. Administrator setup
+must reconcile existing SPA/native clients before creating any new registration;
+#633's unknown registration is not a reusable OS client.

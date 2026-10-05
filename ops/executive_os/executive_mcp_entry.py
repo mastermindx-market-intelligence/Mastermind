@@ -43,7 +43,7 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource'}):
         raise ValueError('installed MCP configuration fields differ')
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
@@ -69,6 +69,7 @@ def validate_document(raw):
     if raw['audit_root'] != '/var/log/mastermind-executive/mcp-auth':
         raise ValueError('MCP requires its dedicated audit directory')
     validate_additional_resources(raw)
+    validate_os_executive_resource(raw)
     validate_optional_mounts(raw)
     return raw
 
@@ -89,6 +90,41 @@ def require_sealed_path(path: Path, *, directory: bool = False) -> None:
 
 
 PUBLIC_ORIGIN = 'https://mcp.mastermind-x.com'
+OS_EXECUTIVE_RESOURCE = PUBLIC_ORIGIN + '/os/executive'
+
+
+def validate_os_executive_resource(raw):
+    """One opt-in OS audience; existing tunnel resources remain independent."""
+    enabled = raw.get('os_executive_transport', False)
+    if not enabled:
+        if 'os_executive_resource' in raw:
+            raise ValueError('OS Executive resource requires enabled v3 transport')
+        return None
+    if (raw.get('executive_mcp_profile') != 'web_ceo_v3'
+            or type(enabled) is not bool
+            or raw.get('os_executive_resource') != OS_EXECUTIVE_RESOURCE):
+        raise ValueError('OS Executive resource must be the exact installed OS audience')
+    return OS_EXECUTIVE_RESOURCE
+
+
+def build_additional_policies(raw, policies):
+    """Add sealed resource variants without changing existing principal grants."""
+    from integrations.business_mcp_auth.contracts import validate_resource_policy
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    resources = validate_additional_resources(raw)
+    os_resource = validate_os_executive_resource(raw)
+    if os_resource is not None:
+        resources += (os_resource,)
+    if (len(resources) != len(set(resources))
+            or policies.read.resource in resources
+            or policies.submit.resource in resources):
+        raise ValueError('primary Executive OAuth resource cannot be duplicated')
+    return tuple(AppPolicies(
+        read=validate_resource_policy(dataclasses.replace(policies.read, resource=resource)),
+        submit=validate_resource_policy(dataclasses.replace(policies.submit, resource=resource)),
+    ) for resource in resources)
+
+
 OS_ASSET_SCHEMA = 'mastermind.os_assets.v1'
 
 
@@ -376,8 +412,7 @@ def main(argv=None):
     if source.name != raw['release_sha'] or os.geteuid() != raw['service_uid']:
         raise ValueError('MCP source or process identity differs from its installation')
     from integrations.mastermind_executive_app.app import AppSettings
-    from integrations.business_mcp_auth.contracts import validate_resource_policy
-    from integrations.mastermind_executive_app.gateway import AppPolicies, load_app_policies
+    from integrations.mastermind_executive_app.gateway import load_app_policies
     from integrations.executive_mcp.server import (
         build_executive_mcp_app, build_personal_read_mcp_app,
         build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app, build_web_ceo_v2_with_coo_mcp_app,
@@ -395,22 +430,7 @@ def main(argv=None):
     import uvicorn
 
     policies = load_app_policies(raw['policies'])
-    additional_resources = validate_additional_resources(raw)
-    additional_policies = ()
-    if additional_resources:
-        if policies.read.resource in additional_resources:
-            raise ValueError('primary Executive OAuth resource cannot be duplicated')
-        additional_policies = tuple(
-            AppPolicies(
-                read=validate_resource_policy(
-                    dataclasses.replace(policies.read, resource=resource)
-                ),
-                submit=validate_resource_policy(
-                    dataclasses.replace(policies.submit, resource=resource)
-                ),
-            )
-            for resource in additional_resources
-        )
+    additional_policies = build_additional_policies(raw, policies)
     settings = AppSettings(
         policies=policies, mastermind_root=source, macro_root_flag=None, environ={},
         ceo_ingress_socket_path=raw['ceo_ingress_socket_path'],
@@ -455,6 +475,7 @@ def main(argv=None):
                 session_summon_handler=session_client.summon,
                 session_reply_read_tool=NativeReplyReadTool(session_client),
                 enable_os_executive_transport=raw.get('os_executive_transport', False),
+                os_executive_resource=validate_os_executive_resource(raw),
                 **mounts,
             )
         elif profile == WEB_CEO_SESSIONS_PROFILE:

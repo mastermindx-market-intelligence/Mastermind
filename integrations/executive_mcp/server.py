@@ -801,6 +801,7 @@ def _build_profile_mcp_app(
     direct_error_factory: Any = None,
     inner_server_version: str | None = None,
     enable_os_executive_transport: bool = False,
+    os_executive_resource: str | None = None,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -829,6 +830,8 @@ def _build_profile_mcp_app(
         raise ValueError("authenticated Executive MCP refuses read-only app settings")
     if type(enable_os_executive_transport) is not bool:
         raise ValueError("OS Executive transport toggle must be boolean")
+    if not enable_os_executive_transport and os_executive_resource is not None:
+        raise ValueError("OS Executive resource requires enabled transport")
     if release_profile and any(app is not None for app in (workspace_app, content_app, os_app)):
         raise ValueError("release control profile refuses optional mounts")
     # This tuple is fixed by the builder, never selected by an MCP argument.
@@ -911,14 +914,21 @@ def _build_profile_mcp_app(
         ):
             raise ValueError("OS Executive transport requires exact installed v3 composition")
 
+        os_pairs = tuple(
+            (authenticator, policy)
+            for authenticator, policy in zip(submit_authenticators, policy_variants)
+            if policy.submit.resource == os_executive_resource
+        )
+        if type(os_executive_resource) is not str or len(os_pairs) != 1:
+            raise ValueError("OS Executive transport requires one exact configured resource")
+        os_authenticator, os_policy = os_pairs[0]
         os_transport_handler = OsExecutiveTransportApp(
             inner_app,
-            submit_verifier=tuple(
-                MastermindTokenVerifier(authenticator=authenticator, policy=policy.submit,
-                                        now=configured.clock, audit_sink=audit_sink)
-                for authenticator, policy in zip(submit_authenticators, policy_variants)
+            submit_verifier=MastermindTokenVerifier(
+                authenticator=os_authenticator, policy=os_policy.submit,
+                now=configured.clock, audit_sink=audit_sink,
             ),
-            submit_authenticator=submit_authenticators,
+            submit_authenticator=os_authenticator,
             clock=configured.clock,
         )
     server: Server = Server(profile_server_name, version=profile_server_version)
@@ -1420,6 +1430,7 @@ def build_web_ceo_v3_mcp_app(
     content_app=None,
     os_app=None,
     enable_os_executive_transport: bool = False,
+    os_executive_resource: str | None = None,
 ) -> Any:
     """Web-CEO v3 composition: v2 owners plus one read-only MDM sensor.
 
@@ -1454,6 +1465,7 @@ def build_web_ceo_v3_mcp_app(
         content_app=content_app,
         os_app=os_app,
         enable_os_executive_transport=enable_os_executive_transport,
+        os_executive_resource=os_executive_resource,
         **direct,
     )
     if session_reply_read_tool is not None:

@@ -129,6 +129,7 @@ def _v3_app(
     os_app: OsStaticApp | None = None,
     audit_sink: Sink | None = None,
     mdm_reader: FixedMdm | None = None,
+    os_resource: str | None = None,
 ) -> Any:
     return transport_server.build_web_ceo_v3_mcp_app(
         settings,
@@ -139,6 +140,7 @@ def _v3_app(
         session_summon_handler=lambda *_: {},
         os_app=os_app or _assets(),
         enable_os_executive_transport=enabled,
+        os_executive_resource=(os_resource or settings.policies.submit.resource) if enabled else None,
     )
 
 
@@ -150,6 +152,7 @@ async def client(
     os_app: OsStaticApp | None = None,
     audit_sink: Sink | None = None,
     mdm_reader: FixedMdm | None = None,
+    os_resource: str | None = None,
 ) -> Any:
     app = _v3_app(
         settings,
@@ -157,6 +160,7 @@ async def client(
         os_app=os_app,
         audit_sink=audit_sink,
         mdm_reader=mdm_reader,
+        os_resource=os_resource,
     )
     if not enabled or app.os_transport is None:
         yield app
@@ -295,6 +299,7 @@ def test_audit_failure_refuses_before_inner_socket(settings: Any, rsa_key: objec
             session_summon_handler=lambda *_: {},
             os_app=_assets(),
             enable_os_executive_transport=True,
+            os_executive_resource=settings.policies.submit.resource,
         )
         assert app.os_transport is not None
         token = fixture._submit_token(rsa_key)
@@ -648,3 +653,41 @@ def test_submit_auth_drift_after_possible_effect_retains_original_identity(setti
             assert result.json()["request_ref"] == app_request_ref(SUBMIT_PAYLOAD["operation_key"])
             assert calls == ["/v1/tools/submit_ceo_intent"]
     asyncio.run(exercise())
+
+
+def test_sealed_os_audience_rejects_tunnel_token_without_breaking_mcp(settings, rsa_key, monkeypatch):
+    from ops.executive_os import executive_mcp_entry as entry
+    from integrations.mastermind_executive_app import gateway
+    # Each real authenticator gets the same disposable signed-key fixture; no network.
+    monkeypatch.setattr(gateway, "_default_jwks_cache", lambda _: fixture._FakeJwksCache(rsa_key))
+    raw = dict(executive_mcp_profile='web_ceo_v3', os_executive_transport=True,
+               os_executive_resource=entry.OS_EXECUTIVE_RESOURCE)
+    configured = dataclasses.replace(settings,
+        additional_policies=entry.build_additional_policies(raw, settings.policies))
+    async def check():
+        async with client(configured, os_resource=entry.OS_EXECUTIVE_RESOURCE) as http:
+            connector = fixture._submit_token(rsa_key)
+            os_token = fixture._submit_token(rsa_key, aud=entry.OS_EXECUTIVE_RESOURCE)
+            rejected = await http.post('/os/executive/context', headers=headers(connector), json={})
+            assert rejected.status_code == 401
+            accepted = await http.post('/os/executive/context', headers=headers(os_token), json={})
+            assert accepted.status_code == 200
+            foreign = fixture._submit_token(rsa_key, aud=entry.OS_EXECUTIVE_RESOURCE + '/other')
+            assert (await http.post('/os/executive/context', headers=headers(foreign), json={})).status_code == 401
+            # The unchanged incumbent connector remains authenticated for its own MCP catalog.
+            result = await http.post('http://127.0.0.1/mcp', headers={'authorization': f'Bearer {connector}', 'accept': 'application/json, text/event-stream'},
+                json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                      'params': {'protocolVersion': '2025-03-26', 'capabilities': {},
+                                 'clientInfo': {'name': 'source-proof', 'version': '1'}}})
+            assert result.status_code == 200
+    asyncio.run(check())
+
+
+def test_enabled_os_transport_requires_one_configured_audience(settings):
+    for resource in (None, 'https://foreign.test/os/executive'):
+        with pytest.raises(ValueError, match='one exact configured resource'):
+            transport_server.build_web_ceo_v3_mcp_app(settings, audit_sink=Sink(),
+                mdm_reader=FixedMdm(), session_target_projector=lambda *_: [],
+                session_reply_handler=lambda *_: {}, session_summon_handler=lambda *_: {},
+                os_app=_assets(), enable_os_executive_transport=True,
+                os_executive_resource=resource)

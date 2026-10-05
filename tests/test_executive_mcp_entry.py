@@ -230,6 +230,7 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     }
     if os_enabled:
         raw['os_executive_transport'] = True
+        raw['os_executive_resource'] = module.OS_EXECUTIVE_RESOURCE
     config = tmp_path / 'installed.json'
     config.write_text(json.dumps(raw))
     from tests.test_executive_mcp_app_composition import fixture
@@ -267,6 +268,8 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     assert settings.ceo_ingress_socket_path == raw['ceo_ingress_socket_path']
     if profile == 'web_ceo_v3':
         assert kwargs.pop('enable_os_executive_transport') is os_enabled
+        assert kwargs.pop('os_executive_resource') == (module.OS_EXECUTIVE_RESOURCE if os_enabled else None)
+        assert tuple(pair.submit.resource for pair in settings.additional_policies) == ((module.OS_EXECUTIVE_RESOURCE,) if os_enabled else ())
         from integrations.mosyle_mdm.client import MosyleInventoryClient
         assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
     if profile in {'web_ceo_v3', 'web_ceo_sessions_v1'}:
@@ -310,3 +313,51 @@ def test_os_transport_cannot_enable_other_profiles(profile):
     from tests.test_executive_workspace_mount import document
     raw = document(); raw['executive_mcp_profile'] = profile; raw['os_executive_transport'] = True
     with pytest.raises(ValueError, match='boolean opt-in'): _module().validate_document(raw)
+
+
+@pytest.mark.parametrize('resource', [None, '', False, [], {},
+    'https://mcp.mastermind-x.com', 'https://mcp.mastermind-x.com/os/executive/',
+    'https://mcp.mastermind-x.com/os/executive?x=1',
+    'https://mcp.mastermind-x.com/os/executive#fragment',
+    'https://mcp.mastermind-x.com:443/os/executive',
+    'https://user@mcp.mastermind-x.com/os/executive',
+    'http://mcp.mastermind-x.com/os/executive',
+    'https://foreign.test/os/executive',
+    'https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_' + '1' * 32])
+def test_os_audience_is_exact_and_not_a_connector_tunnel(resource):
+    from tests.test_executive_workspace_mount import document
+    raw = document()
+    raw.update(executive_mcp_profile='web_ceo_v3', os_executive_transport=True,
+               os_executive_resource=resource)
+    with pytest.raises(ValueError, match='exact installed OS audience'):
+        _module().validate_document(raw)
+
+
+def test_os_audience_requires_explicit_opt_in_and_rejects_missing_value():
+    module = _module()
+    assert module.validate_os_executive_resource({}) is None
+    for raw in ({'os_executive_resource': module.OS_EXECUTIVE_RESOURCE},
+                {'os_executive_transport': False, 'os_executive_resource': module.OS_EXECUTIVE_RESOURCE},
+                {'os_executive_transport': True, 'executive_mcp_profile': 'web_ceo_v3'}):
+        with pytest.raises(ValueError, match='OS Executive resource'):
+            module.validate_os_executive_resource(raw)
+
+
+def test_os_audience_preserves_existing_tunnels_and_all_policy_grants():
+    from tests.test_executive_mcp_app_composition import fixture
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    module = _module()
+    policies = AppPolicies(read=fixture._read_policy(), submit=fixture._submit_policy())
+    tunnel = 'https://tunnel-service.gateway.unified-0.internal.api.openai.org/v1/mcp/tunnel_' + '2' * 32
+    raw = dict(executive_mcp_profile='web_ceo_v3', os_executive_transport=True,
+               os_executive_resource=module.OS_EXECUTIVE_RESOURCE,
+               executive_additional_resources=[tunnel])
+    variants = module.build_additional_policies(raw, policies)
+    assert [pair.submit.resource for pair in variants] == [tunnel, module.OS_EXECUTIVE_RESOURCE]
+    for pair in variants:
+        assert dataclasses.replace(pair.read, resource=policies.read.resource) == policies.read
+        assert dataclasses.replace(pair.submit, resource=policies.submit.resource) == policies.submit
+    assert policies.read.resource == fixture._read_policy().resource
+    duplicate = AppPolicies(read=variants[1].read, submit=variants[1].submit)
+    with pytest.raises(ValueError, match='cannot be duplicated'):
+        module.build_additional_policies(raw, duplicate)
