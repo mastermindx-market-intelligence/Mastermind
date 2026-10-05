@@ -300,6 +300,34 @@ Sol operating executive -> Fabric workers.
         assert text.count(BEGIN) == text.count(END) == 1
 
 
+def test_apply_migrates_native_override_before_existing_v2_block(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    path = home / ".codex" / "AGENTS.md"
+    current = path.read_text(encoding="utf-8")
+    start = current.index(BEGIN)
+    temporary = (
+        "## Native Codex CEO routing override\n\n"
+        "Native Codex child cap is **0 by default**.\n\n"
+        "This is routing policy only. It grants no Fabric admission, provider capacity, "
+        "source custody, effect clearance, or permission.\n\n"
+    )
+    path.write_text(
+        current[:start] + temporary + current[start:],
+        encoding="utf-8",
+    )
+
+    result = apply_policy(home)
+
+    assert result["state"] == "READY"
+    text = path.read_text(encoding="utf-8")
+    assert "## Native Codex CEO routing override" not in text
+    assert text.count(BEGIN) == text.count(END) == 1
+
+
 def test_apply_refuses_ambiguous_unmarked_native_override(tmp_path: Path) -> None:
     home = tmp_path / "home"
     _seed_home(home)
