@@ -67,6 +67,18 @@ agent count, tokens, elapsed time, tool calls, PR count, or administrative motio
   exceptional for major programs rather than the default shape.
 - A qualified Fabric domain coordinator is optional only when it owns a complete bounded subsystem
   outcome and removes real integration load. It may not exist merely to relay summaries.
+- Do not force a ceremonial hierarchy. If one principal plus bounded Fabric leaves is sufficient,
+  omit the extra COO/coordinator. Insert Sol below Astra only when Sol owns real decomposition,
+  integration, return consumption, or multiple workstreams; never use Sol as a message relay.
+- When Astra hands sustained delivery to Sol, transmit a compact frozen mission/frontier capsule and
+  exact artifact refs rather than cloning the parent transcript. Astra returns to strategic exceptions
+  and acceptance instead of shadow-executing the same worker mechanics.
+- Classify every delegated child under the current protected task-complexity/routing law. Prefer
+  deterministic execution for mechanical work, then the least-scarce admitted worker for bounded
+  labor. Frontier capacity requires a concrete FRONTIER_WITNESS; program prestige, child/reviewer
+  status, free slots, or unused premium quota are not witnesses.
+- Consequential builder output receives independent review when current law requires it. Review is
+  not permission for the reviewer to self-start repair or become a second source writer.
 - Routine independently executable labor routes through the existing Executive/Subagent Fabric.
   Native provider children are not the routine worker pool. A native-child exception requires a
   concrete principal-judgment or unique-native-access reason under the current provider rules.
@@ -101,6 +113,8 @@ agent count, tokens, elapsed time, tool calls, PR count, or administrative motio
   silently duplicated on another carrier.
 - Continuously integrate source work. Keep one modifying candidate per conflicting source lane and
   prefer reviewable dependency-correct verticals over indefinitely growing private branches.
+  Before starting a second semantic vertical on the same overlapping source lane, publish/hand off
+  the first as a reviewable candidate unless an explicit atomic dependency requires them together.
 - Context is working memory, not the program ledger. Keep exact artifact/revision refs plus compact
   accepted conclusions; do not repeatedly rehydrate full transcripts, PR bodies, logs, trees, or
   already-accepted proof.
