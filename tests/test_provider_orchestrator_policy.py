@@ -225,6 +225,13 @@ Sol operating executive -> Fabric workers.
         text = path.read_text(encoding="utf-8")
         assert "Keep external SSD placement." in text
         assert "mastermind-ceo-async-ci-v1" not in text
+        assert "mastermind-ceo-forward-execution" not in text
+        assert "mastermind-orchestration-burn-guard-v1" not in text
+        assert "mastermind-fabric-routing-operational-v1" not in text
+        assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
+        assert "Finalization ceremony is pre-yield only." in text
+        assert "Capacity is a ceiling, not a target." in text
+        assert "Sol is the default day-to-day project executive" in text
         assert text.count(BEGIN) == text.count(END) == 1
 
 
@@ -314,6 +321,26 @@ def test_verify_rejects_matching_guard_command_with_non_command_type(tmp_path: P
 
     assert result["state"] == "DRIFT"
     assert "claude_settings.pretool" in result["issues"]
+
+
+def test_verify_rejects_wrong_managed_guard_timeout(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    path = home / ".codex" / "hooks.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    managed = next(
+        row
+        for row in value["hooks"]["PreToolUse"]
+        if row.get("matcher") == "^Bash$"
+    )
+    managed["hooks"][0]["timeout"] = 1
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = verify_policy(home)
+
+    assert result["state"] == "DRIFT"
+    assert "codex_hooks.pretool" in result["issues"]
 
 
 def test_verify_rejects_async_managed_guard_registration(tmp_path: Path) -> None:
