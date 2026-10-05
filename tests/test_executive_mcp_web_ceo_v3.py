@@ -288,6 +288,10 @@ def test_service_owned_session_credential_resolves_without_secret_repr(
         )
     )
     path.chmod(0o600)
+    # Some macOS temp roots inherit group wheel even when the test process runs
+    # as staff. Model the service-owned contract explicitly instead of relying
+    # on filesystem inheritance so the positive case is portable.
+    os.chown(path, -1, os.getegid())
     monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
     monkeypatch.setattr(
         credential_file, "_has_acl", lambda _path, _identity, _descriptor: False
@@ -307,10 +311,32 @@ def test_service_owned_session_credential_resolves_without_secret_repr(
     assert "secret123" not in shown
 
 
+@pytest.mark.parametrize("axis", ["uid", "gid"])
+def test_service_owned_credential_file_refuses_identity_mismatch(
+    tmp_path, monkeypatch, axis
+):
+    path = tmp_path / "mosyle-readonly.json"
+    path.write_text(json.dumps({"auth_mode": "jwt", "access_token": "a" * 32}))
+    path.chmod(0o600)
+    os.chown(path, -1, os.getegid())
+    monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
+    monkeypatch.setattr(
+        credential_file, "_has_acl", lambda _path, _identity, _descriptor: False
+    )
+    expected_uid = os.geteuid() + (1 if axis == "uid" else 0)
+    expected_gid = os.getegid() + (1 if axis == "gid" else 0)
+    source = FileMosyleCredentialSource(
+        path=path, expected_uid=expected_uid, expected_gid=expected_gid
+    )
+    with pytest.raises(MosyleCredentialFileError):
+        run(source.resolve())
+
+
 def test_service_owned_credential_file_refuses_unsafe_mode(tmp_path, monkeypatch):
     path = tmp_path / "mosyle-readonly.json"
     path.write_text(json.dumps({"auth_mode": "jwt", "access_token": "a" * 32}))
     path.chmod(0o644)
+    os.chown(path, -1, os.getegid())
     monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
     monkeypatch.setattr(
         credential_file, "_has_acl", lambda _path, _identity, _descriptor: False
