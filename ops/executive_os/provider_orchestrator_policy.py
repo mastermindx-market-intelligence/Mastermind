@@ -19,6 +19,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+import tomllib
 from typing import Any, Sequence
 
 
@@ -346,6 +347,11 @@ def _hook_row(matcher: str, command: str, message: str) -> dict[str, Any]:
 
 def _render_claude_settings(raw: bytes, guard: Path) -> bytes:
     value = _json_object(raw, "Claude settings")
+    env = value.setdefault("env", {})
+    if not isinstance(env, dict):
+        raise OrchestratorPolicyError("Claude env must be an object")
+    env["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "2"
+    env["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = "1"
     hooks = value.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise OrchestratorPolicyError("Claude hooks must be an object")
@@ -359,6 +365,73 @@ def _render_claude_settings(raw: bytes, guard: Path) -> bytes:
     )
     hooks["PreToolUse"] = rows
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+_TOML_TABLE_RE = __import__("re").compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
+_TOML_AGENT_KEY_RE = __import__("re").compile(
+    r"^(?P<indent>\s*)(?P<key>enabled|max_concurrent_threads_per_session)\s*=.*$"
+)
+
+
+def _render_codex_config(raw: bytes) -> bytes:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise OrchestratorPolicyError("Codex config is not UTF-8") from exc
+    try:
+        parsed = tomllib.loads(text) if text.strip() else {}
+    except tomllib.TOMLDecodeError as exc:
+        raise OrchestratorPolicyError("Codex config is malformed TOML") from exc
+    agents = parsed.get("agents")
+    if agents is not None and not isinstance(agents, dict):
+        raise OrchestratorPolicyError("Codex agents config must be a table")
+
+    lines = text.splitlines()
+    starts = [index for index, line in enumerate(lines) if line.strip() == "[agents]"]
+    if len(starts) > 1:
+        raise OrchestratorPolicyError("Codex config contains duplicate [agents] tables")
+    required = {
+        "max_concurrent_threads_per_session": "max_concurrent_threads_per_session = 1",
+        "enabled": "enabled = false",
+    }
+    if not starts:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(
+            [
+                "[agents]",
+                required["max_concurrent_threads_per_session"],
+                required["enabled"],
+            ]
+        )
+        return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+
+    start = starts[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if _TOML_TABLE_RE.match(lines[index]):
+            end = index
+            break
+
+    seen: set[str] = set()
+    for index in range(start + 1, end):
+        match = _TOML_AGENT_KEY_RE.match(lines[index])
+        if not match:
+            continue
+        key = match.group("key")
+        if key in seen:
+            raise OrchestratorPolicyError(f"Codex agents config duplicates {key}")
+        seen.add(key)
+        lines[index] = match.group("indent") + required[key]
+
+    missing = [
+        required[key]
+        for key in ("max_concurrent_threads_per_session", "enabled")
+        if key not in seen
+    ]
+    if missing:
+        lines[end:end] = missing
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
 def _render_codex_hooks(raw: bytes, guard: Path) -> bytes:
@@ -388,6 +461,7 @@ def _paths(home: Path) -> dict[str, Path]:
         "codex_doc": home / ".codex" / "AGENTS.md",
         "claude_doc": home / ".claude" / "CLAUDE.md",
         "codex_hooks": home / ".codex" / "hooks.json",
+        "codex_config": home / ".codex" / "config.toml",
         "claude_settings": home / ".claude" / "settings.json",
         "codex_guard": home / ".codex" / "hooks" / "mastermind_fabric_routing_guard.py",
         "claude_guard": home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py",
@@ -413,6 +487,7 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
     claude_doc = _regular_bytes(paths["claude_doc"], missing=b"").decode("utf-8")
     claude_settings = _regular_bytes(paths["claude_settings"], missing=b"{}\n")
     codex_hooks = _regular_bytes(paths["codex_hooks"], missing=b"{}\n")
+    codex_config = _regular_bytes(paths["codex_config"], missing=b"")
 
     # Validate every render before the first mutation so malformed peer config
     # cannot leave a half-applied provider pair.
@@ -423,6 +498,7 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
             claude_settings, paths["claude_guard"]
         ),
         "codex_hooks": _render_codex_hooks(codex_hooks, paths["codex_guard"]),
+        "codex_config": _render_codex_config(codex_config),
     }
 
     operations = [
@@ -432,6 +508,7 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
         ("claude_doc", rendered["claude_doc"]),
         ("claude_settings", rendered["claude_settings"]),
         ("codex_hooks", rendered["codex_hooks"]),
+        ("codex_config", rendered["codex_config"]),
     ]
     modified: list[str] = []
     try:
@@ -516,6 +593,15 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
 
     try:
         claude_raw = _regular_bytes(paths["claude_settings"])
+        claude_value = _json_object(claude_raw, "Claude settings")
+        claude_env = claude_value.get("env")
+        if not isinstance(claude_env, dict):
+            issues.append("claude_settings.env")
+        else:
+            if claude_env.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != "2":
+                issues.append("claude_settings.max_concurrent_subagents")
+            if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
+                issues.append("claude_settings.max_subagent_spawn_depth")
         if _managed_hook_count(
             claude_raw, paths["claude_guard"], claude=True
         ) != 1:
@@ -531,6 +617,23 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
             issues.append("codex_hooks.pretool")
     except OrchestratorPolicyError:
         issues.append("codex_hooks.missing")
+
+    try:
+        codex_config_raw = _regular_bytes(paths["codex_config"])
+        try:
+            codex_config = tomllib.loads(codex_config_raw.decode("utf-8"))
+        except (UnicodeError, tomllib.TOMLDecodeError) as exc:
+            raise OrchestratorPolicyError("Codex config is malformed") from exc
+        codex_agents = codex_config.get("agents")
+        if not isinstance(codex_agents, dict):
+            issues.append("codex_config.agents")
+        else:
+            if codex_agents.get("enabled") is not False:
+                issues.append("codex_config.agents_enabled")
+            if codex_agents.get("max_concurrent_threads_per_session") != 1:
+                issues.append("codex_config.max_concurrent_threads")
+    except OrchestratorPolicyError:
+        issues.append("codex_config.missing_or_invalid")
 
     return {
         "state": "READY" if not issues else "DRIFT",
