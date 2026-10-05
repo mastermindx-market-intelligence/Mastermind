@@ -39,7 +39,11 @@ rsa_key = fixture.rsa_key
 short_socket_root = fixture.short_socket_root
 settings = session_fixture.settings
 REF = "req-4a8daf76317cfe92f436991444c58281"
-RECEIPT = {"intent_id": "auto-existing", "job_id": "JOB-existing", "dispatched": False}
+RECEIPT = {
+    "intent_id": ceo_request.automated_intent_id(REF),
+    "job_id": "JOB-existing",
+    "dispatched": False,
+}
 PATH = "/v1/tools/submit_ceo_intent/reconcile"
 
 
@@ -190,6 +194,11 @@ def test_canonical_reference_domain_is_preserved_exactly(reference):
     (CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=False, error={"code": "operation_conflict", "message": "conflict"}), "operation_conflict", "operation_conflict"),
     (CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=False, error={"code": "backend_unavailable", "message": "unavailable"}), "refused", "backend_unavailable"),
     (CeoIngressResponse(transport=TRANSPORT_SENT_OK, ok=True, result={"dispatched": True}), "effect_unknown", "effect_unknown"),
+    (CeoIngressResponse(
+        transport=TRANSPORT_SENT_OK,
+        ok=True,
+        result={"intent_id": "auto-00000000000000000000000000000000", "job_id": "JOB-wrong", "dispatched": False},
+    ), "effect_unknown", "effect_unknown"),
     (OSError("lost status response"), "effect_unknown", "effect_unknown"),
 ])
 def test_status_outcomes_preserve_identity_without_retry(settings, rsa_key, monkeypatch, outcome, status, code):

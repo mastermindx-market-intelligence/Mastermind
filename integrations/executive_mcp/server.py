@@ -1036,11 +1036,21 @@ def _build_profile_mcp_app(
                         "invalid_input", "authority_refused", "grounding_unavailable", "internal_error",
                     }
                 )
-                if not preflight_error and not _executive_outcome(payload, request_ref, response.status_code):
-                    payload = unknown(request_ref, is_release=is_release)
-                elif payload.get("status") == STATUS_EFFECT_UNKNOWN:
-                    # Same closed outcome, now usable through existing MCP tools.
-                    payload = unknown(request_ref, is_release=False)
+                if not preflight_error:
+                    if not _executive_outcome(payload, request_ref, response.status_code):
+                        payload = unknown(request_ref, is_release=is_release)
+                    elif (
+                        is_reconcile
+                        and payload.get("ok") is True
+                        and payload.get("receipt", {}).get("intent_id")
+                        != automated_intent_id(request_ref)
+                    ):
+                        # A status read may only recover the deterministic intent
+                        # belonging to this exact original request reference.
+                        payload = unknown(request_ref, is_release=False)
+                    elif payload.get("status") == STATUS_EFFECT_UNKNOWN:
+                        # Same closed outcome, now usable through existing MCP tools.
+                        payload = unknown(request_ref, is_release=False)
             elif response.status_code != 200 or not _is_e1_envelope(
                 payload, name, inner_server_version or profile_server_version
             ):

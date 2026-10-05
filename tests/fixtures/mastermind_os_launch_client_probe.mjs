@@ -87,7 +87,7 @@ assert.equal(calls.filter(call => call.name === "submit_ceo_intent").length, 1);
 const guardResults = [];
 if (statusEnvelope && final.status === "accepted") {
   const mutations = [
-    ...["1.3.0", "1.3.1", "1.5.0", "2.0.0", null, 1.4, {}].map(version => [
+    ...["1.3.0", "1.3.1", "1.6.0", "2.0.0", null, 1.4, {}].map(version => [
       "unsupported-version:" + JSON.stringify(version),
       value => { value.server_version = version; },
     ]),
