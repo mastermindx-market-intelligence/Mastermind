@@ -90,3 +90,6 @@ The current W0/W1 schema also fail-closes `materiality` to an empty array. No ca
 ### W1 capture relationship to preregistration
 
 `PREREGISTRATION_CANDIDATE.md` freezes the scientific capture contract before W1 can create any graded exposure. W1 may continue deterministic development reconstruction on already-exposed AAPL fixtures, but any new beta/holdout body use, analyst trial, model-context receipt or predictive exposure requires the corresponding registered owner record/child preregistration first. UI display, machine receipt and alert emission are distinct exposure events and must never be inferred from one another.
+
+
+**Development composer now exists:** `development_transition.py` emits three deterministic full candidate objects from frozen AAPL evidence (first availability, unchanged revenue, and cross-filing refusal), all fail-closed and schema-valid. It does not register the schema, publish, or consume untrusted merged lineage. See `DEVELOPMENT_TRANSITION_RESULT.md`.

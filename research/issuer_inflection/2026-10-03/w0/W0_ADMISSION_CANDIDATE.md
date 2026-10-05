@@ -164,3 +164,6 @@ The current W0/W1 schema also fail-closes `materiality` to an empty array. No ca
 The current pre-body scientific contract is `PREREGISTRATION_CANDIDATE.md`. It freezes the exact beta metadata/PIT selection hash `d64bf572890c411e3cb9f2cf8adacdee48b6f2481c2f0ce9defe737072274a9b`, issuer/time/source-revision-family split law, dependence groups, adjudication rules, R/C thresholds, U/P child-preregistration requirements, multiplicity/stopping/amendment law, rights-purpose state and separate UI/model/alert exposure semantics. Ten machine checks pass.
 
 The candidate deliberately does **not** solve the canonical registry write: no experiment ID exists, `trial_registered=false`, and body/outcome inspection remains unauthorized. Historical beta family balance is still unqualified; the owner must either produce event-time family evidence or register an explicit unstratified scope amendment before body inspection. Prospective holdout events remain strictly future/unassigned.
+
+
+The permitted fixture lane now exercises the complete candidate object shape through `development_transition.py`. Its three cases stay `development_golden`, rights-not-admitted, non-emitted, authority-false and `comparison.state=not_evaluable`; this proves composition mechanics only and creates no source-owner or product admission.

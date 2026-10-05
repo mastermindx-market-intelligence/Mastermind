@@ -58,23 +58,20 @@
       "candidate_count": 12,
       "max_filing_date": "2026-09-02",
       "missing": [],
-      "present_tickers": 12,
-      "rows": 948
+      "present_tickers": 12
     },
     "broad_reserve_candidate": {
       "candidate_count": 6,
       "max_filing_date": "2026-09-16",
       "missing": [],
-      "present_tickers": 6,
-      "rows": 558
+      "present_tickers": 6
     },
     "prospective_temporal_holdout_candidate": {
       "candidate_count": 12,
       "historical_rows_eligible_as_holdout_events": false,
       "max_filing_date": "2026-09-30",
       "missing": [],
-      "present_tickers": 12,
-      "rows": 1069
+      "present_tickers": 12
     }
   },
   "legacy_store_at_premerge_pin": {
