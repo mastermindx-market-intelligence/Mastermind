@@ -305,6 +305,15 @@ def test_combined_profile_does_not_expand_frozen_v2_selector():
         validate_installed_mcp_profile('web_ceo_release_v1')
 
 
+def test_os_commission_owner_is_closed_to_disabled_or_missing_transport():
+    module = _module()
+    assert module.build_os_commission_client({}) is None
+    with pytest.raises(ValueError, match='disabled OS transport refuses commission owner'):
+        module.build_os_commission_client({'os_commission_port': 45025})
+    with pytest.raises(ValueError, match='OS transport requires installed commission owner'):
+        module.build_os_commission_client({'os_executive_transport': True})
+
+
 @pytest.mark.parametrize('value', [None, 0, 1, 'true', {}, []])
 def test_os_transport_opt_in_requires_real_boolean(value):
     from tests.test_executive_workspace_mount import document

@@ -109,13 +109,14 @@ def validate_os_executive_resource(raw):
 
 
 def build_os_commission_client(raw):
-    from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
     if raw.get("os_executive_transport", False) is not True:
         if "os_commission_port" in raw:
             raise ValueError("disabled OS transport refuses commission owner")
         return None
     if "os_commission_port" not in raw:
         raise ValueError("OS transport requires installed commission owner")
+    # Keep the optional network client outside the sealed stdlib-only control path.
+    from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
     return StudioCommissionClient(port=raw["os_commission_port"])
 
 
