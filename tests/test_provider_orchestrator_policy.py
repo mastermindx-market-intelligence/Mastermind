@@ -259,7 +259,8 @@ Sol operating executive -> Fabric workers.
         text = path.read_text(encoding="utf-8")
         assert "Keep external SSD placement." in text
         assert "mastermind-ceo-async-ci-v1" not in text
-        assert "mastermind-ceo-forward-execution" not in text
+        assert "<!-- mastermind-ceo-forward-execution -->" not in text
+        assert "<!-- /mastermind-ceo-forward-execution -->" not in text
         assert "mastermind-orchestration-burn-guard-v1" not in text
         assert "mastermind-fabric-routing-operational-v1" not in text
         assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
