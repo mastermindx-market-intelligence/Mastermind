@@ -3,8 +3,9 @@
 
 This is a deployment artifact for local Codex/Claude CEO/orchestrator sessions.
 It creates no lifecycle, queue, merge, retry, watcher, or source-custody authority.
-It only blocks two measured forms of principal-capacity waste inside Mastermind
-workspaces and preserves the standing native-Claude child routing fence.
+It enforces bounded provider-edge anti-burn invariants inside Mastermind workspaces:
+asynchronous CI waits, stable Fabric root accounting, and the standing native-Claude
+child routing fence.
 """
 from __future__ import annotations
 
@@ -80,8 +81,18 @@ REPO_ARG_RE = re.compile(
     re.I,
 )
 
+_ENV_ASSIGN = (
+    r"(?:[A-Za-z_][A-Za-z0-9_]*="
+    r"(?:'[^']*'|\"[^\"]*\"|[^\s;&|]+)\s+)*"
+)
 FABRIC_LAUNCH_RE = re.compile(
-    CMD_POS + r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b",
+    CMD_POS
+    + r"(?:env\s+)?"
+    + _ENV_ASSIGN
+    + r"(?:"
+      r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b"
+      r"|(?:[A-Za-z0-9_./-]+/)?(?:sub|remote_sub)\.sh\b"
+      r")",
     re.I,
 )
 _FABRIC_IDENTITY_NAMES = (
@@ -231,16 +242,20 @@ def repeat_poll_reason(key: str, *, now: float | None = None) -> str | None:
 
 
 def _command_or_environment_value(command: str, name: str) -> str:
-    current = os.environ.get(name, "").strip()
-    if current:
-        return current
+    # An explicit shell assignment wins over inherited process state, including
+    # an explicit empty assignment. This mirrors the environment the launched
+    # child will actually receive instead of letting a parent value mask a reset.
     pattern = re.compile(
-        rf"(?:^|[\s;&|]){re.escape(name)}=(?:'([^']+)'|\"([^\"]+)\"|([^\s;&|]+))"
+        rf"(?:^|[\s;&|]){re.escape(name)}="
+        rf"(?:'([^']*)'|\"([^\"]*)\"|([^\s;&|]*))"
     )
     match = pattern.search(command)
-    if not match:
-        return ""
-    return next((value for value in match.groups() if value is not None), "").strip()
+    if match:
+        return next(
+            (value for value in match.groups() if value is not None),
+            "",
+        ).strip()
+    return os.environ.get(name, "").strip()
 
 
 def guard_fabric_launch(command: str) -> None:
@@ -255,7 +270,8 @@ def guard_fabric_launch(command: str) -> None:
         deny(
             "Mastermind Fabric root-budget guard: provider launch is missing "
             + ", ".join(missing)
-            + ". Every pool run/remote launch must preserve the existing root "
+            + ". Every Fabric launch (pool run/remote or direct approved wrapper) "
+            "must preserve the existing root "
             "orchestrator identity, true parent run, and task class so fair-share, "
             "descendant accounting, and routing economics cannot be reset by a new "
             "chat or helper."
