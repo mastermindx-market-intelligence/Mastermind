@@ -27,6 +27,12 @@ from typing import Any, Sequence
 
 BEGIN = "<!-- mastermind-ceo-forward-execution-v2 -->"
 END = "<!-- /mastermind-ceo-forward-execution-v2 -->"
+TEMP_NATIVE_OVERRIDE_HEADING = "## Native Codex CEO routing override"
+TEMP_NATIVE_OVERRIDE_SENTINELS = (
+    "Native Codex child cap is **0 by default**.",
+    "This is routing policy only. It grants no Fabric admission",
+)
+
 LEGACY_BLOCKS = (
     (
         "<!-- mastermind-ceo-async-ci-v1 -->",
@@ -287,8 +293,37 @@ def _strip_marked_block(text: str, begin: str, end: str) -> str:
     return (text[:start] + text[finish:]).strip()
 
 
+def _strip_temporary_native_override(text: str) -> str:
+    count = text.count(TEMP_NATIVE_OVERRIDE_HEADING)
+    if count == 0:
+        return text
+    if count != 1:
+        raise OrchestratorPolicyError(
+            "temporary native Codex override appears more than once"
+        )
+    start = text.index(TEMP_NATIVE_OVERRIDE_HEADING)
+    next_marker = text.find("<!-- mastermind-ceo-forward-execution -->", start)
+    next_heading = text.find("\n## ", start + len(TEMP_NATIVE_OVERRIDE_HEADING))
+    candidates = [value for value in (next_marker, next_heading) if value >= 0]
+    if not candidates:
+        raise OrchestratorPolicyError(
+            "temporary native Codex override has no safe migration boundary"
+        )
+    end = min(candidates)
+    block = text[start:end]
+    if not all(sentinel in block for sentinel in TEMP_NATIVE_OVERRIDE_SENTINELS):
+        raise OrchestratorPolicyError(
+            "refuse ambiguous Native Codex CEO routing override migration"
+        )
+    prefix = text[:start].rstrip()
+    suffix = text[end:].lstrip()
+    if prefix and suffix:
+        return prefix + "\n\n" + suffix
+    return prefix + suffix
+
+
 def _managed_text(original: str) -> str:
-    text = original
+    text = _strip_temporary_native_override(original)
     for begin, end in LEGACY_BLOCKS:
         text = _strip_marked_block(text, begin, end)
 
