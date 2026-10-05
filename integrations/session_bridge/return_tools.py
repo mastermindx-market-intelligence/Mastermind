@@ -32,9 +32,13 @@ _ERRORS = {
 
 class NativeReplyReadTool:
     def __init__(self, reader: NativeReplyReader) -> None:
-        if type(reader) is not NativeReplyReader:
-            raise TypeError("the existing canonical NativeReplyReader is required")
-        self._reader = reader
+        from .installed import InstalledSessionBridgeClient
+        if type(reader) is NativeReplyReader:
+            self._reader = reader
+        elif type(reader) is InstalledSessionBridgeClient:
+            self._reader = reader.reply_read
+        else:
+            raise TypeError("the existing canonical reader or installed private client is required")
 
     @staticmethod
     def tool_spec() -> ToolSpec:

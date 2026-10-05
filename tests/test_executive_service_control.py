@@ -7,6 +7,10 @@ executables). No real root, sudo, launchctl, service, or network effect occurs.
 from __future__ import annotations
 
 import subprocess
+import json
+import plistlib
+import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,6 +21,7 @@ SCRIPT = ROOT / "ops" / "executive_os" / "service-control.sh"
 CONTROL_LABEL = "com.mastermind.executive.control"
 WORKER_LABEL = "com.mastermind.executive.worker.codex"
 RELAY_LABEL = "com.mastermind.executive.sol-state-relay"
+AGENT_RELAY_LABEL = "com.mastermind.executive.agent-relay"
 MCP_LABEL = "com.mastermind.executive.mcp"
 BACKUP_LABEL = "com.mastermind.executive.backup"
 
@@ -61,7 +66,7 @@ if [ "$plan_key" != "$key" ]; then
   printf 'launchctl call out of scope: expected [%s] got [%s]\n' "$plan_key" "$key" >&2
   exit 97
 fi
-[ -n "$plan_out" ] && printf '%s\n' "$plan_out"
+[ -n "$plan_out" ] && printf '%b\n' "$plan_out"
 [ -n "$plan_err" ] && printf '%s\n' "$plan_err" >&2
 exit "$plan_exit"
 '''
@@ -96,6 +101,7 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
     control_plist = tmp_path / "control.plist"
     worker_plist = tmp_path / "worker.plist"
     relay_plist = tmp_path / "relay.plist"
+    agent_relay_plist = tmp_path / "agent-relay.plist"
     mcp_plist = tmp_path / "mcp.plist"
     text = text.replace(
         'CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"',
@@ -109,26 +115,29 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
         'RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"',
         f'RELAY_PLIST="{relay_plist}"',
     )
-    # The production gateway lifecycle action is introduced by this change.
-    # Keep this harness source-compatible with the RED preimage where the
-    # fixed MCP plist coordinate does not exist yet.
+    text = text.replace(
+        'AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"',
+        f'AGENT_RELAY_PLIST="{agent_relay_plist}"',
+    )
     text = text.replace(
         'MCP_PLIST="/Library/LaunchDaemons/$MCP_LABEL.plist"',
         f'MCP_PLIST="{mcp_plist}"',
     )
     assert str(control_plist) in text and str(worker_plist) in text
+    assert str(agent_relay_plist) in text
     copy_path = tmp_path / "service-control.sh"
     copy_path.write_text(text, encoding="utf-8")
     copy_path.chmod(0o755)
     control_plist.write_text("control-plist", encoding="utf-8")
     worker_plist.write_text("worker-plist", encoding="utf-8")
     relay_plist.write_text("relay-plist", encoding="utf-8")
+    agent_relay_plist.write_text("agent-relay-plist", encoding="utf-8")
     mcp_plist.write_text("mcp-plist", encoding="utf-8")
     return copy_path, control_plist, worker_plist
 
 
 def _write_plan(path: Path, entries: list[Entry]) -> None:
-    lines = ["\t".join((key, str(exit_code), out, err)) for key, exit_code, out, err in entries]
+    lines = ["\t".join((key, str(exit_code), out.replace("\n", r"\n"), err)) for key, exit_code, out, err in entries]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
@@ -139,8 +148,15 @@ def _run(
     *,
     fake_uid: str = "0",
     fake_os: str = "Darwin",
+    remove_agent_relay_plist: bool = False,
+    extra_args: tuple[str, ...] = (),
+    prepare: Callable[[Path], None] | None = None,
 ) -> tuple[int, str, str, list[str], str, Path, Path]:
     script, control_plist, worker_plist = _prepare_script(tmp_path)
+    if prepare is not None:
+        prepare(script)
+    if remove_agent_relay_plist:
+        (tmp_path / "agent-relay.plist").unlink()
     plan_path = tmp_path / "launchctl.plan"
     log_path = tmp_path / "launchctl.log"
     _write_plan(plan_path, plan)
@@ -156,7 +172,7 @@ def _run(
         "FAKE_OS_NAME": fake_os,
     }
     completed = subprocess.run(
-        ["/bin/bash", str(script), action],
+        ["/bin/bash", str(script), action, *extra_args],
         env=env,
         capture_output=True,
         text=True,
@@ -366,8 +382,8 @@ def test_restart_gateway_cycles_only_fixed_mcp_and_confirms_running(
     tmp_path: Path,
 ) -> None:
     mcp_plist = tmp_path / "mcp.plist"
-    plan = _stop_ok(MCP_LABEL) + _ensure_running_bootstrap(MCP_LABEL, mcp_plist)
-    code, out, err, log, remaining, *_ = _run(tmp_path, "restart-gateway", plan)
+    plan = _gateway_enabled_plan() + _stop_ok(MCP_LABEL) + _ensure_running_bootstrap(MCP_LABEL, mcp_plist)
+    code, out, err, log, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
     assert code == 0, err
     assert remaining == ""
     assert f"service={MCP_LABEL} state=absent" in out
@@ -384,7 +400,7 @@ def test_restart_gateway_refuses_registered_but_nonrunning_mcp(
 ) -> None:
     mcp_plist = tmp_path / "mcp.plist"
     plan = (
-        _stop_ok(MCP_LABEL)
+        _gateway_enabled_plan() + _stop_ok(MCP_LABEL)
         + [
             (f"enable system/{MCP_LABEL}", 0, "", ""),
             (f"print system/{MCP_LABEL}", 113, "", "absent"),
@@ -392,8 +408,8 @@ def test_restart_gateway_refuses_registered_but_nonrunning_mcp(
         ]
         + [(f"print system/{MCP_LABEL}", 0, "state = exited", "")] * 31
     )
-    code, _out, err, log, remaining, *_ = _run(tmp_path, "restart-gateway", plan)
-    assert code != 0
+    code, _out, err, log, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 75
     assert "did not become running" in err
     assert remaining == ""
     assert log == [key for key, *_ in plan]
@@ -578,6 +594,113 @@ def test_start_readside_partial_failure_is_terminal_and_does_not_touch_worker(
     )
 
 
+def test_start_agent_relay_starts_only_fixed_agent_relay(tmp_path: Path) -> None:
+    agent_plist = tmp_path / "agent-relay.plist"
+    plan = _ensure_running_bootstrap(AGENT_RELAY_LABEL, agent_plist)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=running" in out
+    assert not any(
+        label in call
+        for label in (CONTROL_LABEL, WORKER_LABEL, RELAY_LABEL, MCP_LABEL, BACKUP_LABEL)
+        for call in log
+    )
+
+
+def test_start_agent_relay_is_idempotent_when_already_running(tmp_path: Path) -> None:
+    plan = _ensure_running_already(AGENT_RELAY_LABEL)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert "existing=1" in out
+    assert not any("bootstrap" in call or "kickstart" in call for call in log)
+
+
+def test_stop_agent_relay_stops_only_fixed_registered_relay(tmp_path: Path) -> None:
+    plan = [
+        (f"print system/{AGENT_RELAY_LABEL}", 0, "state = running", ""),
+    ] + _stop_ok(AGENT_RELAY_LABEL)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=absent" in out
+    assert not any(
+        label in call
+        for label in (CONTROL_LABEL, WORKER_LABEL, RELAY_LABEL, MCP_LABEL, BACKUP_LABEL)
+        for call in log
+    )
+
+
+def test_start_agent_relay_refuses_missing_plist_before_launchctl(
+    tmp_path: Path,
+) -> None:
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path,
+        "start-agent-relay",
+        [],
+        remove_agent_relay_plist=True,
+    )
+
+    assert code == 65
+    assert "missing or unsafe launchd plist" in err
+    assert remaining == ""
+    assert log == []
+
+
+def test_stop_agent_relay_refuses_absent_service_before_disable(tmp_path: Path) -> None:
+    plan = [
+        (f"print system/{AGENT_RELAY_LABEL}", 113, "", "absent"),
+    ]
+
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code != 0
+    assert "must be registered before stop" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert not any(
+        call.startswith(("disable ", "bootout ")) for call in log
+    )
+
+
+def test_stop_agent_relay_can_quiesce_registered_service_if_plist_is_lost(
+    tmp_path: Path,
+) -> None:
+    plan = [
+        (f"print system/{AGENT_RELAY_LABEL}", 0, "state = running", ""),
+    ] + _stop_ok(AGENT_RELAY_LABEL)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path,
+        "stop-agent-relay",
+        plan,
+        remove_agent_relay_plist=True,
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=absent" in out
+
+
 def test_stop_readside_stops_control_then_relay_and_preserves_mcp_worker_backup(
     tmp_path: Path,
 ) -> None:
@@ -719,3 +842,225 @@ def test_stop_refuses_unknown_during_disappearance_wait(tmp_path: Path) -> None:
     assert "state unknown" in err
     assert remaining == ""
     assert log == [key for key, *_ in plan]
+
+
+# Gateway qualification uses only disposable configuration and command shims.
+GATEWAY_SHA = "a" * 40
+GATEWAY_RELEASE_ROOT = "/Library/Application Support/MastermindExecutive/releases"
+GATEWAY_CONFIG_PATH = "/Library/Application Support/MastermindExecutive/config/executive-mcp.json"
+
+
+def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
+                           extra_args=("--expected-sha", GATEWAY_SHA),
+                           missing_config=False, symlink_config=False, native_plutil=False):
+    config = {"schema": "mastermind.executive_mcp_install.v1",
+              "release_sha": GATEWAY_SHA, "service_uid": 458}
+    config.update(config_changes or {})
+    release = f"{GATEWAY_RELEASE_ROOT}/{GATEWAY_SHA}"
+    config_path = tmp_path / "executive-mcp.json"
+    document = {
+        "Label": MCP_LABEL,
+        "ProgramArguments": [
+            "/Library/Application Support/MastermindExecutive/network-runtimes/"
+            + "b" * 64 + "/bin/python", "-I", "-B",
+            release + "/ops/executive_os/executive_mcp_entry.py",
+            "--config", str(config_path)],
+        "WorkingDirectory": release,
+        "UserName": "_mastermind_executive_mcp",
+        "GroupName": "_mastermind_executive_mcp",
+    }
+    document.update(changes or {})
+    def prepare(script):
+        text = script.read_text().replace(GATEWAY_CONFIG_PATH, str(config_path))
+        script.write_text(text)
+        (tmp_path / "mcp.plist").write_bytes(plistlib.dumps(document))
+        if not missing_config:
+            target = tmp_path / "actual-config.json" if symlink_config else config_path
+            target.write_text(json.dumps(config))
+            if symlink_config:
+                config_path.symlink_to(target)
+        if native_plutil:
+            return
+        shim = tmp_path / "native-shims" / "plutil"
+        shim.write_text("#!" + sys.executable + "\n" + r'''import sys,json,plistlib
+from pathlib import Path
+args=sys.argv[1:]
+try:
+    raw=Path(args[-1]).read_bytes()
+    try: obj=json.loads(raw)
+    except (ValueError, UnicodeError): obj=plistlib.loads(raw)
+    if args[0] == '-lint': sys.exit(0)
+    if args[0] == '-type':
+        assert args[1] in obj
+        print(type(obj[args[1]]).__name__)
+        sys.exit(0)
+    assert args[0] == '-extract' and args[2] == 'raw'
+    value=obj
+    for key in args[1].split('.'):
+        value=value[int(key)] if isinstance(value,list) else value[key]
+    expected=args[args.index('-expect')+1]
+    kinds={'string':str,'integer':int,'array':list}
+    assert type(value) is kinds[expected]
+    print(len(value) if isinstance(value,list) else value)
+except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFileException):
+    sys.exit(1)
+''')
+        shim.chmod(0o755)
+    return _run(tmp_path, "restart-gateway", plan, extra_args=extra_args, prepare=prepare)
+
+
+def _gateway_enabled_plan(value="false"):
+    return [("print-disabled system", 0,
+             f'"{MCP_LABEL}" => {value}', ""),
+            (f"print system/{MCP_LABEL}", 0, "state = running", "")]
+
+
+@pytest.mark.parametrize("enabled_value", ["false", "enabled"])
+def test_gateway_exact_release_qualified_before_any_cycle(tmp_path, enabled_value):
+    plan = (_gateway_enabled_plan(enabled_value) + _stop_ok(MCP_LABEL)
+            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist"))
+    code, out, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 0, err
+    assert remaining == ""
+    assert calls == [entry[0] for entry in plan]
+    assert f"release={GATEWAY_SHA}" in out
+    assert not any(label in call for label in
+                   (CONTROL_LABEL, WORKER_LABEL, RELAY_LABEL, AGENT_RELAY_LABEL, BACKUP_LABEL)
+                   for call in calls)
+
+
+@pytest.mark.parametrize("args", [(), ("--expected-sha", "a"*39),
+    ("--expected-sha", "A"*40), ("--release", GATEWAY_SHA),
+    ("--expected-sha", GATEWAY_SHA, "--enable-disabled")])
+def test_gateway_requires_exact_closed_release_arguments(tmp_path, args):
+    code, _, _, calls, _, *_ = _qualified_gateway_run(tmp_path, [], extra_args=args)
+    assert code == 64
+    assert calls == []
+
+
+@pytest.mark.parametrize("changes,config_changes", [
+    ({}, {"release_sha": "c"*40}),
+    ({}, {"service_uid": 450}),
+    ({}, {"schema": "wrong"}),
+    ({"Label": CONTROL_LABEL}, {}),
+    ({"UserName": "root"}, {}),
+    ({"GroupName": "wheel"}, {}),
+    ({"WorkingDirectory": GATEWAY_RELEASE_ROOT + "/" + "c"*40}, {}),
+    ({"ProgramArguments": ["/bin/bash", "-c", "false"]}, {}),
+    ({"Program": "/bin/bash"}, {}),
+])
+def test_gateway_generation_mismatch_is_pre_effect_refusal(tmp_path, changes, config_changes):
+    code, _, err, calls, _, *_ = _qualified_gateway_run(
+        tmp_path, [], changes=changes, config_changes=config_changes)
+    assert code == 65
+    assert "gateway release qualification failed" in err
+    assert calls == []
+
+
+@pytest.mark.parametrize("kind", ["missing", "symlink"])
+def test_gateway_missing_or_indirect_config_never_stops_service(tmp_path, kind):
+    code, _, _, calls, _, *_ = _qualified_gateway_run(
+        tmp_path, [], missing_config=kind=="missing", symlink_config=kind=="symlink")
+    assert code == 65
+    assert calls == []
+
+
+@pytest.mark.parametrize("code,output", [
+    (0, f'"{MCP_LABEL}" => true'), (0, f'"{MCP_LABEL}" => disabled'),
+    (0, f'"{MCP_LABEL}" => false\n"{MCP_LABEL}" => enabled'),
+    (0, "disabled services = {}"), (5, "")])
+def test_gateway_never_enables_previously_disabled_or_unknown_service(tmp_path, code, output):
+    plan = [("print-disabled system", code, output, "")]
+    result, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert result == 65
+    assert "gateway must already be enabled" in err
+    assert calls == ["print-disabled system"]
+    assert remaining == ""
+
+
+def test_gateway_registered_but_not_running_is_pre_effect_refusal(tmp_path):
+    plan = _gateway_enabled_plan()
+    plan[-1] = (f"print system/{MCP_LABEL}", 0, "state = exited", "")
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 65
+    assert "service must be running" in err
+    assert calls == [entry[0] for entry in plan]
+    assert remaining == ""
+
+
+@pytest.mark.parametrize("index,value", [
+    (0, "/usr/bin/python3"), (1, "-c"), (2, "-S"),
+    (3, GATEWAY_RELEASE_ROOT + "/" + "c"*40 + "/ops/executive_os/executive_mcp_entry.py"),
+    (4, "--other-config"), (5, "/tmp/other-config.json")])
+def test_gateway_rejects_each_argv_coordinate_before_lifecycle(tmp_path, index, value):
+    release = GATEWAY_RELEASE_ROOT + "/" + GATEWAY_SHA
+    args = ["/Library/Application Support/MastermindExecutive/network-runtimes/"
+            + "b"*64 + "/bin/python", "-I", "-B",
+            release + "/ops/executive_os/executive_mcp_entry.py", "--config",
+            str(tmp_path / "executive-mcp.json")]
+    args[index] = value
+    code, _, _, calls, _, *_ = _qualified_gateway_run(
+        tmp_path, [], changes={"ProgramArguments": args})
+    assert code == 65
+    assert calls == []
+
+
+def test_gateway_post_start_config_disappearance_is_effect_unknown(tmp_path, monkeypatch):
+    # Remove only the disposable config after the fake bootstrap succeeds.
+    marker = 'exit "$plan_exit"'
+    injected = ('if [[ "$key" == bootstrap* ]]; then\n'
+                '  /bin/rm -f "$(dirname "$FAKE_LAUNCHCTL_PLAN")/executive-mcp.json"\n'
+                'fi\n')
+    monkeypatch.setattr(sys.modules[__name__], "LAUNCHCTL_SHIM",
+                        LAUNCHCTL_SHIM.replace(marker, injected + marker))
+    plan = (_gateway_enabled_plan() + _stop_ok(MCP_LABEL)
+            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist"))
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 75
+    assert "stage=postflight" in err and "do not replay" in err
+    assert remaining == ""
+    assert calls == [entry[0] for entry in plan]
+    assert calls.count(f"disable system/{MCP_LABEL}") == 1
+    assert calls.count(f"bootstrap system {tmp_path / 'mcp.plist'}") == 1
+
+
+def test_gateway_uncertain_stop_has_no_start_or_retry(tmp_path):
+    plan = _gateway_enabled_plan() + _stop_stubborn(MCP_LABEL, bootout_exit=5)
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 75
+    assert "stage=stop" in err and "do not replay" in err
+    assert remaining == ""
+    assert calls.count(f"disable system/{MCP_LABEL}") == 1
+    assert calls.count(f"bootout system/{MCP_LABEL}") == 1
+    assert not any(call.startswith(("enable ", "bootstrap ", "kickstart ")) for call in calls)
+
+
+@pytest.mark.parametrize("stage", ["disable", "enable", "bootstrap"])
+def test_gateway_failed_modifying_verb_stops_without_another_effect(tmp_path, stage):
+    plan = _gateway_enabled_plan()
+    if stage == "disable":
+        plan += [(f"disable system/{MCP_LABEL}", 5, "", "lost disable reply")]
+    else:
+        plan += _stop_ok(MCP_LABEL)
+        if stage == "enable":
+            plan += [(f"enable system/{MCP_LABEL}", 5, "", "lost enable reply")]
+        else:
+            plan += [(f"enable system/{MCP_LABEL}", 0, "", ""),
+                     (f"print system/{MCP_LABEL}", 113, "", "absent"),
+                     (f"bootstrap system {tmp_path / 'mcp.plist'}", 5, "", "lost bootstrap reply")]
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)
+    assert code == 75
+    assert "do not replay" in err
+    assert calls == [entry[0] for entry in plan]
+    assert remaining == ""
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires native macOS plutil parser")
+def test_gateway_qualification_uses_real_native_plutil_with_disposable_files(tmp_path):
+    plan = (_gateway_enabled_plan("enabled") + _stop_ok(MCP_LABEL)
+            + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist"))
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path, plan, native_plutil=True)
+    assert code == 0, err
+    assert remaining == ""
+    assert calls == [entry[0] for entry in plan]

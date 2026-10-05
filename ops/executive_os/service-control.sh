@@ -7,16 +7,21 @@ umask 077
 CONTROL_LABEL="com.mastermind.executive.control"
 WORKER_LABEL="com.mastermind.executive.worker.codex"
 RELAY_LABEL="com.mastermind.executive.sol-state-relay"
+AGENT_RELAY_LABEL="com.mastermind.executive.agent-relay"
 MCP_LABEL="com.mastermind.executive.mcp"
 BACKUP_LABEL="com.mastermind.executive.backup"
 MCP_PLIST="/Library/LaunchDaemons/$MCP_LABEL.plist"
+MCP_CONFIG="/Library/Application Support/MastermindExecutive/config/executive-mcp.json"
+MCP_RELEASE_ROOT="/Library/Application Support/MastermindExecutive/releases"
 CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
+AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-readside|stop-readside|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status}" >&2
+  /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   exit 64
 }
 
@@ -66,7 +71,7 @@ start_one() {
 
 stop_one() {
   local label="$1"
-  /bin/launchctl disable "system/$label"
+  /bin/launchctl disable "system/$label" || return $?
   # A nonzero bootout alone cannot prove absence or failure; read back.
   /bin/launchctl bootout "system/$label" >/dev/null 2>&1 || true
   # launchd acknowledges bootout before the service has fully disappeared.
@@ -136,10 +141,25 @@ require_absent() {
   return 1
 }
 
+require_registered() {
+  local label="$1"
+  local status=0
+  /bin/launchctl print "system/$label" >/dev/null 2>&1 || status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$status" -eq 113 ]; then
+    /bin/echo "service must be registered before stop: $label" >&2
+  else
+    /bin/echo "service registration state unknown before stop: $label (launchctl print exit $status)" >&2
+  fi
+  return 1
+}
+
 ensure_running() {
   local label="$1"
   local plist="$2"
-  /bin/launchctl enable "system/$label"
+  /bin/launchctl enable "system/$label" || return $?
   local before_output before_status=0
   before_output="$(/bin/launchctl print "system/$label" 2>/dev/null)" || before_status=$?
   if [ "$before_status" -eq 0 ] && is_running_output "$before_output"; then
@@ -147,8 +167,8 @@ ensure_running() {
     return 0
   fi
   case "$before_status" in
-    0) /bin/launchctl kickstart "system/$label" ;;
-    113) /bin/launchctl bootstrap system "$plist" ;;
+    0) /bin/launchctl kickstart "system/$label" || return $? ;;
+    113) /bin/launchctl bootstrap system "$plist" || return $? ;;
     *)
       /bin/echo "service registration state unknown before read-side start: $label (launchctl print exit $before_status)" >&2
       return 1
@@ -177,6 +197,59 @@ ensure_running() {
   done
   /bin/echo "service did not become running within read-side startup wait: $label (launchctl print exit $after_status)" >&2
   return 1
+}
+
+
+# This is a read-only qualification of a generation already published by the
+# installed release owner. It neither produces nor edits a config or plist.
+gateway_field() {
+  /usr/bin/plutil -extract "$2" raw -expect "$3" -o - "$1" 2>/dev/null
+}
+
+qualify_gateway_release() {
+  local expected_sha="$1" release network_python runtime_pattern
+  release="$MCP_RELEASE_ROOT/$expected_sha"
+  # Do not call an exit-using helper here: this same observation runs both
+  # before effects (65) and after a cycle (75), with classification by caller.
+  [ -f "$MCP_PLIST" ] && [ ! -L "$MCP_PLIST" ] || return 1
+  [ -f "$MCP_CONFIG" ] && [ ! -L "$MCP_CONFIG" ] || return 1
+  /usr/bin/plutil -lint "$MCP_PLIST" >/dev/null 2>&1 || return 1
+  /usr/bin/plutil -lint "$MCP_CONFIG" >/dev/null 2>&1 || return 1
+  [ "$(gateway_field "$MCP_CONFIG" schema string)" = "mastermind.executive_mcp_install.v1" ] || return 1
+  [ "$(gateway_field "$MCP_CONFIG" release_sha string)" = "$expected_sha" ] || return 1
+  [ "$(gateway_field "$MCP_CONFIG" service_uid integer)" = "458" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" Label string)" = "$MCP_LABEL" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" UserName string)" = "_mastermind_executive_mcp" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" GroupName string)" = "_mastermind_executive_mcp" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" WorkingDirectory string)" = "$release" ] || return 1
+  # A Program override would take precedence over the reviewed argv[0].
+  if /usr/bin/plutil -type Program "$MCP_PLIST" >/dev/null 2>&1; then
+    return 1
+  fi
+  [ "$(gateway_field "$MCP_PLIST" ProgramArguments array)" = "6" ] || return 1
+  network_python="$(gateway_field "$MCP_PLIST" ProgramArguments.0 string)" || return 1
+  runtime_pattern='^/Library/Application Support/MastermindExecutive/network-runtimes/[0-9a-f]{64}/bin/python$'
+  [[ "$network_python" =~ $runtime_pattern ]] || return 1
+  [ "$(gateway_field "$MCP_PLIST" ProgramArguments.1 string)" = "-I" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" ProgramArguments.2 string)" = "-B" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" ProgramArguments.3 string)" = "$release/ops/executive_os/executive_mcp_entry.py" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" ProgramArguments.4 string)" = "--config" ] || return 1
+  [ "$(gateway_field "$MCP_PLIST" ProgramArguments.5 string)" = "$MCP_CONFIG" ] || return 1
+}
+
+require_gateway_enabled() {
+  local output
+  if ! output="$(/bin/launchctl print-disabled system 2>/dev/null)"; then
+    /bin/echo "gateway must already be enabled: state unreadable" >&2
+    return 1
+  fi
+  if ! /bin/echo "$output" | /usr/bin/awk -v label="$MCP_LABEL" '
+    $1 == "\"" label "\"" {count++; if ($2 != "=>" || ($3 != "false" && $3 != "enabled")) bad=1}
+    END {exit(count == 1 && !bad ? 0 : 1)}
+  '; then
+    /bin/echo "gateway must already be enabled: disabled or unknown" >&2
+    return 1
+  fi
 }
 
 WORKER_OBSERVED_STATE=""
@@ -257,7 +330,14 @@ readside_postflight() {
   require_absent "$BACKUP_LABEL"
 }
 
-[ "$#" -eq 1 ] || usage
+[ "$#" -ge 1 ] || usage
+case "$1" in
+  restart-gateway)
+    [ "$#" -eq 3 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
+  *) [ "$#" -eq 1 ] || usage ;;
+esac
 case "$1" in
   start)
     require_root
@@ -283,12 +363,28 @@ case "$1" in
     ;;
   restart-gateway)
     require_root
-    validate_plist "$MCP_PLIST"
-    # The gateway is independently long-lived across read-side restore.
-    # Cycle only its fixed LaunchDaemon so an accepted release can refresh
-    # the MCP tool catalog without changing worker/control/relay state.
-    stop_one "$MCP_LABEL"
-    ensure_running "$MCP_LABEL" "$MCP_PLIST"
+    # Fail before any modifying launchctl verb on a stale/mismatched target.
+    if ! qualify_gateway_release "$3"; then
+      /bin/echo "gateway release qualification failed" >&2
+      exit 65
+    fi
+    require_gateway_enabled || exit 65
+    require_running "$MCP_LABEL" || exit 65
+    # Restart may re-enable only the service this invocation observed enabled
+    # and running before its own stop. It cannot activate a disabled gateway.
+    if ! stop_one "$MCP_LABEL"; then
+      /bin/echo "gateway_refresh_effect_unknown stage=stop; do not replay" >&2
+      exit 75
+    fi
+    if ! ensure_running "$MCP_LABEL" "$MCP_PLIST"; then
+      /bin/echo "gateway_refresh_effect_unknown stage=start; do not replay" >&2
+      exit 75
+    fi
+    if ! qualify_gateway_release "$3"; then
+      /bin/echo "gateway_refresh_effect_unknown stage=postflight; do not replay" >&2
+      exit 75
+    fi
+    /bin/echo "gateway_refresh=running release=$3 catalog_adoption=unverified"
     ;;
   start-readside)
     require_root
@@ -307,6 +403,21 @@ case "$1" in
     stop_one "$CONTROL_LABEL"
     stop_one "$RELAY_LABEL"
     readside_postflight
+    ;;
+  start-agent-relay)
+    require_root
+    # Enrollment/verification is a separate A2 owner. Activation accepts no
+    # caller-supplied label or plist and cannot manufacture enrollment state.
+    validate_plist "$AGENT_RELAY_PLIST"
+    ensure_running "$AGENT_RELAY_LABEL" "$AGENT_RELAY_PLIST"
+    ;;
+  stop-agent-relay)
+    require_root
+    # The pre-enrollment disabled override remains owned by A2 host
+    # preparation. This lifecycle command may mutate the override only for a
+    # service that launchd already proves is registered.
+    require_registered "$AGENT_RELAY_LABEL"
+    stop_one "$AGENT_RELAY_LABEL"
     ;;
   status)
     exec /bin/bash "$SCRIPT_DIR/status.sh"

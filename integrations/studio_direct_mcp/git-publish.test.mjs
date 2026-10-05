@@ -638,3 +638,52 @@ test('non-fast-forward remains refused without rewinding the remote',async()=>{
     assert.equal(await refsAt(f.remote),`refs/heads/${f.branch} ${ahead}`);
   }finally{await f.cleanup();}
 });
+
+
+test('selected repository publisher uses the exact v2 owner binding', async () => {
+  const f = await fixture();
+  try {
+    const calls = [];
+    const selectedExec = async (file, args, options) => {
+      if (file === f.cli) {
+        calls.push(args);
+        return { stdout: JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: 'macro',
+          receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+            branch: f.branch, head_sha: f.head, dirty: false },
+        }), stderr: '' };
+      }
+      return execFile(file, args, options);
+    };
+    const publisher = createGitPublisher({ ...f.config, repository: 'macro' }, { execFile: selectedExec });
+    const status = await publisher.status({ operation_id: f.operationId });
+    assert.equal(status.local_head_sha, f.head);
+    assert.deepEqual(calls, [['status', '--operation-id', f.operationId, '--lane', 'web', '--repository', 'macro']]);
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'macro selected\n');
+    const committed = await publisher.commit({ operation_id: f.operationId, expected_head_sha: f.head, message: 'test: selected owner' });
+    assert.equal(committed.effect_state, 'APPLIED');
+    const pushed = await publisher.push({ operation_id: f.operationId, expected_head_sha: committed.commit_head_sha });
+    assert.equal(pushed.remote_head_sha, committed.commit_head_sha);
+    assert.ok(calls.every((args) => args.at(-1) === 'macro'));
+  } finally { await f.cleanup(); }
+});
+
+test('selected publisher refuses a foreign or unversioned owner receipt before Git', async () => {
+  const f = await fixture();
+  try {
+    for (const bad of [{ repository: 'terminal', schema_version: 'mastermind.workspace_cli/v2' },
+                       { repository: 'macro', schema_version: 'mastermind.workspace_cli/v1' }]) {
+      let gitCalls = 0;
+      const publisher = createGitPublisher({ ...f.config, repository: 'macro' }, {
+        execFile: async (file) => {
+          if (file !== f.cli) { gitCalls++; throw new Error('must not reach Git'); }
+          return { stdout: JSON.stringify({ ...bad, action: 'status', effect: 'NOT_APPLIED',
+            receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace, branch: f.branch } }) };
+        },
+      });
+      await assert.rejects(publisher.status({ operation_id: f.operationId }), /repository binding/);
+      assert.equal(gitCalls, 0);
+    }
+  } finally { await f.cleanup(); }
+});
