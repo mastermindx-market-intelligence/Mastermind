@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,19 @@ def _seed_home(home: Path) -> None:
     (home / ".claude").mkdir(parents=True)
     (home / ".codex" / "AGENTS.md").write_text(
         "# Existing Codex policy\n\nKeep this machine-local note.\n",
+        encoding="utf-8",
+    )
+    (home / ".codex" / "config.toml").write_text(
+        """model = "gpt-6.1-sol"
+
+[agents]
+max_concurrent_threads_per_session = 4
+default_subagent_model = "gpt-5.6-sol"
+enabled = true
+
+[features]
+hooks = true
+""",
         encoding="utf-8",
     )
     (home / ".claude" / "CLAUDE.md").write_text(
@@ -94,6 +108,8 @@ def test_apply_preserves_unrelated_provider_policy_and_hooks(tmp_path: Path) -> 
     claude = json.loads((home / ".claude" / "settings.json").read_text())
     assert claude["model"] == "fable"
     assert claude["permissions"]["defaultMode"] == "bypassPermissions"
+    assert claude["env"]["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] == "2"
+    assert claude["env"]["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] == "1"
     assert any(
         row.get("matcher") == "Write"
         for row in claude["hooks"]["PreToolUse"]
@@ -102,6 +118,13 @@ def test_apply_preserves_unrelated_provider_policy_and_hooks(tmp_path: Path) -> 
         row.get("matcher") == "Agent|Task|Bash"
         for row in claude["hooks"]["PreToolUse"]
     )
+
+    codex_config = tomllib.loads((home / ".codex" / "config.toml").read_text())
+    assert codex_config["model"] == "gpt-6.1-sol"
+    assert codex_config["features"]["hooks"] is True
+    assert codex_config["agents"]["enabled"] is False
+    assert codex_config["agents"]["max_concurrent_threads_per_session"] == 1
+    assert codex_config["agents"]["default_subagent_model"] == "gpt-5.6-sol"
 
     codex = json.loads((home / ".codex" / "hooks.json").read_text())
     assert codex["description"] == "Existing local hooks"
@@ -125,6 +148,7 @@ def test_apply_is_idempotent_and_backups_keep_original_content(tmp_path: Path) -
     _seed_home(home)
     originals = {
         "codex_doc": (home / ".codex" / "AGENTS.md").read_bytes(),
+        "codex_config": (home / ".codex" / "config.toml").read_bytes(),
         "claude_doc": (home / ".claude" / "CLAUDE.md").read_bytes(),
         "codex_hooks": (home / ".codex" / "hooks.json").read_bytes(),
         "claude_settings": (home / ".claude" / "settings.json").read_bytes(),
@@ -135,6 +159,7 @@ def test_apply_is_idempotent_and_backups_keep_original_content(tmp_path: Path) -
         path: path.read_bytes()
         for path in (
             home / ".codex" / "AGENTS.md",
+            home / ".codex" / "config.toml",
             home / ".claude" / "CLAUDE.md",
             home / ".codex" / "hooks.json",
             home / ".claude" / "settings.json",
@@ -149,6 +174,9 @@ def test_apply_is_idempotent_and_backups_keep_original_content(tmp_path: Path) -
     assert (
         home / ".codex" / "AGENTS.md.mastermind-orchestrator-backup"
     ).read_bytes() == originals["codex_doc"]
+    assert (
+        home / ".codex" / "config.toml.mastermind-orchestrator-backup"
+    ).read_bytes() == originals["codex_config"]
     assert (
         home / ".claude" / "CLAUDE.md.mastermind-orchestrator-backup"
     ).read_bytes() == originals["claude_doc"]
@@ -211,10 +239,16 @@ Sol operating executive -> Fabric workers.
         encoding="utf-8",
     )
     assert not (home / ".codex" / "hooks.json").exists()
+    assert not (home / ".codex" / "config.toml").exists()
 
     result = apply_policy(home)
 
     assert result["state"] == "READY"
+    codex_config = tomllib.loads((home / ".codex" / "config.toml").read_text())
+    assert codex_config["agents"] == {
+        "max_concurrent_threads_per_session": 1,
+        "enabled": False,
+    }
     codex_hooks = json.loads((home / ".codex" / "hooks.json").read_text())
     assert len(codex_hooks["hooks"]["PreToolUse"]) == 1
     claude = json.loads((home / ".claude" / "settings.json").read_text())
@@ -361,6 +395,44 @@ def test_verify_rejects_async_managed_guard_registration(tmp_path: Path) -> None
 
     assert result["state"] == "DRIFT"
     assert "codex_hooks.pretool" in result["issues"]
+
+
+def test_verify_detects_codex_native_agent_cap_drift(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    path = home / ".codex" / "config.toml"
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        text.replace("enabled = false", "enabled = true").replace(
+            "max_concurrent_threads_per_session = 1",
+            "max_concurrent_threads_per_session = 4",
+        ),
+        encoding="utf-8",
+    )
+
+    result = verify_policy(home)
+
+    assert result["state"] == "DRIFT"
+    assert "codex_config.agents_enabled" in result["issues"]
+    assert "codex_config.max_concurrent_threads" in result["issues"]
+
+
+def test_verify_detects_claude_native_agent_cap_drift(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    path = home / ".claude" / "settings.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["env"]["CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"] = "8"
+    value["env"]["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = "4"
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = verify_policy(home)
+
+    assert result["state"] == "DRIFT"
+    assert "claude_settings.max_concurrent_subagents" in result["issues"]
+    assert "claude_settings.max_subagent_spawn_depth" in result["issues"]
 
 
 def test_unsafe_provider_parent_is_refused_before_any_mutation(tmp_path: Path) -> None:
