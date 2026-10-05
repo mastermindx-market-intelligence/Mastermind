@@ -302,9 +302,16 @@ def _strip_temporary_native_override(text: str) -> str:
             "temporary native Codex override appears more than once"
         )
     start = text.index(TEMP_NATIVE_OVERRIDE_HEADING)
-    next_marker = text.find("<!-- mastermind-ceo-forward-execution -->", start)
+    next_legacy_marker = text.find(
+        "<!-- mastermind-ceo-forward-execution -->", start
+    )
+    next_current_marker = text.find(BEGIN, start)
     next_heading = text.find("\n## ", start + len(TEMP_NATIVE_OVERRIDE_HEADING))
-    candidates = [value for value in (next_marker, next_heading) if value >= 0]
+    candidates = [
+        value
+        for value in (next_legacy_marker, next_current_marker, next_heading)
+        if value >= 0
+    ]
     if not candidates:
         raise OrchestratorPolicyError(
             "temporary native Codex override has no safe migration boundary"
