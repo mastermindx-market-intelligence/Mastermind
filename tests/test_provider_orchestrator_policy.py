@@ -398,6 +398,55 @@ def test_verify_rejects_async_managed_guard_registration(tmp_path: Path) -> None
     assert "codex_hooks.pretool" in result["issues"]
 
 
+def test_verify_rejects_extra_guard_reference_even_with_one_valid_hook(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    path = home / ".codex" / "hooks.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    managed = next(
+        row
+        for row in value["hooks"]["PreToolUse"]
+        if row.get("matcher") == "^Bash$"
+    )
+    valid = dict(managed["hooks"][0])
+    managed["hooks"].append(
+        {
+            "type": "prompt",
+            "command": valid["command"],
+            "timeout": 10,
+        }
+    )
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = verify_policy(home)
+
+    assert result["state"] == "DRIFT"
+    assert "codex_hooks.pretool" in result["issues"]
+
+
+def test_apply_refuses_dotted_codex_agents_shape_before_rewrite(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    path = home / ".codex" / "config.toml"
+    original = (
+        'model = "gpt-6.1-sol"\n'
+        'agents.enabled = true\n'
+        'agents.max_concurrent_threads_per_session = 4\n'
+    )
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(
+        OrchestratorPolicyError,
+        match=r"one explicit \[agents\] table",
+    ):
+        apply_policy(home)
+
+    assert path.read_text(encoding="utf-8") == original
+
+
 def test_verify_detects_codex_native_agent_cap_drift(tmp_path: Path) -> None:
     home = tmp_path / "home"
     _seed_home(home)
