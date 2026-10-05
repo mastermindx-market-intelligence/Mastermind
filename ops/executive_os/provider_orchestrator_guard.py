@@ -81,18 +81,11 @@ REPO_ARG_RE = re.compile(
     re.I,
 )
 
-_ENV_ASSIGN = (
-    r"(?:[A-Za-z_][A-Za-z0-9_]*="
-    r"(?:'[^']*'|\"[^\"]*\"|[^\s;&|]+)\s+)*"
-)
 FABRIC_LAUNCH_RE = re.compile(
-    CMD_POS
-    + r"(?:env\s+)?"
-    + _ENV_ASSIGN
-    + r"(?:"
-      r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b"
-      r"|(?:[A-Za-z0-9_./-]+/)?(?:sub|remote_sub)\.sh\b"
-      r")",
+    r"(?<![A-Za-z0-9_.-])(?:"
+    r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b"
+    r"|(?:[A-Za-z0-9_./-]+/)?(?:sub|remote_sub)\.sh\b"
+    r")",
     re.I,
 )
 _FABRIC_IDENTITY_NAMES = (
@@ -251,10 +244,15 @@ def _command_or_environment_value(command: str, name: str) -> str:
     )
     match = pattern.search(command)
     if match:
-        return next(
+        value = next(
             (value for value in match.groups() if value is not None),
             "",
         ).strip()
+        # Dynamic shell expansion cannot prove stable root identity. A caller
+        # should inherit an already-bound value or pass an explicit literal.
+        if any(token in value for token in ("$", "`")):
+            return ""
+        return value
     return os.environ.get(name, "").strip()
 
 
