@@ -207,7 +207,7 @@ gateway_field() {
 }
 
 qualify_gateway_release() {
-  local expected_sha="$1" release network_python runtime_pattern
+  local expected_sha="$1" release network_python runtime_pattern service_uid service_user service_group
   release="$MCP_RELEASE_ROOT/$expected_sha"
   # Do not call an exit-using helper here: this same observation runs both
   # before effects (65) and after a cycle (75), with classification by caller.
@@ -217,10 +217,15 @@ qualify_gateway_release() {
   /usr/bin/plutil -lint "$MCP_CONFIG" >/dev/null 2>&1 || return 1
   [ "$(gateway_field "$MCP_CONFIG" schema string)" = "mastermind.executive_mcp_install.v1" ] || return 1
   [ "$(gateway_field "$MCP_CONFIG" release_sha string)" = "$expected_sha" ] || return 1
-  [ "$(gateway_field "$MCP_CONFIG" service_uid integer)" = "458" ] || return 1
+  service_uid="$(gateway_field "$MCP_CONFIG" service_uid integer)" || return 1
+  [[ "$service_uid" =~ ^[0-9]+$ ]] && [ "$service_uid" -gt 0 ] || return 1
   [ "$(gateway_field "$MCP_PLIST" Label string)" = "$MCP_LABEL" ] || return 1
-  [ "$(gateway_field "$MCP_PLIST" UserName string)" = "_mastermind_executive_mcp" ] || return 1
-  [ "$(gateway_field "$MCP_PLIST" GroupName string)" = "_mastermind_executive_mcp" ] || return 1
+  service_user="$(gateway_field "$MCP_PLIST" UserName string)" || return 1
+  service_group="$(gateway_field "$MCP_PLIST" GroupName string)" || return 1
+  # Bind the launchd principal to the service UID already published by the
+  # sealed install generation without duplicating protected account topology.
+  [ "$(/usr/bin/id -u "$service_user" 2>/dev/null)" = "$service_uid" ] || return 1
+  [ "$(/usr/bin/id -gn "$service_user" 2>/dev/null)" = "$service_group" ] || return 1
   [ "$(gateway_field "$MCP_PLIST" WorkingDirectory string)" = "$release" ] || return 1
   # A Program override would take precedence over the reviewed argv[0].
   if /usr/bin/plutil -type Program "$MCP_PLIST" >/dev/null 2>&1; then

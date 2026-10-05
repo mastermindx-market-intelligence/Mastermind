@@ -29,8 +29,18 @@ BACKUP_LABEL = "com.mastermind.executive.backup"
 # these exact paths, so production keeps using absolute macOS binaries and the
 # tests do not depend on shell function interception of path-qualified commands.
 ID_SHIM = r'''#!/bin/bash
-if [ "${1:-}" = "-u" ]; then
+if [ "${1:-}" = "-u" ] && [ "$#" -eq 1 ]; then
   printf '%s\n' "${FAKE_UID:-0}"
+  exit 0
+fi
+if [ "${1:-}" = "-u" ] && [ "$#" -eq 2 ]; then
+  [ "$2" = "${FAKE_SERVICE_USER:-}" ] || exit 1
+  printf '%s\n' "${FAKE_SERVICE_UID:-458}"
+  exit 0
+fi
+if [ "${1:-}" = "-gn" ] && [ "$#" -eq 2 ]; then
+  [ "$2" = "${FAKE_SERVICE_USER:-}" ] || exit 1
+  printf '%s\n' "${FAKE_SERVICE_GROUP:-_mastermind_executive_mcp}"
   exit 0
 fi
 exec /usr/bin/id "$@"
@@ -170,6 +180,9 @@ def _run(
         "FAKE_LAUNCHCTL_LOG": str(log_path),
         "FAKE_UID": fake_uid,
         "FAKE_OS_NAME": fake_os,
+        "FAKE_SERVICE_USER": "_mastermind_executive_mcp",
+        "FAKE_SERVICE_UID": "458",
+        "FAKE_SERVICE_GROUP": "_mastermind_executive_mcp",
     }
     completed = subprocess.run(
         ["/bin/bash", str(script), action, *extra_args],
