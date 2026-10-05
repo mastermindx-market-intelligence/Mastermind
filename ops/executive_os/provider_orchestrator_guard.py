@@ -234,24 +234,31 @@ def repeat_poll_reason(key: str, *, now: float | None = None) -> str | None:
     return None
 
 
-def _command_or_environment_value(command: str, name: str) -> str:
-    # An explicit shell assignment wins over inherited process state, including
-    # an explicit empty assignment. This mirrors the environment the launched
-    # child will actually receive instead of letting a parent value mask a reset.
+def _command_assignment(command: str, name: str) -> tuple[bool, str]:
     pattern = re.compile(
         rf"(?:^|[\s;&|]){re.escape(name)}="
         rf"(?:'([^']*)'|\"([^\"]*)\"|([^\s;&|]*))"
     )
     match = pattern.search(command)
-    if match:
-        value = next(
-            (value for value in match.groups() if value is not None),
-            "",
-        ).strip()
-        # Dynamic shell expansion cannot prove stable root identity. A caller
-        # should inherit an already-bound value or pass an explicit literal.
-        if any(token in value for token in ("$", "`")):
-            return ""
+    if not match:
+        return False, ""
+    value = next(
+        (value for value in match.groups() if value is not None),
+        "",
+    ).strip()
+    # Dynamic shell expansion cannot prove stable identity. A caller should
+    # inherit an already-bound value or pass an explicit literal.
+    if any(token in value for token in ("$", "`")):
+        return True, ""
+    return True, value
+
+
+def _command_or_environment_value(command: str, name: str) -> str:
+    # An explicit shell assignment wins over inherited process state, including
+    # an explicit empty assignment. This mirrors the environment the launched
+    # child will actually receive instead of letting a parent value mask a reset.
+    found, value = _command_assignment(command, name)
+    if found:
         return value
     return os.environ.get(name, "").strip()
 
@@ -259,6 +266,18 @@ def _command_or_environment_value(command: str, name: str) -> str:
 def guard_fabric_launch(command: str) -> None:
     if FABRIC_LAUNCH_RE.search(command) is None:
         return
+
+    inherited_root = os.environ.get("POOL_ORCHESTRATOR_ID", "").strip()
+    root_assigned, assigned_root = _command_assignment(
+        command, "POOL_ORCHESTRATOR_ID"
+    )
+    if inherited_root and root_assigned and assigned_root != inherited_root:
+        deny(
+            "Mastermind Fabric root-budget guard: POOL_ORCHESTRATOR_ID may not "
+            "be rebound inside an already-rooted provider session. Preserve the "
+            "original root identity; a new chat/helper is not a fresh budget."
+        )
+
     missing = [
         name
         for name in _FABRIC_IDENTITY_NAMES
