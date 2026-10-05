@@ -12,10 +12,7 @@ Canonical source:
 The deployer manages one marked policy block in `~/.codex/AGENTS.md` and
 `~/.claude/CLAUDE.md`, one `PreToolUse` registration in each provider home, and identical
 copies of the reviewed guard. Existing unrelated instructions, hooks, model settings, plugins,
-permissions, worktree hooks, and credentials are preserved. Legacy
-`mastermind-ceo-async-ci-v1`, `mastermind-ceo-context-discipline-v1`, and
-`mastermind-ceo-forward-execution` blocks are migrated to the single v2 block rather than
-stacked.
+permissions, worktree hooks, and credentials are preserved. Legacy and temporary operational policy blocks are migrated into the single v2 block rather than stacked. This includes `mastermind-ceo-async-ci-v1`, `mastermind-ceo-context-discipline-v1`, `mastermind-ceo-forward-execution`, `mastermind-orchestration-burn-guard-v1`, and `mastermind-fabric-routing-operational-v1`. The v2 block is the only managed provider-policy plane after a successful apply.
 
 ## Verify before apply
 
@@ -25,8 +22,7 @@ Run from a protected/reviewed Mastermind checkout:
 python3 ops/executive_os/provider_orchestrator_policy.py verify --home "$HOME"
 ```
 
-`READY` means the exact reviewed guard digest, policy content, and both provider hook
-registrations match. `DRIFT` is read-only evidence; it does not authorize overwriting an
+`READY` means the exact reviewed guard digest, policy content, and both provider hook registrations match **as synchronous command handlers**. It does not prove that the provider loaded or trusted the hook, that native-agent settings have the intended values, or that Executive/Fabric runtime admission is live. `DRIFT` is read-only evidence; it does not authorize overwriting an
 unrelated provider home. `REFUSED` means preflight found a malformed/unsafe target before
 an apply could complete. `APPLY_INCOMPLETE_VERIFY_REQUIRED` is different: at least one
 managed file changed before a later write failed. Keep the same host/carrier, inspect the
@@ -61,9 +57,38 @@ verify all four observations separately:
 Do not launch a real workflow merely to prove the guard; use an already-existing run/PR or a
 synthetic hook payload where possible. Never cancel/re-dispatch shared CI as part of this canary.
 
+## Execution-efficiency acceptance
+
+The managed policy carries these anti-burn invariants in addition to the CI guard:
+
+- optimize accepted capability delta per original-root budget rather than agent count, tokens, elapsed time, tool calls, or PR count;
+- Sol is the default day-to-day project executive; Astra is optional strategic/meta capacity for genuine principal judgment;
+- routine bounded labor goes through the existing Executive/Subagent Fabric; native provider children are exceptions, not the worker pool;
+- capacity is a ceiling, not a utilization target; preserve one original root/grant/depth/budget and reserve review/repair/integration capacity before widening fan-out;
+- every worker owns one independently useful bounded outcome with exact source/ref, scope, DONE_WHEN/evidence, non-goals, and escalation condition;
+- leaf workers do not recursively fan out; an admitted coordinator's helpers remain descendants of the original root;
+- two consecutive support-only parent cycles with no capability delta trigger NO_DELTA_LOOP and force a tactic/lane change;
+- two consecutive status-only/no-delta returns for the same worker dependency trigger a worker breaker rather than generic Continue;
+- consume a returned child before replacing or duplicating it;
+- continuously integrate source through reviewable dependency-correct verticals instead of indefinitely growing private branches;
+- phase completion/checkpoint is a save-and-reassess boundary, not automatic finalization while useful authorized work remains.
+
+These are orchestration policy constraints only. They do not create a second router, queue, scheduler,
+retry controller, session registry, or lifecycle owner.
+
 ## Fleet acceptance
 
-Track source review, host installation, provider hook visibility/trust, and behavioral canary as
-four distinct states. A merged source file proves none of the latter three. A copied file proves
-neither provider selection nor hook execution. For an offline host, leave it `NOT_INSTALLED`
-rather than inferring convergence from another machine.
+Track the rollout as separate layers:
+
+1. reviewed/merged policy source;
+2. exact managed policy bytes and guard digest installed on the host;
+3. exact synchronous hook registration;
+4. provider hook loading/visibility and any required human trust/selection;
+5. effective native-client agent/concurrency/depth settings;
+6. behavioral canary for CI and native-child routing;
+7. canonical Executive/Subagent Fabric root-budget, admission, START/return, and acceptance proof.
+
+Do not collapse these into one green state. A merged source file proves none of the host/runtime layers.
+A copied file proves neither provider selection nor hook execution. Never manufacture a Codex trusted
+hash or silently alter unrelated provider permissions/model/account settings. For an offline host, leave
+it `NOT_INSTALLED` rather than inferring convergence from another machine.
