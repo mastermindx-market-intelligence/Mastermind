@@ -1,3 +1,4 @@
+import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
   decodeMissionv3,
@@ -35,6 +36,7 @@ export interface AuthState {
   content: boolean;
 }
 export interface RawClient {
+  readonly executive?: OsExecutiveTransport;
   getState(): AuthState;
   /** Existing source epoch, when exposed by the fixed client; never a principal or grant. */
   invalidationGeneration?(): number;
