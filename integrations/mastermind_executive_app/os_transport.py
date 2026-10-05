@@ -28,6 +28,7 @@ import hashlib
 import json
 import math
 from collections.abc import Awaitable, Callable, Mapping
+from http import HTTPStatus
 from typing import Any
 
 from starlette.responses import JSONResponse, Response
@@ -414,7 +415,7 @@ class OsExecutiveTransportApp:
             or query_string
             or scheme != "https"
         ):
-            await Response(status_code=404, headers=_OS_HTTP_HEADERS)(scope, receive, send)
+            await Response(status_code=HTTPStatus.NOT_FOUND, headers=_OS_HTTP_HEADERS)(scope, receive, send)
             return
 
         headers = scope.get("headers") or ()
@@ -430,7 +431,7 @@ class OsExecutiveTransportApp:
             await JSONResponse(
                 {"ok": False, "error": {"code": "transport_refused",
                                          "message": "fixed OS transport refused"}},
-                status_code=403,
+                status_code=HTTPStatus.FORBIDDEN,
                 headers=_OS_HTTP_HEADERS,
             )(scope, receive, send)
             return
@@ -441,7 +442,7 @@ class OsExecutiveTransportApp:
             await JSONResponse(
                 {"ok": False, "error": {"code": "authentication_required",
                                          "message": "authentication required"}},
-                status_code=401,
+                status_code=HTTPStatus.UNAUTHORIZED,
                 headers={**_OS_HTTP_HEADERS, "WWW-Authenticate": "Bearer"},
             )(scope, receive, send)
             return
@@ -450,7 +451,7 @@ class OsExecutiveTransportApp:
         if principal is None:
             await JSONResponse(
                 {"ok": False, "error": {"code": "authentication_required", "message": "authentication required"}},
-                status_code=401, headers={**_OS_HTTP_HEADERS, "WWW-Authenticate": "Bearer"},
+                status_code=HTTPStatus.UNAUTHORIZED, headers={**_OS_HTTP_HEADERS, "WWW-Authenticate": "Bearer"},
             )(scope, receive, send)
             return
 
@@ -460,7 +461,7 @@ class OsExecutiveTransportApp:
             await JSONResponse(
                 {"ok": False, "error": {"code": "invalid_input",
                                          "message": "body receive deadline exceeded"}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )(scope, receive, send)
             return
@@ -468,7 +469,7 @@ class OsExecutiveTransportApp:
             await JSONResponse(
                 {"ok": False, "error": {"code": "invalid_input",
                                          "message": str(exc) or "request body is invalid"}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )(scope, receive, send)
             return
@@ -479,7 +480,7 @@ class OsExecutiveTransportApp:
             await JSONResponse(
                 {"ok": False, "error": {"code": "invalid_input",
                                          "message": str(exc) or "request body is invalid"}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )(scope, receive, send)
             return
@@ -488,7 +489,7 @@ class OsExecutiveTransportApp:
             path != "/os/executive/context" and set(body_obj) != {"arguments"}
         ):
             await JSONResponse({"ok": False, "error": {"code": "invalid_input", "message": "fixed request body required"}},
-                               status_code=400, headers=_OS_HTTP_HEADERS)(scope, receive, send)
+                               status_code=HTTPStatus.BAD_REQUEST, headers=_OS_HTTP_HEADERS)(scope, receive, send)
             return
 
         # Revalidate the original bearer after each awaited operation before
@@ -499,14 +500,14 @@ class OsExecutiveTransportApp:
             response = JSONResponse(
                 {"ok": False, "error": {"code": "backend_unavailable",
                                          "message": "Executive response is unavailable"}},
-                status_code=503,
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 headers=_OS_HTTP_HEADERS,
             )
         except Exception:
             response = JSONResponse(
                 {"ok": False, "error": {"code": "backend_unavailable",
                                          "message": "Executive response is unavailable"}},
-                status_code=503,
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 headers=_OS_HTTP_HEADERS,
             )
         await response(scope, receive, send)
@@ -549,8 +550,8 @@ class OsExecutiveTransportApp:
     ) -> Response:
         if path == "/os/executive/context":
             if not await self._still_current(scope, principal):
-                return JSONResponse({"ok": False, "error": {"code": "identity_unverified", "message": "context authorization changed"}}, status_code=401, headers=_OS_HTTP_HEADERS)
-            return JSONResponse(_context_payload(principal), status_code=200,
+                return JSONResponse({"ok": False, "error": {"code": "identity_unverified", "message": "context authorization changed"}}, status_code=HTTPStatus.UNAUTHORIZED, headers=_OS_HTTP_HEADERS)
+            return JSONResponse(_context_payload(principal), status_code=HTTPStatus.OK,
                                 headers=_OS_HTTP_HEADERS)
         if path == "/os/executive/submit":
             return await self._dispatch_submit(scope, body_obj, principal)
@@ -572,7 +573,7 @@ class OsExecutiveTransportApp:
             return JSONResponse(
                 {"ok": False, "error": {"code": "invalid_input",
                                          "message": "body must contain exactly {\"arguments\": {...}}"}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
         try:
@@ -582,12 +583,12 @@ class OsExecutiveTransportApp:
                 return JSONResponse(
                     {"ok": False, "error": {"code": "invalid_input",
                                              "message": "invalid submit arguments"}},
-                    status_code=400,
+                    status_code=HTTPStatus.BAD_REQUEST,
                     headers=_OS_HTTP_HEADERS,
                 )
             return JSONResponse(
                 {"ok": False, "error": {"code": exc.code, "message": exc.message}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
 
@@ -597,7 +598,7 @@ class OsExecutiveTransportApp:
             return JSONResponse(
                 {"ok": False, "error": {"code": "invalid_input",
                                          "message": "operation_key is not admissible"}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
 
@@ -611,34 +612,34 @@ class OsExecutiveTransportApp:
         try:
             start, body = await _drive_inner(self._inner_app, inner_scope, replay_body)
         except Exception:
-            return JSONResponse(_unknown_outcome(request_ref), status_code=202,
+            return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED,
                                 headers=_OS_HTTP_HEADERS)
 
         if not await self._still_current(scope, principal):
-            return JSONResponse(_unknown_outcome(request_ref), status_code=202, headers=_OS_HTTP_HEADERS)
+            return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED, headers=_OS_HTTP_HEADERS)
         if start["status"] not in (200, 202, 409, 503) or not body:
-            return JSONResponse(_unknown_outcome(request_ref), status_code=202,
+            return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED,
                                 headers=_OS_HTTP_HEADERS)
         try:
             decoded = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
-            return JSONResponse(_unknown_outcome(request_ref), status_code=202,
+            return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED,
                                 headers=_OS_HTTP_HEADERS)
         from integrations.executive_mcp.server import _executive_outcome
         if _executive_outcome(decoded, request_ref, start["status"]):
             if decoded["status"] == "accepted":
                 receipt = decoded["receipt"]
                 if receipt.get("intent_id") != automated_intent_id(request_ref):
-                    return JSONResponse(_unknown_outcome(request_ref), status_code=202,
+                    return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED,
                                         headers=_OS_HTTP_HEADERS)
                 # Strict-v2 work identity must come from the durable producer.
                 if receipt.get("work_ref") != validated.get("workstream"):
-                    return JSONResponse(_unknown_outcome(request_ref), status_code=202,
+                    return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED,
                                         headers=_OS_HTTP_HEADERS)
             if decoded["status"] != "effect_unknown":
                 return JSONResponse(decoded, status_code=start["status"], headers=_OS_HTTP_HEADERS)
         # Malformed or unknown replies retain the original identity for recovery.
-        return JSONResponse(_unknown_outcome(request_ref), status_code=202,
+        return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED,
                             headers=_OS_HTTP_HEADERS)
 
     async def _dispatch_status(
@@ -656,7 +657,7 @@ class OsExecutiveTransportApp:
             return JSONResponse(
                 {"ok": False, "error": {"code": "invalid_input",
                                          "message": "status body must contain intent_id arguments"}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
         try:
@@ -666,12 +667,12 @@ class OsExecutiveTransportApp:
                 return JSONResponse(
                     {"ok": False, "error": {"code": "invalid_input",
                                              "message": "invalid status arguments"}},
-                    status_code=400,
+                    status_code=HTTPStatus.BAD_REQUEST,
                     headers=_OS_HTTP_HEADERS,
                 )
             return JSONResponse(
                 {"ok": False, "error": {"code": exc.code, "message": exc.message}},
-                status_code=400,
+                status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
 
@@ -685,16 +686,16 @@ class OsExecutiveTransportApp:
             return JSONResponse(
                 {"ok": False, "error": {"code": "backend_unavailable",
                                          "message": "Executive response is unavailable"}},
-                status_code=503,
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 headers=_OS_HTTP_HEADERS,
             )
         if not await self._still_current(scope, principal):
-            return JSONResponse({"ok": False, "error": {"code": "identity_unverified", "message": "status authorization changed"}}, status_code=401, headers=_OS_HTTP_HEADERS)
+            return JSONResponse({"ok": False, "error": {"code": "identity_unverified", "message": "status authorization changed"}}, status_code=HTTPStatus.UNAUTHORIZED, headers=_OS_HTTP_HEADERS)
         if start["status"] != 200 or not body:
             return JSONResponse(
                 {"ok": False, "error": {"code": "backend_unavailable",
                                          "message": "Executive response is unavailable"}},
-                status_code=503,
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 headers=_OS_HTTP_HEADERS,
             )
         try:
@@ -703,7 +704,7 @@ class OsExecutiveTransportApp:
             return JSONResponse(
                 {"ok": False, "error": {"code": "backend_unavailable",
                                          "message": "Executive response is unavailable"}},
-                status_code=503,
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 headers=_OS_HTTP_HEADERS,
             )
         # Status failures are never settlement: a not_found response does not
@@ -716,11 +717,11 @@ class OsExecutiveTransportApp:
                 isinstance(decoded["data"], dict)
                 and decoded["data"].get("intent_id") == validated["intent_id"]
             ):
-                return JSONResponse(decoded, status_code=200, headers=_OS_HTTP_HEADERS)
+                return JSONResponse(decoded, status_code=HTTPStatus.OK, headers=_OS_HTTP_HEADERS)
         return JSONResponse(
             {"ok": False, "error": {"code": "backend_unavailable",
                                      "message": "Executive response is unavailable"}},
-            status_code=503,
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             headers=_OS_HTTP_HEADERS,
         )
 
