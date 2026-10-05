@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 DIR_MODE = 0o700
 FILE_MODE = 0o600
@@ -38,6 +39,12 @@ REQUEST_TIMEOUT_MS = 300_000
 # small under multi-session C2 use and caused capacity 503s despite healthy backend
 # execution. The gateway validates up to 1024; keep a bounded 256 installed default.
 MAX_SESSIONS = 256
+
+# Private-seat transport and backend limits are independent. Keep enough backend
+# headroom for eight simultaneous tunnel requests while retaining the gateway's
+# reserved catalog slot and a bounded queue for short contention bursts.
+MAX_BACKEND_CONCURRENCY = 8
+MAX_BACKEND_QUEUE = 16
 
 # Bounded typed-Git publication policy. These are host-owned values, not CLI
 # inputs, so a ChatGPT caller cannot select another repository, remote, lane,
@@ -63,9 +70,15 @@ PAPER_APP_REL = Path("Applications/Paper.app")
 # Studio Direct control owner instead of letting a model compose shell probes.
 FLEET_STATUS_LAUNCHER_REL = Path(".local/bin/studio-direct")
 FLEET_STATUS_TIMEOUT_MS = 15_000
+FLEET_FABRIC_LAUNCHER_REL = Path(".local/bin/pool")
+FLEET_FABRIC_TIMEOUT_MS = 8_000
+FLEET_ROUTE_HOST_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+MAX_FLEET_ROUTES = 32
 
-# CLI adapter. gateway.mjs is still staged as the engine import, never argv[1].
+# CLI adapters. gateway.mjs is still staged as the engine import, never argv[1].
 PRIVATE_GATEWAY_NAME = "private-tunnel-gateway.mjs"
+TAILNET_GATEWAY_NAME = "tailnet-gateway.mjs"
+TAILNET_FABRIC_ACCOUNTS = frozenset(("fabric-read", "fabric-design", "fleet-host"))
 
 ACCOUNT_LABEL_MAX = 64
 ACCOUNT_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,63})?$")
@@ -81,17 +94,33 @@ STAGE_FILES = (
     "workspace-access.mjs",
     "paper-design.mjs",
     "fleet-status.mjs",
+    "fleet-routing.mjs",
     "private-tunnel-auth.mjs",
     "private-tunnel-gateway.mjs",
+    "tailnet-gateway.mjs",
     "package.json",
     "package-lock.json",
 )
 
-# Historical installs are admitted only through exact known file sets. The
-# immediately preceding v0.1.6 install has every current file except the new
-# read-only fleet-status consumer; earlier generations also predate Paper,
-# output paging, and typed Git.
-LEGACY_STAGE_FILES_V5 = tuple(name for name in STAGE_FILES if name != "workspace-access.mjs")
+# Historical installs are admitted only through exact known file sets.
+# This merge has two immediate predecessor lines:
+#   * the universal-fabric branch lacked workspace-access.mjs;
+#   * protected master lacked fleet-routing.mjs and tailnet-gateway.mjs.
+# Preserve both exact generations, then the older linear history.
+LEGACY_STAGE_FILES_V8 = tuple(name for name in STAGE_FILES if name != "workspace-access.mjs")
+LEGACY_STAGE_FILES_V8_PRE_FLEET_STATUS = tuple(
+    name for name in LEGACY_STAGE_FILES_V8 if name != "fleet-status.mjs"
+)
+LEGACY_STAGE_FILES_V7 = tuple(
+    name for name in STAGE_FILES
+    if name not in ("fleet-routing.mjs", TAILNET_GATEWAY_NAME)
+)
+LEGACY_STAGE_FILES_V6 = tuple(
+    name for name in LEGACY_STAGE_FILES_V8 if name != "fleet-routing.mjs"
+)
+LEGACY_STAGE_FILES_V5 = tuple(
+    name for name in LEGACY_STAGE_FILES_V6 if name != TAILNET_GATEWAY_NAME
+)
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
@@ -99,6 +128,10 @@ LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != 
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V8),
+        frozenset(LEGACY_STAGE_FILES_V8_PRE_FLEET_STATUS),
+        frozenset(LEGACY_STAGE_FILES_V7),
+        frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
         frozenset(LEGACY_STAGE_FILES_V3),
@@ -428,6 +461,11 @@ def _build_runtime_roots(account: str) -> dict:
     """Build per-account paths using the real HOME environment variable."""
     user_root = _user_root()
     base = user_root / ".local" / "share" / "studio-direct-mcp" / "private" / account
+    gateway_name = (
+        TAILNET_GATEWAY_NAME
+        if account in TAILNET_FABRIC_ACCOUNTS
+        else PRIVATE_GATEWAY_NAME
+    )
     return {
         "base": base,
         "state": base / "state",
@@ -435,7 +473,7 @@ def _build_runtime_roots(account: str) -> dict:
         "config": base / "config.json",
         "manifest": base / "manifest.json",
         "plist": user_root / "Library" / "LaunchAgents" / f"com.mastermind.studio-direct-private.{account}.plist",
-        "gateway": base / PRIVATE_GATEWAY_NAME,
+        "gateway": base / gateway_name,
         "node_modules": base / "node_modules",
     }
 
@@ -513,7 +551,7 @@ def _fleet_status_config(user_root: Path) -> dict | None:
     launcher = user_root / FLEET_STATUS_LAUNCHER_REL
     if not launcher.exists():
         return None
-    return {
+    config = {
         "enabled": True,
         "launcherPath": str(launcher),
         "launcherSha256": _stable_regular_file_hash(
@@ -521,6 +559,138 @@ def _fleet_status_config(user_root: Path) -> dict | None:
         ),
         "timeoutMs": FLEET_STATUS_TIMEOUT_MS,
     }
+    fabric_launcher = user_root / FLEET_FABRIC_LAUNCHER_REL
+    if fabric_launcher.exists():
+        config.update(
+            {
+                "fabricLauncherPath": str(fabric_launcher),
+                "fabricLauncherSha256": _stable_regular_file_hash(
+                    fabric_launcher, label="Subagent Fabric pool launcher"
+                ),
+                "fabricTimeoutMs": FLEET_FABRIC_TIMEOUT_MS,
+            }
+        )
+    return config
+
+
+def _validate_tailnet_public_url(account: str, value: str | None) -> str | None:
+    if account not in TAILNET_FABRIC_ACCOUNTS:
+        if value not in (None, ""):
+            raise SystemExit(
+                "--public-url is reserved for --account fabric-read|fabric-design|fleet-host"
+            )
+        return None
+    if not isinstance(value, str) or not value:
+        raise SystemExit(
+            "--account fabric-read|fabric-design|fleet-host requires "
+            "--public-url https://<host>.ts.net"
+        )
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise SystemExit("fabric route --public-url must be an exact HTTPS tailnet origin") from exc
+    hostname = parsed.hostname
+    if (
+        parsed.scheme != "https"
+        or not isinstance(hostname, str)
+        or not hostname.endswith(".ts.net")
+        or len(hostname) <= len(".ts.net")
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise SystemExit("fabric route --public-url must be an exact HTTPS tailnet origin")
+    normalized = f"https://{hostname}"
+    if port is not None:
+        normalized += f":{port}"
+    return normalized
+
+
+def _validate_fleet_routes(
+    account: str, values: list[str] | tuple[str, ...] | None
+) -> tuple[tuple[str, str], ...]:
+    if values in (None, (), []):
+        return ()
+    if account in TAILNET_FABRIC_ACCOUNTS:
+        raise SystemExit("fleet routes are not allowed on tailnet fabric/fleet-host gateways")
+    if not isinstance(values, (list, tuple)) or len(values) > MAX_FLEET_ROUTES:
+        raise SystemExit(f"--fleet-route accepts at most {MAX_FLEET_ROUTES} routes")
+    routes: list[tuple[str, str]] = []
+    host_refs: set[str] = set()
+    urls: set[str] = set()
+    for raw in values:
+        if not isinstance(raw, str) or "=" not in raw:
+            raise SystemExit("--fleet-route must use HOST_REF=https://<host>.ts.net/mcp")
+        host_ref, url_value = raw.split("=", 1)
+        if FLEET_ROUTE_HOST_RE.fullmatch(host_ref) is None:
+            raise SystemExit("--fleet-route host ref is invalid")
+        try:
+            parsed = urlsplit(url_value)
+            port = parsed.port
+        except (TypeError, ValueError) as exc:
+            raise SystemExit("--fleet-route URL must be exact HTTPS tailnet /mcp") from exc
+        hostname = parsed.hostname
+        if (
+            parsed.scheme != "https"
+            or not isinstance(hostname, str)
+            or not hostname.endswith(".ts.net")
+            or len(hostname) <= len(".ts.net")
+            or port is not None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path != "/mcp"
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise SystemExit("--fleet-route URL must be exact HTTPS tailnet /mcp")
+        normalized = f"https://{hostname}/mcp"
+        if host_ref in host_refs or normalized in urls:
+            raise SystemExit("--fleet-route host refs and URLs must be unique")
+        host_refs.add(host_ref)
+        urls.add(normalized)
+        routes.append((host_ref, normalized))
+    return tuple(sorted(routes))
+
+
+def _fleet_routing_config(routes: tuple[tuple[str, str], ...]) -> dict | None:
+    if not routes:
+        return None
+    return {
+        "enabled": True,
+        "requestTimeoutMs": REQUEST_TIMEOUT_MS,
+        "routes": [
+            {"hostRef": host_ref, "url": url}
+            for host_ref, url in routes
+        ],
+    }
+
+
+def _installed_fleet_routes(config: object, account: str) -> tuple[tuple[str, str], ...]:
+    if not isinstance(config, dict):
+        raise SystemExit("not staged: config invalid")
+    raw = config.get("fleetRouting")
+    if raw is None:
+        return ()
+    if (
+        not isinstance(raw, dict)
+        or set(raw) != {"enabled", "requestTimeoutMs", "routes"}
+        or raw.get("enabled") is not True
+        or raw.get("requestTimeoutMs") != REQUEST_TIMEOUT_MS
+        or not isinstance(raw.get("routes"), list)
+    ):
+        raise SystemExit("not staged: fleet routing config invalid")
+    encoded: list[str] = []
+    for route in raw["routes"]:
+        if not isinstance(route, dict) or set(route) != {"hostRef", "url"}:
+            raise SystemExit("not staged: fleet routing config invalid")
+        encoded.append(f"{route.get('hostRef')}={route.get('url')}")
+    try:
+        return _validate_fleet_routes(account, encoded)
+    except SystemExit as exc:
+        raise SystemExit("not staged: fleet routing config invalid") from exc
 
 
 def _build_config(
@@ -532,11 +702,14 @@ def _build_config(
     state_dir: Path,
     user_root: Path,
     *,
+    public_url: str | None = None,
+    fleet_routes: tuple[tuple[str, str], ...] = (),
     repository_workspaces: bool = False,
 ) -> dict:
     if type(repository_workspaces) is not bool:
         raise ValueError("repository workspace setting must be boolean")
-    # publicUrl is omitted: the private adapter rejects a public origin.
+    # Ordinary private seats omit publicUrl; reserved fabric routes bind one
+    # exact tailnet HTTPS origin while the gateway itself remains loopback-only.
     config = {
         "accountLabel": account,
         "host": host,
@@ -548,12 +721,19 @@ def _build_config(
         "childEnv": {"NODE_OPTIONS": ""},
         "stateDir": str(state_dir),
         "maxSessions": MAX_SESSIONS,
+        "maxPerSessionConcurrency": MAX_BACKEND_CONCURRENCY,
+        "maxQueuedPerSession": MAX_BACKEND_QUEUE,
         "requestTimeoutMs": REQUEST_TIMEOUT_MS,
         "idleTimeoutMs": IDLE_TIMEOUT_MS,
         "reclaimIdleGraceMs": 30_000,
         "gitPublish": _typed_git_config(user_root),
         "paperDesign": _paper_design_config(user_root),
     }
+    if public_url is not None:
+        config["publicUrl"] = public_url
+    fleet_routing = _fleet_routing_config(fleet_routes)
+    if fleet_routing is not None:
+        config["fleetRouting"] = fleet_routing
     if repository_workspaces:
         config["repositoryWorkspaces"] = {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
@@ -777,6 +957,7 @@ def _verify_prior_install(
     host: str,
     port: int,
     roots: dict,
+    public_url: str | None,
 ) -> None:
     if (
         prior.get("source") != str(source)
@@ -823,6 +1004,18 @@ def _verify_prior_install(
             "refusing restage: existing config hash diverges; "
             "stop the service first"
         )
+    try:
+        existing_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("refusing restage: existing config invalid") from exc
+    if (
+        not isinstance(existing_config, dict)
+        or existing_config.get("accountLabel") != account
+        or existing_config.get("publicUrl") != public_url
+    ):
+        raise SystemExit(
+            "refusing restage: existing public URL/channel diverges; stop first"
+        )
     if roots["plist"].is_symlink() or not roots["plist"].is_file():
         raise SystemExit(
             "refusing restage: existing plist missing; stop the service first"
@@ -856,6 +1049,7 @@ def _preflight_stage(
     host: str,
     port: int,
     roots: dict,
+    public_url: str | None,
 ) -> None:
     _check_source_files(source)
     _assert_no_symlink_ancestors(roots["base"])
@@ -865,7 +1059,7 @@ def _preflight_stage(
     if prior is not None:
         _verify_prior_install(
             prior, source, node_abs, backend_abs,
-            account, label, host, port, roots,
+            account, label, host, port, roots, public_url,
         )
     else:
         _assert_first_install_clean(roots)
@@ -902,6 +1096,8 @@ def _write_install(
     result_key: str,
     previous_source: str | None = None,
     dependency_tree_hash: str | None = None,
+    public_url: str | None = None,
+    fleet_routes: tuple[tuple[str, str], ...] = (),
     repository_workspaces: bool = False,
 ) -> int:
     user_root = _user_root()
@@ -926,6 +1122,8 @@ def _write_install(
                 backend_abs,
                 roots["state"],
                 user_root,
+                public_url=public_url,
+                fleet_routes=fleet_routes,
                 repository_workspaces=repository_workspaces,
             ),
             indent=2,
@@ -1011,11 +1209,34 @@ def cmd_stage(args) -> int:
     backend_abs = _resolve_abs("--backend", args.backend)
     port = int(args.port)
     _validate_port(port)
+    public_url = _validate_tailnet_public_url(
+        account, getattr(args, "public_url", None)
+    )
+
+    requested_route_values = getattr(args, "fleet_route", None)
+    clear_fleet_routes = bool(getattr(args, "clear_fleet_routes", False))
+    requested_routes = (
+        _validate_fleet_routes(account, requested_route_values)
+        if requested_route_values is not None else ()
+    )
 
     roots = _build_runtime_roots(account)
     prior = _preflight_stage(
-        source, node_abs, backend_abs, account, label, host, port, roots
+        source, node_abs, backend_abs, account, label, host, port, roots, public_url
     )
+    fleet_routes = () if clear_fleet_routes else requested_routes
+    if isinstance(prior, dict):
+        try:
+            existing_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit("refusing restage: existing config invalid") from exc
+        existing_routes = _installed_fleet_routes(existing_config, account)
+        if requested_route_values is None and not clear_fleet_routes:
+            fleet_routes = existing_routes
+        elif fleet_routes != existing_routes:
+            raise SystemExit(
+                "refusing restage: fleet route config diverges; use upgrade while stopped"
+            )
     # The Paper-owned immutable runtime must exist and match before this
     # lifecycle writes a config/plist that advertises the Paper capability.
     _verify_paper_runtime(_user_root())
@@ -1029,6 +1250,8 @@ def cmd_stage(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="staged",
         dependency_tree_hash=retained_dependency_hash,
+        public_url=public_url,
+        fleet_routes=fleet_routes,
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
     )
 
@@ -1063,6 +1286,14 @@ def _verify_staged_install(
         raise SystemExit("not staged: config hash missing from manifest")
     if _sha256_file(roots["config"]) != stored_config_hash:
         raise SystemExit("not staged: config hash mismatch")
+    try:
+        installed_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("not staged: config invalid") from exc
+    if not isinstance(installed_config, dict) or installed_config.get("accountLabel") != account:
+        raise SystemExit("not staged: config channel mismatch")
+    _validate_tailnet_public_url(account, installed_config.get("publicUrl"))
+    _installed_fleet_routes(installed_config, account)
 
     if roots["plist"].is_symlink() or not roots["plist"].is_file():
         raise SystemExit("not staged: plist missing")
@@ -1100,7 +1331,12 @@ def _verify_staged_install(
     expected_argv = _expected_argv(node, roots["gateway"], roots["config"])
     if list(plist.get("ProgramArguments") or []) != expected_argv:
         raise SystemExit("plist is not our exact install")
-    if Path(expected_argv[1]).name != PRIVATE_GATEWAY_NAME:
+    expected_gateway_name = (
+        TAILNET_GATEWAY_NAME
+        if account in TAILNET_FABRIC_ACCOUNTS
+        else PRIVATE_GATEWAY_NAME
+    )
+    if Path(expected_argv[1]).name != expected_gateway_name:
         raise SystemExit("plist is not our exact install")
 
     return manifest
@@ -1122,6 +1358,16 @@ def cmd_upgrade(args) -> int:
     backend_abs = _resolve_abs("--backend", args.backend)
     port = int(args.port)
     _validate_port(port)
+    public_url = _validate_tailnet_public_url(
+        account, getattr(args, "public_url", None)
+    )
+
+    requested_route_values = getattr(args, "fleet_route", None)
+    clear_fleet_routes = bool(getattr(args, "clear_fleet_routes", False))
+    requested_routes = (
+        _validate_fleet_routes(account, requested_route_values)
+        if requested_route_values is not None else ()
+    )
 
     roots = _build_runtime_roots(account)
     if _launchd_inspect(label) is not None:
@@ -1140,6 +1386,18 @@ def cmd_upgrade(args) -> int:
         raise SystemExit(
             "refusing upgrade: node, backend, host and port must match the existing install"
         )
+    try:
+        existing_config = json.loads(roots["config"].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("refusing upgrade: existing config invalid") from exc
+    existing_routes = _installed_fleet_routes(existing_config, account)
+    if clear_fleet_routes:
+        fleet_routes = ()
+    elif requested_route_values is None:
+        fleet_routes = existing_routes
+    else:
+        fleet_routes = requested_routes
+
     for path in _stage_dest_files(roots):
         _assert_dest_safe(path)
     # Upgrade is still pre-effect here. Refuse before replacing any staged
@@ -1149,6 +1407,8 @@ def cmd_upgrade(args) -> int:
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
+        public_url=public_url,
+        fleet_routes=fleet_routes,
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
     )
 
@@ -1286,6 +1546,14 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--source", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
+        s.add_argument("--public-url")
+        routes = s.add_mutually_exclusive_group()
+        routes.add_argument(
+            "--fleet-route",
+            action="append",
+            metavar="HOST_REF=HTTPS_TS_NET_MCP_URL",
+        )
+        routes.add_argument("--clear-fleet-routes", action="store_true")
         s.add_argument("--enable-repository-workspaces", action="store_true",
                        help="enable the closed installed repository-workspace consumer")
         s.set_defaults(func=globals()[f"cmd_{name}"])

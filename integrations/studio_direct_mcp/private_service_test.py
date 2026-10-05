@@ -9,7 +9,7 @@ Contracts:
   * Explicit stopped-service upgrade accepts only exact known v1 installs and preserves runtime state
   * Account labels are already-lowercase, <=64, no silent aliasing
   * Port 45017 is reserved; source/node/backend must be absolute
-  * Config omits publicUrl, keeps 5h idle/64 sessions, and enables bounded typed Git
+  * Config omits publicUrl, keeps bounded private-session limits, and enables bounded typed Git
 All mutations stay inside temp fixtures; subprocess is mocked.
 """
 from __future__ import annotations
@@ -188,6 +188,9 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         source=str(source),
         node=str(node),
         backend=str(backend),
+        public_url=None,
+        fleet_route=None,
+        clear_fleet_routes=False,
         enable_repository_workspaces=False,
     )
 
@@ -237,8 +240,12 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     manifest["version"] = 1
     for key in ("nodeHash", "backendHash", "dependencyTreeHash"):
         manifest.pop(key, None)
-    removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
-        "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
+    removed = (
+        "fleet-routing.mjs", "tailnet-gateway.mjs", "fleet-status.mjs",
+        "paper-design.mjs", "output-budget.mjs"
+    ) if typed_git else (
+        "fleet-routing.mjs", "tailnet-gateway.mjs", "fleet-status.mjs",
+        "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
     removed = (*removed, "workspace-access.mjs")
     for name in removed:
@@ -272,8 +279,10 @@ class TestIdentity(unittest.TestCase):
                 "workspace-access.mjs",
                 "paper-design.mjs",
                 "fleet-status.mjs",
+                "fleet-routing.mjs",
                 "private-tunnel-auth.mjs",
                 "private-tunnel-gateway.mjs",
+                "tailnet-gateway.mjs",
                 "package.json",
                 "package-lock.json",
             },
@@ -308,6 +317,20 @@ class TestIdentity(unittest.TestCase):
         legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V1}
         self.assertTrue(svc._valid_manifest({**base, "files": current}, "test-account", _label_for("test-account")))
         self.assertTrue(svc._valid_manifest({**base, "files": legacy}, "test-account", _label_for("test-account")))
+        feature_head_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V8}
+        self.assertTrue(svc._valid_manifest({**base, "files": feature_head_legacy}, "test-account", _label_for("test-account")))
+        self.assertNotIn("workspace-access.mjs", svc.LEGACY_STAGE_FILES_V8)
+        master_head_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V7}
+        self.assertTrue(svc._valid_manifest({**base, "files": master_head_legacy}, "test-account", _label_for("test-account")))
+        self.assertIn("workspace-access.mjs", svc.LEGACY_STAGE_FILES_V7)
+        self.assertNotIn("fleet-routing.mjs", svc.LEGACY_STAGE_FILES_V7)
+        self.assertNotIn("tailnet-gateway.mjs", svc.LEGACY_STAGE_FILES_V7)
+        router_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V6}
+        self.assertTrue(svc._valid_manifest({**base, "files": router_legacy}, "test-account", _label_for("test-account")))
+        self.assertNotIn("fleet-routing.mjs", svc.LEGACY_STAGE_FILES_V6)
+        self.assertIn("tailnet-gateway.mjs", svc.LEGACY_STAGE_FILES_V6)
+        tailnet_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V5}
+        self.assertTrue(svc._valid_manifest({**base, "files": tailnet_legacy}, "test-account", _label_for("test-account")))
         previous_current = {name: digest for name in svc.LEGACY_STAGE_FILES_V4}
         self.assertTrue(svc._valid_manifest({**base, "files": previous_current}, "test-account", _label_for("test-account")))
         immediate_legacy = {name: digest for name in svc.LEGACY_STAGE_FILES_V3}
@@ -477,6 +500,14 @@ class TestRuntimeRoots(unittest.TestCase):
             self.assertEqual(roots["gateway"].name, "private-tunnel-gateway.mjs")
             self.assertEqual(roots["gateway"], roots["base"] / "private-tunnel-gateway.mjs")
 
+    def test_fabric_gateways_are_tailnet_adapters(self):
+        for account in ("fabric-read", "fabric-design", "fleet-host"):
+            with self.subTest(account=account), IsolatedHome(account) as (_, _, roots):
+                self.assertEqual(roots["gateway"].name, "tailnet-gateway.mjs")
+                self.assertEqual(
+                    roots["gateway"], roots["base"] / "tailnet-gateway.mjs"
+                )
+
     def test_mixed_case_account_is_not_silently_folded(self):
         with IsolatedHome("MyAccount") as (_, label, roots):
             self.assertIn("MyAccount", str(roots["base"]))
@@ -571,6 +602,8 @@ class TestBuildConfig(unittest.TestCase):
             self.assertEqual(config["childEnv"]["NODE_OPTIONS"], "")
             self.assertEqual(config["stateDir"], str(state_dir))
             self.assertEqual(config["maxSessions"], 256)
+            self.assertEqual(config["maxPerSessionConcurrency"], 8)
+            self.assertEqual(config["maxQueuedPerSession"], 16)
             self.assertEqual(config["requestTimeoutMs"], 300_000)
             self.assertEqual(config["idleTimeoutMs"], 1_800_000)
             self.assertEqual(
@@ -607,6 +640,73 @@ class TestBuildConfig(unittest.TestCase):
             self.assertNotIn("account", config["paperDesign"])
             self.assertNotIn("token", config["paperDesign"])
             self.assertNotIn("fleetStatus", config)
+            self.assertNotIn("fleetRouting", config)
+
+    def test_config_projects_only_validated_operator_fleet_routes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            node = _make_node(Path(raw))
+            backend = _make_backend(Path(raw))
+            routes = svc._validate_fleet_routes(
+                "test-account",
+                [
+                    "ubuntu1=https://ubuntu1.example-tailnet.ts.net/mcp",
+                    "mini4=https://mini4.example-tailnet.ts.net/mcp",
+                ],
+            )
+            config = svc._build_config(
+                "test-account", "127.0.0.1", 45018,
+                node, backend, home / "state", home,
+                fleet_routes=routes,
+            )
+            self.assertEqual(
+                config["fleetRouting"],
+                {
+                    "enabled": True,
+                    "requestTimeoutMs": 300_000,
+                    "routes": [
+                        {
+                            "hostRef": "mini4",
+                            "url": "https://mini4.example-tailnet.ts.net/mcp",
+                        },
+                        {
+                            "hostRef": "ubuntu1",
+                            "url": "https://ubuntu1.example-tailnet.ts.net/mcp",
+                        },
+                    ],
+                },
+            )
+            self.assertEqual(
+                svc._installed_fleet_routes(config, "test-account"),
+                routes,
+            )
+
+    def test_fleet_routes_refuse_nested_fabric_duplicates_and_non_tailnet_urls(self):
+        with self.assertRaisesRegex(SystemExit, "not allowed"):
+            svc._validate_fleet_routes(
+                "fleet-host",
+                ["mini4=https://mini4.example-tailnet.ts.net/mcp"],
+            )
+        with self.assertRaisesRegex(SystemExit, "unique"):
+            svc._validate_fleet_routes(
+                "test-account",
+                [
+                    "mini4=https://mini4.example-tailnet.ts.net/mcp",
+                    "mini4=https://ubuntu1.example-tailnet.ts.net/mcp",
+                ],
+            )
+        for value in (
+            "mini4=http://mini4.example-tailnet.ts.net/mcp",
+            "mini4=https://example.com/mcp",
+            "mini4=https://mini4.example-tailnet.ts.net/",
+            "mini4=https://mini4.example-tailnet.ts.net:443/mcp",
+            "mini4=https://mini4.example-tailnet.ts.net:8443/mcp",
+            "mini4=https://user:pass@mini4.example-tailnet.ts.net/mcp",
+            "mini4=https://mini4.example-tailnet.ts.net/mcp?x=1",
+        ):
+            with self.subTest(value=value), self.assertRaisesRegex(SystemExit, "exact HTTPS"):
+                svc._validate_fleet_routes("test-account", [value])
 
     def test_config_enrolls_hash_pinned_existing_fleet_status_owner(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -616,6 +716,9 @@ class TestBuildConfig(unittest.TestCase):
             launcher.parent.mkdir(parents=True)
             launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             launcher.chmod(0o700)
+            fabric_launcher = home / ".local" / "bin" / "pool"
+            fabric_launcher.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fabric_launcher.chmod(0o700)
             node = _make_node(Path(raw))
             backend = _make_backend(Path(raw))
             config = svc._build_config(
@@ -629,8 +732,103 @@ class TestBuildConfig(unittest.TestCase):
                     "launcherPath": str(launcher),
                     "launcherSha256": svc._sha256_file(launcher),
                     "timeoutMs": 15_000,
+                    "fabricLauncherPath": str(fabric_launcher),
+                    "fabricLauncherSha256": svc._sha256_file(fabric_launcher),
+                    "fabricTimeoutMs": 8_000,
                 },
             )
+
+
+class TestTailnetFabricConfig(unittest.TestCase):
+    def test_both_fabric_routes_stage_with_tailnet_gateway_and_verify_exact_install(self):
+        for account, port in (("fabric-read", 45117), ("fabric-design", 45118), ("fleet-host", 45120)):
+            with self.subTest(account=account), tempfile.TemporaryDirectory() as raw:
+                tmp = Path(raw)
+                home = tmp / "home"
+                home.mkdir(parents=True, exist_ok=True)
+                (home / "Library" / "LaunchAgents").mkdir(parents=True, exist_ok=True)
+                src = _make_source(tmp)
+                node = _make_node(tmp)
+                backend = _make_backend(tmp)
+                paper_sha = _seed_paper_runtime(home)
+                args = _stage_args(src, node, backend, account, port)
+                args.public_url = "https://m2.example-tailnet.ts.net"
+                with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                     mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                     mock.patch.object(svc, "_run", CmdRecorder()):
+                    rc, _ = _capture_stdout(lambda: svc.cmd_stage(args))
+                    self.assertEqual(rc, 0)
+                    roots = svc._build_runtime_roots(account)
+                    _seed_node_modules(roots)
+                    manifest = svc._verify_staged_install(
+                        account,
+                        _label_for(account),
+                        roots,
+                        require_runtime_seal=False,
+                    )
+                self.assertEqual(manifest["account"], account)
+                self.assertEqual(roots["gateway"].name, "tailnet-gateway.mjs")
+                plist = plistlib.loads(roots["plist"].read_bytes())
+                self.assertEqual(
+                    Path(plist["ProgramArguments"][1]).name,
+                    "tailnet-gateway.mjs",
+                )
+
+    def test_only_fabric_routes_may_bind_exact_tailnet_origin(self):
+        for account in ("fabric-read", "fabric-design", "fleet-host"):
+            with self.subTest(account=account):
+                self.assertEqual(
+                    svc._validate_tailnet_public_url(
+                        account, "https://m2.example-tailnet.ts.net/"
+                    ),
+                    "https://m2.example-tailnet.ts.net",
+                )
+        self.assertEqual(
+            svc._validate_tailnet_public_url(
+                "fabric-read", "https://m2.example-tailnet.ts.net:10000"
+            ),
+            "https://m2.example-tailnet.ts.net:10000",
+        )
+        for value in (
+            None,
+            "http://m2.example-tailnet.ts.net",
+            "https://example.com",
+            "https://m2.example-tailnet.ts.net/path",
+            "https://user:pass@m2.example-tailnet.ts.net",
+            "https://m2.example-tailnet.ts.net?x=1",
+        ):
+            with self.assertRaises(SystemExit):
+                svc._validate_tailnet_public_url("fabric-read", value)
+        with self.assertRaisesRegex(
+            SystemExit, "reserved for --account fabric-read\\|fabric-design\\|fleet-host"
+        ):
+            svc._validate_tailnet_public_url(
+                "chatgpt1", "https://m2.example-tailnet.ts.net"
+            )
+
+    def test_fabric_config_projects_public_origin_without_changing_paper_owner(self):
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw) / "home"
+            home.mkdir()
+            node = _make_node(Path(raw))
+            backend = _make_backend(Path(raw))
+            config = svc._build_config(
+                "fabric-design",
+                "127.0.0.1",
+                45117,
+                node,
+                backend,
+                home / "state",
+                home,
+                public_url="https://m2.example-tailnet.ts.net:10000",
+            )
+            self.assertEqual(
+                config["publicUrl"], "https://m2.example-tailnet.ts.net:10000"
+            )
+            self.assertEqual(config["accountLabel"], "fabric-design")
+            self.assertEqual(config["host"], "127.0.0.1")
+            self.assertIn("paperDesign", config)
+            self.assertNotIn("token", json.dumps(config).lower())
 
 
 class TestBuildPlist(unittest.TestCase):
@@ -715,6 +913,8 @@ class TestStage(unittest.TestCase):
                 self.assertEqual(config["requestTimeoutMs"], 300_000)
                 self.assertEqual(config["reclaimIdleGraceMs"], 30_000)
                 self.assertEqual(config["maxSessions"], 256)
+                self.assertEqual(config["maxPerSessionConcurrency"], 8)
+                self.assertEqual(config["maxQueuedPerSession"], 16)
                 self.assertEqual(config["gitPublish"]["enabled"], True)
                 self.assertEqual(
                     config["gitPublish"]["workspaceCli"],
@@ -990,6 +1190,115 @@ class TestUpgrade(unittest.TestCase):
 
     def test_typed_git_install_upgrades_stopped_and_preserves_runtime_state(self):
         self._assert_historical_upgrade(typed_git=True)
+
+    def test_upgrade_preserves_existing_fleet_routes_when_not_redeclared(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            src = _make_source(tmp)
+            node = _make_node(tmp)
+            backend = _make_backend(tmp)
+            paper_sha = _seed_paper_runtime(home)
+            initial = _stage_args(src, node, backend)
+            initial.fleet_route = [
+                "mini4=https://mini4.example-tailnet.ts.net/mcp",
+            ]
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                _capture_stdout(lambda: svc.cmd_stage(initial))
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+                upgraded_source = _make_upgrade_source(tmp)
+                _capture_stdout(
+                    lambda: svc.cmd_upgrade(
+                        _stage_args(upgraded_source, node, backend)
+                    )
+                )
+                config = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertEqual(
+                config["fleetRouting"]["routes"],
+                [{
+                    "hostRef": "mini4",
+                    "url": "https://mini4.example-tailnet.ts.net/mcp",
+                }],
+            )
+
+    def test_upgrade_replaces_or_clears_fleet_routes_only_when_explicit(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            src = _make_source(tmp)
+            node = _make_node(tmp)
+            backend = _make_backend(tmp)
+            paper_sha = _seed_paper_runtime(home)
+            initial = _stage_args(src, node, backend)
+            initial.fleet_route = [
+                "mini4=https://mini4.example-tailnet.ts.net/mcp",
+            ]
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                _capture_stdout(lambda: svc.cmd_stage(initial))
+                roots = svc._build_runtime_roots("test-account")
+                _seed_node_modules(roots)
+
+                upgraded_source = _make_upgrade_source(tmp)
+                replace = _stage_args(upgraded_source, node, backend)
+                replace.fleet_route = [
+                    "ubuntu1=https://ubuntu1.example-tailnet.ts.net/mcp",
+                ]
+                _capture_stdout(lambda: svc.cmd_upgrade(replace))
+                config = json.loads(roots["config"].read_text(encoding="utf-8"))
+                self.assertEqual(
+                    config["fleetRouting"]["routes"],
+                    [{
+                        "hostRef": "ubuntu1",
+                        "url": "https://ubuntu1.example-tailnet.ts.net/mcp",
+                    }],
+                )
+
+                second = tmp / "upgrade2-src"
+                second.mkdir()
+                for name in svc.STAGE_FILES:
+                    (second / name).write_text(
+                        f"// second upgraded {name} contents\n",
+                        encoding="utf-8",
+                    )
+                clear = _stage_args(second, node, backend)
+                clear.clear_fleet_routes = True
+                _capture_stdout(lambda: svc.cmd_upgrade(clear))
+                config = json.loads(roots["config"].read_text(encoding="utf-8"))
+            self.assertNotIn("fleetRouting", config)
+
+    def test_restage_refuses_fleet_route_change_without_upgrade(self):
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            src = _make_source(tmp)
+            node = _make_node(tmp)
+            backend = _make_backend(tmp)
+            paper_sha = _seed_paper_runtime(home)
+            initial = _stage_args(src, node, backend)
+            initial.fleet_route = [
+                "mini4=https://mini4.example-tailnet.ts.net/mcp",
+            ]
+            with mock.patch.dict(os.environ, {"HOME": str(home)}), \
+                 mock.patch.object(svc, "PAPER_BRIDGE_SHA256", paper_sha), \
+                 mock.patch.object(svc, "_run", CmdRecorder()):
+                _capture_stdout(lambda: svc.cmd_stage(initial))
+                changed = _stage_args(src, node, backend)
+                changed.fleet_route = [
+                    "ubuntu1=https://ubuntu1.example-tailnet.ts.net/mcp",
+                ]
+                with self.assertRaisesRegex(SystemExit, "use upgrade"):
+                    svc.cmd_stage(changed)
 
     def _assert_historical_upgrade(self, *, typed_git):
         with tempfile.TemporaryDirectory() as raw:

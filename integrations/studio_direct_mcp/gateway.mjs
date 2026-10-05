@@ -114,9 +114,16 @@ import {
   fleetStatusToolResult,
   resolveFleetStatusConfig,
 } from './fleet-status.mjs';
+import {
+  FLEET_BACKEND_TOOL_NAMES,
+  STUDIO_SELECT_HOST_TOOL,
+  createFleetRouter,
+  fleetRouteToolResult,
+  resolveFleetRoutingConfig,
+} from './fleet-routing.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.8';
+export const GATEWAY_VERSION = '0.1.10';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -128,7 +135,7 @@ const GATEWAY_GENERATION = randomUUID();
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_SESSIONS_DEFAULT = 8;
 const MAX_PER_SESSION_CONCURRENCY = 4;
-const MAX_QUEUED_PER_SESSION = 4;
+const MAX_QUEUED_PER_SESSION_DEFAULT = 4;
 /** Reserve one shared-backend slot for MCP catalog/template traffic. */
 const CATALOG_RESERVED_BACKEND_SLOTS = 1;
 const REQUEST_TIMEOUT_MS_DEFAULT = 60_000;
@@ -136,6 +143,8 @@ const IDLE_TIMEOUT_MS_DEFAULT = 30 * 60 * 1000;
 const SESSION_SWEEP_INTERVAL_MS = 60_000;
 /** Shared-account frontend shells must be idle this long before capacity reclaim. */
 const RECLAIM_IDLE_GRACE_MS_DEFAULT = 30_000;
+const TOOL_NAME_RE = /^[A-Za-z][A-Za-z0-9_.-]{0,127}$/;
+const MAX_TOOL_ALLOWLIST = 128;
 
 /**
  * Closed vocabulary used in logs and in stats.byClassification, so log
@@ -268,6 +277,25 @@ function mapStrings(obj) {
   return out;
 }
 
+function resolveToolAllowlist(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_TOOL_ALLOWLIST) {
+    throw new TypeError(
+      `config.toolAllowlist must be an array with 1..${MAX_TOOL_ALLOWLIST} tool names`);
+  }
+  const names = [];
+  for (const raw of value) {
+    if (typeof raw !== 'string' || !TOOL_NAME_RE.test(raw)) {
+      throw new TypeError('config.toolAllowlist contains an invalid tool name');
+    }
+    if (names.includes(raw)) {
+      throw new TypeError(`config.toolAllowlist contains duplicate tool name ${raw}`);
+    }
+    names.push(raw);
+  }
+  return Object.freeze([...names].sort());
+}
+
 /**
  * Validate and normalise a partial config into the shape the gateway uses.
  * Throws a descriptive Error on anything that would silently weaken security.
@@ -309,6 +337,8 @@ export function resolveConfig(partial = {}) {
     cfg.reclaimIdleGraceMs, 250, 10 * 60 * 1000, RECLAIM_IDLE_GRACE_MS_DEFAULT);
   cfg.maxPerSessionConcurrency = clampInt(
     cfg.maxPerSessionConcurrency, 1, 64, MAX_PER_SESSION_CONCURRENCY);
+  cfg.maxQueuedPerSession = clampInt(
+    cfg.maxQueuedPerSession, 1, 256, MAX_QUEUED_PER_SESSION_DEFAULT);
   cfg.requestTimeoutMs = clampInt(
     cfg.requestTimeoutMs, 1, 24 * 60 * 60 * 1000, REQUEST_TIMEOUT_MS_DEFAULT);
   cfg.idleTimeoutMs = clampInt(
@@ -373,6 +403,8 @@ export function resolveConfig(partial = {}) {
   if (cfg.repositoryWorkspaces && !cfg.gitPublish) throw new TypeError('repositoryWorkspaces requires configured typed Git');
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
+  cfg.fleetRouting = resolveFleetRoutingConfig(cfg.fleetRouting);
+  cfg.toolAllowlist = resolveToolAllowlist(cfg.toolAllowlist);
 
   return cfg;
 }
@@ -537,7 +569,7 @@ function createLimiter(max, maxQueued, { reservePriority = 0 } = {}) {
       const priorityQueued = queue.length - normalQueued;
       if ((!waiter.priority && normalQueued >= normalQueueCap) ||
           (waiter.priority && priorityQueued >= priorityQueueCap)) {
-        const err = new Error('Server busy: per-session concurrency cap reached');
+        const err = new Error('Server busy: backend concurrency cap reached');
         err.code = 'STUDIO_BUSY';
         return Promise.reject(err);
       }
@@ -585,8 +617,9 @@ const STUDIO_PING_TOOL = Object.freeze({
   title: 'Studio Gateway Ping',
   description:
     'Reports private Studio gateway liveness with an ephemeral process-generation nonce, per-call ' +
-    'nonce, wall-clock timestamp, monotonic age, call duration, gateway version, and MCP session ' +
-    'reference. The generation nonce is random and process-scoped; it carries no host or hardware ' +
+    'nonce, wall-clock timestamp, monotonic age, call duration, gateway version, MCP session ' +
+    'reference, and current bounded backend concurrency counters. The generation nonce is random ' +
+    'and process-scoped; it carries no host or hardware ' +
     'data. The gateway answers this probe without invoking ' +
     'the Desktop Commander backend or filesystem.',
   inputSchema: {
@@ -609,6 +642,7 @@ let pingCounter = 0;
 
 function handleStudioPing(session) {
   const startNs = process.hrtime.bigint();
+  const limiter = session?.owner?.limiter ?? session?.limiter ?? null;
   const structured = {
     timestamp: new Date().toISOString(),
     generation: GATEWAY_GENERATION,
@@ -617,6 +651,15 @@ function handleStudioPing(session) {
     monotonicDurationMs: 0,
     gatewayVersion: GATEWAY_VERSION,
     sessionId: session ? session.id : null,
+    selectedHostRef: session?.selectedHostRef ?? null,
+    concurrency: limiter ? {
+      scope: session?.owner ? 'account-backend' : 'session-backend',
+      active: limiter.active,
+      queued: limiter.queued,
+      maxActive: session.cfg.maxPerSessionConcurrency,
+      maxQueued: session.cfg.maxQueuedPerSession,
+      catalogReservedSlots: session?.owner ? CATALOG_RESERVED_BACKEND_SLOTS : 0,
+    } : null,
   };
   structured.monotonicDurationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
   return {
@@ -767,6 +810,8 @@ class BackendOwner {
     this.generation = randomUUID();
     this.outputPager = new TextOutputPager();
     this.outputToolSchemas = new Map();
+    this.backendToolContracts = new Map();
+    this.fleetRouter = cfg.fleetRouting ? createFleetRouter(cfg.fleetRouting) : null;
     this.state = 'idle';
     this.client = null;
     this.transport = null;
@@ -774,7 +819,7 @@ class BackendOwner {
     this.closePromise = null;
     this.closing = false;
     this.sessions = new Set();
-    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, MAX_QUEUED_PER_SESSION, {
+    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, cfg.maxQueuedPerSession, {
       reservePriority: CATALOG_RESERVED_BACKEND_SLOTS,
     });
   }
@@ -829,11 +874,13 @@ class BackendOwner {
     this.closing = true;
     this.outputPager.clear();
     this.outputToolSchemas.clear();
+    this.backendToolContracts.clear();
     this.state = 'broken';
     this.limiter.drain('Backend closed');
     this.closePromise = (async () => {
       try { await this.client?.close(); } catch {}
       try { await this.transport?.close(); } catch {}
+      try { await this.fleetRouter?.close?.(); } catch {}
       // A connecting child must finish cleanup before its owner is released.
       try { await this.connectPromise; } catch {}
       this.client = null;
@@ -863,6 +910,10 @@ class GatewaySession {
     this.owner = owner;
     this.outputPager = owner?.outputPager ?? new TextOutputPager();
     this.outputToolSchemas = owner?.outputToolSchemas ?? new Map();
+    this.backendToolContracts = owner?.backendToolContracts ?? new Map();
+    this.fleetRouter = owner?.fleetRouter ?? (cfg.fleetRouting ? createFleetRouter(cfg.fleetRouting) : null);
+    this.selectedHostRef = null;
+    this.backendToolCalls = 0;
     this.backendOpsInFlight = 0;
 
     this.createdAt = Date.now();
@@ -877,7 +928,7 @@ class GatewaySession {
     // idle expiry only. Separate from `limiter`, which counts backend
     // operations, so an idle SSE listener can never starve tool calls.
     this.httpRequestsInFlight = 0;
-    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, MAX_QUEUED_PER_SESSION);
+    this.limiter = createLimiter(cfg.maxPerSessionConcurrency, cfg.maxQueuedPerSession);
 
     this.backendState = 'idle'; // idle | connecting | ready | broken
     this.backendClient = null;
@@ -888,7 +939,11 @@ class GatewaySession {
     // Starts reclaim-safe. Any effectful or interactive admission flips this
     // permanently; catalog/read-only work does not.
     this.reclaimUnsafe = false;
-    this.readonlyToolNames = new Set([STUDIO_PING_TOOL.name, OUTPUT_PAGE_TOOL.name]);
+    this.readonlyToolNames = new Set([
+      STUDIO_PING_TOOL.name,
+      OUTPUT_PAGE_TOOL.name,
+      STUDIO_SELECT_HOST_TOOL.name,
+    ]);
 
     this.transport = null;
     this.server = null;
@@ -898,7 +953,29 @@ class GatewaySession {
     this.fleetStatus = cfg.fleetStatus
       ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
       : null;
+    this.toolAllowlist = cfg.toolAllowlist ? new Set(cfg.toolAllowlist) : null;
     this.owner?.sessions.add(this);
+  }
+
+  toolIsExposed(name) {
+    return this.toolAllowlist === null || this.toolAllowlist.has(name);
+  }
+
+  localTools() {
+    const tools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+    if (this.fleetStatus) tools.push({ ...STUDIO_FLEET_STATUS_TOOL });
+    if (this.fleetRouter) tools.push({ ...STUDIO_SELECT_HOST_TOOL });
+    if (this.gitPublisher) {
+      tools.push(...(this.workspaceAccess ? STUDIO_REPOSITORY_GIT_TOOLS : STUDIO_GIT_PUBLISH_TOOLS)
+        .map((tool) => ({ ...tool })));
+    }
+    if (this.workspaceAccess) {
+      tools.push(...STUDIO_WORKSPACE_TOOLS.map((tool) => ({ ...tool })));
+    }
+    if (this.paperDesigner) {
+      tools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
+    }
+    return tools;
   }
 
   rememberToolAnnotations(tool) {
@@ -908,6 +985,88 @@ class GatewaySession {
       this.readonlyToolNames.add(tool.name);
     } else {
       this.readonlyToolNames.delete(tool.name);
+    }
+  }
+
+  rememberBackendToolContract(tool) {
+    if (!tool || typeof tool.name !== 'string') return;
+    if (!FLEET_BACKEND_TOOL_NAMES.includes(tool.name)) return;
+    this.backendToolContracts.set(tool.name, tool.inputSchema ?? null);
+  }
+
+  async ensureBackendToolContracts(signal) {
+    if (this.backendToolContracts.size > 0) return;
+    const backend = await this.ensureBackend();
+    const result = await backend.client.listTools(
+      {},
+      { timeout: this.cfg.requestTimeoutMs, signal },
+    );
+    for (const tool of sanitizeToolList(result.tools)) this.rememberBackendToolContract(tool);
+    if (this.backendToolContracts.size === 0) {
+      throw new Error('FLEET_ROUTE_LOCAL_CONTRACT_UNAVAILABLE');
+    }
+  }
+
+  async selectFleetHost(args, signal) {
+    if (!this.fleetRouter) {
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_ROUTING_NOT_CONFIGURED',
+      }, true);
+    }
+    const hostRef = args?.hostRef;
+    if (this.selectedHostRef !== null) {
+      if (this.selectedHostRef === hostRef) {
+        return fleetRouteToolResult({
+          schema: 'mastermind.studio_fleet_route_binding.v1',
+          status: 'BOUND',
+          effect_state: 'NOT_APPLIED',
+          hostRef,
+          reused: true,
+        });
+      }
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_SESSION_ALREADY_BOUND',
+        hostRef: this.selectedHostRef,
+      }, true);
+    }
+    if (this.backendToolCalls > 0) {
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_BIND_AFTER_BACKEND_USE_REFUSED',
+      }, true);
+    }
+    try {
+      await this.ensureBackendToolContracts(signal);
+      const receipt = await this.fleetRouter.preflight(
+        hostRef,
+        this.backendToolContracts,
+        { signal },
+      );
+      this.selectedHostRef = receipt.hostRef;
+      this.touch();
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'BOUND',
+        effect_state: 'NOT_APPLIED',
+        hostRef: receipt.hostRef,
+        toolCount: receipt.toolCount,
+        reused: false,
+      });
+    } catch {
+      return fleetRouteToolResult({
+        schema: 'mastermind.studio_fleet_route_binding.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'FLEET_ROUTE_PREFLIGHT_REFUSED',
+      }, true);
     }
   }
 
@@ -999,8 +1158,9 @@ class GatewaySession {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
         instructions:
           'HTTP gateway in front of the local Desktop Commander stdio server. ' +
-          'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
-          'studio_output_page reads retained output without repeating the original action. ' +
+          'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_select_host, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
+          'When fleet routing is configured, studio_select_host performs a one-way session binding before Desktop Commander tool use; it never performs automatic placement or retries. ' +
+          'studio_output_page reads retained output without repeating the original action and follows an established remote host binding when present. ' +
           'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
           'start_process and interact_with_process represent direct terminal effects rather than work-submission or agent-handoff transport. ' +
           'Nested agent instructions, worker handoffs, and opaque/repackaged payloads are outside their declared scope. ' +
@@ -1009,42 +1169,50 @@ class GatewaySession {
       },
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async (request, extra) =>
-      session.withBackendSlot(async () => {
+    server.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
+      const localTools = session.localTools();
+      const localNames = new Set(localTools.map((tool) => tool.name));
+      if (
+        session.toolAllowlist &&
+        [...session.toolAllowlist].every((name) => localNames.has(name))
+      ) {
+        const tools = localTools.filter((tool) => session.toolIsExposed(tool.name));
+        for (const tool of tools) session.rememberToolAnnotations(tool);
+        session.bumpTool(LIST_TOOLS_KEY);
+        return { tools };
+      }
+      return session.withBackendSlot(async () => {
         const backend = await session.ensureBackend();
         const result = await backend.client.listTools(request.params ?? {}, {
           timeout: session.cfg.requestTimeoutMs,
           signal: extra?.signal,
         });
         const tools = sanitizeToolList(result.tools);
-        const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
-        if (session.fleetStatus) {
-          localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
-        }
-        if (session.gitPublisher) {
-          localTools.push(...(session.workspaceAccess ? STUDIO_REPOSITORY_GIT_TOOLS : STUDIO_GIT_PUBLISH_TOOLS).map((tool) => ({ ...tool })));
-        }
-        if (session.workspaceAccess) {
-          localTools.push(...STUDIO_WORKSPACE_TOOLS.map((tool) => ({ ...tool })));
-        }
-        if (session.paperDesigner) {
-          localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
-        }
+for (const tool of tools) session.rememberBackendToolContract(tool);
         const backendNames = new Set(tools.map((tool) => tool.name));
         for (const localTool of localTools) {
           if (backendNames.has(localTool.name)) {
-            throw new McpError(ErrorCode.InternalError, `Backend tool name collides with gateway-owned tool: ${localTool.name}`);
+            throw new McpError(
+              ErrorCode.InternalError,
+              `Backend tool name collides with gateway-owned tool: ${localTool.name}`,
+            );
           }
           tools.push(localTool);
         }
-        for (const tool of tools) session.rememberToolAnnotations(tool);
-        const out = { tools };
-        if (typeof result.nextCursor === 'string' && result.nextCursor.length > 0) {
+        const exposed = tools.filter((tool) => session.toolIsExposed(tool.name));
+        for (const tool of exposed) session.rememberToolAnnotations(tool);
+        const out = { tools: exposed };
+        if (
+          session.toolAllowlist === null &&
+          typeof result.nextCursor === 'string' &&
+          result.nextCursor.length > 0
+        ) {
           out.nextCursor = result.nextCursor;
         }
         session.bumpTool(LIST_TOOLS_KEY);
         return out;
-      }, { kind: 'tools/list', catalogPriority: true }));
+      }, { kind: 'tools/list', catalogPriority: true });
+    });
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
       session.callTool(request, extra));
@@ -1053,8 +1221,15 @@ class GatewaySession {
     // during installation, so the advertised references must remain readable
     // through the same authenticated session and bounded backend queue.
     const proxyCatalog = (schema, capability, method, emptyResult) => {
-      server.setRequestHandler(schema, async (request, extra) =>
-        session.withBackendSlot(async () => {
+      server.setRequestHandler(schema, async (request, extra) => {
+        if (session.toolAllowlist) {
+          if (emptyResult) return { ...emptyResult };
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'Resources are not exposed on this restricted Studio gateway.',
+          );
+        }
+        return session.withBackendSlot(async () => {
           const backend = await session.ensureBackend();
           if (!backend.client.getServerCapabilities()?.[capability]) {
             if (emptyResult) return { ...emptyResult };
@@ -1064,7 +1239,8 @@ class GatewaySession {
             timeout: session.cfg.requestTimeoutMs,
             signal: extra?.signal,
           });
-        }, { kind: request.method, catalogPriority: true }));
+        }, { kind: request.method, catalogPriority: true });
+      });
     };
     proxyCatalog(ListResourcesRequestSchema, 'resources', 'listResources', { resources: [] });
     proxyCatalog(ListResourceTemplatesRequestSchema, 'resources', 'listResourceTemplates', { resourceTemplates: [] });
@@ -1085,9 +1261,45 @@ class GatewaySession {
     const name = request?.params?.name;
     const started = Date.now();
 
+    if (!this.toolIsExposed(name)) {
+      log('info', 'tool_call_refused_not_exposed', {
+        sid: this.tag,
+        tool: typeof name === 'string' ? name : 'invalid',
+        durationMs: Date.now() - started,
+        classification: CLASSIFICATION.NOT_FOUND,
+      });
+      throw new McpError(
+        ErrorCode.MethodNotFound,
+        'Tool is not exposed on this Studio gateway.',
+      );
+    }
+
+    if (this.fleetRouter && name === STUDIO_SELECT_HOST_TOOL.name) {
+      this.bumpTool(name);
+      const result = await this.selectFleetHost(request?.params?.arguments ?? {}, extra?.signal);
+      log(result.isError ? 'warn' : 'info', 'tool_call', {
+        sid: this.tag,
+        tool: name,
+        durationMs: Date.now() - started,
+        classification: result.isError ? CLASSIFICATION.TOOL_ERROR : CLASSIFICATION.OK,
+      });
+      return result;
+    }
+
     if (name === OUTPUT_PAGE_TOOL.name) {
       this.touch();
       this.bumpTool(name);
+      if (this.selectedHostRef) {
+        try {
+          return await this.fleetRouter.call(
+            this.selectedHostRef,
+            { name, arguments: request?.params?.arguments ?? {} },
+            { signal: extra?.signal },
+          );
+        } catch (err) {
+          return this.handleToolFailure(err, name, started);
+        }
+      }
       return this.outputPager.read(request?.params?.arguments ?? {});
     }
 
@@ -1121,6 +1333,15 @@ class GatewaySession {
     }
 
     if (this.paperDesigner && PAPER_DESIGN_TOOL_NAMES.has(name)) {
+      if (this.selectedHostRef) {
+        return paperToolResult({
+          schema: 'mastermind.paper_studio_host_binding.v1',
+          status: 'REFUSED',
+          effect_state: 'NOT_APPLIED',
+          code: 'PAPER_TOOL_REQUIRES_LOCAL_STUDIO_SESSION',
+          selected_host_ref: this.selectedHostRef,
+        }, true);
+      }
       return this.withBackendSlot(async () => {
         this.bumpTool(name);
         const result = await this.paperDesigner.call(name, request?.params?.arguments ?? {});
@@ -1138,7 +1359,7 @@ class GatewaySession {
       }, { kind: 'tools/call', tool: name, started });
     }
 
-    if (this.workspaceAccess && STUDIO_WORKSPACE_TOOLS.some((tool) => tool.name === name)) {
+if (this.workspaceAccess && STUDIO_WORKSPACE_TOOLS.some((tool) => tool.name === name)) {
       this.bumpTool(name);
       try {
         const args = request?.params?.arguments ?? {};
@@ -1150,6 +1371,18 @@ class GatewaySession {
       } catch {
         return gitToolResult({ status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'WORKSPACE_ACTION_REFUSED' }, true);
       }
+    }
+
+    if (this.gitPublisher && this.selectedHostRef &&
+        (name === STUDIO_GIT_PUBLISH_STATUS_TOOL.name ||
+         name === STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.name ||
+         name === STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL.name)) {
+      return gitToolResult({
+        schema: 'mastermind.studio_git_tool_error.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'TYPED_GIT_REQUIRES_LOCAL_STUDIO_SESSION',
+      }, true);
     }
 
     if (this.gitPublisher &&
@@ -1188,7 +1421,7 @@ class GatewaySession {
 
     return this.withBackendSlot(async () => {
       this.bumpTool(name);
-      const backend = await this.ensureBackend();
+      this.backendToolCalls += 1;
 
       try {
         // Exactly one attempt. There is no retry loop anywhere in this file.
@@ -1203,11 +1436,21 @@ class GatewaySession {
             : {}),
           mastermind_remote_call_id: String(extra?.requestId),
         };
-        const result = await backend.client.callTool(
-          { name, arguments: request?.params?.arguments ?? {}, _meta: backendMeta },
-          undefined,
-          { timeout: this.cfg.requestTimeoutMs, signal: extra?.signal },
-        );
+        let result;
+        if (this.selectedHostRef) {
+          result = await this.fleetRouter.call(
+            this.selectedHostRef,
+            { name, arguments: request?.params?.arguments ?? {}, _meta: backendMeta },
+            { signal: extra?.signal },
+          );
+        } else {
+          const backend = await this.ensureBackend();
+          result = await backend.client.callTool(
+            { name, arguments: request?.params?.arguments ?? {}, _meta: backendMeta },
+            undefined,
+            { timeout: this.cfg.requestTimeoutMs, signal: extra?.signal },
+          );
+        }
         this.touch();
         const classification = result && result.isError === true
           ? CLASSIFICATION.TOOL_ERROR
@@ -1427,9 +1670,12 @@ class GatewaySession {
       return;
     }
 
-    // Per-session mode: output retention shares this backend lifetime.
+    // Per-session mode: output retention and any fleet router share this
+    // frontend lifetime. Shared-account routers are closed by BackendOwner.
     this.outputPager.clear();
     this.outputToolSchemas.clear();
+    this.backendToolContracts.clear();
+    try { await this.fleetRouter?.close?.(); } catch { /* bounded cleanup */ }
     this.closingBackend = true;
     const transport = this.backendTransport;
     const client = this.backendClient;
@@ -2144,6 +2390,12 @@ export async function startGateway(partialConfig = {}, auth = {}) {
       backend: {
         spawns: stats.backend.spawns,
         lost: stats.backend.lost,
+        limits: {
+          maxConcurrency: cfg.maxPerSessionConcurrency,
+          maxQueued: cfg.maxQueuedPerSession,
+          catalogReservedSlots: cfg.backendMode === 'shared-account'
+            ? CATALOG_RESERVED_BACKEND_SLOTS : 0,
+        },
         // Expose backend generation per owner (shared mode only).
         // Useful for tests that verify different principals got different generations.
         ...(cfg.backendMode === 'shared-account' && {
@@ -2151,6 +2403,8 @@ export async function startGateway(partialConfig = {}, auth = {}) {
             principal: o.principalTag,
             generation: o.generation,
             state: o.state,
+            active: o.limiter.active,
+            queued: o.limiter.queued,
           })),
         }),
       },

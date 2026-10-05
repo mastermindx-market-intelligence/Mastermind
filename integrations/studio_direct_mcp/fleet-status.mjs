@@ -7,8 +7,35 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const SHA256 = /^[0-9a-f]{64}$/;
 const OWNER_SCHEMA = 'mastermind.studio_direct_fleet_status.v1';
-const RESULT_SCHEMA = 'mastermind.studio_fleet_status_tool.v1';
+const RESULT_SCHEMA = 'mastermind.studio_fleet_status_tool.v2';
+const FABRIC_VIEW_SCHEMA = 'placement-view.private-candidate.v1';
 const MAX_OUTPUT_BYTES = 256 * 1024;
+const MAX_FABRIC_HOSTS = 32;
+const FABRIC_MODES = Object.freeze([
+  'go-codex',
+  'glm',
+  'minimax',
+  'grok',
+  'cursor',
+  'oc-free',
+]);
+const HOST_REF = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const GATE_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const HOST_TITLES = Object.freeze({
+  m2: 'M2 Studio — Lead Computer',
+  m1: 'M1 Studio — Data + CI',
+  mb: 'MacBook Pro — Mobile Computer',
+  mini1: 'Mac mini 1 — Worker',
+  mini2: 'Mac mini 2 — Worker',
+  mini3: 'Mac mini 3 — Worker',
+  mini4: 'Mac mini 4 — Candidate Worker',
+  ubuntu0: 'Ubuntu 0 — Worker',
+  ubuntu1: 'Ubuntu 1 — Compute Worker',
+  ubuntu2: 'Ubuntu 2 — Compute Worker',
+  ubuntu3: 'Ubuntu 3 — Compute Worker',
+  pc: 'Windows/WSL PC — CI + Local Models',
+});
+const SCHEDULER_SHADOW_HOST_REFS = new Set(['bm1', 'bmb']);
 
 export const STUDIO_FLEET_STATUS_TOOL = Object.freeze({
   name: 'studio_fleet_status',
@@ -37,7 +64,15 @@ export function resolveFleetStatusConfig(raw) {
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     throw new TypeError('config.fleetStatus must be an object when enabled');
   }
-  const allowed = new Set(['enabled', 'launcherPath', 'launcherSha256', 'timeoutMs']);
+  const allowed = new Set([
+    'enabled',
+    'launcherPath',
+    'launcherSha256',
+    'timeoutMs',
+    'fabricLauncherPath',
+    'fabricLauncherSha256',
+    'fabricTimeoutMs',
+  ]);
   for (const key of Object.keys(raw)) {
     if (!allowed.has(key)) throw new TypeError(`config.fleetStatus contains unknown key: ${key}`);
   }
@@ -52,22 +87,58 @@ export function resolveFleetStatusConfig(raw) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 30000) {
     throw new TypeError('config.fleetStatus.timeoutMs must be an integer from 1000 to 30000');
   }
+  const fabricKeys = [
+    raw.fabricLauncherPath,
+    raw.fabricLauncherSha256,
+    raw.fabricTimeoutMs,
+  ];
+  const fabricConfigured = fabricKeys.some((value) => value !== undefined && value !== null);
+  if (fabricConfigured) {
+    if (typeof raw.fabricLauncherPath !== 'string' || !path.isAbsolute(raw.fabricLauncherPath)) {
+      throw new TypeError('config.fleetStatus.fabricLauncherPath must be absolute');
+    }
+    if (typeof raw.fabricLauncherSha256 !== 'string' || !SHA256.test(raw.fabricLauncherSha256)) {
+      throw new TypeError('config.fleetStatus.fabricLauncherSha256 must be lowercase sha256');
+    }
+    const fabricTimeoutMs = Number(raw.fabricTimeoutMs);
+    if (!Number.isInteger(fabricTimeoutMs) || fabricTimeoutMs < 1000 || fabricTimeoutMs > 30000) {
+      throw new TypeError('config.fleetStatus.fabricTimeoutMs must be an integer from 1000 to 30000');
+    }
+  }
   return Object.freeze({
     launcherPath: raw.launcherPath,
     launcherSha256: raw.launcherSha256,
     timeoutMs,
+    ...(fabricConfigured ? {
+      fabricLauncherPath: raw.fabricLauncherPath,
+      fabricLauncherSha256: raw.fabricLauncherSha256,
+      fabricTimeoutMs: Number(raw.fabricTimeoutMs),
+    } : {}),
   });
 }
 
-async function verifyLauncher(cfg) {
-  const info = await lstat(cfg.launcherPath);
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error('FLEET_STATUS_LAUNCHER_UNSAFE');
+async function verifyRegularLauncher(launcherPath, expectedSha256, prefix) {
+  const info = await lstat(launcherPath);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${prefix}_LAUNCHER_UNSAFE`);
   if (typeof process.getuid === 'function' && info.uid !== process.getuid()) {
-    throw new Error('FLEET_STATUS_LAUNCHER_OWNER_MISMATCH');
+    throw new Error(`${prefix}_LAUNCHER_OWNER_MISMATCH`);
   }
-  const bytes = await readFile(cfg.launcherPath);
+  const bytes = await readFile(launcherPath);
   const digest = createHash('sha256').update(bytes).digest('hex');
-  if (digest !== cfg.launcherSha256) throw new Error('FLEET_STATUS_LAUNCHER_DRIFT');
+  if (digest !== expectedSha256) throw new Error(`${prefix}_LAUNCHER_DRIFT`);
+}
+
+async function verifyLauncher(cfg) {
+  await verifyRegularLauncher(cfg.launcherPath, cfg.launcherSha256, 'FLEET_STATUS');
+}
+
+async function verifyFabricLauncher(cfg) {
+  if (!cfg.fabricLauncherPath) return;
+  await verifyRegularLauncher(
+    cfg.fabricLauncherPath,
+    cfg.fabricLauncherSha256,
+    'FLEET_STATUS_FABRIC',
+  );
 }
 
 const PUBLIC_ACCOUNTS = new Set([
@@ -266,6 +337,181 @@ function projectStatusRow(row) {
   };
 }
 
+function expectFiniteNumber(value, min, max) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) invalidOwner();
+  return value;
+}
+
+function parseGatePair(detail, separator) {
+  if (typeof detail !== 'string' || detail.length > 96) return [null, null];
+  const parts = detail.split(separator);
+  if (parts.length !== 2) return [null, null];
+  const left = Number(parts[0]);
+  const right = Number(parts[1]);
+  if (!Number.isFinite(left) || !Number.isFinite(right) || left < 0 || right < 0) {
+    return [null, null];
+  }
+  return [left, right];
+}
+
+function normalizeRoles(detail) {
+  if (typeof detail !== 'string' || detail.length > 256) return [];
+  const roles = detail
+    .split(',')
+    .filter((value) => /^[a-z0-9][a-z0-9._-]{0,63}$/.test(value));
+  return [...new Set(roles)].sort();
+}
+
+function gateMap(row) {
+  if (!Array.isArray(row?.gates) || row.gates.length > 32) invalidOwner();
+  const result = new Map();
+  for (const gate of row.gates) {
+    exactKeys(gate, ['host', 'gate', 'result', 'detail']);
+    if (gate.host !== row.host || typeof gate.gate !== 'string' || !GATE_NAME.test(gate.gate)) {
+      invalidOwner();
+    }
+    if (gate.result !== 'PASS' && gate.result !== 'FAIL') invalidOwner();
+    if (typeof gate.detail !== 'string' || gate.detail.length > 256) invalidOwner();
+    if (result.has(gate.gate)) invalidOwner();
+    result.set(gate.gate, gate);
+  }
+  return result;
+}
+
+function projectFabricRow(row, mode) {
+  exactKeys(
+    row,
+    ['host', 'eligible', 'seat', 'ssh_alias', 'score', 'age', 'gates'],
+    ['candidate_excluded', 'identity_shadowed', 'telemetry_source'],
+  );
+  if (typeof row.host !== 'string' || !HOST_REF.test(row.host)) invalidOwner();
+  expectBoolean(row.eligible);
+  expectBoolean(row.seat);
+  if (row.ssh_alias !== null && typeof row.ssh_alias !== 'string') invalidOwner();
+  if (row.score !== null) expectFiniteNumber(row.score, -1000, 1000);
+  const age = row.age === null ? null : expectBoundedInteger(row.age, 0, 86_400);
+  if (row.candidate_excluded !== undefined) expectBoolean(row.candidate_excluded);
+  if (row.identity_shadowed !== undefined) expectBoolean(row.identity_shadowed);
+  const gates = gateMap(row);
+  const roles = normalizeRoles(gates.get('roles')?.detail ?? '');
+  const [load1] = parseGatePair(gates.get('load')?.detail, '<');
+  const [activeLanes, laneCeiling] = parseGatePair(gates.get('lane-ceiling')?.detail, '<');
+  const [diskFreeGb] = parseGatePair(gates.get('disk')?.detail, '>=');
+  const cpuDetail = gates.get('cpu')?.detail;
+  const logicalCpuCount = /^\d{1,4}$/.test(cpuDetail ?? '') ? Number(cpuDetail) : null;
+
+  return {
+    hostRef: row.host,
+    title: HOST_TITLES[row.host] ?? `${row.host} — Fleet Host`,
+    roles,
+    seat: row.seat,
+    online: gates.get('reachable')?.result === 'PASS',
+    fresh: gates.get('fresh')?.result === 'PASS',
+    freshAgeSeconds: age,
+    environment: {
+      logicalCpuCount,
+      load1,
+      diskFreeGb,
+      activeLanes,
+      laneCeiling,
+    },
+    mode,
+    modeState: {
+      eligible: row.eligible,
+      modeQualified: gates.get('mode')?.result === 'PASS',
+      automaticQualification: gates.get('automatic-qualification')?.result === 'PASS',
+      toolsReady: gates.get('tools')?.result === 'PASS',
+      candidateExcluded: row.candidate_excluded === true,
+    },
+  };
+}
+
+function mergeFabricRows(projectedRows) {
+  const hosts = new Map();
+  for (const row of projectedRows) {
+    // bm1/bmb are durable scheduler aliases for the M1/MacBook physical hosts.
+    // Their temporary role can change (for example during a travel hold), so
+    // suppress them by their established registry refs as well as role.
+    if (SCHEDULER_SHADOW_HOST_REFS.has(row.hostRef) || row.roles.includes('lanes-shadow')) continue;
+    const existing = hosts.get(row.hostRef);
+    if (!existing) {
+      hosts.set(row.hostRef, {
+        hostRef: row.hostRef,
+        title: row.title,
+        roles: row.roles,
+        seat: row.seat,
+        online: row.online,
+        fresh: row.fresh,
+        freshAgeSeconds: row.freshAgeSeconds,
+        environment: row.environment,
+        modes: {},
+        advisoryOnly: true,
+        placementAuthority: false,
+        executionAuthority: false,
+        physicalIdentityProven: false,
+      });
+    } else {
+      existing.online ||= row.online;
+      existing.fresh ||= row.fresh;
+      if (existing.freshAgeSeconds === null ||
+          (row.freshAgeSeconds !== null && row.freshAgeSeconds < existing.freshAgeSeconds)) {
+        existing.freshAgeSeconds = row.freshAgeSeconds;
+      }
+      if (existing.roles.length === 0 && row.roles.length > 0) existing.roles = row.roles;
+      for (const [key, value] of Object.entries(row.environment)) {
+        if (existing.environment[key] === null && value !== null) existing.environment[key] = value;
+      }
+    }
+    hosts.get(row.hostRef).modes[row.mode] = row.modeState;
+  }
+  return [...hosts.values()].sort((a, b) => a.hostRef.localeCompare(b.hostRef));
+}
+
+function validateAndProjectFabricView(value, expectedMode) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalidOwner();
+  if (value.schema !== FABRIC_VIEW_SCHEMA || value.mode !== expectedMode) invalidOwner();
+  const rows = value.host_eligibility?.hosts;
+  if (!Array.isArray(rows) || rows.length > MAX_FABRIC_HOSTS) invalidOwner();
+  return rows.map((row) => projectFabricRow(row, expectedMode));
+}
+
+async function readFabricProjection(cfg) {
+  if (!cfg.fabricLauncherPath) return null;
+  await verifyFabricLauncher(cfg);
+  const views = await Promise.all(FABRIC_MODES.map(async (mode) => {
+    const { stdout } = await execFileAsync(
+      cfg.fabricLauncherPath,
+      ['placement', '--mode', mode, '--json'],
+      {
+        timeout: cfg.fabricTimeoutMs,
+        maxBuffer: MAX_OUTPUT_BYTES,
+        windowsHide: true,
+        env: {
+          HOME: process.env.HOME ?? '',
+          PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+        },
+      },
+    );
+    let value;
+    try {
+      value = JSON.parse(stdout);
+    } catch {
+      throw new Error('FLEET_STATUS_FABRIC_RESULT_INVALID');
+    }
+    return validateAndProjectFabricView(value, mode);
+  }));
+  const hosts = mergeFabricRows(views.flat());
+  return {
+    schema: 'mastermind.studio_fleet_hosts.v1',
+    scope: 'subagent-fabric-registered-hosts',
+    hostCount: hosts.length,
+    hosts,
+    advisoryOnly: true,
+    placementAuthority: false,
+    executionAuthority: false,
+  };
+}
+
 function validateAndProjectOwnerResult(value) {
   exactKeys(value, ['schema', 'action', 'accountCount', 'readyCount', 'allReady', 'accounts']);
   if (value.schema !== OWNER_SCHEMA || value.action !== 'status' || !Array.isArray(value.accounts)) {
@@ -321,10 +567,24 @@ export function createFleetStatus(rawConfig) {
         throw new Error('FLEET_STATUS_OWNER_RESULT_INVALID');
       }
       const projection = validateAndProjectOwnerResult(owner);
+      let physicalFleet = null;
+      let fabricIssue = null;
+      if (cfg.fabricLauncherPath) {
+        try {
+          physicalFleet = await readFabricProjection(cfg);
+        } catch (error) {
+          fabricIssue = typeof error?.message === 'string' &&
+            /^FLEET_STATUS_FABRIC_[A-Z0-9_]+$/.test(error.message)
+            ? error.message
+            : 'FLEET_STATUS_FABRIC_UNAVAILABLE';
+        }
+      }
       return {
         schema: RESULT_SCHEMA,
-        state: projection.allReady ? 'READY' : 'DEGRADED',
+        state: projection.allReady && !fabricIssue ? 'READY' : 'DEGRADED',
         ...projection,
+        physicalFleet,
+        issues: fabricIssue ? [fabricIssue] : [],
       };
     },
   });

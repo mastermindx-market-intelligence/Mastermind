@@ -34,7 +34,7 @@ PINNED_TUNNEL_CLIENT = (
 )
 TRANSPORT_TTL = "5h"
 STARTUP_WAIT = "30s"
-MAX_CONCURRENT_REQUESTS = 4
+MAX_CONCURRENT_REQUESTS = 8
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
 
 # Known loopback mapping. Other safe accounts take port from the gateway manifest.

@@ -414,6 +414,10 @@ test('SDK tool requests progress through a single HTTP connection after initiali
     assert.ok(list.tools.length > 0);
     const ping = await a.client.callTool({ name: 'studio_ping', arguments: {} }, undefined, { timeout: 2000 });
     assert.equal(ping.isError, undefined);
+    assert.equal(ping.structuredContent.concurrency.scope, 'session-backend');
+    assert.equal(ping.structuredContent.concurrency.maxActive, 4);
+    assert.equal(ping.structuredContent.concurrency.maxQueued, 4);
+    assert.equal(ping.structuredContent.concurrency.catalogReservedSlots, 0);
     assert.equal(transport.sessionId, sessionId);
     assert.equal(gw.stats().backend.spawns, 1);
   } finally {
@@ -467,7 +471,63 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     'gateway generation must be an ephemeral random UUID, not a host-derived identifier',
   );
-  assert.equal(payload.gatewayVersion, '0.1.8');
+  assert.equal(payload.gatewayVersion, '0.1.10');
+});
+
+test('configured fleet routing advertises one-way host selection and refuses late binding', async () => {
+  const { gw } = await bootGateway({
+    fleetRouting: {
+      enabled: true,
+      requestTimeoutMs: 5000,
+      routes: [
+        {
+          hostRef: 'mini4',
+          url: 'https://mini4.example-tailnet.ts.net/mcp',
+        },
+      ],
+    },
+  });
+  const a = newClient('tok-alice');
+  await connect(a.client, gw.url, a.transportOpts);
+
+  const listed = await a.client.listTools();
+  const selector = listed.tools.find((tool) => tool.name === 'studio_select_host');
+  assert.ok(selector, 'configured fleet router must advertise studio_select_host');
+  assert.deepEqual(
+    [
+      selector.annotations.readOnlyHint,
+      selector.annotations.destructiveHint,
+      selector.annotations.idempotentHint,
+      selector.annotations.openWorldHint,
+    ],
+    [true, false, true, false],
+  );
+
+  const initialPing = await a.client.callTool({ name: 'studio_ping', arguments: {} });
+  assert.equal(initialPing.structuredContent.selectedHostRef, null);
+
+  const unknown = await a.client.callTool({
+    name: 'studio_select_host',
+    arguments: { hostRef: 'unknown-host' },
+  });
+  assert.equal(unknown.isError, true);
+  assert.equal(unknown.structuredContent.code, 'FLEET_ROUTE_PREFLIGHT_REFUSED');
+
+  const localRead = await a.client.callTool({
+    name: 'read_file',
+    arguments: { path: '/fixture-local-before-bind' },
+  });
+  assert.notEqual(localRead.isError, true);
+
+  const late = await a.client.callTool({
+    name: 'studio_select_host',
+    arguments: { hostRef: 'mini4' },
+  });
+  assert.equal(late.isError, true);
+  assert.equal(late.structuredContent.code, 'FLEET_BIND_AFTER_BACKEND_USE_REFUSED');
+
+  const finalPing = await a.client.callTool({ name: 'studio_ping', arguments: {} });
+  assert.equal(finalPing.structuredContent.selectedHostRef, null);
 });
 
 test('configured studio_fleet_status lists and returns the bounded public projection', async () => {
@@ -561,7 +621,7 @@ test('configured studio_fleet_status lists and returns the bounded public projec
     { timeout: 5000 },
   );
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v2');
   assert.equal(result.structuredContent.state, 'DEGRADED');
   assert.equal(result.structuredContent.accountCount, 2);
   assert.equal(result.structuredContent.readyCount, 1);
@@ -581,6 +641,7 @@ test('shared backend reserves one slot for catalog traffic while typed Git remai
     backendMode: 'shared-account',
     maxSessions: 8,
     maxPerSessionConcurrency: 4,
+    maxQueuedPerSession: 12,
     requestTimeoutMs: 10_000,
     gitPublish: {
       enabled: true,
@@ -597,6 +658,12 @@ test('shared backend reserves one slot for catalog traffic while typed Git remai
     await connect(actor.client, gw.url, actor.transportOpts);
     actors.push(actor);
   }
+
+  const ping = await actors[4].client.callTool({ name: 'studio_ping', arguments: {} });
+  assert.equal(ping.structuredContent.concurrency.scope, 'account-backend');
+  assert.equal(ping.structuredContent.concurrency.maxActive, 4);
+  assert.equal(ping.structuredContent.concurrency.maxQueued, 12);
+  assert.equal(ping.structuredContent.concurrency.catalogReservedSlots, 1);
 
   const catalog = await actors[4].client.listTools();
   const names = new Set(catalog.tools.map((tool) => tool.name));
