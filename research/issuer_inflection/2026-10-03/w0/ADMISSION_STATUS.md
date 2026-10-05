@@ -110,3 +110,9 @@ Current-head CI #6070 / run `37174887821` failed the protected identity guard wi
 ### TERMINAL_HOST_RELEASE_2026-10-04
 
 Terminal #777 merged at `d9128b500fb434e3548574e89b25a2a85053f3d7`; current master observed `70b5ffff3e3a950a2ef7e24e129f3e62e9a41256`. Existing same-origin BFF blob `9a9f9c3f...` and closed normalizer blob `6b15b8f1...` are unchanged. The prior active Analysis host-writer collision is released. This does **not** clear Macro #7426 `HOLD_FOR_OWNER_RECOMPOSE`, rights, trial capture, or authorize an I3 Terminal write. Final mount must target merged `AnalysisWorkspace.tsx` blob `6faa4625...` only after the sibling reader contract is admitted. Terminal receipt: #777 comment `5983190619`.
+
+## W0 preregistration freeze — candidate complete, registry admission still false
+
+`PREREGISTRATION_CANDIDATE.md` now freezes the W0 scientific boundary before any validation/holdout body or outcome inspection. Its machine-readable JSON block is checked by `test_i3_preregistration_candidate.py` (**10 passed**). It binds the exact beta event-selection hash `d64bf572...`, split/dependence law, R/C acceptance thresholds, U/P child-prereg requirements, multiplicity/stopping/amendment law, purpose-specific rights state, exposure separation and all-false action authority.
+
+This is **not** a registered experiment. `trial_registered=false`, body/outcome inspection remains unauthorized, prospective holdout events remain future/unassigned, and the 12 beta identities are still pre-body candidates rather than confirmatory validation units. Utility still requires a pilot-derived power/sample-size freeze that excludes that pilot from confirmation; prediction still requires a feature-specific child preregistration with no universal alpha threshold. The canonical Portfolio Learning and Accountability registry writer/fence and post-write readback remain open gates.

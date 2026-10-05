@@ -28,3 +28,9 @@ This resolves feasibility but not authority/custody. The owner-program dependenc
 ## Frozen I3 pre-registration candidate
 
 The metadata-only beta event selection is now frozen before body/outcome inspection as `issuer_inflection.beta_event_identity_candidate/v1`, SHA-256 `d64bf572890c411e3cb9f2cf8adacdee48b6f2481c2f0ce9defe737072274a9b`. It contains the 12 accepted owner metadata identities plus exact PIT membership evidence. Historical business-family balance is explicitly unqualified; prospective temporal holdouts remain unassigned and future-only. This hash is a candidate artifact for the existing registry owner to reference later; it is **not** an experiment ID, registry record, or trial admission.
+
+## Prepared preregistration payload
+
+`PREREGISTRATION_CANDIDATE.md` now supplies the complete W0 payload that can be frozen without a registry mutation. Its embedded JSON is validated by 10 tests and references the exact beta event-selection hash, source-owner identities, split/dependence law, R/C gates, U/P child-prereg requirements, multiplicity/stopping/amendment policy, rights purposes and exposure classes.
+
+The existing owner still must perform the canonical act: allocate/reuse the experiment identity under an admitted serialized writer, persist immutable artifact references, and read back the same experiment ID plus hashes. Until that occurs, the prepared payload remains `CANDIDATE_NOT_REGISTERED`; it is not a substitute for the registry or permission to inspect bodies/outcomes.

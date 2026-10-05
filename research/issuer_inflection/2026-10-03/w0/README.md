@@ -64,3 +64,5 @@ The normal CI entry is `tests/test_i3_baseline_fixture_consumer.py`, which runs 
 
 
 Terminal #777 merged as `d9128b500fb434e3548574e89b25a2a85053f3d7`, so the active Analysis-host custody collision is closed. Current master keeps the Company Intelligence BFF/normalizer bytes unchanged; W1 still waits on Macro #7426 semantic recomposition before any sibling reader or final mount.
+
+`PREREGISTRATION_CANDIDATE.md` is the machine-checked W0 scientific freeze prepared for the existing Portfolio Learning and Accountability owner. It references the exact 12-event pre-body selection, keeps the prospective holdout event identities unassigned, freezes R/C policy thresholds, and explicitly defers U/P outcome work to separate child preregistrations. `test_i3_preregistration_candidate.py` has 10 checks. The artifact is not a registry record and grants no body/outcome inspection or exposure authority.
