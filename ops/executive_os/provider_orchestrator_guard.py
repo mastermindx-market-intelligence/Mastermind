@@ -138,7 +138,33 @@ def is_mastermind_scope(payload: dict[str, object]) -> bool:
     return False
 
 
-def _poll_key(command: str, cwd: str) -> str | None:
+def _session_scope(payload: dict[str, object]) -> str:
+    """Return a stable best-effort provider-session scope for local cooldowns.
+
+    Prefer explicit provider/session identifiers. Fall back to documented/installed
+    environment identities, then the long-lived provider parent process. This state is
+    only a local anti-poll hint; it is not lifecycle or RuntimeBinding authority.
+    """
+
+    for key in (
+        "session_id",
+        "sessionId",
+        "thread_id",
+        "threadId",
+        "conversation_id",
+        "conversationId",
+    ):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return f"{key}:{value}"
+    for name in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return f"{name}:{value}"
+    return f"ppid:{os.getppid()}"
+
+
+def _poll_key(command: str, cwd: str, session_scope: str) -> str | None:
     repo_match = REPO_ARG_RE.search(command)
     scope = repo_match.group("repo").lower() if repo_match else os.path.realpath(cwd)
     for label, regex in (
@@ -148,7 +174,7 @@ def _poll_key(command: str, cwd: str) -> str | None:
     ):
         match = regex.search(command)
         if match:
-            return f"{label}:{scope}:{match.group('id')}"
+            return f"{session_scope}:{label}:{scope}:{match.group('id')}"
     return None
 
 
@@ -238,7 +264,9 @@ def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> Non
 
     if not background and not watches and not loop_poll and not delayed_poll:
         key = _poll_key(
-            clean, str(payload.get("cwd") or os.getcwd())
+            clean,
+            str(payload.get("cwd") or os.getcwd()),
+            _session_scope(payload),
         )
         if key:
             repeat = repeat_poll_reason(key)
