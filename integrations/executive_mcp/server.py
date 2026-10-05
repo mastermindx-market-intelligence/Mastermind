@@ -802,6 +802,7 @@ def _build_profile_mcp_app(
     inner_server_version: str | None = None,
     enable_os_executive_transport: bool = False,
     os_executive_resource: str | None = None,
+    os_commission_preparer: Any | None = None,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -830,6 +831,8 @@ def _build_profile_mcp_app(
         raise ValueError("authenticated Executive MCP refuses read-only app settings")
     if type(enable_os_executive_transport) is not bool:
         raise ValueError("OS Executive transport toggle must be boolean")
+    if not enable_os_executive_transport and os_commission_preparer is not None:
+        raise ValueError("disabled OS transport refuses commission preparation")
     if not enable_os_executive_transport and os_executive_resource is not None:
         raise ValueError("OS Executive resource requires enabled transport")
     if release_profile and any(app is not None for app in (workspace_app, content_app, os_app)):
@@ -930,6 +933,7 @@ def _build_profile_mcp_app(
             ),
             submit_authenticator=os_authenticator,
             clock=configured.clock,
+            commission_preparer=os_commission_preparer,
         )
     server: Server = Server(profile_server_name, version=profile_server_version)
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
@@ -1431,6 +1435,7 @@ def build_web_ceo_v3_mcp_app(
     os_app=None,
     enable_os_executive_transport: bool = False,
     os_executive_resource: str | None = None,
+    os_commission_preparer: Any | None = None,
 ) -> Any:
     """Web-CEO v3 composition: v2 owners plus one read-only MDM sensor.
 
@@ -1466,6 +1471,7 @@ def build_web_ceo_v3_mcp_app(
         os_app=os_app,
         enable_os_executive_transport=enable_os_executive_transport,
         os_executive_resource=os_executive_resource,
+        os_commission_preparer=os_commission_preparer,
         **direct,
     )
     if session_reply_read_tool is not None:

@@ -367,9 +367,10 @@ def test_expired_and_access_projection_drift_are_withheld(settings: Any, rsa_key
 
 
 @pytest.mark.parametrize("lose_reply", [False, True], ids=["accepted", "lost-reply"])
+@pytest.mark.parametrize("with_publication", [False, True], ids=["existing-source", "prepared-source"])
 def test_strict_v2_original_launch_survives_reopen_without_duplicate(
     settings: Any, rsa_key: object, tmp_path: Path, short_socket_root: Path,
-    lose_reply: bool,
+    lose_reply: bool, with_publication: bool, monkeypatch,
 ) -> None:
     import hashlib
     import os
@@ -382,6 +383,11 @@ def test_strict_v2_original_launch_survives_reopen_without_duplicate(
     from integrations.mastermind_executive_app import gateway
 
     payload = {**SUBMIT_PAYLOAD, "workstream": "WS:OS-TRANSPORT-ORIGINAL"}
+    if with_publication:
+        payload["operation_key"] = "mmos-launch-" + "a" * 40
+    publications = []
+    from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient, PreparationResult
+    from integrations.mastermind_executive_app.web_commission_source import GitHubWebCommissionSourceProvider, COMMISSION_PATH
     root, macro = Path(settings.mastermind_root), Path(settings.macro_root_flag)
     sha = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
 
@@ -402,12 +408,44 @@ def test_strict_v2_original_launch_survives_reopen_without_duplicate(
             "watch_mode": "turn_watch_v1",
         }
         source_state = [source]
+        # Publication has separate source custody from the installed grounding checkout.
+        commission_root = tmp_path / "commission-publisher"
+        fixture._git_repo(commission_root)
+        def refs():
+            if not source_state[0]:
+                return ()
+            values = subprocess.check_output(["git", "-C", str(commission_root), "for-each-ref",
+                "--format=%(objectname) %(refname)", "refs/heads/sol/web-*"], text=True)
+            return tuple(tuple(line.split(" ", 1)) for line in values.splitlines())
+        real_source = GitHubWebCommissionSourceProvider(
+            list_refs=refs, fetch_blob=lambda *, commit: subprocess.check_output(
+                ["git", "-C", str(commission_root), "show", commit + ":" + COMMISSION_PATH]))
+        async def prepare(_client, **request):
+            # I/O-boundary fixture stands in for the separately tested real Studio publisher.
+            assert request["bearer"] == fixture._submit_token(rsa_key)
+            assert request["arguments"] == payload
+            assert len(request["principal_scope"]) == 64
+            publications.append(request["arguments"]["operation_key"])
+            subprocess.run(["git", "-C", str(commission_root), "checkout", "-b",
+                            "sol/web-" + payload["operation_key"]], check=True, capture_output=True)
+            brief = commission_root / COMMISSION_PATH
+            brief.parent.mkdir(parents=True)
+            brief.write_text("# Published OS commission\n\n" + json.dumps(payload, sort_keys=True))
+            subprocess.run(["git", "-C", str(commission_root), "add", COMMISSION_PATH], check=True)
+            subprocess.run(["git", "-C", str(commission_root), "commit", "-m", "test: exact operation commission"],
+                           check=True, capture_output=True)
+            head = subprocess.check_output(["git", "-C", str(commission_root), "rev-parse", "HEAD"], text=True).strip()
+            observed = real_source(ceo_request.automated_intent_id(ceo_request.app_request_ref(payload["operation_key"])), payload["workstream"])
+            assert observed["commission_ref"]["commit"] == head
+            return PreparationResult("prepared", payload["operation_key"], head,
+                                     hashlib.sha256(brief.read_bytes()).hexdigest())
+        monkeypatch.setattr(StudioCommissionClient, "prepare", prepare)
         service = ExecutiveControlService(
             base.config, supervisor_factory=lambda runtime: fixture._NoExecutionSupervisor(),
             ceo_ingress_socket_path=short_socket_root / "real.sock",
             ceo_ingress_peer_uid=os.geteuid() + 1000,
             ceo_ingress_grounding_provider=grounding, ceo_ingress_armed=False,
-            ceo_ingress_dialogue_source_provider=lambda *_: source_state[0],
+            ceo_ingress_dialogue_source_provider=real_source if with_publication else lambda *_: source_state[0],
             ceo_ingress_app_binding=CeoIngressAppBinding(
                 peer_uid=os.geteuid(), armed=True, grounding_provider=grounding,
                 read_provider=readers, read_schema=CEO_WEB_CEO_V2_READ_SCHEMA),
@@ -458,6 +496,8 @@ def test_strict_v2_original_launch_survives_reopen_without_duplicate(
             request_ref = ceo_request.app_request_ref(payload["operation_key"])
             intent_id = ceo_request.automated_intent_id(request_ref)
             async with client(configured) as inner:
+                if with_publication:
+                    inner.os_transport._commission_preparer = StudioCommissionClient(port=45025)
                 response = await inner.post("/os/executive/submit", headers=headers(token),
                                             json={"arguments": payload})
                 assert response.status_code == (202 if lose_reply else 200), response.text
@@ -476,6 +516,8 @@ def test_strict_v2_original_launch_survives_reopen_without_duplicate(
             source_state[0] = None
             # Reopened app has only the original pointer; it makes a status read.
             async with client(configured) as reopened:
+                if with_publication:
+                    reopened.os_transport._commission_preparer = StudioCommissionClient(port=45025)
                 response = await reopened.post(
                     "/os/executive/status", headers=headers(token),
                     json={"arguments": {"intent_id": intent_id}})
@@ -484,6 +526,7 @@ def test_strict_v2_original_launch_survives_reopen_without_duplicate(
                 assert response.json()["data"] == durable
             assert sum(frame["schema"] == ingress.SUBMIT_SCHEMA_V2 for frame in frames) == 1
             assert service.runtime.jobs.list_jobs() == jobs
+            assert publications == ([payload["operation_key"]] if with_publication else [])
             assert service.runtime.attempts.list_attempts() == []
             assert service.runtime.workers.list_workers() == []
             assert not errors, errors
@@ -691,3 +734,71 @@ def test_enabled_os_transport_requires_one_configured_audience(settings):
                 session_reply_handler=lambda *_: {}, session_summon_handler=lambda *_: {},
                 os_app=_assets(), enable_os_executive_transport=True,
                 os_executive_resource=resource)
+
+
+@pytest.mark.parametrize("preparation", ["prepared", "effect_unknown", "refused", "lost", "drift"])
+def test_publication_precedes_submit_and_never_changes_original_form(
+    settings, rsa_key, monkeypatch, preparation,
+):
+    from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient, PreparationResult
+    from control_plane.ceo_request import app_request_ref
+    events = []
+    payload = {**SUBMIT_PAYLOAD, "operation_key": "mmos-launch-" + "a" * 40,
+               "workstream": "WS:Publication"}
+    bearer = fixture._submit_token(rsa_key)
+
+    async def exercise():
+        async with client(settings) as inner:
+            transport = inner.os_transport
+            transport._commission_preparer = StudioCommissionClient(port=45025)
+
+            async def prepare(self, **supplied):
+                events.append(("prepare", supplied))
+                if preparation == "lost":
+                    raise TimeoutError()
+                if preparation == "drift":
+                    async def stale(*_):
+                        return False
+                    transport._still_current = stale
+                return PreparationResult("prepared" if preparation == "drift" else preparation,
+                                         payload["operation_key"])
+
+            async def inner_app(scope, receive, send):
+                event = await receive()
+                events.append(("submit", json.loads(event["body"])))
+                assert (b"authorization", ("Bearer " + bearer).encode()) in scope["headers"]
+                # An uncertain inner response retains the same operation pointer.
+                await send({"type": "http.response.start", "status": 503, "headers": []})
+                await send({"type": "http.response.body", "body": b"{}"})
+
+            monkeypatch.setattr(StudioCommissionClient, "prepare", prepare)
+            transport._inner_app = inner_app
+            response = await inner.post("/os/executive/submit", headers=headers(bearer),
+                                        json={"arguments": payload})
+            assert response.status_code == 202
+            assert response.json()["request_ref"] == app_request_ref(payload["operation_key"])
+            assert response.json()["status"] == "effect_unknown"
+            assert events[0][0] == "prepare"
+            assert events[0][1]["bearer"] == bearer
+            assert len(events[0][1]["principal_scope"]) == 64
+            assert events[0][1]["arguments"] == payload
+            assert "attempt_limit" not in events[0][1]["arguments"]
+            assert len(events) == (2 if preparation == "prepared" else 1)
+            if preparation == "prepared":
+                assert events[1][1]["arguments"]["operation_key"] == payload["operation_key"]
+                assert "attempt_limit" in events[1][1]["arguments"]
+    asyncio.run(exercise())
+
+
+def test_status_reopen_does_not_invoke_publication(settings, rsa_key, monkeypatch):
+    from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
+    async def never(*_, **__):
+        pytest.fail("status lookup must not prepare or submit again")
+    monkeypatch.setattr(StudioCommissionClient, "prepare", never)
+    async def exercise():
+        async with client(settings) as inner:
+            inner.os_transport._commission_preparer = StudioCommissionClient(port=45025)
+            response = await inner.post("/os/executive/status", headers=headers(fixture._submit_token(rsa_key)),
+                                        json={"arguments": {"intent_id": "auto-" + "a" * 32}})
+            assert response.status_code in (200, 503)
+    asyncio.run(exercise())

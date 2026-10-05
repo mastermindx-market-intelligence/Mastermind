@@ -43,7 +43,7 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port'}):
         raise ValueError('installed MCP configuration fields differ')
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
@@ -70,6 +70,7 @@ def validate_document(raw):
         raise ValueError('MCP requires its dedicated audit directory')
     validate_additional_resources(raw)
     validate_os_executive_resource(raw)
+    build_os_commission_client(raw)
     validate_optional_mounts(raw)
     return raw
 
@@ -105,6 +106,17 @@ def validate_os_executive_resource(raw):
             or raw.get('os_executive_resource') != OS_EXECUTIVE_RESOURCE):
         raise ValueError('OS Executive resource must be the exact installed OS audience')
     return OS_EXECUTIVE_RESOURCE
+
+
+def build_os_commission_client(raw):
+    from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
+    if raw.get("os_executive_transport", False) is not True:
+        if "os_commission_port" in raw:
+            raise ValueError("disabled OS transport refuses commission owner")
+        return None
+    if "os_commission_port" not in raw:
+        raise ValueError("OS transport requires installed commission owner")
+    return StudioCommissionClient(port=raw["os_commission_port"])
 
 
 def build_additional_policies(raw, policies):
@@ -478,6 +490,7 @@ def main(argv=None):
                 session_reply_read_tool=NativeReplyReadTool(session_client),
                 enable_os_executive_transport=raw.get('os_executive_transport', False),
                 os_executive_resource=validate_os_executive_resource(raw),
+                os_commission_preparer=build_os_commission_client(raw),
                 **mounts,
             )
         elif profile == WEB_CEO_SESSIONS_PROFILE:

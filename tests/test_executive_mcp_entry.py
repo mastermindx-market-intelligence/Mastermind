@@ -231,6 +231,7 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     if os_enabled:
         raw['os_executive_transport'] = True
         raw['os_executive_resource'] = module.OS_EXECUTIVE_RESOURCE
+        raw['os_commission_port'] = 45025
     config = tmp_path / 'installed.json'
     config.write_text(json.dumps(raw))
     from tests.test_executive_mcp_app_composition import fixture
@@ -267,6 +268,9 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
     assert settings.read_from_ceo_ingress is True
     assert settings.ceo_ingress_socket_path == raw['ceo_ingress_socket_path']
     if profile == 'web_ceo_v3':
+        from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
+        preparer = kwargs.pop('os_commission_preparer')
+        assert (type(preparer) is StudioCommissionClient) if os_enabled else preparer is None
         assert kwargs.pop('enable_os_executive_transport') is os_enabled
         assert kwargs.pop('os_executive_resource') == (module.OS_EXECUTIVE_RESOURCE if os_enabled else None)
         assert tuple(pair.submit.resource for pair in settings.additional_policies) == ((module.OS_EXECUTIVE_RESOURCE,) if os_enabled else ())

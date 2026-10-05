@@ -369,6 +369,7 @@ class OsExecutiveTransportApp:
         submit_verifier: MastermindTokenVerifier | tuple[MastermindTokenVerifier, ...],
         submit_authenticator: JwtAuthenticator | tuple[JwtAuthenticator, ...],
         clock: Callable[[], int],
+        commission_preparer: Any | None = None,
     ) -> None:
         verifiers = submit_verifier if isinstance(submit_verifier, tuple) else (submit_verifier,)
         if not verifiers or any(type(v) is not MastermindTokenVerifier for v in verifiers):
@@ -390,6 +391,10 @@ class OsExecutiveTransportApp:
         self._submit_verifiers = verifiers
         self._submit_authenticators = authenticators
         self._clock = clock
+        from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
+        if commission_preparer is not None and type(commission_preparer) is not StudioCommissionClient:
+            raise TypeError("installed Studio commission client required")
+        self._commission_preparer = commission_preparer
 
     # ---------------------------------------------------------------- ASGI
 
@@ -601,6 +606,22 @@ class OsExecutiveTransportApp:
                 status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
+
+        if self._commission_preparer is not None:
+            try:
+                prepared = await self._commission_preparer.prepare(
+                    arguments=arguments, bearer=self._bearer_from_scope(scope),
+                    principal_scope=principal_scope(principal),
+                )
+            except Exception:
+                prepared = None
+            # Source publication is not Job admission. Uncertain publication or
+            # authorization drift keeps the original pointer and never submits.
+            if (prepared is None or prepared.status != "prepared"
+                    or prepared.operation_key != validated["operation_key"]
+                    or not await self._still_current(scope, principal)):
+                return JSONResponse(_unknown_outcome(request_ref),
+                                    status_code=HTTPStatus.ACCEPTED, headers=_OS_HTTP_HEADERS)
 
         # Build the inner submit scope with the ORIGINAL bearer forwarded so
         # the inner submit tool independently re-verifies.  No new operation
