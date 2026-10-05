@@ -31,10 +31,43 @@ generation cannot become green. Skipped/neutral checks are accepted only when th
 policy explicitly permits that identity and the check is genuinely non-applicable.
 
 This slice performs **zero polling, registration, persistence, wake, rerun, merge, deploy or lease
-mutation**. It therefore closes the deterministic classification seam only. It does not satisfy the
-H5 requirement for one reusable live Class-E/Class-T observer, material-change return path or native
-Claude continuation. The future observer owner should feed its owner-native snapshots through this
-classifier rather than reproduce check semantics in a Claude plugin.
+mutation**. It closes the deterministic classification seam only.
+
+## H5-B1 current source slice — deterministic transition filter, not registration
+
+The current branch now also adds
+`control_plane/github_ci_candidate_observer.py` as a second pure layer over H5-A. It does not
+sample GitHub. Instead, an existing Class-E/Class-T process owner may feed successive H5-A
+observations through one deterministic observer key:
+
+`repository + repository_id + PR + candidate_ref + expected_head_sha + required-check policy +
+required-check identity set`.
+
+That key produces one stable `github-ci-observer-...` identifier so an outer owner can coalesce one
+observer per exact candidate without a new registry in this module.
+
+The transition filter applies the protected watcher law directly:
+
+- an initial exact PENDING sample establishes a quiescent baseline and does not wake reasoning;
+- queued→running or partial required-check progress that leaves the overall candidate PENDING is
+  suppressed as `NO_MATERIAL_CHANGE`;
+- exact terminal GREEN / FAILED / STALE returns are terminal/material;
+- UNKNOWN owner-native evidence is material when first seen or when its issue set changes;
+- UNKNOWN→PENDING recovery is material so the owner can re-establish observer health;
+- repeated UNKNOWN with the same issue set remains quiescent even when a fresh sample/digest moves;
+- a terminal observer generation cannot be reused or resurrected;
+- candidate/policy/required-check identity drift is a typed refusal, not implicit rebinding.
+
+B1 validates the canonical digest of every supplied H5-A observation before consuming it. It imports
+no network, subprocess, timer, persistence, MCP or scheduling owner and exposes no merge/deploy/rerun/
+Wake operation. It therefore closes the **material-change filter and deterministic dedupe identity**
+only. It still does not register a process, poll GitHub, own a return route, or wake/resume Claude.
+
+**H5-B2** remains the process-owner composition: bind B1 to one existing accepted Class-E/Class-T
+waiter/process, register-or-reuse that exact candidate, persist only through that owner's existing
+handle/checkpoint mechanism, and deliver a material result through an accepted return target. The
+future owner must feed its owner-native snapshots through H5-A+B1 rather than reproduce CI semantics
+inside a Claude plugin.
 
 ## Resolve the existing owner first
 
