@@ -115,6 +115,8 @@ def build_additional_policies(raw, policies):
     os_resource = validate_os_executive_resource(raw)
     if os_resource is not None:
         resources += (os_resource,)
+    if not resources:
+        return ()
     if (len(resources) != len(set(resources))
             or policies.read.resource in resources
             or policies.submit.resource in resources):
