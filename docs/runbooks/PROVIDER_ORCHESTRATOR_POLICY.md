@@ -9,10 +9,7 @@ Canonical source:
 - `ops/executive_os/provider_orchestrator_policy.py`
 - `ops/executive_os/provider_orchestrator_guard.py`
 
-The deployer manages one marked policy block in `~/.codex/AGENTS.md` and
-`~/.claude/CLAUDE.md`, one `PreToolUse` registration in each provider home, and identical
-copies of the reviewed guard. Existing unrelated instructions, hooks, model settings, plugins,
-permissions, worktree hooks, and credentials are preserved. Legacy and temporary operational policy blocks are migrated into the single v2 block rather than stacked. This includes `mastermind-ceo-async-ci-v1`, `mastermind-ceo-context-discipline-v1`, `mastermind-ceo-forward-execution`, `mastermind-orchestration-burn-guard-v1`, and `mastermind-fabric-routing-operational-v1`. The v2 block is the only managed provider-policy plane after a successful apply.
+The deployer manages one marked policy block in `~/.codex/AGENTS.md` and `~/.claude/CLAUDE.md`, one `PreToolUse` registration in each provider home, exact native-agent safety settings (`~/.codex/config.toml`: agents disabled by default with thread cap 1; Claude env: max 2 native subagents and spawn depth 1), and identical copies of the reviewed guard. Existing unrelated instructions, hooks, model settings, plugins, permissions, worktree hooks, credentials, and unrelated TOML/JSON fields are preserved. The Codex native-agent disable is intentionally user-scope defense-in-depth: a rare native-child exception requires an explicit reviewed reconfiguration rather than silently consuming local collaboration slots. Legacy and temporary operational policy blocks are migrated into the single v2 block rather than stacked. This includes `mastermind-ceo-async-ci-v1`, `mastermind-ceo-context-discipline-v1`, `mastermind-ceo-forward-execution`, `mastermind-orchestration-burn-guard-v1`, and `mastermind-fabric-routing-operational-v1`. The v2 block is the only managed provider-policy plane after a successful apply.
 
 ## Verify before apply
 
@@ -53,6 +50,8 @@ verify all four observations separately:
 3. A foreground CI status + `sleep` polling loop is denied even at a 150–300 second cadence.
 4. A first bounded CI status read is admitted; an unchanged repeat inside five minutes is
    denied. A real watcher/event remains the next observation.
+5. Codex effective config reads `agents.enabled=false` and `max_concurrent_threads_per_session=1`.
+6. Claude effective settings read `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=2` and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`.
 
 Do not launch a real workflow merely to prove the guard; use an already-existing run/PR or a
 synthetic hook payload where possible. Never cancel/re-dispatch shared CI as part of this canary.
