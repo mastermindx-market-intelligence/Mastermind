@@ -922,13 +922,18 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
     return _run(tmp_path, "restart-gateway", plan, extra_args=extra_args, prepare=prepare)
 
 
+def _gateway_override_table(*rows):
+    body = "\n".join(f'    "{label}" => {value}' for label, value in rows)
+    return "disabled services = {\n" + body + ("\n" if body else "") + "}"
+
+
 def _gateway_enabled_plan(value="false"):
-    return [("print-disabled system", 0,
-             f'"{MCP_LABEL}" => {value}', ""),
+    rows = () if value is None else ((MCP_LABEL, value),)
+    return [("print-disabled system", 0, _gateway_override_table(*rows), ""),
             (f"print system/{MCP_LABEL}", 0, "state = running", "")]
 
 
-@pytest.mark.parametrize("enabled_value", ["false", "enabled"])
+@pytest.mark.parametrize("enabled_value", [None, "false", "enabled"])
 def test_gateway_exact_release_qualified_before_any_cycle(tmp_path, enabled_value):
     plan = (_gateway_enabled_plan(enabled_value) + _stop_ok(MCP_LABEL)
             + _ensure_running_bootstrap(MCP_LABEL, tmp_path / "mcp.plist"))
@@ -979,9 +984,13 @@ def test_gateway_missing_or_indirect_config_never_stops_service(tmp_path, kind):
 
 
 @pytest.mark.parametrize("code,output", [
-    (0, f'"{MCP_LABEL}" => true'), (0, f'"{MCP_LABEL}" => disabled'),
-    (0, f'"{MCP_LABEL}" => false\n"{MCP_LABEL}" => enabled'),
-    (0, "disabled services = {}"), (5, "")])
+    (0, _gateway_override_table((MCP_LABEL, "true"))),
+    (0, _gateway_override_table((MCP_LABEL, "disabled"))),
+    (0, _gateway_override_table((MCP_LABEL, "false"), (MCP_LABEL, "enabled"))),
+    (0, "disabled services = {}"),
+    (0, 'disabled services = {\n    "bad label" => enabled\n}'),
+    (5, ""),
+])
 def test_gateway_never_enables_previously_disabled_or_unknown_service(tmp_path, code, output):
     plan = [("print-disabled system", code, output, "")]
     result, _, err, calls, remaining, *_ = _qualified_gateway_run(tmp_path, plan)

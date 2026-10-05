@@ -249,8 +249,23 @@ require_gateway_enabled() {
     return 1
   fi
   if ! /bin/echo "$output" | /usr/bin/awk -v label="$MCP_LABEL" '
-    $1 == "\"" label "\"" {count++; if ($2 != "=>" || ($3 != "false" && $3 != "enabled")) bad=1}
-    END {exit(count == 1 && !bad ? 0 : 1)}
+    NF == 0 {next}
+    $1 == "disabled" && $2 == "services" && $3 == "=" && $4 == "{" && NF == 4 {header++; next}
+    $1 == "}" && NF == 1 {footer++; next}
+    NF == 3 && $1 ~ /^"[A-Za-z0-9._-]+"$/ && $2 == "=>" \
+        && ($3 == "enabled" || $3 == "disabled" || $3 == "true" || $3 == "false") {
+      if ($1 == "\"" label "\"") {
+        seen++;
+        if ($3 == "disabled" || $3 == "true") disabled=1
+      }
+      next
+    }
+    {invalid=1}
+    END {
+      # print-disabled is an override table, not an inventory.  A valid table
+      # with no row for this label means the service is default-enabled.
+      exit(header == 1 && footer == 1 && !invalid && seen <= 1 && !disabled ? 0 : 1)
+    }
   '; then
     /bin/echo "gateway must already be enabled: disabled or unknown" >&2
     return 1
