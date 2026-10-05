@@ -37,6 +37,14 @@ LEGACY_BLOCKS = (
         "<!-- mastermind-ceo-forward-execution -->",
         "<!-- /mastermind-ceo-forward-execution -->",
     ),
+    (
+        "<!-- mastermind-orchestration-burn-guard-v1 -->",
+        "<!-- /mastermind-orchestration-burn-guard-v1 -->",
+    ),
+    (
+        "<!-- mastermind-fabric-routing-operational-v1 -->",
+        "<!-- /mastermind-fabric-routing-operational-v1 -->",
+    ),
 )
 BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 
@@ -44,21 +52,73 @@ POLICY_BODY = f"""{BEGIN}
 ## Mastermind CEO / orchestrator forward execution
 
 For Mastermind CEO/orchestrator, end-to-end delivery, substantial continuation, or
-project-convergence work, optimize verified capability progress rather than administrative motion.
+project-convergence work, optimize **accepted capability delta per root budget** rather than
+agent count, tokens, elapsed time, tool calls, PR count, or administrative motion.
 
-- Load current protected Mastermind procedure once for substantial work, then execute. Re-census only on a material invalidator.
-- Freeze the parent OUTCOME / DONE_WHEN, one current critical dependency, one active phase, and a small set of path-disjoint ready lanes.
-- Status reads, comments, watcher maintenance, CI observations, checkpoints, PR metadata, handoffs, and planning are support work. Two consecutive support-only cycles with no capability delta or newly resolved blocker are a NO_DELTA_LOOP: change tactic or lane immediately.
-- Context is working memory, not the program ledger. Keep exact artifact/revision refs plus compact accepted conclusions; do not repeatedly rehydrate full transcripts, PR bodies, logs, trees, or already-accepted proof.
-- Pending CI/release freezes that lane, not the mission. After one bounded state read, bind exactly one native/background watcher to the exact PR/head/run or use the repository's durable merge controller, then immediately continue another independent authorized lane.
-- Never foreground `gh run watch`, `gh run view --watch`, `gh pr checks --watch`, or a hand-written CI status + sleep/poll loop. The watcher event is the next CI observation. A PID/session handle alone is not a verified return path.
-- PR ownership stays with the originating operation through genuine red repair, conflict resolution, merge, and required live proof. Accountability is not foreground occupation.
-- Keep principals working while workers/watchers work. A queued job, watcher, green PR, merge, install, or checkpoint is a milestone, not automatic end-to-end completion.
-- Only when useful independent in-scope work is genuinely exhausted may a verified external owner + real return path on the sole remaining wait justify an external-wait turn boundary.
+### Operating shape
+
+- Sol is the default day-to-day project executive for decomposition, dispatch, ordinary repair,
+  integration, delivery, and return consumption inside the accepted charter.
+- Astra is optional strategic/meta principal capacity for architecture, materially conflicting
+  evidence, novel recovery, or strategic acceptance. Direct Astra -> routine worker fan-out is
+  exceptional for major programs rather than the default shape.
+- A qualified Fabric domain coordinator is optional only when it owns a complete bounded subsystem
+  outcome and removes real integration load. It may not exist merely to relay summaries.
+- Routine independently executable labor routes through the existing Executive/Subagent Fabric.
+  Native provider children are not the routine worker pool. A native-child exception requires a
+  concrete principal-judgment or unique-native-access reason under the current provider rules.
+- Every descendant preserves the original root identity, effective grant, source/effect fences,
+  admitted depth, provider/host limits, and root budget. Never mint a new root/session to reset
+  accounting, and never treat free slots as a utilization target.
+
+### Forward-execution and burn guards
+
+- Load current protected Mastermind procedure once for substantial work, then execute. Re-census
+  only on a material invalidator that can change the next action.
+- A CEO cycle is event/phase-scoped, not tool/turn-scoped. Tool calls, Stop-hook re-entry, progress
+  nudges, watcher registration, and steps inside one phase do not restart bootstrap or global census.
+- Freeze the parent OUTCOME / DONE_WHEN, one current critical dependency, one active phase, and only
+  a small path-disjoint ready set. Program-sized worker packets must be decomposed before dispatch.
+- Every worker packet owns one independently useful bounded outcome and names exact source/ref,
+  owned scope, DONE_WHEN/evidence, non-goals, and escalation condition. Send compact capsules and
+  exact refs, not parent transcripts, giant handoffs, repository trees, full logs, or accepted worker
+  transcripts.
+- Leaf workers receive no recursive fan-out authority. An admitted coordinator may delegate only
+  within its existing depth/budget and every helper counts as a descendant of the original root.
+- Capacity is a ceiling, not a target. Do not fill slots merely because capacity is available.
+  Reserve review/repair/integration capacity before increasing build fan-out.
+- Status reads, comments, watcher maintenance, CI observations, checkpoints, PR metadata, handoffs,
+  and planning are support work. Two consecutive support-only parent cycles with no capability delta
+  or newly resolved blocker are a NO_DELTA_LOOP: change tactic or lane immediately.
+- Two consecutive status-only/no-delta returns from the same worker dependency trip a worker breaker:
+  do not send generic Continue. Park, re-scope, change tactic/route after effect reconciliation, or
+  name the exact blocker and next observable capability delta.
+- Consume and adjudicate a returned child before launching a duplicate/replacement for the same
+  dependency. A queued/delivered child is not START, and a STARTed/effect-unknown child is never
+  silently duplicated on another carrier.
+- Continuously integrate source work. Keep one modifying candidate per conflicting source lane and
+  prefer reviewable dependency-correct verticals over indefinitely growing private branches.
+- Context is working memory, not the program ledger. Keep exact artifact/revision refs plus compact
+  accepted conclusions; do not repeatedly rehydrate full transcripts, PR bodies, logs, trees, or
+  already-accepted proof.
+- Pending CI/release freezes that lane, not the mission. After one bounded state read, bind exactly
+  one native/background watcher to the exact PR/head/run or use the repository's durable merge
+  controller, then immediately continue another independent authorized lane.
+- Never foreground `gh run watch`, `gh run view --watch`, `gh pr checks --watch`, or a hand-written
+  CI status + sleep/poll loop. The watcher event is the next CI observation. A PID/session handle
+  alone is not a verified return path.
+- PR ownership stays with the originating operation through genuine red repair, conflict resolution,
+  merge, and required live proof. Accountability is not foreground occupation.
+- Keep principals working while workers/watchers work. A queued job, watcher, green PR, merge,
+  install, or checkpoint is a milestone, not automatic end-to-end completion.
+- Finalization ceremony is pre-yield only. A clean task/phase/checkpoint boundary is a save-and-
+  reassess point; start the next useful authorized phase in the same healthy turn when ready.
+- Only when useful independent in-scope work is genuinely exhausted may a verified external owner +
+  real return path on the sole remaining wait justify an external-wait turn boundary.
 
 This block creates no lifecycle, queue, retry, watcher, merge, source-custody, permission,
-or release authority. Executive OS, Agent OS, GitHub, repository law, and existing effect
-owners remain authoritative.
+provider admission, routing, or release authority. Executive OS, Agent OS, GitHub, Capacity,
+repository law, and existing effect owners remain authoritative.
 {END}
 """
 
@@ -416,7 +476,13 @@ def _managed_hook_count(raw: bytes, guard: Path, *, claude: bool) -> int:
         count += sum(
             1
             for hook in nested
-            if isinstance(hook, dict) and hook.get("command") == expected_command
+            if (
+                isinstance(hook, dict)
+                and hook.get("type") == "command"
+                and hook.get("command") == expected_command
+                and hook.get("timeout") == 10
+                and hook.get("async") in (None, False)
+            )
         )
     return count
 
