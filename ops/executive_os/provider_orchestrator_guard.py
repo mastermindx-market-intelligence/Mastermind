@@ -139,7 +139,7 @@ def _scope_roots(home: Path) -> tuple[Path, ...]:
     return tuple(Path(os.path.realpath(path)) for path in roots)
 
 
-def is_mastermind_scope(payload: dict[str, object]) -> bool:
+def is_project_scope(payload: dict[str, object]) -> bool:
     cwd = Path(os.path.realpath(str(payload.get("cwd") or os.getcwd())))
     home = Path(os.path.expanduser("~"))
     for root in _scope_roots(home):
@@ -296,7 +296,7 @@ def guard_fabric_launch(command: str) -> None:
 
 
 def guard_bash(payload: dict[str, object], tool_input: dict[str, object]) -> None:
-    if not is_mastermind_scope(payload):
+    if not is_project_scope(payload):
         return
     command = str(tool_input.get("command") or "")
     clean = strip_heredocs(command)
@@ -420,7 +420,7 @@ def main() -> None:
         guard_bash(payload, tool_input)
         return
 
-    if tool in ("Agent", "Task") and is_mastermind_scope(payload):
+    if tool in ("Agent", "Task") and is_project_scope(payload):
         guard_native_child(tool_input)
 
 
