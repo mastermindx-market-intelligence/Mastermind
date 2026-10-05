@@ -191,12 +191,12 @@ def test_apply_is_idempotent_and_backups_keep_original_content(tmp_path: Path) -
 def test_managed_policy_retains_efficiency_and_hierarchy_laws() -> None:
     text = policy.POLICY_BODY
     required = (
-        "accepted capability delta per original-root budget",
+        "accepted capability delta per root budget",
         "Sol is the default day-to-day project executive",
         "Do not force a ceremonial hierarchy",
         "compact frozen mission/frontier capsule",
         "FRONTIER_WITNESS",
-        "Capacity is a ceiling, not a utilization target",
+        "Capacity is a ceiling, not a target",
         "NO_DELTA_LOOP",
         "worker breaker",
         "Before starting a second semantic vertical",
