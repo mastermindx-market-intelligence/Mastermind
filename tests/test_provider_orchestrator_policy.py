@@ -171,6 +171,16 @@ old async law
 <!-- mastermind-ceo-context-discipline-v1 -->
 old context law
 <!-- /mastermind-ceo-context-discipline-v1 -->
+<!-- mastermind-ceo-forward-execution -->
+A CEO cycle is event/phase-scoped, not tool/turn-scoped.
+Finalization ceremony is pre-yield only.
+<!-- /mastermind-ceo-forward-execution -->
+<!-- mastermind-orchestration-burn-guard-v1 -->
+Capacity is a ceiling, not a utilization target.
+<!-- /mastermind-orchestration-burn-guard-v1 -->
+<!-- mastermind-fabric-routing-operational-v1 -->
+Sol operating executive -> Fabric workers.
+<!-- /mastermind-fabric-routing-operational-v1 -->
 """
     (home / ".codex" / "AGENTS.md").write_text(
         "# Storage rule\n\nKeep external SSD placement.\n\n" + legacy,
@@ -242,6 +252,12 @@ old context law
     assert text.count(BEGIN) == text.count(END) == 1
     assert "old async law" not in text
     assert "old context law" not in text
+    assert "mastermind-orchestration-burn-guard-v1" not in text
+    assert "mastermind-fabric-routing-operational-v1" not in text
+    assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
+    assert "Finalization ceremony is pre-yield only." in text
+    assert "Capacity is a ceiling, not a target." in text
+    assert "Sol is the default day-to-day project executive" in text
     assert "# Existing Codex policy" in text
 
 
@@ -278,6 +294,46 @@ def test_verify_detects_managed_policy_content_drift(tmp_path: Path) -> None:
 
     assert result["state"] == "DRIFT"
     assert "claude_doc.managed_block" in result["issues"]
+
+
+def test_verify_rejects_matching_guard_command_with_non_command_type(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    path = home / ".claude" / "settings.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    managed = next(
+        row
+        for row in value["hooks"]["PreToolUse"]
+        if row.get("matcher") == "Agent|Task|Bash"
+    )
+    managed["hooks"][0]["type"] = "prompt"
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = verify_policy(home)
+
+    assert result["state"] == "DRIFT"
+    assert "claude_settings.pretool" in result["issues"]
+
+
+def test_verify_rejects_async_managed_guard_registration(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    apply_policy(home)
+    path = home / ".codex" / "hooks.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    managed = next(
+        row
+        for row in value["hooks"]["PreToolUse"]
+        if row.get("matcher") == "^Bash$"
+    )
+    managed["hooks"][0]["async"] = True
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = verify_policy(home)
+
+    assert result["state"] == "DRIFT"
+    assert "codex_hooks.pretool" in result["issues"]
 
 
 def test_unsafe_provider_parent_is_refused_before_any_mutation(tmp_path: Path) -> None:
@@ -374,9 +430,16 @@ def mastermind_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return cwd
 
 
-def _payload(cwd: Path, command: str, *, background: bool = False) -> dict[str, object]:
+def _payload(
+    cwd: Path,
+    command: str,
+    *,
+    background: bool = False,
+    session_id: str = "session-a",
+) -> dict[str, object]:
     return {
         "cwd": str(cwd),
+        "session_id": session_id,
         "tool_name": "Bash",
         "tool_input": {
             "command": command,
@@ -457,6 +520,25 @@ def test_guard_blocks_repeat_single_status_read_but_not_first(
     assert output["permissionDecision"] == "deny"
     assert "redundant status read" in output["permissionDecisionReason"]
     assert "continue another independent authorized project lane" in output["permissionDecisionReason"]
+
+
+def test_guard_does_not_share_cooldown_across_independent_sessions(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    command = "gh pr checks 8413 -R mastermindx-market-intelligence/macro"
+    tool_input = {"command": command}
+
+    guard.guard_bash(
+        _payload(mastermind_scope, command, session_id="session-a"),
+        tool_input,
+    )
+    guard.guard_bash(
+        _payload(mastermind_scope, command, session_id="session-b"),
+        tool_input,
+    )
+
+    assert capsys.readouterr().out == ""
 
 
 def test_general_pr_view_remains_available_for_effect_readback(
