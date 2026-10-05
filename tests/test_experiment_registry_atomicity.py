@@ -86,6 +86,18 @@ def test_corrupt_preimage_refuses_mutation_and_preserves_bytes(isolated_registry
     assert isolated_registry.read_bytes() == original
 
 
+def test_malformed_object_envelope_refuses_mutation(isolated_registry: Path) -> None:
+    for raw in (
+        b'{"not_experiments":[]}',
+        b'{"experiments":{}}',
+        b'42',
+    ):
+        isolated_registry.write_bytes(raw)
+        assert registry.load() == []
+        assert registry.add(record("new")) is False
+        assert isolated_registry.read_bytes() == raw
+
+
 def test_duplicate_id_preimage_refuses_mutation(isolated_registry: Path) -> None:
     isolated_registry.write_text('[{"id":"dup"},{"id":"dup"}]')
     before = isolated_registry.read_bytes()

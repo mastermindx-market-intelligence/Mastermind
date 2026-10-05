@@ -117,10 +117,14 @@ def _decode_registry_bytes(raw: bytes, *, strict: bool) -> list[dict]:
     if isinstance(data, list):
         experiments = data
     elif isinstance(data, dict):
+        if strict and "experiments" not in data:
+            raise ValueError("experiment registry envelope requires experiments")
         experiments = data.get("experiments")
-        if experiments is None:
+        if experiments is None and not strict:
             experiments = []
     else:
+        if strict:
+            raise ValueError("experiment registry must be a list or experiments envelope")
         experiments = []
     if strict:
         return _validate_mutation_rows(experiments)
