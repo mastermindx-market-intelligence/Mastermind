@@ -1,0 +1,165 @@
+{
+  "scope": "Author-side documentation/link/scope validation only; not independent review or product proof.",
+  "observed_at_utc": "2026-10-05T08:24:17.140771+00:00",
+  "status": "PASS",
+  "checks": [
+    {
+      "name": "required_files_utf8_line_endings_local_links",
+      "local_links_checked": 13
+    },
+    {
+      "name": "snapshot_unique_and_sha_valid",
+      "records": 33
+    },
+    {
+      "name": "required_packet_boundaries_present",
+      "assertions": 18
+    },
+    {
+      "name": "workspace_change_scope",
+      "changed_paths": 10,
+      "outside": []
+    },
+    {
+      "name": "immutable_source_links",
+      "requested": true,
+      "unique_urls": 24,
+      "verified": 24
+    }
+  ],
+  "file_sha256": {
+    "README.md": "635beb4469743f8acc2baa143e7031587a7b7fd85691f1a6cc19a2b4d78482a0",
+    "01_CENSUS.md": "3236b157b8a4a9b886e6de282c6f1a72ab07f4e4ea1c433dbf6d897434c1e39d",
+    "02_MASTERPLAN.md": "06b674b2b69fc43487786ae54fb2e90609ce5f54e5a00968a63a131d7e2239f6",
+    "03_WORK_PACKAGES.md": "fc523de57104047ac678211706ce464b3710da83ee10fcfde9edd39af576b53e",
+    "04_LOCAL_PRINCIPAL_HANDOFF.md": "212ff74508873140a626424c5c3b299744747a1608e4441ee672a76e067a06c2",
+    "05_ACCEPTANCE_AND_RED_TEAM.md": "f2388933939e767b0ec15dac976a5394423c7f05ff2a38f82b992e004515a3b6",
+    "06_SOURCE_REGISTER.md": "7786f0178b5512eb724567de89201b594f0c38aea9ef93e20dec8beb5dcff0f6",
+    "07_CHECKPOINT.md": "6324563e4be14519fac8eea4f602eb8c36ec9186722ce6aefde2a7f4138c5f78",
+    "PR_SNAPSHOT.json": "d42f7be90468816378197876e382ba464fc2259c8ed67a927abe923758f04a51",
+    "validate_packet.py": "e44e4cffeaf2c39361c5b5d509f4ea8851a85b28a15081657e1baaeeed4e5bb2"
+  },
+  "source_files": [
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/3f471167f31950f652d308a3342419024f0d113d/scripts/validate_perception.py",
+      "blob_sha": "5db1cc245ccee30d54a828e592ea03d7bd384ba6",
+      "size": 22634
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/65a3ef69fbcbcae521da30f0f501a3bec5ea9587/research/PIT_EXPECTATIONS_AND_THEME_INTELLIGENCE_MASTERPLAN_2026-10-04.md",
+      "blob_sha": "2b58d67fd1f026d14359a1281c296424c22f753f",
+      "size": 20478
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_c9_qualification/2026-10-04/README.md",
+      "blob_sha": "24c622ff03c7a0733146ff00a2553036ba0d5717",
+      "size": 9302
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/README.md",
+      "blob_sha": "f2ec5dd41bbd5cd618f3d43f1e698c6c64349ef3",
+      "size": 6032
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/b41bba31d5dc4a15a8ec8b2eaa8babf411b7d0a6/docs/plans/MARKET_INTELLIGENCE_MASTERPLAN_2026-10-04.md",
+      "blob_sha": "e27ddf77c953166fc261d2e99f17a666ba83ce2d",
+      "size": 31596
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/b90704d4b5c62ae604fae3b85d2847677515801a/docs/research/k3e-hardening-2026-10-03/MASTERPLAN.md",
+      "blob_sha": "1153241567bb4ebe970fc886bd848139b4198939",
+      "size": 66139
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/08a02dad68d37264966e2eb7a79bae3cc98db05b/research/research_vault_ai_fabric_20261004/08_EXECUTION_CHECKPOINT_2026-10-05.md",
+      "blob_sha": "b444f24e10e7f2deb3d3c30163fa9dcd41270646",
+      "size": 9406
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0a74706819a2cdf276b8d278182c8b468c481d93/docs/superpowers/plans/2026-10-03-gmi-theme-subtheme-end-to-end-completion.md",
+      "blob_sha": "0ea88d843c4be73eea16a614641862a5cddb4c8c",
+      "size": 79060
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/13910854fbd652dcdf975301bdc8c6728c2e4767/engine/k3e_expectation_surface.py",
+      "blob_sha": "d83e25b50321147b3077d7cff79f93466ad471a5",
+      "size": 22682
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1537636f53cc24184a16e7a044f066d7e43f2ac4/engine/rotation_events.py",
+      "blob_sha": "bcd3961be24a57e44d45bcfbd5f2190b2b059f9a",
+      "size": 76904
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/4895b47660d817889556757560c004d00951db80/engine/research_vault/fulltext.py",
+      "blob_sha": "ea9bc8f9c7006f6f6a1a66e9088f833ce844578c",
+      "size": 12838
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/66ff33ac507bb2eb7c18443a0cd27e79b20933ad/app/ticker_news.py",
+      "blob_sha": "61ec75d72fdc70f36653f75d3a3b26ce88216b09",
+      "size": 14270
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/66ff33ac507bb2eb7c18443a0cd27e79b20933ad/docs/superpowers/plans/2026-10-04-terminal-ticker-news-end-to-end.md",
+      "blob_sha": "39099bde51007f1fbef80904c348fe46066d254d",
+      "size": 26871
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/69d8c407e7033b9aa1e2fb4699398b454d7864c2/research/alpha_intelligence/expectation_market_dynamics/CURRENT_CAPABILITY_LEDGER.md",
+      "blob_sha": "ffec0c5bb53c4b403b3f39ea464ae87934606ffc",
+      "size": 12793
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/agentos/workstreams/WS-ALPHA-INTELLIGENCE-INTEGRATION.md",
+      "blob_sha": "edbce9b082505bfc81f91f596101f28e2b9ed66a",
+      "size": 15162
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/agentos/workstreams/WS-EARNINGS-EVENT-INTELLIGENCE-COMPILER.md",
+      "blob_sha": "7463800d46a3b4ef036f7e78101803605008ce20",
+      "size": 35265
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/agentos/workstreams/WS-GMI-THEME-GRAPH.md",
+      "blob_sha": "db5a41f3516c22665341a83952b018889322568c",
+      "size": 9671
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/agentos/workstreams/WS-PROPHET-REGIME-TIMEFRAME-RESEARCH.md",
+      "blob_sha": "3b4896abe326c2ac1c0362803943c6013853ee53",
+      "size": 3957
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/agentos/workstreams/WS-TREND-PERSISTENCE.md",
+      "blob_sha": "1fbe7f0f4034e7786c65f92d7fefbab7245b298b",
+      "size": 6584
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/collectors/equity_revisions.py",
+      "blob_sha": "8f1d3d822543fd11e18b5a78b957259d43e4c164",
+      "size": 39445
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/engine/fundamental_forensics/query.py",
+      "blob_sha": "529d9e7df8e6183848fea0a37280e938c0bd9238",
+      "size": 260120
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/engine/news_event_ledger.py",
+      "blob_sha": "1f92e5a58fb828f3e768bcfe091dd128cdf54f6f",
+      "size": 11946
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/8caf40ff8d81be0faca6f20d90d6f0e51c9cd420/engine/residual_momentum.py",
+      "blob_sha": "29c86ee13b83d6cd32dfa9fe82957871d65bd06a",
+      "size": 18210
+    },
+    {
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/e4dfde9c1acc2c6849c7400dc1218aff4b74b7a4/terminal/lib/catalystReadModel.ts",
+      "blob_sha": "ab2b10b89ec07a289a2aeaf2c55ffab8a508ee3a",
+      "size": 14504
+    }
+  ],
+  "failures": []
+}
