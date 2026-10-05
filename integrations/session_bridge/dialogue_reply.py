@@ -82,6 +82,7 @@ class AgentDialogueContinueWriter:
         *,
         socket_path: Path,
         service_call: ServiceCall = call_service,
+        before_commit: Callable[..., Any] | None = None,
     ) -> None:
         path = Path(socket_path)
         if not path.is_absolute():
@@ -93,6 +94,9 @@ class AgentDialogueContinueWriter:
         self._resolver = resolver
         self._socket_path = path
         self._service_call = service_call
+        if before_commit is not None and not callable(before_commit):
+            raise TypeError("before_commit must be callable")
+        self._before_commit = before_commit
 
     @staticmethod
     def _context(binding: ExecutiveReplyBinding) -> dict[str, Any]:
@@ -327,8 +331,28 @@ class AgentDialogueContinueWriter:
                 "send_protocol": EXACT_SEND_PROTOCOL,
             },
         }
+        async def before_write():
+            # This closure runs only after the incumbent Relay has returned
+            # READY for this exact fingerprint, immediately before COMMIT.
+            latest_request, latest_reply = await self._read(binding=binding, context=context)
+            final_binding = self._resolver.resolve(target_ref)
+            if (dataclasses.asdict(final_binding) != bound_witness
+                    or self._context(final_binding) != context
+                    or latest_request != request_message or latest_reply):
+                raise BridgeError("binding_unavailable", "continuation changed before COMMIT")
+            self._before_commit(
+                binding=final_binding, context=context,
+                request_message=latest_request, message=message,
+            )
+
         try:
-            response = await self._service_call(self._socket_path, send_request)
+            if self._before_commit is None:
+                response = await self._service_call(self._socket_path, send_request)
+            else:
+                response = await self._service_call(
+                    self._socket_path, send_request, before_write=before_write)
+        except BridgeError:
+            raise
         except DialogueServiceError as exc:
             code = "carrier_effect_unknown" if exc.code == "SEND_EFFECT_UNKNOWN" else "carrier_unavailable"
             raise BridgeError(code, exc.code) from None

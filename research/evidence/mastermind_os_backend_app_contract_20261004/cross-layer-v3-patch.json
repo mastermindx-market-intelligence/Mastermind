@@ -1,0 +1,584 @@
+{
+  "scope": "temporary authenticated component integration; no production/provider effects",
+  "consumer_ref": "37d02586eeb97d92e6fb9ed6dbc7cd142dd6449c",
+  "consumer_source": {
+    "app/mastermind_os/src/orchestration/operation-key.ts": {
+      "sha256": "8596eef6272ed1055ed397670bbb0cb27162759539a18e35fbcd43b3a5bae791",
+      "bytes": 6394
+    },
+    "app/mastermind_os/src/orchestration/executive-launch-command-port.ts": {
+      "sha256": "3ed863b6d7f22bf852191caec33917c07a46333ca3525281a34717fcc6183c2e",
+      "bytes": 22627
+    },
+    "app/mastermind_os/src/orchestration/operation-controller.ts": {
+      "sha256": "f6c7c9ce4cc4db25ac7b1dbef325408b2b8336751fa7b8dfc25f1a14a6b625ed",
+      "bytes": 24885
+    },
+    "app/mastermind_os/src/mission.ts": {
+      "sha256": "a502141418a2f359ded882b2eda9277dd53aad18b6c09fa22b2469fdf7367b01",
+      "bytes": 57350
+    },
+    "app/mastermind_os/src/workspace-contract.ts": {
+      "sha256": "14992cfc81dbc577cf50ba7198285b21652bb25eb5cc6c0efc53954e33ef11b1",
+      "bytes": 14854
+    }
+  },
+  "consumer_patch": {
+    "sha256": "46b06ee2feeba65c668020b247a05495b12d1969fb200228652e445b0a91d7b8",
+    "target": "app/mastermind_os/src/orchestration/executive-launch-command-port.ts",
+    "patched_source_sha256": "43467062827376e3eeaae8bd7d9203f32a7abe890ba340686d7b80d73e9bda3d"
+  },
+  "cases": [
+    {
+      "profile": "web_ceo_v2",
+      "receipt_mode": "legacy",
+      "type": "result",
+      "scenario": "accepted",
+      "initial_state": "accepted",
+      "blocked_duplicate_begin": null,
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 0,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": "mastermind.ceo_intent_receipt.v1",
+          "work_ref": null,
+          "envelope_sha256": "18732d3e2078b5c6f4c9a7e55b69606f0ecd09ec263e45db59b0e223d65780ff"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    },
+    {
+      "profile": "web_ceo_v2",
+      "receipt_mode": "legacy",
+      "type": "result",
+      "scenario": "lost-reply",
+      "initial_state": "unknown",
+      "blocked_duplicate_begin": "PENDING_POINTER",
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 1,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [
+        {
+          "name": "unsupported-version:\"1.3.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.3.1\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.5.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"2.0.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:null",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:1.4",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:{}",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-tool",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "wrong-mode",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "extra-envelope-field",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-intent",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "malformed-degraded",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "future-receipt-schema",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        }
+      ],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": null,
+          "work_ref": null,
+          "envelope_sha256": "20051b4b43bb0d34e97b72d8a978f0aeac6561292e2decdf846f26db3838f775"
+        },
+        {
+          "tool": "ceo_intent_status",
+          "server_version": "1.2.0",
+          "receipt_schema": "mastermind.ceo_intent_receipt.v1",
+          "work_ref": null,
+          "envelope_sha256": "1b804323ab271d996ae5d08b496ce827afbcfee0445abc4b1c7b84e799fee1ee"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    },
+    {
+      "profile": "web_ceo_v3",
+      "receipt_mode": "legacy",
+      "type": "result",
+      "scenario": "accepted",
+      "initial_state": "accepted",
+      "blocked_duplicate_begin": null,
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 0,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": "mastermind.ceo_intent_receipt.v1",
+          "work_ref": null,
+          "envelope_sha256": "1cb5a008133e70993bcfbc5cf61541c86691c265acbd4abcf7d2b736a56a2995"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    },
+    {
+      "profile": "web_ceo_v3",
+      "receipt_mode": "legacy",
+      "type": "result",
+      "scenario": "lost-reply",
+      "initial_state": "unknown",
+      "blocked_duplicate_begin": "PENDING_POINTER",
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 1,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [
+        {
+          "name": "unsupported-version:\"1.3.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.3.1\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.5.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"2.0.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:null",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:1.4",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:{}",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-tool",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "wrong-mode",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "extra-envelope-field",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-intent",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "malformed-degraded",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "future-receipt-schema",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        }
+      ],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": null,
+          "work_ref": null,
+          "envelope_sha256": "20051b4b43bb0d34e97b72d8a978f0aeac6561292e2decdf846f26db3838f775"
+        },
+        {
+          "tool": "ceo_intent_status",
+          "server_version": "1.4.0",
+          "receipt_schema": "mastermind.ceo_intent_receipt.v1",
+          "work_ref": null,
+          "envelope_sha256": "4c223a46a2a1768ba5dc7e86b68dba76509a88fb10c618c0d46aa6cf95c76a46"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    },
+    {
+      "profile": "web_ceo_v2",
+      "receipt_mode": "strict-v2",
+      "type": "result",
+      "scenario": "accepted",
+      "initial_state": "accepted",
+      "blocked_duplicate_begin": null,
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 0,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": "mastermind.ceo_intent_receipt.v2",
+          "work_ref": "WS:ORIGINAL-LAUNCH",
+          "envelope_sha256": "8b16feed1444e4e61aead2fcad8413311849ea88f946fcd3fe71aaf3ddd5726d"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    },
+    {
+      "profile": "web_ceo_v2",
+      "receipt_mode": "strict-v2",
+      "type": "result",
+      "scenario": "lost-reply",
+      "initial_state": "unknown",
+      "blocked_duplicate_begin": "PENDING_POINTER",
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 1,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [
+        {
+          "name": "unsupported-version:\"1.3.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.3.1\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.5.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"2.0.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:null",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:1.4",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:{}",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-tool",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "wrong-mode",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "extra-envelope-field",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-intent",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "malformed-degraded",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "future-receipt-schema",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        }
+      ],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": null,
+          "work_ref": null,
+          "envelope_sha256": "20051b4b43bb0d34e97b72d8a978f0aeac6561292e2decdf846f26db3838f775"
+        },
+        {
+          "tool": "ceo_intent_status",
+          "server_version": "1.2.0",
+          "receipt_schema": "mastermind.ceo_intent_receipt.v2",
+          "work_ref": "WS:ORIGINAL-LAUNCH",
+          "envelope_sha256": "ef42cb4a398b7822eb94b68e8c0fd07aa6786523a715652fe31e55bf2324763f"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    },
+    {
+      "profile": "web_ceo_v3",
+      "receipt_mode": "strict-v2",
+      "type": "result",
+      "scenario": "accepted",
+      "initial_state": "accepted",
+      "blocked_duplicate_begin": null,
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 0,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": "mastermind.ceo_intent_receipt.v2",
+          "work_ref": "WS:ORIGINAL-LAUNCH",
+          "envelope_sha256": "daeb01b2bfd2112c1db0517c5b6476c6321f9f4ce316bbe62bf4056bee76636a"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    },
+    {
+      "profile": "web_ceo_v3",
+      "receipt_mode": "strict-v2",
+      "type": "result",
+      "scenario": "lost-reply",
+      "initial_state": "unknown",
+      "blocked_duplicate_begin": "PENDING_POINTER",
+      "final_state": "accepted",
+      "reason": "ACCEPTED",
+      "mission_selection": {
+        "workRef": "WS:ORIGINAL-LAUNCH",
+        "rootJobId": "JOB-001"
+      },
+      "submit_calls": 1,
+      "status_calls": 1,
+      "pending_hints": 0,
+      "compatibility_passed": true,
+      "negative_controls": [
+        {
+          "name": "unsupported-version:\"1.3.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.3.1\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"1.5.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:\"2.0.0\"",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:null",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:1.4",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "unsupported-version:{}",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-tool",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "wrong-mode",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "extra-envelope-field",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "foreign-intent",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "malformed-degraded",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        },
+        {
+          "name": "future-receipt-schema",
+          "status": "unknown",
+          "pending_pointer_retained": true
+        }
+      ],
+      "actual_producer_envelopes": [
+        {
+          "tool": "submit_ceo_intent",
+          "server_version": null,
+          "receipt_schema": null,
+          "work_ref": null,
+          "envelope_sha256": "20051b4b43bb0d34e97b72d8a978f0aeac6561292e2decdf846f26db3838f775"
+        },
+        {
+          "tool": "ceo_intent_status",
+          "server_version": "1.4.0",
+          "receipt_schema": "mastermind.ceo_intent_receipt.v2",
+          "work_ref": "WS:ORIGINAL-LAUNCH",
+          "envelope_sha256": "dd431e469d186eb9a1882d4476187cd2144494606e20d031827ecd0156b975d3"
+        }
+      ],
+      "backend_jobs": 1,
+      "backend_attempts": 0,
+      "backend_workers": 0,
+      "backend_submit_frames": 1
+    }
+  ],
+  "passed": 8,
+  "failed": 0,
+  "negative_controls_passed": 52
+}
