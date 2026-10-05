@@ -894,10 +894,12 @@ def _build_profile_mcp_app(
             return unknown_release_result()
         if request_ref is None:
             raise ValueError("CEO recovery requires the original request reference")
+        intent_id = automated_intent_id(request_ref)
         if reconcile_tool_name is not None:
             message = (
                 f"the Executive response is unavailable; call {reconcile_tool_name} "
-                f"with request_ref={request_ref} for this original request. "
+                f"with request_ref={request_ref} for this original request, or read "
+                f"ceo_intent_status with intent_id={intent_id} on an older published catalog. "
                 "A not_found response does not authorize resubmission. "
                 "Preserve request_ref and require canonical reconciliation "
                 "before any further submission."
@@ -905,7 +907,6 @@ def _build_profile_mcp_app(
         else:
             # Frozen older profiles expose only the intent-id reader. Reuse
             # the canonical identity owner; never copy its hash derivation.
-            intent_id = automated_intent_id(request_ref)
             message = (
                 "the Executive response is unavailable; read ceo_intent_status "
                 f"with intent_id={intent_id} for this original request. "
