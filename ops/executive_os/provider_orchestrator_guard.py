@@ -81,11 +81,28 @@ REPO_ARG_RE = re.compile(
     re.I,
 )
 
+_SUB_LAUNCH_MODE = (
+    r"(?:grok|qwen|minimax|glm|minimax-codex|glm-codex|go-codex|"
+    r"go-claude|oc-free|cursor|__glm_vision)"
+)
+_REMOTE_LAUNCH_MODE = (
+    r"(?:glm|glm-codex|minimax|minimax-codex|grok|cursor|qwen|go-codex|"
+    r"codex-native|claude-native|oc-free)"
+)
+_SLOT_POOL = (
+    r"(?:grok|minimax|glm|glm-frontier|bailian|cursor|go|ocfree|"
+    r"codex-native|claude-native)"
+)
 FABRIC_LAUNCH_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:"
     r"(?:[A-Za-z0-9_./-]+/)?pool\s+(?:run|remote)\b"
-    r"|(?:[A-Za-z0-9_./-]+/)?(?:sub|remote_sub)\.sh\b"
-    r"|(?:python(?:3(?:\.\d+)?)?\s+)?(?:[A-Za-z0-9_./-]+/)?slot\.py\b"
+    r"|(?:[A-Za-z0-9_./-]+/)?sub\.sh\s+" + _SUB_LAUNCH_MODE + r"\b"
+    r"|(?:[A-Za-z0-9_./-]+/)?remote_sub\.sh\s+\S+\s+"
+    + _REMOTE_LAUNCH_MODE
+    + r"\b"
+    r"|(?:python(?:3(?:\.\d+)?)?\s+)?(?:[A-Za-z0-9_./-]+/)?slot\.py\s+"
+    + _SLOT_POOL
+    + r"\b"
     r")",
     re.I,
 )
