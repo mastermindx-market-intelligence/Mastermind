@@ -683,6 +683,39 @@ def test_guard_denies_explicit_empty_identity_over_inherited_value(
     assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
 
 
+def test_guard_denies_rebinding_an_inherited_root(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-original")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "parent-1")
+    monkeypatch.setenv("POOL_TASK_CLASS", "review")
+    command = (
+        "POOL_ORCHESTRATOR_ID=root-reset pool run grok bounded /tmp grok-4.6"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "may not be rebound" in output["permissionDecisionReason"]
+
+
+def test_guard_allows_explicit_same_inherited_root(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-original")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "parent-1")
+    monkeypatch.setenv("POOL_TASK_CLASS", "review")
+    command = (
+        "POOL_ORCHESTRATOR_ID=root-original pool run grok bounded /tmp grok-4.6"
+    )
+    guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
 def test_guard_denies_dynamic_root_identity_expansion(
     mastermind_scope: Path,
     capsys: pytest.CaptureFixture[str],
