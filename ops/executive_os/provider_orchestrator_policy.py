@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import sys
@@ -368,8 +369,8 @@ def _render_claude_settings(raw: bytes, guard: Path) -> bytes:
     return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-_TOML_TABLE_RE = __import__("re").compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
-_TOML_AGENT_KEY_RE = __import__("re").compile(
+_TOML_TABLE_RE = re.compile(r"^\s*\[[^\]]+\]\s*(?:#.*)?$")
+_TOML_AGENT_KEY_RE = re.compile(
     r"^(?P<indent>\s*)(?P<key>enabled|max_concurrent_threads_per_session)\s*=.*$"
 )
 
@@ -396,6 +397,10 @@ def _render_codex_config(raw: bytes) -> bytes:
         "enabled": "enabled = false",
     }
     if not starts:
+        if agents is not None:
+            raise OrchestratorPolicyError(
+                "Codex agents config must use one explicit [agents] table"
+            )
         if lines and lines[-1].strip():
             lines.append("")
         lines.extend(
@@ -565,6 +570,33 @@ def _managed_hook_count(raw: bytes, guard: Path, *, claude: bool) -> int:
     return count
 
 
+def _managed_hook_reference_count(raw: bytes) -> int:
+    value = _json_object(raw, "provider hooks")
+    hooks = value.get("hooks")
+    if not isinstance(hooks, dict):
+        return 0
+    rows = hooks.get("PreToolUse")
+    if not isinstance(rows, list):
+        return 0
+    count = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        nested = row.get("hooks")
+        if not isinstance(nested, list):
+            continue
+        count += sum(
+            1
+            for hook in nested
+            if (
+                isinstance(hook, dict)
+                and "mastermind_fabric_routing_guard.py"
+                in str(hook.get("command") or "")
+            )
+        )
+    return count
+
+
 def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
     paths = _paths(home)
     canonical = _canonical_guard(guard_source)
@@ -603,18 +635,20 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
                 issues.append("claude_settings.max_concurrent_subagents")
             if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
                 issues.append("claude_settings.max_subagent_spawn_depth")
-        if _managed_hook_count(
-            claude_raw, paths["claude_guard"], claude=True
-        ) != 1:
+        if (
+            _managed_hook_count(claude_raw, paths["claude_guard"], claude=True) != 1
+            or _managed_hook_reference_count(claude_raw) != 1
+        ):
             issues.append("claude_settings.pretool")
     except OrchestratorPolicyError:
         issues.append("claude_settings.missing")
 
     try:
         codex_raw = _regular_bytes(paths["codex_hooks"])
-        if _managed_hook_count(
-            codex_raw, paths["codex_guard"], claude=False
-        ) != 1:
+        if (
+            _managed_hook_count(codex_raw, paths["codex_guard"], claude=False) != 1
+            or _managed_hook_reference_count(codex_raw) != 1
+        ):
             issues.append("codex_hooks.pretool")
     except OrchestratorPolicyError:
         issues.append("codex_hooks.missing")
