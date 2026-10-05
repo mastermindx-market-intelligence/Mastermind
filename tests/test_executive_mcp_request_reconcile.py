@@ -21,6 +21,7 @@ try:
 finally:
     sys.path.pop(0)
 
+from control_plane import ceo_request
 from control_plane.executive_ceo_ingress import STATUS_SCHEMA_V2
 from integrations.executive_mcp import server as transport
 from integrations.executive_mcp import web_ceo_v3 as v3
@@ -202,8 +203,10 @@ def test_status_outcomes_preserve_identity_without_retry(settings, rsa_key, monk
             assert payload["request_ref"] == REF
             assert payload["error"]["code"] == code
             if status == "effect_unknown":
-                assert v3.RECONCILE_TOOL_NAME in payload["error"]["message"]
-                assert "does not authorize resubmission" in payload["error"]["message"]
+                message = payload["error"]["message"]
+                assert v3.RECONCILE_TOOL_NAME in message
+                assert f"intent_id={ceo_request.automated_intent_id(REF)}" in message
+                assert "does not authorize resubmission" in message
     asyncio.run(run())
     assert_one_status(frames, settings)
 
@@ -359,7 +362,12 @@ def test_real_committed_request_is_recovered_without_new_job_or_attempt(settings
                 assert len(submitted) == 1
                 assert submitted[0].get("status") == "accepted", submitted[0]
                 assert unknown["request_ref"] == submitted[0]["request_ref"]
-                assert v3.RECONCILE_TOOL_NAME in unknown["error"]["message"]
+                message = unknown["error"]["message"]
+                assert v3.RECONCILE_TOOL_NAME in message
+                assert (
+                    f"intent_id={ceo_request.automated_intent_id(unknown['request_ref'])}"
+                    in message
+                )
                 original_jobs = service.runtime.jobs.list_jobs()
                 assert len(original_jobs) == 1
 
