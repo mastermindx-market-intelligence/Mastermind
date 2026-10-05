@@ -126,6 +126,80 @@ def test_worker_account_must_match_canonical_slot_uid(monkeypatch):
     assert calls == []
 
 
+def test_control_uid_quiesce_service_precondition_is_observe_only(monkeypatch):
+    monkeypatch.setattr(
+        control.ProductionArmHost,
+        "_loaded",
+        lambda _self, label: label == control.CONTROL_LABEL,
+    )
+    monkeypatch.setattr(
+        control.ProductionArmHost,
+        "_stop_services_for_admission",
+        lambda _self: pytest.fail("quiesce precondition must not stop services"),
+    )
+    monkeypatch.setattr(
+        control.os, "kill", lambda *_args: pytest.fail("quiesce precondition must not signal")
+    )
+    with pytest.raises(control.ArmAdmissionError) as error:
+        control.ProductionArmHost().require_services_already_stopped()
+    assert error.value.code == "services_not_stopped"
+
+
+class _QuiesceCliHost:
+    def __init__(self):
+        self.calls = []
+
+    def effective_uid(self):
+        self.calls.append("effective_uid")
+        return 0
+
+    def require_exact_install(self, expected_sha):
+        self.calls.append("require_exact_install")
+        return expected_sha
+
+    def validate_acceptance(self, _expected_sha):
+        self.calls.append("validate_acceptance")
+        return "accepted"
+
+    def load_unarmed_configs(self, _expected_sha):
+        self.calls.append("load_unarmed_configs")
+        return object()
+
+    def require_runtime_quiescent(self, _configs):
+        self.calls.append("require_runtime_quiescent")
+
+    def require_services_already_stopped(self):
+        self.calls.append("require_services_already_stopped")
+        raise control.ArmAdmissionError("services_not_stopped")
+
+    def require_transaction_absent(self):
+        pytest.fail("transaction gate must not follow failed service precondition")
+
+    def quiesce_control_uid_for_arm(self):
+        pytest.fail("quiesce must not run when a fixed service is loaded")
+
+    def require_service_uids_quiescent(self):
+        pytest.fail("post-quiescence proof must not run after refusal")
+
+
+def test_control_uid_quiesce_cli_refuses_loaded_service_before_any_quiesce(capsys):
+    host = _QuiesceCliHost()
+    code = control.main(
+        ["arm-quiesce-control-uid", "--expected-sha", "a" * 40],
+        host=host,
+    )
+    assert code == 2
+    assert "services_not_stopped" in capsys.readouterr().out
+    assert host.calls == [
+        "effective_uid",
+        "require_exact_install",
+        "validate_acceptance",
+        "load_unarmed_configs",
+        "require_runtime_quiescent",
+        "require_services_already_stopped",
+    ]
+
+
 def test_control_uid_quiesce_signals_only_fixed_control_principal(monkeypatch):
     state = {450: [101, 102], 451: [123]}
     calls = []
