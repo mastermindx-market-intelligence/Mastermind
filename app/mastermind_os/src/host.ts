@@ -19,6 +19,13 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import { decodeWorkDocument, type WorkDocument } from "./work";
+import {
+  completeOrchestratorCommandBinding,
+  type OrchestratorCommandBinding,
+} from "./orchestration/host-command-bindings";
+
+export type { OrchestratorCommandBinding };
 
 export interface AuthState {
   status: "unconfigured" | "signed_out" | "signing_in" | "signed_in" | "error";
@@ -34,6 +41,7 @@ export interface RawClient {
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
+  readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
     work_ref: string;
     root_job_id: string;
@@ -56,12 +64,11 @@ export interface RawClient {
 }
 /**
  * One internally consistent typed read API: every fixed read returns its
- * fully decoded frozen DTO, or throws. The typed allowed 503 body is not a
- * separate wrapper kind — it is the validated
- * `mastermind.workspace_role_result.v1` envelope with availability
- * "UNAVAILABLE", preserved whole (reason_codes included) for the consumer
- * render path. The exact five selector fields stay separate from the
- * AbortSignal, which is an option, never part of the selector.
+ * fully decoded frozen DTO, or throws. Work and Result each preserve their
+ * schema-specific typed allowed 503 document with availability "UNAVAILABLE";
+ * neither becomes a generic error wrapper or empty success. The exact Result
+ * five-selector tuple stays separate from AbortSignal, which is an option,
+ * never part of the selector.
  */
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
@@ -74,6 +81,7 @@ export interface MissionHost {
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readPrograms?: ProgramRead;
+  readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
@@ -81,8 +89,12 @@ export interface MissionHost {
   invalidationGeneration?: () => number;
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
+  commandBinding?: OrchestratorCommandBinding;
 }
-export function bindMissionHost(client: RawClient): MissionHost {
+export function bindMissionHost(
+  client: RawClient,
+  commandBinding?: unknown,
+): MissionHost {
   let epoch = 0;
   let previous = JSON.stringify(client.getState());
   let previousClientGeneration = client.invalidationGeneration?.();
@@ -100,6 +112,7 @@ export function bindMissionHost(client: RawClient): MissionHost {
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
+  const command = completeOrchestratorCommandBinding(commandBinding);
   return {
     invalidationGeneration: () => epoch,
     auth: {
@@ -120,6 +133,15 @@ export function bindMissionHost(client: RawClient): MissionHost {
       const raw = await client.readPrograms({ signal });
       check(signal, started);
       return decodeProgramsEnvelope(raw);
+    },
+    async readWork({ signal }) {
+      const started = epoch;
+      check(signal, started);
+      const raw = await client.readWork({ signal });
+      check(signal, started);
+      const result = decodeWorkDocument(raw);
+      if (!result) throw new Error("WORK_RESPONSE_INVALID");
+      return result;
     },
     async readMission({ workRef, rootJobId, signal }) {
       const selection = normalizeSelection({ workRef, rootJobId });
@@ -203,6 +225,7 @@ export function bindMissionHost(client: RawClient): MissionHost {
       if (!result) throw new Error("WINDOW_RESPONSE_INVALID");
       return result;
     },
+    ...(command ? { commandBinding: command } : {}),
   };
 }
 
@@ -277,6 +300,7 @@ export async function createNativeClient(
   async function read(
     command:
       | "read_programs"
+      | "read_work"
       | "read_mission"
       | "read_mission_v3"
       | "read_result"
@@ -350,6 +374,7 @@ export async function createNativeClient(
       if (ticket === control && started === epoch) update(result);
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
+    readWork: ({ signal }) => read("read_work", signal),
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));

@@ -441,19 +441,20 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   /**
    * Fixed-route read. The default policy keeps the established behavior:
    * any non-OK status (including 401/403 auth refusal and 503) fails closed
-   * with READ_FAILED before a body is read. Only the result route opts into
-   * the single allowed typed error body: a 503 whose body parses under the
-   * exact 16KiB result cap and presents the closed unavailable envelope
-   * shape. Nothing else may surface error JSON, and the full closed-body
-   * validation stays in the host decoder.
+   * with READ_FAILED before a body is read. Work and Result opt into
+   * schema-specific typed 503 bodies only on their fixed routes: Work uses
+   * the full public cap and the closed Work queue schema; Result uses the
+   * exact 16KiB result cap and the closed result envelope schema. Nothing
+   * else may surface error JSON, and full closed-body validation stays in
+   * the host decoder.
    */
   async function read(
     resource: Resource,
     url: string,
     signal: AbortSignal,
-    policy: { cap: number; allowTypedUnavailable: boolean } = {
+    policy: { cap: number; typedUnavailableSchema: string | null } = {
       cap: MAX_RESPONSE_BYTES,
-      allowTypedUnavailable: false,
+      typedUnavailableSchema: null,
     },
   ) {
     const ticket = generation,
@@ -479,14 +480,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         },
         signal: controller.signal,
       });
-      if (response.status === 503 && policy.allowTypedUnavailable) {
+      if (response.status === 503 && policy.typedUnavailableSchema) {
         const body = await boundedJson(response, policy.cap);
         if (
           body === null ||
           typeof body !== "object" ||
           Array.isArray(body) ||
           (body as Record<string, unknown>).schema !==
-            "mastermind.workspace_role_result.v1" ||
+            policy.typedUnavailableSchema ||
           (body as Record<string, unknown>).availability !== "UNAVAILABLE"
         )
           throw new Error("RESPONSE_INVALID");
@@ -526,6 +527,16 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     signOut,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
+    readWork: ({ signal }) =>
+      read(
+        "acquisition",
+        `${ORIGIN}/workspace/work/current`,
+        signal,
+        {
+          cap: MAX_RESPONSE_BYTES,
+          typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
+        },
+      ),
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));
@@ -578,7 +589,10 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           result_envelope_digest: resultEnvelopeDigest,
         })}`,
         signal,
-        { cap: RESULT_HTTP_BODY_BYTES, allowTypedUnavailable: true },
+        {
+          cap: RESULT_HTTP_BODY_BYTES,
+          typedUnavailableSchema: "mastermind.workspace_role_result.v1",
+        },
       );
     },
     readCurrentWindow: ({ signal }) =>
