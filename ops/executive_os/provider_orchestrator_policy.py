@@ -4,6 +4,7 @@
 This is a host configuration deployer, not a lifecycle/control plane. It preserves
 unrelated user configuration, never reads credentials, and only manages:
 - one marked policy block in ~/.codex/AGENTS.md and ~/.claude/CLAUDE.md;
+- exact native-agent safety settings in ~/.codex/config.toml and Claude settings;
 - one PreToolUse hook registration in each provider home; and
 - identical copies of the reviewed provider_orchestrator_guard.py source.
 
