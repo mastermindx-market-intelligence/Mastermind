@@ -559,13 +559,22 @@ class CeoIngressReadGateway:
             and response.error["code"] in ceo_ingress.ERROR_CODES
         ):
             upstream_code = response.error["code"]
-            if upstream_code in {"ingress_unavailable", "backend_unavailable"}:
+            if upstream_code in {
+                "peer_credentials_unavailable",
+                "peer_denied",
+                "ingress_unavailable",
+                "unsupported_ingress_schema",
+                "backend_unavailable",
+                "internal_error",
+            }:
+                # These describe the installed host-to-host read boundary, not
+                # the caller's Executive authority.  A peer/schema mismatch can
+                # surface as peer_denied before the read provider is reached,
+                # so presenting it as a user permission refusal would be false.
                 message = "Executive reader is unavailable in the installed backend."
             else:
                 code = "backend_refused"
-                if upstream_code in {
-                    "peer_denied", "peer_credentials_unavailable", "authority_refused",
-                }:
+                if upstream_code == "authority_refused":
                     message = "Executive reader permission was refused by the installed backend."
                 else:
                     message = "Executive reader request was refused by the installed backend."
