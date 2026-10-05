@@ -52,6 +52,7 @@ verify all four observations separately:
    denied. A real watcher/event remains the next observation.
 5. Codex effective config reads `agents.enabled=false` and `max_concurrent_threads_per_session=1`.
 6. Claude effective settings read `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=2` and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`.
+7. A real `pool run` / `pool remote` launch without `POOL_ORCHESTRATOR_ID`, `POOL_PARENT_RUN_ID`, or `POOL_TASK_CLASS` is denied before dispatch; the same bounded launch with the existing stable root/parent/class is admitted to the Fabric's own routing/admission checks.
 
 Do not launch a real workflow merely to prove the guard; use an already-existing run/PR or a
 synthetic hook payload where possible. Never cancel/re-dispatch shared CI as part of this canary.
@@ -63,6 +64,7 @@ The managed policy carries these anti-burn invariants in addition to the CI guar
 - optimize accepted capability delta per original-root budget rather than agent count, tokens, elapsed time, tool calls, or PR count;
 - Sol is the default day-to-day project executive; Astra is optional strategic/meta capacity for genuine principal judgment;
 - routine bounded labor goes through the existing Executive/Subagent Fabric; native provider children are exceptions, not the worker pool;
+- Fabric launches preserve the original root/true-parent/task-class identity at the provider edge so a new chat/helper cannot reset fair-share or descendant accounting;
 - capacity is a ceiling, not a utilization target; preserve one original root/grant/depth/budget and reserve review/repair/integration capacity before widening fan-out;
 - every worker owns one independently useful bounded outcome with exact source/ref, scope, DONE_WHEN/evidence, non-goals, and escalation condition;
 - leaf workers do not recursively fan out; an admitted coordinator's helpers remain descendants of the original root;
