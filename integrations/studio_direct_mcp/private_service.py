@@ -638,7 +638,7 @@ def _validate_fleet_routes(
             or not isinstance(hostname, str)
             or not hostname.endswith(".ts.net")
             or len(hostname) <= len(".ts.net")
-            or port not in (None, 443)
+            or port is not None
             or parsed.username is not None
             or parsed.password is not None
             or parsed.path != "/mcp"

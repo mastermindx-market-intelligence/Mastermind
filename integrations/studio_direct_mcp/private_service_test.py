@@ -652,7 +652,7 @@ class TestBuildConfig(unittest.TestCase):
                 "test-account",
                 [
                     "ubuntu1=https://ubuntu1.example-tailnet.ts.net/mcp",
-                    "mini4=https://mini4.example-tailnet.ts.net:443/mcp",
+                    "mini4=https://mini4.example-tailnet.ts.net/mcp",
                 ],
             )
             config = svc._build_config(
@@ -700,6 +700,7 @@ class TestBuildConfig(unittest.TestCase):
             "mini4=http://mini4.example-tailnet.ts.net/mcp",
             "mini4=https://example.com/mcp",
             "mini4=https://mini4.example-tailnet.ts.net/",
+            "mini4=https://mini4.example-tailnet.ts.net:443/mcp",
             "mini4=https://mini4.example-tailnet.ts.net:8443/mcp",
             "mini4=https://user:pass@mini4.example-tailnet.ts.net/mcp",
             "mini4=https://mini4.example-tailnet.ts.net/mcp?x=1",
