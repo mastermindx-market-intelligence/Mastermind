@@ -8,6 +8,7 @@ supervisor-private stdio as the separate internal lane.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from http.client import HTTPS_PORT
 from urllib.parse import urlsplit
 
 
@@ -41,7 +42,7 @@ def _https_endpoint(
         or not host
         or parsed.username is not None
         or parsed.password is not None
-        or port not in (None, 443)
+        or port not in (None, HTTPS_PORT)
         or parsed.path != expected_path
         or parsed.query
         or parsed.fragment
@@ -52,7 +53,7 @@ def _https_endpoint(
     ):
         raise BrowserIngressError("Internal Browser route must be a tailnet host")
     canonical = f"https://{host}"
-    if port == 443 and parsed.netloc.endswith(":443"):
+    if port == HTTPS_PORT and parsed.netloc.endswith(":443"):
         canonical += ":443"
     return canonical + expected_path
 
