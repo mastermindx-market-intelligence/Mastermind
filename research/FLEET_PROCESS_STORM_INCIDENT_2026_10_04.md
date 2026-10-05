@@ -124,6 +124,38 @@ Release condition for the hold:
 3. pass normal host admission/readiness gates;
 4. deliberately restore the `lanes` role and prove routing eligibility.
 
+## Pre-login Desktop Commander recovery hardening
+
+A later acceptance pass proved the remaining Desktop Commander outage was a launch-domain defect, not a reboot or Tailscale defect.
+
+Mini2 was still at `Unknown User / loginDone=false` with FileVault enabled, while its manually recovered Desktop Commander process carried `SSH_CLIENT` and `SSH_CONNECTION` values pointing to the M2 Studio LAN interface. The pre-existing persistence definition was only a per-user LaunchAgent, so it could not own recovery before an Aqua login.
+
+The existing fixed Desktop Commander 0.2.51 runners on Mini1, Mini2, Mini3 and Mini4 were migrated from user LaunchAgents to system-domain LaunchDaemons that:
+
+- run as each existing mini user;
+- preserve each existing `~/.desktop-commander-device/device.json` identity/session;
+- use the same installed `run-remote.zsh` and vendor tree;
+- use `RunAtLoad + KeepAlive` with a 15-second throttle;
+- write stdout/stderr to `/dev/null` so vendor tool payloads do not accumulate in logs;
+- keep a rollback copy of each prior user LaunchAgent; and
+- remove the active per-user LaunchAgent definition to prevent a duplicate bridge after later GUI login.
+
+Mini2 production proof was completed while `loginDone=false`:
+
+```text
+system label: com.mastermind.desktop-commander.remote.mini2
+initial system-owned pid: 35190
+process uid: 501
+process ppid: 1
+SSH_CLIENT inherited: false
+SSH_CONNECTION inherited: false
+remote device: online
+```
+
+A controlled `launchctl kill SIGTERM system/com.mastermind.desktop-commander.remote.mini2` produced pid `35327`; Desktop Commander reconnected automatically and a remote ping succeeded. No reboot was required for that canary because the host was already in the exact no-GUI-login state the change is intended to survive.
+
+Mini1, Mini3 and Mini4 were migrated through the same pattern and each returned a successful remote Desktop Commander ping after switchover.
+
 ## Recovery state
 
 Mini2 itself returned to the canonical host-recovery `READY` state after FileVault/post-unlock recovery, power-policy repair, transport restoration, and disk-floor recovery. SSH, Tailscale, Screen Sharing/ARD and Desktop Commander were independently restored.
