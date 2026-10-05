@@ -553,6 +553,71 @@ def _emitted(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
     return json.loads(raw)["hookSpecificOutput"]
 
 
+def test_guard_denies_fabric_launch_without_stable_root_identity(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "pool remote mini2 glm /tmp/packet.txt "
+        "/Users/mini2/lanes/repos/Mastermind glm-5.3"
+    )
+    with pytest.raises(SystemExit):
+        guard.guard_bash(
+            _payload(mastermind_scope, command),
+            {"command": command},
+        )
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "Fabric root-budget guard" in output["permissionDecisionReason"]
+    assert "POOL_ORCHESTRATOR_ID" in output["permissionDecisionReason"]
+    assert "POOL_PARENT_RUN_ID" in output["permissionDecisionReason"]
+    assert "POOL_TASK_CLASS" in output["permissionDecisionReason"]
+
+
+def test_guard_allows_fabric_launch_with_explicit_root_identity(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = (
+        "POOL_ORCHESTRATOR_ID=root-1 POOL_PARENT_RUN_ID=root-1 "
+        "POOL_TASK_CLASS=review pool remote mini2 glm /tmp/packet.txt "
+        "/Users/mini2/lanes/repos/Mastermind glm-5.3"
+    )
+    guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
+def test_guard_allows_fabric_launch_with_inherited_root_identity(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-1")
+    monkeypatch.setenv("POOL_PARENT_RUN_ID", "parent-1")
+    monkeypatch.setenv("POOL_TASK_CLASS", "execute")
+    command = 'pool run grok "bounded task" /tmp grok-4.6'
+    guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
+def test_guard_does_not_treat_pool_observation_as_launch(
+    mastermind_scope: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS"):
+        monkeypatch.delenv(name, raising=False)
+    command = "pool status"
+    guard.guard_bash(_payload(mastermind_scope, command), {"command": command})
+    assert capsys.readouterr().out == ""
+
+
 def test_guard_denies_foreground_watch_at_polite_interval(
     mastermind_scope: Path,
     capsys: pytest.CaptureFixture[str],
