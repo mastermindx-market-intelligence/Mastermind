@@ -27,6 +27,7 @@ import pwd
 import re
 import secrets
 import selectors
+import signal
 import stat
 import subprocess
 import sys
@@ -62,6 +63,7 @@ from control_plane.executive_autonomy import (
 from ops.executive_os import release_manifest
 from ops.executive_os import git_handoff_preflight
 from ops.executive_os import provider_readiness
+from ops.executive_os import provider_worker_slots
 from scripts import executive_os_phase1c_control_wrapper as control_wrapper
 
 
@@ -77,6 +79,14 @@ AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
 CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
 CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
+DIALOGUE_CANARY_OPERATIONS = frozenset({"DIALOGUE_WAKE_CANARY_PUBLISH"})
+CONTROL_ONLY_TRANSACTION_OPERATIONS = CEO_SUBMIT_OPERATIONS | DIALOGUE_CANARY_OPERATIONS
+_CANARY_RECEIPT_ARCHIVE = "prior-dialogue-canary-receipt.json"
+_CANARY_MANIFEST_FIELDS = frozenset({
+    "prior_canary_receipt_sha256", "target_canary_receipt_sha256",
+    "prior_canary_receipt_present",
+})
+
 _CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
 _CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
     r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled|true|false)$'
@@ -170,7 +180,8 @@ _ARM_ADMISSION_CODES = frozenset(
 )
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CEO_SUBMIT_OPERATIONS
+A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -507,6 +518,8 @@ class ArmAdmissionHost(Protocol):
 
     def require_services_stopped(self) -> None: ...
 
+    def require_services_already_stopped(self) -> None: ...
+
     def require_service_uids_quiescent(self) -> None: ...
 
     def require_transaction_absent(self) -> None: ...
@@ -663,6 +676,14 @@ def _parser() -> argparse.ArgumentParser:
     arm.add_argument("--workspace-binding-class", action=_StoreOnce, required=True)
     arm.add_argument("--credential-expires-at", action=_StoreOnce, required=True)
 
+    arm_quiesce = sub.add_parser(
+        "arm-quiesce-control-uid",
+        help="Quiesce only the fixed Control service UID before a receipt-gated arm.",
+    )
+    arm_quiesce.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
+
     disarm = sub.add_parser("disarm", help="Converge both arm bits to false.")
     disarm.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
@@ -700,6 +721,19 @@ def _parser() -> argparse.ArgumentParser:
     ceo_reconcile.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
+    canary_publish = sub.add_parser(
+        "dialogue-canary-publish", help="Publish one bounded, source-derived continuation grant."
+    )
+    canary_publish.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    canary_publish.add_argument("--read-ref", action=_StoreOnce, required=True)
+    canary_publish.add_argument("--validity-seconds", type=int, action=_StoreOnce, required=True)
+    canary_reconcile = sub.add_parser(
+        "dialogue-canary-reconcile", help="Restore one interrupted grant publication's exact preimages."
+    )
+    canary_reconcile.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    for command in sorted(A2_DISABLE_COMMANDS):
+        a2 = sub.add_parser(command, help="Prepare or reconcile the fixed unloaded A2 disable.")
+        a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
     return parser
 
 
@@ -1451,9 +1485,9 @@ def execute_disarm(
         return existing
     host.require_exact_install(expected_sha)
     transaction_id = host.new_transaction_id()
-    host.stop_services(expected_sha)
     try:
         prior_configs = host.begin_disarm(expected_sha, transaction_id)
+        host.stop_services(expected_sha)
     except Exception as exc:
         raise TransactionEffectUnknown() from exc
     transaction = TransactionContext(
@@ -2117,6 +2151,29 @@ class ProductionStatusHost:
         return completed.returncode == 0
 
     @staticmethod
+    def _loaded_observe_only(label: str) -> bool:
+        """Return loaded/absent only when launchd proves either state.
+
+        This helper is intentionally narrower than the historical ``_loaded``
+        predicate.  The quiesce-only command must not treat a permission, IPC,
+        or transient launchctl read failure as service absence before signaling
+        the fixed Control UID.
+        """
+        completed = subprocess.run(
+            ["/bin/launchctl", "print", f"system/{label}"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+        if completed.returncode == 0:
+            return True
+        if completed.returncode == 113:
+            return False
+        raise ArmAdmissionError("services_gate_failed")
+
+    @staticmethod
     def _control_ready(expected_sha: str) -> bool:
         release = SYSTEM_ROOT / "releases" / expected_sha
         control_home = RUNTIME_ROOT / "control" / "home"
@@ -2477,30 +2534,140 @@ class ProductionArmHost(ProductionStatusHost):
         if any(loaded):
             raise ArmAdmissionError("services_not_stopped")
 
-    def require_service_uids_quiescent(self) -> None:
+    def require_services_already_stopped(self) -> None:
+        """Observe the fixed Control/worker labels without changing lifecycle state."""
         try:
-            identities = (
-                pwd.getpwnam(CONTROL_USER).pw_uid,
-                pwd.getpwnam("_mastermind_worker").pw_uid,
+            loaded = (
+                self._loaded_observe_only(CONTROL_LABEL),
+                self._loaded_observe_only(WORKER_LABEL),
             )
+        except ArmAdmissionError:
+            raise
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ArmAdmissionError("services_gate_failed") from exc
+        if any(loaded):
+            raise ArmAdmissionError("services_not_stopped")
+
+    def quiesce_control_uid_for_arm(self) -> tuple[int, ...]:
+        """Converge only the fixed Control service UID to zero live processes.
+
+        This is a pre-arm cleanup action, not part of the arm admission gate.
+        It never targets the worker UID (whose one attested distnoted may be
+        permitted by require_service_uids_quiescent), and it accepts no
+        caller-selected UID, PID, signal or timeout. The process table is the
+        reconciliation source: every signal target must still be observed under
+        the canonical Control UID, and success requires two consecutive empty
+        observations after the final signal.
+        """
+
+        from control_plane.executive_worker_broker import _ps_pids_for_uid
+
+        try:
+            control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
         except KeyError as exc:
             raise ArmAdmissionError("service_uid_process_unknown") from exc
-        for uid in identities:
+        if control_uid <= 0:
+            raise ArmAdmissionError("service_uid_process_unknown")
+
+        try:
+            before = _ps_pids_for_uid(control_uid)
+        except Exception as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        if not before:
+            time.sleep(0.1)
             try:
-                completed = subprocess.run(
-                    ["/usr/bin/pgrep", "-U", str(uid)],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=5,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
+                if not _ps_pids_for_uid(control_uid):
+                    return ()
+            except Exception as exc:
                 raise ArmAdmissionError("service_uid_process_unknown") from exc
-            if completed.returncode == 0 and completed.stdout.strip():
-                raise ArmAdmissionError("service_uid_process_live")
-            if completed.returncode not in {0, 1}:
+
+        signalled: set[int] = set()
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            phase_signalled: set[int] = set()
+            for _ in range(50):
+                try:
+                    live = _ps_pids_for_uid(control_uid)
+                except Exception as exc:
+                    raise ArmAdmissionError("service_uid_process_unknown") from exc
+                if not live:
+                    time.sleep(0.1)
+                    try:
+                        live = _ps_pids_for_uid(control_uid)
+                    except Exception as exc:
+                        raise ArmAdmissionError("service_uid_process_unknown") from exc
+                    if not live:
+                        return tuple(sorted(signalled))
+                for pid in live:
+                    if pid <= 1:
+                        raise ArmAdmissionError("service_uid_process_unknown")
+                    if pid in phase_signalled:
+                        continue
+                    try:
+                        os.kill(pid, signum)
+                    except ProcessLookupError:
+                        continue
+                    except OSError as exc:
+                        raise ArmAdmissionError("service_uid_process_unknown") from exc
+                    phase_signalled.add(pid)
+                    signalled.add(pid)
+                time.sleep(0.1)
+
+        try:
+            remaining = _ps_pids_for_uid(control_uid)
+        except Exception as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        if remaining:
+            raise ArmAdmissionError("service_uid_process_live")
+        return tuple(sorted(signalled))
+
+    def require_service_uids_quiescent(self) -> None:
+        # Reuse the worker owner's saved/real/effective UID projection and exact
+        # Apple launchd attribution. Process names and argv never grant an
+        # exception. This gate observes only; it never sweeps or signals.
+        from control_plane.executive_ambient_process import (
+            AmbientClassification, AmbientProcessIdentity, DarwinDistnotedClassifier,
+        )
+        from control_plane.executive_worker_broker import _ps_pids_for_uid
+
+        try:
+            control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
+            worker = provider_worker_slots.get_slot("codex-01")
+            worker_uid = pwd.getpwnam(worker.worker_user).pw_uid
+            if worker_uid != worker.worker_uid:
                 raise ArmAdmissionError("service_uid_process_unknown")
+        except (KeyError, provider_worker_slots.SlotCatalogError) as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        for uid in (control_uid, worker_uid):
+            try:
+                before = _ps_pids_for_uid(uid)
+                if not before:
+                    continue
+                # The reviewed ambient exception belongs only to the dedicated
+                # worker principal. Control must remain entirely absent.
+                if uid != worker_uid:
+                    raise ArmAdmissionError("service_uid_process_live")
+                classifier = DarwinDistnotedClassifier()
+                ambient = classifier.classify(worker_uid=uid)
+                if type(ambient) is not AmbientClassification or ambient.status == "failed_closed":
+                    raise ArmAdmissionError("service_uid_process_unknown")
+                if ambient.status != "attested" or len(ambient.identities) != 1:
+                    raise ArmAdmissionError("service_uid_process_live")
+                identity = ambient.identities[0]
+                if type(identity) is not AmbientProcessIdentity or identity.codesign_verified is not True:
+                    raise ArmAdmissionError("service_uid_process_unknown")
+                if (identity.uid != uid or identity.pid <= 1
+                        or identity.launchd_reported_pid != identity.pid
+                        or before != (identity.pid,)):
+                    raise ArmAdmissionError("service_uid_process_live")
+                # Process creation, exit, PID replacement or attribution drift
+                # during the read cannot inherit the earlier observation.
+                if (_ps_pids_for_uid(uid) != before
+                        or classifier.classify(worker_uid=uid) != ambient):
+                    raise ArmAdmissionError("service_uid_process_unknown")
+            except ArmAdmissionError:
+                raise
+            except Exception as exc:
+                raise ArmAdmissionError("service_uid_process_unknown") from exc
 
     def require_transaction_absent(self) -> None:
         if AUTONOMY_TRANSACTION.exists() or AUTONOMY_TRANSACTION.is_symlink():
@@ -2624,6 +2791,14 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256",
             "target_worker_sha256",
         }
+        if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
+            required |= _CANARY_MANIFEST_FIELDS
+            if (
+                type(value.get("prior_canary_receipt_present")) is not bool
+                or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                       for field in ("prior_canary_receipt_sha256", "target_canary_receipt_sha256"))
+            ):
+                raise TransactionEffectUnknown()
         keys = set(value)
         allowed_with_control_preimage = required | {_CONTROL_LAUNCHD_PREIMAGE_FIELD}
         if (
@@ -2652,7 +2827,7 @@ class ProductionTransactionHost(ProductionArmHost):
             or (
                 _CONTROL_LAUNCHD_PREIMAGE_FIELD in value
                 and (
-                    value.get("operation") not in CEO_SUBMIT_OPERATIONS
+                    value.get("operation") not in CONTROL_ONLY_TRANSACTION_OPERATIONS
                     or type(value.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)) is not bool
                 )
             )
@@ -2688,6 +2863,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = current[
                 _CONTROL_LAUNCHD_PREIMAGE_FIELD
             ]
+        if current is not None and operation in DIALOGUE_CANARY_OPERATIONS:
+            value.update({key: current[key] for key in _CANARY_MANIFEST_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -3320,9 +3497,13 @@ class ProductionTransactionHost(ProductionArmHost):
         self._remove_candidate(control_candidate)
         self._remove_candidate(worker_candidate)
         expected = {"transaction.json", "prior-control.json", "prior-worker.json"}
+        archives = list(self._archive_paths())
+        if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
+            expected.add(_CANARY_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)
         if set(os.listdir(AUTONOMY_TRANSACTION)) != expected:
             raise TransactionEffectUnknown()
-        for path in (*self._archive_paths(), self._manifest_path()):
+        for path in (*archives, self._manifest_path()):
             info = path.lstat()
             if (
                 stat.S_ISLNK(info.st_mode)
@@ -3370,7 +3551,8 @@ class ProductionTransactionHost(ProductionArmHost):
                 self._claim_transaction_owner()
             manifest = self._manifest()
             if (
-                manifest.get("transaction_id") != transaction_id
+                manifest.get("operation") not in {"ARM", "DISARM"}
+                or manifest.get("transaction_id") != transaction_id
                 or manifest.get("expected_sha") != expected_sha
             ):
                 raise TransactionEffectUnknown()
@@ -3640,7 +3822,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         )
         self._persist_phase(transaction, "CANDIDATES_WRITTEN")
 
-    def validate_candidates(self, transaction: TransactionContext) -> None:
+    def _read_validated_control_candidate(self, transaction: TransactionContext):
         release = SYSTEM_ROOT / "releases" / transaction.expected_sha
         control_candidate, _worker_candidate = self._candidate_paths(
             transaction.transaction_id
@@ -3648,7 +3830,6 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         control_home = RUNTIME_ROOT / "control" / "home"
         control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
         worker_gid = grp.getgrnam(WORKER_GROUP).gr_gid
-        expected_armed = self._manifest().get("operation") == "CEO_SUBMIT_ARM"
         self._run_fixed(
             [
                 "/usr/bin/sudo",
@@ -3682,6 +3863,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         worker_raw, _worker_info = _read_root_file(
             WORKER_CONFIG, modes=frozenset({0o440}), gid=worker_gid
         )
+        return candidate_control, candidate_raw, worker_raw
+
+    def validate_candidates(self, transaction: TransactionContext) -> None:
+        candidate_control, candidate_raw, worker_raw = self._read_validated_control_candidate(transaction)
+        expected_armed = self._manifest().get("operation") == "CEO_SUBMIT_ARM"
         if (
             sha256_bytes(candidate_raw) != transaction.candidates.control_sha256
             or candidate_control.get("ceo_submit_armed") is not expected_armed
@@ -3864,6 +4050,10 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
 
     @staticmethod
     def _read_control_launchd_disabled_override() -> bool:
+        return ProductionCeoSubmitHost._read_launchd_disabled_override(CONTROL_LABEL)
+
+    @staticmethod
+    def _read_launchd_disabled_override(target_label: str, *, allow_absent: bool = False):
         """Read one exact persistent launchd override with a closed parser.
 
         ``print-disabled`` is a global table. Before a CEO-submit transaction may
@@ -3880,7 +4070,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         except UnicodeDecodeError as exc:
             raise TransactionEffectUnknown() from exc
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if len(lines) < 3 or lines[0] != "disabled services = {" or lines[-1] != "}":
+        if len(lines) < 2 or lines[0] != "disabled services = {" or lines[-1] != "}":
             raise TransactionEffectUnknown()
         observed: dict[str, bool] = {}
         for line in lines[1:-1]:
@@ -3892,9 +4082,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             if label in observed or state not in _CONTROL_LAUNCHD_DISABLED_SPELLINGS:
                 raise TransactionEffectUnknown()
             observed[label] = _CONTROL_LAUNCHD_DISABLED_SPELLINGS[state]
-        if CONTROL_LABEL not in observed:
+        if target_label not in observed:
+            if allow_absent:
+                return None
             raise TransactionEffectUnknown()
-        return observed[CONTROL_LABEL]
+        return observed[target_label]
 
     def _persist_control_launchd_preimage(
         self, transaction: TransactionContext, disabled: bool
@@ -3905,7 +4097,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             raise TransactionEffectUnknown()
         current = self._manifest()
         if (
-            current.get("operation") not in CEO_SUBMIT_OPERATIONS
+            current.get("operation") not in CONTROL_ONLY_TRANSACTION_OPERATIONS
             or current.get("transaction_id") != transaction.transaction_id
             or current.get("expected_sha") != transaction.expected_sha
         ):
@@ -4044,6 +4236,14 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
     def _ceo_admission_probe(
         self, expected_sha: str, expected_control_sha256: str
     ) -> bool:
+        return self._control_config_probe(
+            expected_sha, expected_control_sha256, required_state="AWAITING_CANARY"
+        )
+
+    def _control_config_probe(
+        self, expected_sha: str, expected_control_sha256: str, *,
+        required_state: str | None = None,
+    ) -> bool:
         """CEO-admission probe: fixed label + fixed socket + AWAITING_CANARY +
         wrapper-owned attestation validator.
 
@@ -4107,7 +4307,9 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         ):
             return False
         result = value["result"]
-        if result.get("service_state") != "AWAITING_CANARY":
+        if result.get("service_state") not in {"READY", "AWAITING_CANARY"}:
+            return False
+        if required_state is not None and result.get("service_state") != required_state:
             return False
         # The service resolves its host-owned socket declaration (on macOS,
         # /var/run is /private/var/run). Admit only these two fixed spellings;
@@ -4550,6 +4752,55 @@ def main(
     if args.command in CEO_SUBMIT_COMMANDS:
         ceo_host = ProductionCeoSubmitHost() if host is None else host
         return _run_ceo_submit_command(ceo_host, args, now=current)
+
+    if args.command == "arm-quiesce-control-uid":
+        arm_host = ProductionArmHost() if host is None else host
+        try:
+            require_root_privilege(arm_host.effective_uid())
+            installed = arm_host.require_exact_install(args.expected_sha)
+            if installed != args.expected_sha:
+                raise ArmAdmissionError("install_gate_failed")
+            arm_host.validate_acceptance(args.expected_sha)
+            configs = arm_host.load_unarmed_configs(args.expected_sha)
+            arm_host.require_runtime_quiescent(configs)
+            arm_host.require_services_already_stopped()
+            arm_host.require_transaction_absent()
+            signalled = arm_host.quiesce_control_uid_for_arm()
+            arm_host.require_service_uids_quiescent()
+            document = operation_document(
+                code="control_uid_quiesced",
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+                replayed=not signalled,
+            )
+            exit_code = 0
+        except ArmAdmissionError as exc:
+            document = operation_document(
+                code=exc.code,
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+            )
+            exit_code = 2
+        except Exception:
+            document = operation_document(
+                code="service_uid_process_unknown",
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+            )
+            exit_code = 2
+        print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+        return exit_code
+
+    if args.command in {"dialogue-canary-publish", "dialogue-canary-reconcile"}:
+        from ops.executive_os.dialogue_wake_canary_control import run_command
+        return run_command(args, host=host)
+
+    if args.command in A2_DISABLE_COMMANDS:
+        from ops.executive_os.a2_disable_preparation_control import run_command
+        return run_command(args, host=host)
 
     transaction_host = ProductionTransactionHost() if host is None else host
     try:

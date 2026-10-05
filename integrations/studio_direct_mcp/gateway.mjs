@@ -99,6 +99,7 @@ import {
   resolveGitPublishConfig,
   toolResult as gitToolResult,
 } from './git-publish.mjs';
+import { STUDIO_WORKSPACE_TOOLS, STUDIO_REPOSITORY_GIT_TOOLS, createRepositoryWorkspaceAccess, resolveRepositoryWorkspaceConfig } from './workspace-access.mjs';
 import {
   PAPER_DESIGN_TOOLS,
   PAPER_DESIGN_TOOL_NAMES,
@@ -368,6 +369,8 @@ export function resolveConfig(partial = {}) {
   }
 
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
+  cfg.repositoryWorkspaces = resolveRepositoryWorkspaceConfig(cfg.repositoryWorkspaces);
+  if (cfg.repositoryWorkspaces && !cfg.gitPublish) throw new TypeError('repositoryWorkspaces requires configured typed Git');
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
 
@@ -889,7 +892,8 @@ class GatewaySession {
 
     this.transport = null;
     this.server = null;
-    this.gitPublisher = cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null;
+    this.workspaceAccess = cfg.repositoryWorkspaces ? createRepositoryWorkspaceAccess(cfg.repositoryWorkspaces, cfg.gitPublish) : null;
+    this.gitPublisher = this.workspaceAccess ?? (cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null);
     this.paperDesigner = cfg.paperDesign ? createPaperDesigner(cfg.paperDesign) : null;
     this.fleetStatus = cfg.fleetStatus
       ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
@@ -1018,7 +1022,10 @@ class GatewaySession {
           localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
         }
         if (session.gitPublisher) {
-          localTools.push(...STUDIO_GIT_PUBLISH_TOOLS.map((tool) => ({ ...tool })));
+          localTools.push(...(session.workspaceAccess ? STUDIO_REPOSITORY_GIT_TOOLS : STUDIO_GIT_PUBLISH_TOOLS).map((tool) => ({ ...tool })));
+        }
+        if (session.workspaceAccess) {
+          localTools.push(...STUDIO_WORKSPACE_TOOLS.map((tool) => ({ ...tool })));
         }
         if (session.paperDesigner) {
           localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
@@ -1129,6 +1136,20 @@ class GatewaySession {
         });
         return paperToolResult(result.value, result.isError);
       }, { kind: 'tools/call', tool: name, started });
+    }
+
+    if (this.workspaceAccess && STUDIO_WORKSPACE_TOOLS.some((tool) => tool.name === name)) {
+      this.bumpTool(name);
+      try {
+        const args = request?.params?.arguments ?? {};
+        const data = name === 'studio_workspace_repositories'
+          ? await this.workspaceAccess.repositories(args) : await this.workspaceAccess.acquire(args);
+        const isError = data?.status === 'REFUSED' || data?.status === 'PARTIAL' || data?.effect_state === 'EFFECT_UNKNOWN';
+        if (data?.effect_state === 'EFFECT_UNKNOWN') this.taint('workspace acquisition effect unknown');
+        return gitToolResult(data, isError);
+      } catch {
+        return gitToolResult({ status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'WORKSPACE_ACTION_REFUSED' }, true);
+      }
     }
 
     if (this.gitPublisher &&

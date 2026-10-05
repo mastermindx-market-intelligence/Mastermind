@@ -1093,10 +1093,21 @@ Attempt IDs, UIDs, exit statuses, and exact SHA.
 ## Receipt-gated autonomy arm, proof, and credential interlock
 
 Formal acceptance still leaves both installed arm bits false. Do not edit either
-JSON config. From the exact installed release, first prove the closed unarmed
-state, then run the one root transaction that binds the reviewed Gate B receipt,
-formal acceptance, current provider readiness, both configs, exact release and
-Runtime quiescence:
+JSON config. Acceptance may also leave macOS per-user agents owned by the fixed
+Control service UID after the LaunchDaemons stop. The arm gate deliberately
+never signals a process, so converge that one fixed principal through the
+existing autonomy owner before the receipt-gated arm. This pre-arm action accepts
+only the expected release SHA: it cannot select a UID, PID, label, signal or
+timeout; it requires the accepted release, unarmed configs, a quiescent Runtime,
+stopped Control/worker services and no autonomy transaction; it never targets
+the worker UID, Runtime, configs, credentials or Gate B receipt. Success is
+current process-table evidence only, and the following arm independently
+rechecks service-UID quiescence.
+
+From the exact installed release, first prove the closed unarmed state, then
+quiesce the fixed Control UID and run the one root transaction that binds the
+reviewed Gate B receipt, formal acceptance, current provider readiness, both
+configs, exact release and Runtime quiescence:
 
 ```bash
 AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
@@ -1106,6 +1117,8 @@ WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
 CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
 
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+sudo /bin/bash "$AUTONOMY_CONTROL" arm-quiesce-control-uid \
+  --expected-sha "$MERGE_SHA"
 sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --expected-sha "$MERGE_SHA" \
   --gate-b-receipt "$GATE_B_RECEIPT" \
@@ -1114,6 +1127,8 @@ sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
+
+The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
 
 The first status must be exactly `UNARMED`; the post-transaction status must be
 exactly `ARMED_READY`. Arm stops both services before committing either config,

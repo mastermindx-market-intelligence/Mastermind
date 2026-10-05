@@ -90,6 +90,16 @@ Produces a current-state model, disagreement ledger and exact next action.
 Mandatory after current-state recovery for substantial continuing or modifying CEO work in the
 active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
 status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
+For attended ChatGPT work it also owns task/capability-based Pro versus Extra High recommendations;
+this does not change automated ModelRouter/Executive reasoning-mode admission or runtime authority.
+
+### `SESSION_RELIABILITY.md`
+Mandatory companion whenever a session expects more than three tool calls, starts or continues a host
+process, performs multi-source archaeology, resumes after any generation/tool failure, or is expected
+to run longer than one material phase. It bounds output at source, reconciles timeout/taint by exact
+identity, checkpoints before context pressure, distinguishes bounded mode recovery from context
+rotation, and preserves a compact recovery frontier without creating another lifecycle, memory, retry,
+session, or transport plane.
 
 ### `skills/paper-design-workflow/SKILL.md`
 Mandatory domain companion for any Mastermind request to inspect, edit, upgrade, review, migrate,
@@ -233,13 +243,15 @@ specific law.
     Chairman commission is the thread parent, pickup/start/return/ruling/STOP edges stay under that
     exact parent unless current canonical transport law explicitly establishes a different carrier.
 23. Forward execution. After current-source recovery, keep advancing the highest-leverage unblocked
-    dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
-    turn, while another useful independent lane remains. Supporting artifacts do not substitute for
-    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
-    ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission
-    incomplete, current checkpoint readback, justified boundary and exact next action, without
-    transferring custody or inventing a wake. Durable execution after a turn still requires a
-    production-proven external owner with a real return path.
+    dependency in the Chairman-authorized scope. A genuine blocker or external wait freezes that lane,
+    not the whole turn, while another useful independent lane remains. Supporting artifacts, review
+    requests, notifications, status reads and checkpoints do not substitute for capability advancement.
+    After a task/phase completes, verify/save it, reassess the parent mission and start the next safe
+    ready phase in the same healthy turn. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
+    ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission incomplete,
+    current checkpoint readback, genuine continuity/surface boundary and exact next action; an ordinary
+    phase/chunk/checkpoint boundary alone is insufficient. Durable execution after a turn still requires
+    a production-proven external owner with a real return path.
 
 ## Modification handshake
 

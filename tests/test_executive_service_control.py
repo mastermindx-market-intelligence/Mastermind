@@ -17,6 +17,7 @@ SCRIPT = ROOT / "ops" / "executive_os" / "service-control.sh"
 CONTROL_LABEL = "com.mastermind.executive.control"
 WORKER_LABEL = "com.mastermind.executive.worker.codex"
 RELAY_LABEL = "com.mastermind.executive.sol-state-relay"
+AGENT_RELAY_LABEL = "com.mastermind.executive.agent-relay"
 MCP_LABEL = "com.mastermind.executive.mcp"
 BACKUP_LABEL = "com.mastermind.executive.backup"
 
@@ -96,6 +97,7 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
     control_plist = tmp_path / "control.plist"
     worker_plist = tmp_path / "worker.plist"
     relay_plist = tmp_path / "relay.plist"
+    agent_relay_plist = tmp_path / "agent-relay.plist"
     text = text.replace(
         'CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"',
         f'CONTROL_PLIST="{control_plist}"',
@@ -108,13 +110,19 @@ def _prepare_script(tmp_path: Path) -> tuple[Path, Path, Path]:
         'RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"',
         f'RELAY_PLIST="{relay_plist}"',
     )
+    text = text.replace(
+        'AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"',
+        f'AGENT_RELAY_PLIST="{agent_relay_plist}"',
+    )
     assert str(control_plist) in text and str(worker_plist) in text
+    assert str(agent_relay_plist) in text
     copy_path = tmp_path / "service-control.sh"
     copy_path.write_text(text, encoding="utf-8")
     copy_path.chmod(0o755)
     control_plist.write_text("control-plist", encoding="utf-8")
     worker_plist.write_text("worker-plist", encoding="utf-8")
     relay_plist.write_text("relay-plist", encoding="utf-8")
+    agent_relay_plist.write_text("agent-relay-plist", encoding="utf-8")
     return copy_path, control_plist, worker_plist
 
 
@@ -130,8 +138,11 @@ def _run(
     *,
     fake_uid: str = "0",
     fake_os: str = "Darwin",
+    remove_agent_relay_plist: bool = False,
 ) -> tuple[int, str, str, list[str], str, Path, Path]:
     script, control_plist, worker_plist = _prepare_script(tmp_path)
+    if remove_agent_relay_plist:
+        (tmp_path / "agent-relay.plist").unlink()
     plan_path = tmp_path / "launchctl.plan"
     log_path = tmp_path / "launchctl.log"
     _write_plan(plan_path, plan)
@@ -392,6 +403,60 @@ def _ensure_running_already(label: str) -> list[Entry]:
     ]
 
 
+def _agent_relay_disabled(state: str, *, exit_code: int = 0) -> list[Entry]:
+    assert state in {"enabled", "disabled"}
+    return [
+        (
+            "print-disabled system",
+            exit_code,
+            f'        "{AGENT_RELAY_LABEL}" => {state}' if exit_code == 0 else "",
+            "" if exit_code == 0 else "disabled-state unavailable",
+        )
+    ]
+
+
+def _agent_relay_start_bootstrap(
+    agent_plist: Path,
+    *,
+    enable_exit: int = 0,
+    bootstrap_exit: int = 0,
+) -> list[Entry]:
+    return (
+        _agent_relay_disabled("disabled")
+        + [(f"enable system/{AGENT_RELAY_LABEL}", enable_exit, "", "enable reply lost" if enable_exit else "")]
+        + _agent_relay_disabled("enabled")
+        + _observe_absent(AGENT_RELAY_LABEL)
+        + [(f"bootstrap system {agent_plist}", bootstrap_exit, "", "bootstrap reply lost" if bootstrap_exit else "")]
+        + _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("enabled")
+    )
+
+
+def _agent_relay_start_already() -> list[Entry]:
+    return (
+        _agent_relay_disabled("enabled")
+        + _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("enabled")
+    )
+
+
+def _agent_relay_stop(
+    *,
+    disable_exit: int = 0,
+    bootout_exit: int = 0,
+) -> list[Entry]:
+    return (
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("enabled")
+        + [(f"disable system/{AGENT_RELAY_LABEL}", disable_exit, "", "disable reply lost" if disable_exit else "")]
+        + _agent_relay_disabled("disabled")
+        + _observe_running(AGENT_RELAY_LABEL)
+        + [(f"bootout system/{AGENT_RELAY_LABEL}", bootout_exit, "", "bootout reply lost" if bootout_exit else "")]
+        + _observe_absent(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("disabled")
+    )
+
+
 def _readside_preflight(*, worker_pid: int | None = None) -> list[Entry]:
     worker = (
         _observe_absent(WORKER_LABEL)
@@ -530,6 +595,386 @@ def test_start_readside_partial_failure_is_terminal_and_does_not_touch_worker(
         and WORKER_LABEL in line
         for line in log
     )
+
+
+def test_start_agent_relay_starts_only_fixed_agent_relay(tmp_path: Path) -> None:
+    agent_plist = tmp_path / "agent-relay.plist"
+    plan = _agent_relay_start_bootstrap(agent_plist)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=running" in out
+    assert "disabled=enabled" in out
+    assert not any(
+        label in call
+        for label in (CONTROL_LABEL, WORKER_LABEL, RELAY_LABEL, MCP_LABEL, BACKUP_LABEL)
+        for call in log
+    )
+
+
+def test_start_agent_relay_is_idempotent_when_already_running(tmp_path: Path) -> None:
+    plan = _agent_relay_start_already()
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert "existing=1" in out
+    assert not any(
+        call.startswith(("enable ", "bootstrap ", "kickstart ")) for call in log
+    )
+
+
+def test_start_agent_relay_recovers_nonzero_enable_and_bootstrap_from_readback(
+    tmp_path: Path,
+) -> None:
+    agent_plist = tmp_path / "agent-relay.plist"
+    plan = _agent_relay_start_bootstrap(
+        agent_plist,
+        enable_exit=5,
+        bootstrap_exit=5,
+    )
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert "effect=enable recovered=1" in out
+    assert "effect=bootstrap recovered=1" in out
+    assert log.count(f"enable system/{AGENT_RELAY_LABEL}") == 1
+    assert log.count(f"bootstrap system {agent_plist}") == 1
+
+
+def test_start_agent_relay_resumes_partial_enabled_absent_without_replaying_enable(
+    tmp_path: Path,
+) -> None:
+    agent_plist = tmp_path / "agent-relay.plist"
+    plan = (
+        _agent_relay_disabled("enabled")
+        + _observe_absent(AGENT_RELAY_LABEL)
+        + [(f"bootstrap system {agent_plist}", 0, "", "")]
+        + _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("enabled")
+    )
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert f"service={AGENT_RELAY_LABEL} state=running" in out
+    assert not any(call.startswith("enable ") for call in log)
+    assert log.count(f"bootstrap system {agent_plist}") == 1
+
+
+def test_start_agent_relay_read_only_preflight_failures_are_not_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    cases = [
+        [("print-disabled system", 5, "", "disabled-state unavailable")],
+        _agent_relay_disabled("enabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")],
+        _agent_relay_disabled("enabled")
+        + _observe_running(AGENT_RELAY_LABEL)
+        + [("print-disabled system", 5, "", "final-disabled unavailable")],
+    ]
+    for index, plan in enumerate(cases):
+        case_root = tmp_path / str(index)
+        case_root.mkdir()
+        code, _out, err, log, remaining, *_ = _run(case_root, "start-agent-relay", plan)
+        assert code != 75
+        assert "state=unknown" in err
+        assert "state=effect_unknown" not in err
+        assert remaining == ""
+        assert log == [key for key, *_ in plan]
+        assert not any(
+            call.startswith(("enable ", "bootstrap ", "kickstart ")) for call in log
+        )
+
+
+def test_start_agent_relay_post_enable_registration_failure_is_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _agent_relay_disabled("disabled")
+        + [(f"enable system/{AGENT_RELAY_LABEL}", 0, "", "")]
+        + _agent_relay_disabled("enabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")]
+    )
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "start-agent-relay", plan)
+    assert code == 75
+    assert "state=effect_unknown stage=pre-start-registration" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert log.count(f"enable system/{AGENT_RELAY_LABEL}") == 1
+    assert not any(call.startswith(("bootstrap ", "kickstart ")) for call in log)
+
+
+def test_start_agent_relay_does_not_replay_bootstrap_when_readback_is_unknown(
+    tmp_path: Path,
+) -> None:
+    agent_plist = tmp_path / "agent-relay.plist"
+    plan = (
+        _agent_relay_disabled("enabled")
+        + _observe_absent(AGENT_RELAY_LABEL)
+        + [(f"bootstrap system {agent_plist}", 5, "", "bootstrap reply lost")]
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "readback unavailable")]
+    )
+
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 75
+    assert "state=effect_unknown stage=bootstrap-reconcile" in err
+    assert remaining == ""
+    assert log.count(f"bootstrap system {agent_plist}") == 1
+
+
+def test_start_agent_relay_refuses_unresolved_enable_without_next_effect(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _agent_relay_disabled("disabled")
+        + [(f"enable system/{AGENT_RELAY_LABEL}", 5, "", "enable reply lost")]
+        + _agent_relay_disabled("disabled")
+    )
+
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path, "start-agent-relay", plan
+    )
+
+    assert code == 75
+    assert "state=effect_unknown stage=enable-reconcile" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert not any(
+        call.startswith(("bootstrap ", "kickstart ")) for call in log
+    )
+
+
+def test_stop_agent_relay_stops_only_fixed_registered_relay(tmp_path: Path) -> None:
+    plan = _agent_relay_stop()
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=absent" in out
+    assert "disabled=disabled" in out
+    assert not any(
+        label in call
+        for label in (CONTROL_LABEL, WORKER_LABEL, RELAY_LABEL, MCP_LABEL, BACKUP_LABEL)
+        for call in log
+    )
+
+
+def test_stop_agent_relay_recovers_nonzero_disable_and_bootout_from_readback(
+    tmp_path: Path,
+) -> None:
+    plan = _agent_relay_stop(disable_exit=5, bootout_exit=5)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert "effect=disable recovered=1" in out
+    assert "effect=bootout recovered=1" in out
+    assert log.count(f"disable system/{AGENT_RELAY_LABEL}") == 1
+    assert log.count(f"bootout system/{AGENT_RELAY_LABEL}") == 1
+
+
+def test_stop_agent_relay_resumes_partial_disabled_registered_without_replaying_disable(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("disabled")
+        + _observe_running(AGENT_RELAY_LABEL)
+        + [(f"bootout system/{AGENT_RELAY_LABEL}", 0, "", "")]
+        + _observe_absent(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("disabled")
+    )
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert f"service={AGENT_RELAY_LABEL} state=absent" in out
+    assert not any(call.startswith("disable ") for call in log)
+    assert log.count(f"bootout system/{AGENT_RELAY_LABEL}") == 1
+
+
+def test_stop_agent_relay_read_only_preflight_failures_are_not_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    cases = [
+        _observe_running(AGENT_RELAY_LABEL)
+        + [("print-disabled system", 5, "", "disabled-state unavailable")],
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("disabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")],
+    ]
+    for index, plan in enumerate(cases):
+        case_root = tmp_path / str(index)
+        case_root.mkdir()
+        code, _out, err, log, remaining, *_ = _run(case_root, "stop-agent-relay", plan)
+        assert code != 75
+        assert "state=unknown" in err
+        assert "state=effect_unknown" not in err
+        assert remaining == ""
+        assert log == [key for key, *_ in plan]
+        assert not any(call.startswith(("disable ", "bootout ")) for call in log)
+
+
+def test_stop_agent_relay_post_disable_registration_failure_is_effect_unknown(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("enabled")
+        + [(f"disable system/{AGENT_RELAY_LABEL}", 0, "", "")]
+        + _agent_relay_disabled("disabled")
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "registration unavailable")]
+    )
+    code, _out, err, log, remaining, *_ = _run(tmp_path, "stop-agent-relay", plan)
+    assert code == 75
+    assert "state=effect_unknown stage=pre-bootout-registration" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert log.count(f"disable system/{AGENT_RELAY_LABEL}") == 1
+    assert not any(call.startswith("bootout ") for call in log)
+
+
+def test_stop_agent_relay_does_not_replay_bootout_when_readback_is_unknown(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("disabled")
+        + _observe_running(AGENT_RELAY_LABEL)
+        + [(f"bootout system/{AGENT_RELAY_LABEL}", 5, "", "bootout reply lost")]
+        + [(f"print system/{AGENT_RELAY_LABEL}", 5, "", "readback unavailable")]
+    )
+
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code == 75
+    assert "state=effect_unknown stage=bootout-reconcile" in err
+    assert remaining == ""
+    assert log.count(f"bootout system/{AGENT_RELAY_LABEL}") == 1
+
+
+def test_stop_agent_relay_refuses_unresolved_disable_without_bootout(
+    tmp_path: Path,
+) -> None:
+    plan = (
+        _observe_running(AGENT_RELAY_LABEL)
+        + _agent_relay_disabled("enabled")
+        + [(f"disable system/{AGENT_RELAY_LABEL}", 5, "", "disable reply lost")]
+        + _agent_relay_disabled("enabled")
+    )
+
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code == 75
+    assert "state=effect_unknown stage=disable-reconcile" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert not any(call.startswith("bootout ") for call in log)
+
+
+def test_status_agent_relay_is_read_only_and_reports_exact_state(
+    tmp_path: Path,
+) -> None:
+    plan = _agent_relay_disabled("disabled") + _observe_absent(AGENT_RELAY_LABEL)
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path, "status-agent-relay", plan
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert f"service={AGENT_RELAY_LABEL} state=absent disabled=disabled" in out
+    assert log == [key for key, *_ in plan]
+    assert not any(
+        call.startswith(("enable ", "disable ", "bootstrap ", "kickstart ", "bootout "))
+        for call in log
+    )
+
+
+def test_start_agent_relay_refuses_missing_plist_before_launchctl(
+    tmp_path: Path,
+) -> None:
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path,
+        "start-agent-relay",
+        [],
+        remove_agent_relay_plist=True,
+    )
+
+    assert code == 65
+    assert "missing or unsafe launchd plist" in err
+    assert remaining == ""
+    assert log == []
+
+
+def test_stop_agent_relay_refuses_absent_service_before_disable(tmp_path: Path) -> None:
+    plan = [
+        (f"print system/{AGENT_RELAY_LABEL}", 113, "", "absent"),
+    ]
+
+    code, _out, err, log, remaining, *_ = _run(
+        tmp_path, "stop-agent-relay", plan
+    )
+
+    assert code != 0
+    assert "must be registered before stop" in err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert not any(
+        call.startswith(("disable ", "bootout ")) for call in log
+    )
+
+
+def test_stop_agent_relay_can_quiesce_registered_service_if_plist_is_lost(
+    tmp_path: Path,
+) -> None:
+    plan = _agent_relay_stop()
+
+    code, out, err, log, remaining, *_ = _run(
+        tmp_path,
+        "stop-agent-relay",
+        plan,
+        remove_agent_relay_plist=True,
+    )
+
+    assert code == 0, err
+    assert remaining == ""
+    assert log == [key for key, *_ in plan]
+    assert f"service={AGENT_RELAY_LABEL} state=absent" in out
 
 
 def test_stop_readside_stops_control_then_relay_and_preserves_mcp_worker_backup(

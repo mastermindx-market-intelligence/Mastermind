@@ -2,8 +2,8 @@
 
 A numeric parent PID is only a lookup hint. Admission also requires the child
 kernel parent unique ID to match the unchanged current OHF writer instance.
-An exec completed before child creation is outside this lineage proof; the host
-must separately qualify admission-time OHF executable/capability continuity.
+The admitted execution pair also fences exec before child creation; current
+lineage alone is insufficient to prove continuity from OHF admission.
 """
 from __future__ import annotations
 
@@ -56,6 +56,8 @@ def require_current_writer_parent(
     writer_pgid: int,
     writer_start_identity: str,
     writer_boot_id: str,
+    writer_unique_id: int,
+    writer_pidversion: int,
     inspector: ProcessInspector,
 ) -> None:
     """Check a Runtime-selected writer against this connected direct child.
@@ -69,6 +71,8 @@ def require_current_writer_parent(
         or type(writer_pgid) is not int or writer_pgid <= 0
         or type(writer_start_identity) is not str or not writer_start_identity
         or type(writer_boot_id) is not str or not writer_boot_id
+        or type(writer_unique_id) is not int or writer_unique_id <= 0
+        or type(writer_pidversion) is not int or writer_pidversion <= 0
     ):
         raise PeerIdentityError("CONSULT_WRITER_IDENTITY_REQUIRED")
     try:
@@ -78,6 +82,8 @@ def require_current_writer_parent(
         boot = inspector.boot_session_id()
         if (
             child[0].parent_pid != writer_pid
+            or instance.unique_id != writer_unique_id
+            or instance.pidversion != writer_pidversion
             or child[1].parent_unique_id != instance.unique_id
             or child[1].parent_pidversion != instance.pidversion
             or writer.start_identity != writer_start_identity

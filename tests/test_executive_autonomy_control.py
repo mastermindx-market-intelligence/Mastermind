@@ -130,7 +130,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_sha": SHA,
     }
 
-    # The command set is EXACTLY the closed seven: no generic recovery/debug verb
+    # The command set is EXACTLY the closed twelve: no generic recovery/debug verb
     # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
@@ -141,12 +141,23 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     assert set(subparser_actions[0].choices) == {
         "status",
         "arm",
+        "arm-quiesce-control-uid",
         "disarm",
         "ceo-submit-status",
         "ceo-submit-arm",
         "ceo-submit-disarm",
         "ceo-submit-reconcile",
+        "dialogue-canary-publish",
+        "dialogue-canary-reconcile",
+        "a2-disable-prepare",
+        "a2-disable-prepare-reconcile",
     }
+    for command in ("a2-disable-prepare", "a2-disable-prepare-reconcile"):
+        assert vars(parser.parse_args([command, "--expected-sha", SHA])) == {
+            "command": command, "expected_sha": SHA,
+        }
+        with pytest.raises(SystemExit):
+            parser.parse_args([command, "--expected-sha", SHA, "--service-label", "foreign"])
 
     # A CEO verb carries no COO authority flag: the arm admission surface of the
     # legacy verb must not be reachable from the CEO domain.
@@ -359,6 +370,7 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     for verb in (
         "status",
         "arm",
+        "arm-quiesce-control-uid",
         "disarm",
         "ceo-submit-status",
         "ceo-submit-arm",
@@ -366,6 +378,11 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
         "ceo-submit-reconcile",
     ):
         assert verb in wrapper
+    closed_prefix = "status|arm|arm-quiesce-control-uid|disarm|ceo-submit-status"
+    # The verb must be present in both the usage surface and the shell case
+    # whitelist; a Python-only parser entry is not an installed command path.
+    assert wrapper.count(closed_prefix) == 2
+
     for forbidden in ("eval ", "bash -c", "sh -c", "curl ", "security "):
         assert forbidden not in wrapper
 
@@ -667,7 +684,8 @@ def test_production_admission_reuses_readiness_and_opens_runtime_read_only():
     assert "provider_readiness.validate_receipt_file(" in production
     assert "Runtime.at(" in production
     assert "create=False" in production
-    assert '["/usr/bin/pgrep", "-U", str(uid)]' in production
+    assert "_ps_pids_for_uid(uid)" in production
+    assert "DarwinDistnotedClassifier()" in production
     for forbidden in (
         "provider_readiness.reserve",
         "provider_readiness._finalize",

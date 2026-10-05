@@ -74,6 +74,7 @@ fn main() {
             auth::sign_in,
             auth::sign_out,
             auth::read_programs,
+            auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
             auth::read_result,

@@ -88,6 +88,16 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
         raise BridgeError("invalid_input", "verified principal projection is invalid") from None
 
 
+def _validate_arguments(tool, arguments):
+    if tool == "session_reply_read":
+        from .return_tools import NativeReplyReadTool
+        try:
+            return NativeReplyReadTool.validate(tool, arguments)
+        except Exception:
+            raise BridgeError("invalid_input", "reply read requires one valid read_ref") from None
+    return validate_tool_arguments(tool, arguments)
+
+
 def validate_private_frame(value: Any) -> tuple[str, NeutralPrincipalProjection, dict[str, Any]]:
     if not isinstance(value, Mapping) or set(value) != _PRIVATE_KEYS:
         raise BridgeError("invalid_input", "installed Session Bridge frame is invalid")
@@ -97,7 +107,7 @@ def validate_private_frame(value: Any) -> tuple[str, NeutralPrincipalProjection,
     if not isinstance(tool, str):
         raise BridgeError("invalid_input", "installed Session Bridge tool is invalid")
     principal = _principal(value.get("principal"))
-    arguments = validate_tool_arguments(tool, value.get("arguments"))
+    arguments = _validate_arguments(tool, value.get("arguments"))
     return tool, principal, arguments
 
 
@@ -110,6 +120,7 @@ class InstalledSessionBridgeProvider:
         target_projector: Callable[[NeutralPrincipalProjection, str | None], Any],
         reply_handler: Callable[[NeutralPrincipalProjection, Mapping[str, Any]], Any],
         summon_handler: Callable[[NeutralPrincipalProjection, Mapping[str, Any]], Any],
+        reply_read_handler: Callable | None = None,
     ) -> None:
         for name, value in (
             ("target_projector", target_projector),
@@ -121,6 +132,9 @@ class InstalledSessionBridgeProvider:
         self._target_projector = target_projector
         self._reply_handler = reply_handler
         self._summon_handler = summon_handler
+        if reply_read_handler is not None and not callable(reply_read_handler):
+            raise TypeError("reply read handler must be callable")
+        self._reply_read_handler = reply_read_handler
 
     async def handle_frame(self, frame: Any) -> dict[str, Any]:
         tool, principal, arguments = validate_private_frame(frame)
@@ -138,7 +152,11 @@ class InstalledSessionBridgeProvider:
                         "authorized target projection is unavailable",
                     )
                 return _result(tool, data=[dict(item) for item in data])
-            if tool == "session_send":
+            if tool == "session_reply_read":
+                if self._reply_read_handler is None:
+                    raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")
+                data = await _maybe(self._reply_read_handler(principal, dict(arguments)))
+            elif tool == "session_send":
                 data = await _maybe(self._reply_handler(principal, dict(arguments)))
             else:
                 data = await _maybe(self._summon_handler(principal, dict(arguments)))
@@ -196,12 +214,14 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     from .native_backends import CanonicalReplyCoordinator, CanonicalTargetReader, ExactTargetRouter
 
     projector = RuntimeFabricTargetProjector(runtime)
-    writer = AgentDialogueContinueWriter(
-        RuntimeExecutiveReplyBindingResolver(projector), socket_path=dialogue_socket_path)
     codex = RuntimeCodexTargetProjector(
         projector, owner_configured=codex_owner_configured)
-    codex_writer = AgentDialogueContinueWriter(
-        RuntimeExecutiveReplyBindingResolver(codex), socket_path=dialogue_socket_path)
+    from .runtime_return import RuntimeSessionReturn
+    from .native_read import NativeReplyReader
+    returns = RuntimeSessionReturn(runtime, fabric=projector, codex=codex,
+                                   socket_path=dialogue_socket_path)
+    reply_reader = NativeReplyReader(returns, socket_path=dialogue_socket_path,
+                                    projected_principal=True)
     reader = CanonicalTargetReader(
         fabric_reader=projector.project, codex_reader=codex.project, claude_reader=lambda: [])
 
@@ -211,12 +231,15 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     # A canonical reply receipt is never promoted into attention/consumption.
     # The existing Dialogue/Wake loop remains the attention owner; this bridge
     # cannot inject a raw provider prompt or launch another worker.
-    coordinator = CanonicalReplyCoordinator(
-        reply_writer=writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
-    codex_coordinator = CanonicalReplyCoordinator(
-        reply_writer=codex_writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
-    router = ExactTargetRouter(
-        fabric_reply=coordinator, codex_reply=codex_coordinator, claude_reply=unavailable)
+    def coordinator(targets, principal, arguments):
+        # Bind authorization to this invocation; no cached caller or second
+        # writer can enter COMMIT without the original request's durable fence.
+        writer = AgentDialogueContinueWriter(
+            RuntimeExecutiveReplyBindingResolver(targets), socket_path=dialogue_socket_path,
+            before_commit=lambda **facts: returns.begin_continuation_commit(
+                principal, arguments, **facts))
+        return CanonicalReplyCoordinator(
+            reply_writer=writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
 
     def targets(principal, kind):
         values = reader(kind)
@@ -225,12 +248,24 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
         return values
 
     async def send(principal, arguments):
-        return await _maybe(router(
+        committed = await returns.reconcile_existing_send(principal, arguments)
+        read_ref = returns.bind_request(principal, arguments)
+        if committed is not None:
+            # Reconciliation reads the original carrier only; it never revives a
+            # worker or repeats attention after a lost response/reconnection.
+            return {"target_ref": arguments["target_ref"], "reply_committed": True,
+                    "carrier": committed, "attention": {"state": "EFFECT_UNKNOWN"},
+                    "read_ref": read_ref}
+        router = ExactTargetRouter(
+            fabric_reply=coordinator(projector, principal, arguments),
+            codex_reply=coordinator(codex, principal, arguments), claude_reply=unavailable)
+        result = await _maybe(router(
             arguments["target_ref"], arguments["instruction"],
             arguments["stop_condition"], arguments["operation_key"]))
+        return {**result, "read_ref": read_ref}
 
     return private_ingress_owner(InstalledSessionBridgeProvider(
-        target_projector=targets, reply_handler=send,
+        target_projector=targets, reply_handler=send, reply_read_handler=reply_reader,
         summon_handler=(summon_handler if summon_handler is not None else unavailable)))
 
 
@@ -258,7 +293,7 @@ class InstalledSessionBridgeClient:
         tool: str,
         arguments: Mapping[str, Any],
     ) -> Any:
-        args = validate_tool_arguments(tool, arguments)
+        args = _validate_arguments(tool, arguments)
         modifying = tool in MODIFYING_TOOLS
         frame = {
             "schema": PRIVATE_SCHEMA,
@@ -337,6 +372,9 @@ class InstalledSessionBridgeClient:
         self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]
     ) -> Any:
         return await self._call(principal, "session_send", arguments)
+
+    async def reply_read(self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]) -> Any:
+        return await self._call(principal, "session_reply_read", arguments)
 
     async def summon(
         self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]
