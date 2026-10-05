@@ -655,3 +655,164 @@ Candidate V2 fields:
 - residual price impact per unit OFI/depth.
 
 The decisive test is incremental OOS value over the minute-bar model. If negligible, **KILL MICROSTRUCTURE V2**.
+
+
+## 14. Disagreement ledger
+
+| Claim | Supporting evidence | Contradictory / limiting evidence | Current Mastermind evidence | Resolution |
+|---|---|---|---|---|
+| Industry/group leadership predicts stock momentum | Moskowitz–Grinblatt; later industry work | common factors can explain much industry momentum; international strength varies | C1 broad-sector increment = null | finer PIT industry remains testable; broad-sector prior demoted |
+| Factor momentum explains stock momentum | Ehsani–Linnainmaa U.S. evidence | newer international evidence is mixed | B2 shows strong stock-level baseline absorbs many descriptors | include factor controls; do not assume full explanation |
+| Smooth/continuous winners are more durable | Frog-in-the-Pan literature | effect is regime-dependent; path variables can proxy vol/jumps | B/B2 path family largely redundant with volatility | test only residual, matched, jump-aware continuity |
+| Near-high behavior predicts continuation | 52-week-high literature | proximity is mechanically related to momentum and vol | Mastermind distance-to-high family did not earn promotion | high occupancy is low-priority and must beat distance-to-high |
+| High volume confirms leaders | price/volume literature shows interaction | high-volume winners can reverse faster; event/squeeze volume is ambiguous | rotation tensor treats RVOL as proxy, not proof | raw RVOL is a control; signed/OFI data needed for mechanism |
+| Leaders recover faster from shocks | market-resiliency literature supports recovery as meaningful | low beta/low vol/liquidity can generate same appearance | not directly tested by B/B2/C1 | **highest-value new falsification lane** |
+| Institutional inflows buy every dip | flow pressure and institutional liquidity supply are plausible | passive flows, systematic demand, short covering, dealer hedging and information repricing are alternatives | no direct institutional-flow observation in proposed V1 | causal claim rejected without direct flow evidence |
+| Theme-first × stock-second is superior | thematic doctrine and industry literature | C1 interaction/additive broad-sector state did not carry | C1-NULL | retest only at PIT industry/static basket with strong baseline |
+| Group breadth deterioration leads reversal | breadth literature and practitioner logic | breadth may be contemporaneous and regime-specific | C1 daily group features did not carry | test only as exhaustion lead-time feature |
+| Microstructure will improve resilience inference | OFI/queue/resiliency literature | predictive horizons can be very short and costly | no Mastermind V2 test | defer until V1 survives |
+
+## 15. Existing-system census and owner boundary
+
+| Proposed capability | Existing owner/substrate | Tested null / warning | True missing plane |
+|---|---|---|---|
+| Daily stock path descriptors | `brain/trend_persistence.py` | Wave B/B2 null on incremental model value | conditional intraday residual response |
+| Sector rotation | `brain/rotation_tensor.py` | C1 broad-sector persistence null; tensor remains advisory | validated intraday/PIT group evidence |
+| Theme doctrine | `docs/source_thematic_rotation_framework.md` | doctrine not empirical truth | PIT dynamic-theme membership + validation |
+| Outcome grading | prediction/outcome machinery | date clustering already required | new labels, not a new ledger |
+| Live stock quote access | `data_layer/polygon.py` | current module is per-symbol and not a historical whole-market research plane | bulk flat-file ingestion |
+| Group flow proxies | rotation tensor RVOL / ETF shares outstanding | proxy/coverage limits | direct mechanism data if later justified |
+| Corporate-action-safe minute history | none established in audited bounded set | current flat files unadjusted | stable-ID adjustment/security-master plane |
+| Shock event/recovery state | none | untested | V1 research feature family |
+| Trade/quote OFI/depth | none | untested | V2 event-window plane |
+
+No new control plane is recommended. Validated stock snapshots should attach to existing signal/prediction/outcome surfaces; validated group fields should extend/feed the rotation owner.
+
+## 16. Final family classification
+
+### TEST NOW — after the normalized V1 minute panel passes data QA
+
+- market-residual return and RSZ;
+- market-shock resilience;
+- rank persistence;
+- residual continuity/jump concentration;
+- exhaustion/early warning;
+- regime interaction.
+
+These are conceptually separable from C1 and B/B2 and require no speculative dynamic-theme history.
+
+### TEST AFTER DATA REPAIR
+
+- PIT sector residual strength;
+- PIT industry / industry-group state;
+- industry-first × stock-second interaction;
+- residual high occupancy;
+- static baskets whose historical membership can be evidenced.
+
+The blockers are taxonomy history, stable security identity, and corporate-action normalization.
+
+### CAPTURE PROSPECTIVELY
+
+- dynamic-theme membership;
+- theme lifecycle changes;
+- theme relationship provenance;
+- any analyst/LLM-created theme assignment used for future confirmatory work.
+
+Use append-only effective dating. Do not rewrite prior membership when a theme narrative evolves.
+
+### DEFER
+
+- economic-network propagation until a PIT relationship graph is sourced;
+- direct institutional-flow mechanism work;
+- full trade/quote microstructure;
+- price-progress-per-OFI/turnover ratios until denominator stability and V1 need are demonstrated.
+
+### REJECT
+
+- “strong price action implies institutional inflow”;
+- raw RVOL as bullish accumulation;
+- sequential residualization as the only residual definition;
+- generic intraday path efficiency/gain retention without matched volatility/jump controls;
+- present-day dynamic-theme membership backcast as confirmatory evidence;
+- an opaque `LeadershipScore`;
+- a second rotation engine;
+- a new outcome ledger.
+
+## 17. Source register
+
+**Retrieval date for external sources: 2026-10-05.**
+
+### Mastermind — pinned internal sources
+
+- Trend Persistence readout, pinned base: https://github.com/mastermindx-market-intelligence/Mastermind/blob/7eac3ec252475600147ec9a376b8ca16403ac4c5/research/TREND_PERSISTENCE_READOUT.md
+- C1 preregistration: https://github.com/mastermindx-market-intelligence/Mastermind/blob/7eac3ec252475600147ec9a376b8ca16403ac4c5/research/TREND_PERSISTENCE_PREREG_C1.md
+- C1 result: https://github.com/mastermindx-market-intelligence/Mastermind/blob/7eac3ec252475600147ec9a376b8ca16403ac4c5/research/data/trend_persistence_c1_result.json
+- B2 result: https://github.com/mastermindx-market-intelligence/Mastermind/blob/7eac3ec252475600147ec9a376b8ca16403ac4c5/research/data/trend_persistence_b2_result.json
+- Rotation tensor: https://github.com/mastermindx-market-intelligence/Mastermind/blob/7eac3ec252475600147ec9a376b8ca16403ac4c5/brain/rotation_tensor.py
+- Thematic rotation framework: https://github.com/mastermindx-market-intelligence/Mastermind/blob/7eac3ec252475600147ec9a376b8ca16403ac4c5/docs/source_thematic_rotation_framework.md
+
+### Momentum / group / residual literature
+
+- Moskowitz, T.J. & Grinblatt, M. (1999), “Do Industries Explain Momentum?”, *Journal of Finance* 54(4), 1249–1290. DOI: https://doi.org/10.1111/0022-1082.00146
+- Ehsani, S. & Linnainmaa, J.T. (2022), “Factor Momentum and the Momentum Factor”, *Journal of Finance* 77(3), 1877–1919. DOI: https://doi.org/10.1111/jofi.13131
+- Blitz, D., Huij, J. & Martens, M. (2011), “Residual Momentum”, *Journal of Empirical Finance* 18(3), 506–521. DOI: https://doi.org/10.1016/j.jempfin.2011.01.003
+- Da, Z., Gurun, U.G. & Warachka, M. (2014), “Frog in the Pan: Continuous Information and Momentum”, *Review of Financial Studies* 27(7), 2171–2218. DOI: https://doi.org/10.1093/rfs/hhu003
+- Galvani, V. (2024), “Frog in the Pan and the market-state effect on momentum”, *Finance Research Letters* 63, 105374. DOI: https://doi.org/10.1016/j.frl.2024.105374
+- George, T.J. & Hwang, C.-Y. (2004), “The 52-Week High and Momentum Investing”, *Journal of Finance* 59(5), 2145–2176. DOI: https://doi.org/10.1111/j.1540-6261.2004.00695.x
+- Lee, C.M.C. & Swaminathan, B. (2000), “Price Momentum and Trading Volume”, *Journal of Finance* 55(5), 2017–2069. DOI: https://doi.org/10.1111/0022-1082.00280
+- Daniel, K. & Moskowitz, T.J. (2016), “Momentum Crashes”, *Journal of Financial Economics* 122(2), 221–247. DOI: https://doi.org/10.1016/j.jfineco.2015.12.002
+
+### Economic links / flows
+
+- Cohen, L. & Frazzini, A. (2008), “Economic Links and Predictable Returns”, *Journal of Finance* 63(4), 1977–2011. DOI: https://doi.org/10.1111/j.1540-6261.2008.01379.x
+- Lou, D. (2012), “A Flow-Based Explanation for Return Predictability”, *Review of Financial Studies* 25(12), 3457–3489. DOI: https://doi.org/10.1093/rfs/hhs103
+- “Production complementarity and information transmission across industries” (2024), *Journal of Financial Economics* 155, 103812. DOI: https://doi.org/10.1016/j.jfineco.2024.103812
+- Jiang, H., Vayanos, D. & Zheng, L., “Passive Investing and the Rise of Mega-Firms”, *Review of Financial Studies* (2025). DOI: https://doi.org/10.1093/rfs/hhaf085
+
+### Intraday volatility / microstructure / resilience
+
+- Gao, L., Han, Y., Li, S.Z. & Zhou, G. (2018), “Market Intraday Momentum”, *Journal of Financial Economics* 129(2), 394–414. DOI: https://doi.org/10.1016/j.jfineco.2018.05.009
+- Barndorff-Nielsen, O.E., Kinnebrock, S. & Shephard, N. (2010), “Measuring Downside Risk — Realized Semivariance”, in *Volatility and Time Series Econometrics*. Primary: https://doi.org/10.1093/acprof:oso/9780199549498.003.0007
+- Barndorff-Nielsen, O.E. & Shephard, N. (2004), “Power and Bipower Variation with Stochastic Volatility and Jumps”, *Journal of Financial Econometrics* 2(1), 1–37. Primary: https://academic.oup.com/jfec/article/2/1/1/960705
+- Cont, R., Kukanov, A. & Stoikov, S. (2014), “The Price Impact of Order Book Events”, *Journal of Financial Econometrics* 12(1), 47–88. DOI: https://doi.org/10.1093/jjfinec/nbt003
+- Gould, M.D. & Bonart, J. (2015), “Queue Imbalance as a One-Tick-Ahead Price Predictor in a Limit Order Book”. DOI: https://doi.org/10.2139/ssrn.2702117
+- Lo, D.K. & Hall, A.D. (2015), “Resiliency of the limit order book”, *Journal of Economic Dynamics and Control* 61, 222–244. Primary: https://ideas.repec.org/a/eee/dyncon/v61y2015icp222-244.html
+- “Institutional trading and stock resiliency: Evidence from the 2007–2009 financial crisis” (2013), *Journal of Financial Economics* 108(3), 773–797. DOI: https://doi.org/10.1016/j.jfineco.2013.01.007
+
+### Massive data documentation
+
+- Stock Flat Files overview — whole-market day/minute/trade/quote datasets; flat files unadjusted: https://massive.com/docs/flat-files/stocks/overview
+- Minute aggregates — documented history back to 2003-09-10: https://massive.com/docs/flat-files/stocks/minute-aggregates
+- Stock quote flat files — top-of-book quotes with nanosecond timestamps: https://massive.com/docs/flat-files/stocks/quotes
+- Stock WebSocket minute aggregates — premarket/RTH/after-hours coverage and qualifying-trade bar rules: https://massive.com/docs/websocket/stocks/aggregates-per-minute
+- Splits endpoint — effective dates and historical adjustment factors: https://massive.com/docs/rest/stocks/corporate-actions/splits
+- Dividends endpoint — historical cash distributions and adjustment factors: https://massive.com/docs/rest/stocks/corporate-actions/dividends
+
+## 18. Final decision
+
+**ADVANCE WITH MAJOR REVISION.**
+
+The commission’s core intuition survives only after being stripped of its causal story and decomposed into testable pieces.
+
+The most promising genuinely new plane is **conditional shock resilience**: whether a stock that is already strong, after market/factor neutralization, absorbs exogenous market/group weakness with unusually small residual MAE and unusually fast first-passage recovery — and whether that behavior predicts later continuation, lower adverse excursion, rank survival or earlier exhaustion detection after controlling for beta, volatility, liquidity, gap/event magnitude and conventional momentum.
+
+The second-most promising plane is **leadership deterioration while medium-horizon RS is still high**. This is both empirically distinct and product-relevant if it provides measurable lead time.
+
+Residual continuity and rank persistence are worth testing but face a serious redundancy burden from Wave B/B2. Industry/group context remains plausible but should re-enter only through PIT finer taxonomy and a strong stock baseline. Dynamic themes should be captured prospectively rather than fabricated historically. Microstructure is a V2 explanation/improvement layer, not the first experiment.
+
+A successful outcome of the next program may be that only one of these families survives — or none. That would still be a successful research result.
+
+### Frozen handoff for the next data-science owner
+
+Before computing any candidate-label relationship:
+
+1. repair stable security identity and corporate actions for minute flat files;
+2. establish the exact PIT sector/industry source and coverage;
+3. freeze the universe/calendar/snapshots/labels;
+4. freeze the residualization comparison and shock definition;
+5. freeze the strong momentum/beta/volatility/liquidity/event baseline;
+6. freeze family-wise kill/advance rules;
+7. preserve 2023-01-03 through 2026-06-02 as the untouched holdout unless data QA forces a pre-analysis calendar revision;
+8. run market-only V1 before group/theme or microstructure expansion.
+
+No production indicator, composite score, sizing rule or trading gate is justified by this audit.
