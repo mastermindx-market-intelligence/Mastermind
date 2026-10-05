@@ -28,7 +28,7 @@ def install_transport(monkeypatch, handler):
         construction.append(kwargs)
         return real(**kwargs, transport=httpx.MockTransport(observed))
 
-    monkeypatch.setattr(module.httpx, "AsyncClient", client)
+    monkeypatch.setattr(httpx, "AsyncClient", client)
     return calls, construction
 
 

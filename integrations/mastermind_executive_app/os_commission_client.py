@@ -14,8 +14,6 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
 SCHEMA = "mastermind.os.commission_preparation.v1"
 ROUTE = "/os-internal/commission/prepare"
 MAX_REQUEST_BYTES = 65_536
@@ -91,8 +89,10 @@ class StudioCommissionClient:
         if len(body) > MAX_REQUEST_BYTES:
             raise ValueError("commission preparation body refused")
         # No injectable destination/transport or caller-selected environment.
+        # Keep the optional HTTP transport outside stdlib-only control-plane imports.
         # Tests patch HTTPX at its existing I/O boundary.
         try:
+            import httpx
             async with asyncio.timeout(self._timeout), httpx.AsyncClient(
                 trust_env=False, follow_redirects=False, timeout=self._timeout,
             ) as client:
