@@ -518,6 +518,8 @@ class ArmAdmissionHost(Protocol):
 
     def require_services_stopped(self) -> None: ...
 
+    def require_services_already_stopped(self) -> None: ...
+
     def require_service_uids_quiescent(self) -> None: ...
 
     def require_transaction_absent(self) -> None: ...
@@ -2506,6 +2508,15 @@ class ProductionArmHost(ProductionStatusHost):
         if any(loaded):
             self._stop_services_for_admission()
             loaded = (self._loaded(CONTROL_LABEL), self._loaded(WORKER_LABEL))
+        if any(loaded):
+            raise ArmAdmissionError("services_not_stopped")
+
+    def require_services_already_stopped(self) -> None:
+        """Observe the fixed Control/worker labels without changing lifecycle state."""
+        try:
+            loaded = (self._loaded(CONTROL_LABEL), self._loaded(WORKER_LABEL))
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ArmAdmissionError("services_gate_failed") from exc
         if any(loaded):
             raise ArmAdmissionError("services_not_stopped")
 
@@ -4724,7 +4735,7 @@ def main(
             arm_host.validate_acceptance(args.expected_sha)
             configs = arm_host.load_unarmed_configs(args.expected_sha)
             arm_host.require_runtime_quiescent(configs)
-            arm_host.require_services_stopped()
+            arm_host.require_services_already_stopped()
             arm_host.require_transaction_absent()
             signalled = arm_host.quiesce_control_uid_for_arm()
             arm_host.require_service_uids_quiescent()
