@@ -51,11 +51,11 @@ def _read_message(process):
     return json.loads(line)
 
 
-def _case(profile, lose_reply, strict_v2, key, root, port, controller):
+def _case(profile, lose_reply, strict_v2, key, root, port, controller, store_contract):
     scenario = "lost-reply" if lose_reply else "accepted"
     process = subprocess.Popen(
         [shutil.which("node"), str(ROOT / "tests/fixtures/mastermind_os_launch_client_probe.mjs"),
-         str(port), str(controller), scenario],
+         str(port), str(controller), scenario, store_contract],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, bufsize=1,
     )
@@ -131,6 +131,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--consumer-ref", required=True)
     parser.add_argument("--consumer-patch", type=Path)
+    parser.add_argument("--consumer-store-contract", choices=("legacy", "atomic"), default="legacy",
+                        help="Exact pointer-store interface of the pinned consumer; never expose both aliases")
     parser.add_argument("--receipt-mode", choices=("legacy", "strict-v2", "both"), default="both")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
@@ -168,7 +170,8 @@ def main():
                                            ("-lost" if lose_reply else "-accepted"))
                     case_root.mkdir()
                     result = _case(profile, lose_reply, strict_v2, key, case_root,
-                        modules["executive-launch-command-port"], modules["operation-controller"])
+                        modules["executive-launch-command-port"], modules["operation-controller"],
+                        args.consumer_store_contract)
                     results.append(result)
                     print(json.dumps({key: result[key] for key in (
                         "profile", "receipt_mode", "scenario", "final_state", "compatibility_passed"
@@ -176,6 +179,7 @@ def main():
     passed = sum(case["compatibility_passed"] for case in results)
     report = {"scope": "temporary authenticated component integration; no production/provider effects",
               "consumer_ref": args.consumer_ref, "consumer_source": manifest,
+              "consumer_store_contract": args.consumer_store_contract,
               "consumer_patch": patch_evidence, "cases": results,
               "passed": passed, "failed": len(results) - passed,
               "positive_version_controls_passed": sum(

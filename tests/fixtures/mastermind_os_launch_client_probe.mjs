@@ -1,9 +1,10 @@
-/** Disposable component proof for the frozen #1150 port/controller. */
+/** Disposable component proof for an exact frozen or current port/controller. */
 import assert from "node:assert/strict";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
 
-const [portFile, controllerFile, scenario] = process.argv.slice(2);
+const [portFile, controllerFile, scenario, storeContract = "legacy"] = process.argv.slice(2);
+assert(["legacy", "atomic"].includes(storeContract));
 const { ExecutiveLaunchCommandPort } = await import(pathToFileURL(portFile));
 const { OperationController } = await import(pathToFileURL(controllerFile));
 const input = readline.createInterface({ input: process.stdin });
@@ -39,14 +40,30 @@ const form = { goal: "Read the disposable fixture and return evidence.",
   projectRef: "executive-infrastructure", profileRef: "research_only" };
 function pointerStore(initial) {
   const hints = new Map(initial ? [[ctx.principalScope, structuredClone(initial)]] : []);
-  return { hints, store: {
+  const store = {
     read(scope) { return hints.get(scope) ?? null; },
+  };
+  if (storeContract === "atomic") Object.assign(store, {
+    reserve(scope, pointer) {
+      const prior = hints.get(scope);
+      if (prior) return { reserved: false, pointer: structuredClone(prior) };
+      hints.set(scope, structuredClone(pointer));
+      return { reserved: true };
+    },
+    clearIfEqual(scope, pointer) {
+      assert.deepEqual(hints.get(scope), pointer);
+      hints.delete(scope);
+      return true;
+    },
+  });
+  else Object.assign(store, {
     write(scope, pointer) { hints.set(scope, structuredClone(pointer)); },
     clear(scope, pointer) {
       assert.deepEqual(hints.get(scope), pointer);
       hints.delete(scope);
     },
-  } };
+  });
+  return { hints, store };
 }
 const { hints, store } = pointerStore();
 const port = new ExecutiveLaunchCommandPort(config, client, () => ctx);
