@@ -6,19 +6,72 @@ Parent: Draft PR #1259.
 
 **State: SOURCE CANDIDATE / NOT INSTALLED / MISSION_COMPLETE=false.**
 
-## Decision
+## 2026-10-06 correction — split managed profiles from shared human Chrome
 
-Use **Chrome DevTools MCP as the low-level actuator for existing interactive
-Chrome sessions**, underneath Mastermind's existing Browser owner. Keep the
-custom Browser Link extension as optional explicit-share UX/fallback work, not
-as the canonical effect, retry, tab-lock or placement owner.
+Current protected compatibility pin: `877b1e7f275da0b6d3558d2667778b32d628bf67`.
+The original 2026-10-05 pin remains the source base of the candidate below; the
+bounded protected movement did not touch Browser/Capacity/procedure paths relevant
+to this correction.
+
+The earlier conclusion that Chrome DevTools MCP `--autoConnect` should be the
+canonical actuator for the user's normal signed-in default Chrome profile is
+**superseded**. Keep DevTools MCP for Mastermind-managed non-default debugging
+profiles. Keep the Browser Link extension/native-host path as the canonical
+mechanism for deliberately sharing tabs from normal human Chrome.
+
+This correction is evidence-driven:
+
+- M2 stable Chrome 154 reports the remote-debugging preference as user-enabled.
+- the Chrome browser process listens on loopback port 9222, but the normal
+  `/json/version`, `/json/list`, `/json/protocol` endpoints return 404;
+- the default Chrome data root has no `DevToolsActivePort`;
+- pinned `chrome-devtools-mcp@1.10.1` initializes and exposes its full catalog,
+  including page-ID routing, but `list_pages` cannot attach to that default
+  profile because the required `DevToolsActivePort` is absent;
+- current upstream issues #1830/#2283 describe the same Chrome 150+ default-profile
+  hardening/permission-proxy behavior. Do not depend on that unresolved upstream
+  attach path for Mastermind's core shared-human-browser capability.
+
+The complementary managed-profile lane is proven on real Chrome. A disposable
+non-default profile launched with `--remote-debugging-port=0` produced its
+`DevToolsActivePort`; pinned backend 1.10.1 then connected through the existing
+contract, verified the selected tool schema digest
+`a96d57919b458c0ea5e8dd0abf6e290080e0a7b2afb97b9e37147498debedf9b`, routed
+by explicit `pageId`, captured a real accessibility snapshot, filled a real input,
+clicked a real button, observed the final page state, and left zero owned processes.
+The current focused Browser campaign is **146 passed**.
+
+Therefore the two actuator families are now:
+
+1. **managed browser profile** → pinned Chrome DevTools MCP / Playwright under the
+   existing Browser owner, suitable for isolated or intentionally persistent
+   automation profiles;
+2. **shared human Chrome tab** → Browser Link MV3 extension + Native Messaging host,
+   with explicit Share/Stop, exact tab/document/consent generation and the same
+   Browser/Runtime effect owner above it.
+
+This is not a second scheduler or effect plane. Capacity may choose among already
+enrolled compatible resources, but an `EFFECT_UNKNOWN` action remains stuck to its
+original resource and caller until reconciled. Auth0 remains a later Web-ingress
+linking step, not browser-session authentication.
+
+
+## Historical 2026-10-05 decision — superseded for default human Chrome
+
+The original amendment proposed **Chrome DevTools MCP as the low-level actuator
+for existing interactive Chrome sessions** and treated Browser Link as optional.
+The 2026-10-06 evidence above supersedes that part: DevTools MCP remains the
+managed-profile actuator; Browser Link is the shared-human-tab actuator. The
+existing Browser owner still remains canonical for effect, retry, tab-lock and
+placement semantics above either backend.
 
 This amendment does not replace the managed isolated/persistent Playwright
 browser path. The two actuator families serve different cases:
 
 - managed Playwright: isolated or owner-selected persistent automation browser;
-- DevTools auto-connect: an already-running, already-authenticated human Chrome
-  profile that deliberately enables remote debugging and accepts the connection.
+- DevTools auto-connect: an already-running **Mastermind-managed non-default**
+  Chrome profile with a real `DevToolsActivePort`;
+- Browser Link: an explicitly shared tab in the user's normal signed-in Chrome.
 
 All Web CEO and native worker callers still terminate in the same Mastermind
 Browser facade, Browser/Runtime effect owner and Capacity path. Models never
