@@ -447,8 +447,10 @@ qualify_gateway_refresh_preflight() {
   local controller="$expected_dir/service-control.sh"
   local helper="$expected_dir/gateway_refresh_preflight.py"
   # The lifecycle controller and deep verifier must be the same installed
-  # generation being qualified. BASH_SOURCE names the file whose bytes Bash
-  # actually loaded; unlike $0 it cannot be spoofed by a sourcing caller.
+  # generation being qualified. Bind the raw BASH_SOURCE path first: unlike
+  # derived cd/pwd state, it cannot be changed by caller-defined shell
+  # functions. Canonical lifecycle callers execute this exact absolute path.
+  [ "$SCRIPT_SOURCE" = "$controller" ] || return 1
   [ "$SCRIPT_DIR" = "$expected_dir" ] || return 1
   [ "$SCRIPT_PATH" = "$controller" ] || return 1
   [ -f "$controller" ] && [ ! -L "$controller" ] || return 1

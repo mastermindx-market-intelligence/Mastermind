@@ -176,6 +176,7 @@ def _run(
     prepare: Callable[[Path], None] | None = None,
     spoof_argv0: str | None = None,
     shadow_cd: bool = False,
+    shadow_builtin: bool = False,
     cwd: Path | None = None,
 ) -> tuple[int, str, str, list[str], str, Path, Path]:
     script, control_plist, worker_plist = _prepare_script(tmp_path)
@@ -205,7 +206,11 @@ def _run(
         # Execute the disposable checkout body through the source builtin
         # while supplying a forged installed-controller argv0. $0 follows the
         # caller; BASH_SOURCE[0] must continue to identify the loaded file.
-        prelude = "cd() { return 0; }; " if shadow_cd else ""
+        prelude = ""
+        if shadow_builtin:
+            prelude += "builtin() { return 0; }; "
+        if shadow_cd:
+            prelude += "cd() { return 0; }; "
         command = [
             "/bin/bash",
             "-c",
@@ -1228,7 +1233,8 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            preflight_exit=0, preflight_exits=None, helper_kind="regular",
                            controller_from_release=True,
                            source_with_spoofed_argv0=False,
-                           source_with_shadowed_cd=False):
+                           source_with_shadowed_cd=False,
+                           source_with_shadowed_builtin=False):
     config = {"schema": "mastermind.executive_mcp_install.v1",
               "release_sha": GATEWAY_SHA, "service_uid": 458}
     config.update(config_changes or {})
@@ -1339,7 +1345,11 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
         shim.chmod(0o755)
     spoof_argv0 = None
     expected_controller_dir = release_root / GATEWAY_SHA / "ops" / "executive_os"
-    if source_with_spoofed_argv0 or source_with_shadowed_cd:
+    if (
+        source_with_spoofed_argv0
+        or source_with_shadowed_cd
+        or source_with_shadowed_builtin
+    ):
         spoof_argv0 = str(expected_controller_dir / "service-control.sh")
     return _run(
         tmp_path,
@@ -1349,7 +1359,12 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
         prepare=prepare,
         spoof_argv0=spoof_argv0,
         shadow_cd=source_with_shadowed_cd,
-        cwd=expected_controller_dir if source_with_shadowed_cd else None,
+        shadow_builtin=source_with_shadowed_builtin,
+        cwd=(
+            expected_controller_dir
+            if source_with_shadowed_cd or source_with_shadowed_builtin
+            else None
+        ),
     )
 
 
@@ -1436,6 +1451,22 @@ def test_gateway_refuses_sourced_checkout_with_shadowed_cd_and_installed_argv0(
         [],
         controller_from_release=False,
         source_with_shadowed_cd=True,
+    )
+    assert code == 65
+    assert "gateway deep preflight failed" in err
+    assert calls == []
+    assert remaining == ""
+
+
+def test_gateway_refuses_sourced_checkout_with_shadowed_builtin_and_cd(
+    tmp_path,
+):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path,
+        [],
+        controller_from_release=False,
+        source_with_shadowed_cd=True,
+        source_with_shadowed_builtin=True,
     )
     assert code == 65
     assert "gateway deep preflight failed" in err
