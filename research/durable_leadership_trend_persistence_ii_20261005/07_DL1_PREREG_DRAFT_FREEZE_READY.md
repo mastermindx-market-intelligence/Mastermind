@@ -473,7 +473,9 @@ Last primary t+20 maturity = offset 555.
 
 Last t+60 structural-secondary maturity = offset 595.
 
-Conservative one-reveal horizon = **596 market trading sessions from offset 0 through 595**, approximately 2.37 trading years.
+The frozen five-market-session resolution grace for the last `DL1_OCCUPANCY_60` endpoint expires at offset 600.
+
+Conservative one-reveal horizon = **601 market trading sessions from offset 0 through 600**, approximately 2.38 trading years.
 
 No anchor exists while the source gate is unresolved.
 
@@ -500,7 +502,7 @@ A matured earlier block may mechanically enter the fitting set for a later block
 
 Evaluation / TrialLedger remains the look owner.
 
-All predictions and endpoint labels remain sealed from efficacy analysis until every final-eligibility predicate in §23 is true.
+All predictions and endpoint labels remain sealed from efficacy analysis until every final-eligibility predicate in §24 is true.
 
 Exactly one formal efficacy report is permitted.
 
@@ -768,7 +770,9 @@ After B9:
 - concatenate only B4–B9 OOS predictions;
 - compute `d_i = LogLoss_S - LogLoss_A`;
 - compute the same `DeltaLogLoss20` and relative improvement as §§16/18;
-- apply the exact §17 circular moving-block-bootstrap test using the same fixed 10,000 bootstrap block-index draws generated once from seed `2026100601`.
+- when the caller requests inferential adjudication, apply the exact §17 circular moving-block-bootstrap test using the same fixed 10,000 bootstrap block-index draws generated once from seed `2026100601`.
+
+For §23.6 beta calibration, `RUN_SYNTHETIC_STUDY` performs every literal prequential S/A refit and OOS prediction above but does **not** run the bootstrap because `M(beta)` uses only fitted relative log-loss improvement. For §23.7 power estimation, the bootstrap is run exactly. This is a computational omission of an unused statistic, not an estimator shortcut.
 
 No oracle shortcut is permitted.
 
