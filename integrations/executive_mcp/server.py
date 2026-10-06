@@ -67,7 +67,16 @@ from integrations.executive_mcp.schemas import (
     validate_tool_arguments,
 )
 
-__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
+#: Three fixed POST routes served by the OS Executive transport.  These are
+#: exactly the routes enumerated in the integration continuation; nothing
+#: else is added by the opt-in OS transport.
+_OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
+    "/os/executive/context",
+    "/os/executive/submit",
+    "/os/executive/status",
+)
+
+__all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
 
 _E1_READ_NAMES = tuple(path.rsplit("/", 1)[-1] for path in sorted(E1_READ_PATHS))
 _E1_ENVELOPE_FIELDS = frozenset(
@@ -522,10 +531,12 @@ class _ExecutivePolicyVerifiers:
                 return None
         return None
 
+
 class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
 
-    def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None):
+    def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None,
+                 os_executive_transport=None):
         self._app = app
         self._routes = {metadata_path: "GET", "/mcp": "POST",
                         "/v1/tools/submit_ceo_intent/reconcile": "POST"}
@@ -556,6 +567,11 @@ class _ExecutivePathFence:
             self._routes.update({path: "GET" for path in os_app.paths})
             self._public_routes.update(os_app.paths)
             self._query_routes.update(("/os/", "/os/auth/callback"))
+        if os_executive_transport is not None:
+            # The three fixed OS Executive routes are POST and require the
+            # exact single bearer plus the closed host/origin set.  They are
+            # never query-bearing and never alias onto static GET routes.
+            self._routes.update({path: "POST" for path in _OS_EXECUTIVE_ROUTES})
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
@@ -576,6 +592,17 @@ class _ExecutivePathFence:
                     await JSONResponse({"error": "transport_refused"}, status_code=403,
                         headers=_OS_RESPONSE_HEADERS if path.startswith("/os/")
                         else {"Cache-Control": "no-store"})(scope, receive, send)
+                    return
+            if path in _OS_EXECUTIVE_ROUTES:
+                headers = scope.get("headers", ())
+                hosts = [v for k, v in headers if k.lower() == b"host"]
+                origins = [v for k, v in headers if k.lower() == b"origin"]
+                authorizations = [v for k, v in headers if k.lower() == b"authorization"]
+                if (scope.get("scheme") != "https" or hosts != [b"mcp.mastermind-x.com"]
+                        or len(origins) > 1 or (origins and origins != [b"https://mcp.mastermind-x.com"])
+                        or len(authorizations) != 1):
+                    await JSONResponse({"ok": False, "error": {"code": "transport_refused", "message": "fixed OS transport refused"}},
+                        status_code=403, headers=_OS_RESPONSE_HEADERS)(scope, receive, send)
                     return
             if path in self._workspace_routes and sum(
                     key.lower() == b"authorization" for key, _ in scope.get("headers", ())) > 1:
@@ -655,24 +682,24 @@ _OS_RESPONSE_HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; "
         "connect-src 'self' https://dev-eo0jf8us5mup7wd5.us.auth0.com; "
-        "img-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
+        "img-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'none'",
 }
 
 
 class OsStaticApp:
-    """Three verified release assets, never a pathname supplied by a request."""
+    """A closed verified release layout, never a request-supplied pathname."""
     def __init__(self, assets):
         # The sealed launcher supplies already-hashed immutable bytes. The
         # static owner itself also closes the route set before outer routing.
-        if type(assets) is not dict or len(assets) != 3 or "/os/" not in assets:
+        from integrations.mastermind_executive_app.os_assets import os_asset_mimes
+        if type(assets) is not dict or "/os/" not in assets or any(
+            type(path) is not str or not path.startswith("/os/") for path in assets
+        ):
             raise ValueError("fixed OS asset set required")
-        expected = {"/os/": "text/html; charset=utf-8"}
-        for suffix, mime in (("css", "text/css; charset=utf-8"), ("js", "text/javascript; charset=utf-8")):
-            paths = [path for path in assets if isinstance(path, str)
-                     and re.fullmatch(r"/os/assets/index-[A-Za-z0-9_-]+\." + suffix, path)]
-            if len(paths) != 1:
-                raise ValueError("fixed OS asset set required")
-            expected[paths[0]] = mime
+        relative = {"index.html" if path == "/os/" else path[4:]: path for path in assets}
+        if len(relative) != len(assets):
+            raise ValueError("fixed OS asset set required")
+        expected = {relative[name]: mime for name, mime in os_asset_mimes(relative).items()}
         for path, value in assets.items():
             if (type(value) is not tuple or len(value) != 2 or type(value[0]) is not bytes
                     or not 0 < len(value[0]) <= 4 * 1024 * 1024 or value[1] != expected.get(path)):
@@ -773,6 +800,9 @@ def _build_profile_mcp_app(
     direct_handler: Any = None,
     direct_error_factory: Any = None,
     inner_server_version: str | None = None,
+    enable_os_executive_transport: bool = False,
+    os_executive_resource: str | None = None,
+    os_commission_preparer: Any | None = None,
     reconcile_tool_name: str | None = None,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
@@ -781,6 +811,11 @@ def _build_profile_mcp_app(
     Submit and status use only the App's dedicated CeoIngress client. Every
     tool call forwards its current raw bearer for independent App verification.
     No installed configuration, public listener, or fixture write is implied.
+
+    The OS Executive transport is opt-in via ``enable_os_executive_transport``;
+    when enabled it requires the exact installed v3 composition (server 1.4.0/1.5.0,
+    ``OsStaticApp``, ``read_from_ceo_ingress=True``) and exposes exactly three
+    POST routes around the existing :class:`BoundedE1App`.
     """
     from control_plane.ceo_request import app_request_ref, automated_intent_id
     from integrations.mastermind_executive_app.app import (
@@ -795,6 +830,12 @@ def _build_profile_mcp_app(
 
     if settings.read_only:
         raise ValueError("authenticated Executive MCP refuses read-only app settings")
+    if type(enable_os_executive_transport) is not bool:
+        raise ValueError("OS Executive transport toggle must be boolean")
+    if not enable_os_executive_transport and os_commission_preparer is not None:
+        raise ValueError("disabled OS transport refuses commission preparation")
+    if not enable_os_executive_transport and os_executive_resource is not None:
+        raise ValueError("OS Executive resource requires enabled transport")
     if release_profile and any(app is not None for app in (workspace_app, content_app, os_app)):
         raise ValueError("release control profile refuses optional mounts")
     # This tuple is fixed by the builder, never selected by an MCP argument.
@@ -867,6 +908,41 @@ def _build_profile_mcp_app(
     # Reuse the bounded ASGI seam. Its generic failure body is never evidence
     # of no effect: all unrecognized submit replies become same-request UNKNOWN.
     inner_app = BoundedE1App(profile_create_app(configured))
+
+    # Construct the OS Executive transport with the EXACT submit
+    # MastermindTokenVerifier and matching submit JwtAuthenticator(s) — never a
+    # read or workspace verifier.  No resource widening, no fallback.
+    os_transport_handler = None
+    if enable_os_executive_transport:
+        from integrations.mastermind_executive_app.os_transport import OsExecutiveTransportApp
+
+        if (
+            profile_server_name != "mastermind-executive"
+            or profile_server_version not in ("1.4.0", "1.5.0")
+            or os_app is None
+            or type(os_app) is not OsStaticApp
+            or not getattr(configured, "read_from_ceo_ingress", False)
+        ):
+            raise ValueError("OS Executive transport requires exact installed v3 composition")
+
+        os_pairs = tuple(
+            (authenticator, policy)
+            for authenticator, policy in zip(submit_authenticators, policy_variants)
+            if policy.submit.resource == os_executive_resource
+        )
+        if type(os_executive_resource) is not str or len(os_pairs) != 1:
+            raise ValueError("OS Executive transport requires one exact configured resource")
+        os_authenticator, os_policy = os_pairs[0]
+        os_transport_handler = OsExecutiveTransportApp(
+            inner_app,
+            submit_verifier=MastermindTokenVerifier(
+                authenticator=os_authenticator, policy=os_policy.submit,
+                now=configured.clock, audit_sink=audit_sink,
+            ),
+            submit_authenticator=os_authenticator,
+            clock=configured.clock,
+            commission_preparer=os_commission_preparer,
+        )
     server: Server = Server(profile_server_name, version=profile_server_version)
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
@@ -1115,11 +1191,21 @@ def _build_profile_mcp_app(
         if type(os_app) is not OsStaticApp:
             raise ValueError("fixed OS static owner required")
         outer_routes.extend(Route(path, os_app, methods=["GET"]) for path in sorted(os_app.paths))
+    if os_transport_handler is not None:
+        for route_path in _OS_EXECUTIVE_ROUTES:
+            outer_routes.append(Route(route_path, os_transport_handler, methods=["POST"]))
     outer_app = Starlette(routes=outer_routes, lifespan=lifespan)
     outer_app.router.redirect_slashes = False
-    return _DuplicateAuthorizationGuard(outer_app,
+    #: Public, read-only view of the OS Executive transport handler (or None
+    #: if disabled). Tests use this to wrap a recording verifier without
+    #: reaching into private route tables.
+    outer_app.os_transport = os_transport_handler
+    guard = _DuplicateAuthorizationGuard(outer_app,
         fenced_app=_ExecutivePathFence(outer_app, metadata_path, workspace_app=workspace_app,
-                                      content_app=content_app, os_app=os_app))
+                                      content_app=content_app, os_app=os_app,
+                                      os_executive_transport=os_transport_handler))
+    guard.os_transport = os_transport_handler
+    return guard
 
 
 def build_release_control_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
@@ -1383,8 +1469,17 @@ def build_web_ceo_v3_mcp_app(
     workspace_app=None,
     content_app=None,
     os_app=None,
+    enable_os_executive_transport: bool = False,
+    os_executive_resource: str | None = None,
+    os_commission_preparer: Any | None = None,
 ) -> Any:
-    """Web-CEO v3: existing owners, MDM observation and request reconciliation."""
+    """Web-CEO v3 over existing owners plus MDM and request reconciliation.
+
+    OS Executive transport is default-off. When enabled it requires the exact
+    installed v3 composition (server 1.4.0/1.5.0, OsStaticApp,
+    read_from_ceo_ingress=True). Request reconciliation remains the existing
+    submit-scope status-read path over the original request_ref.
+    """
 
     from integrations.executive_mcp.web_ceo_v3 import (
         RECONCILE_TOOL_NAME,
@@ -1412,6 +1507,9 @@ def build_web_ceo_v3_mcp_app(
         workspace_app=workspace_app,
         content_app=content_app,
         os_app=os_app,
+        enable_os_executive_transport=enable_os_executive_transport,
+        os_executive_resource=os_executive_resource,
+        os_commission_preparer=os_commission_preparer,
         **direct,
     )
     if session_reply_read_tool is not None:
@@ -1420,7 +1518,6 @@ def build_web_ceo_v3_mcp_app(
             raise TypeError("the canonical reply-read tool is required")
         configuration = session_reply_read_tool.extend_host_configuration(configuration)
     return _build_profile_mcp_app(settings, **configuration)
-
 
 
 def build_web_ceo_sessions_mcp_app(
@@ -1440,6 +1537,7 @@ def build_web_ceo_sessions_mcp_app(
     from integrations.executive_mcp.web_ceo_sessions import (
         WEB_CEO_SESSIONS_SERVER_NAME,
         WEB_CEO_SESSIONS_SERVER_VERSION,
+        WEB_CEO_SESSIONS_TOOL_SPECS,
         validate_web_ceo_sessions_tool_arguments,
     )
     from integrations.mastermind_executive_app.app import create_web_ceo_v2_app
@@ -1470,12 +1568,13 @@ def build_web_ceo_sessions_mcp_app(
     return _build_profile_mcp_app(settings, **configuration)
 
 
-
 def build_web_ceo_sessions_tools() -> list[mcp_types.Tool]:
     from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_TOOL_SPECS
     return [
         mcp_types.Tool(
-            name=spec.name, description=spec.description, inputSchema=spec.input_schema,
+            name=spec.name,
+            description=spec.description,
+            inputSchema=spec.input_schema,
             annotations=mcp_types.ToolAnnotations(**spec.annotations),
         ) for spec in WEB_CEO_SESSIONS_TOOL_SPECS
     ]

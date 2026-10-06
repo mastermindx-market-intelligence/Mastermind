@@ -130,7 +130,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_sha": SHA,
     }
 
-    # The command set is EXACTLY the closed eleven: no generic recovery/debug verb
+    # The command set is EXACTLY the closed twelve: no generic recovery/debug verb
     # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
@@ -141,6 +141,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
     assert set(subparser_actions[0].choices) == {
         "status",
         "arm",
+        "arm-quiesce-control-uid",
         "disarm",
         "ceo-submit-status",
         "ceo-submit-arm",
@@ -369,6 +370,7 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
     for verb in (
         "status",
         "arm",
+        "arm-quiesce-control-uid",
         "disarm",
         "ceo-submit-status",
         "ceo-submit-arm",
@@ -376,6 +378,11 @@ def test_wrapper_and_installer_keep_the_control_surface_fixed_and_unarmed():
         "ceo-submit-reconcile",
     ):
         assert verb in wrapper
+    closed_prefix = "status|arm|arm-quiesce-control-uid|disarm|ceo-submit-status"
+    # The verb must be present in both the usage surface and the shell case
+    # whitelist; a Python-only parser entry is not an installed command path.
+    assert wrapper.count(closed_prefix) == 2
+
     for forbidden in ("eval ", "bash -c", "sh -c", "curl ", "security "):
         assert forbidden not in wrapper
 

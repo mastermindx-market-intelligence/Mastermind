@@ -75,6 +75,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
+import { createCommissionService } from './commission-service.mjs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -371,6 +372,17 @@ export function resolveConfig(partial = {}) {
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.repositoryWorkspaces = resolveRepositoryWorkspaceConfig(cfg.repositoryWorkspaces);
   if (cfg.repositoryWorkspaces && !cfg.gitPublish) throw new TypeError('repositoryWorkspaces requires configured typed Git');
+  if (cfg.commissionPublication !== undefined && cfg.commissionPublication !== false) {
+    const value = cfg.commissionPublication;
+    if (!value || typeof value !== 'object' || Array.isArray(value) ||
+        Object.keys(value).sort().join(',') !== 'configurationDigest,enabled' || value.enabled !== true ||
+        typeof value.configurationDigest !== 'string' || !/^[0-9a-f]{64}$/.test(value.configurationDigest) ||
+        !cfg.repositoryWorkspaces?.allowedRepositories.includes('mastermind') ||
+        cfg.host !== '127.0.0.1' || cfg.publicUrl || cfg.testMode || cfg.port < 1024 || cfg.port === 8443 || cfg.port === 45017) {
+      throw new TypeError('commission publication requires exact opted-in private owner configuration');
+    }
+    cfg.commissionPublication = Object.freeze({...value});
+  }
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
 
@@ -1543,6 +1555,17 @@ class GatewaySession {
  */
 export async function startGateway(partialConfig = {}, auth = {}) {
   const cfg = resolveConfig(partialConfig);
+  let commissionService = null;
+  if (cfg.commissionPublication) {
+    if (typeof auth.accountLabel !== 'string' || !auth.accountLabel ||
+        auth.principal !== 'tunnel:' + auth.accountLabel) throw new TypeError('private Studio commission owner required');
+    commissionService = await createCommissionService({
+      configurationDigest: cfg.commissionPublication.configurationDigest,
+      accountLabel: auth.accountLabel, port: cfg.port,
+      gitConfig: cfg.gitPublish, workspaceConfig: cfg.repositoryWorkspaces,
+    });
+  }
+
   const lists = buildAllowlists(cfg);
 
   /** Every live session, keyed by MCP session id. */
@@ -1696,6 +1719,8 @@ export async function startGateway(partialConfig = {}, auth = {}) {
     }
     return next();
   });
+
+  if (commissionService) app.use(commissionService.middleware);
 
   /* 2. Unauthenticated health endpoints. No paths, no principals, no tokens. */
   app.get('/healthz', (_req, res) => {
@@ -2088,6 +2113,7 @@ export async function startGateway(partialConfig = {}, auth = {}) {
       clearInterval(sweeper);
       listeningAddress = null;
       await admitTail;
+      if (commissionService) await commissionService.close();
 
       // Close all remaining owned backends. Broken predecessors were already
       // closed before replacement.
