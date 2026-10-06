@@ -43,6 +43,17 @@ class ExecutiveDelegationIdentity:
     session_ref: str
 
 
+@dataclasses.dataclass(frozen=True)
+class NestedExecutiveDelegationIdentity:
+    """Immutable identity for one admitted depth-2 orchestration child."""
+
+    job_id: str
+    parent_job_id: str
+    root_job_id: str
+    operation_key: str
+    session_ref: str
+
+
 def _refuse(reason: str) -> None:
     raise ExecutiveDelegationIdentityError(reason)
 
@@ -205,6 +216,102 @@ def derive_delegation_identity(job: Job) -> ExecutiveDelegationIdentity:
         _refuse("projected dialogue identity is outside the V2 transport contract")
     return ExecutiveDelegationIdentity(
         job_id=job.job_id,
+        root_job_id=job.root_job_id,
+        operation_key=operation_key,
+        session_ref=session_ref,
+    )
+
+def _validate_nested_orchestration_child(job: Job, parent: Job) -> None:
+    """Validate immutable lineage only; never grant nested delegation authority.
+
+    The parent must already be a canonical direct-root ``work`` child.  That is
+    the existing role a future domain coordinator can occupy without adding a
+    sixth orchestration-role enum.  Runtime/Capacity remain responsible for
+    proving that this particular work Job was admitted as a coordinator, that
+    one root budget covers every descendant, and that child returns are
+    consumed by the same parent.
+    """
+
+    if not isinstance(job, Job) or not isinstance(parent, Job):
+        _refuse("nested identity projection requires Runtime Jobs")
+
+    # Reuse the protected V1 validator for the depth-1 parent.  It proves the
+    # strict root relationship, closed provenance wire and revision lineage.
+    _validate_orchestration_child(parent)
+    if parent.orchestration_role != "work" or parent.depth != 1:
+        _refuse("nested delegation parent is not a direct-root work Job")
+
+    required_ids = {
+        "job_id": job.job_id,
+        "parent_job_id": job.parent_job_id,
+        "root_job_id": job.root_job_id,
+    }
+    for name, value in required_ids.items():
+        if not isinstance(value, str) or _JOB_ID_RE.fullmatch(value) is None:
+            _refuse(f"{name} is not a canonical Runtime Job identifier")
+
+    if (
+        job.job_id in {parent.job_id, parent.root_job_id}
+        or job.parent_job_id != parent.job_id
+        or job.root_job_id != parent.root_job_id
+        or isinstance(job.depth, bool)
+        or not isinstance(job.depth, int)
+        or job.depth != 2
+        or job.orchestration_role not in {"work", "review", "repair"}
+    ):
+        _refuse("nested orchestration lineage is not one conserved-root depth-2 child")
+
+    provenance = job.orchestration_provenance
+    if not isinstance(provenance, dict) or set(provenance) != _PROVENANCE_KEYS:
+        _refuse("nested orchestration provenance is not the closed wire")
+    if (
+        provenance["schema_version"]
+        != "mastermind.executive_orchestration_provenance/v1"
+        or provenance["creator"] != "coo_cycle"
+        or provenance["job_id"] != job.job_id
+        or provenance["parent_job_id"] != job.parent_job_id
+        or provenance["root_job_id"] != job.root_job_id
+        or provenance["role"] != job.orchestration_role
+        or not _is_wire_id(provenance["source_id"])
+        or not isinstance(provenance["source_digest"], str)
+        or _DIGEST_RE.fullmatch(provenance["source_digest"]) is None
+        or not _is_wire_id(provenance["command_id"])
+    ):
+        _refuse("nested orchestration provenance identity is incoherent")
+    if (
+        not isinstance(job.orchestration_provenance_digest, str)
+        or _DIGEST_RE.fullmatch(job.orchestration_provenance_digest) is None
+        or job.orchestration_provenance_digest != orchestration_digest(provenance)
+    ):
+        _refuse("nested orchestration provenance digest is invalid")
+
+    _validate_revision_lineage(job)
+
+
+def derive_nested_delegation_identity(
+    job: Job, parent: Job
+) -> NestedExecutiveDelegationIdentity:
+    """Project a depth-2 child's lineage-bound company dialogue identity.
+
+    This is an additive fail-closed contract for the Sol-led domain-coordinator
+    program.  It performs no Runtime lookup, child creation, capacity claim,
+    provider launch, result consumption or authority expansion.  Callers must
+    separately prove the parent's coordinator admission and the conserved root
+    budget before START.
+    """
+
+    _validate_nested_orchestration_child(job, parent)
+    job_token = job.job_id.lower()
+    operation_key = f"exec-{job_token}"
+    session_ref = f"asd-session-exec-{job_token}"
+    if (
+        _OPERATION_KEY_RE.fullmatch(operation_key) is None
+        or _SESSION_REF_RE.fullmatch(session_ref) is None
+    ):
+        _refuse("projected nested dialogue identity is outside the V2 transport contract")
+    return NestedExecutiveDelegationIdentity(
+        job_id=job.job_id,
+        parent_job_id=parent.job_id,
         root_job_id=job.root_job_id,
         operation_key=operation_key,
         session_ref=session_ref,
