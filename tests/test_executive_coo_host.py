@@ -23,18 +23,12 @@ finally:
 ROOT = Path(__file__).resolve().parents[1]
 
 
+PRINCIPAL_PROFILE = "principal.claude-code.executive-coo.v1"
+PRINCIPAL_GRANT = "mastermind-executive-coo-v1"
+
+
 def registry_file(tmp_path):
-    raw = json.loads((ROOT / "config/executive_agent_capabilities.json").read_text())
-    template = copy.deepcopy(raw["mcp_servers"]["openai-developer-docs-v1"])
-    specs = {s.name: {"name": s.name, "inputSchema": s.input_schema,
-                     "annotations": s.annotations} for s in COO_TOOL_SPECS}
-    template.update(config_name="mastermindExecutive", url="https://mcp.mastermind-x.com/mcp/coo",
-        auth_status="oAuth", server_identity=COO_SERVER_NAME, server_version=COO_SERVER_VERSION,
-        enabled_tools=sorted(specs), tool_schema_digest=observed_mcp_tool_schema_digest({"tools": specs}))
-    raw["mcp_servers"]["executive-coo-test"] = template
-    profile = copy.deepcopy(raw["profiles"]["operator.appserver.readonly.v1"])
-    profile["mcp_servers"] = ["executive-coo-test"]
-    raw["profiles"]["coo.test.v1"] = profile
+    raw = json.loads((ROOT / "config/executive_claude_principal_capabilities.json").read_text())
     path = tmp_path / "capabilities.json"
     path.write_text(json.dumps(raw))
     return path
@@ -47,8 +41,8 @@ def setup(tmp_path):
     coo["missions"] = [dict(enabled=True, work_ref="WS:EXECUTIVE-CAPACITY-FABRIC",
         principal_binding_digest=_digest(coo["binding"]["binding"]),
         mission_authority_ref="authority:coo-test", outcome_ref="outcome:coo-test",
-        proof_contract_ref="proof:coo-test", capability_profile_id="coo.test.v1",
-        capability_profile_digest=registry.profiles["coo.test.v1"].profile_digest,
+        proof_contract_ref="proof:coo-test", capability_profile_id=PRINCIPAL_PROFILE,
+        capability_profile_digest=registry.profiles[PRINCIPAL_PROFILE].profile_digest,
         execution_profiles=["research_only"], allowed_write_paths=[])]
     source = CooInstalledSource(lambda: copy.deepcopy(coo),
         lambda: ExecutionCapabilityRegistry.load(path, source_root=ROOT))
@@ -97,7 +91,7 @@ def test_host_facts_refuse_unenrolled_or_changed_sources(tmp_path, fault):
     if fault == "mission": coo["missions"] = []
     if fault == "profile": row["capability_profile_digest"] = "f" * 64
     if fault == "schema":
-        raw = json.loads(path.read_text()); raw["mcp_servers"]["executive-coo-test"]["tool_schema_digest"] = "f" * 64
+        raw = json.loads(path.read_text()); raw["mcp_servers"][PRINCIPAL_GRANT]["tool_schema_digest"] = "f" * 64
         path.write_text(json.dumps(raw))
     if fault == "revoked": coo["binding"] = install.coo_binding(enabled=False)
     if fault == "principal": frame["principal"]["client_ref"] = "f" * 64
