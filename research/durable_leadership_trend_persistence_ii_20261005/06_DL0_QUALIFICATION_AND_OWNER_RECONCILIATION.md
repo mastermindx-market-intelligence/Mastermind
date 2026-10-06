@@ -5,7 +5,7 @@
 ## Source pins
 
 - Mastermind protected master: `a6d40ff648671b03bd4d829d84dd066b58ea8c3f`
-- Macro main: `eae8baa8d3d4db35d5c9ac4f8e292143cf620854`
+- Macro main: `cab92332ea939ca148257e16c117768db5523634`
 
 Current protected Mastermind is `a6d40ff...`; its Skillpack remains schema `mastermind.sol_skillpack.v1`, version `1.0.1`. Macro is `e95e32d...`. A bounded current-source recheck—not a new census—confirmed the relevant current blobs remain collision-free for this repair: `engine/leader_lifecycle.py` blob `80bb0fed...`, PSS-CR1 blob `5f25dcfc...`, plus current Top Anatomy, Conditional Fusion, D03 ruling and Prophet-US source-rights records. The intervening repository movement does not alter the two reviewed defects or the existing source gate.
 
