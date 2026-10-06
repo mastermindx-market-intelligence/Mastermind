@@ -4,7 +4,7 @@
 
 **Current source pins**
 - Mastermind protected `master`: `d8c302b8a8a65ab13e2afba98cc73481606ed4d0`
-- Macro `main`: `0beebb3bd1f246a13396c3bd8f996103a26c3b77`
+- Macro `main`: `91f274d860e77f245bde31232a617f81d9a5b331`
 
 The protected Skillpack at `d8c302...` retains schema `mastermind.sol_skillpack.v1`, version `1.0.1`, and the same `INDEX.md` blob as the prior `877b1e7...` pin; the intervening Mastermind movement is unrelated OS work and does not change this research ruling.
 
