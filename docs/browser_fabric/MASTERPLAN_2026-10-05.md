@@ -54,11 +54,11 @@ The internal lane must not depend on OpenAI's Web tunnel. Both lanes share busin
 
 ### Multiple plugins on one tunnel
 
-Reuse the installed tunnel binary, service management and credential custody. Do not assume one existing tunnel ID automatically yields distinct per-plugin catalogs. Official documentation describes forwarding to a configured MCP server and workspace association; per-plugin server multiplexing needs an actual trusted-route canary.
+Reuse the installed tunnel **binary, service-management pattern and credential custody**, but use a **distinct Browser tunnel identity**. Current OpenAI Secure MCP Tunnel documentation states that one tunnel client forwards to its configured private MCP target; adding organizations/workspaces to the same tunnel does not change that private endpoint. That does not provide trustworthy per-plugin catalog multiplexing.
 
-Prefer a separate Browser listener/process/catalog and separately registered tunnel binding when the existing binding is server-specific. A shared tunnel can be retained only after trusted client routing and catalog separation are proven. A different display name or caller-supplied header is not trusted routing.
+Therefore Browser gets its own listener/process/catalog and separately registered tunnel ID, while Studio/Paper keeps its current tunnel ID. The Browser native/fabric lane remains independently usable over the private Browser endpoint even when the Web tunnel is unavailable. A different display name or caller-supplied header is not trusted routing.
 
-Separate plugins isolate catalogs, consent and release failures. Sharing one tunnel still shares that tunnel's outage domain. Separation cannot bypass a provider safety refusal or an administrator policy. Do not stop production Studio/Paper services to test Browser independence.
+Separate tunnel identities reduce catalog/release/outage coupling without creating another Browser owner. Both paths still terminate in the same Browser/Runtime effect and admission owners. Separation cannot bypass a provider safety refusal, browser policy or uncertain effect. Do not stop production Studio/Paper services to test Browser independence. Auth0/API linking is still the final Web-ingress enrollment step.
 
 ## 5. Identity, persistence and same-tab concurrency
 
