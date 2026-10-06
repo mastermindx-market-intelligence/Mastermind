@@ -125,6 +125,38 @@ def test_semantic_config_refuses_startup_invalid_documents(mutate):
         preflight._semantic_config(value, SHA)
 
 
+def test_read_config_refuses_config_ancestor_drift(monkeypatch):
+    topology = SimpleNamespace(
+        config_path="/fixed/config",
+        config_mode=0o644,
+        config_gid=0,
+    )
+    observations = iter((("before",), ("after",)))
+    monkeypatch.setattr(
+        preflight.installed,
+        "_observe_ancestors",
+        lambda *args: next(observations),
+    )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_read_trusted_bytes",
+        lambda *args, **kwargs: (b"{}", object()),
+    )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_load_strict_json",
+        lambda *args, **kwargs: _config(),
+    )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_object_identity",
+        lambda *args: ("leaf",),
+    )
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight._read_config(topology, object(), SHA)
+
+
 def test_qualifier_composes_existing_release_and_runtime_owners(monkeypatch):
     calls = []
     topology = SimpleNamespace(config_path="/fixed/config", config_mode=0o644,
@@ -145,7 +177,7 @@ def test_qualifier_composes_existing_release_and_runtime_owners(monkeypatch):
     monkeypatch.setattr(
         preflight, "_read_config",
         lambda *args: (calls.append(("config", args[-1]))
-                       or ("e" * 64, ("identity",))),
+                       or ("e" * 64, ("identity",), ("ancestors",))),
     )
     monkeypatch.setattr(
         preflight.installed, "_verify_release",
@@ -188,7 +220,7 @@ def test_qualifier_refuses_drift_detected_by_incumbent_owner(monkeypatch):
     )
     monkeypatch.setattr(
         preflight, "_read_config",
-        lambda *args: ("e" * 64, ("identity",)),
+        lambda *args: ("e" * 64, ("identity",), ("ancestors",)),
     )
     monkeypatch.setattr(
         preflight.installed, "_verify_release",

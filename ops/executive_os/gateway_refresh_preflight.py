@@ -58,6 +58,7 @@ def _semantic_config(document: object, expected_sha: str) -> dict:
 
 def _read_config(topology, budget, expected_sha: str):
     try:
+        ancestors = installed._observe_ancestors(topology.config_path, budget)
         raw, info = installed._read_trusted_bytes(
             topology.config_path,
             budget=budget,
@@ -70,7 +71,12 @@ def _read_config(topology, budget, expected_sha: str):
         )
         _semantic_config(document, expected_sha)
         identity = installed._object_identity(info)
-        return hashlib.sha256(raw).hexdigest(), identity
+        current_ancestors = installed._observe_ancestors(
+            topology.config_path, budget
+        )
+        if current_ancestors != ancestors:
+            _refuse()
+        return hashlib.sha256(raw).hexdigest(), identity, ancestors
     except GatewayRefreshPreflightError:
         raise
     except Exception:
@@ -87,7 +93,7 @@ def qualify_gateway_refresh(expected_sha: str) -> dict[str, str]:
         plist = installed._verify_role_plist(
             topology, budget, expected_release=expected_sha
         )
-        config_digest, config_identity = _read_config(
+        config_digest, config_identity, config_ancestors = _read_config(
             topology, budget, expected_sha
         )
         release = installed._verify_release(topology, expected_sha, budget)
@@ -99,12 +105,13 @@ def qualify_gateway_refresh(expected_sha: str) -> dict[str, str]:
         )
         if current_plist != plist:
             _refuse()
-        current_digest, current_identity = _read_config(
+        current_digest, current_identity, current_ancestors = _read_config(
             topology, budget, expected_sha
         )
         if (
             current_digest != config_digest
             or current_identity != config_identity
+            or current_ancestors != config_ancestors
         ):
             _refuse()
         installed._recheck_release(release, budget)
