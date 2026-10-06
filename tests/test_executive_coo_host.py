@@ -52,6 +52,51 @@ def setup(tmp_path):
     return host, coo, principal, path
 
 
+def test_from_path_uses_fixed_sealed_principal_policy(tmp_path, monkeypatch):
+    from ops.executive_os import executive_mcp_entry as entry
+    from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
+
+    registry = ExecutionCapabilityRegistry.load(
+        ROOT / "config/executive_claude_principal_capabilities.json",
+        source_root=ROOT,
+    )
+    profile = registry.resolve(PRINCIPAL_PROFILE)
+    coo = install.coo_block()
+    work_ref = "WS:EXECUTIVE-CAPACITY-FABRIC"
+    coo["missions"] = [dict(
+        enabled=True,
+        work_ref=work_ref,
+        principal_binding_digest=_digest(coo["binding"]["binding"]),
+        mission_authority_ref="authority:coo-principal",
+        outcome_ref="outcome:coo-principal",
+        proof_contract_ref="proof:coo-principal",
+        capability_profile_id=PRINCIPAL_PROFILE,
+        capability_profile_digest=profile.profile_digest,
+        execution_profiles=["research_only"],
+        allowed_write_paths=[],
+    )]
+    raw = install.base_document()
+    raw.update(coo=coo, executive_mcp_profile=WEB_CEO_V3_PROFILE)
+
+    source = tmp_path / raw["release_sha"]
+    (source / "config").mkdir(parents=True)
+    (source / "config/executive_claude_principal_capabilities.json").write_text(
+        (ROOT / "config/executive_claude_principal_capabilities.json").read_text()
+    )
+    config = tmp_path / "executive-mcp.json"
+    config.write_text(json.dumps(raw))
+
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *args, **kwargs: None)
+    monkeypatch.setattr(entry.os, "geteuid", lambda: 458)
+
+    selected = CooInstalledSource.from_path(
+        config, source, expected_uid=458
+    )
+    row, _, _ = selected.snapshot(work_ref)
+    assert row["capability_profile_id"] == PRINCIPAL_PROFILE
+    assert row["capability_profile_digest"] == profile.profile_digest
+
+
 def test_real_registry_and_install_binding_produce_exact_authority(tmp_path):
     host, coo, principal, _ = setup(tmp_path)
     frame = dict(schema=FACT_SCHEMA, operation="authority", work_ref=coo["missions"][0]["work_ref"], principal=principal)
