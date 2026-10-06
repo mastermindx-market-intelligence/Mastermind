@@ -74,13 +74,55 @@ class FakeIngressClient:
                 "macro": {"root": "/macro", "sha": "b" * 40, "resolved_via": "flag"},
                 "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
                 "inbox_schema": "mastermind.executive_inbox.v2",
-                "strategic_state": {"schema": "mastermind.strategic_state.v1"},
+                "strategic_state": {
+            "schema": "mastermind.strategic_state.v1",
+            "company_phase": "PRE_REVENUE_MVP_CONVERGENCE",
+            "north_star": ["Build a trustworthy product."],
+            "p0": [{
+                "id": "EXECUTIVE_OS",
+                "department": "executive",
+                "objective": "Establish durable execution.",
+                "status": "active",
+            }],
+            "constraints": {
+                "new_feature_expansion": "constrained",
+                "autonomous_production_deploy": "prohibited",
+                "autonomous_live_capital_execution": "prohibited",
+                "duplicate_control_planes": "prohibited",
+                "marketing_org_expansion_before_distribution_proof": "prohibited",
+                "unbounded_autonomous_strategic_modification": "prohibited",
+            },
+        },
                 "next_recommended_act": "Review current attention.",
                 "runtime_db": {
                     "path": "/runtime/executive.sqlite3",
                     "present": True,
                 },
-                "runtime_counts": {"jobs": {"total": 1}},
+                "runtime_counts": {
+            "jobs": {
+                "total": 1,
+                "by_status": {
+                    "QUEUED": 1, "RUNNING": 0, "CHECKPOINTED": 0,
+                    "COMPLETED": 0, "FAILED": 0, "CANCEL_REQUESTED": 0,
+                    "CANCELLED": 0, "LOST": 0, "RATE_LIMITED": 0,
+                },
+            },
+            "attempts": {
+                "total": 0,
+                "by_status": {
+                    "CLAIMED": 0, "RUNNING": 0, "CHECKPOINTED": 0,
+                    "COMPLETED": 0, "FAILED": 0, "CANCEL_REQUESTED": 0,
+                    "CANCELLED": 0, "LOST": 0, "RATE_LIMITED": 0,
+                },
+            },
+            "workers": {
+                "total": 0,
+                "by_status": {
+                    "AVAILABLE": 0, "BUSY": 0, "DRAINING": 0,
+                    "OFFLINE": 0, "ERROR": 0, "RATE_LIMITED": 0,
+                },
+            },
+        },
                 "attention_counts": {
                     "total": 0,
                     "chairman": 0,

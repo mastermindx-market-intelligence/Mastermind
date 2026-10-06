@@ -641,7 +641,127 @@ class CeoIngressReadGateway:
         )
 
     @staticmethod
+    def _valid_strategic_summary(value: object) -> bool:
+        import re
+        from control_plane import strategic_state
+
+        if value is None:
+            return True
+        if type(value) is not dict or set(value) != {
+            "schema", "company_phase", "north_star", "p0", "constraints"
+        }:
+            return False
+        if (
+            value["schema"] != strategic_state.SCHEMA
+            or type(value["company_phase"]) is not str
+            or not value["company_phase"].strip()
+            or type(value["north_star"]) is not list
+            or not value["north_star"]
+            or not all(type(item) is str and item.strip() for item in value["north_star"])
+            or type(value["p0"]) is not list
+            or not value["p0"]
+            or type(value["constraints"]) is not dict
+        ):
+            return False
+        seen: set[str] = set()
+        for row in value["p0"]:
+            if type(row) is not dict or set(row) != {
+                "id", "department", "objective", "status"
+            }:
+                return False
+            if not all(type(row[key]) is str and row[key].strip() for key in row):
+                return False
+            if re.fullmatch(r"[A-Z][A-Z0-9_]*", row["id"]) is None or row["id"] in seen:
+                return False
+            seen.add(row["id"])
+        current_constraint_keys = set(strategic_state.REQUIRED_CONSTRAINTS) | {
+            "unbounded_autonomous_strategic_modification"
+        }
+        return (
+            set(value["constraints"]) == current_constraint_keys
+            and all(
+                type(name) is str
+                and name
+                and type(level) is str
+                and level
+                for name, level in value["constraints"].items()
+            )
+        )
+
+    @staticmethod
+    def _valid_runtime_counts(value: object) -> bool:
+        from control_plane.executive_runtime import (
+            AttemptStatus, JobStatus, WorkerStatus,
+        )
+
+        if value is None:
+            return True
+        if type(value) is not dict or set(value) != {"jobs", "attempts", "workers"}:
+            return False
+        for name, enum_type in (
+            ("jobs", JobStatus),
+            ("attempts", AttemptStatus),
+            ("workers", WorkerStatus),
+        ):
+            section = value[name]
+            if section is None:
+                continue
+            if type(section) is not dict or set(section) != {"total", "by_status"}:
+                return False
+            by_status = section["by_status"]
+            expected = {member.value for member in enum_type}
+            if (
+                type(section["total"]) is not int
+                or section["total"] < 0
+                or type(by_status) is not dict
+                or set(by_status) != expected
+                or any(type(count) is not int or count < 0 for count in by_status.values())
+                or section["total"] != sum(by_status.values())
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _valid_attention_counts(value: object) -> bool:
+        from control_plane import executive_inbox
+
+        expected = set(executive_inbox.TARGETS) | {"total"}
+        return (
+            type(value) is dict
+            and set(value) == expected
+            and all(type(count) is int and count >= 0 for count in value.values())
+            and value["total"] == sum(
+                value[target] for target in executive_inbox.TARGETS
+            )
+        )
+
+    @staticmethod
+    def _valid_handoffs(value: object) -> bool:
+        from control_plane import ceo_boot_packet
+
+        if type(value) is not list or len(value) > ceo_boot_packet.HANDOFF_LIMIT:
+            return False
+        for row in value:
+            if (
+                type(row) is not dict
+                or set(row) != {"name", "path"}
+                or type(row["name"]) is not str
+                or not row["name"]
+                or len(row["name"]) > 255
+                or type(row["path"]) is not str
+                or not row["path"].startswith("agentos/handoffs/")
+                or not row["path"].endswith(".md")
+                or row["path"].startswith("/")
+                or ".." in Path(row["path"]).parts
+            ):
+                return False
+        return True
+
+    @staticmethod
     def _valid_state_data(value: object) -> bool:
+        import re
+        from control_plane import ceo_boot_packet, executive_inbox
+
         keys = {
             "mastermind", "macro", "boot_packet_schema", "inbox_schema",
             "strategic_state", "next_recommended_act", "runtime_db",
@@ -658,23 +778,35 @@ class CeoIngressReadGateway:
             and type(mastermind["branch"]) is str
             and type(mastermind["root"]) is str
             and type(mastermind["sha"]) is str
-            and len(mastermind["sha"]) == 40
+            and re.fullmatch(r"[0-9a-f]{40}", mastermind["sha"]) is not None
             and type(macro) is dict
             and set(macro) == {"root", "sha", "resolved_via"}
             and (macro["root"] is None or type(macro["root"]) is str)
-            and (macro["sha"] is None or (type(macro["sha"]) is str and len(macro["sha"]) == 40))
+            and (
+                macro["sha"] is None
+                or (
+                    type(macro["sha"]) is str
+                    and re.fullmatch(r"[0-9a-f]{40}", macro["sha"]) is not None
+                )
+            )
             and (macro["resolved_via"] is None or type(macro["resolved_via"]) is str)
-            and (value["boot_packet_schema"] is None or type(value["boot_packet_schema"]) is str)
-            and type(value["inbox_schema"]) is str
-            and (value["strategic_state"] is None or type(value["strategic_state"]) is dict)
-            and (value["next_recommended_act"] is None or type(value["next_recommended_act"]) is str)
+            and value["boot_packet_schema"] == ceo_boot_packet.SCHEMA
+            and value["inbox_schema"] == executive_inbox.SCHEMA
+            and CeoIngressReadGateway._valid_strategic_summary(value["strategic_state"])
+            and (
+                value["next_recommended_act"] is None
+                or (
+                    type(value["next_recommended_act"]) is str
+                    and bool(value["next_recommended_act"].strip())
+                )
+            )
             and type(runtime_db) is dict
             and set(runtime_db) == {"path", "present"}
             and type(runtime_db["path"]) is str
             and type(runtime_db["present"]) is bool
-            and (value["runtime_counts"] is None or type(value["runtime_counts"]) is dict)
-            and type(value["attention_counts"]) is dict
-            and type(value["handoffs"]) is list
+            and CeoIngressReadGateway._valid_runtime_counts(value["runtime_counts"])
+            and CeoIngressReadGateway._valid_attention_counts(value["attention_counts"])
+            and CeoIngressReadGateway._valid_handoffs(value["handoffs"])
         )
 
     @staticmethod
@@ -719,17 +851,31 @@ class CeoIngressReadGateway:
             and (value["latest_attempt"] is None or type(value["latest_attempt"]) is dict)
         )
 
-    @staticmethod
-    def _valid_fabric_data(value: object, *, arguments: Mapping[str, Any]) -> bool:
+    @classmethod
+    def _fabric_schema_family(cls) -> str:
+        return "none"
+
+    @classmethod
+    def _valid_fabric_data(
+        cls, value: object, *, arguments: Mapping[str, Any]
+    ) -> bool:
         from control_plane import fabric_job_view, fabric_result_projection
 
         if type(value) is not dict:
             return False
         view = arguments.get("view")
+        family = cls._fabric_schema_family()
         if view == "roots":
+            expected_schema = (
+                fabric_job_view.ROOT_LIST_SCHEMA
+                if family == "v1"
+                else fabric_job_view.ROOT_LIST_SCHEMA_V2
+                if family == "v2"
+                else None
+            )
             return (
-                value.get("schema")
-                in {fabric_job_view.ROOT_LIST_SCHEMA, fabric_job_view.ROOT_LIST_SCHEMA_V2}
+                expected_schema is not None
+                and value.get("schema") == expected_schema
                 and set(value) == fabric_job_view.ROOT_LIST_KEYS
                 and type(value.get("roots")) is list
                 and type(value.get("count")) is int
@@ -738,8 +884,16 @@ class CeoIngressReadGateway:
             )
         if view == "root":
             schema = value.get("schema")
+            expected_schema = (
+                fabric_job_view.SCHEMA
+                if family == "v1"
+                else fabric_job_view.SCHEMA_V2
+                if family == "v2"
+                else None
+            )
             if (
-                schema not in {fabric_job_view.SCHEMA, fabric_job_view.SCHEMA_V2}
+                expected_schema is None
+                or schema != expected_schema
                 or set(value) != fabric_job_view.OUTPUT_KEYS
                 or type(value.get("children")) is not list
                 or type(value.get("unjoined_job_ids")) is not list
@@ -758,7 +912,7 @@ class CeoIngressReadGateway:
                 for child in value["children"]
             ):
                 return False
-            if schema == fabric_job_view.SCHEMA_V2:
+            if family == "v2":
                 runtime = value.get("runtime")
                 acquisition = runtime.get("acquisition") if type(runtime) is dict else None
                 query = acquisition.get("query") if type(acquisition) is dict else None
@@ -766,6 +920,8 @@ class CeoIngressReadGateway:
                     return False
             return True
         if view == "result":
+            if family != "v2":
+                return False
             keys = {
                 "schema", "selection", "role", "execution_status", "acceptance",
                 "role_result_digest", "generation", "availability",
@@ -798,6 +954,7 @@ class CeoIngressReadGateway:
     def _valid_intent_receipt(
         value: object, *, arguments: Mapping[str, Any]
     ) -> bool:
+        import re
         from control_plane import ceo_intent
 
         if type(value) is not dict:
@@ -809,42 +966,93 @@ class CeoIngressReadGateway:
             "grounding", "created_at_ms",
         }
         keys = set(value)
-        if schema == ceo_intent.RECEIPT_SCHEMA:
+        if schema in {ceo_intent.RECEIPT_SCHEMA, ceo_intent.RECEIPT_SCHEMA_SERVICE}:
             if keys != base_keys:
                 return False
         elif schema == ceo_intent.RECEIPT_SCHEMA_V2:
             if keys not in (base_keys, base_keys | {"work_ref"}):
                 return False
+        elif schema == ceo_intent.RECEIPT_SCHEMA_PRINCIPAL:
+            if keys != base_keys | {"principal", "request_ref"}:
+                return False
         else:
             return False
         authority = value.get("authority")
         grounding = value.get("grounding")
-        return (
+        if not (
             type(value.get("intent_id")) is str
             and value["intent_id"] == arguments.get("intent_id")
+            and ceo_intent.INTENT_ID_RE.fullmatch(value["intent_id"]) is not None
             and type(value.get("fingerprint")) is str
-            and len(value["fingerprint"]) == 64
+            and re.fullmatch(r"[0-9a-f]{64}", value["fingerprint"]) is not None
             and type(value.get("job_id")) is str
+            and re.fullmatch(r"JOB-[0-9]{1,9}", value["job_id"]) is not None
             and type(value.get("status")) is str
             and value.get("accepted") is True
             and type(value.get("duplicate")) is bool
             and value.get("dispatched") is False
             and type(value.get("created_at_ms")) is int
+            and value["created_at_ms"] >= 0
             and type(authority) is dict
             and set(authority) == {"requested", "policy_sha256", "authority_level"}
             and type(authority["requested"]) is list
+            and all(type(item) is str for item in authority["requested"])
             and type(authority["policy_sha256"]) is str
-            and len(authority["policy_sha256"]) == 64
+            and re.fullmatch(r"[0-9a-f]{64}", authority["policy_sha256"]) is not None
             and type(authority["authority_level"]) is str
+            and re.fullmatch(r"A[0-7]", authority["authority_level"]) is not None
             and type(grounding) is dict
             and set(grounding) <= {"mastermind_sha", "macro_sha", "boot_packet_schema"}
             and {"mastermind_sha", "macro_sha"} <= set(grounding)
-            and type(grounding["mastermind_sha"]) is str
-            and len(grounding["mastermind_sha"]) == 40
-            and type(grounding["macro_sha"]) is str
-            and len(grounding["macro_sha"]) == 40
-            and ("work_ref" not in value or type(value["work_ref"]) is str)
-        )
+            and all(
+                type(grounding[key]) is str
+                and ceo_intent.SHA_RE.fullmatch(grounding[key]) is not None
+                for key in ("mastermind_sha", "macro_sha")
+            )
+            and (
+                "boot_packet_schema" not in grounding
+                or (
+                    type(grounding["boot_packet_schema"]) is str
+                    and bool(grounding["boot_packet_schema"])
+                    and len(grounding["boot_packet_schema"]) <= 128
+                )
+            )
+        ):
+            return False
+        if schema == ceo_intent.RECEIPT_SCHEMA_V2:
+            work_ref = value.get("work_ref")
+            return (
+                work_ref is None
+                or (
+                    type(work_ref) is str
+                    and re.fullmatch(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", work_ref)
+                    is not None
+                )
+            )
+        if schema == ceo_intent.RECEIPT_SCHEMA_PRINCIPAL:
+            from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+            from control_plane.coo_principal_request import principal_intent_id
+
+            principal = value["principal"]
+            request_ref = value["request_ref"]
+            if type(principal) is not dict or set(principal) != {
+                "seat", "work_ref", "principal_binding_digest",
+                "mission_authority_ref", "authority_generation_digest",
+            }:
+                return False
+            if principal.get("seat") != "coo":
+                return False
+            try:
+                PrincipalAdmissionContext(
+                    work_ref=principal["work_ref"],
+                    principal_binding_digest=principal["principal_binding_digest"],
+                    mission_authority_ref=principal["mission_authority_ref"],
+                    authority_generation_digest=principal["authority_generation_digest"],
+                )
+                return principal_intent_id(request_ref) == value["intent_id"]
+            except (KeyError, TypeError, ValueError):
+                return False
+        return True
 
     @classmethod
     def _valid_success_data(
@@ -1007,6 +1215,10 @@ class CeoIngressReadGateway:
 class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
     """Versioned Web-CEO installed reader; legacy v1 remains unchanged."""
 
+    @classmethod
+    def _fabric_schema_family(cls) -> str:
+        return "v1"
+
     def _result_server_version(self) -> str:
         from integrations.executive_mcp.web_ceo import WEB_CEO_SERVER_VERSION
 
@@ -1031,6 +1243,10 @@ class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
 
 class WebCeoV2CeoIngressReadGateway(WebCeoCeoIngressReadGateway):
     """Static Web-CEO v2 installed reader (App-read v3); earlier readers frozen."""
+
+    @classmethod
+    def _fabric_schema_family(cls) -> str:
+        return "v2"
 
     _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V3
 

@@ -81,10 +81,52 @@ def canonical_result(
             "macro": {"root": "/macro", "sha": "b" * 40, "resolved_via": "flag"},
             "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
             "inbox_schema": "mastermind.executive_inbox.v2",
-            "strategic_state": {"schema": "mastermind.strategic_state.v1"},
+            "strategic_state": {
+            "schema": "mastermind.strategic_state.v1",
+            "company_phase": "PRE_REVENUE_MVP_CONVERGENCE",
+            "north_star": ["Build a trustworthy product."],
+            "p0": [{
+                "id": "EXECUTIVE_OS",
+                "department": "executive",
+                "objective": "Establish durable execution.",
+                "status": "active",
+            }],
+            "constraints": {
+                "new_feature_expansion": "constrained",
+                "autonomous_production_deploy": "prohibited",
+                "autonomous_live_capital_execution": "prohibited",
+                "duplicate_control_planes": "prohibited",
+                "marketing_org_expansion_before_distribution_proof": "prohibited",
+                "unbounded_autonomous_strategic_modification": "prohibited",
+            },
+        },
             "next_recommended_act": "Review current attention.",
             "runtime_db": {"path": "/runtime/executive.sqlite3", "present": True},
-            "runtime_counts": {"jobs": {"total": 2}},
+            "runtime_counts": {
+            "jobs": {
+                "total": 2,
+                "by_status": {
+                    "QUEUED": 2, "RUNNING": 0, "CHECKPOINTED": 0,
+                    "COMPLETED": 0, "FAILED": 0, "CANCEL_REQUESTED": 0,
+                    "CANCELLED": 0, "LOST": 0, "RATE_LIMITED": 0,
+                },
+            },
+            "attempts": {
+                "total": 0,
+                "by_status": {
+                    "CLAIMED": 0, "RUNNING": 0, "CHECKPOINTED": 0,
+                    "COMPLETED": 0, "FAILED": 0, "CANCEL_REQUESTED": 0,
+                    "CANCELLED": 0, "LOST": 0, "RATE_LIMITED": 0,
+                },
+            },
+            "workers": {
+                "total": 0,
+                "by_status": {
+                    "AVAILABLE": 0, "BUSY": 0, "DRAINING": 0,
+                    "OFFLINE": 0, "ERROR": 0, "RATE_LIMITED": 0,
+                },
+            },
+        },
             "attention_counts": {"total": 0, "chairman": 0, "ceo": 0, "coo": 0},
             "handoffs": [],
         } if ok else None,
@@ -197,6 +239,12 @@ def test_missing_socket_does_not_claim_reader_or_execution_ready(profile):
     (lambda value: value["data"].__setitem__("execution_ready", True), "forged-readiness-field"),
     (lambda value: value["data"]["macro"].__setitem__("execution_ready", True), "nested-macro-readiness"),
     (lambda value: value["data"]["macro"].__setitem__("private_detail", SECRET), "nested-macro-private"),
+    (lambda value: value["data"]["strategic_state"].__setitem__("private_detail", SECRET), "strategic-private"),
+    (lambda value: value["data"]["strategic_state"]["p0"][0].__setitem__("private_detail", SECRET), "strategic-p0-private"),
+    (lambda value: value["data"]["strategic_state"]["constraints"].__setitem__("execution_ready", "true"), "strategic-constraint-extra"),
+    (lambda value: value["data"]["runtime_counts"].__setitem__("private_detail", SECRET), "runtime-counts-private"),
+    (lambda value: value["data"]["attention_counts"].__setitem__("execution_ready", 1), "attention-counts-private"),
+    (lambda value: value["data"]["handoffs"].append({"name": "x", "path": "agentos/handoffs/x.md", "private_detail": SECRET}), "handoff-private"),
     (lambda value: value.__setitem__("data", None), "null-success-data"),
     (
         lambda value: value.__setitem__(
@@ -392,6 +440,104 @@ def test_fabric_root_projection_must_match_requested_root():
     data["runtime"]["acquisition"]["query"]["root_job_id"] = "JOB-013"
     assert gateway._valid_fabric_data(
         data, arguments={"view": "root", "root_job_id": requested}
+    ) is False
+
+
+def test_v2_and_v3_fabric_readers_reject_legacy_root_projection():
+    from control_plane import fabric_job_view
+
+    requested = "JOB-003"
+    arguments = {"view": "root", "root_job_id": requested}
+    legacy = {
+        "schema": fabric_job_view.SCHEMA,
+        "generated_at": "2026-10-06T06:00:00Z",
+        "runtime": {"root": None, "db_present": True, "identity": None},
+        "armed": {},
+        "root": {"job_id": requested, "root_job_id": requested},
+        "children": [],
+        "unjoined_job_count": 0,
+        "unjoined_job_ids": [],
+        "degraded": [],
+        "missingness": [],
+        "capability": {},
+    }
+    assert WebCeoCeoIngressReadGateway._valid_fabric_data(
+        legacy, arguments=arguments
+    ) is True
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        legacy, arguments=arguments
+    ) is False
+    assert WebCeoV3CeoIngressReadGateway._valid_fabric_data(
+        legacy, arguments=arguments
+    ) is False
+
+    current = copy.deepcopy(legacy)
+    current["schema"] = fabric_job_view.SCHEMA_V2
+    current["runtime"]["acquisition"] = {
+        "query": {"kind": "root_detail", "root_job_id": requested}
+    }
+    assert WebCeoCeoIngressReadGateway._valid_fabric_data(
+        current, arguments=arguments
+    ) is False
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        current, arguments=arguments
+    ) is True
+
+
+def _canonical_receipt(schema, intent_id):
+    return {
+        "schema": schema,
+        "intent_id": intent_id,
+        "fingerprint": "a" * 64,
+        "job_id": "JOB-003",
+        "status": "QUEUED",
+        "accepted": True,
+        "duplicate": False,
+        "dispatched": False,
+        "authority": {
+            "requested": ["READ", "RESEARCH"],
+            "policy_sha256": "b" * 64,
+            "authority_level": "A0",
+        },
+        "grounding": {
+            "mastermind_sha": "c" * 40,
+            "macro_sha": "d" * 40,
+            "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+        },
+        "created_at_ms": 1,
+    }
+
+
+def test_intent_status_accepts_service_and_principal_receipt_families():
+    from control_plane import ceo_intent
+    from control_plane.coo_principal_request import principal_intent_id
+
+    service_id = "svc-status-proof"
+    service = _canonical_receipt(ceo_intent.RECEIPT_SCHEMA_SERVICE, service_id)
+    assert WebCeoV2CeoIngressReadGateway._valid_intent_receipt(
+        service, arguments={"intent_id": service_id}
+    ) is True
+
+    request_ref = "req-coo-" + "1" * 32
+    principal_id = principal_intent_id(request_ref)
+    principal = _canonical_receipt(
+        ceo_intent.RECEIPT_SCHEMA_PRINCIPAL, principal_id
+    )
+    principal["principal"] = {
+        "seat": "coo",
+        "work_ref": "WS:EXECUTIVE-CAPACITY-FABRIC",
+        "principal_binding_digest": "e" * 64,
+        "mission_authority_ref": "MAS-1143",
+        "authority_generation_digest": "f" * 64,
+    }
+    principal["request_ref"] = request_ref
+    assert WebCeoV2CeoIngressReadGateway._valid_intent_receipt(
+        principal, arguments={"intent_id": principal_id}
+    ) is True
+
+    principal["request_ref"] = "req-coo-" + "2" * 32
+    assert WebCeoV2CeoIngressReadGateway._valid_intent_receipt(
+        principal, arguments={"intent_id": principal_id}
     ) is False
 
 
