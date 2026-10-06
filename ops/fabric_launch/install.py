@@ -22,6 +22,7 @@ PREFIXES = ('ops/fabric_launch/', 'research/worker_craft/mastermind-craft/', 'sk
 EXACT_FILES = {'control_plane/__init__.py', 'control_plane/worker_craft.py', 'control_plane/worker_execution_contract.py'}
 BEGIN = '# BEGIN MASTERMIND WORKER BOOTSTRAP'
 END = '# END MASTERMIND WORKER BOOTSTRAP'
+STUDIO_CONSUMER_ROOT = Path.home() / '.local/share/studio-direct-mcp/private'
 
 
 def sha(data):
@@ -31,8 +32,17 @@ def sha(data):
 def source_files(repository, commit):
     if not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise ValueError('SOURCE_COMMIT_INVALID')
-    names = subprocess.check_output(['git','-C',str(repository),'ls-tree','-r','--name-only',commit],text=True,timeout=15).splitlines()
-    names = [n for n in names if n in EXACT_FILES or n.startswith(PREFIXES)]
+    entries = subprocess.check_output(['git','-C',str(repository),'ls-tree','-r','-z',commit],timeout=15).split(b'\0')
+    names=[]
+    for entry in entries:
+        if not entry:continue
+        metadata,raw_name=entry.split(b'\t',1)
+        name=raw_name.decode('utf-8')
+        if name not in EXACT_FILES and not name.startswith(PREFIXES):continue
+        mode,kind,_=metadata.split(b' ')
+        if mode not in (b'100644',b'100755') or kind!=b'blob':
+            raise ValueError('SOURCE_FILE_NOT_REGULAR')
+        names.append(name)
     if not EXACT_FILES.issubset(names) or len(names) > 64:
         raise ValueError('SOURCE_CLOSURE_INVALID')
     files = {}
@@ -79,8 +89,14 @@ def stage(repository, commit, destination):
               'native_skill_attested':False,'files':expected}
     destination=Path(destination)
     if destination.exists():
-        if destination.is_symlink() or json.loads((destination/'manifest.json').read_text())!=manifest:
+        if destination.is_symlink() or (destination/'manifest.json').is_symlink() or json.loads((destination/'manifest.json').read_text())!=manifest:
             raise ValueError('EXISTING_RELEASE_MISMATCH')
+        expected_names=set(files)|{'manifest.json'}
+        actual_names=set()
+        for path in destination.rglob('*'):
+            if path.is_symlink():raise ValueError('EXISTING_RELEASE_LINK_REFUSED')
+            if path.is_file():actual_names.add(str(path.relative_to(destination)))
+        if actual_names!=expected_names:raise ValueError('EXISTING_RELEASE_EXTRA_OR_MISSING_FILES')
         for name,value in files.items():
             path=destination/name
             if path.is_symlink() or not path.is_file() or path.read_bytes()!=value:
@@ -103,6 +119,42 @@ def stage(repository, commit, destination):
     return manifest
 
 
+def pinned_consumers(wrapper, proposed_sha):
+    """Read the existing Studio owner's pins; never rewrite or weaken them."""
+    target=str(Path(wrapper).absolute())
+    conflicts=[]
+    paths=list(STUDIO_CONSUMER_ROOT.glob('*/config.json'))
+    if len(paths)>32:raise ValueError('CONSUMER_CENSUS_UNBOUNDED')
+    for path in paths:
+        if path.is_symlink() or path.stat().st_size>1024*1024:
+            raise ValueError('CONSUMER_CONFIG_UNSAFE')
+        try:value=json.loads(path.read_bytes())
+        except (ValueError,UnicodeError):raise ValueError('CONSUMER_CONFIG_UNREADABLE') from None
+        config=value.get('fleetStatus',{}) if isinstance(value,dict) else {}
+        if not isinstance(config,dict):raise ValueError('CONSUMER_CONFIG_UNREADABLE')
+        if config.get('enabled') is True and config.get('fabricLauncherPath')==target:
+            if config.get('fabricLauncherSha256')!=proposed_sha:
+                conflicts.append(path.parent.name)
+    return conflicts
+
+
+def stage_wrapper_candidate(wrapper, release, expected_sha, output):
+    wrapper=Path(wrapper)
+    if wrapper.is_symlink() or not wrapper.is_file():raise ValueError('WRAPPER_NOT_REGULAR')
+    original=wrapper.read_bytes()
+    if sha(original)!=expected_sha:raise ValueError('WRAPPER_PREIMAGE_CHANGED')
+    candidate=wrapper_content(original,release)
+    with Path(output).open('xb') as stream:
+        stream.write(candidate)
+        stream.flush()
+        os.fchmod(stream.fileno(),0o600)
+        os.fsync(stream.fileno())
+    subprocess.run(['bash','-n',str(output)],check=True,timeout=10)
+    if Path(output).read_bytes()!=candidate:raise ValueError('WRAPPER_CANDIDATE_READBACK_FAILED')
+    return {'state':'WRAPPER_CANDIDATE_NOT_INSTALLED','original_sha256':expected_sha,
+            'candidate_sha256':sha(candidate),'pinned_consumer_count':len(pinned_consumers(wrapper,sha(candidate)))}
+
+
 def activate(wrapper, release, expected_sha):
     wrapper=Path(wrapper)
     before=wrapper.lstat()
@@ -112,6 +164,8 @@ def activate(wrapper, release, expected_sha):
     if sha(data)!=expected_sha:raise ValueError('WRAPPER_PREIMAGE_CHANGED')
     updated=wrapper_content(data,release)
     if updated==data:return {'state':'ALREADY_CURRENT','wrapper_sha256':expected_sha}
+    if pinned_consumers(wrapper,sha(updated)):
+        raise ValueError('PINNED_CONSUMER_RELEASE_REQUIRED')
     backup=wrapper.with_name(wrapper.name+'.pre-worker-bootstrap-'+expected_sha[:12])
     if backup.exists():
         if backup.is_symlink() or backup.read_bytes()!=data:raise ValueError('BACKUP_CONFLICT')
@@ -137,6 +191,7 @@ def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source-sha',required=True);p.add_argument('--destination',required=True)
     p.add_argument('--wrapper');p.add_argument('--expected-wrapper-sha');p.add_argument('--apply',action='store_true')
+    p.add_argument('--candidate-output')
     args=p.parse_args(argv)
     try:
         files=source_files(ROOT,args.source_sha)
@@ -146,7 +201,10 @@ def main(argv=None):
         result={'state':'CONTENT_STAGED','source_commit':args.source_sha,'authority_granted':False}
         if args.wrapper:
             if not args.expected_wrapper_sha:raise ValueError('EXPECTED_PREIMAGE_REQUIRED')
-            result.update(activate(args.wrapper,Path(args.destination),args.expected_wrapper_sha))
+            if args.candidate_output:
+                result.update(stage_wrapper_candidate(args.wrapper,Path(args.destination),args.expected_wrapper_sha,args.candidate_output))
+            else:
+                result.update(activate(args.wrapper,Path(args.destination),args.expected_wrapper_sha))
         print(json.dumps(result,sort_keys=True));return 0
     except (ValueError,OSError,subprocess.SubprocessError) as exc:
         print('BOOT_INSTALL_REFUSED '+(str(exc) if isinstance(exc,ValueError) else type(exc).__name__),file=sys.stderr);return 78

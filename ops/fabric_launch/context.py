@@ -54,8 +54,10 @@ Inventory the tools actually exposed in this run. A named plugin or installed CL
 of authentication, resource permission, or a successful action. Use only granted tools.
 Stop dependent work with a precise missing-tool or stale-context result; do not fake completion.
 Do not copy credentials, weaken permissions, change accounts, or reroute a denied/uncertain effect.
-Leaf workers do not spawn helpers. Operators delegate only through an already-admitted existing
-Fabric/Executive path with conserved root budget; a role name grants no child-launch authority.
+Leaf workers do not spawn helpers unless the exact task/profile already grants a named bounded
+helper, such as the existing restricted visual-assistance path. A missing tool or role name is not
+that grant. Operators delegate only through an already-admitted existing Fabric/Executive path
+with conserved root budget; a role name grants no child-launch authority.
 Return the actual artifact/revision, tests actually run, limitations, unresolved effects and
 next action through the existing result path. Propose memory updates to Agent OS with evidence;
 do not write a new durable memory store or claim that a returned result was accepted.

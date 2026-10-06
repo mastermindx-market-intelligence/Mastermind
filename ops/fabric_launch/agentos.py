@@ -24,10 +24,12 @@ def validate_bundle(raw, workstream):
             if key in result:raise LaunchInputError('AGENTOS_DUPLICATE_KEY')
             result[key]=value
         return result
+    def nonfinite(_):
+        raise LaunchInputError('AGENTOS_NONFINITE_JSON')
     try:
         bundle=json.loads(raw.decode(),object_pairs_hook=unique,
-                          parse_constant=lambda _: (_ for _ in ()).throw(LaunchInputError('AGENTOS_NONFINITE_JSON')))
-    except (ValueError,UnicodeError) as exc:
+                          parse_constant=nonfinite)
+    except (ValueError,UnicodeError,RecursionError) as exc:
         if isinstance(exc,LaunchInputError):raise
         raise LaunchInputError('AGENTOS_BUNDLE_MALFORMED') from None
     if type(bundle) is not dict or bundle.get('schema')!='context_bundle.v1':

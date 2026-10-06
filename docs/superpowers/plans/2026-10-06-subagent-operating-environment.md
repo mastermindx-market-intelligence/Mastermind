@@ -270,3 +270,25 @@ Provider-specific documentation also matters: Slack's official Skills plugin cur
 provides the Slack MCP connection on Claude Code and Cursor, while Codex receives skills
 only. Installing a similarly named plugin is therefore not proof of Slack access in Codex.
 Source: https://docs.slack.dev/ai/slack-skills-plugin/ (checked 2026-10-06).
+
+
+## 12. Harness-specific integration
+
+| Harness | Observed current integration | Correct next integration boundary |
+|---|---|---|
+| Codex native | User config ignored; explicitly supplied OpenAI provider/model, Studio MCP and workspace sandbox; native agents disabled | Prompt bootstrap works without provider-home edits. Native plugin selection must be added through its admitted exact profile, not a global config assumption |
+| Claude-based GLM/MiniMax | Existing provider home plus strict task MCP projection | Retain provider/account isolation and existing vision assistance. Do not blanket-disable an already-granted bounded visual helper merely because the caller is a leaf |
+| Grok native | Ephemeral per-run GROK_HOME and the existing Studio read projection | Supply method/context through the same task and keep native tool evidence separate from host probes |
+| OpenCode free/Go | Existing provider/catalog restrictions and isolated native configuration | Reuse those restrictions; do not add paid-provider fallback or inherited plugin providers |
+| Governed Executive | Pinned profile/skill/package/adapter identity; live installed source differs from source head | Native role package and actual operator-child capabilities require existing Runtime/Capacity/profile admission |
+
+The 6,000-byte inline project-fact supplement is a launch-packet bound, not a model context
+window limit. Workers may read larger assigned sources through their admitted tools. Give
+operators selective live canonical context and source references, not the entire CEO chat.
+Required material that does not fit must be split through the existing task/context owner or
+raise a precise preparation error; never silently omit source law or fabricate memory.
+
+A current native Claude MCP census on M2 returned `linear-server` as authentication-required.
+This is a real actor/client enrollment gap; the presence of the ChatGPT Linear connector or
+a saved MCP server name is not evidence of a working native Linear tool. No credential or
+OAuth state was copied or reset during this task.

@@ -47,3 +47,10 @@ def test_missing_existing_craft_refuses_instead_of_rebuilding():
 def test_escaping_skill_path_refuses():
     data=inputs();data['skills/mastermind-worker-bootstrap/../../escape']=b'x'
     with pytest.raises(ValueError,match='PLUGIN_SOURCE_PATH_INVALID'):p.assemble(data,'a'*40)
+
+
+def test_different_source_versions_do_not_reuse_native_plugin_version():
+    first=json.loads(p.assemble(inputs(),'a'*40)['.codex-plugin/plugin.json'])
+    second=json.loads(p.assemble(inputs(),'b'*40)['.codex-plugin/plugin.json'])
+    assert first['version']!=second['version']
+    assert 'aaaaaaaaaaaa' in first['version']

@@ -117,3 +117,50 @@ def test_wrapper_symlink_cannot_be_activated(tmp_path):
     with pytest.raises(ValueError,match='WRAPPER_NOT_REGULAR'):
         install.activate(wrapper,Path('/release'),install.sha(b'untouched'))
     assert target.read_text()=='untouched'
+
+
+def test_existing_studio_pin_blocks_wrapper_swap_without_config_changes(tmp_path,monkeypatch):
+    wrapper=tmp_path/'pool';original=b'#!/bin/bash\ncase "$CMD" in\n*) exit 2;;\nesac\n';wrapper.write_bytes(original)
+    root=tmp_path/'studio-private';instance=root/'fabric-read';instance.mkdir(parents=True)
+    config=instance/'config.json';data=json.dumps({'fleetStatus':{'enabled':True,'fabricLauncherPath':str(wrapper),'fabricLauncherSha256':install.sha(original)}}).encode();config.write_bytes(data)
+    monkeypatch.setattr(install,'STUDIO_CONSUMER_ROOT',root)
+    with pytest.raises(ValueError,match='PINNED_CONSUMER_RELEASE_REQUIRED'):
+        install.activate(wrapper,Path('/release'),install.sha(original))
+    assert wrapper.read_bytes()==original and config.read_bytes()==data
+    assert not list(tmp_path.glob('*.pre-worker*'))
+
+
+def test_wrapper_candidate_is_usable_release_input_not_a_live_swap(tmp_path,monkeypatch):
+    wrapper=tmp_path/'pool';original=b'#!/bin/bash\ncase "$CMD" in\n*) exit 2;;\nesac\n';wrapper.write_bytes(original)
+    root=tmp_path/'studio-private';instance=root/'fabric-read';instance.mkdir(parents=True)
+    config=instance/'config.json';config.write_text(json.dumps({'fleetStatus':{'enabled':True,'fabricLauncherPath':str(wrapper),'fabricLauncherSha256':install.sha(original)}}))
+    monkeypatch.setattr(install,'STUDIO_CONSUMER_ROOT',root)
+    output=tmp_path/'pool.candidate'
+    result=install.stage_wrapper_candidate(wrapper,Path('/release'),install.sha(original),output)
+    assert result['state']=='WRAPPER_CANDIDATE_NOT_INSTALLED' and result['pinned_consumer_count']==1
+    assert result['candidate_sha256']==install.sha(output.read_bytes())
+    assert wrapper.read_bytes()==original
+
+
+def test_extra_file_in_staged_release_refuses_reuse(tmp_path,monkeypatch):
+    source={'control_plane/__init__.py':b'', 'skills/example/SKILL.md':b'fixture'}
+    monkeypatch.setattr(install,'source_files',lambda *args:source)
+    release=tmp_path/'release'
+    install.stage(tmp_path,'a'*40,release)
+    release.chmod(0o755)
+    (release/'json.py').write_text('# unexpected import shadow')
+    with pytest.raises(ValueError,match='EXTRA_OR_MISSING_FILES'):
+        install.stage(tmp_path,'a'*40,release)
+    for path in release.rglob('*'):
+        if path.is_dir():path.chmod(0o755)
+
+
+def test_git_symlink_source_refuses_before_any_read_of_its_target(monkeypatch):
+    calls=[]
+    def output(argv,**kwargs):
+        calls.append(argv)
+        return b'120000 blob '+b'a'*40+b'\tops/fabric_launch/context.py\0'
+    monkeypatch.setattr(install.subprocess,'check_output',output)
+    with pytest.raises(ValueError,match='SOURCE_FILE_NOT_REGULAR'):
+        install.source_files(Path('/fixture'),'a'*40)
+    assert len(calls)==1

@@ -52,7 +52,8 @@ Inspect the tools actually exposed in this generation. Separate installation, au
 callability, authorization and proven behavior. A server's tool list does not prove a named
 write is allowed. Recheck required project facts and source refs before dependent effects.
 
-Use the method on the assignment, not as a new mission. Leaf workers do not spawn helpers.
+Use the method on the assignment, not as a new mission. Leaf workers do not acquire general child-launch permission; an exact existing bounded-helper
+grant, such as the reviewed visual-assistance path, remains governed by its original owner.
 Operators use only an already-admitted existing child path and conserve the original root,
 parent, budget, depth and return obligations. Keep the reviewed adapter identity unchanged.
 

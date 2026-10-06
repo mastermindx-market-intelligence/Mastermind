@@ -1,0 +1,83 @@
+{
+  "affected_source_hashes": {
+    "docs/superpowers/plans/2026-10-06-subagent-operating-environment.md": "063ca1ec982899e61c59d004f86469743169e46739eff7df16100380071bfe69",
+    "ops/fabric_launch/agentos.py": "b146c008c939ca8276f91eadca4b60b781ec694e64ff02ddaa9908cc6c8f2dfe",
+    "ops/fabric_launch/context.py": "1c4ce6401cdbb4cca6a29f9b0311db9288e6de86e4a8b0b129568132b769375f",
+    "ops/fabric_launch/install.py": "ffb3995755628e4d859ba67a22feb65fe04c7a7af2fb5f3f75161e6d6f917afc",
+    "ops/fabric_launch/plugin.py": "53608d037ae940302a3d0516de411bf145ba7dfdcc10a6fbafe92df316c5806a",
+    "skills/mastermind-worker-bootstrap/SKILL.md": "a66fcdabcf30a9bbfe9b3a599f51e41d390bb104bda135212b84a07f22927d6c",
+    "tests/test_fabric_launch_observe_install.py": "f1272ef66b2238a870c780ffa8e2cb1a1b767567370ba256e80912792f85ae55",
+    "tests/test_fabric_launch_plugin.py": "d915d91583e472cffae0082a3a64c09e4a00f550044ab13e7d082d2859e5a7f9"
+  },
+  "capability_state": "PARTIAL",
+  "children": [
+    {
+      "cleanup_proven": true,
+      "host": "ubuntu2",
+      "receipt_sha256": "3f6d457b419a4ad966f26c4704b23daa62700d84f4c4d8d515e38e20e29f0919",
+      "requested_model": "grok-4.6",
+      "residual_count": 0,
+      "returncode": 124,
+      "run_id": "rs_20261006T212533Z_15080",
+      "served_model_attested": false,
+      "verdict": "TIMED_OUT_NO_ARTIFACT"
+    },
+    {
+      "cleanup_proven": true,
+      "host": "ubuntu2",
+      "receipt_sha256": "8f7cc6e04257d5d6931e6c075b9d27cafeb06ff48806d9149dc3537a4b9c24e3",
+      "requested_model": "grok-4.6",
+      "residual_count": 0,
+      "returncode": 0,
+      "run_id": "rs_20261006T213309Z_27991",
+      "served_model_attested": false,
+      "verdict": "BOUNDED_VERIFIER_ACCEPTED"
+    }
+  ],
+  "do_not_redo": [
+    "Craft compiler and role-method design.",
+    "Successful verifier implementation and original exact source closure proof.",
+    "Historical timeout or successful worker dispatches."
+  ],
+  "installation": {
+    "executive_profiles_changed": false,
+    "global_hook": "NOT_INSTALLED",
+    "native_skill_attested": false,
+    "pool_wrapper_changed": false,
+    "pool_wrapper_sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
+    "studio_pinned_consumers": 10
+  },
+  "mission": "Fresh workers receive a bounded task, one role method, attributed context, usable tools and an exact return path.",
+  "parent_verification": {
+    "log_sha256": "b8ef89a377574ef978743c6d5b8ef04cf23d31d70f07ab687da15689d46050db",
+    "passed": 3,
+    "source_files_unchanged": 27,
+    "tests_rerun": 3,
+    "worker_test_sha256": "e026f837926ed98f9a75ee4e678224e3993690a7573987743002c309cd40cdaa"
+  },
+  "pending": [
+    "Publish hardening delta and exact-head CI.",
+    "Coordinate pool wrapper rollout through the existing Studio publication owner for all ten pinned consumers.",
+    "Release retained Craft dependencies through their source owners before protected native CapabilityPackage admission.",
+    "Enroll native app credentials through each app owner; Linear auth is unresolved."
+  ],
+  "procedure_pin": "6e82f9af41bf175c87e70f6a852f73b71eca80c8",
+  "schema": "mastermind.fabric_launch_evidence.v1",
+  "source_dependencies": {
+    "587": "2238f840f8c173fe06e8288b2d9e53ed66f44756",
+    "588": "12f670bd55a2f28ce0e5507d6913b84f10ae9d37"
+  },
+  "source_dependencies_protected": false,
+  "source_predecessor": "e67027b1f35202703e5989a3980bb6e34f20d194",
+  "source_tested_live": "2fcaaae3c19a313c5eef850854e217a74abcd9d2",
+  "tests": {
+    "focused_passed": 159,
+    "log_sha256": "49e6700f4283feda838c6a79341908927fa01ffc631d31d3a818a36d82aa4dfd",
+    "predecessor_hosted_ci": {
+      "conclusion": "success",
+      "head": "e67027b1f35202703e5989a3980bb6e34f20d194",
+      "run_id": 37534408525
+    },
+    "subtests_passed": 59
+  }
+}
