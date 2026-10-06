@@ -3,8 +3,10 @@
 **Status:** research-only package. No DL-1 instrument, efficacy read, ranker, lifecycle state, portfolio rule, procurement, or production change is authorized.
 
 **Current source pins**
-- Mastermind protected `master`: `877b1e7f275da0b6d3558d2667778b32d628bf67`
+- Mastermind protected `master`: `d8c302b8a8a65ab13e2afba98cc73481606ed4d0`
 - Macro `main`: `0beebb3bd1f246a13396c3bd8f996103a26c3b77`
+
+The protected Skillpack at `d8c302...` retains schema `mastermind.sol_skillpack.v1`, version `1.0.1`, and the same `INDEX.md` blob as the prior `877b1e7...` pin; the intervening Mastermind movement is unrelated OS work and does not change this research ruling.
 
 **Scientific ruling:** **CONTINUE — NARROWED**  
 **Operational DL-0 ruling:** **WAIT_FOR_DATA / SOURCE_GATE**  
