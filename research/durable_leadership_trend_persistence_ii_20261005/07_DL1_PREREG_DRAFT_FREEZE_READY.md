@@ -226,6 +226,85 @@ Thus no post-formation disappearance can improve the result by disappearing from
 
 The structural-secondary hazard report, if ever opened after a primary pass, likewise requires zero `HAZARD_PENDING_*` rows; only ordinary administrative censoring at t+60 is permitted in its analyzed population.
 
+## 4A. Exhaustive endpoint attrition / delisting law
+
+Post-formation status is part of the endpoint definition. **No future-state row is silently dropped.** Formation-time abstentions in §8 are the only statistical abstentions permitted. After a row forms, every future state maps deterministically to a label/event or to a typed unresolved status that blocks the relevant read.
+
+### 4A.1 Daily Q4 comparison universe
+
+For every U.S. market trading session d used by an occupancy or first-exit endpoint, define `RANK_EXPECTED(d)` as securities that, at d:
+
+- are point-in-time S&P 1500 constituents under the existing membership owner;
+- are U.S. primary common-equity listings;
+- have resolved canonical issuer identity;
+- have at least 126 valid panel-close observations through d;
+- have no provenance-backed security termination effective before or on d.
+
+Define `RANK_UNIVERSE(d)` as the subset of `RANK_EXPECTED(d)` with a valid **exact-session** panel close on d and sufficient SPY history to compute `RS_126`.
+
+The focal security does **not** have to remain an S&P 1500 constituent after formation. `RANK_UNIVERSE(d)` supplies the comparison threshold even when the focal has left the index.
+
+A daily threshold is valid only if:
+
+- `|RANK_UNIVERSE(d)| >= 1000`; and
+- `|RANK_UNIVERSE(d)| / |RANK_EXPECTED(d)| >= 0.98`.
+
+Otherwise every DL-1 endpoint needing that date receives `PENDING_RANK_THRESHOLD`; the missing date is not skipped or substituted.
+
+For a valid date:
+
+`Q4_THRESHOLD(d) = quantile_0.75({RS_126(j,d): j in RANK_UNIVERSE(d)})`
+
+using Hyndman-Fan type 7 linear interpolation, identical to NumPy `quantile(..., 0.75, method="linear")`.
+
+A price from d−1 or d+1 is never substituted for d.
+
+### 4A.2 Focal-security continuity law
+
+After formation, follow the **formed economic security** through canonical security/issuer lineage:
+
+- pure ticker rename, exchange transfer, or listing migration with provenance-backed continuity of the same security/issuer => continue on the canonical successor listing;
+- acquisition/merger that legally terminates the formed security => terminal event even if consideration converts into an acquirer security;
+- unproven successor continuity => no guessed splice.
+
+Leaving the S&P 1500 by itself is neither an exit nor a censoring event.
+
+### 4A.3 Deterministic outcome-status table
+
+| Post-formation condition at required session d | `DL1_OCCUPANCY_h` treatment when d=t+h | `DL1_FIRST_EXIT_60` treatment | Statistical treatment |
+|---|---|---|---|
+| Focal remains PIT S&P 1500 member; exact valid close; valid daily Q4 threshold | 1 iff focal `RS_126(d) >= Q4_THRESHOLD(d)`, else 0 | first session with focal `RS_126(d) < Q4_THRESHOLD(d)` is exit | labeled |
+| Focal left S&P 1500 but remains same continuously identified, listed, priceable security | same 0/1 rule against **current** `RANK_UNIVERSE(d)` threshold | same rank-exit rule; index removal alone is not exit | labeled; never dropped for membership attrition |
+| Proven ticker rename / exchange transfer / primary-listing migration with canonical same-security continuity | follow successor listing and apply same 0/1 rule | continuity preserved; exit only by rank or later terminal rule | labeled |
+| Proven acquisition/merger effective on or before d that terminates formed security | 0 for every endpoint on/after effective session | terminal exit at first U.S. market session on/after effective timestamp | labeled event, never censored |
+| Proven delisting/security termination effective on or before d | 0 | terminal exit at first U.S. market session on/after effective timestamp | labeled event |
+| Bankruptcy/reorganization **with proven security termination or primary-listing termination** | 0 on/after termination | terminal exit on effective termination session | labeled event |
+| Bankruptcy/reorganization filing while the same primary security continues trading | normal rank rule | normal rank rule | labeled; bankruptcy filing alone is not terminal |
+| Loss of primary listing with **no** provenance-backed continuous successor | 0 on/after effective loss | terminal exit on effective loss session | labeled event |
+| Proven security-specific halt/suspension/no official close on an otherwise open U.S. market session | 0 if the halt spans t+h | first confirmed halt/suspension session is an exit | labeled event; not administrative missingness |
+| Exact-session close absent because source delivery/backfill is late, while source/market status does not prove halt or termination | `PENDING_PRICE_DATA` | `PENDING_PRICE_DATA` for that daily state | no label/censor/abstention; read blocked until exact-session fact resolves |
+| Price remains permanently unavailable and no provenance-backed halt/terminal/continuity status exists | `UNRESOLVED_PRICE_PERMANENT` | `UNRESOLVED_PRICE_PERMANENT` | no label/censor/abstention; relevant read permanently blocked |
+| Price-basis/corporate-action adjustment is unresolved so `RS_126` is not comparable | `UNRESOLVED_PRICE_BASIS` | `UNRESOLVED_PRICE_BASIS` | no imputation; relevant read blocked |
+| Daily Q4 threshold fails §4A.1 coverage | `PENDING_RANK_THRESHOLD` | `PENDING_RANK_THRESHOLD` | no label/censor/abstention; relevant read blocked |
+| Same security survives and stays at/above Q4 on every determinable session 1..60 | n/a | right-censor at 60 | **only** permitted right-censoring case |
+
+### 4A.4 Endpoint resolution law
+
+For the **primary occupancy read**, every otherwise analysis-admissible formed row must end in exactly one of:
+
+- `OCCUPIED=1`; or
+- `OCCUPIED=0` including deterministic terminal/halt states above.
+
+Required primary endpoint resolution rate = **100%**.
+
+Any `PENDING_*` or `UNRESOLVED_*` primary row means `WAIT_FOR_OUTCOME_DATA`; the row is not removed from N, denominator, power floor, or reporting.
+
+For the structural first-exit endpoint, administrative missingness is never treated as independent censoring. The hazard report may open only when every required daily state through exit/censor is determinable. Otherwise its status is `WAIT_FOR_HAZARD_DATA`. This secondary wait cannot change the primary occupancy verdict.
+
+### 4A.5 Provenance rule for terminal states
+
+A post-formation terminal/halt/continuity classification must be backed by the existing canonical security/identity/corporate-action source available to the study and carry an effective timestamp plus source receipt. If the estate cannot prove which condition occurred, the row remains typed unresolved. **Last price, zero price, average imputation, inferred acquisition, and future constituent status are forbidden substitutes.**
+
 ## 5. Formation clock and eligible universe
 
 Formation cadence: every fifth U.S. market trading session beginning at future gate-cleared/freeze anchor offset 0.
@@ -488,9 +567,12 @@ Training rows are all prior matured eligible rows whose **full 60-trading-sessio
 Thus the 60-session embargo is automatic.
 
 For each Bk:
+- every training row whose endpoint should have matured under the calendar must have a resolved primary status under §4A; otherwise the block is `WAIT_FOR_OUTCOME_DATA`;
 - compute transforms from eligible training rows only;
 - fit N/G/S/A on training rows only;
 - seal all Bk predictions before any Bk outcome matures.
+
+No post-formation missing/terminal row is removed to make a fit possible. Deterministic terminal states enter with their frozen 0 label; administrative unresolved states block the fit until resolved.
 
 B1–B3 are burn-in only. No A−S efficacy statistic or peer-feature outcome association from burn-in is exposed to a researcher.
 
@@ -541,7 +623,7 @@ Algorithm:
 1. Compute observed `Delta = mean_i(d_i)`.
 2. Center row loss differences: `d_i0 = d_i - Delta`.
 3. Let the 72 formation dates be indexed 0..71.
-4. For each of exactly 10,000 replicates using PRNG seed `2026100601`:
+4. Instantiate NumPy `Generator(PCG64(2026100601))`. For each of exactly 10,000 replicates:
    - sample six block-start indices independently and uniformly from 0..71 with replacement;
    - for each start, take 12 consecutive formation-date indices with circular wrap modulo 72;
    - concatenate the six blocks;
@@ -671,163 +753,165 @@ Report hazard-A versus hazard-S integrated Brier score through 60 sessions and p
 
 This structural secondary cannot rescue a failed primary and does not convert an occupancy null into a hazard null.
 
-## 23. Exact outcome-blind power simulation
+## 23. Exact outcome-blind power simulation — literal fitted-procedure refitting
 
-The power calculation must estimate the finite-sample behavior of the **actual frozen fitted procedure**. Synthetic oracle probabilities are permitted only to generate synthetic labels; they are never substituted for fitted S/A predictions in calibration or power adjudication.
+The power calculation must emulate the **same finite-sample fitted S-versus-A procedure** used by the study. No oracle `p_A` may be scored directly against a stored `p_S`.
 
-No confirmatory efficacy outcome, confirmatory A−S statistic, confirmatory G-feature/outcome association, subgroup efficacy, or hazard association may enter this procedure.
+Confirmatory efficacy outcomes remain sealed. Power may use:
 
-### 23.1 Inputs allowed before the sole reveal
+- B1–B3 matured primary labels after §4A resolution;
+- all B1–B9 formation-time covariates and row identities because they existed before each row's outcome;
+- formation dates, group/sector identities, abstention geometry, and source-quality metadata;
+- no B4–B9 outcome labels, A−S differences, G-feature/outcome associations, subgroup efficacy, or hazard outcomes.
 
-Power may use only:
+If B1–B3 primary labels are not 100% resolved under §4A, power status is `WAIT_FOR_OUTCOME_DATA`.
 
-- the fixed pre-outcome covariate matrices for all accrued B1–B9 rows;
-- formation dates, industry groups, and **formation-time** abstention/source-status geometry only;
-- B1–B3 matured `DL1_OCCUPANCY_20` labels;
-- the frozen S/G definitions and estimator;
-- no B4–B9 outcome label, terminal-event coding, endpoint missingness resolution, post-formation outcome status, or outcome-derived statistic.
+### 23.1 Frozen baseline outcome generator
 
-B1–B3 labels are development/burn-in inputs. They may be processed mechanically for power and fitting, but no burn-in A−S or G-efficacy statistic is emitted to a researcher.
+Pool B1–B3 rows only.
 
-### 23.2 Baseline generator from S only
+Using the exact estimator and transform law in §12:
 
-Using complete B1–B3 burn-in rows only:
+1. estimate S-training winsorization/standardization from pooled B1–B3 S covariates;
+2. fit one ridge-logistic **generator-S** to the real B1–B3 `DL1_OCCUPANCY_20` labels;
+3. apply that frozen generator transform/model to every B1–B9 row to obtain `p0_i`.
 
-1. fit the frozen ridge-logistic **S** model from §12 once, using the same winsorization/standardization rules;
-2. call its fitted probability for any accrued row `p0_i`;
-3. no G variable enters this baseline-generator fit.
+This generator is used only to define the synthetic data-generating process. Its coefficients are not a DL-1 efficacy result and are not shown to the researcher before the final read.
 
-For each burn-in formation date t:
+For each B1–B3 formation date t:
 
-- `n_t` = number of resolved burn-in rows;
-- `s_t` = number with occupancy20=1;
-- `q_t=(s_t+0.5)/(n_t+1)`;
-- `pbar_t` = mean baseline-generator `p0_i` for rows on t;
-- `a_t = logit(q_t) - logit(pbar_t)`, with q/p clipped to [1e-6,1−1e-6].
+- observed rate `q_t=(s_t+0.5)/(n_t+1)`;
+- generator mean `m_t=mean_i(p0_i)` across that date's burn-in rows;
+- date residual `a_t = logit(q_t) - logit(m_t)`.
 
 Estimate exactly one AR(1):
 
 `phi = clip(sum_{t=2..36}(a_t*a_{t-1}) / sum_{t=1..35}(a_t^2), -0.95, 0.95)`.
 
-Innovation variance is the mean squared residual of `a_t - phi*a_{t-1}` for t=2..36.
+Innovation variance:
 
-If the denominator is zero, set `phi=0`. If innovation variance is zero, use zero date shock.
+`sigma2 = mean((a_t - phi*a_{t-1})^2)`, t=2..36.
 
-No other dependence model is tried.
+If the denominator is zero, `phi=0`. If `sigma2=0`, all synthetic date shocks are zero. No alternative dependence model is tried.
 
-### 23.3 Frozen power-only peer direction
+### 23.2 Frozen outcome-blind peer-direction score
 
-Using **B1–B3 covariates only**, compute one fixed mean/SD (ddof=0) for each of:
+Construct a simulation-only scalar `z_i` from the five continuous G fields:
 
 - `peer_continuity_20`;
 - `breadth_q4_t`;
 - `breadth_change_20`;
-- `leader_dependency_hhi60`;
+- negative `leader_dependency_hhi60`;
 - `peer_residual_strength60`.
 
-For every accrued row i define:
+For each field, mean and population SD are estimated **once from pooled B1–B3 formation covariates only**. Standardize every B1–B9 row using those frozen burn-in moments, then take the arithmetic mean of the five standardized values.
 
-`z_i = mean(z_continuity, z_breadth, z_breadth_change, -z_dependency_hhi, z_peer_residual_strength)`.
+If any required burn-in SD is zero, power status is `WAIT_FOR_POWER_GEOMETRY`; no field is dropped or reweighted.
 
-`dependency_zero_positive` is not part of z.
+`dependency_zero_positive` remains an A-model feature but is not included in `z_i`.
 
-These burn-in transformations are frozen for the entire power calculation.
+`z_i` is a synthetic-alternative direction only. It is never a fitted DL-1 score and never enters actual S or A predictions except through A's own six frozen G regressors.
 
-`z_i` is a **data-generating device only**. It is never a fitted DL-1 feature reduction and never replaces the six-field G vector in A.
+### 23.3 Synthetic outcome law
 
-### 23.4 Synthetic data-generating law
+For a candidate scalar beta >=0, each synthetic dataset spans all B1–B9 rows.
 
-For each simulation replicate, generate one shared formation-date shock process across **all 108 formation dates B1–B9**.
+Instantiate independent date shocks:
 
-Use a stationary AR(1):
-
-- `eta_0 ~ Normal(0, sigma2/(1-phi^2))` when `|phi|<1`;
-- `eta_t = phi*eta_(t-1) + Normal(0,sigma2)`;
-- if `sigma2=0`, all eta are zero.
+- initial `eta_1 ~ Normal(0, sigma2/(1-phi^2))` when `sigma2>0`; otherwise 0;
+- `eta_t = phi*eta_(t-1) + epsilon_t`;
+- `epsilon_t ~ Normal(0, sigma2)`.
 
 For row i on formation date t:
 
-`p_gen_i(beta) = logistic(logit(p0_i) + beta*z_i + eta_t)`.
+`p_true_i(beta) = logistic(logit(clip(p0_i,1e-6,1-1e-6)) + beta*z_i + eta_t)`.
 
-Conditional on `p_gen`, draw each row's synthetic binary occupancy independently.
+Generate:
 
-The oracle `p_gen` is used **only to draw labels**. It is never scored against S, never used as A, and never appears in the §17 test statistic.
+`Y_i ~ Bernoulli(p_true_i(beta))`.
 
-### 23.5 Literal `RUN_SYNTHETIC_STUDY` procedure
+No real B4–B9 endpoint label enters this law.
 
-Every simulated dataset is adjudicated by literal refitting.
+### 23.4 Literal prequential refit inside every simulated dataset
 
-For blocks B4, B5, ..., B9 in order:
+For **every** synthetic dataset and for every confirmatory block B4 through B9:
 
-1. select the synthetic training rows using the exact §14 rule: a row is admissible only when its full 60-market-session post-formation window ends strictly before the first market session of the evaluation block;
-2. recompute the frozen §12 1st/99th winsor limits and mean/SD using those admissible training covariates only;
-3. fit a fresh frozen ridge-logistic **S** model on the synthetic training labels;
-4. fit a fresh frozen ridge-logistic **A** model on the same synthetic training labels;
-5. produce OOS S and A predictions for that evaluation block;
-6. seal the predictions and continue to the next block; later training may use earlier synthetic rows only when §14 makes them admissible.
+1. construct the synthetic training set using exactly §14: only prior rows whose full 60-market-session post-formation window ends strictly before the first market session of the evaluation block;
+2. use the synthetic `Y` values for those training rows;
+3. re-estimate that block's 1st/99th-percentile winsorization and mean/ddof=0 SD from the synthetic training rows' covariates exactly as §12;
+4. literally refit the frozen ridge-logistic **S** model with lambda=1;
+5. literally refit the frozen ridge-logistic **A** model with lambda=1;
+6. apply those fitted models to the evaluation block's frozen covariates;
+7. store the synthetic OOS `LogLoss_S`, `LogLoss_A`, and `d_i`.
 
-After B9:
-- concatenate only B4–B9 OOS predictions;
-- compute `d_i = LogLoss_S - LogLoss_A`;
-- compute the same `DeltaLogLoss20` and relative improvement as §§16/18;
-- when the caller requests inferential adjudication, apply the exact §17 circular moving-block-bootstrap test using the same fixed 10,000 bootstrap block-index draws generated once from seed `2026100601`.
+The same convergence criterion, zero-variance rule, no-class-weight rule, no-fallback rule, and clipping law apply.
 
-For §23.6 beta calibration, `RUN_SYNTHETIC_STUDY` performs every literal prequential S/A refit and OOS prediction above but does **not** run the bootstrap because `M(beta)` uses only fitted relative log-loss improvement. For §23.7 power estimation, the bootstrap is run exactly. This is a computational omission of an unused statistic, not an estimator shortcut.
+A synthetic dataset in which any required block returns `WAIT_FOR_MODEL_FIT` counts as a **non-rejection** for power. It is never repaired by changing the estimator or dropping a predictor.
 
-No oracle shortcut is permitted.
+This is literal finite-sample refitting. No synthetic oracle probability is used as an evaluated A prediction.
 
-If any S or A fit in any block violates the frozen §12 convergence rule, the entire power calculation returns `WAIT_FOR_MODEL_FIT`; failed simulation replicates are not silently discarded.
+### 23.5 Calibrate beta to the frozen 1% fitted-procedure alternative
 
-### 23.6 Calibrate the frozen 1% alternative on the fitted procedure
+Use NumPy `SeedSequence(2026100602)` to spawn exactly 2,000 independent `PCG64` dataset streams. Reuse the same streams/common random numbers for every beta evaluation.
 
-Define, for candidate beta:
+For a given beta:
 
-`M(beta) = mean over synthetic datasets of [DeltaLogLoss20 / mean(LogLoss_S)]`
+- simulate each full B1–B9 dataset under §23.3;
+- execute the literal refitting procedure in §23.4;
+- concatenate B4–B9 OOS predictions;
+- for successful-fit simulations compute
 
-where every value is produced by `RUN_SYNTHETIC_STUDY`, not by oracle probabilities.
+`RI_r(beta) = (mean(LogLoss_S) - mean(LogLoss_A)) / mean(LogLoss_S)`;
 
-Using PRNG seed `2026100602`:
+- failed-fit simulations contribute `RI_r=0`.
 
-- generate exactly 2,000 full B1–B9 simulation random-number tapes and reuse the same tapes for every beta;
-- bracket beta on [0,10];
-- require `M(0) < 0.01` and `M(10) >= 0.01`; otherwise power eligibility fails;
-- perform deterministic bisection for exactly 40 iterations:
-  - midpoint = (lo+hi)/2;
-  - if `M(midpoint) >=0.01`, set hi=midpoint;
-  - otherwise set lo=midpoint;
-- define `beta_star = hi`;
-- require `|M(beta_star)-0.01| <= 0.0001`; otherwise return `WAIT_FOR_POWER_CALIBRATION`.
+Define `F(beta)=mean_r(RI_r(beta))`.
 
-Thus the alternative is calibrated to **1.00% expected relative log-loss improvement of the actual finite-sample prequential fitted A over fitted S**, not to an oracle model.
+Solve beta on [0,10] by deterministic bisection for:
 
-### 23.7 Power estimate under literal refitting
+`F(beta)=0.010000`
 
-Using independent PRNG seed `2026100603`:
+with absolute tolerance `1e-5` and at most 60 iterations.
 
-1. generate exactly 20,000 new full B1–B9 synthetic datasets using `beta_star`;
-2. for each dataset run `RUN_SYNTHETIC_STUDY` literally;
-3. record success iff the §17 one-sided p-value is <0.05;
-4. do not substitute the materiality, calibration, stability, or challenger gates into the statistical-power calculation; those remain separate final advancement requirements.
+The endpoints beta=0 and beta=10 are evaluated first. If they do not bracket 0.010000, or if bisection does not reach tolerance within 60 iterations, power gate fails with `POWER_ALTERNATIVE_NOT_CALIBRATABLE`.
 
-Estimated power:
+The 1% target is therefore defined on the **actual fitted prequential A-versus-S procedure**, not on oracle probabilities.
 
-`POWER = (# simulations with p<0.05) / 20000`.
+### 23.6 Power estimate under literal refitting
 
-Requirement: **POWER >=0.80**.
+Use independent NumPy `SeedSequence(2026100603)` to spawn exactly 20,000 independent `PCG64` dataset streams.
 
-Monte Carlo standard error must be reported as `sqrt(POWER*(1-POWER)/20000)`; it does not change the 0.80 threshold.
+For each synthetic dataset:
 
-### 23.8 Power firewall
+1. generate B1–B9 outcomes using the calibrated beta and §23.3;
+2. literally refit S and A for B4–B9 under §23.4;
+3. if any required fit fails, record non-rejection;
+4. otherwise compute confirmatory `d_i`;
+5. apply the exact §17 one-sided circular moving-block bootstrap;
+6. record rejection iff `p<0.05`.
 
-The power engine may not:
+Estimated power = rejected datasets / 20,000.
 
-- read B4–B9 real outcomes;
-- fit A to any real confirmatory outcome;
-- tune beta from real G/outcome associations;
-- alter alpha, block length, sample floors, estimator, feature vector, or 1% effect floor;
-- replace literal refitting with an oracle or analytical shortcut unless a later prereg amendment proves exact mathematical equivalence **before any efficacy read**.
+Requirement: **estimated power >=0.80**.
 
-The power calculation cannot run before the taxonomy source gate supplies lawful prospective peer geometry and B1–B3 have matured.
+No alpha, effect floor, sample floor, block length, model, or bootstrap count changes if power is below 80%. Status remains `WAIT_FOR_DATA`.
+
+### 23.7 Exact bootstrap acceleration permitted — refitting may not be shortcut
+
+Literal S/A refitting in §23.4 is mandatory.
+
+After a simulated dataset has produced fixed OOS `d_i`, §17's row-level bootstrap may be computed with formation-date sufficient aggregates only:
+
+- `N_t = count(rows on formation date t)`;
+- `C_t = sum_i_on_t(d_i - Delta)`.
+
+For any bootstrap multiset of formation dates with multiplicities `m_t`:
+
+`Delta_star = sum_t(m_t*C_t) / sum_t(m_t*N_t)`.
+
+This is **algebraically identical** to duplicating every selected row with the same formation-date multiplicity and taking the row-weighted mean required by §17. Therefore date aggregation changes neither the bootstrap sample nor statistic; it is only a computational representation.
+
+No analogous shortcut is permitted for fitting S or A.
 
 ## 24. Final-read eligibility
 
