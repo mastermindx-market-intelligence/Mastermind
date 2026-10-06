@@ -18,7 +18,10 @@ from typing import Any
 
 TAB_REF_SCHEMA = "mastermind.browser_tab_ref.v1"
 TAB_REF_VERSION = "v1"
+BROKER_ACTION_SCHEMA = "mastermind.browser_broker_action_ref.v1"
+BROKER_ACTION_REF_VERSION = "ba1"
 MAX_TAB_REF_BYTES = 16 * 1024
+MAX_BROKER_ACTION_REF_BYTES = 32 * 1024
 MAX_TAB_REF_LIFETIME_MS = 5 * 60 * 1000
 HIGH_LEVEL_ACTIONS = frozenset(
     {"snapshot", "screenshot", "click", "type", "scroll", "navigate"}
@@ -28,6 +31,7 @@ _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _BROWSER_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~:-]{15,16383}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _PURPOSE = b"mastermind.browser-tab-ref.v1\0"
+_BROKER_ACTION_PURPOSE = b"mastermind.browser-broker-action-ref.v1\0"
 
 
 class BrowserTabRefError(ValueError):
@@ -162,6 +166,36 @@ class BrowserTabRef:
             _refuse("TIME_WINDOW_INVALID")
 
 
+@dataclasses.dataclass(frozen=True)
+class BrokeredBrowserActionRef:
+    schema: str
+    subject_digest: str
+    client_ref: str
+    resource: str
+    tab_ref_sha256: str
+    owner_action_ref: str
+    issued_at_ms: int
+    expires_at_ms: int
+
+    def __post_init__(self) -> None:
+        if self.schema != BROKER_ACTION_SCHEMA:
+            _refuse("ACTION_REF_INVALID")
+        _hex64(self.subject_digest, "SUBJECT_INVALID")
+        _token(self.client_ref)
+        _token(self.resource)
+        _hex64(self.tab_ref_sha256, "ACTION_TAB_BINDING_INVALID")
+        if (
+            type(self.owner_action_ref) is not str
+            or not 1 <= len(self.owner_action_ref.encode("utf-8")) <= MAX_TAB_REF_BYTES
+            or any(ord(ch) < 33 or ord(ch) > 126 for ch in self.owner_action_ref)
+        ):
+            _refuse("OWNER_ACTION_REF_INVALID")
+        issued = _integer(self.issued_at_ms, "ACTION_TIME_WINDOW_INVALID")
+        expires = _integer(self.expires_at_ms, "ACTION_TIME_WINDOW_INVALID")
+        if expires <= issued or expires - issued > MAX_TAB_REF_LIFETIME_MS:
+            _refuse("ACTION_TIME_WINDOW_INVALID")
+
+
 class BrowserTabRefCodec:
     """HMAC codec over canonical JSON. Holds only a signing key, never tab state."""
 
@@ -218,6 +252,119 @@ class BrowserTabRefCodec:
         payload = self._payload(value)
         signature = hmac.new(self._key, _PURPOSE + payload, hashlib.sha256).digest()
         return f"{TAB_REF_VERSION}.{_b64encode(payload)}.{_b64encode(signature)}"
+
+    @staticmethod
+    def _broker_action_dict(value: BrokeredBrowserActionRef) -> dict[str, object]:
+        if type(value) is not BrokeredBrowserActionRef:
+            _refuse("ACTION_REF_INVALID")
+        value.__post_init__()
+        return {
+            "schema": value.schema,
+            "subject_digest": value.subject_digest,
+            "client_ref": value.client_ref,
+            "resource": value.resource,
+            "tab_ref_sha256": value.tab_ref_sha256,
+            "owner_action_ref": value.owner_action_ref,
+            "issued_at_ms": value.issued_at_ms,
+            "expires_at_ms": value.expires_at_ms,
+        }
+
+    def encode_brokered_action(self, value: BrokeredBrowserActionRef) -> str:
+        try:
+            payload = json.dumps(
+                self._broker_action_dict(value),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeError):
+            _refuse("ACTION_REF_INVALID")
+        if not payload or len(payload) > MAX_BROKER_ACTION_REF_BYTES:
+            _refuse("ACTION_REF_INVALID")
+        signature = hmac.new(
+            self._key, _BROKER_ACTION_PURPOSE + payload, hashlib.sha256
+        ).digest()
+        return (
+            f"{BROKER_ACTION_REF_VERSION}."
+            f"{_b64encode(payload)}.{_b64encode(signature)}"
+        )
+
+    def decode_brokered_action(
+        self,
+        token: object,
+        *,
+        now_ms: int,
+        subject_digest: object,
+        client_ref: object,
+        resource: object,
+        tab_ref: object,
+        require_fresh: bool = True,
+    ) -> BrokeredBrowserActionRef:
+        _integer(now_ms, "ACTION_TIME_WINDOW_INVALID")
+        if type(require_fresh) is not bool:
+            _refuse("ACTION_REF_INVALID")
+        if (
+            type(token) is not str
+            or len(token.encode("utf-8")) > MAX_BROKER_ACTION_REF_BYTES * 2
+        ):
+            _refuse("ACTION_REF_INVALID")
+        parts = token.split(".")
+        if len(parts) != 3 or parts[0] != BROKER_ACTION_REF_VERSION:
+            _refuse("ACTION_REF_INVALID")
+        try:
+            payload = _b64decode(parts[1])
+            signature = _b64decode(parts[2])
+        except BrowserTabRefError:
+            _refuse("ACTION_REF_INVALID")
+        if (
+            len(payload) > MAX_BROKER_ACTION_REF_BYTES
+            or len(signature) != hashlib.sha256().digest_size
+        ):
+            _refuse("ACTION_REF_INVALID")
+        expected = hmac.new(
+            self._key, _BROKER_ACTION_PURPOSE + payload, hashlib.sha256
+        ).digest()
+        if not hmac.compare_digest(signature, expected):
+            _refuse("ACTION_REF_SIGNATURE_INVALID")
+        try:
+            raw = json.loads(
+                payload.decode("utf-8"),
+                object_pairs_hook=_strict_pairs,
+                parse_constant=lambda _value: _refuse("ACTION_REF_INVALID"),
+            )
+        except BrowserTabRefError:
+            raise
+        except (UnicodeDecodeError, ValueError, TypeError, RecursionError):
+            _refuse("ACTION_REF_INVALID")
+        expected_fields = {
+            field.name for field in dataclasses.fields(BrokeredBrowserActionRef)
+        }
+        if type(raw) is not dict or set(raw) != expected_fields:
+            _refuse("ACTION_REF_INVALID")
+        try:
+            value = BrokeredBrowserActionRef(**raw)
+        except TypeError:
+            _refuse("ACTION_REF_INVALID")
+        if now_ms < value.issued_at_ms:
+            _refuse("ACTION_TIME_WINDOW_INVALID")
+        if require_fresh and now_ms >= value.expires_at_ms:
+            _refuse("ACTION_REF_EXPIRED")
+        if (
+            type(subject_digest) is not str
+            or type(client_ref) is not str
+            or type(resource) is not str
+            or value.subject_digest != subject_digest
+            or value.client_ref != client_ref
+            or value.resource != resource
+        ):
+            _refuse("CALLER_BINDING_CHANGED")
+        if type(tab_ref) is not str:
+            _refuse("ACTION_TAB_BINDING_CHANGED")
+        tab_digest = hashlib.sha256(tab_ref.encode("utf-8")).hexdigest()
+        if tab_digest != value.tab_ref_sha256:
+            _refuse("ACTION_TAB_BINDING_CHANGED")
+        return value
 
     def decode(
         self,
@@ -301,10 +448,14 @@ class BrowserTabRefCodec:
 
 
 __all__ = [
+    "BROKER_ACTION_REF_VERSION",
+    "BROKER_ACTION_SCHEMA",
     "HIGH_LEVEL_ACTIONS",
+    "MAX_BROKER_ACTION_REF_BYTES",
     "MAX_TAB_REF_BYTES",
     "MAX_TAB_REF_LIFETIME_MS",
     "TAB_REF_SCHEMA",
+    "BrokeredBrowserActionRef",
     "BrowserTabRef",
     "BrowserTabRefCodec",
     "BrowserTabRefError",

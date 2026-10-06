@@ -10,6 +10,7 @@ from integrations.mastermind_browser_plugin.owner_adapter import (
     BrowserCallerBinding,
     ManagedBrowserOwnerAdapter,
     OwnerToolCall,
+    WorkbenchManagedProjector,
 )
 from integrations.mastermind_browser_plugin.tab_ref import (
     BrowserTabRef,
@@ -420,3 +421,266 @@ def test_workbench_projector_rejects_scroll_and_argument_smuggling():
 
     with pytest.raises(OwnerRefused):
         projector.project_read(tab_value(), "snapshot", {"filename": "leak.md"})
+
+
+def shared_token(caller=Caller(), *, consent_ref="consent-a", **changes):
+    values = dict(
+        backend=TabBackend.SHARED_HUMAN.value,
+        consent_ref=consent_ref,
+        subject_digest=caller.subject_digest,
+        client_ref=caller.client_ref,
+        resource=caller.resource,
+    )
+    values.update(changes)
+    return token(**values)
+
+
+def test_shared_human_adapter_multiplexes_two_callers_over_one_broker_owner():
+    from integrations.mastermind_browser_plugin.owner_adapter import (
+        SharedHumanBrowserOwnerAdapter,
+    )
+
+    broker = Caller(
+        subject_digest="9" * 64,
+        client_ref="browser-broker",
+        resource="workbench-browser",
+    )
+    effect = EffectPort()
+    current = []
+
+    owner = SharedHumanBrowserOwnerAdapter(
+        codec=BrowserTabRefCodec(KEY),
+        clock_ms=lambda: NOW,
+        caller_binding=caller_binding,
+        revalidate_tab=lambda caller, tab: current.append((caller, tab)) or True,
+        effect_port=effect,
+        projector=WorkbenchManagedProjector(),
+        fleet_reader=lambda caller, args: {"browsers": []},
+        tabs_reader=lambda caller, args: {"tabs": []},
+        expected_catalog_schema_digest=SCHEMA_DIGEST,
+        expected_backend_schema_digest=BACKEND_DIGEST,
+        broker_caller=broker,
+    )
+    alice = Caller(client_ref="alice")
+    bob = Caller(client_ref="bob")
+    alice_ref = shared_token(alice)
+    bob_ref = shared_token(bob)
+
+    asyncio.run(owner.browser_snapshot(alice, {"tab_ref": alice_ref}))
+    asyncio.run(owner.browser_snapshot(bob, {"tab_ref": bob_ref}))
+
+    assert [row[1] for row in effect.calls] == [broker, broker]
+    assert effect.calls[0][2] == effect.calls[1][2] == tab_value().browser_ref
+    assert [row[0].client_ref for row in current] == ["alice", "bob"]
+
+
+def test_shared_human_prepared_action_is_outer_bound_to_external_caller():
+    from integrations.mastermind_browser_plugin.owner_adapter import (
+        SharedHumanBrowserOwnerAdapter,
+    )
+
+    broker = Caller(
+        subject_digest="9" * 64,
+        client_ref="browser-broker",
+        resource="workbench-browser",
+    )
+    effect = EffectPort()
+    owner = SharedHumanBrowserOwnerAdapter(
+        codec=BrowserTabRefCodec(KEY),
+        clock_ms=lambda: NOW,
+        caller_binding=caller_binding,
+        revalidate_tab=lambda caller, tab: True,
+        effect_port=effect,
+        projector=WorkbenchManagedProjector(),
+        fleet_reader=lambda caller, args: {"browsers": []},
+        tabs_reader=lambda caller, args: {"tabs": []},
+        expected_catalog_schema_digest=SCHEMA_DIGEST,
+        expected_backend_schema_digest=BACKEND_DIGEST,
+        broker_caller=broker,
+    )
+    alice = Caller(client_ref="alice")
+    bob = Caller(client_ref="bob")
+    alice_ref = shared_token(alice)
+    bob_ref = shared_token(bob)
+
+    prepared = asyncio.run(
+        owner.prepare_browser_action(
+            alice,
+            {
+                "tab_ref": alice_ref,
+                "action": "click",
+                "args": {"element_ref": "element-a"},
+            },
+        )
+    )
+    assert prepared["action_ref"] != "owner-action-ref"
+    assert "owner-action-ref" not in prepared["action_ref"]
+
+    result = asyncio.run(
+        owner.run_browser_action(
+            alice,
+            {"tab_ref": alice_ref, "action_ref": prepared["action_ref"]},
+        )
+    )
+    assert result["effect"] == "APPLIED"
+    assert [row[0] for row in effect.calls] == ["prepare", "run"]
+    assert effect.calls[0][1] == broker
+    assert effect.calls[1][1] == broker
+    assert effect.calls[1][-1] == "owner-action-ref"
+
+    with pytest.raises(OwnerRefused, match="CALLER_BINDING_CHANGED"):
+        asyncio.run(
+            owner.run_browser_action(
+                bob,
+                {"tab_ref": bob_ref, "action_ref": prepared["action_ref"]},
+            )
+        )
+    assert [row[0] for row in effect.calls] == ["prepare", "run"]
+
+
+def test_shared_human_action_cannot_be_rebound_to_new_consent_or_document():
+    from integrations.mastermind_browser_plugin.owner_adapter import (
+        SharedHumanBrowserOwnerAdapter,
+    )
+
+    broker = Caller(
+        subject_digest="9" * 64,
+        client_ref="browser-broker",
+        resource="workbench-browser",
+    )
+    effect = EffectPort()
+    owner = SharedHumanBrowserOwnerAdapter(
+        codec=BrowserTabRefCodec(KEY),
+        clock_ms=lambda: NOW,
+        caller_binding=caller_binding,
+        revalidate_tab=lambda caller, tab: True,
+        effect_port=effect,
+        projector=WorkbenchManagedProjector(),
+        fleet_reader=lambda caller, args: {"browsers": []},
+        tabs_reader=lambda caller, args: {"tabs": []},
+        expected_catalog_schema_digest=SCHEMA_DIGEST,
+        expected_backend_schema_digest=BACKEND_DIGEST,
+        broker_caller=broker,
+    )
+    caller = Caller(client_ref="alice")
+    first = shared_token(caller, consent_ref="consent-a")
+    second = shared_token(caller, consent_ref="consent-b")
+
+    prepared = asyncio.run(
+        owner.prepare_browser_action(
+            caller,
+            {
+                "tab_ref": first,
+                "action": "click",
+                "args": {"element_ref": "element-a"},
+            },
+        )
+    )
+    with pytest.raises(OwnerRefused, match="ACTION_TAB_BINDING_CHANGED"):
+        asyncio.run(
+            owner.run_browser_action(
+                caller,
+                {"tab_ref": second, "action_ref": prepared["action_ref"]},
+            )
+        )
+    assert [row[0] for row in effect.calls] == ["prepare"]
+
+
+def test_shared_human_reconcile_survives_consent_revocation_expiry_and_schema_upgrade():
+    from integrations.mastermind_browser_plugin.owner_adapter import (
+        SharedHumanBrowserOwnerAdapter,
+    )
+
+    broker = Caller(
+        subject_digest="9" * 64,
+        client_ref="browser-broker",
+        resource="workbench-browser",
+    )
+    effect = EffectPort()
+    current = []
+    owner = SharedHumanBrowserOwnerAdapter(
+        codec=BrowserTabRefCodec(KEY),
+        clock_ms=lambda: NOW,
+        caller_binding=caller_binding,
+        revalidate_tab=lambda caller, tab: current.append((caller, tab)) or True,
+        effect_port=effect,
+        projector=WorkbenchManagedProjector(),
+        fleet_reader=lambda caller, args: {"browsers": []},
+        tabs_reader=lambda caller, args: {"tabs": []},
+        expected_catalog_schema_digest=SCHEMA_DIGEST,
+        expected_backend_schema_digest=BACKEND_DIGEST,
+        broker_caller=broker,
+    )
+    caller = Caller(client_ref="alice")
+    tab_ref = shared_token(caller)
+    prepared = asyncio.run(
+        owner.prepare_browser_action(
+            caller,
+            {
+                "tab_ref": tab_ref,
+                "action": "click",
+                "args": {"element_ref": "element-a"},
+            },
+        )
+    )
+
+    # A later process may run with different current schemas and no live consent;
+    # reconciliation must still reach the original durable effect owner.
+    later = SharedHumanBrowserOwnerAdapter(
+        codec=BrowserTabRefCodec(KEY),
+        clock_ms=lambda: NOW + 60_000,
+        caller_binding=caller_binding,
+        revalidate_tab=lambda caller, tab: False,
+        effect_port=effect,
+        projector=WorkbenchManagedProjector(),
+        fleet_reader=lambda caller, args: {"browsers": []},
+        tabs_reader=lambda caller, args: {"tabs": []},
+        expected_catalog_schema_digest="f" * 64,
+        expected_backend_schema_digest="a" * 64,
+        broker_caller=broker,
+    )
+    result = asyncio.run(
+        later.reconcile_browser_action(
+            caller,
+            {"tab_ref": tab_ref, "action_ref": prepared["action_ref"]},
+        )
+    )
+    assert result["effect"] == "EFFECT_UNKNOWN"
+    assert result["reconciled"] is True
+    assert current  # prepare did revalidate while live
+    assert [row[0] for row in effect.calls] == ["prepare", "reconcile"]
+    assert effect.calls[-1][1] == broker
+
+
+def test_shared_human_adapter_rejects_managed_refs_and_never_uses_external_caller_at_effect_port():
+    from integrations.mastermind_browser_plugin.owner_adapter import (
+        SharedHumanBrowserOwnerAdapter,
+    )
+
+    broker = Caller(
+        subject_digest="9" * 64,
+        client_ref="browser-broker",
+        resource="workbench-browser",
+    )
+    effect = EffectPort()
+    owner = SharedHumanBrowserOwnerAdapter(
+        codec=BrowserTabRefCodec(KEY),
+        clock_ms=lambda: NOW,
+        caller_binding=caller_binding,
+        revalidate_tab=lambda caller, tab: True,
+        effect_port=effect,
+        projector=WorkbenchManagedProjector(),
+        fleet_reader=lambda caller, args: {"browsers": []},
+        tabs_reader=lambda caller, args: {"tabs": []},
+        expected_catalog_schema_digest=SCHEMA_DIGEST,
+        expected_backend_schema_digest=BACKEND_DIGEST,
+        broker_caller=broker,
+    )
+    with pytest.raises(OwnerRefused, match="BACKEND_MISMATCH"):
+        asyncio.run(
+            owner.browser_snapshot(
+                Caller(),
+                {"tab_ref": token()},
+            )
+        )
+    assert effect.calls == []

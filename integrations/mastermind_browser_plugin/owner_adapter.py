@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import hashlib
 import inspect
 import json
 import re
@@ -18,6 +19,8 @@ from urllib.parse import urlsplit
 
 from .facade import OwnerRefused
 from .tab_ref import (
+    BROKER_ACTION_SCHEMA,
+    BrokeredBrowserActionRef,
     BrowserTabRef,
     BrowserTabRefCodec,
     BrowserTabRefError,
@@ -263,6 +266,12 @@ class ManagedBrowserOwnerAdapter:
             raise OwnerRefused("CLOCK_UNAVAILABLE")
         return value
 
+    def _required_backend(self) -> str:
+        return TabBackend.MANAGED.value
+
+    def _effect_caller(self, caller: Any) -> Any:
+        return caller
+
     async def _caller(self, caller: Any) -> BrowserCallerBinding:
         try:
             binding = await _maybe(self._caller_binding(caller))
@@ -299,7 +308,7 @@ class ManagedBrowserOwnerAdapter:
             or tab.resource != binding.resource
         ):
             raise OwnerRefused("CALLER_BINDING_CHANGED")
-        if tab.backend != TabBackend.MANAGED.value:
+        if tab.backend != self._required_backend():
             raise OwnerRefused("BACKEND_MISMATCH")
         if require_current:
             if tab.catalog_schema_digest != self._catalog_digest:
@@ -376,7 +385,7 @@ class ManagedBrowserOwnerAdapter:
         )
         value = await _maybe(
             self._effect_port.call_read_tool(
-                caller,
+                self._effect_caller(caller),
                 tab.browser_ref,
                 projected.tool_name,
                 dict(projected.arguments),
@@ -402,7 +411,7 @@ class ManagedBrowserOwnerAdapter:
         )
         action_ref = await _maybe(
             self._effect_port.prepare_action(
-                caller,
+                self._effect_caller(caller),
                 tab.browser_ref,
                 projected.tool_name,
                 dict(projected.arguments),
@@ -421,7 +430,7 @@ class ManagedBrowserOwnerAdapter:
         )
         value = await _maybe(
             self._effect_port.run_action(
-                caller,
+                self._effect_caller(caller),
                 tab.browser_ref,
                 args["action_ref"],
             )
@@ -437,9 +446,143 @@ class ManagedBrowserOwnerAdapter:
         )
         value = await _maybe(
             self._effect_port.reconcile_action(
-                caller,
+                self._effect_caller(caller),
                 tab.browser_ref,
                 args["action_ref"],
+            )
+        )
+        return self._receipt(value)
+
+
+class SharedHumanBrowserOwnerAdapter(ManagedBrowserOwnerAdapter):
+    """Multiplex external callers over one owner-bound Playwright extension broker.
+
+    The official Playwright extension gives one MCP client one user-selected tab
+    group. Mastermind keeps exactly one broker MCP resource for that group and
+    issues separate signed BrowserTabRef capabilities to admitted callers above
+    it. The durable Workbench action owner continues to own all browser effects.
+    """
+
+    def __init__(self, *, broker_caller: Any, **kwargs: Any) -> None:
+        if broker_caller is None:
+            raise TypeError("broker caller is required")
+        super().__init__(**kwargs)
+        self._broker_caller = broker_caller
+
+    def _required_backend(self) -> str:
+        return TabBackend.SHARED_HUMAN.value
+
+    def _effect_caller(self, caller: Any) -> Any:
+        return self._broker_caller
+
+    async def prepare_browser_action(self, caller: Any, args: dict) -> dict:
+        action = args["action"]
+        tab_ref = args["tab_ref"]
+        tab = await self._decode_tab(
+            caller,
+            tab_ref,
+            action=action,
+            require_fresh=True,
+            require_current=True,
+        )
+        projected = self._tool_call(
+            await _maybe(
+                self._projector.project_action(tab, action, dict(args["args"]))
+            )
+        )
+        owner_action_ref = await _maybe(
+            self._effect_port.prepare_action(
+                self._broker_caller,
+                tab.browser_ref,
+                projected.tool_name,
+                dict(projected.arguments),
+            )
+        )
+        if type(owner_action_ref) is not str or not owner_action_ref:
+            raise ValueError("effect owner action reference is invalid")
+        now_ms = self._now()
+        if now_ms >= tab.expires_at_ms:
+            raise OwnerRefused("TAB_REF_EXPIRED")
+        try:
+            outer = self._codec.encode_brokered_action(
+                BrokeredBrowserActionRef(
+                    schema=BROKER_ACTION_SCHEMA,
+                    subject_digest=tab.subject_digest,
+                    client_ref=tab.client_ref,
+                    resource=tab.resource,
+                    tab_ref_sha256=hashlib.sha256(
+                        tab_ref.encode("utf-8")
+                    ).hexdigest(),
+                    owner_action_ref=owner_action_ref,
+                    issued_at_ms=now_ms,
+                    expires_at_ms=tab.expires_at_ms,
+                )
+            )
+        except BrowserTabRefError as exc:
+            raise OwnerRefused(str(exc)) from exc
+        return {"action_ref": outer}
+
+    def _decode_outer_action(
+        self,
+        tab: BrowserTabRef,
+        *,
+        tab_ref: object,
+        action_ref: object,
+        require_fresh: bool,
+    ) -> BrokeredBrowserActionRef:
+        try:
+            return self._codec.decode_brokered_action(
+                action_ref,
+                now_ms=self._now(),
+                subject_digest=tab.subject_digest,
+                client_ref=tab.client_ref,
+                resource=tab.resource,
+                tab_ref=tab_ref,
+                require_fresh=require_fresh,
+            )
+        except BrowserTabRefError as exc:
+            raise OwnerRefused(str(exc)) from exc
+
+    async def run_browser_action(self, caller: Any, args: dict) -> dict:
+        tab = await self._decode_tab(
+            caller,
+            args["tab_ref"],
+            require_fresh=True,
+            require_current=True,
+        )
+        prepared = self._decode_outer_action(
+            tab,
+            tab_ref=args["tab_ref"],
+            action_ref=args["action_ref"],
+            require_fresh=True,
+        )
+        value = await _maybe(
+            self._effect_port.run_action(
+                self._broker_caller,
+                tab.browser_ref,
+                prepared.owner_action_ref,
+            )
+        )
+        return self._receipt(value)
+
+    async def reconcile_browser_action(self, caller: Any, args: dict) -> dict:
+        tab = await self._decode_tab(
+            caller,
+            args["tab_ref"],
+            require_fresh=False,
+            require_current=False,
+        )
+        prepared = self._decode_outer_action(
+            tab,
+            tab_ref=args["tab_ref"],
+            action_ref=args["action_ref"],
+            require_fresh=False,
+        )
+        value = await _maybe(
+            self._effect_port.reconcile_action(
+                self._broker_caller,
+                tab.browser_ref,
+                prepared.owner_action_ref,
             )
         )
         return self._receipt(value)
@@ -451,5 +594,6 @@ __all__ = [
     "ManagedBrowserOwnerAdapter",
     "ManagedToolProjector",
     "OwnerToolCall",
+    "SharedHumanBrowserOwnerAdapter",
     "WorkbenchManagedProjector",
 ]

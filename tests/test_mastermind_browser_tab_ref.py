@@ -258,3 +258,170 @@ def test_expired_tab_ref_can_be_decoded_only_for_original_reconciliation():
     assert recovered == binding()
     with pytest.raises(BrowserTabRefError, match="TIME_WINDOW_INVALID"):
         codec().decode(token, now_ms=NOW - 1, require_fresh=False)
+
+
+def test_brokered_action_ref_roundtrips_and_hides_owner_action_ref():
+    from integrations.mastermind_browser_plugin.tab_ref import (
+        BROKER_ACTION_SCHEMA,
+        BrokeredBrowserActionRef,
+    )
+
+    tab_token = codec().encode(
+        binding(
+            backend=TabBackend.SHARED_HUMAN.value,
+            consent_ref="consent-a",
+        )
+    )
+    action = BrokeredBrowserActionRef(
+        schema=BROKER_ACTION_SCHEMA,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        tab_ref_sha256=hashlib.sha256(tab_token.encode("utf-8")).hexdigest(),
+        owner_action_ref="owner-action-ref",
+        issued_at_ms=NOW,
+        expires_at_ms=NOW + 60_000,
+    )
+    token_value = codec().encode_brokered_action(action)
+    assert "owner-action-ref" not in token_value
+    assert codec().decode_brokered_action(
+        token_value,
+        now_ms=NOW + 1,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        tab_ref=tab_token,
+    ) == action
+
+
+def test_brokered_action_ref_is_bound_to_external_caller_and_exact_tab_ref():
+    from integrations.mastermind_browser_plugin.tab_ref import (
+        BROKER_ACTION_SCHEMA,
+        BrokeredBrowserActionRef,
+    )
+
+    first = codec().encode(
+        binding(
+            backend=TabBackend.SHARED_HUMAN.value,
+            consent_ref="consent-a",
+        )
+    )
+    second = codec().encode(
+        binding(
+            backend=TabBackend.SHARED_HUMAN.value,
+            consent_ref="consent-b",
+        )
+    )
+    action = BrokeredBrowserActionRef(
+        schema=BROKER_ACTION_SCHEMA,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        tab_ref_sha256=hashlib.sha256(first.encode("utf-8")).hexdigest(),
+        owner_action_ref="owner-action-ref",
+        issued_at_ms=NOW,
+        expires_at_ms=NOW + 60_000,
+    )
+    outer = codec().encode_brokered_action(action)
+
+    for changes in (
+        {"subject_digest": "e" * 64},
+        {"client_ref": "client-b"},
+        {"resource": "other-resource"},
+        {"tab_ref": second},
+    ):
+        kwargs = dict(
+            token=outer,
+            now_ms=NOW + 1,
+            subject_digest="b" * 64,
+            client_ref="client-a",
+            resource="browser-resource",
+            tab_ref=first,
+        )
+        kwargs.update(changes)
+        with pytest.raises(
+            BrowserTabRefError,
+            match="CALLER_BINDING_CHANGED|ACTION_TAB_BINDING_CHANGED",
+        ):
+            codec().decode_brokered_action(**kwargs)
+
+
+def test_brokered_action_ref_expiry_blocks_run_but_not_original_reconcile():
+    from integrations.mastermind_browser_plugin.tab_ref import (
+        BROKER_ACTION_SCHEMA,
+        BrokeredBrowserActionRef,
+    )
+
+    tab_token = codec().encode(
+        binding(
+            backend=TabBackend.SHARED_HUMAN.value,
+            consent_ref="consent-a",
+        )
+    )
+    action = BrokeredBrowserActionRef(
+        schema=BROKER_ACTION_SCHEMA,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        tab_ref_sha256=hashlib.sha256(tab_token.encode("utf-8")).hexdigest(),
+        owner_action_ref="owner-action-ref",
+        issued_at_ms=NOW,
+        expires_at_ms=NOW + 60_000,
+    )
+    outer = codec().encode_brokered_action(action)
+    with pytest.raises(BrowserTabRefError, match="ACTION_REF_EXPIRED"):
+        codec().decode_brokered_action(
+            outer,
+            now_ms=NOW + 60_000,
+            subject_digest="b" * 64,
+            client_ref="client-a",
+            resource="browser-resource",
+            tab_ref=tab_token,
+        )
+    assert codec().decode_brokered_action(
+        outer,
+        now_ms=NOW + 60_000,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        tab_ref=tab_token,
+        require_fresh=False,
+    ).owner_action_ref == "owner-action-ref"
+
+
+def test_brokered_action_ref_tampering_is_refused():
+    from integrations.mastermind_browser_plugin.tab_ref import (
+        BROKER_ACTION_SCHEMA,
+        BrokeredBrowserActionRef,
+    )
+
+    tab_token = codec().encode(
+        binding(
+            backend=TabBackend.SHARED_HUMAN.value,
+            consent_ref="consent-a",
+        )
+    )
+    action = BrokeredBrowserActionRef(
+        schema=BROKER_ACTION_SCHEMA,
+        subject_digest="b" * 64,
+        client_ref="client-a",
+        resource="browser-resource",
+        tab_ref_sha256=hashlib.sha256(tab_token.encode("utf-8")).hexdigest(),
+        owner_action_ref="owner-action-ref",
+        issued_at_ms=NOW,
+        expires_at_ms=NOW + 60_000,
+    )
+    outer = codec().encode_brokered_action(action)
+    prefix, payload, signature = outer.split(".")
+    raw = bytearray(base64.urlsafe_b64decode(payload + "=="))
+    raw[-2] ^= 1
+    changed = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    with pytest.raises(BrowserTabRefError):
+        codec().decode_brokered_action(
+            f"{prefix}.{changed}.{signature}",
+            now_ms=NOW + 1,
+            subject_digest="b" * 64,
+            client_ref="client-a",
+            resource="browser-resource",
+            tab_ref=tab_token,
+        )
