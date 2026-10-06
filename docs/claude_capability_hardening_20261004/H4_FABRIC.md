@@ -92,11 +92,62 @@ new orchestration schema. A regression test requires that refusal. Therefore H4-
 Job/root through today's CEO or bounded-principal sink even if a model can construct the public
 business request.
 
-**H4-B** is the next shared-owner compatibility unit after #1041 reaches an accepted current-base
-interface. H4-B must authenticate/authorize the role-correct principal action kind, derive the
-current host execution/profile/source/proof/placement binding from existing owners, and connect
-the H4-A envelope to #1041's existing root/domain constructor atomically. It must preserve the same
-request/intent identity and reject cross-kind or semantic drift rather than creating another root.
+**H4-B** is the next shared-owner compatibility unit against the **current protected V1 COO graph**.
+The deeper current-master recensus supersedes the earlier assumption that #1041 must merge first:
+canonical Runtime/CooCycle already supplies the strict aggregation root, planner, plan admission,
+work, independent review, repair, immutable aggregation handoff and exact dispatch/reconciliation
+path required by H4. H4's first live proof can run with direct depth-1 children under that root;
+it does not require #1041's extra depth-2/domain layer.
+
+#1041 is therefore a historical/reference source for this program, not a merge prerequisite. Its
+later Fable principal disposition (should_close_unmerged) is compatible with H4 because none of
+the H4 acceptance cases require an intermediate domain. Do not copy #1041's schema bump,
+provider-charge ledger, domain service-custody layer or depth increase into H4.
+
+H4-B must authenticate/authorize the role-correct principal action kind, derive the current host
+execution/profile/source/proof/placement binding from existing owners, and connect the H4-A
+envelope to the existing protected strict-V2 aggregation-root constructor atomically. It must
+preserve the same request/intent identity and reject cross-kind or semantic drift rather than
+creating another root.
+
+### Current protected-root finding
+
+Current protected Runtime has one private strict root constructor,
+JobRegistry.create_v2_orchestration_root(...). It accepts only mastermind.ceo_intent.v2, derives
+one deterministic intent command, binds the reviewed execution/placement and Dialogue source, and
+persists root orchestration provenance with creator=ceo_intent.
+
+That creator is not decorative. Current source reasserts it across root decoding, child lineage,
+planner creation, interactive-plan creation, plan admission, dispatch/requeue, aggregation handoff,
+finite-control validation, terminal proof and replay. H4-B therefore must factor one closed
+root-source discriminator/validator used by every one of those paths. A scattered collection of
+creator == ceo_intent OR creator == coo_principal exceptions is not acceptable.
+
+The new principal root source must have:
+- a distinct closed source/schema identity for governed orchestration;
+- the same stable principal request_ref / intent_id used by H4-A and principal status;
+- its own action fingerprint including governed_orchestration;
+- exact current principal binding / mission authority generation;
+- the same reviewed host execution/placement and Dialogue-source facts required by CEO v2;
+- deterministic root command/replay identity under the existing event store;
+- root provenance that preserves the actual principal issuer rather than relabeling it CEO.
+
+Existing CEO-v2 roots and every historical creator=ceo_intent receipt remain byte/semantic
+compatible. Generic create_job remains unable to mint aggregation roots and the private root
+creation capability remains non-model-visible.
+
+### Current principal-ingress finding
+
+Current executive_ceo_ingress already has App-only principal submit/status frames and one shared
+replay/grounding/fresh-admission path. H4 should reuse those owners:
+- keep the existing principal status identity because H4-A intentionally shares request_ref /
+  intent_id across action kinds;
+- add a separately discriminated fresh principal-orchestration submit frame rather than widening
+  the existing bounded-intent request shape;
+- derive a trusted final orchestration sink envelope from H4-A plus current host bindings;
+- never coerce that envelope into CEO v2 merely to reach create_v2_orchestration_root;
+- durable cross-kind reuse under the same request identity must conflict on action/root fingerprint
+  instead of minting a second root.
 
 ### Current authority-owner finding
 
