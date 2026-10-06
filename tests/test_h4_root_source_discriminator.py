@@ -24,8 +24,10 @@ def _root(creator: str = "ceo_intent", *, schema: str | None = None):
     }
 
 
-def test_root_source_discriminator_is_closed_and_ceo_only_today() -> None:
-    assert runtime._ORCHESTRATION_ROOT_CREATORS == frozenset({"ceo_intent"})
+def test_root_source_discriminator_is_closed_to_reviewed_root_creators() -> None:
+    assert runtime._ORCHESTRATION_ROOT_CREATORS == frozenset(
+        {"ceo_intent", runtime.PRINCIPAL_ORCHESTRATION_ROOT_CREATOR}
+    )
     root_source = {
         "schema_version": runtime._ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA,
         "creator": "ceo_intent",
@@ -48,6 +50,13 @@ def test_root_source_discriminator_is_closed_and_ceo_only_today() -> None:
     assert runtime._orchestration_root_creator(_root()) == "ceo_intent"
     assert runtime._accepted_orchestration_root_provenance(_root()) is True
     assert runtime._ceo_intent_root_provenance(_root()) is True
+
+    principal = _root(runtime.PRINCIPAL_ORCHESTRATION_ROOT_CREATOR)
+    assert runtime._orchestration_root_creator(principal) == (
+        runtime.PRINCIPAL_ORCHESTRATION_ROOT_CREATOR
+    )
+    assert runtime._accepted_orchestration_root_provenance(principal) is True
+    assert runtime._ceo_intent_root_provenance(principal) is False
 
     for creator in ("coo_cycle", "principal_orchestration", "", "ceo-intent"):
         assert runtime._orchestration_root_creator(_root(creator)) is None
@@ -104,6 +113,7 @@ def test_generic_runtime_lifecycle_uses_one_root_source_discriminator() -> None:
         "create_interactive_operator",
         "admit_cycle_plan",
         "create_cycle_handoff",
+        "_remember",
     }
     for name in generic:
         calls = _called_names(_function(tree, name))
@@ -119,7 +129,6 @@ def test_generic_runtime_lifecycle_uses_one_root_source_discriminator() -> None:
         "create_v2_orchestration_root",
         "arm_finite_cycle",
         "_validated_capacity_source_root",
-        "_remember",
     }
     assert _functions_containing_literal(tree, "ceo_intent") == allowed_ceo_specific
 

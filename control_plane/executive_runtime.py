@@ -259,11 +259,15 @@ _ORCHESTRATION_PROVENANCE_SCHEMA = "mastermind.executive_orchestration_provenanc
 _ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA = (
     "mastermind.executive_orchestration_provenance_source/v1"
 )
-# Closed current root-source vocabulary. H4 principal-root work may add one
-# separately reviewed creator here only after its source/command/replay contract
-# exists. Sealed child provenance remains coo_cycle and finite-drive paths below
-# retain their explicit CEO-intent requirement.
-_ORCHESTRATION_ROOT_CREATORS = frozenset({"ceo_intent"})
+# Closed root-source vocabulary. The COO-principal creator is source-only until
+# its separately reviewed ingress is composed; sealed child provenance remains
+# coo_cycle and finite-drive paths below retain their explicit CEO-intent
+# requirement.
+CEO_ORCHESTRATION_ROOT_CREATOR = "ceo_intent"
+PRINCIPAL_ORCHESTRATION_ROOT_CREATOR = "coo_principal"
+_ORCHESTRATION_ROOT_CREATORS = frozenset(
+    {CEO_ORCHESTRATION_ROOT_CREATOR, PRINCIPAL_ORCHESTRATION_ROOT_CREATOR}
+)
 COO_CYCLE_BLOCK_REASONS = frozenset(
     {
         "invalid_root",
@@ -12279,6 +12283,100 @@ class JobRegistry:
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
         )
 
+    def create_principal_orchestration_root(
+        self,
+        bundle: Mapping[str, Any],
+        *,
+        principal_admission_guard: Callable[[object], None],
+    ) -> Job:
+        """Create one source-only COO-principal aggregation root.
+
+        No current MCP/ingress path calls this method. The existing host guard
+        must re-prove the exact principal/mission authority generation before
+        the Runtime effect. Stable command identity is shared with bounded COO
+        work so cross-kind reuse is a reconciliation conflict, never a second
+        root.
+        """
+
+        from control_plane.ceo_intent import command_id_for
+        from control_plane.coo_principal_envelope import (
+            CooPrincipalEnvelopeError,
+            principal_orchestration_bundle_digest,
+            validate_principal_orchestration_bundle,
+        )
+
+        if not callable(principal_admission_guard):
+            raise StateConflict(
+                "principal orchestration requires a current admission guard"
+            )
+        try:
+            normalized = validate_principal_orchestration_bundle(bundle)
+            bundle_digest = principal_orchestration_bundle_digest(normalized)
+        except CooPrincipalEnvelopeError as exc:
+            raise StateConflict(
+                f"principal orchestration bundle is invalid: {exc}"
+            ) from exc
+
+        intent_id = str(normalized["intent_id"])
+        command_id = command_id_for(intent_id)
+        existing = self.store.find_event_by_command_id(command_id)
+        if existing is not None:
+            raise StateConflict(
+                "principal orchestration operation already has durable state; "
+                "reconcile the original request"
+            )
+        try:
+            principal_admission_guard(normalized)
+        except Exception as exc:
+            raise StateConflict(
+                "principal orchestration admission is not current"
+            ) from exc
+
+        request = normalized["normalized_request"]
+        envelope = normalized["envelope"]
+        try:
+            attempt_limit = CooCyclePolicy.load().max_attempts_per_orchestration_job
+        except CooCyclePolicyError as exc:
+            raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
+
+        provenance = {
+            "schema": envelope["schema"],
+            "intent_id": intent_id,
+            "request_ref": normalized["request_ref"],
+            "action_kind": normalized["action_kind"],
+            "request_fingerprint": normalized["request_fingerprint"],
+            "bundle_digest": bundle_digest,
+            "actor": envelope["actor"],
+            "seat": envelope["seat"],
+            "principal_binding_digest": envelope["principal_binding_digest"],
+            "mission_authority_ref": envelope["mission_authority_ref"],
+            "authority_generation_digest": envelope["authority_generation_digest"],
+            "grounding": dict(envelope["grounding"]),
+            "workstream": envelope["workstream"],
+        }
+        return self.create_job(
+            str(request["objective"]),
+            department=str(request["department"]),
+            priority=int(request["priority"]),
+            authority_level="A0",
+            constraints={},
+            attempt_limit=int(attempt_limit),
+            requested_authorities=["READ"],
+            allowed_write_paths=[],
+            validation_commands=[],
+            command_id=command_id,
+            provenance=provenance,
+            business_impact=str(request["business_impact"]),
+            orchestration_role="aggregation",
+            orchestration_provenance={
+                "schema_version": _ORCHESTRATION_PROVENANCE_SOURCE_SCHEMA,
+                "creator": PRINCIPAL_ORCHESTRATION_ROOT_CREATOR,
+                "source_id": intent_id,
+                "source_digest": bundle_digest,
+            },
+            _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
+        )
+
     def create_cycle_planner(
         self,
         root_job_id: str,
@@ -23593,7 +23691,7 @@ class BoundedRuntimeReadObservation:
         self._after: int | None = None
         self._identity: str | None = None
         self._receipt: RuntimeReadObservationReceipt | None = None
-        self._commands: dict[str, tuple[str, str, str]] = {}
+        self._commands: dict[str, tuple[str, str, str, str]] = {}
         self._events: dict[str, Event | None] = {}
         # Fixed VM budget handed to the fresh private connection this
         # observation's owner opens; it is never a caller-facing callback.
@@ -23632,8 +23730,7 @@ class BoundedRuntimeReadObservation:
             if not (isinstance(cycle, Mapping) and set(cycle) == keys
                     and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
                     and digest == orchestration_digest(cycle)
-                    and cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
-                    and cycle.get("creator") == "ceo_intent"
+                    and _accepted_orchestration_root_provenance(cycle)
                     and isinstance(cycle.get("source_id"), str)
                     and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", cycle["source_id"])
                     and isinstance(cycle.get("source_digest"), str)
@@ -23644,7 +23741,12 @@ class BoundedRuntimeReadObservation:
                     and cycle.get("root_job_id") == job.job_id == job.root_job_id
                     and cycle.get("role") == job.orchestration_role == "aggregation"):
                 continue
-            self._commands[cycle["command_id"]] = (job.job_id, digest, cycle["source_digest"])
+            self._commands[cycle["command_id"]] = (
+                job.job_id,
+                digest,
+                cycle["source_digest"],
+                str(cycle["creator"]),
+            )
 
     def read_job_root_bounded(self, root_job_id: str) -> BoundedRuntimeRootSnapshot:
         self._select()
@@ -23714,20 +23816,49 @@ class BoundedRuntimeReadObservation:
                 return self._events[command_id]
             if len(self._events) >= 17:
                 raise StateConflict("bounded observation point budget exceeded")
-            job_id, digest, source_digest = self._commands[command_id]
+            job_id, digest, source_digest, creator = self._commands[command_id]
             event = self._store.get_event_by_command_id(command_id, connection=self._connection)
             if event is not None:
                 payload = event.payload
                 provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
-                if not (event.event_type == "JOB_CREATED" and event.command_id == command_id
-                        and event.job_id == event.aggregate_id == job_id and event.aggregate_type == "job"
-                        and isinstance(provenance, Mapping)
-                        and provenance.get("schema") == "mastermind.ceo_intent.v2"
-                        and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+                common = (
+                    event.event_type == "JOB_CREATED"
+                    and event.command_id == command_id
+                    and event.job_id == event.aggregate_id == job_id
+                    and event.aggregate_type == "job"
+                    and isinstance(payload, Mapping)
+                    and isinstance(provenance, Mapping)
+                    and payload.get("orchestration_role") == "aggregation"
+                    and payload.get("orchestration_provenance_digest") == digest
+                )
+                if not common:
+                    raise RuntimeReadUnavailable(
+                        "creation Event identity disagrees with included Job"
+                    )
+                if creator == CEO_ORCHESTRATION_ROOT_CREATOR:
+                    valid_creator = (
+                        provenance.get("schema") == "mastermind.ceo_intent.v2"
+                        and "ceo-intent:" + str(provenance.get("intent_id"))
+                        == command_id
                         and provenance.get("fingerprint") == source_digest
-                        and payload.get("orchestration_role") == "aggregation"
-                        and payload.get("orchestration_provenance_digest") == digest):
-                    raise RuntimeReadUnavailable("creation Event identity disagrees with included Job")
+                    )
+                elif creator == PRINCIPAL_ORCHESTRATION_ROOT_CREATOR:
+                    valid_creator = (
+                        provenance.get("schema")
+                        == "mastermind.executive_principal_orchestration.v1"
+                        and "ceo-intent:" + str(provenance.get("intent_id"))
+                        == command_id
+                        and provenance.get("action_kind") == "governed_orchestration"
+                        and provenance.get("actor") == "coo-principal"
+                        and provenance.get("seat") == "coo"
+                        and provenance.get("bundle_digest") == source_digest
+                    )
+                else:
+                    valid_creator = False
+                if not valid_creator:
+                    raise RuntimeReadUnavailable(
+                        "creation Event source disagrees with included Job"
+                    )
             self._events[command_id] = event
             return event
         except BaseException:

@@ -34,6 +34,7 @@ from control_plane.executive_runtime import (
     Runtime,
     StateConflict,
     WorkerStatus,
+    _accepted_orchestration_root_provenance,
     _current_orchestration_tree_material,
     _current_orchestration_tree_material_for_dispatch,
     _review_attempt_is_independent,
@@ -790,7 +791,7 @@ class CooCycle:
             or not isinstance(provenance, dict)
             or provenance.get("schema_version")
             != "mastermind.executive_orchestration_provenance/v1"
-            or provenance.get("creator") != "ceo_intent"
+            or not _accepted_orchestration_root_provenance(provenance)
             or provenance.get("role") != "aggregation"
             or provenance.get("job_id") != root.job_id
             or provenance.get("root_job_id") != root.job_id

@@ -13,7 +13,10 @@ from pathlib import PurePosixPath
 
 from common.executive_workspace_contract import canonical, _check_work_ref
 from control_plane import ceo_intent, ceo_request
-from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+from control_plane.coo_principal_envelope import (
+    PrincipalAdmissionContext,
+    validate_principal_orchestration_bundle,
+)
 from control_plane.coo_principal_mandate import (
     DEFAULT_PRINCIPAL_ACTIONS,
     PRINCIPAL_ACTIONS,
@@ -150,6 +153,46 @@ class CooHostProvider:
         mandate = project_coo_principal_mandate(principal=principal,
             authority=authority, mission_workspace=mission)
         if mandate["new_effect_gate"] != "OPEN" or self.source.snapshot(row["work_ref"]) != before:
+            _refuse()
+        return None
+
+    def guard_orchestration(self, bundle):
+        """Re-prove current COO authority before a governed root effect."""
+
+        try:
+            normalized = validate_principal_orchestration_bundle(bundle)
+        except (TypeError, ValueError):
+            _refuse()
+        envelope = normalized["envelope"]
+        before = self.source.snapshot(envelope["workstream"])
+        row, principal, authority = before
+        context = PrincipalAdmissionContext(
+            row["work_ref"],
+            principal.principal_binding_digest,
+            authority.mission_authority_ref,
+            authority.authority_generation_digest,
+        )
+        if (
+            row["enabled"] is not True
+            or envelope["workstream"] != context.work_ref
+            or any(
+                envelope.get(key) != value
+                for key, value in dataclasses.asdict(context).items()
+                if key != "work_ref"
+            )
+            or "governed_orchestration" not in authority.principal_actions
+        ):
+            _refuse()
+        mission = self.workspace.read_mission_for_work_ref(row["work_ref"])
+        mandate = project_coo_principal_mandate(
+            principal=principal,
+            authority=authority,
+            mission_workspace=mission,
+        )
+        if (
+            mandate["new_effect_gate"] != "OPEN"
+            or self.source.snapshot(row["work_ref"]) != before
+        ):
             _refuse()
         return None
 

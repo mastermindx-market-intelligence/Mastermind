@@ -12,6 +12,7 @@ only authority that may accept this envelope into Executive Runtime.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -109,6 +110,145 @@ def _grounding(value: object) -> dict[str, Any]:
             raise CooPrincipalEnvelopeError("grounding.boot_packet_schema is invalid")
         result["boot_packet_schema"] = schema
     return result
+
+
+_ORCHESTRATION_ENVELOPE_KEYS = frozenset(
+    {
+        "schema",
+        "intent_id",
+        "action_kind",
+        "request_fingerprint",
+        "actor",
+        "seat",
+        "principal_binding_digest",
+        "mission_authority_ref",
+        "authority_generation_digest",
+        "objective",
+        "department",
+        "priority",
+        "business_impact",
+        "workstream",
+        "grounding",
+    }
+)
+_ORCHESTRATION_BUNDLE_KEYS = frozenset(
+    {
+        "request_ref",
+        "intent_id",
+        "action_kind",
+        "request_fingerprint",
+        "normalized_request",
+        "envelope",
+        "bundle_digest",
+    }
+)
+
+
+def validate_principal_orchestration_bundle(value: object) -> dict[str, Any]:
+    """Validate the complete H4 pre-sink bundle without creating effects."""
+
+    if not isinstance(value, Mapping) or set(value) != _ORCHESTRATION_BUNDLE_KEYS:
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle is not the closed principal wire"
+        )
+    raw_request = value.get("normalized_request")
+    if not isinstance(raw_request, Mapping):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle normalized_request is invalid"
+        )
+    work_ref = raw_request.get("workstream")
+    if type(work_ref) is not str:
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle normalized_request requires workstream"
+        )
+    try:
+        normalized = normalize_principal_orchestration_request(
+            dict(raw_request),
+            expected_work_ref=work_ref,
+        )
+        request_ref = orchestration_request_ref(normalized)
+        intent_id = principal_intent_id(request_ref)
+        request_fingerprint = orchestration_request_fingerprint(normalized)
+    except ValueError as exc:
+        raise CooPrincipalEnvelopeError(str(exc)) from exc
+    if normalized != dict(raw_request):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle request is not canonical"
+        )
+    if (
+        value.get("request_ref") != request_ref
+        or value.get("intent_id") != intent_id
+        or value.get("action_kind") != ORCHESTRATION_ACTION_KIND
+        or value.get("request_fingerprint") != request_fingerprint
+    ):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle identity does not match its request"
+        )
+
+    raw_envelope = value.get("envelope")
+    if (
+        not isinstance(raw_envelope, Mapping)
+        or set(raw_envelope) != _ORCHESTRATION_ENVELOPE_KEYS
+    ):
+        raise CooPrincipalEnvelopeError(
+            "orchestration envelope is not the closed principal wire"
+        )
+    try:
+        context = PrincipalAdmissionContext(
+            work_ref=raw_envelope["workstream"],
+            principal_binding_digest=raw_envelope["principal_binding_digest"],
+            mission_authority_ref=raw_envelope["mission_authority_ref"],
+            authority_generation_digest=raw_envelope["authority_generation_digest"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CooPrincipalEnvelopeError(str(exc)) from exc
+    canonical_envelope = {
+        "schema": ORCHESTRATION_INTENT_SCHEMA,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "actor": ACTOR,
+        "seat": SEAT,
+        "principal_binding_digest": context.principal_binding_digest,
+        "mission_authority_ref": context.mission_authority_ref,
+        "authority_generation_digest": context.authority_generation_digest,
+        "objective": str(normalized["objective"]),
+        "department": str(normalized["department"]),
+        "priority": int(normalized["priority"]),
+        "business_impact": str(normalized["business_impact"]),
+        "workstream": str(normalized["workstream"]),
+        "grounding": _grounding(raw_envelope["grounding"]),
+    }
+    if context.work_ref != work_ref or dict(raw_envelope) != canonical_envelope:
+        raise CooPrincipalEnvelopeError(
+            "orchestration envelope differs from its canonical bundle"
+        )
+    material = {
+        "request_ref": request_ref,
+        "intent_id": intent_id,
+        "action_kind": ORCHESTRATION_ACTION_KIND,
+        "request_fingerprint": request_fingerprint,
+        "normalized_request": normalized,
+        "envelope": canonical_envelope,
+    }
+    expected_bundle_digest = hashlib.sha256(
+        ceo_intent.canonical_bytes(material)
+    ).hexdigest()
+    supplied_bundle_digest = value.get("bundle_digest")
+    if (
+        type(supplied_bundle_digest) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", supplied_bundle_digest) is None
+        or supplied_bundle_digest != expected_bundle_digest
+    ):
+        raise CooPrincipalEnvelopeError(
+            "orchestration bundle digest does not bind its canonical content"
+        )
+    return {**material, "bundle_digest": expected_bundle_digest}
+
+
+def principal_orchestration_bundle_digest(value: object) -> str:
+    normalized = validate_principal_orchestration_bundle(value)
+    return str(normalized["bundle_digest"])
 
 
 def _execution_contract(
@@ -254,13 +394,19 @@ def derive_principal_orchestration_envelope(
         "grounding": _grounding(grounding),
     }
 
-    return {
+    material = {
         "request_ref": request_ref,
         "intent_id": intent_id,
         "action_kind": ORCHESTRATION_ACTION_KIND,
         "request_fingerprint": request_fingerprint,
         "normalized_request": normalized,
         "envelope": envelope,
+    }
+    return {
+        **material,
+        "bundle_digest": hashlib.sha256(
+            ceo_intent.canonical_bytes(material)
+        ).hexdigest(),
     }
 
 
@@ -273,4 +419,6 @@ __all__ = [
     "PrincipalAdmissionContext",
     "derive_principal_envelope",
     "derive_principal_orchestration_envelope",
+    "principal_orchestration_bundle_digest",
+    "validate_principal_orchestration_bundle",
 ]

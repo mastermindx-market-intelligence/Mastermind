@@ -15,7 +15,11 @@ from control_plane.coo_principal_host import (
     validate_missions,
 )
 from ops.executive_os.coo_principal_host import CooInstalledSource
-from control_plane.coo_principal_envelope import PrincipalAdmissionContext, derive_principal_envelope
+from control_plane.coo_principal_envelope import (
+    PrincipalAdmissionContext,
+    derive_principal_envelope,
+    derive_principal_orchestration_envelope,
+)
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest
 from control_plane.workspace_read_service import WorkspaceReadService
 from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS
@@ -151,6 +155,87 @@ def envelope_for(host, tmp_path):
         workstream=row["work_ref"]), context=context, workspace_root=str(tmp_path / "workspaces"),
         grounding=dict(mastermind_sha="a" * 40, macro_sha="b" * 40, boot_packet_schema="mastermind.ceo_boot_packet.v1"))
     return value["envelope"]
+
+
+def orchestration_bundle_for(host):
+    row, fact, authority = host.source.snapshot("WS:EXECUTIVE-CAPACITY-FABRIC")
+    context = PrincipalAdmissionContext(
+        row["work_ref"],
+        fact.principal_binding_digest,
+        authority.mission_authority_ref,
+        authority.authority_generation_digest,
+    )
+    return derive_principal_orchestration_envelope(
+        dict(
+            operation_key="coo-host-orchestration",
+            objective="Coordinate one governed orchestration episode.",
+            department="executive-infrastructure",
+            priority=6,
+            workstream=row["work_ref"],
+            business_impact="routine",
+        ),
+        context=context,
+        grounding=dict(
+            mastermind_sha="a" * 40,
+            macro_sha="b" * 40,
+            boot_packet_schema="mastermind.ceo_boot_packet.v1",
+        ),
+    )
+
+
+def test_orchestration_guard_requires_current_explicit_action_and_mission(
+    tmp_path,
+    monkeypatch,
+):
+    host, coo, _, _ = setup(tmp_path)
+    row = coo["missions"][0]
+    row.update(
+        authority_version=MISSION_AUTHORITY_VERSION,
+        principal_actions=["bounded_intent", "governed_orchestration"],
+    )
+    document = mandate.mission_doc()
+    monkeypatch.setattr(
+        host.workspace,
+        "read_mission_for_work_ref",
+        lambda work_ref: document,
+    )
+    bundle = orchestration_bundle_for(host)
+    assert host.guard_orchestration(bundle) is None
+
+    row["principal_actions"] = ["bounded_intent"]
+    with pytest.raises(ValueError):
+        host.guard_orchestration(bundle)
+
+
+def test_orchestration_guard_refuses_stale_mission_and_source_movement(
+    tmp_path,
+    monkeypatch,
+):
+    host, coo, _, _ = setup(tmp_path)
+    row = coo["missions"][0]
+    row.update(
+        authority_version=MISSION_AUTHORITY_VERSION,
+        principal_actions=["bounded_intent", "governed_orchestration"],
+    )
+    bundle = orchestration_bundle_for(host)
+
+    stale = mandate.mission_doc()
+    stale["read_state"]["state"] = "HISTORICAL"
+    monkeypatch.setattr(
+        host.workspace,
+        "read_mission_for_work_ref",
+        lambda work_ref: stale,
+    )
+    with pytest.raises(ValueError):
+        host.guard_orchestration(bundle)
+
+    def moved(_work_ref):
+        row["enabled"] = False
+        return mandate.mission_doc()
+
+    monkeypatch.setattr(host.workspace, "read_mission_for_work_ref", moved)
+    with pytest.raises(ValueError):
+        host.guard_orchestration(bundle)
 
 
 def test_final_guard_uses_real_mandate_reducer_and_current_mission(tmp_path, monkeypatch):

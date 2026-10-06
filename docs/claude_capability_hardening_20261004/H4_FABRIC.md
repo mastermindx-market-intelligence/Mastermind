@@ -192,45 +192,102 @@ H4-B0 satisfies the authority-side requirements:
 6. no Runtime/root constructor, CEO ingress, CooCycle, MCP tool catalog or production config is
    changed by this slice.
 
-### H4-B1a current source slice — one closed Runtime root-source discriminator
+### H4-B1a published source slice — one closed Runtime root-source discriminator
 
-The obsolete #1041 hierarchy carrier is now closed unmerged under its explicit Fable
-`should_close_unmerged` disposition; protected V1 remains the H4 graph. With that stale Runtime
-collision cleared, the branch factors the generic V1 orchestration lifecycle through one Runtime
-root-source discriminator.
+With #1041 closed unmerged, the branch first centralized the existing V1 orchestration lifecycle
+around one closed Runtime root-source discriminator. The published B1a head still admitted only
+`ceo_intent`; child provenance remained exactly `coo_cycle`. CEO-specific finite-control,
+maintenance/source-capacity and CEO replay paths deliberately remained CEO-only.
 
-Today the closed root creator set remains exactly `{"ceo_intent"}`, so this refactor **does not admit
-a principal root**. It removes duplicated CEO-literal checks from the generic lifecycle paths that a
-future reviewed root source must share:
+### H4-B1b current source candidate — principal root creation, cycle admission and Fabric readback
 
-- persisted aggregation-root decode;
-- exact-worker target root binding;
-- child-lineage creation;
-- planner and interactive-child creation;
-- plan admission;
-- dispatch and requeue;
-- aggregation handoff.
+The current source candidate advances that foundation without exposing a production caller.
 
-The pre-persistence source discriminator is role-sensitive: aggregation may use only a member of the
-closed root-creator set, while child roles remain exactly `coo_cycle`. This prevents adding a future
-principal root creator from silently authorizing principal-authored child provenance.
+The closed root creator vocabulary becomes exactly:
 
-CEO-specific consumers remain explicitly CEO-only and are **not** widened by the generic helper:
-finite-drive admission/binding/arm, the current `create_v2_orchestration_root` constructor, C2's
-CEO-source authority projection, and the legacy CEO command-correlated bounded reader.
+- `ceo_intent`;
+- `coo_principal`.
 
-A source-law regression asserts the generic Runtime functions call the central discriminator and
-that literal `ceo_intent` remains only in that reviewed CEO-specific allowlist. Existing V1
-root/planner/plan/dispatch/requeue/aggregation/finite regressions remain the behavioral oracle.
+The pre-persistence source discriminator remains role-sensitive: only reviewed root creators may
+create the aggregation root; plan/work/review/repair children remain `coo_cycle`. Existing CEO-v2
+receipts remain unchanged.
 
-Still open for **H4-B1b/B2**: create one separately discriminated principal-root constructor/source
-contract inside Runtime, then compose the principal ingress after #1147's overlapping
-`executive_ceo_ingress.py` / `ceo_intent.py` carrier is accepted or released. The B0 action grant
-and B1a discriminator are necessary foundations, not sufficient authority to create a root.
+The H4-A orchestration bundle now includes a canonical full `bundle_digest` over its normalized
+request plus trusted principal/authority/grounding envelope. Any mutation to principal binding,
+authority generation, grounding or business semantics moves that digest; the Runtime source digest
+binds the exact bundle generation.
 
-**H4-C** later exposes only that accepted operation/status through the COO MCP/package after H1
-native profile/schema qualification. No raw CooCycle method, worker selector or provider/account
-selector becomes model-visible.
+`CooHostProvider.guard_orchestration(...)` is the source-only current-effect guard. It revalidates
+the canonical H4 bundle, current root-sealed mission row, principal binding, authority generation,
+explicit `governed_orchestration` action grant, current Mission Workspace and the same post-read
+source snapshot before permitting the root effect.
+
+`JobRegistry.create_principal_orchestration_root(...)` is a separate source-only constructor. It:
+
+- validates the canonical full H4 bundle;
+- uses the same existing `command_id_for(intent_id)` namespace as bounded COO work, so cross-kind
+  reuse under one `work_ref + operation_key` cannot mint a second Job/root;
+- invokes the fresh host admission guard before the Runtime effect;
+- creates exactly one depth-0 `aggregation` root with creator `coo_principal`;
+- preserves the actual principal/request/action/authority/grounding facts in the existing
+  `JOB_CREATED` provenance;
+- starts at A0 / READ only, with no write paths, validation commands, branch or worktree;
+- accepts no caller provider/account/model/host/tree/worker selector;
+- uses the existing private V2 root-creation capability internally, so generic `create_job`
+  still cannot mint orchestration roots; and
+- has **no production caller** in the current source tree.
+
+The first review of B1b exposed two split-brain generic consumers and repaired them:
+
+1. `CooCycle.run_once()` still required literal `creator=ceo_intent`, so a valid principal root
+   immediately became `invalid_root`. It now consumes the same central reviewed-root discriminator.
+2. the bounded Runtime/Fabric observer remembered and point-read only CEO root creation events. The
+   bounded observer now accepts either reviewed root source while validating each creator's exact
+   event schema separately, and `fabric_job_view.v2` validates principal-root workstream provenance
+   directly from the immutable `JOB_CREATED` record. The CEO-specific
+   `executive_inbox.ceo_intent_provenance` helper remains CEO-only.
+
+A principal B1b root can therefore create the existing deterministic planner through CooCycle and
+appear with that planner in the canonical bounded `executive_fabric` projection. It still cannot be
+claimed as live orchestration.
+
+The source-only proof currently includes:
+
+- 25/25 discriminating H4 bundle/root/source tests;
+- 481/481 dependency-free H4/Runtime/Fabric tests, with one unrelated host-specific sealed-worker
+  process-identity fixture deliberately deselected rather than weakened;
+- 125/125 full Phase-1F-C CooCycle + Fabric-v2 compatibility tests.
+
+The local host cannot collect the signed COO ASGI suite because `jwt` is absent; hosted CI remains
+the integration owner for those app tests.
+
+### H4-B2 still required — trusted host binding, dispatch, ingress and reconciliation
+
+B1b deliberately does **not** derive or install the reviewed host execution/placement binding that
+real planner/work dispatch requires. Its root currently contains only Runtime's ordinary default
+quota-class normalization, not an admitted provider/model/host/profile selection.
+
+The existing Executive service's strict bound-root/dispatch path is still CEO-root-specific and the
+current principal constructor has no production ingress caller. Therefore B2 must:
+
+1. derive the current host execution/profile/source/proof/placement binding from existing owners,
+   not from the model request;
+2. carry the current Dialogue source through the existing trusted host composition;
+3. extend the service's generic bound-root/dispatch validation to the reviewed root-source
+   discriminator without widening CEO-only finite/release paths;
+4. add a separately discriminated principal-orchestration ingress frame after the overlapping #1147
+   ingress carrier is accepted/released;
+5. preserve the existing principal `request_ref / intent_id` status and same-command reconciliation
+   semantics after response loss; and
+6. prove an actual planner/child dispatch only after those exact source gates and H1/H3 native
+   admission are accepted.
+
+Finite-drive admission/arm, CEO intent replay and C2 CEO-source maintenance remain CEO-only unless
+their own owner later admits a separate principal use case; H4 does not need to widen them.
+
+**H4-C** later exposes only the accepted orchestration operation/status through the COO MCP/package
+after H1 native profile/schema qualification. No raw CooCycle method, worker selector or
+provider/account selector becomes model-visible.
 
 ## Normal execution and consumption
 

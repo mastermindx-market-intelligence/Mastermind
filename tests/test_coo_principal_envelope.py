@@ -14,6 +14,8 @@ from control_plane.coo_principal_envelope import (
     PrincipalAdmissionContext,
     derive_principal_envelope,
     derive_principal_orchestration_envelope,
+    principal_orchestration_bundle_digest,
+    validate_principal_orchestration_bundle,
 )
 from control_plane.coo_principal_request import ORCHESTRATION_ACTION_KIND
 
@@ -102,6 +104,49 @@ def derive_orchestration(request=None, *, ctx=None, ground=None):
         context=ctx or context(),
         grounding=ground or grounding(),
     )
+
+
+def test_orchestration_bundle_round_trips_and_has_full_source_digest():
+    result = derive_orchestration()
+    validated = validate_principal_orchestration_bundle(result)
+    assert validated == result
+    digest = principal_orchestration_bundle_digest(result)
+    assert len(digest) == 64
+    assert digest == principal_orchestration_bundle_digest(validated)
+
+
+@pytest.mark.parametrize(
+    ("surface", "field", "value"),
+    [
+        ("bundle", "request_ref", "req-coo-" + "f" * 32),
+        ("bundle", "intent_id", "coo-" + "f" * 32),
+        ("bundle", "action_kind", "bounded_intent"),
+        ("bundle", "request_fingerprint", "f" * 64),
+        ("bundle", "bundle_digest", "f" * 64),
+        ("request", "objective", "changed after derivation"),
+        ("request", "operation_key", "different-operation-key"),
+        ("envelope", "principal_binding_digest", "f" * 64),
+        ("envelope", "authority_generation_digest", "f" * 64),
+        ("envelope", "business_impact", "material"),
+        ("envelope", "grounding", {"mastermind_sha": "f" * 40, "macro_sha": "2" * 40}),
+    ],
+)
+def test_orchestration_bundle_detects_identity_or_payload_drift(surface, field, value):
+    result = derive_orchestration()
+    changed = {
+        key: (dict(item) if isinstance(item, dict) else item)
+        for key, item in result.items()
+    }
+    if surface == "bundle":
+        changed[field] = value
+    elif surface == "request":
+        changed["normalized_request"] = dict(changed["normalized_request"])
+        changed["normalized_request"][field] = value
+    else:
+        changed["envelope"] = dict(changed["envelope"])
+        changed["envelope"][field] = value
+    with pytest.raises(CooPrincipalEnvelopeError):
+        validate_principal_orchestration_bundle(changed)
 
 
 def test_orchestration_envelope_is_role_correct_and_current_sink_inert():
@@ -226,6 +271,7 @@ def test_orchestration_bundle_has_no_runtime_effect_or_acceptance_claim():
         "request_fingerprint",
         "normalized_request",
         "envelope",
+        "bundle_digest",
     }
     forbidden = {
         "job_id",

@@ -1043,50 +1043,139 @@ def read_fabric_view(
 
 
 def _bounded_provenance(runtime, job, *, creation_event_reader=None):
-    """Validate durable routing before one Event point read and owner validation.
+    """Validate one bounded root's durable source and workstream join.
 
-    The adapter supplies only the immutable Job already in the bounded snapshot
-    and its unique command-id Event. The historical validator receives no real
-    registry, so its compatibility list interface cannot acquire Event history.
+    CEO roots keep the historical owner validator. H4 principal roots are
+    validated directly from the same immutable Job + JOB_CREATED event without
+    turning this read adapter into a principal authority or retry owner.
     """
-    from control_plane.executive_runtime import orchestration_digest
+    from control_plane.executive_runtime import (
+        PRINCIPAL_ORCHESTRATION_ROOT_CREATOR,
+        orchestration_digest,
+    )
 
     cycle = getattr(job, "orchestration_provenance", None)
     digest = getattr(job, "orchestration_provenance_digest", None)
     keys = {"schema_version", "creator", "source_id", "source_digest", "command_id",
             "job_id", "parent_job_id", "root_job_id", "role"}
     if not isinstance(cycle, Mapping) or set(cycle) != keys:
-        return None, "durable CEO-intent provenance not projected"
+        return None, "durable orchestration root provenance not projected"
     source_id = cycle.get("source_id")
-    if not (
+    common = (
         cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
-        and cycle.get("creator") == "ceo_intent"
         and isinstance(source_id, str)
         and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", source_id)
         and cycle.get("command_id") == f"ceo-intent:{source_id}"
         and isinstance(cycle.get("source_digest"), str)
         and re.fullmatch(r"[0-9a-f]{64}", cycle["source_digest"])
-        and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)
+        and isinstance(digest, str)
+        and re.fullmatch(r"[0-9a-f]{64}", digest)
         and digest == orchestration_digest(cycle)
         and cycle.get("job_id") == job.job_id
-        and cycle.get("parent_job_id") is None and job.parent_job_id is None
+        and cycle.get("parent_job_id") is None
+        and job.parent_job_id is None
         and cycle.get("root_job_id") == job.job_id == job.root_job_id
         and cycle.get("role") == job.orchestration_role == "aggregation"
-    ):
-        return None, "durable CEO-intent provenance invalid or unsupported"
+    )
+    if not common:
+        return None, "durable orchestration root provenance invalid or unsupported"
+
     point_read = creation_event_reader or runtime.events.get_event_by_command_id
     event = point_read(cycle["command_id"])
-    if event is None or event.event_type != "JOB_CREATED":
-        return None, "durable CEO-intent creation Event unavailable"
-    # Only v2 carries the durable cycle needed to prove this bounded join.
-    provenance = event.payload.get("provenance") if isinstance(event.payload, Mapping) else None
-    if not isinstance(provenance, Mapping) or provenance.get("schema") != "mastermind.ceo_intent.v2":
-        return None, "durable CEO-intent creation Event schema unsupported"
-    adapter = SimpleNamespace(
-        jobs=SimpleNamespace(get_job=lambda job_id: job if job_id == job.job_id else None),
-        events=SimpleNamespace(list_events=lambda *, job_id: (event,) if job_id == job.job_id else ()),
-    )
-    return executive_inbox.ceo_intent_provenance(adapter, str(job.job_id))
+    if (
+        event is None
+        or event.event_type != "JOB_CREATED"
+        or event.aggregate_type != "job"
+        or event.aggregate_id != job.job_id
+        or event.job_id != job.job_id
+        or event.command_id != cycle["command_id"]
+    ):
+        return None, "durable orchestration root creation Event unavailable"
+
+    creator = cycle.get("creator")
+    if creator == "ceo_intent":
+        provenance = (
+            event.payload.get("provenance")
+            if isinstance(event.payload, Mapping)
+            else None
+        )
+        if (
+            not isinstance(provenance, Mapping)
+            or provenance.get("schema") != "mastermind.ceo_intent.v2"
+        ):
+            return None, "durable CEO-intent creation Event schema unsupported"
+        adapter = SimpleNamespace(
+            jobs=SimpleNamespace(
+                get_job=lambda job_id: job if job_id == job.job_id else None
+            ),
+            events=SimpleNamespace(
+                list_events=lambda *, job_id: (event,)
+                if job_id == job.job_id
+                else ()
+            ),
+        )
+        return executive_inbox.ceo_intent_provenance(adapter, str(job.job_id))
+
+    if creator != PRINCIPAL_ORCHESTRATION_ROOT_CREATOR:
+        return None, "durable orchestration root creator unsupported"
+
+    payload = event.payload if isinstance(event.payload, Mapping) else None
+    provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
+    principal_keys = {
+        "schema",
+        "intent_id",
+        "request_ref",
+        "action_kind",
+        "request_fingerprint",
+        "bundle_digest",
+        "actor",
+        "seat",
+        "principal_binding_digest",
+        "mission_authority_ref",
+        "authority_generation_digest",
+        "grounding",
+        "workstream",
+    }
+    if not isinstance(provenance, Mapping) or set(provenance) != principal_keys:
+        return None, "durable principal orchestration Event shape unsupported"
+    workstream = provenance.get("workstream")
+    if not (
+        provenance.get("schema") == "mastermind.executive_principal_orchestration.v1"
+        and provenance.get("intent_id") == source_id
+        and isinstance(provenance.get("request_ref"), str)
+        and re.fullmatch(r"req-coo-[0-9a-f]{32}", provenance["request_ref"])
+        and provenance.get("action_kind") == "governed_orchestration"
+        and isinstance(provenance.get("request_fingerprint"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", provenance["request_fingerprint"])
+        and provenance.get("bundle_digest") == cycle["source_digest"]
+        and provenance.get("actor") == "coo-principal"
+        and provenance.get("seat") == "coo"
+        and all(
+            isinstance(provenance.get(name), str)
+            and re.fullmatch(r"[0-9a-f]{64}", provenance[name])
+            for name in (
+                "principal_binding_digest",
+                "authority_generation_digest",
+            )
+        )
+        and isinstance(provenance.get("mission_authority_ref"), str)
+        and provenance["mission_authority_ref"]
+        and isinstance(provenance.get("grounding"), Mapping)
+        and isinstance(workstream, str)
+        and re.fullmatch(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", workstream)
+        and payload.get("orchestration_role") == "aggregation"
+        and payload.get("orchestration_provenance_digest") == digest
+    ):
+        return None, "durable principal orchestration Event identity invalid"
+
+    return {
+        "schema": provenance["schema"],
+        "intent_id": provenance["intent_id"],
+        "actor": provenance["actor"],
+        "request_ref": provenance["request_ref"],
+        "action_kind": provenance["action_kind"],
+        "workstream": workstream,
+    }, None
 
 
 def _bounded_plan_child(job, *, root, root_validated):
