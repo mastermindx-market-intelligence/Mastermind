@@ -103,10 +103,10 @@ def test_candidate_manifest_matches_both_current_source_generations() -> None:
     assert dialogue["tool_schema_digest"] == PRINCIPAL_TOOL_SCHEMA_DIGEST
     assert dialogue["grant_capability_id"] is None
     assert dialogue["transport_owner"] == (
-        "integrations/mastermind_company_principal_host.py"
+        "integrations/company_dialogue_principal_host_transport.py"
     )
     assert dialogue["transport_state"] == (
-        "SOURCE_BUILT_INSTALL_AND_ADMISSION_OPEN"
+        "UNIX_EDGE_SOURCE_BUILT_SERVICE_BINDING_INSTALL_OPEN"
     )
 
     assert len(manifest["unresolved"]) == 5

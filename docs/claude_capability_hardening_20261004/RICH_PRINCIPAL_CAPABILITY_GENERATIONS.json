@@ -29,8 +29,8 @@
       "server_identity": "mastermind-company-dialogue-principal-mcp",
       "server_version": "0.1.0",
       "tool_schema_digest": "d45c0f8fe2451c726757c42be729e0e49fc5b2637c33efc97dee00168fab7abd",
-      "transport_owner": "integrations/mastermind_company_principal_host.py",
-      "transport_state": "SOURCE_BUILT_INSTALL_AND_ADMISSION_OPEN"
+      "transport_owner": "integrations/company_dialogue_principal_host_transport.py",
+      "transport_state": "UNIX_EDGE_SOURCE_BUILT_SERVICE_BINDING_INSTALL_OPEN"
     }
   ],
   "execution_surface": "claude-agent-sdk",

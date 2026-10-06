@@ -159,11 +159,25 @@ exposes read-only same-message-key reconciliation. It does not choose a principa
 provider, account, session, route or transport and creates no listener, Job, Attempt, store, retry
 owner or capability grant.
 
-The remaining B2-B admission/install work is narrower: bind the exact principal server/tool-schema
-generation into H1 capability admission and current Company/Wake applicability, then compose the
-installed stdio/host entrypoint with this factory. Source existence does not admit a native principal.
-Only after exact admission, installation and independent review may a real principal use the
-modifying tools.
+**H6-B3-A local transport is now source-built** through
+`integrations/company_dialogue_principal_host_contract.py` and
+`integrations/company_dialogue_principal_host_transport.py`. The stdio-side client emits only the
+public `{tool, arguments}` shape; it carries no principal/child/thread/session/profile identity.
+The Executive-side socket host authenticates the exact Unix peer, revalidates the public arguments,
+and calls the already-composed B2-B host. Lost response after a modifying request is reported as
+`EFFECT_UNKNOWN`; reads fail safely as unavailable; there is no automatic resend. Host-owned
+`scope_change` / `canonical_ref` derivation remains inside the principal gateway and never crosses
+the Unix wire as caller authority.
+
+The real Unix regression suite proves same-UID round-trip, wrong server/worker UID refusal,
+duplicate/malformed frame refusal, read-vs-modifying response-loss semantics and absence of
+Runtime/provider selection in the transport: **54 passed** together with the existing B1/B2-A tests.
+
+The remaining admission/install work is narrower: compose this exact host transport into the
+existing Executive service listener owner, install one sealed/hash-locked stdio edge around that
+socket, then bind the exact principal server/tool-schema generation into H1 capability admission.
+Source existence does not admit a native principal. Only after exact admission, installation and
+independent review may a real principal use the modifying tools.
 
 ## Message operation and effect reconciliation
 
@@ -233,17 +247,18 @@ requires a real complete principal → counterpart → return → continuation �
 same Executive/Agent OS mission identity, no Chairman message shuttling and no duplicate
 wake/job/session effects. A worker-only reporting loop or successful Slack post is insufficient.
 
-Current source candidate: **H6-A + H6-B1 + H6-B2-A**. The pure principal/child resolver,
-neutral principal actor ceiling, principal-only four-tool schema, exact-send gateway, one-edge replay
-identity, typed pre-COMMIT contract and existing-Runtime-backed single-COMMIT owner/reconciler are
-built and source-tested. They remain `BUILT_NOT_PROVEN / PRODUCTION_INERT`: the owner is not
-installed into a host application, the principal server has no admitted capability-profile grant,
-and no native principal can be claimed from these files.
+Current source candidate: **H6-A + H6-B1 + H6-B2-A + B2-B + B3-A**. The pure
+principal/child resolver, neutral principal actor ceiling, principal-only four-tool schema,
+exact-send gateway, one-edge replay identity, typed pre-COMMIT contract, existing-Runtime-backed
+single-COMMIT owner/reconciler, source-only host composition and peer-authenticated Unix transport
+are built and source-tested. They remain `BUILT_NOT_PROVEN / PRODUCTION_INERT`: the transport is
+not yet composed into the installed Executive service listener, the principal server has no admitted
+capability-profile grant, and no native principal can be claimed from these files.
 
-Held for **H6-B2-B / acceptance**: compose the Runtime fence owner into the accepted installed
-host/application path; qualify exact Company/Wake applicability; bind the resulting principal
-server/tool-schema digest into the H1 native profile; expose only its read-only reconciliation
-operation after qualification; prove installation and native selection; then run the real reciprocal
+Held for **H6-B3-B / acceptance**: compose the tested Unix host into the existing Executive service,
+qualify/install the sealed stdio edge and exact Company/Wake applicability; bind the resulting
+principal server/tool-schema digest into the H1 native profile; expose only its read-only
+reconciliation operation after qualification; prove installation and native selection; then run the real reciprocal
 principal → child → return → CONTINUE → return → STOP cycle and verify zero duplicate
 message/Wake/Job/session effects. Macro Agent OS publication authority remains separate. These are
 engineering gates under existing owners, not permission to invent a Claude inbox, thread registry,
