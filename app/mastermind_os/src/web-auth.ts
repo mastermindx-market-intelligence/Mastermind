@@ -1,4 +1,6 @@
 import {
+  EXECUTIVE_SCOPE,
+  validateExecutiveResource,
   ACQUISITION_AUDIENCE,
   ACQUISITION_SCOPE,
   CALLBACK_PATH,
@@ -40,7 +42,7 @@ export interface WebAuthDeps {
   clearTimeout?: typeof clearTimeout;
   now?: () => number;
 }
-type Resource = "acquisition" | "content";
+type Resource = "acquisition" | "content" | "executive";
 type Token = { value: string; expires: number };
 const TYPE = "mastermind-auth-callback";
 const opaque = (s: unknown, max = 4096): s is string =>
@@ -109,9 +111,10 @@ export function handleWebAuthCallback(): boolean {
   return true;
 }
 
-/** Private memory owns two exact-audience tokens. Only fixed reads cross this boundary. */
+/** The existing private token owner exposes fixed reads and optional Executive commands. */
 export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   const config = { ...readWebAuthConfig(), ...deps.config };
+  const executiveResource = validateExecutiveResource(config.executiveResource);
   const configured =
     typeof config.webClientId === "string" &&
     /^[A-Za-z0-9_-]{1,128}$/.test(config.webClientId) &&
@@ -141,10 +144,23 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   const tokens: Record<Resource, Token | null> = {
     acquisition: null,
     content: null,
+    executive: null,
   };
   const listeners = new Set<(s: AuthState) => void>();
   const valid = (resource: Resource) =>
     Boolean(tokens[resource] && tokens[resource]!.expires > now());
+  let executiveGeneration = 0;
+  const executiveListeners = new Set<() => void>();
+  const executiveRequests = new Set<AbortController>();
+  function advanceExecutive() {
+    executiveGeneration++;
+    for (const request of executiveRequests) request.abort();
+    for (const listener of executiveListeners) {
+      try { listener(); } catch { /* isolate subscribers */ }
+    }
+  }
+  const resourceScope = (resource: Resource) => resource === "executive" ? EXECUTIVE_SCOPE :
+    resource === "acquisition" ? ACQUISITION_SCOPE : CONTENT_SCOPE;
   function getState(): AuthState {
     return {
       status: !configured
@@ -172,6 +188,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   }
   function cancel() {
     generation++;
+    tokens.executive = null;
+    advanceExecutive();
     const old = flow;
     flow = null;
     if (old) {
@@ -198,8 +216,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     ticket: number,
     signal: AbortSignal,
   ): Promise<Token> {
-    const scope =
-      resource === "acquisition" ? ACQUISITION_SCOPE : CONTENT_SCOPE;
+    const scope = resourceScope(resource);
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       client_id: config.webClientId!,
@@ -238,7 +255,10 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         !Number.isSafeInteger(t.expires_in) ||
         Number(t.expires_in) < 1 ||
         Number(t.expires_in) > 604800 ||
-        (t.scope !== undefined && t.scope !== scope)
+        (resource === "executive"
+          ? typeof t.scope !== "string" || t.scope.trim().split(/\s+/).sort().join(" ") !==
+            EXECUTIVE_SCOPE.split(" ").sort().join(" ")
+          : t.scope !== undefined && t.scope !== scope)
       )
         throw new Error("TOKEN_INVALID");
       return {
@@ -274,9 +294,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     check(ticket);
     if (current.popup.closed) throw new Error("POPUP_CLOSED");
     const url = new URL(`${ISSUER}authorize`);
-    const scope =
-      resource === "acquisition" ? ACQUISITION_SCOPE : CONTENT_SCOPE;
+    const scope = resourceScope(resource);
     const audience =
+      resource === "executive" ? executiveResource! :
       resource === "acquisition" ? ACQUISITION_AUDIENCE : CONTENT_AUDIENCE;
     for (const [key, value] of Object.entries({
       response_type: "code",
@@ -371,10 +391,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       const token = await completion;
       check(ticket);
       tokens[resource] = token;
+      if (resource === "executive") advanceExecutive();
       later(
         () => {
           if (ticket === generation && tokens[resource] === token) {
             tokens[resource] = null;
+            if (resource === "executive") advanceExecutive();
             emit();
           }
         },
@@ -415,6 +437,16 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       check(current.generation);
       await transaction("content", current);
       check(current.generation);
+      if (executiveResource) {
+        try { await transaction("executive", current); check(current.generation); }
+        catch {
+          if (current.generation === generation) {
+            tokens.executive = null;
+            advanceExecutive();
+          }
+          // Optional Executive authorization cannot erase valid workspace access.
+        }
+      }
     } catch (error) {
       if (current.generation === generation) lastError = reason(error);
     } finally {
@@ -515,7 +547,57 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       signal.removeEventListener("abort", onAbort);
     }
   }
+  async function executivePost(route: "context" | "submit" | "status", arguments_: unknown, signal: AbortSignal) {
+    const token = tokens.executive, ticket = executiveGeneration;
+    if (!configured || !executiveResource || !token || !valid("executive"))
+      throw new Error("EXECUTIVE_AUTH_REQUIRED");
+    const body = JSON.stringify(route === "context" ? {} : { arguments: arguments_ });
+    if (new TextEncoder().encode(body).length > 65_536) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    const timer = later(abort, READ_TIMEOUT_MS);
+    executiveRequests.add(controller);
+    const current = () => !controller.signal.aborted && ticket === executiveGeneration &&
+      tokens.executive === token && valid("executive");
+    let rejectAbort!: (error: Error) => void;
+    const cancelled = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
+    const rejectCancelled = () => rejectAbort(new Error("EXECUTIVE_REQUEST_CANCELLED"));
+    controller.signal.addEventListener("abort", rejectCancelled, { once: true });
+    try {
+      if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
+      const result = (async () => {
+        const response = await fetchFn(`${ORIGIN}/os/executive/${route}`, {
+          method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
+          headers: { Accept: "application/json", "Content-Type": "application/json",
+            Authorization: `Bearer ${token.value}` },
+          body, signal: controller.signal,
+        });
+        if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
+        if (!response.ok) throw new Error("EXECUTIVE_REQUEST_FAILED");
+        const decoded = await boundedJson(response, 262_144);
+        if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
+        return decoded;
+      })();
+      return await Promise.race([result, cancelled]);
+    } finally {
+      clear(timer);
+      signal.removeEventListener("abort", abort);
+      controller.signal.removeEventListener("abort", rejectCancelled);
+      executiveRequests.delete(controller);
+      controller.abort();
+    }
+  }
   return {
+    executive: {
+      authGeneration: () => executiveGeneration,
+      available: () => configured && executiveResource !== null && valid("executive"),
+      subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
+      context: (signal) => executivePost("context", null, signal),
+      submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
+      status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
+    },
     getState,
     subscribe(listener) {
       listeners.add(listener);

@@ -23,10 +23,16 @@ import { OperationController } from "./operation-controller";
 // ── Shared store state ─────────────────────────────────────────────────────────
 
 interface StoreState {
-  _storeWriteShouldFail: boolean;
+  _storeReserveShouldFail: boolean;
+  _storeReadShouldFail: boolean;
+  _storeClearShouldFail: boolean;
   _data: Map<string, OperationPointer>;
-  /** Every pointer the store was asked to persist, for privacy assertions. */
-  _writes: Array<OperationPointer>;
+  /** Every pointer the store was asked to reserve, for privacy assertions. */
+  _reservations: Array<OperationPointer>;
+  /** Every read the store was asked, in order. */
+  _reads: Array<string>;
+  /** Every clear the store was asked. */
+  _clears: Array<OperationPointer>;
 }
 
 /** Exact match on all three fields, as the real host store is specified to do. */
@@ -40,20 +46,40 @@ function samePointer(a: OperationPointer, b: OperationPointer): boolean {
 
 function makeStoreWithState(): { store: PendingPointerStore; state: StoreState } {
   const state: StoreState = {
-    _storeWriteShouldFail: false,
+    _storeReserveShouldFail: false,
+    _storeReadShouldFail: false,
+    _storeClearShouldFail: false,
     _data: new Map(),
-    _writes: [],
+    _reservations: [],
+    _reads: [],
+    _clears: [],
   };
   const store: PendingPointerStore = {
-    read: (scope) => state._data.get(scope) ?? null,
-    write: (scope, pointer) => {
-      if (state._storeWriteShouldFail) throw new Error("store write failed");
-      state._writes.push(pointer);
-      state._data.set(scope, pointer);
+    read: (scope) => {
+      state._reads.push(scope);
+      if (state._storeReadShouldFail) throw new Error("store read failed");
+      return state._data.get(scope) ?? null;
     },
-    clear: (scope, pointer) => {
+    reserve: (scope, pointer) => {
+      if (state._storeReserveShouldFail) throw new Error("store reserve failed");
+      // Reserve never overwrites — even when the existing pointer exactly
+      // equals the incoming one. The caller joins the observation, never
+      // submits a second effect.
       const existing = state._data.get(scope);
-      if (existing && samePointer(existing, pointer)) state._data.delete(scope);
+      if (existing) return { reserved: false, pointer: existing };
+      state._data.set(scope, pointer);
+      state._reservations.push(pointer);
+      return { reserved: true };
+    },
+    clearIfEqual: (scope, pointer) => {
+      state._clears.push(pointer);
+      if (state._storeClearShouldFail) throw new Error("store clear failed");
+      const existing = state._data.get(scope);
+      if (existing && samePointer(existing, pointer)) {
+        state._data.delete(scope);
+        return true;
+      }
+      return false;
     },
   };
   return { store, state };
@@ -275,13 +301,13 @@ describe("OperationController", () => {
 
       await ctrl.begin(LAUNCH_INTENT);
 
-      expect(state._writes).toHaveLength(0);
+      expect(state._reservations).toHaveLength(0);
       expect(state._data.size).toBe(0);
     });
 
-    it("store-write failure refuses without submit", async () => {
+    it("store-reserve failure refuses without submit", async () => {
       const { store, state } = makeStoreWithState();
-      state._storeWriteShouldFail = true;
+      state._storeReserveShouldFail = true;
       const submitSpy = vi.fn();
       const portState = makePort({ _submit: submitSpy });
       const ctrl = new OperationController(buildPort(portState), store);
@@ -293,7 +319,7 @@ describe("OperationController", () => {
       expect(submitSpy).not.toHaveBeenCalled();
     });
 
-    it("writes the pointer before submit", async () => {
+    it("reserves the pointer before submit", async () => {
       const { store, state } = makeStoreWithState();
       const order: string[] = [];
       const portState = makePort({
@@ -302,16 +328,17 @@ describe("OperationController", () => {
           return echoReceipt(pointer, "accepted");
         }),
       });
-      const originalWrite = store.write.bind(store);
-      store.write = (scope, pointer) => {
-        order.push("write");
-        originalWrite(scope, pointer);
-      };
+      const originalReserve = store.reserve.bind(store);
+      store.reserve = ((scope: string, pointer: OperationPointer, signal?: AbortSignal) => {
+        order.push("reserve");
+        return originalReserve(scope, pointer, signal);
+      }) as PendingPointerStore["reserve"];
       const ctrl = new OperationController(buildPort(portState), store);
 
       await ctrl.begin(LAUNCH_INTENT);
 
-      expect(order).toEqual(["write", "submit"]);
+      expect(order).toEqual(["reserve", "submit"]);
+      expect(state._reservations).toHaveLength(1);
     });
 
     it("same-intent duplicate begin is local OPERATION_BUSY; original continues", async () => {
@@ -321,6 +348,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const watch = watchSettled(p1);
       const p2 = await ctrl.begin(LAUNCH_INTENT);
       await Promise.resolve();
@@ -348,6 +376,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const watch = watchSettled(p1);
       const p2 = await ctrl.begin(STOP_INTENT);
       const p3 = await ctrl.begin(MESSAGE_INTENT);
@@ -378,6 +407,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const watch = watchSettled(p1);
       const p2 = await ctrl.begin({
         kind: "launch",
@@ -416,7 +446,13 @@ describe("OperationController", () => {
 
     it("a malformed stored hint never reaches the port", async () => {
       const { store } = makeStoreWithState();
-      store.write("scope-A", { operationKey: "junk" } as OperationPointer);
+      // Seed via the test fixture's underlying map: the public API is now
+      // read/reserve/clearIfEqual, and reserve refuses to overwrite, so
+      // corrupt pointers can be set up only through the underlying state.
+      store.read = ((scope: string) => {
+        if (scope === "scope-A") return { operationKey: "junk" } as unknown as OperationPointer;
+        return null;
+      }) as PendingPointerStore["read"];
       const portState = makePort();
       const ctrl = new OperationController(buildPort(portState), store);
 
@@ -546,6 +582,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const watch = watchSettled(p1);
       const p2 = await ctrl.begin(LAUNCH_INTENT);
       await Promise.resolve();
@@ -593,6 +630,7 @@ describe("OperationController", () => {
         };
 
         const p1 = ctrl.begin(firstIntent);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
         const watch = watchSettled(p1);
         const p2 = await ctrl.begin(secondIntent);
         await Promise.resolve();
@@ -619,6 +657,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const watch = watchSettled(p1);
       portState._ctx = { principalScope: "scope-B", generation: "gen-1" };
       const p2 = await ctrl.begin(LAUNCH_INTENT);
@@ -650,6 +689,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       portState._ctx = { principalScope: "scope-A", generation: "gen-2" };
       const p2 = await ctrl.begin(LAUNCH_INTENT);
 
@@ -673,6 +713,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const bad = await ctrl.begin({
         kind: "restart" as OperationKind,
         payload: {},
@@ -694,6 +735,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       portState._ctx = null;
       const absent = await ctrl.begin(LAUNCH_INTENT);
 
@@ -785,7 +827,9 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.recover();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const p2 = ctrl.recover();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       resolveRead();
       const [r1, r2] = await Promise.all([p1, p2]);
 
@@ -801,7 +845,9 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const recovered = ctrl.recover();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       resolve(acceptedEcho(SUBMITTED_POINTER));
       const [r1, r2] = await Promise.all([p1, recovered]);
 
@@ -819,6 +865,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       const watch = watchSettled(p1);
       portState._ctx = { principalScope: "scope-B", generation: "gen-1" };
       const recovered = await ctrl.recover();
@@ -847,6 +894,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const p1 = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       portState._ctx = { principalScope: "scope-A", generation: "gen-2" };
       const recovered = await ctrl.recover();
 
@@ -894,7 +942,9 @@ describe("OperationController", () => {
       await ctrl.recover();
 
       expect(state._data.get("scope-A")).toEqual(BASE_POINTER);
-      expect(state._writes).toHaveLength(0);
+      // Recover only reads; no reservation, no clear.
+      expect(state._reservations).toHaveLength(0);
+      expect(state._clears).toHaveLength(0);
     });
   });
 
@@ -906,6 +956,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       expect(first.submitFn).toHaveBeenCalledTimes(1);
       expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
 
@@ -915,9 +966,7 @@ describe("OperationController", () => {
       expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
 
       const again = await ctrl.begin(LAUNCH_INTENT);
-      expect(again.status).toBe("checking");
-      expect(again.reason).toBe("PENDING_POINTER");
-      expect(again.pointer).toEqual(SUBMITTED_POINTER);
+      expectLocalBusy(again);
       expect(first.submitFn).toHaveBeenCalledTimes(1);
       expect(portState._prepare).toHaveBeenCalledTimes(1);
 
@@ -930,7 +979,7 @@ describe("OperationController", () => {
     it("clear with wrong pointer does not erase newer operation", async () => {
       const { store } = makeStoreWithState();
       const newPointer = { operationKey: "op-new", kind: "launch" as OperationKind, targetKey: null };
-      store.write("scope-A", newPointer);
+      store.reserve("scope-A", newPointer);
       const portState = makePort();
       const ctrl = new OperationController(buildPort(portState), store);
 
@@ -961,12 +1010,13 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       // A newer operation's hint lands in the store while the first is in flight.
       state._data.set("scope-A", newer);
       resolve(acceptedEcho(SUBMITTED_POINTER));
       await pending;
 
-      expect(ctrl.getState().status).toBe("accepted");
+      expect(ctrl.getState().status).toBe("unknown");
       expect(store.read("scope-A")).toEqual(newer);
     });
 
@@ -977,15 +1027,17 @@ describe("OperationController", () => {
         kind: "launch",
         targetKey: null,
       };
-      store.write("scope-A", pointer);
+      state._data.set("scope-A", pointer);
       const portState = makePort({ _ctx: null });
       const ctrl = new OperationController(buildPort(portState), store);
 
       ctrl.invalidate();
 
       expect(state._data.get("scope-A")).toEqual(pointer);
-      // Only the seeded write: the controller added and removed nothing.
-      expect(state._writes).toEqual([pointer]);
+      // Only the seeded pointer is in the store; the controller reserved
+      // nothing and cleared nothing.
+      expect(state._reservations).toHaveLength(0);
+      expect(state._clears).toHaveLength(0);
     });
   });
 
@@ -1550,9 +1602,7 @@ describe("OperationController", () => {
 
       const again = await ctrl.begin(LAUNCH_INTENT);
 
-      expect(again.status).toBe("checking");
-      expect(again.reason).toBe("PENDING_POINTER");
-      expect(again.pointer).toEqual(SUBMITTED_POINTER);
+      expect(again).toMatchObject({ status: "checking", reason: "PENDING_POINTER", pointer: SUBMITTED_POINTER });
       expect(portState._submit).toHaveBeenCalledTimes(1);
       expect(portState._prepare).toHaveBeenCalledTimes(1);
     });
@@ -1628,11 +1678,11 @@ describe("OperationController", () => {
 
       const result = await ctrl.begin(LAUNCH_INTENT);
 
-      expect(result.status).toBe("unknown");
+      expect(result.status).toBe("idle");
       expect(result.reason).toBe("EPOCH_CHANGED");
-      expect(result.pointer?.operationKey).toBe("op-launch-1");
+      expect(result.pointer).toBeNull();
       expect(store.read("scope-A")).not.toBeNull();
-      expect(ctrl.getState().status).toBe("unknown");
+      expect(ctrl.getState().status).toBe("idle");
     });
 
     it("A-B-A: the retained hint is still recoverable under the new epoch", async () => {
@@ -1677,6 +1727,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       ctrl.invalidate();
       // The port surfaces the abort as a rejection after invalidate() ran.
       rejectSubmit(new Error("The operation was aborted"));
@@ -1701,7 +1752,7 @@ describe("OperationController", () => {
         kind: "launch",
         targetKey: null,
       };
-      store.write("scope-A", pointer);
+      state._data.set("scope-A", pointer);
       let rejectRead!: (e: Error) => void;
       const readFn = vi.fn(
         (_p: OperationPointer, signal: AbortSignal) =>
@@ -1714,6 +1765,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.recover();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       ctrl.invalidate();
       rejectRead(new Error("The operation was aborted"));
 
@@ -1760,6 +1812,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       ctrl.invalidate();
       first.resolve(acceptedEcho(SUBMITTED_POINTER));
       await pending;
@@ -1778,6 +1831,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       ctrl.invalidate();
       first.reject(new Error("producer failed after abort"));
       await pending;
@@ -1808,6 +1862,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       expect(first.submitFn).toHaveBeenCalledTimes(1);
 
       ctrl.invalidate();
@@ -1815,9 +1870,7 @@ describe("OperationController", () => {
       generation = "gen-C";
 
       const again = await ctrl.begin(LAUNCH_INTENT);
-      expect(again.status).toBe("checking");
-      expect(again.reason).toBe("PENDING_POINTER");
-      expect(again.pointer).toEqual(SUBMITTED_POINTER);
+      expectLocalBusy(again);
       expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
       expect(first.submitFn).toHaveBeenCalledTimes(1);
       expect(portState._prepare).toHaveBeenCalledTimes(1);
@@ -1836,6 +1889,7 @@ describe("OperationController", () => {
       const ctrl = new OperationController(buildPort(portState), store);
 
       const pending = ctrl.begin(LAUNCH_INTENT);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       ctrl.invalidate();
       first.reject(new Error("aborted"));
       await pending;
@@ -1913,10 +1967,522 @@ describe("OperationController", () => {
       await ctrl.begin({ kind: "launch", payload: secret, targetKey: null });
 
       expect(JSON.stringify(ctrl.getState())).not.toContain("sk-secret-value");
-      for (const written of state._writes) {
-        expect(JSON.stringify(written)).not.toContain("sk-secret-value");
+      for (const reserved of state._reservations) {
+        expect(JSON.stringify(reserved)).not.toContain("sk-secret-value");
       }
-      expect(JSON.stringify(state._writes)).not.toContain("payload");
+      expect(JSON.stringify(state._reservations)).not.toContain("payload");
+    });
+  });
+
+  // ── Async durability boundary ─────────────────────────────────────────────
+  //
+  // The store is now a three-operation durability boundary (read / reserve /
+  // clearIfEqual) instead of a sync read/write/clear. These tests cover what
+  // each operation must and must not let the controller do, and the order in
+  // which the controller must fence, fence, and commit.
+  describe("async durability boundary", () => {
+    it("read throwing is LOCAL_UNAVAILABLE: zero prepare, zero submit, no clear", async () => {
+      const { store, state } = makeStoreWithState();
+      state._storeReadShouldFail = true;
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("idle");
+      expect(result.reason).toBe("LOCAL_UNAVAILABLE");
+      expect(portState._prepare).not.toHaveBeenCalled();
+      expect(portState._submit).not.toHaveBeenCalled();
+      expect(state._reservations).toHaveLength(0);
+      expect(state._clears).toHaveLength(0);
+    });
+
+    it("read returning a corrupt pointer is MALFORMED_POINTER: zero prepare, zero submit", async () => {
+      const { store, state } = makeStoreWithState();
+      store.read = (() => ({ operationKey: "junk" }) as unknown as OperationPointer) as PendingPointerStore["read"];
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("idle");
+      expect(result.reason).toBe("MALFORMED_POINTER");
+      expect(portState._prepare).not.toHaveBeenCalled();
+      expect(portState._submit).not.toHaveBeenCalled();
+      expect(state._reservations).toHaveLength(0);
+    });
+
+    it("deferred reserve keeps submit at zero until the reserve commits", async () => {
+      const { store } = makeStoreWithState();
+      let commitReserve!: () => void;
+      const pending = new Promise<void>((res) => {
+        commitReserve = res;
+      });
+      const originalReserve = store.reserve.bind(store);
+      store.reserve = ((scope: string, pointer: OperationPointer, signal?: AbortSignal) => {
+        return pending.then(() => originalReserve(scope, pointer, signal));
+      }) as PendingPointerStore["reserve"];
+
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const begin = ctrl.begin(LAUNCH_INTENT);
+      // Yield to let begin run to the await on reserve.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(portState._submit).not.toHaveBeenCalled();
+
+      commitReserve();
+      // Allow the now-pending reserve to settle through the original fixture.
+      await new Promise<void>((res) => {
+        queueMicrotask(res);
+      });
+      await begin;
+
+      expect(portState._submit).toHaveBeenCalledTimes(1);
+    });
+
+    it("competing controllers — reserve is atomic, at most one submit", async () => {
+      // Two controllers share an in-memory store. Each tries to begin at the
+      // same time with a different intent: only the reservation winner
+      // reaches port.submit. The loser must report PENDING_POINTER and never
+      // hit submit.
+      const sharedData = new Map<string, OperationPointer>();
+      const sharedStore: PendingPointerStore = {
+        read: (scope) => sharedData.get(scope) ?? null,
+        reserve: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing) return { reserved: false, pointer: existing };
+          sharedData.set(scope, pointer);
+          return { reserved: true };
+        },
+        clearIfEqual: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing && samePointer(existing, pointer)) {
+            sharedData.delete(scope);
+            return true;
+          }
+          return false;
+        },
+      };
+
+      const portA = makePort({
+        _prepare: vi.fn(() => ({ operationKey: "op-A", kind: "launch" as OperationKind, targetKey: null })),
+      });
+      const portB = makePort({
+        _prepare: vi.fn(() => ({ operationKey: "op-B", kind: "launch" as OperationKind, targetKey: null })),
+      });
+      const ctrlA = new OperationController(buildPort(portA), sharedStore);
+      const ctrlB = new OperationController(buildPort(portB), sharedStore);
+
+      // Both begin simultaneously. Only one reserve commits.
+      const [resA, resB] = await Promise.all([
+        ctrlA.begin(LAUNCH_INTENT),
+        ctrlB.begin(LAUNCH_INTENT),
+      ]);
+
+      const submissions = [vi.mocked(portA._submit).mock.calls.length, vi.mocked(portB._submit).mock.calls.length];
+      const totalSubmits = submissions[0] + submissions[1];
+      expect(totalSubmits).toBe(1);
+
+      const winner = totalSubmits === 1 ? (submissions[0] === 1 ? resA : resB) : null;
+      const loser = totalSubmits === 1 ? (submissions[0] === 0 ? resA : resB) : null;
+
+      // Whichever controller won reports accepted (or its own terminal state);
+      // the loser reports checking/PENDING_POINTER with the winner's pointer.
+      expect(winner).not.toBeNull();
+      expect(loser).not.toBeNull();
+      expect(loser!.status).toBe("checking");
+      expect(loser!.reason).toBe("PENDING_POINTER");
+      expect(loser!.pointer).toMatchObject({
+        operationKey: winner!.status === "accepted" ? (vi.mocked(portA._submit).mock.calls.length ? "op-A" : "op-B") : (loser!.pointer?.operationKey ?? null),
+      });
+      // The accepted winner has atomically cleared its own pointer.
+      expect(sharedData.size).toBe(0);
+    });
+
+    it("occupied equal pointer in store -> checking, zero new submit", async () => {
+      const { store } = makeStoreWithInitial([["scope-A", SUBMITTED_POINTER]]);
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("checking");
+      expect(result.reason).toBe("PENDING_POINTER");
+      expect(result.pointer).toEqual(SUBMITTED_POINTER);
+      expect(portState._prepare).not.toHaveBeenCalled();
+      expect(portState._submit).not.toHaveBeenCalled();
+    });
+
+    it("occupied different pointer in store -> checking, zero new submit", async () => {
+      const foreign: OperationPointer = {
+        operationKey: "op-other",
+        kind: "launch",
+        targetKey: null,
+      };
+      const { store } = makeStoreWithInitial([["scope-A", foreign]]);
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("checking");
+      expect(result.reason).toBe("PENDING_POINTER");
+      expect(result.pointer).toEqual(foreign);
+      expect(portState._prepare).not.toHaveBeenCalled();
+      expect(portState._submit).not.toHaveBeenCalled();
+    });
+
+    it("reserve returning a different pointer -> checking, zero new submit", async () => {
+      // Reserve loses the race to a different pointer (e.g., another
+      // controller's reserve committed between our read and our reserve).
+      const foreign: OperationPointer = {
+        operationKey: "op-other",
+        kind: "launch",
+        targetKey: null,
+      };
+      const { store } = makeStoreWithState();
+      store.reserve = ((scope: string, _pointer: OperationPointer, _signal?: AbortSignal) => {
+        return { reserved: false as const, pointer: foreign };
+      }) as PendingPointerStore["reserve"];
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("checking");
+      expect(result.reason).toBe("PENDING_POINTER");
+      expect(result.pointer).toEqual(foreign);
+      expect(portState._submit).not.toHaveBeenCalled();
+    });
+
+    it("late invalidation during read suppresses every later publish", async () => {
+      const { store } = makeStoreWithState();
+      const readStart = deferredSubmit();
+      store.read = ((scope: string) => {
+        // Synchronously invalidate while the read is "in flight" by calling
+        // ctrl.invalidate() from the host store callback.
+        ctrl.invalidate();
+        return null;
+      }) as PendingPointerStore["read"];
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("idle");
+      expect(result.reason).toBe("CLEARED");
+      expect(portState._submit).not.toHaveBeenCalled();
+    });
+
+    it("late invalidation during reserve suppresses submit", async () => {
+      const { store } = makeStoreWithState();
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+      // Override reserve to invalidate before returning.
+      const originalReserve = store.reserve.bind(store);
+      store.reserve = ((scope: string, p: OperationPointer, signal?: AbortSignal) => {
+        ctrl.invalidate();
+        return originalReserve(scope, p, signal);
+      }) as PendingPointerStore["reserve"];
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("idle");
+      expect(result.reason).toBe("CLEARED");
+      expect(portState._submit).not.toHaveBeenCalled();
+    });
+
+    it("late invalidation during submit suppresses publish; hint is durable", async () => {
+      const { store } = makeStoreWithState();
+      let invalidateFromSubmit!: () => void;
+      const portState = makePort({
+        _submit: vi.fn(async (pointer: OperationPointer) => {
+          invalidateFromSubmit();
+          return echoReceipt(pointer, "accepted");
+        }),
+      });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const begin = ctrl.begin(LAUNCH_INTENT);
+      // Submit hasn't been invoked yet; install the invalidator and let it
+      // run synchronously when submit is called below.
+      invalidateFromSubmit = () => ctrl.invalidate();
+      const result = await begin;
+
+      expect(result.status).toBe("idle");
+      expect(result.reason).toBe("CLEARED");
+      // The reservation is durable, so the hint remains in the store even
+      // though the receipt was suppressed.
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+    });
+
+    it("late invalidation during clear suppresses terminal publish", async () => {
+      const { store } = makeStoreWithState();
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+      const originalClear = store.clearIfEqual.bind(store);
+      store.clearIfEqual = ((scope: string, pointer: OperationPointer, signal?: AbortSignal) => {
+        // Invalidate from inside the host store callback for the clear.
+        ctrl.invalidate();
+        return originalClear(scope, pointer, signal);
+      }) as PendingPointerStore["clearIfEqual"];
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      // The receipt was accepted and clearIfEqual returned true, but the
+      // controller was invalidated during clear — so the UI sees CLEARED,
+      // not ACCEPTED. The hint may have been cleared by the store already
+      // (durable effect), and the in-flight slot joins through the await.
+      expect(result.status).toBe("idle");
+      expect(result.reason).toBe("CLEARED");
+      expect(store.read("scope-A")).toBeNull();
+    });
+
+    it("clearIfEqual returning false on an accepted receipt holds unknown", async () => {
+      const { store } = makeStoreWithState();
+      // Make clearIfEqual return false even though the receipt is accepted.
+      store.clearIfEqual = (() => false) as PendingPointerStore["clearIfEqual"];
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      // Terminal receipt, but the clear said false: we don't know the state.
+      expect(result.status).toBe("unknown");
+      expect(result.reason).toBe("UNKNOWN_RECEIPT");
+      expect(result.pointer).toEqual(SUBMITTED_POINTER);
+      // The hint remains — the next recover() can resolve it.
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+    });
+
+    it("clearIfEqual rejecting on a refused receipt holds unknown", async () => {
+      const { store } = makeStoreWithState();
+      store.clearIfEqual = (() => {
+        throw new Error("store write conflict");
+      }) as PendingPointerStore["clearIfEqual"];
+      const portState = makePort({
+        _submit: vi.fn(async (pointer: OperationPointer) => echoReceipt(pointer, "refused")),
+      });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("unknown");
+      expect(result.reason).toBe("UNKNOWN_RECEIPT");
+      expect(result.pointer).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+    });
+
+    it("clearIfEqual returning false on a refused receipt holds unknown", async () => {
+      const { store } = makeStoreWithState();
+      store.clearIfEqual = (() => false) as PendingPointerStore["clearIfEqual"];
+      const portState = makePort({
+        _submit: vi.fn(async (pointer: OperationPointer) => echoReceipt(pointer, "refused")),
+      });
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      expect(result.status).toBe("unknown");
+      expect(result.reason).toBe("UNKNOWN_RECEIPT");
+      expect(result.pointer).toEqual(SUBMITTED_POINTER);
+      expect(store.read("scope-A")).toEqual(SUBMITTED_POINTER);
+    });
+
+    it("lost reply + new controller recover is status-only, no second submit", async () => {
+      // First controller submits, gets an unknown receipt, holds the pointer.
+      // A brand-new controller (different instance, same store) recovers
+      // through readOperation only — never submits.
+      const sharedData = new Map<string, OperationPointer>();
+      const sharedStore: PendingPointerStore = {
+        read: (scope) => sharedData.get(scope) ?? null,
+        reserve: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing) return { reserved: false, pointer: existing };
+          sharedData.set(scope, pointer);
+          return { reserved: true };
+        },
+        clearIfEqual: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing && samePointer(existing, pointer)) {
+            sharedData.delete(scope);
+            return true;
+          }
+          return false;
+        },
+      };
+      const portA = makePort({
+        _submit: vi.fn(async (pointer: OperationPointer) => echoReceipt(pointer, "unknown")),
+        _readOp: vi.fn(async (pointer: OperationPointer) => echoReceipt(pointer, "unknown")),
+      });
+      const portB = makePort({
+        _submit: vi.fn(async (pointer: OperationPointer) => echoReceipt(pointer, "unknown")),
+        _readOp: vi.fn(async (pointer: OperationPointer) =>
+          echoReceipt(pointer, "accepted", { missionSelection: VALID_SELECTION }),
+        ),
+      });
+
+      const ctrlA = new OperationController(buildPort(portA), sharedStore);
+      const beginA = await ctrlA.begin(LAUNCH_INTENT);
+      expect(beginA.status).toBe("unknown");
+      expect(beginA.reason).toBe("UNKNOWN_RECEIPT");
+      expect(portA._submit).toHaveBeenCalledTimes(1);
+
+      // New controller, same store: recover must use readOperation only.
+      const ctrlB = new OperationController(buildPort(portB), sharedStore);
+      const recovered = await ctrlB.recover();
+
+      expect(recovered.status).toBe("accepted");
+      expect(recovered).toHaveProperty("missionSelection", VALID_SELECTION);
+      expect(portB._submit).not.toHaveBeenCalled();
+      expect(portB._readOp).toHaveBeenCalledTimes(1);
+      // Only one submit ever happened (from the first controller).
+      expect(portA._submit).toHaveBeenCalledTimes(1);
+      // And the hint is cleared by the recovering readOperation's success.
+      expect(sharedStore.read("scope-A")).toBeNull();
+    });
+
+    it("clearIfEqual does not erase a pointer that was overwritten by a newer reservation", async () => {
+      // The first controller's submit returned accepted. Before its
+      // clearIfEqual ran, a new controller reserved a different pointer in
+      // the same scope. The exact-pointer check must return false; the UI
+      // holds unknown; the newer pointer survives.
+      const sharedData = new Map<string, OperationPointer>();
+      const sharedStore: PendingPointerStore = {
+        read: (scope) => sharedData.get(scope) ?? null,
+        reserve: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing) return { reserved: false, pointer: existing };
+          sharedData.set(scope, pointer);
+          return { reserved: true };
+        },
+        clearIfEqual: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing && samePointer(existing, pointer)) {
+            sharedData.delete(scope);
+            return true;
+          }
+          return false;
+        },
+      };
+      let overwrite!: () => void;
+      const portA = makePort({
+        _submit: vi.fn(async (pointer: OperationPointer) => {
+          // Before A's clearIfEqual runs, a newer reservation lands in the
+          // store. A's clear must see the new one and return false.
+          overwrite();
+          return echoReceipt(pointer, "accepted", { missionSelection: VALID_SELECTION });
+        }),
+      });
+      const ctrlA = new OperationController(buildPort(portA), sharedStore);
+
+      const beginPromise = ctrlA.begin(LAUNCH_INTENT);
+      overwrite = () => {
+        sharedData.set("scope-A", {
+          operationKey: "op-newer",
+          kind: "launch",
+          targetKey: null,
+        });
+      };
+      const result = await beginPromise;
+
+      expect(result.status).toBe("unknown");
+      expect(result.reason).toBe("UNKNOWN_RECEIPT");
+      expect(sharedStore.read("scope-A")).toEqual({
+        operationKey: "op-newer",
+        kind: "launch",
+        targetKey: null,
+      });
+    });
+
+    it("reserve never overwrites — even when the new pointer is exactly equal to the existing", async () => {
+      // Two concurrent begins with the SAME prepared pointer. The second
+      // reserve must lose with reserved:false, even though the pointers are
+      // structurally equal. The second controller sees checking/PENDING_POINTER.
+      const sharedData = new Map<string, OperationPointer>();
+      const sharedStore: PendingPointerStore = {
+        read: (scope) => sharedData.get(scope) ?? null,
+        reserve: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing) return { reserved: false, pointer: existing };
+          sharedData.set(scope, pointer);
+          return { reserved: true };
+        },
+        clearIfEqual: (scope, pointer) => {
+          const existing = sharedData.get(scope);
+          if (existing && samePointer(existing, pointer)) {
+            sharedData.delete(scope);
+            return true;
+          }
+          return false;
+        },
+      };
+      const equalPointer: OperationPointer = {
+        operationKey: "op-shared",
+        kind: "launch",
+        targetKey: null,
+      };
+      const portState = makePort({
+        _prepare: vi.fn(() => equalPointer),
+        _submit: vi.fn(async (p: OperationPointer) =>
+          echoReceipt(p, "accepted", { missionSelection: VALID_SELECTION }),
+        ),
+      });
+      const ctrl1 = new OperationController(buildPort(portState), sharedStore);
+      const ctrl2 = new OperationController(buildPort(portState), sharedStore);
+
+      const [r1, r2] = await Promise.all([
+        ctrl1.begin(LAUNCH_INTENT),
+        ctrl2.begin(LAUNCH_INTENT),
+      ]);
+
+      const results = [r1, r2];
+      const accepted = results.filter((r) => r.status === "accepted");
+      const checking = results.filter((r) => r.status === "checking");
+
+      expect(accepted).toHaveLength(1);
+      expect(checking).toHaveLength(1);
+      expect(checking[0]!.reason).toBe("PENDING_POINTER");
+      // Only one submit was issued.
+      expect(portState._submit).toHaveBeenCalledTimes(1);
+    });
+
+    it("recover that finds no pointer returns RECOVER_NO_POINTER without calling clearIfEqual", async () => {
+      const { store, state } = makeStoreWithState();
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      const result = await ctrl.recover();
+
+      expect(result.status).toBe("idle");
+      expect(result.reason).toBe("RECOVER_NO_POINTER");
+      expect(portState._readOp).not.toHaveBeenCalled();
+      expect(state._clears).toHaveLength(0);
+    });
+
+    it("sign-out during reserve bails before submit; the uncommitted reservation leaves no hint", async () => {
+      const { store } = makeStoreWithState();
+      const portState = makePort();
+      const ctrl = new OperationController(buildPort(portState), store);
+
+      // Make reserve observe the system signal and pretend it was aborted
+      // before any commit happened. We model this by throwing from reserve,
+      // which the controller maps to STORE_WRITE_FAILED. The store stays
+      // empty: no reservation was committed.
+      store.reserve = ((_scope: string, _pointer: OperationPointer, _signal?: AbortSignal) => {
+        portState._ctx = null;
+        throw new Error("aborted before commit");
+      }) as PendingPointerStore["reserve"];
+
+      const result = await ctrl.begin(LAUNCH_INTENT);
+
+      // sign-out happens after reserve was rejected; the controller returns
+      // idle/OWNER_ABSENT (the context gate). The hint was not committed.
+      expect(result.status).toBe("idle");
+      expect(store.read("scope-A")).toBeNull();
+      expect(portState._submit).not.toHaveBeenCalled();
     });
   });
 });

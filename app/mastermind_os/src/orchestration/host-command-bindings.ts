@@ -42,6 +42,12 @@ export interface OrchestratorCommandView {
 /**
  * Owner-injected command capability. Completeness is a closed shape check:
  * there are no catalog, provider, or programs-derived defaults.
+ *
+ * The pending-pointer store is checked for the atomic durability boundary:
+ * `read`, `reserve`, and `clearIfEqual`. Bindings that expose `write` or
+ * `clear` aliases are rejected — controllers cannot compose them to fake
+ * durability, and the controller's contract requires the atomic operations
+ * instead.
  */
 export interface OrchestratorCommandBinding {
   readonly port: FiniteCommandPort;
@@ -80,8 +86,18 @@ export function completeOrchestratorCommandBinding(
     !isFn(port.readOperation)
   )
     return null;
-  if (!isFn(store.read) || !isFn(store.write) || !isFn(store.clear))
+  // Durability boundary: only the three atomic operations are accepted.
+  if (
+    !isFn(store.read) ||
+    !isFn(store.reserve) ||
+    !isFn(store.clearIfEqual)
+  )
     return null;
+  // Reject any binding that exposes a write or clear alias — those would let
+  // a controller compose non-atomic reads/writes instead of going through
+  // the durable reserve / clearIfEqual operations.
+  if (isFn((store as Record<string, unknown>).write)) return null;
+  if (isFn((store as Record<string, unknown>).clear)) return null;
   if (
     !isFn(value.getView) ||
     !isFn(value.subscribe) ||

@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { navigateCompanyOperation } from "./test-operational-navigation";
 import { bindMissionHost, type AuthState } from "./host";
 import { createWebAuth } from "./web-auth";
 import type {
@@ -84,7 +85,7 @@ afterEach(() => {
 
 describe("React read lifecycle fences", () => {
   it("hides displayed A synchronously while B is pending and after B rejects", async () => {
-    const b = deferred<unknown>(),
+    const b = deferred<unknown>(), collectionB = deferred<unknown>(),
       read = vi.fn(({ workRef }: { workRef: string }) =>
         workRef === "WS:ALPHA"
           ? Promise.resolve(missionFixture("WS:ALPHA", "JOB-A"))
@@ -92,7 +93,7 @@ describe("React read lifecycle fences", () => {
       );
     window.MastermindMissionHost = {
       selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
-      readPrograms,
+      readPrograms: vi.fn().mockImplementationOnce(readPrograms).mockImplementation(() => collectionB.promise),
       readMission: read,
     };
     const user = userEvent.setup();
@@ -101,12 +102,15 @@ describe("React read lifecycle fences", () => {
       await screen.findByRole("button", { name: "Mission Workspace" }),
     );
     expect(await screen.findByText("JOB-A")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
     expect(screen.queryByText("JOB-A")).toBeNull();
-    expect(screen.getByText(/SOURCE_READ_PENDING/)).toBeTruthy();
+    expect(screen.getByText(/PROGRAM_SELECTION_PENDING/)).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(1);
+    await act(async () => collectionB.resolve(await readPrograms()));
+    expect(await screen.findByText(/SOURCE_READ_PENDING/)).toBeTruthy();
     await act(async () => b.reject(new Error("disconnected")));
     expect(await screen.findByText(/SOURCE_UNAVAILABLE/)).toBeTruthy();
     expect(screen.queryByText("JOB-A")).toBeNull();
@@ -136,8 +140,8 @@ describe("React read lifecycle fences", () => {
     expect(signals.get("WS:ALPHA")?.aborted).toBe(true);
     await act(async () => b.resolve(missionFixture("WS:BETA", "JOB-B")));
     expect(
-      (await screen.findAllByRole("heading", { name: "Beta program" })).length,
-    ).toBe(1);
+      await screen.findByText("Exact project context · JOB-B"),
+    ).toBeTruthy();
     await act(async () => a.resolve(missionFixture("WS:ALPHA", "JOB-A")));
     await waitFor(() =>
       expect(
@@ -289,14 +293,16 @@ describe("React read lifecycle fences", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "Mission Workspace" }));
     expect(await screen.findByText("JOB-A")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
     expect(window.location.search).toBe(
       "?work_ref=WS%3ABETA&root_job_id=JOB-B",
     );
-    expect(await screen.findByText("JOB-B")).toBeTruthy();
+    expect(
+      await screen.findByText("Exact project context · JOB-B"),
+    ).toBeTruthy();
 
     window.history.back();
     await waitFor(() =>
@@ -304,14 +310,18 @@ describe("React read lifecycle fences", () => {
         "?work_ref=WS%3AALPHA&root_job_id=JOB-A",
       ),
     );
-    expect(await screen.findByText("JOB-A")).toBeTruthy();
+    expect(
+      await screen.findByText("Exact project context · JOB-A"),
+    ).toBeTruthy();
     window.history.forward();
     await waitFor(() =>
       expect(window.location.search).toBe(
         "?work_ref=WS%3ABETA&root_job_id=JOB-B",
       ),
     );
-    expect(await screen.findByText("JOB-B")).toBeTruthy();
+    expect(
+      await screen.findByText("Exact project context · JOB-B"),
+    ).toBeTruthy();
 
     cleanup();
     render(<App />);
@@ -336,7 +346,7 @@ describe("React read lifecycle fences", () => {
         "?work_ref=WS%3AALPHA&root_job_id=JOB-A",
       ),
     );
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
@@ -389,7 +399,7 @@ describe("Executive OS convergence surfaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(await screen.findByText("JOB-2")).toBeTruthy();
     expect(screen.getByText("CHECKPOINTED")).toBeTruthy();
     expect(screen.getByText("JOB-1")).toBeTruthy();
@@ -407,7 +417,7 @@ describe("Executive OS convergence surfaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(await screen.findByText("projection_refused")).toBeTruthy();
     expect(screen.getAllByText("UNAVAILABLE").length).toBeGreaterThan(0);
     expect(screen.getByText(/not evidence of zero work/i)).toBeTruthy();
@@ -422,7 +432,7 @@ describe("Executive OS convergence surfaces", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Fleet & Capacity" }));
+    await navigateCompanyOperation(user, "Fleet & Capacity");
     expect(
       screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
     ).toBeTruthy();
@@ -459,22 +469,50 @@ describe("Executive OS convergence surfaces", () => {
     render(<App />);
     const attention = screen
       .getByRole("heading", {
-        name: "Chairman attention",
+        name: "Chairman attention is not established.",
         level: 2,
       })
       .closest("section");
     expect(attention).toBeTruthy();
     expect(
       within(attention!).getByText(
-        "Absence here is not evidence that zero decisions exist.",
+        "Missing attention data does not mean there are no decisions.",
         { exact: false },
       ),
     ).toBeTruthy();
-    expect(within(attention!).getByText("NOT PROJECTED")).toBeTruthy();
+    expect(within(attention!).queryByText("The owner has requested Chairman attention.")).toBeNull();
   });
 });
 
 describe("native and interaction contracts", () => {
+  it("keeps exactly five Company destinations and contextual operational routes", async () => {
+    render(<App />);
+    const company = screen.getByRole("navigation", { name: "Company navigation" });
+    expect(within(company).getAllByRole("button").map(button => button.textContent?.trim().replace(/^[^A-Za-z]+/, ""))).toEqual([
+      "Today", "Projects", "Inbox", "Conversations", "Knowledge",
+    ]);
+    const operations = screen.getByRole("navigation", { name: "Company operations" });
+    expect(within(operations).getByRole("button", { name: "Work" })).toBeTruthy();
+    expect(within(operations).getByRole("button", { name: "Open Programs" })).toBeTruthy();
+    await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity" }));
+    expect(screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 })).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Company operations" })).toBeNull();
+  });
+  it("skip to workspace retains Today and the original URL while focusing main", async () => {
+    window.MastermindMissionHost = {
+      selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
+      readPrograms,
+      readMission: async () => missionFixture("WS:ALPHA", "JOB-A"),
+    };
+    const user = userEvent.setup();
+    render(<App />);
+    expect(screen.getByRole("heading", { name: "Today", level: 1 })).toBeTruthy();
+    const originalUrl = location.href;
+    await user.click(screen.getByRole("link", { name: "Skip to workspace" }));
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+    expect(location.href).toBe(originalUrl);
+    expect(screen.getByRole("heading", { name: "Today", level: 1 })).toBeTruthy();
+  });
   it("native mode invokes readiness only and never fetches", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -1120,9 +1158,9 @@ describe("installed authentication and permitted content", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(screen.getByRole("button", { name: "Conversation" }));
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     const beta = await screen.findByRole("button", { name: /Beta program/ });
     await user.click(beta);
     await act(async () => {
@@ -1187,7 +1225,7 @@ describe("route focus handoff", () => {
   it("retains persistent navigation focus and exposes the current route", async () => {
     const user = userEvent.setup();
     render(<App />);
-    const programs = screen.getByRole("button", { name: "Programs" });
+    const programs = screen.getByRole("button", { name: "Projects" });
     programs.focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(programs);
@@ -1196,7 +1234,7 @@ describe("route focus handoff", () => {
     expect(document.activeElement).toBe(programs);
   });
 
-  it("hands program selection to the Mission heading without stealing focus when data resolves", async () => {
+  it("hands program selection to the Projects heading without stealing focus when data resolves", async () => {
     const pending = deferred<unknown>();
     window.MastermindMissionHost = {
       selection: { workRef: "WS:ALPHA", rootJobId: "JOB-A" },
@@ -1213,7 +1251,7 @@ describe("route focus handoff", () => {
     (await screen.findByRole("button", { name: /Beta program/ })).focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(
-      screen.getByRole("heading", { name: "Mission Workspace", level: 1 }),
+      screen.getByRole("heading", { name: "Projects", level: 1 }),
     );
     const connections = screen.getByRole("button", { name: "Connections" });
     connections.focus();
@@ -1472,18 +1510,24 @@ function memoryStore(): PendingPointerStore {
   const data = new Map<string, OperationPointer>();
   return {
     read: (scope) => data.get(scope) ?? null,
-    write: (scope, pointer) => {
-      data.set(scope, pointer);
-    },
-    clear: (scope, pointer) => {
+    reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
+        data.set(scope, pointer);
+        return { reserved: true };
+      },
+    clearIfEqual: (scope, pointer) => {
       const current = data.get(scope);
       if (
         current &&
         current.operationKey === pointer.operationKey &&
         current.kind === pointer.kind &&
         current.targetKey === pointer.targetKey
-      )
-        data.delete(scope);
+      ) {
+          data.delete(scope);
+          return true;
+        }
+        return false;
     },
   };
 }
@@ -1642,7 +1686,7 @@ function installCommandHost(
 }
 
 async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Work" }));
+  await navigateCompanyOperation(user, "Work");
   await user.type(
     screen.getByLabelText("Goal"),
     "Ship the orchestrator",
@@ -1657,7 +1701,7 @@ describe("App command composition", () => {
 
     installCommandHost(undefined);
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     cleanup();
@@ -1687,7 +1731,7 @@ describe("App command composition", () => {
       },
     };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(incomplete.prepare).not.toHaveBeenCalled();
     expect(incomplete.submit).not.toHaveBeenCalled();
@@ -1701,7 +1745,7 @@ describe("App command composition", () => {
       content: false,
     });
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(signedOut.prepare).not.toHaveBeenCalled();
@@ -1718,7 +1762,12 @@ describe("App command composition", () => {
       expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"),
     );
     expect(window.location.search).toContain("root_job_id=JOB-L");
-    expect(screen.getByRole("heading", { name: "Mission Workspace", level: 1 })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Projects", level: 1 }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
+    ).toBe("true");
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledTimes(1);
     expect(prepare.mock.calls[0][0].kind).toBe("launch");
@@ -1733,7 +1782,7 @@ describe("App command composition", () => {
     installCommandHost(binding);
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Ship the orchestrator");
     const launch = screen.getByRole("button", { name: "Launch" });
     await user.click(launch);
@@ -1861,7 +1910,7 @@ describe("App command composition", () => {
     const user = userEvent.setup();
     render(<App />);
     await launchFromWork(user);
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(await screen.findByRole("button", { name: /Beta program/ }));
     await act(async () =>
       pending.resolve({
@@ -1931,18 +1980,24 @@ describe("host-composition repair regressions (R2)", () => {
     ]);
     const store: PendingPointerStore = {
       read: (scope) => data.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const readOperation = vi
@@ -2018,11 +2073,17 @@ describe("host-composition repair regressions (R2)", () => {
     const data = new Map<string, OperationPointer>([["owner-a", seeded]]);
     const store: PendingPointerStore = {
       read: (scope) => data.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope) => {
+      clearIfEqual: (scope, pointer) => {
+        const current = data.get(scope);
+        if (!current || current.operationKey !== pointer.operationKey || current.kind !== pointer.kind || current.targetKey !== pointer.targetKey) return false;
         data.delete(scope);
+        return true;
       },
     };
     const readOperation = vi.fn(
@@ -2128,15 +2189,15 @@ describe("host-composition repair regressions (R2)", () => {
     installCommandHost(made.binding);
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "First launch");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
 
     // A second dispatch from a remounted leaf (mission switch and back).
-    await user.click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(user, "Programs");
     await user.click(await screen.findByRole("button", { name: /Beta program/ }));
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Second launch");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     expect(made.prepare).toHaveBeenCalledTimes(1);
@@ -2215,18 +2276,24 @@ describe("host-composition repair regressions (R2)", () => {
     const data = new Map<string, OperationPointer>();
     const store: PendingPointerStore = {
       read: (scope) => data.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const replacementRead = vi.fn(
@@ -2352,35 +2419,47 @@ describe("host-composition repair regressions (R4)", () => {
     const data1 = new Map<string, OperationPointer>([["owner-a", seeded]]);
     const store1: PendingPointerStore = {
       read: (scope) => data1.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data1.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data1.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data1.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data1.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const data2 = new Map<string, OperationPointer>();
     const store2: PendingPointerStore = {
       read: (scope) => data2.get(scope) ?? null,
-      write: (scope, pointer) => {
+      reserve: (scope, pointer) => {
+        const existing = data2.get(scope);
+        if (existing) return { reserved: false, pointer: existing };
         data2.set(scope, pointer);
+        return { reserved: true };
       },
-      clear: (scope, pointer) => {
+      clearIfEqual: (scope, pointer) => {
         const current = data2.get(scope);
         if (
           current &&
           current.operationKey === pointer.operationKey &&
           current.kind === pointer.kind &&
           current.targetKey === pointer.targetKey
-        )
+        ) {
           data2.delete(scope);
+          return true;
+        }
+        return false;
       },
     };
     const oldRead = vi.fn(
@@ -2446,7 +2525,7 @@ describe("host-composition repair regressions (R4)", () => {
     // The seeded pointer lives only in the old store, so the live recover
     // is read-only and reaches no old-port call; the uncertainty survives.
     await user.click(screen.getByRole("button", { name: "Today" }));
-    await user.click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(user, "Work");
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await act(async () => {
       for (let i = 0; i < 8; i++) await Promise.resolve();
@@ -2551,7 +2630,7 @@ describe("host-composition repair regressions (R4)", () => {
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(replacement.submit).toHaveBeenCalledTimes(1));
     expect(old.submit).toHaveBeenCalledTimes(1);
-    expect(replacement.binding.store.read("owner-a")?.operationKey).toBe(
+    expect((await replacement.binding.store.read("owner-a"))?.operationKey).toBe(
       "op-1",
     );
     // The OLD route's receipt arrives while the newer launch is in flight:
@@ -2571,7 +2650,7 @@ describe("host-composition repair regressions (R4)", () => {
     });
     expect(window.location.search).not.toContain("WS%3ASTALE");
     expect(screen.getByRole("button", { name: "Launching…" })).toBeTruthy();
-    expect(replacement.binding.store.read("owner-a")?.operationKey).toBe(
+    expect((await replacement.binding.store.read("owner-a"))?.operationKey).toBe(
       "op-1",
     );
     // The newer launch's own ACCEPTED receipt settles its own pending,
@@ -2607,7 +2686,7 @@ describe("Pro/native command recovery integration", () => {
     render(<App />);
     await launchFromWork(user);
     await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
-    expect(made.binding.store.read("owner-a")?.operationKey).toBe("op-1");
+    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe("op-1");
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(made.readOperation).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(window.location.search).toContain("work_ref=WS%3ALAUNCH"));
@@ -2655,7 +2734,7 @@ describe("Pro/native Conversation recovery", () => {
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole("button", { name: "Check status" }).hasAttribute("disabled")).toBe(false));
-    expect(made.binding.store.read("owner-a")?.operationKey).toBe("op-1");
+    expect((await made.binding.store.read("owner-a"))?.operationKey).toBe("op-1");
     await user.click(screen.getByRole("button", { name: "Check status" }));
     await waitFor(() => expect(readOperation).toHaveBeenCalledTimes(2));
     expect(made.submit).toHaveBeenCalledTimes(1);

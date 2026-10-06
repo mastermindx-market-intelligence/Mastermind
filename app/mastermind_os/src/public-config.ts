@@ -1,7 +1,8 @@
 // Public, build-time configuration constants for the Mastermind OS web client.
 //
 // These values are fixed for the approved deployment. Only the public web
-// client ID comes from Vite build input; the native ID is compiled by Rust.
+// client ID and optional qualified Executive resource come from Vite build input;
+// the native client configuration is compiled by Rust.
 //
 // This module intentionally contains no business logic. It is a small surface
 // that the auth controller and tests both depend on so neither one has to
@@ -32,7 +33,7 @@ export const TOKEN_RESPONSE_BYTES = 32_768;
 export const TOKEN_TIMEOUT_MS = 15 * 1000;
 export const READ_TIMEOUT_MS = 15 * 1000;
 
-// The controller retains one popup WindowProxy for both transactions.
+// The controller retains one popup WindowProxy across the workspace and optional Executive transactions.
 export const POPUP_FEATURES = [
   "width=520",
   "height=720",
@@ -53,10 +54,12 @@ export interface WebAuthConfig {
   readonly contentScope: string;
   readonly webClientId: string | null;
   readonly nativeClientId: string | null;
+  /** Immutable operator-qualified Executive audience; absent means disabled. */
+  readonly executiveResource: string | null;
 }
 
-// `webClientId` is the only non-secret value that a non-secret build input
-// (`VITE_MM_WEB_CLIENT_ID`) is allowed to override. The native client is not
+// Public build inputs supply the client ID and optional qualified Executive resource.
+// The native client is not
 // registered in this web surface; Rust reads MM_NATIVE_CLIENT_ID separately.
 export function readWebAuthConfig(): WebAuthConfig {
   const web = readStringEnv("VITE_MM_WEB_CLIENT_ID");
@@ -71,6 +74,7 @@ export function readWebAuthConfig(): WebAuthConfig {
     contentScope: CONTENT_SCOPE,
     webClientId: web && web.length > 0 ? web : null,
     nativeClientId: null,
+    executiveResource: validateExecutiveResource(readStringEnv("VITE_MM_EXECUTIVE_RESOURCE")),
   };
 }
 
@@ -79,6 +83,7 @@ export function readWebAuthConfig(): WebAuthConfig {
 declare global {
   interface ImportMetaEnv {
     readonly VITE_MM_WEB_CLIENT_ID?: string;
+    readonly VITE_MM_EXECUTIVE_RESOURCE?: string;
   }
   interface ImportMeta {
     readonly env: ImportMetaEnv;
@@ -92,4 +97,14 @@ function readStringEnv(name: keyof ImportMetaEnv): string | null {
   } catch {
     return null;
   }
+}
+
+export const EXECUTIVE_SCOPE = "mastermind.executive.read mastermind.executive.intent.submit";
+export function validateExecutiveResource(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !!url.hostname && !url.username && !url.password &&
+      !url.search && !url.hash && url.href === value ? value : null;
+  } catch { return null; }
 }

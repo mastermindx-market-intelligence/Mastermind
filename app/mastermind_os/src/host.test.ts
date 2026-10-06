@@ -227,7 +227,7 @@ describe("native fixed command adapter", () => {
     await signin;
     expect(client.getState()).toEqual(out);
     expect(invoke.mock.calls.map((c) => c[0])).toEqual([
-      "auth_status",
+      "executive_auth_status", "auth_status",
       "sign_in",
       "sign_out",
     ]);
@@ -236,7 +236,7 @@ describe("native fixed command adapter", () => {
     const pending = deferred<unknown>();
     let listener!: (e: { payload: unknown }) => void;
     const invoke = vi.fn(async (command: string) =>
-      command === "auth_status" ? signed : pending.promise,
+      command === "auth_status" ? signed : command === "executive_auth_status" ? { generation: 0, available: false } : pending.promise,
     );
     const client = await createNativeClient(
       invoke as never,
@@ -339,7 +339,7 @@ describe("optional orchestrator command binding", () => {
     submit: vi.fn(),
     readOperation: vi.fn(),
   };
-  const store = { read: () => null, write: () => {}, clear: () => {} };
+  const store = { read: () => null, reserve: () => ({ reserved: true as const }), clearIfEqual: () => true };
   const complete = {
     port,
     store,
