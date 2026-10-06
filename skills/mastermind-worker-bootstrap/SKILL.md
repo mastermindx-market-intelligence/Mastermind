@@ -25,10 +25,15 @@ Read [context-and-returns.md](references/context-and-returns.md) for project fac
 Use the installed existing-owner integration when available:
 
 ```bash
+pool context --workstream <existing-workstream> --output <new-context-bundle.json>
 pool doctor --mission-ref <assignment-ref> --workspace <exact-workspace> --output <new-observations.json>
 pool prepare <launch-input.json> --output <new-packet.json>
 pool render <new-packet.json>
 ```
+
+`context` passes through the existing Agent OS compiler for an exact workstream on
+the controlling host; it preserves the owner's complete bundle and degradation metadata.
+It does not grant workers remote memory access or write to Agent OS.
 
 `doctor` makes bounded harmless reads on the host where it runs. It does not install tools,
 copy credentials, prove future provider-native loading, or establish write permission.

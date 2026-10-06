@@ -246,3 +246,27 @@ Linear official MCP: https://linear.app/docs/mcp
 External docs describe provider capabilities, not Mastermind's installed permissions.
 Current installed facts and exact test/live receipts are maintained in the companion
 implementation evidence on this source carrier and parent #600.
+
+
+## 11. Concrete delivery additions and coverage limit
+
+The launch CLI now exposes `context` as a one-shot pass-through to the existing Agent OS
+`compile-context` reader on the controlling host. It requires a named existing workstream,
+preserves exact returned bytes, and retains no-answer/degraded/omitted accounting. It does
+not create a remote memory service or silently grant native workers Agent OS access.
+
+A reproducible `mastermind-workforce` plugin artifact is generated from the existing Craft
+skill plus Worker Bootstrap without another canonical skill copy. The optional Docs variant
+adds only the public OpenAI documentation MCP. Both Codex and Claude manifest layouts are
+provided; source admission, native loading and tool authorization remain separate. No
+provider, runtime, account or global plugin installation is performed by packaging.
+
+The `pool` hook covers `pool run` and `pool remote` callers only. Direct `ext/sub.sh`,
+`lane2.py`, existing queue launchers and Executive adapters are not silently intercepted.
+They require their existing owner's explicit integration and exact-source acceptance.
+Do not describe this bounded hook as universal fleet adoption.
+
+Provider-specific documentation also matters: Slack's official Skills plugin currently
+provides the Slack MCP connection on Claude Code and Cursor, while Codex receives skills
+only. Installing a similarly named plugin is therefore not proof of Slack access in Codex.
+Source: https://docs.slack.dev/ai/slack-skills-plugin/ (checked 2026-10-06).

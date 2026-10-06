@@ -1,6 +1,8 @@
 # Context and continuity
 
-Prefer a named workstream using the existing Macro Agent OS reader:
+On the controlling host, use `pool context --workstream <existing-key> --output <new-file>`
+when the launch helper is installed. It passes through the existing owner unchanged.
+Otherwise prefer a named workstream using the existing Macro Agent OS reader:
 
 ```bash
 python3 scripts/agentos.py compile-context --workstream <existing-key> --json --budget <bounded-budget>

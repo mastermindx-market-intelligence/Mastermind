@@ -53,7 +53,7 @@ def wrapper_content(original, release):
     quoted=shlex.quote(str(release))
     block=(BEGIN+'\n'+
         'case "$CMD" in\n'+
-        '  prepare|doctor|render)\n'+
+        '  prepare|doctor|render|context)\n'+
         '    exec env PYTHONDONTWRITEBYTECODE=1 python3 '+quoted+'/ops/fabric_launch/cli.py "$CMD" "$@" ;;\n'+
         '  run|remote)\n'+
         '    exec env PYTHONDONTWRITEBYTECODE=1 python3 '+quoted+'/ops/fabric_launch/pool_entry.py --kit "$KIT_DIR" "$CMD" "$@" ;;\n'+

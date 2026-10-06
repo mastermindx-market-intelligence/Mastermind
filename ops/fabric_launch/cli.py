@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from ops.fabric_launch.context import (LaunchInputError, MAX_PACKET_BYTES, canonical,
     parse, prepare, verify_packet, augment_plain_prompt, digest)
 from ops.fabric_launch.observe import observe, ENDPOINTS
+from ops.fabric_launch.agentos import read_context
 
 
 def read_regular(path, maximum=MAX_PACKET_BYTES):
@@ -73,6 +74,9 @@ def main(argv=None):
     p.add_argument("--mission-ref", required=True); p.add_argument("--workspace", required=True)
     p.add_argument("--repository"); p.add_argument("--service", action="append", choices=sorted(ENDPOINTS), default=[])
     p.add_argument("--output", required=True)
+    p = sub.add_parser("context")
+    p.add_argument("--workstream", required=True); p.add_argument("--budget", type=int, default=4000)
+    p.add_argument("--output", required=True)
     p = sub.add_parser("augment")
     p.add_argument("input"); p.add_argument("--task-class", default="")
     p.add_argument("--output", required=True)
@@ -93,6 +97,10 @@ def main(argv=None):
             print(json.dumps({"scope_ref": result["scope_ref"],
                               "callable": [r["tool"] for r in result["items"] if r["state"] == "CALLABLE"],
                               "authority_granted": False}, sort_keys=True))
+        elif args.command == "context":
+            raw, receipt = read_context(args.workstream, args.budget)
+            write_exclusive(args.output, raw)
+            print(json.dumps(receipt, sort_keys=True))
         else:
             prompt, receipt = augment_plain_prompt(read_regular(args.input, 512 * 1024).decode(), args.task_class)
             write_exclusive(args.output, prompt.encode())
