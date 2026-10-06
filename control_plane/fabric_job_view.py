@@ -93,7 +93,7 @@ fact; an unjoined job is counted; an absent ``control.json`` leaves every arm
 path is never rendered (it is disarmed, and here ``EXCLUDED``).
 
 The one shape the spec fixes that deserves saying plainly: ``children`` holds
-the child Jobs the view could JOIN to a CEO-intent workstream, and
+the child Jobs the view could JOIN to a durable orchestration-root workstream, and
 ``unjoined_job_count`` / ``unjoined_job_ids`` hold every other job in scope.
 Nothing is hidden — a job the view cannot join is counted by total, named once
 in ``degraded``, and its id is listed — and the two sets are disjoint, so
@@ -103,6 +103,7 @@ is the ``chairman_control_room.py:1274-1280`` hazard, and it is a red test.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from types import SimpleNamespace
@@ -453,7 +454,7 @@ def _partition(jobs, *, root_job, root_job_id, joined_job_ids):
     cannot be filtered), so the root filter happens here, in Python.
 
     D4 contract: ``children`` are the child Jobs this view could JOIN to a
-    CEO-intent workstream, and every other member of the scope (root included)
+    durable orchestration-root workstream, and every other member of the scope (root included)
     is returned as ``unjoined`` — counted, id-exposed (R3) and named once in
     ``degraded``.  The rendered tree is therefore never a silent subset:
     ``len(children) + unjoined_job_count`` equals the number of Jobs in scope,
@@ -756,7 +757,7 @@ def _compose_fabric_view(
     if unjoined:
         entries = entries + [
             f"unjoined jobs: {len(unjoined)} job(s) under root {str(root_job_id)!r} "
-            "carry no CEO-intent workstream provenance"
+            "carry no durable orchestration-root workstream provenance"
         ]
 
     if armed.get("ceo_submit_armed") is False:
@@ -1136,7 +1137,14 @@ def _bounded_provenance(runtime, job, *, creation_event_reader=None):
         "grounding",
         "workstream",
     }
-    if not isinstance(provenance, Mapping) or set(provenance) != principal_keys:
+    dialogue_keys = {"dialogue_source", "dialogue_source_digest"}
+    if (
+        not isinstance(provenance, Mapping)
+        or (
+            set(provenance) != principal_keys
+            and set(provenance) != principal_keys | dialogue_keys
+        )
+    ):
         return None, "durable principal orchestration Event shape unsupported"
     workstream = provenance.get("workstream")
     if not (
@@ -1167,6 +1175,30 @@ def _bounded_provenance(runtime, job, *, creation_event_reader=None):
         and payload.get("orchestration_provenance_digest") == digest
     ):
         return None, "durable principal orchestration Event identity invalid"
+
+    if dialogue_keys <= set(provenance):
+        from control_plane.executive_runtime import normalize_executive_dialogue_source
+
+        try:
+            normalized_dialogue = normalize_executive_dialogue_source(
+                provenance["dialogue_source"],
+                work_ref=workstream,
+            ).to_dict()
+        except (TypeError, ValueError):
+            return None, "durable principal dialogue source invalid"
+        encoded_dialogue = json.dumps(
+            normalized_dialogue,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        if (
+            dict(provenance["dialogue_source"]) != normalized_dialogue
+            or provenance.get("dialogue_source_digest")
+            != hashlib.sha256(encoded_dialogue).hexdigest()
+        ):
+            return None, "durable principal dialogue source digest invalid"
 
     return {
         "schema": provenance["schema"],
@@ -1202,7 +1234,7 @@ def _bounded_plan_child(job, *, root, root_validated):
             "job_id", "parent_job_id", "root_job_id", "role"}
     root_digest = getattr(root, "orchestration_provenance_digest", None)
     if not isinstance(cycle, Mapping) or set(cycle) != keys:
-        return None, "durable CEO-intent provenance not projected"
+        return None, "durable orchestration provenance not projected"
     if not (
         cycle.get("schema_version") == "mastermind.executive_orchestration_provenance/v1"
         and cycle.get("creator") == "coo_cycle"
@@ -1225,6 +1257,103 @@ def _bounded_plan_child(job, *, root, root_validated):
         and getattr(job, "depth", None) == 1
     ):
         return None, "durable COO-cycle planner provenance invalid or unsupported"
+    return job, None
+
+
+def _bounded_cycle_child(
+    job,
+    *,
+    root,
+    root_validated,
+    jobs_by_id,
+):
+    """Validate one capability-protected work/review/repair child from its Runtime row."""
+
+    from control_plane.executive_runtime import orchestration_digest
+
+    role = getattr(job, "orchestration_role", None)
+    if role == "plan":
+        return _bounded_plan_child(job, root=root, root_validated=root_validated)
+    if role not in {"work", "review", "repair"}:
+        return None, "unsupported COO-cycle child role"
+    if not root_validated:
+        return None, "root workstream provenance unavailable"
+
+    cycle = getattr(job, "orchestration_provenance", None)
+    digest = getattr(job, "orchestration_provenance_digest", None)
+    keys = {
+        "schema_version",
+        "creator",
+        "source_id",
+        "source_digest",
+        "command_id",
+        "job_id",
+        "parent_job_id",
+        "root_job_id",
+        "role",
+    }
+    if not isinstance(cycle, Mapping) or set(cycle) != keys:
+        return None, "durable COO-cycle child provenance not projected"
+    if not (
+        cycle.get("schema_version")
+        == "mastermind.executive_orchestration_provenance/v1"
+        and cycle.get("creator") == "coo_cycle"
+        and cycle.get("job_id") == job.job_id
+        and cycle.get("parent_job_id") == root.job_id == job.parent_job_id
+        and cycle.get("root_job_id") == root.job_id == job.root_job_id
+        and cycle.get("role") == role
+        and getattr(job, "depth", None) == 1
+        and isinstance(digest, str)
+        and re.fullmatch(r"[0-9a-f]{64}", digest)
+        and digest == orchestration_digest(cycle)
+        and isinstance(cycle.get("source_id"), str)
+        and cycle["source_id"]
+        and isinstance(cycle.get("source_digest"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", cycle["source_digest"])
+        and isinstance(cycle.get("command_id"), str)
+        and cycle["command_id"]
+    ):
+        return None, "durable COO-cycle child provenance invalid"
+
+    if role == "work":
+        if not (
+            cycle["source_id"] == root.job_id
+            and cycle["source_digest"] == getattr(job, "plan_digest", None)
+            and isinstance(getattr(job, "plan_attempt_id", None), str)
+            and isinstance(getattr(job, "plan_step_id", None), str)
+            and getattr(job, "repair_round", None) == 0
+            and getattr(job, "supersedes_job_id", None) is None
+            and getattr(job, "reviews_job_id", None) is None
+        ):
+            return None, "durable work provenance source invalid"
+        return job, None
+
+    if role == "review":
+        reviewed_id = getattr(job, "reviews_job_id", None)
+        reviewed = jobs_by_id.get(reviewed_id)
+        if not (
+            isinstance(reviewed_id, str)
+            and cycle["source_id"] == reviewed_id
+            and reviewed is not None
+            and reviewed.root_job_id == root.job_id
+            and reviewed.plan_step_id == job.plan_step_id
+            and reviewed.orchestration_role in {"work", "repair"}
+        ):
+            return None, "durable review provenance source invalid"
+        return job, None
+
+    rejecting_review = jobs_by_id.get(cycle["source_id"])
+    superseded = jobs_by_id.get(getattr(job, "supersedes_job_id", None))
+    if not (
+        rejecting_review is not None
+        and rejecting_review.orchestration_role == "review"
+        and superseded is not None
+        and superseded.orchestration_role in {"work", "repair"}
+        and rejecting_review.reviews_job_id == superseded.job_id
+        and rejecting_review.plan_step_id == job.plan_step_id
+        and superseded.plan_step_id == job.plan_step_id
+    ):
+        return None, "durable repair provenance source invalid"
     return job, None
 
 
@@ -1327,14 +1456,32 @@ def _observe_bounded_root(runtime, root_job_id, *, notes, present):
                     unjoined = unjoined + [root_job.job_id]
                     notes = notes + [f"provenance not projected: {root_job.job_id}: {warning or 'workstream unavailable'}"]
                 planner_candidates = []
+                jobs_by_id = {job.job_id: job for job in jobs}
                 for job in jobs[1:]:
-                    candidate, warning = _bounded_plan_child(
-                        job, root=root_job, root_validated=root_validated)
-                    if candidate is not None:
-                        planner_candidates = planner_candidates + [candidate]
-                        continue
+                    if job.orchestration_role == "plan":
+                        candidate, warning = _bounded_plan_child(
+                            job,
+                            root=root_job,
+                            root_validated=root_validated,
+                        )
+                        if candidate is not None:
+                            planner_candidates = planner_candidates + [candidate]
+                            continue
+                    else:
+                        candidate, warning = _bounded_cycle_child(
+                            job,
+                            root=root_job,
+                            root_validated=root_validated,
+                            jobs_by_id=jobs_by_id,
+                        )
+                        if candidate is not None:
+                            joined.add(candidate.job_id)
+                            continue
                     unjoined = unjoined + [job.job_id]
-                    notes = notes + [f"provenance not projected: {job.job_id}: {warning or 'workstream unavailable'}"]
+                    notes = notes + [
+                        f"provenance not projected: {job.job_id}: "
+                        f"{warning or 'workstream unavailable'}"
+                    ]
                 # Join only a unique eligible planner; a truncated scope cannot
                 # establish uniqueness, and ambiguity refuses the join while the
                 # unjoined facts stay listed.
@@ -1390,7 +1537,7 @@ def _document_observed_fabric_view_v2(root_job_id, *, armed, runtime_identity, o
         facts = []
         if unjoined:
             facts = facts + [_fact("MISSING_PRODUCER", "runtime.acquisition.provenance", "executive_runtime",
-                               "durable CEO-intent workstream join unavailable for included Jobs")]
+                               "durable orchestration-root workstream join unavailable for included Jobs")]
         if snapshot.jobs_truncated or snapshot.attempts_truncated_job_ids:
             facts = facts + [_fact("OMITTED", "runtime.acquisition.truncation", "executive_runtime",
                                "owner acquisition budget omits Jobs or Attempts")]

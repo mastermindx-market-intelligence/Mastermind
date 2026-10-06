@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +20,7 @@ from control_plane.executive_runtime import (
     Runtime,
     StateConflict,
     _ceo_intent_root_provenance,
+    orchestration_digest,
 )
 
 
@@ -212,6 +214,17 @@ def test_host_bound_principal_root_persists_trusted_workspace_binding_and_dialog
         == binding["operator_execution_profile_id"]
     )
 
+    fabric = read_fabric_view_v2_from_runtime(
+        runtime,
+        root.job_id,
+        armed={},
+        runtime_identity={"db_present": True},
+    )
+    assert fabric["root"]["job_id"] == root.job_id
+    assert [row["job_id"] for row in fabric["children"]] == [planner.job_id]
+    assert fabric["unjoined_job_count"] == 0
+    assert fabric["runtime"]["acquisition"]["provenance"]["state"] == "COMPLETE"
+
 
 @pytest.mark.parametrize(
     "fault",
@@ -328,6 +341,384 @@ def test_principal_root_and_planner_join_existing_fabric_view(tmp_path):
     assert [row["job_id"] for row in document["children"]] == [outcome.selected_job_id]
     assert document["unjoined_job_count"] == 0
     assert document["runtime"]["acquisition"]["provenance"]["state"] == "COMPLETE"
+
+
+def test_principal_root_two_lane_reviewed_cycle_reaches_canonical_completion(tmp_path):
+    from tests import test_executive_os_phase1fc as phase
+
+    runtime = Runtime.at(tmp_path)
+    phase._register(runtime, "worker-a")
+    phase._register(runtime, "worker-b")
+    source = bundle(
+        operation_key="h4-two-lane-cycle",
+        objective="Coordinate two path-disjoint governed read outcomes.",
+    )
+    root = runtime.jobs.create_principal_orchestration_root(
+        source,
+        principal_admission_guard=lambda _value: None,
+    )
+    dispatches = []
+
+    def accepted_dispatch(job_id: str, command_id: str):
+        job = runtime.jobs.get_job(job_id)
+        assert job is not None
+        if job.orchestration_role in {"plan", "aggregation"}:
+            worker = "worker-a"
+        elif job.orchestration_role == "review":
+            worker = "worker-b"
+        elif job.plan_step_id == "step-primary":
+            worker = "worker-a"
+        else:
+            worker = "worker-b"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            job_id,
+            command_id=command_id,
+            worker_id=worker,
+        )
+        assert outcome is not None
+        dispatches.append(outcome)
+        return outcome
+
+    cycle = CooCycle(runtime, dispatcher=accepted_dispatch)
+    assert cycle.run_once(root.job_id).action == "PLANNER_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    planner = dispatches[-1]
+
+    plan_body = {
+        "schema_version": "mastermind.execution_plan/v1",
+        "root_job_id": root.job_id,
+        "plan_attempt_id": planner.attempt.attempt_id,
+        "steps": [
+            {
+                "ordinal": 0,
+                "step_id": "step-primary",
+                "objective": "Produce the primary bounded read outcome.",
+                "business_impact": "routine",
+                "review_required": True,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+            {
+                "ordinal": 1,
+                "step_id": "step-evidence",
+                "objective": "Produce a path-disjoint evidence-only outcome.",
+                "business_impact": "routine",
+                "review_required": False,
+                "requested_authorities": ["READ"],
+                "allowed_write_paths": [],
+                "validation_ids": [],
+                "attempt_limit": 1,
+                "cost_class": "small",
+            },
+        ],
+    }
+    phase._complete_ohf_role(runtime, planner, plan_body, identity_seed=9101)
+
+    admitted = cycle.run_once(root.job_id)
+    assert admitted.action == "PLAN_ADMITTED"
+    work_ids = list(admitted.receipt["work_job_ids"])
+    assert len(work_ids) == 2
+    work_by_step = {}
+    for work_id in work_ids:
+        job = runtime.jobs.get_job(work_id)
+        assert job is not None
+        worker = "worker-a" if job.plan_step_id == "step-primary" else "worker-b"
+        outcome = runtime.attempts.dispatch_cycle_job(
+            work_id,
+            command_id=f"coo-cycle:{root.job_id}:dispatch:{work_id}:attempt:1",
+            worker_id=worker,
+        )
+        assert outcome is not None
+        work_by_step[str(job.plan_step_id)] = outcome
+    assert {item.attempt.worker_id for item in work_by_step.values()} == {
+        "worker-a",
+        "worker-b",
+    }
+
+    plan_digest = phase.result_digest(plan_body)
+    seals = {}
+    for step_id, work in work_by_step.items():
+        body = {
+            "schema_version": "mastermind.work_result/v1",
+            "root_job_id": root.job_id,
+            "plan_attempt_id": planner.attempt.attempt_id,
+            "plan_digest": plan_digest,
+            "plan_step_id": step_id,
+            "repair_round": 0,
+            "artifacts": [],
+            "evidence_digests": [],
+        }
+        seals[step_id] = phase._complete_ohf_role(
+            runtime,
+            work,
+            body,
+            identity_seed=9102 if step_id == "step-primary" else 9103,
+        )[0]
+
+    assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    review = dispatches[-1]
+    primary = work_by_step["step-primary"]
+    review_body = phase._review_body(
+        root_id=root.job_id,
+        plan_attempt_id=planner.attempt.attempt_id,
+        plan_digest=plan_digest,
+        target_job_id=primary.attempt.job_id,
+        target_attempt_id=primary.attempt.attempt_id,
+        target_result_digest=seals["step-primary"]["role_result_digest"],
+        repair_round=0,
+        verdict="approve",
+        plan_step_id="step-primary",
+    )
+    phase._complete_ohf_role(runtime, review, review_body, identity_seed=9104)
+    assert review.attempt.worker_id != primary.attempt.worker_id
+
+    handoff_outcome = cycle.run_once(root.job_id)
+    assert handoff_outcome.action == "HANDOFF_CREATED"
+    handoff = runtime.jobs.get_cycle_handoff(root.job_id)
+    assert len(handoff["revisions"]) == 2
+    by_step = {item["plan_step_id"]: item for item in handoff["revisions"]}
+    assert by_step["step-primary"]["qualifying_review_result_digest"] is not None
+    assert by_step["step-evidence"]["qualifying_review_result_digest"] is None
+
+    assert cycle.run_once(root.job_id).action == "DISPATCHED"
+    aggregation = dispatches[-1]
+    aggregation_body = {
+        "schema_version": "mastermind.aggregation_result/v1",
+        "root_job_id": root.job_id,
+        "handoff_digest": handoff["handoff_digest"],
+        "policy_sha": handoff["policy_sha"],
+        "plan_attempt_id": handoff["plan_attempt_id"],
+        "plan_digest": handoff["plan_digest"],
+        "revisions": [
+            {
+                key: item[key]
+                for key in (
+                    "ordinal",
+                    "plan_step_id",
+                    "current_job_id",
+                    "current_attempt_id",
+                    "current_result_digest",
+                    "repair_round",
+                    "review_required",
+                    "qualifying_review_job_id",
+                    "qualifying_review_attempt_id",
+                    "qualifying_review_result_digest",
+                )
+            }
+            for item in handoff["revisions"]
+        ],
+        "aggregate_summary": "Two path-disjoint principal outcomes are accepted.",
+        "evidence_digests": [],
+    }
+    phase._complete_ohf_role(runtime, aggregation, aggregation_body, identity_seed=9105)
+
+    completed = runtime.jobs.get_job(root.job_id)
+    assert completed is not None
+    assert completed.status.value == "COMPLETED"
+    assert cycle.run_once(root.job_id).action == "NO_ACTION"
+
+    fabric = read_fabric_view_v2_from_runtime(
+        runtime,
+        root.job_id,
+        armed={},
+        runtime_identity={"db_present": True},
+    )
+    assert fabric["unjoined_job_count"] == 0, fabric
+    assert fabric["root"] is not None, fabric["degraded"]
+    assert fabric["root"]["status"] == "COMPLETED"
+
+    from control_plane.coo_principal_orchestration_status import (
+        resolve_principal_orchestration,
+    )
+
+    reconciled = resolve_principal_orchestration(
+        runtime,
+        request_ref=source["request_ref"],
+        work_ref=WORK_REF,
+    )
+    assert reconciled["job_id"] == root.job_id
+    assert reconciled["job_status"] == "COMPLETED"
+
+
+def _fabric_child(
+    *,
+    role: str,
+    job_id: str,
+    root_id: str,
+    source_id: str,
+    source_digest: str,
+    plan_step_id: str,
+    reviews_job_id: str | None = None,
+    supersedes_job_id: str | None = None,
+    repair_round: int = 0,
+):
+    provenance = {
+        "schema_version": "mastermind.executive_orchestration_provenance/v1",
+        "creator": "coo_cycle",
+        "source_id": source_id,
+        "source_digest": source_digest,
+        "command_id": f"coo-cycle:{root_id}:fixture:{job_id}",
+        "job_id": job_id,
+        "parent_job_id": root_id,
+        "root_job_id": root_id,
+        "role": role,
+    }
+    return SimpleNamespace(
+        job_id=job_id,
+        parent_job_id=root_id,
+        root_job_id=root_id,
+        depth=1,
+        orchestration_role=role,
+        orchestration_provenance=provenance,
+        orchestration_provenance_digest=orchestration_digest(provenance),
+        plan_attempt_id="ATT-001",
+        plan_digest="a" * 64,
+        plan_step_id=plan_step_id,
+        repair_round=repair_round,
+        supersedes_job_id=supersedes_job_id,
+        reviews_job_id=reviews_job_id,
+    )
+
+
+def test_fabric_work_join_refuses_foreign_plan_source_digest():
+    from control_plane import fabric_job_view as fabric
+
+    root = SimpleNamespace(job_id="JOB-001", orchestration_provenance_digest="b" * 64)
+    valid = _fabric_child(
+        role="work",
+        job_id="JOB-002",
+        root_id=root.job_id,
+        source_id=root.job_id,
+        source_digest="a" * 64,
+        plan_step_id="step-a",
+    )
+    joined, warning = fabric._bounded_cycle_child(
+        valid,
+        root=root,
+        root_validated=True,
+        jobs_by_id={root.job_id: root, valid.job_id: valid},
+    )
+    assert joined is valid and warning is None
+
+    hostile_cycle = dict(valid.orchestration_provenance)
+    hostile_cycle["source_digest"] = "f" * 64
+    hostile = SimpleNamespace(
+        **{
+            **valid.__dict__,
+            "orchestration_provenance": hostile_cycle,
+            "orchestration_provenance_digest": orchestration_digest(hostile_cycle),
+        }
+    )
+    joined, warning = fabric._bounded_cycle_child(
+        hostile,
+        root=root,
+        root_validated=True,
+        jobs_by_id={root.job_id: root, hostile.job_id: hostile},
+    )
+    assert joined is None
+    assert warning == "durable work provenance source invalid"
+
+
+def test_fabric_review_join_requires_exact_reviewed_target():
+    from control_plane import fabric_job_view as fabric
+
+    root = SimpleNamespace(job_id="JOB-001", orchestration_provenance_digest="b" * 64)
+    work = _fabric_child(
+        role="work",
+        job_id="JOB-002",
+        root_id=root.job_id,
+        source_id=root.job_id,
+        source_digest="a" * 64,
+        plan_step_id="step-a",
+    )
+    review = _fabric_child(
+        role="review",
+        job_id="JOB-003",
+        root_id=root.job_id,
+        source_id=work.job_id,
+        source_digest="c" * 64,
+        plan_step_id="step-a",
+        reviews_job_id=work.job_id,
+    )
+    jobs = {root.job_id: root, work.job_id: work, review.job_id: review}
+    joined, warning = fabric._bounded_cycle_child(
+        review,
+        root=root,
+        root_validated=True,
+        jobs_by_id=jobs,
+    )
+    assert joined is review and warning is None
+
+    wrong = SimpleNamespace(**{**review.__dict__, "reviews_job_id": "JOB-999"})
+    joined, warning = fabric._bounded_cycle_child(
+        wrong,
+        root=root,
+        root_validated=True,
+        jobs_by_id={**jobs, wrong.job_id: wrong},
+    )
+    assert joined is None
+    assert warning == "durable review provenance source invalid"
+
+
+def test_fabric_repair_join_requires_rejecting_review_of_superseded_revision():
+    from control_plane import fabric_job_view as fabric
+
+    root = SimpleNamespace(job_id="JOB-001", orchestration_provenance_digest="b" * 64)
+    work = _fabric_child(
+        role="work",
+        job_id="JOB-002",
+        root_id=root.job_id,
+        source_id=root.job_id,
+        source_digest="a" * 64,
+        plan_step_id="step-a",
+    )
+    review = _fabric_child(
+        role="review",
+        job_id="JOB-003",
+        root_id=root.job_id,
+        source_id=work.job_id,
+        source_digest="c" * 64,
+        plan_step_id="step-a",
+        reviews_job_id=work.job_id,
+    )
+    repair = _fabric_child(
+        role="repair",
+        job_id="JOB-004",
+        root_id=root.job_id,
+        source_id=review.job_id,
+        source_digest="d" * 64,
+        plan_step_id="step-a",
+        supersedes_job_id=work.job_id,
+        repair_round=1,
+    )
+    jobs = {
+        root.job_id: root,
+        work.job_id: work,
+        review.job_id: review,
+        repair.job_id: repair,
+    }
+    joined, warning = fabric._bounded_cycle_child(
+        repair,
+        root=root,
+        root_validated=True,
+        jobs_by_id=jobs,
+    )
+    assert joined is repair and warning is None
+
+    unrelated_review = SimpleNamespace(**{**review.__dict__, "reviews_job_id": "JOB-999"})
+    broken_jobs = {**jobs, review.job_id: unrelated_review}
+    joined, warning = fabric._bounded_cycle_child(
+        repair,
+        root=root,
+        root_validated=True,
+        jobs_by_id=broken_jobs,
+    )
+    assert joined is None
+    assert warning == "durable repair provenance source invalid"
 
 
 def test_same_principal_operation_refuses_second_root_and_requires_reconciliation(tmp_path):
