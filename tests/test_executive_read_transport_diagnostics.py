@@ -7,7 +7,7 @@ import tempfile
 
 import pytest
 
-from integrations.executive_mcp.schemas import RESULT_SCHEMA
+from integrations.executive_mcp.schemas import RESULT_SCHEMA, bound_document
 from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_SERVER_VERSION
 from integrations.mastermind_executive_app.gateway import (
     CeoIngressClient,
@@ -571,6 +571,13 @@ def test_v2_fabric_root_list_requires_owner_acquisition_and_row_contract():
     false_truncation["truncated"] = True
     mutations.append(false_truncation)
 
+    private_identity = copy.deepcopy(canonical)
+    private_identity["runtime"]["identity"] = {
+        "execution_ready": True,
+        "private_detail": SECRET,
+    }
+    mutations.append(private_identity)
+
     for value in mutations:
         assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
             value, arguments=arguments
@@ -665,7 +672,7 @@ def _canonical_inbox_data():
 
 def test_inbox_nested_public_contract_rejects_private_and_readiness_fields():
     canonical = _canonical_inbox_data()
-    assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(canonical) is True
+    assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(canonical, bounded=[]) is True
 
     mutations = []
 
@@ -690,7 +697,33 @@ def test_inbox_nested_public_contract_rejects_private_and_readiness_fields():
     mutations.append(evidence)
 
     for value in mutations:
-        assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(value) is False
+        assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(value, bounded=[]) is False
+
+
+def test_inbox_accepts_canonical_bounded_attention_receipts():
+    result = canonical_result(WebCeoV2CeoIngressReadGateway)
+    result["tool"] = "executive_inbox"
+    data = _canonical_inbox_data()
+    data["attention"][0]["reason"] = "R" * 20_000
+    data["attention"][0]["evidence"][0]["value"] = "E" * 12_000
+    data["attention"][0]["existing_next_actions"] = ["N" * 8_000]
+    bounded_data, receipts = bound_document(data, limit=4_096)
+    assert receipts
+    result["data"] = bounded_data
+    result["bounded"] = receipts
+
+    gateway = WebCeoV2CeoIngressReadGateway("/tmp/not-used.sock", CeoIngressClient())
+    assert gateway._is_canonical_read_result(
+        result, tool="executive_inbox", arguments={}
+    ) is True
+
+    forged = copy.deepcopy(result)
+    replacement = forged["data"]["attention"][0]["reason"]
+    assert type(replacement) is dict and replacement["bounded"] is True
+    replacement["returned_bytes"] += 1
+    assert gateway._is_canonical_read_result(
+        forged, tool="executive_inbox", arguments={}
+    ) is False
 
 
 def test_inbox_accepts_canonical_agent_os_attention_shape():
@@ -718,7 +751,7 @@ def test_inbox_accepts_canonical_agent_os_attention_shape():
         ],
         "existing_next_actions": [],
     }]
-    assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(value) is True
+    assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(value, bounded=[]) is True
 
 
 def _canonical_receipt(schema, intent_id):

@@ -585,6 +585,7 @@ class CeoIngressReadGateway:
     def _valid_bounding_receipts(value: object) -> bool:
         if not isinstance(value, list):
             return False
+        fields: set[str] = set()
         for receipt in value:
             if (
                 type(receipt) is not dict
@@ -598,8 +599,52 @@ class CeoIngressReadGateway:
                 or type(receipt["field"]) is not str
                 or not receipt["field"]
                 or len(receipt["field"]) > 512
+                or receipt["field"] in fields
             ):
                 return False
+            fields.add(receipt["field"])
+        return True
+
+    @staticmethod
+    def _valid_bounded_text(
+        value: object,
+        *,
+        field: str,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+        allow_empty: bool = True,
+    ) -> bool:
+        if type(value) is str:
+            return allow_empty or bool(value)
+        if (
+            type(value) is not dict
+            or set(value) != {
+                "bounded", "original_bytes", "returned_bytes", "field", "preview"
+            }
+            or value.get("bounded") is not True
+            or value.get("field") != field
+            or type(value.get("original_bytes")) is not int
+            or type(value.get("returned_bytes")) is not int
+            or value["original_bytes"] <= 0
+            or value["returned_bytes"] < 0
+            or value["returned_bytes"] > value["original_bytes"]
+            or type(value.get("preview")) is not str
+            or (not allow_empty and not value["preview"])
+            or len(value["preview"].encode("utf-8")) != value["returned_bytes"]
+        ):
+            return False
+        receipt = receipts.get(field)
+        if (
+            type(receipt) is not dict
+            or receipt != {
+                "bounded": True,
+                "original_bytes": value["original_bytes"],
+                "returned_bytes": value["returned_bytes"],
+                "field": field,
+            }
+        ):
+            return False
+        consumed.add(field)
         return True
 
     @staticmethod
@@ -810,7 +855,12 @@ class CeoIngressReadGateway:
         )
 
     @staticmethod
-    def _valid_inbox_grounding(value: object) -> bool:
+    def _valid_inbox_grounding(
+        value: object,
+        *,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
         import re
         from control_plane import ceo_boot_packet
 
@@ -824,13 +874,31 @@ class CeoIngressReadGateway:
         return (
             type(mastermind) is dict
             and set(mastermind) == {"branch", "root", "sha"}
-            and type(mastermind["branch"]) is str
-            and type(mastermind["root"]) is str
+            and CeoIngressReadGateway._valid_bounded_text(
+                mastermind["branch"],
+                field="grounding.mastermind.branch",
+                receipts=receipts,
+                consumed=consumed,
+            )
+            and CeoIngressReadGateway._valid_bounded_text(
+                mastermind["root"],
+                field="grounding.mastermind.root",
+                receipts=receipts,
+                consumed=consumed,
+            )
             and type(mastermind["sha"]) is str
             and re.fullmatch(r"[0-9a-f]{40}", mastermind["sha"]) is not None
             and type(macro) is dict
             and set(macro) == {"root", "sha"}
-            and (macro["root"] is None or type(macro["root"]) is str)
+            and (
+                macro["root"] is None
+                or CeoIngressReadGateway._valid_bounded_text(
+                    macro["root"],
+                    field="grounding.macro.root",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+            )
             and (
                 macro["sha"] is None
                 or (
@@ -844,12 +912,23 @@ class CeoIngressReadGateway:
             )
             and type(runtime_db) is dict
             and set(runtime_db) == {"path", "present"}
-            and type(runtime_db["path"]) is str
+            and CeoIngressReadGateway._valid_bounded_text(
+                runtime_db["path"],
+                field="grounding.runtime_db.path",
+                receipts=receipts,
+                consumed=consumed,
+            )
             and type(runtime_db["present"]) is bool
         )
 
     @staticmethod
-    def _valid_inbox_attention_item(value: object) -> bool:
+    def _valid_inbox_attention_item(
+        value: object,
+        *,
+        index: int,
+        receipts: Mapping[str, Mapping[str, Any]],
+        consumed: set[str],
+    ) -> bool:
         import re
         from control_plane import executive_inbox
         from control_plane.executive_runtime import JobStatus
@@ -884,17 +963,38 @@ class CeoIngressReadGateway:
             and (value["job_id"] is None or type(value["job_id"]) is str)
             and (value["workstream"] is None or type(value["workstream"]) is str)
             and (value["status"] is None or type(value["status"]) is str)
-            and type(value["reason"]) is str
-            and bool(value["reason"])
+            and CeoIngressReadGateway._valid_bounded_text(
+                value["reason"],
+                field=f"attention[{index}].reason",
+                receipts=receipts,
+                consumed=consumed,
+                allow_empty=False,
+            )
             and type(evidence) is list
             and all(
                 type(item) is dict
                 and set(item) == {"ref", "field", "value"}
-                and all(type(item[key]) is str for key in ("ref", "field", "value"))
-                for item in evidence
+                and all(
+                    CeoIngressReadGateway._valid_bounded_text(
+                        item[key],
+                        field=f"attention[{index}].evidence[{evidence_index}].{key}",
+                        receipts=receipts,
+                        consumed=consumed,
+                    )
+                    for key in ("ref", "field", "value")
+                )
+                for evidence_index, item in enumerate(evidence)
             )
             and type(next_actions) is list
-            and all(type(item) is str for item in next_actions)
+            and all(
+                CeoIngressReadGateway._valid_bounded_text(
+                    item,
+                    field=f"attention[{index}].existing_next_actions[{action_index}]",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for action_index, item in enumerate(next_actions)
+            )
         ):
             return False
         if source == "agent_os":
@@ -939,29 +1039,55 @@ class CeoIngressReadGateway:
         )
 
     @staticmethod
-    def _valid_inbox_data(value: object) -> bool:
+    def _valid_inbox_data(value: object, *, bounded: object) -> bool:
         from control_plane import executive_inbox
 
         keys = {
             "schema", "generated_at", "grounding", "attention",
             "runtime_counts", "suppressed", "degraded",
         }
-        return (
-            type(value) is dict
-            and set(value) == keys
-            and value["schema"] == executive_inbox.SCHEMA
-            and CeoIngressReadGateway._valid_generated_at(value["generated_at"])
-            and CeoIngressReadGateway._valid_inbox_grounding(value["grounding"])
+        if (
+            type(value) is not dict
+            or set(value) != keys
+            or value["schema"] != executive_inbox.SCHEMA
+            or not CeoIngressReadGateway._valid_generated_at(value["generated_at"])
+            or not CeoIngressReadGateway._valid_bounding_receipts(bounded)
+        ):
+            return False
+        receipts = {receipt["field"]: receipt for receipt in bounded}
+        consumed: set[str] = set()
+        if not (
+            CeoIngressReadGateway._valid_inbox_grounding(
+                value["grounding"], receipts=receipts, consumed=consumed
+            )
             and type(value["attention"]) is list
             and all(
-                CeoIngressReadGateway._valid_inbox_attention_item(item)
-                for item in value["attention"]
+                CeoIngressReadGateway._valid_inbox_attention_item(
+                    item,
+                    index=index,
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for index, item in enumerate(value["attention"])
             )
             and CeoIngressReadGateway._valid_runtime_counts(value["runtime_counts"])
             and CeoIngressReadGateway._valid_inbox_suppressed(value["suppressed"])
             and type(value["degraded"]) is list
-            and all(type(item) is str for item in value["degraded"])
-        )
+            and all(
+                CeoIngressReadGateway._valid_bounded_text(
+                    item,
+                    field=f"degraded[{index}]",
+                    receipts=receipts,
+                    consumed=consumed,
+                )
+                for index, item in enumerate(value["degraded"])
+            )
+        ):
+            return False
+        # Every outer bounding receipt for an inbox must bind one accepted
+        # replacement object at exactly the same data path; no orphan receipt
+        # may make an otherwise foreign replacement look canonical.
+        return consumed == set(receipts)
 
     @staticmethod
     def _valid_job_data(value: object, *, arguments: Mapping[str, Any]) -> bool:
@@ -1032,8 +1158,12 @@ class CeoIngressReadGateway:
         if not (
             type(runtime) is dict
             and set(runtime) == {"root", "db_present", "identity", "acquisition"}
-            and (runtime["root"] is None or type(runtime["root"]) is str)
-            and type(runtime["db_present"]) is bool
+            # Production V2/V3 binds this exact public runtime identity in
+            # scripts/executive_os_phase1c.py.  Do not accept a foreign/private
+            # readiness object in the otherwise schema-valid root list.
+            and runtime["root"] is None
+            and runtime["db_present"] is True
+            and runtime["identity"] is None
             and type(roots) is list
             and all(CeoIngressReadGateway._valid_fabric_root_row(row) for row in roots)
             and len({row["job_id"] for row in roots}) == len(roots)
@@ -1320,12 +1450,17 @@ class CeoIngressReadGateway:
 
     @classmethod
     def _valid_success_data(
-        cls, value: object, *, tool: str, arguments: Mapping[str, Any]
+        cls,
+        value: object,
+        *,
+        tool: str,
+        arguments: Mapping[str, Any],
+        bounded: object,
     ) -> bool:
         if tool == "executive_state":
             return cls._valid_state_data(value)
         if tool == "executive_inbox":
-            return cls._valid_inbox_data(value)
+            return cls._valid_inbox_data(value, bounded=bounded)
         if tool == "executive_job":
             return cls._valid_job_data(value, arguments=arguments)
         if tool == "executive_fabric":
@@ -1374,7 +1509,10 @@ class CeoIngressReadGateway:
             return (
                 result["error"] is None
                 and self._valid_success_data(
-                    result["data"], tool=tool, arguments=arguments
+                    result["data"],
+                    tool=tool,
+                    arguments=arguments,
+                    bounded=result["bounded"],
                 )
             )
         error = result["error"]
