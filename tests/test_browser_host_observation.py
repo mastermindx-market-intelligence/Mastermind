@@ -5,6 +5,7 @@ from control_plane.executive_steward import Freshness, SourceOwner, SourceRef
 from control_plane.browser_host_observation import (
     BrowserHostObservation,
     BrowserHostObservationError,
+    BrowserHostQualification,
     BrowserHostState,
     qualify_browser_host,
 )
@@ -54,10 +55,13 @@ def test_current_consented_autoconnect_host_is_ready_but_not_placement():
     assert result.state is BrowserHostState.READY
     assert result.reason=='ready'
     assert result.host_ref=='m2'
+    assert result.boot_ref=='boot-20261005'
     assert result.profile_ref=='chrome-profile-a'
+    assert result.backend_schema_digest==DIGEST
     assert set(result.to_dict())=={
-        'schema','host_ref','profile_ref','browser_instance_ref',
-        'connector_generation','state','reason','is_placement','is_admission',
+        'schema','host_ref','boot_ref','profile_ref','browser_instance_ref',
+        'connector_generation','backend_schema_digest','state','reason',
+        'is_placement','is_admission',
     }
 
 
@@ -163,3 +167,16 @@ def test_contract_does_not_duplicate_capacity_or_placement_metrics():
     names=set(BrowserHostObservation.__dataclass_fields__)
     for forbidden in {'cpu','memory','load','active_lanes','lane_ceiling','quota','rank','score','worker_id','attempt_id'}:
         assert forbidden not in names
+
+def test_ready_qualification_cannot_be_forged_outside_the_qualifier():
+    with pytest.raises(BrowserHostObservationError, match='qualification seal'):
+        BrowserHostQualification(
+            host_ref='m2',
+            boot_ref='boot-20261005',
+            profile_ref='chrome-profile-a',
+            browser_instance_ref='chrome-instance-a',
+            connector_generation='devtools-generation-a',
+            backend_schema_digest=DIGEST,
+            state=BrowserHostState.READY,
+            reason='ready',
+        )

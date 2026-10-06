@@ -6,7 +6,7 @@ caller, create a lease, persist state, or read a clock.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import re
 
@@ -20,6 +20,7 @@ _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _CHROME_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)\.(\d+)$")
 _BACKEND_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_QUALIFICATION_SEAL = object()
 
 
 class BrowserHostObservationError(ValueError):
@@ -100,11 +101,18 @@ class BrowserHostObservation:
 @dataclass(frozen=True, slots=True)
 class BrowserHostQualification:
     host_ref: str
+    boot_ref: str
     profile_ref: str
     browser_instance_ref: str
     connector_generation: str
+    backend_schema_digest: str
     state: BrowserHostState
     reason: str
+    _seal: object = field(repr=False, compare=False, default=None)
+
+    def __post_init__(self) -> None:
+        if self._seal is not _QUALIFICATION_SEAL:
+            raise BrowserHostObservationError("qualification seal is invalid")
 
     @property
     def is_placement(self) -> bool:
@@ -118,9 +126,11 @@ class BrowserHostQualification:
         return {
             "schema": SCHEMA,
             "host_ref": self.host_ref,
+            "boot_ref": self.boot_ref,
             "profile_ref": self.profile_ref,
             "browser_instance_ref": self.browser_instance_ref,
             "connector_generation": self.connector_generation,
+            "backend_schema_digest": self.backend_schema_digest,
             "state": self.state.value,
             "reason": self.reason,
             "is_placement": False,
@@ -131,11 +141,14 @@ class BrowserHostQualification:
 def _result(row: BrowserHostObservation, state: BrowserHostState, reason: str) -> BrowserHostQualification:
     return BrowserHostQualification(
         host_ref=row.host_ref,
+        boot_ref=row.boot_ref,
         profile_ref=row.profile_ref,
         browser_instance_ref=row.browser_instance_ref,
         connector_generation=row.connector_generation,
+        backend_schema_digest=row.backend_schema_digest,
         state=state,
         reason=reason,
+        _seal=_QUALIFICATION_SEAL,
     )
 
 
