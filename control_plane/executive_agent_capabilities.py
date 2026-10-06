@@ -67,11 +67,74 @@ _DUPLICATE_JSON_KEY_REASON = "capability policy has a duplicate JSON key"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
 _CONFIG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-_EXECUTION_SURFACES = frozenset({"codex-exec", "codex-app-server"})
+CLAUDE_OPERATOR_PROVIDER = "claude"
+CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
+CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+})
 _AUTH_REALMS = frozenset({"dedicated-worker-account"})
+_ADAPTER_EXECUTION_SURFACES = {
+    "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
+    "claude-code": frozenset({"claude-code"}),
+}
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+
+
+def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
+    """Return whether one reviewed adapter owns the declared execution surface."""
+
+    adapter = str(adapter_id or "").strip().lower()
+    surface = str(execution_surface or "").strip().lower()
+    return surface in _ADAPTER_EXECUTION_SURFACES.get(adapter, frozenset())
+
+
+def is_sealed_worker_execution_surface(execution_surface: str) -> bool:
+    """Return whether the surface is a foreground sealed worker process."""
+
+    return str(execution_surface or "").strip().lower() in _SEALED_WORKER_EXECUTION_SURFACES
 _SANDBOX_POLICIES = frozenset({"read-only", "workspace-write"})
 _APPROVAL_POLICIES = frozenset({"never"})
 _NETWORK_POLICIES = frozenset({"disabled", "loopback-browser-only"})
+
+
+def claude_security_config_projection(effective: Mapping[str, Any], *,
+                                     launch_provenance: Mapping[str, Any]) -> dict[str, object]:
+    """Canonical security subset of native get_settings.effective.
+
+    This encoder grants no observation authority. The helper supplies actual
+    readback; the registry supplies expected policy through the same encoder.
+    Missing permissions in a complete effective-settings read means no rules;
+    null/malformed values refuse. Never fill missing sandbox state from intent.
+    Tools and permission mode are attested separately from native init metadata.
+    launch_provenance records the helper's actually applied immutable launch
+    options; it is explicitly separate from native effective-settings readback.
+    """
+    if not isinstance(effective, Mapping):
+        raise CapabilityPolicyError("Claude effective settings are unavailable")
+    sandbox, permissions = effective.get("sandbox"), effective.get("permissions", {})
+    if (not isinstance(sandbox, Mapping) or not isinstance(permissions, Mapping)
+            or type(sandbox.get("enabled")) is not bool):
+        raise CapabilityPolicyError("Claude effective security settings are unavailable")
+    if (not isinstance(launch_provenance, Mapping)
+            or set(launch_provenance) != {"setting_sources", "strict_mcp_config", "skills"}
+            or type(launch_provenance["strict_mcp_config"]) is not bool
+            or any(not isinstance(launch_provenance[k], list)
+                   or len(launch_provenance[k]) > 32
+                   or any(not isinstance(x, str) or not x or len(x) > 128 for x in launch_provenance[k])
+                   for k in ("setting_sources", "skills"))):
+        raise CapabilityPolicyError("Claude applied launch provenance is unavailable")
+    try:
+        return json.loads(json.dumps({"sandbox": dict(sandbox), "permissions": dict(permissions),
+                                     "applied_launch_provenance": dict(launch_provenance)},
+                                     sort_keys=True, allow_nan=False))
+    except (TypeError, ValueError):
+        raise CapabilityPolicyError("Claude effective security settings are invalid") from None
+
+
+def claude_security_config_digest(effective: Mapping[str, Any], *,
+                                 launch_provenance: Mapping[str, Any]) -> str:
+    return _digest(claude_security_config_projection(effective, launch_provenance=launch_provenance))
 _MCP_TRANSPORTS = frozenset({"stdio", "streamable-http"})
 _MCP_AUTH_STATUSES = frozenset(
     {"unsupported", "notLoggedIn", "bearerToken", "oAuth"}
@@ -153,6 +216,10 @@ except (KeyError,OSError,TypeError,UnicodeError,ValueError):
  raise SystemExit("runtime container bootstrap refused")
 '''
 WORKER_BROWSER_MCP_ARGS = ("-I", "-S", "-c", WORKER_BROWSER_MCP_BOOTSTRAP)
+COMPANY_MCP_COMMAND = "/usr/bin/python3"
+COMPANY_MCP_BOOTSTRAP = 'import hashlib,json,os,pathlib,re,stat,subprocess\nR=pathlib.Path("/Library/Application Support/MastermindExecutive")\nC=R/"config/company-consultation-edge.json"\nE={"PATH":"/usr/bin:/bin","LANG":"en_US.UTF-8"}\ndef sealed(p,d=False):\n for n in (p,*p.parents):\n  i=n.lstat(); D=d or n!=p\n  if i.st_uid!=0 or ((n==p or n==R or R in n.parents) and i.st_gid!=0) or i.st_mode&0o022 or stat.S_ISLNK(i.st_mode) or not (stat.S_ISDIR(i.st_mode) if D else stat.S_ISREG(i.st_mode)) or (not D and i.st_nlink!=1): raise ValueError()\n  if b"+" in subprocess.check_output(["/usr/bin/stat","-f","%Sp",str(n)],env=E): raise ValueError()\ntry:\n sealed(C)\n if stat.S_IMODE(C.stat().st_mode)!=0o444: raise ValueError()\n v=json.loads(C.read_bytes()); S=v["release_sha"]\n if set(v)!={"schema","release_sha","control_uid","worker_uid","entry_sha256","receipt_sha256"} or v["schema"]!="mastermind.company_mcp_edge/v1" or type(S)!=str or re.fullmatch("[0-9a-f]{40}",S) is None or type(v["worker_uid"])!=int or v["worker_uid"]<=0 or os.geteuid()!=v["worker_uid"]: raise ValueError()\n P=R/"releases"/S/"ops/executive_os/company_mcp_edge.py"; sealed(P)\n if hashlib.sha256(P.read_bytes()).hexdigest()!=v["entry_sha256"]: raise ValueError()\n B=pathlib.Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"); sealed(B)\n os.execve(B,[str(B),"-I","-S","-B",str(P),"stdio"],E)\nexcept (KeyError,OSError,TypeError,ValueError):\n raise SystemExit("Company edge bootstrap refused")\n'
+COMPANY_MCP_ARGS = ("-I", "-S", "-B", "-c", COMPANY_MCP_BOOTSTRAP)
+COMPANY_EXECUTION_PROFILE = "operator.appserver.interactive.company-mcp.v1"
 _RESOURCE_KEYS = frozenset(
     {
         "artifact_root",
@@ -175,6 +242,7 @@ _COMPANY_CONSULTATION_FORBIDDEN_AUTHORITY = (
     "deploy",
     "admin",
 )
+COMPANY_MCP_CONFIG_NAME = "company-consultation-v1"
 COMPANY_CONSULTATION_SCHEMA = "mastermind.company_consultation_mcp.v1"
 COMPANY_CONSULTATION_SERVER_IDENTITY = "mastermind-company-consultation-mcp"
 COMPANY_CONSULTATION_SERVER_VERSION = "1.0.0"
@@ -358,6 +426,14 @@ _BASE_APP_SERVER_OVERRIDES = (
     "features.mcp_2026_07_28=false",
     "features.multi_agent=false",
     "features.multi_agent_v2=false",
+    "features.browser_use_external=false",
+    "features.browser_use_full_cdp_access=false",
+    "features.daemon_auto_start=false",
+    "features.shell_snapshot=false",
+    "features.shell_snapshot_v2=false",
+    "features.skill_mcp_dependency_install=false",
+    "features.skill_search=false",
+    "features.workspace_dependencies=false",
 )
 
 
@@ -732,6 +808,9 @@ class ExecutionCapabilityProfile:
     def app_server_config_projection(self) -> dict[str, object]:
         """Security-relevant config expected back from ``config/read``."""
 
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            raise CapabilityPolicyError("Claude policy cannot use a Codex config projection")
+
         agents: dict[str, object]
         multi_agent: object = False
         multi_agent_v2: object = False
@@ -796,7 +875,44 @@ class ExecutionCapabilityProfile:
 
     @property
     def expected_config_digest(self) -> str:
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            requested = self.claude_sdk_config_projection()
+            return claude_security_config_digest({
+                "sandbox": requested["sandbox"],
+                "permissions": {},
+            }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
         return _digest(self.app_server_config_projection())
+
+    def claude_sdk_config_projection(self) -> dict[str, object]:
+        """Requested policy only; never evidence that the CLI enforced it.
+
+        This first disabled profile has no command, write, MCP, plugin or child
+        capability. A current production policy observer is still required
+        before enabling it or deriving observed OHF enforcement fields.
+        """
+        if (self.execution_surface != CLAUDE_OPERATOR_EXECUTION_SURFACE
+                or self.write_capable or self.sandbox_policy != "read-only"
+                or self.network_policy != "disabled"
+                or self.native_helper_policy is not NativeHelperPolicy.DISABLED
+                or self.skills or self.skill_grants or self.mcp_server_grants
+                or self.plugins or self.resource_grants):
+            raise CapabilityPolicyError("Claude policy exceeds its unadmitted first profile")
+        return {
+            "tools": ["Read", "Glob", "Grep"],
+            "skills": [],
+            "permission_mode": "dontAsk",
+            "setting_sources": [],
+            "strict_mcp_config": True,
+            "mcp_servers": {},
+            "sandbox": {
+                "enabled": True, "failIfUnavailable": True,
+                "autoAllowBashIfSandboxed": False,
+                "allowUnsandboxedCommands": False,
+                "excludedCommands": [],
+                "network": {"allowedDomains": [], "deniedDomains": ["*"],
+                            "allowAllUnixSockets": False, "allowLocalBinding": False},
+            },
+        }
 
     def app_server_config_overrides(self) -> tuple[str, ...]:
         if self.execution_surface != "codex-app-server":
@@ -867,6 +983,15 @@ class ExecutionCapabilityProfile:
                 "harness_binary_digest must be a lowercase SHA-256 digest"
             )
         required: list[CapabilityIdentity] = []
+        if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
+            # The SDK injects its result-rendering tool only for the fixed
+            # Executive plan output schema. It is observed as a capability,
+            # not supplied as a permission or an extra base tool in the SDK.
+            self.claude_sdk_config_projection()
+            required.extend(
+                CapabilityIdentity(name=name, kind="tool", harness_binary_digest=binary_digest)
+                for name in ("Read", "Glob", "Grep", "StructuredOutput")
+            )
         if self.skill_grants:
             # Exact V4 company-Skill grants compile their closure digest
             # into the existing OHF identity; package path, source commit
@@ -1042,16 +1167,17 @@ class ExecutionCapabilityRegistry:
                 )
             else:
                 command_value = str(value.get("command") or "").strip()
-                if (
-                    capability_id != "playwright-worker-browser-b1"
-                    or command_value != WORKER_BROWSER_MCP_COMMAND
-                ):
+                reviewed = {
+                    "playwright-worker-browser-b1": (WORKER_BROWSER_MCP_COMMAND, WORKER_BROWSER_MCP_ARGS),
+                    "company-consultation-mcp-v1": (COMPANY_MCP_COMMAND, COMPANY_MCP_ARGS),
+                }.get(capability_id)
+                if reviewed is None or command_value != reviewed[0]:
                     raise CapabilityPolicyError(
                         f"MCP grant {capability_id!r} stdio command is not reviewed"
                     )
                 raw_args = value.get("args")
                 if (
-                    raw_args != list(WORKER_BROWSER_MCP_ARGS)
+                    raw_args != list(reviewed[1])
                     or len(
                         json.dumps(
                             raw_args,
@@ -1102,6 +1228,16 @@ class ExecutionCapabilityRegistry:
                 value.get("tool_schema_digest"),
                 field=f"mcp_servers.{capability_id}.tool_schema_digest",
             )
+            if capability_id == "company-consultation-mcp-v1" and (
+                config_name != "company-consultation-v1" or transport != "stdio"
+                or auth_status != "unsupported"
+                or server_identity != COMPANY_CONSULTATION_SERVER_IDENTITY
+                or server_version != COMPANY_CONSULTATION_SERVER_VERSION
+                or enabled_tools != tuple(sorted(COMPANY_CONSULTATION_ENABLED_TOOLS))
+                or approval_mode != "approve"
+                or tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError("Company MCP grant differs from its reviewed binding")
             normalized_grant = {
                 "capability_id": capability_id,
                 "config_name": config_name,
@@ -1271,6 +1407,8 @@ class ExecutionCapabilityRegistry:
                 field=f"profiles.{profile_id}.execution_surface",
                 choices=_EXECUTION_SURFACES,
             )
+            if execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE and enabled:
+                raise CapabilityPolicyError("Claude policy observation is not admitted")
             auth_realm = _closed_choice(
                 value.get("auth_realm"),
                 field=f"profiles.{profile_id}.auth_realm",
@@ -1433,12 +1571,12 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} both requires and forbids: {', '.join(collision)}"
                 )
-            if execution_surface == "codex-exec" and (
+            if is_sealed_worker_execution_surface(execution_surface) and (
                 mcp_server_ids or resource_ids or plugins
             ):
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} cannot grant MCP/plugins or resources "
-                    "to sealed codex-exec"
+                    f"to sealed worker execution surface {execution_surface!r}"
                 )
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
             if is_browser_profile:
@@ -1476,10 +1614,10 @@ class ExecutionCapabilityRegistry:
                         "skill_capabilities; exact V4 company-Skill profiles "
                         "require skills=[]"
                     )
-                if execution_surface == "codex-exec":
+                if is_sealed_worker_execution_surface(execution_surface):
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} cannot grant skill_capabilities "
-                        "to sealed codex-exec"
+                        f"to sealed worker execution surface {execution_surface!r}"
                     )
                 if write_capable:
                     raise CapabilityPolicyError(

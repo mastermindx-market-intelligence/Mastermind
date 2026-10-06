@@ -86,12 +86,23 @@ CAP_S1_OPERATION_ID = "mastermind-cap-s1-complete-vertical-20260901-sol-001"
 CAP_S1_HARNESS_VERSION = "ohf-fake-app-server/p0b"
 
 
+def _test_python_binary() -> Path:
+    python = Path(sys.executable).resolve()
+    if sys.platform == "darwin":
+        # Framework bin/python execs a second image; all launch and receipt
+        # fixtures must attest the actual interpreter used by the fake server.
+        image = python.parent.parent / "Resources/Python.app/Contents/MacOS/Python"
+        if image.is_file():
+            return image.resolve()
+    return python
+
+
 def _test_binary_digest() -> str:
     """The exact digest the fake-App-Server harness (the running python
     interpreter) will compute for itself -- every skill-canary harness in
     this module launches that same interpreter, so this is a fixed value."""
 
-    return hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest()
+    return hashlib.sha256(_test_python_binary().read_bytes()).hexdigest()
 
 
 def _load_cap_s1_generation():
@@ -147,7 +158,7 @@ def _stage_cap_s1_binding(
         profile=profile,
         projection=projection,
         protocol_receipt=build_protocol_attestation_receipt(
-            binary_path=str(Path(sys.executable).resolve()),
+            binary_path=str(_test_python_binary()),
             binary_digest=_test_binary_digest(),
             binary_version=CAP_S1_HARNESS_VERSION,
             stable_inventory_digest="c" * 64,
@@ -329,7 +340,7 @@ def _make_harness(
     (codex_home / "auth.json").chmod(0o600)
     (skill / "SKILL.md").write_text("# OHF probe\n", encoding="utf-8")
     state_path = codex_home / "fake-state.json"
-    python = Path(sys.executable).resolve()
+    python = _test_python_binary()
     argv = (
         (str(python), str(REPO_ROOT / "tests/fixtures/ohf_p1b_fault_app_server.py"))
         if fault_server
@@ -1252,7 +1263,7 @@ def test_auth_marker_is_only_statted_and_parent_credentials_are_not_inherited(
 
 
 def test_default_home_and_symlinked_auth_are_refused(tmp_path: Path) -> None:
-    python = Path(sys.executable).resolve()
+    python = _test_python_binary()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     default_home = (Path.home() / ".codex").resolve()
@@ -1269,7 +1280,7 @@ def test_default_home_and_symlinked_auth_are_refused(tmp_path: Path) -> None:
 def test_credential_boundary_rejects_hardlinks_modes_and_symlinked_ancestors(
     tmp_path: Path,
 ) -> None:
-    python = Path(sys.executable).resolve()
+    python = _test_python_binary()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     home = tmp_path / "home"
@@ -1435,13 +1446,13 @@ def test_blocked_read_events_and_interrupt_demultiplex_response_and_completion(
     )
     client = harness.adapter._state(harness.generation).client
     entered_wait = threading.Event()
-    original_wait = client.wait_notification
+    original_wait = client.wait_notifications_through
 
     def wait_notification(method: str, *, timeout: float = 15.0):
         entered_wait.set()
         return original_wait(method, timeout=timeout)
 
-    client.wait_notification = wait_notification  # type: ignore[method-assign]
+    client.wait_notifications_through = wait_notification  # type: ignore[method-assign]
     result: dict[str, object] = {}
 
     def read() -> None:
@@ -1805,12 +1816,16 @@ def test_orchestration_principal_observations_bind_exact_launched_process_and_ho
     process = harness.adapter.observe_process_credentials(harness.generation)
     provider_home = harness.adapter.observe_provider_home_identity(harness.generation)
 
-    assert process.process_identity == {
+    expected = {
         "pid": started.process.pid,
         "pgid": started.process.pgid,
         "process_start_identity": started.process.process_start_identity,
         "boot_id": started.process.boot_id,
     }
+    if sys.platform == "darwin":
+        instance = codex_operator_adapter._observe_process_instance(started.process.pid)
+        expected.update(unique_id=instance.unique_id, pidversion=instance.pidversion)
+    assert process.process_identity == expected
     assert process.os_principal_uid == os.getuid()
     assert process.os_principal_name
     assert provider_home.provider_home_identity["path"] == str(
@@ -3064,3 +3079,74 @@ def test_str_loader_wire_is_byte_identical_with_and_without_binding(
         == bound_wire
         == [{"type": "text", "text": "Reply with the probe acknowledgement."}]
     )
+
+
+
+def test_exec_identity_is_preserved_in_credentials_without_changing_session_wire(harness):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    calls = []
+    def observe(pid):
+        calls.append(pid)
+        return _ProcessInstanceObservation(123456, 7)
+    harness.adapter.process_instance_observer = observe
+    started, _, _ = _start(harness)
+    credentials = harness.adapter.observe_process_credentials(harness.generation)
+    assert len(calls) == 5  # launch, initialization, thread start, before/after UID read
+    assert set(calls) == {started.process.pid}
+    assert credentials.process_identity["unique_id"] == 123456
+    assert credentials.process_identity["pidversion"] == 7
+    assert not hasattr(started.process, "unique_id")
+
+
+@pytest.mark.parametrize("changed_at", [2, 3])
+@pytest.mark.parametrize("field", ["unique_id", "pidversion"])
+def test_exec_drift_during_start_refuses_the_generation(harness, changed_at, field):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    calls = 0
+    def observe(pid):
+        nonlocal calls
+        calls += 1
+        value = _ProcessInstanceObservation(123456, 7)
+        return dataclasses.replace(value, **{field: 123457 if field == "unique_id" else 8}) if calls >= changed_at else value
+    harness.adapter.process_instance_observer = observe
+    with pytest.raises(CodexAdapterError, match="execution identity changed") as caught:
+        _start(harness)
+    assert caught.value.effect_unknown
+    assert harness.adapter._generations == {}
+
+
+@pytest.mark.parametrize("field,value", [("unique_id", 0), ("unique_id", True), ("pidversion", 0), ("pidversion", False)])
+def test_invalid_execution_pair_refuses_start(harness, field, value):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    bad = dataclasses.replace(_ProcessInstanceObservation(123456, 7), **{field: value})
+    harness.adapter.process_instance_observer = lambda pid: bad
+    with pytest.raises(CodexAdapterError, match="not observable"):
+        _start(harness)
+    assert harness.adapter._generations == {}
+
+
+def test_exec_between_start_and_principal_admission_refuses(harness):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    current = _ProcessInstanceObservation(123456, 7)
+    harness.adapter.process_instance_observer = lambda pid: current
+    _start(harness)
+    current = dataclasses.replace(current, pidversion=8)
+    with pytest.raises(CodexAdapterError, match="execution identity changed"):
+        harness.adapter.observe_process_credentials(harness.generation)
+
+
+def test_exec_during_principal_uid_read_refuses(harness, monkeypatch):
+    from control_plane.executive_process_identity import _ProcessInstanceObservation
+    current = _ProcessInstanceObservation(123456, 7)
+    harness.adapter.process_instance_observer = lambda pid: current
+    _start(harness)
+    original = codex_operator_adapter.subprocess.run
+    def run(argv, **kwargs):
+        nonlocal current
+        result = original(argv, **kwargs)
+        if argv[:3] == ["ps", "-o", "uid="]:
+            current = dataclasses.replace(current, pidversion=8)
+        return result
+    monkeypatch.setattr(codex_operator_adapter.subprocess, "run", run)
+    with pytest.raises(CodexAdapterError, match="execution identity changed"):
+        harness.adapter.observe_process_credentials(harness.generation)

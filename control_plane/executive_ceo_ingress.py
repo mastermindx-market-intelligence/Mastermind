@@ -22,6 +22,18 @@ It is deliberately narrow:
   submission still reaches ``control_plane.ceo_intent.submit_intent`` and
   ``resolve_intent`` — this module adds admission/replay/error law around that
   existing sink, never a second one, and no new SQLite table/store/queue.
+* **The optional admission callback is host composition, never wire.**  A
+  trusted host may pass ``admission_guard`` — a keyword-only, private
+  composition parameter — to ``handle_frame``.  It is not a request schema
+  key, socket capability, token, or alternate sink: only a FRESH submission
+  (never a durable replay) invokes it exactly once, off the event loop, on a
+  detached deep copy of the canonical normalized envelope, after the final
+  trusted grounding/dialogue-source re-observation and immediately before the
+  one sink call.  Success is ``None`` only; a non-callable guard, a non-None
+  return, or any raised exception refuses with the FIXED existing
+  ``backend_refused`` classification and zero sink calls, so callback text can
+  never reach the wire.  Guard success is not launch authority; the canonical
+  sink/Runtime keep final authority and transactional checks.
 * **Errors are typed and closed (§12, R1 §3/§4).**  :class:`CeoIngressError`
   carries one of :data:`ERROR_CODES` plus a message.  For the four dependency-
   failure codes named in the R1 security correction, the wire message is a
@@ -49,6 +61,7 @@ Usage
 from __future__ import annotations
 
 import asyncio
+import copy
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -102,8 +115,14 @@ MAX_REQUEST_BYTES = 8192
 #: this bound is a protocol/backend defect and must refuse, never truncate.
 MAX_RESPONSE_BYTES = 32768
 
-# Closed internal read capabilities for the separately configured App peer.
+# Closed internal read capabilities for separately configured App peers.
+# v1 is the immutable BSC-E1 four-reader profile. v2 is the separately
+# versioned Web-CEO profile and does not change v1's admitted surface.
+# v3 is the static Web-CEO v2 profile (server 1.2.0) and likewise changes
+# neither earlier admitted surface.
 APP_READ_SCHEMA = "mastermind.executive_ceo_ingress_app_read.v1"
+APP_READ_SCHEMA_V2 = "mastermind.executive_ceo_ingress_app_read.v2"
+APP_READ_SCHEMA_V3 = "mastermind.executive_ceo_ingress_app_read.v3"
 APP_GROUNDING_SCHEMA = "mastermind.executive_ceo_ingress_app_grounding.v1"
 
 #: §7.2 — exact status id validation.
@@ -363,6 +382,9 @@ async def _submit(
     execution_binding: Mapping[str, Any] | None = None,
     dialogue_source: ExecutiveDialogueSource | None = None,
     require_dialogue_source: bool = False,
+    principal_context: Any = None,
+    principal_request_ref: str | None = None,
+    principal_admission_guard: Any = None,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
@@ -376,6 +398,10 @@ async def _submit(
             submit_kwargs["dialogue_source"] = dialogue_source.to_dict()
         if require_dialogue_source:
             submit_kwargs["require_dialogue_source"] = True
+        if principal_context is not None:
+            submit_kwargs.update(principal_context=principal_context,
+                principal_request_ref=principal_request_ref,
+                principal_admission_guard=principal_admission_guard)
         return await asyncio.to_thread(
             ceo_intent.submit_intent,
             runtime,
@@ -415,7 +441,21 @@ def _build_envelope(
     workspace_root: "Path | str",
     grounding: Mapping[str, str],
     strict_v2: bool = False,
+    principal_context: Any = None,
+    principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
+    if principal_context is not None:
+        from control_plane.coo_principal_envelope import derive_principal_envelope
+        try:
+            if strict_v2:
+                raise ValueError()
+            bundle = derive_principal_envelope(normalized, context=principal_context,
+                workspace_root=str(workspace_root), grounding=grounding)
+            if bundle["request_ref"] != principal_request_ref or bundle["intent_id"] != intent_id:
+                raise ValueError()
+            return ceo_intent.validate_intent(bundle["envelope"])
+        except (TypeError, ValueError) as exc:
+            raise _dependency_failure("backend_refused") from exc
     try:
         envelope = ceo_request.build_trusted_envelope(
             normalized,
@@ -447,6 +487,7 @@ async def _handle_submit(
     runtime: Any,
     grounding_provider: GroundingProvider,
     workspace_root: "Path | str",
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
     """§11.2 submit pre-reconciliation — this order is load-bearing."""
 
@@ -473,6 +514,7 @@ async def _handle_submit(
         runtime=runtime,
         grounding_provider=grounding_provider,
         workspace_root=workspace_root,
+        admission_guard=admission_guard,
     )
 
 
@@ -487,6 +529,7 @@ async def _handle_submit_v2(
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
 ) -> dict[str, Any]:
     """AD-ID1 automated submit with the same load-bearing v1 order.
 
@@ -516,6 +559,7 @@ async def _handle_submit_v2(
         strict_v2=strict_v2_admission,
         execution_binding_provider=execution_binding_provider,
         dialogue_source_provider=dialogue_source_provider,
+        admission_guard=admission_guard,
     )
 
 
@@ -549,8 +593,20 @@ async def _handle_normalized_submit(
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
+    principal_context: Any = None,
+    principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
-    """Shared replay/grounding/sink law after version-specific validation."""
+    """Shared replay/grounding/sink law after version-specific validation.
+
+    ``admission_guard`` is optional trusted host composition (never a request
+    field).  Only the FRESH path below reaches it, exactly once, strictly
+    between the final trusted re-observation and the one sink call; the
+    durable replay in step 5 bypasses it entirely, including when the guard
+    would refuse or raise. For principal frames, the required guard is carried
+    to the existing sink for its fresh-only check immediately before Job effect;
+    the legacy optional-guard behavior remains unchanged.
+    """
 
     # 3. construct the candidate envelope using the CALLER's observed_grounding
     #    claim ONLY for identity comparison (never for a new submission).
@@ -560,6 +616,7 @@ async def _handle_normalized_submit(
         workspace_root=workspace_root,
         grounding=observed,
         strict_v2=strict_v2,
+        principal_context=principal_context, principal_request_ref=principal_request_ref,
     )
     # 4. exact command-id lookup.
     command_id = ceo_intent.command_id_for(intent_id)
@@ -571,7 +628,9 @@ async def _handle_normalized_submit(
     #    source while returning the canonical duplicate receipt.
     if existing is not None:
         return _finalize_receipt(
-            await _submit(runtime, candidate_envelope, workspace_root)
+            await _submit(runtime, candidate_envelope, workspace_root,
+                principal_context=principal_context, principal_request_ref=principal_request_ref,
+                principal_admission_guard=admission_guard)
         )
 
     # 6. only when no canonical event exists, observe current trusted grounding.
@@ -589,6 +648,7 @@ async def _handle_normalized_submit(
         workspace_root=workspace_root,
         grounding=trusted,
         strict_v2=strict_v2,
+        principal_context=principal_context, principal_request_ref=principal_request_ref,
     )
 
     execution_binding: Mapping[str, Any] | None = None
@@ -627,6 +687,32 @@ async def _handle_normalized_submit(
         if reobserved_source != admitted_source:
             raise _classification_failure("operation_conflict")
 
+    # 10. optional host-only admission gate.  Exactly one synchronous
+    #     callback over a DETACHED deep copy of the canonical trusted
+    #     envelope — the exact ``_build_envelope``/``validate_intent``
+    #     material the sink will receive, JSON-compatible, with no writable
+    #     alias into the trusted original (nested mappings/lists included).
+    #     A non-callable guard, a non-None return, or any raised exception
+    #     refuses with the FIXED existing ``backend_refused``
+    #     classification and ZERO sink calls, so callback text or private
+    #     content can never reach the wire.  ``None`` means admitted; the
+    #     guard cannot replace the envelope by returning another object, and
+    #     its success is not launch authority — the canonical sink/Runtime
+    #     still own final authority and the concurrent transactional checks.
+    if admission_guard is not None and principal_context is None:
+        if not callable(admission_guard):
+            raise _dependency_failure("backend_refused")
+        try:
+            verdict = await asyncio.to_thread(
+                admission_guard, copy.deepcopy(trusted_envelope)
+            )
+        except Exception as exc:
+            # Dependency boundary: opaque by design — the callback's own
+            # exception text is never forwarded (R1 §3.2 convention).
+            raise _dependency_failure("backend_refused") from exc
+        if verdict is not None:
+            raise _dependency_failure("backend_refused")
+
     # 11. call the existing v1 mutation sink.
     receipt = await _submit(
         runtime,
@@ -635,6 +721,8 @@ async def _handle_normalized_submit(
         execution_binding=execution_binding,
         dialogue_source=admitted_source,
         require_dialogue_source=strict_v2,
+        principal_context=principal_context, principal_request_ref=principal_request_ref,
+        principal_admission_guard=admission_guard,
     )
     return _finalize_receipt(receipt)
 
@@ -725,6 +813,72 @@ def _require_v2_admission(*, service_state: Any, ceo_ingress_armed: bool) -> Non
         )
 
 
+# Additive App-only frames on the existing socket, not another ingress service.
+PRINCIPAL_SUBMIT_SCHEMA = "mastermind.ceo_ingress.principal_submit.v1"
+PRINCIPAL_STATUS_SCHEMA = "mastermind.ceo_ingress.principal_status.v1"
+PRINCIPAL_SCHEMAS = frozenset({PRINCIPAL_SUBMIT_SCHEMA, PRINCIPAL_STATUS_SCHEMA})
+_PRINCIPAL_CONTEXT_KEYS = frozenset({"work_ref", "principal_binding_digest",
+                                    "mission_authority_ref", "authority_generation_digest"})
+_PRINCIPAL_STATUS_KEYS = frozenset({"schema", "request_ref", "principal_context"})
+_PRINCIPAL_SUBMIT_KEYS = _PRINCIPAL_STATUS_KEYS | {"observed_grounding", "request"}
+
+
+def _principal_context(value):
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    raw = _exact_top_keys(value, "principal context", _PRINCIPAL_CONTEXT_KEYS)
+    try:
+        return PrincipalAdmissionContext(**raw)
+    except (TypeError, ValueError) as exc:
+        raise CeoIngressError("invalid_input", "principal context is invalid") from exc
+
+
+def _principal_receipt(receipt, *, context, request_ref, intent_id):
+    if (not isinstance(receipt, Mapping)
+            or receipt.get("schema") != ceo_intent.RECEIPT_SCHEMA_PRINCIPAL
+            or receipt.get("request_ref") != request_ref
+            or receipt.get("intent_id") != intent_id):
+        raise _dependency_failure("backend_refused")
+    expected = {"seat": "coo", "work_ref": context.work_ref,
+                "principal_binding_digest": context.principal_binding_digest,
+                "mission_authority_ref": context.mission_authority_ref,
+                "authority_generation_digest": context.authority_generation_digest}
+    if receipt.get("principal") != expected:
+        raise _classification_failure("operation_conflict")
+    return _finalize_receipt(receipt)
+
+
+async def _handle_principal_frame(parsed, *, runtime, grounding_provider,
+                                  workspace_root, principal_admission_guard):
+    from control_plane.coo_principal_request import (
+        normalize_principal_request, principal_request_ref, principal_intent_id,
+    )
+    is_submit = parsed["schema"] == PRINCIPAL_SUBMIT_SCHEMA
+    _exact_top_keys(parsed, "principal frame",
+                    _PRINCIPAL_SUBMIT_KEYS if is_submit else _PRINCIPAL_STATUS_KEYS)
+    context = _principal_context(parsed["principal_context"])
+    request_ref = parsed["request_ref"]
+    try:
+        intent_id = principal_intent_id(request_ref)
+    except (TypeError, ValueError) as exc:
+        raise CeoIngressError("invalid_input", "principal request identity is invalid") from exc
+    if not is_submit:
+        receipt = await _resolve_status_intent(runtime, intent_id)
+    else:
+        observed = _validate_observed_grounding(parsed["observed_grounding"])
+        try:
+            normalized = normalize_principal_request(parsed["request"],
+                                                     expected_work_ref=context.work_ref)
+            if principal_request_ref(normalized) != request_ref:
+                raise ValueError()
+        except (TypeError, ValueError) as exc:
+            raise CeoIngressError("invalid_input", "principal request does not bind its context") from exc
+        receipt = await _handle_normalized_submit(normalized, observed=observed,
+            intent_id=intent_id, runtime=runtime, grounding_provider=grounding_provider,
+            workspace_root=workspace_root, admission_guard=principal_admission_guard,
+            principal_context=context, principal_request_ref=request_ref)
+    return _principal_receipt(receipt, context=context, request_ref=request_ref, intent_id=intent_id)
+
+
 async def handle_frame(
     parsed: Any,
     *,
@@ -738,11 +892,15 @@ async def handle_frame(
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
+    admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
+    principal_peer_authorized: bool = False,
+    principal_admission_guard: Any = None,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
-    There is no generic dispatcher: exactly five closed ``schema`` values are
-    legal.  The caller applies PR-A's full admission predicate to v1 submit/
+    There is no generic dispatcher: the existing five closed schemas remain,
+    plus two separately gated App-only principal frames. The caller applies
+    PR-A's full admission predicate to v1 submit/
     status before invoking this function; AD-ID1 reasserts that same predicate
     for v2 inside this authorized module, while the R0 state branch is read-only
     and uses only current in-process values supplied by the same service.
@@ -752,11 +910,26 @@ async def handle_frame(
     connection handler) owns the raw socket framing (newline/oversize/UTF-8/
     JSON-syntax) and peer authentication; this function receives an already
     UTF-8-decoded, already ``json.loads``-parsed Python object.
+
+    ``admission_guard`` is private host composition forwarded ONLY down the
+    two public submit branches: status and state requests never invoke it, a
+    frame carrying it as a top-level key still fails the closed-schema check,
+    and a durable exact-command replay inside the submit path bypasses it
+    entirely.  See :func:`_handle_normalized_submit` for the one fresh-path
+    invocation point and its refusal law.
     """
 
     if not isinstance(parsed, Mapping):
         raise CeoIngressError("invalid_input", "request frame must be a JSON object")
     schema = parsed.get("schema")
+    if isinstance(schema, str) and schema in PRINCIPAL_SCHEMAS:
+        # Only the service's kernel-peer selection may supply this capability.
+        # It is never read from the frame. Default construction grants nothing.
+        if principal_peer_authorized is not True or not callable(principal_admission_guard):
+            raise CeoIngressError("peer_denied", "principal frame is not authorized for this peer")
+        return await _handle_principal_frame(parsed, runtime=runtime,
+            grounding_provider=grounding_provider, workspace_root=workspace_root,
+            principal_admission_guard=principal_admission_guard)
     if schema == SUBMIT_SCHEMA:
         _exact_top_keys(parsed, "submit frame", _SUBMIT_TOP_KEYS)
         return await _handle_submit(
@@ -764,6 +937,7 @@ async def handle_frame(
             runtime=runtime,
             grounding_provider=grounding_provider,
             workspace_root=workspace_root,
+            admission_guard=admission_guard,
         )
     if schema == STATUS_SCHEMA:
         _exact_top_keys(parsed, "status frame", _STATUS_TOP_KEYS)
@@ -781,6 +955,7 @@ async def handle_frame(
             strict_v2_admission=strict_v2_admission,
             execution_binding_provider=execution_binding_provider,
             dialogue_source_provider=dialogue_source_provider,
+            admission_guard=admission_guard,
         )
     if schema == STATUS_SCHEMA_V2:
         _require_v2_admission(

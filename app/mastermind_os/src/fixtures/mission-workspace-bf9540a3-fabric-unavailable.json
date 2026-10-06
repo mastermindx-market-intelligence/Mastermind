@@ -1,0 +1,234 @@
+{
+  "acceptance": {
+    "artifact_revision": null,
+    "evidence": [],
+    "owner": null,
+    "reason_codes": [
+      "ACCEPTANCE_OWNER_NOT_PROJECTED"
+    ],
+    "ruling": null,
+    "state": "NOT_PROJECTED"
+  },
+  "budget": {},
+  "children": {
+    "coverage": "INCOMPLETE",
+    "items": [],
+    "overflow_count": null,
+    "reason_codes": [
+      "FABRIC_VIEW_UNAVAILABLE"
+    ],
+    "state": "UNAVAILABLE",
+    "total_count": null,
+    "unjoined_job_count": null,
+    "unjoined_job_ids": []
+  },
+  "conversation": {
+    "coverage": "NOT_PROJECTED",
+    "items": [],
+    "overflow_count": null,
+    "reason_codes": [
+      "MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"
+    ],
+    "state": "UNAVAILABLE",
+    "total_count": null
+  },
+  "degraded": [
+    "active_builds: unavailable",
+    "boot_packet: unavailable",
+    "mission root unavailable"
+  ],
+  "execution": {
+    "artifacts": [],
+    "errors_present": false,
+    "evidence": [],
+    "next_actions": [],
+    "state": null,
+    "summary_present": false
+  },
+  "feature_gates": {
+    "actions": "READ_ONLY",
+    "advanced": "AVAILABLE",
+    "conversation": "UNAVAILABLE"
+  },
+  "generated_at": "2026-09-05T00:00:00Z",
+  "missingness": [
+    {
+      "missingness_class": "DEGRADED",
+      "producer_owner": null,
+      "reason": "source detail withheld",
+      "target_field": "transport.evidence"
+    },
+    {
+      "missingness_class": "EXCLUDED",
+      "producer_owner": "executive_os",
+      "reason": "source detail withheld",
+      "target_field": "conversation"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": null,
+      "reason": "source detail withheld",
+      "target_field": "acceptance"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "executive_os",
+      "reason": "source detail withheld",
+      "target_field": "children.worker_id"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "autonomy_projection",
+      "reason": "source detail withheld",
+      "target_field": "mission.root_job_id"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "executive_os",
+      "reason": "source detail withheld",
+      "target_field": "mission.title"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": null,
+      "reason": "source detail withheld",
+      "target_field": "source.generation_vector"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "slack",
+      "reason": "source detail withheld",
+      "target_field": "transport.continued"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "slack",
+      "reason": "source detail withheld",
+      "target_field": "transport.stopped"
+    }
+  ],
+  "mission": {
+    "armed": {
+      "ceo_ingress_app_armed": null,
+      "ceo_submit_armed": null,
+      "coo_autonomy_armed": null,
+      "dialogue_bridge_armed": null,
+      "source": "absent",
+      "terminal_return_armed": null
+    },
+    "capability": {
+      "detail": null,
+      "installed": null,
+      "state": null,
+      "version": null
+    },
+    "depth": null,
+    "evidence": [],
+    "orchestration_role": null,
+    "plan_step_id": null,
+    "root_job_ambiguous": false,
+    "root_job_candidates": [
+      "JOB-B5"
+    ],
+    "root_job_id": null,
+    "runtime_root_state": "UNKNOWN",
+    "status": null,
+    "submission_availability": "UNKNOWN",
+    "title": null
+  },
+  "posture": {
+    "evidence": [],
+    "rule": "E3",
+    "value": "CONSUMPTION_UNKNOWN"
+  },
+  "principal": {
+    "accountable_seat": "ceo",
+    "current_sol_target": null,
+    "current_worker": null,
+    "evidence": [],
+    "owed_turn": {
+      "reason": "attention_targets_seat",
+      "seat": "ceo",
+      "source_refs": [
+        {
+          "freshness": "current",
+          "observed_at": "2026-09-05T00:00:00Z",
+          "owner": "executive_inbox",
+          "ref": "ATTENTION-B5"
+        }
+      ]
+    }
+  },
+  "program": {
+    "attention_ids": [
+      "ATTENTION-B5"
+    ],
+    "disagreements": [],
+    "evidence": [],
+    "github_prs": [],
+    "next_action": null,
+    "state": "active",
+    "title": "Bounded fixture",
+    "work_ref": "WS:B5"
+  },
+  "read_state": {
+    "reason_codes": [
+      "SOURCE_OR_VALIDITY_INCOMPLETE"
+    ],
+    "state": "PARTIAL",
+    "usable_sections": [
+      "program",
+      "principal",
+      "transport"
+    ]
+  },
+  "review": {
+    "evidence": [],
+    "required": null,
+    "reviews_job_id": null,
+    "verdict": "NOT_YET"
+  },
+  "schema": "mastermind.mission_workspace.v1",
+  "source": {
+    "control_room_generated_at": "2026-09-05T00:00:00Z",
+    "control_room_schema": "mastermind.chairman_control_room.v1",
+    "fabric_view_generated_at": null,
+    "fabric_view_schema": null,
+    "source_coverage": [
+      "control_room"
+    ],
+    "source_generation": {
+      "generation": null,
+      "state": "UNKNOWN",
+      "version": null
+    }
+  },
+  "transport": {
+    "actionable": true,
+    "carrier": {
+      "actionable": false,
+      "historical": true,
+      "reason": null,
+      "state": "OWNER_HELD"
+    },
+    "dispatch_state": "RETURNED",
+    "evidence": [],
+    "historical": false,
+    "reason": "canonical_terminal_wake_acknowledged",
+    "w3c": {
+      "reason": null,
+      "source_receipt": {
+        "freshness": "SOURCE_EVIDENCE_TIME",
+        "observed_at": "2026-09-05T00:00:00Z",
+        "snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "terminal_source_owner": "executive_terminal_return",
+        "wake_source_owner": "wake_ledger"
+      },
+      "state": "RESOLVED",
+      "terminal_applied": true,
+      "terminal_state": "APPLIED",
+      "wake_state": "TARGET_ACKNOWLEDGED"
+    },
+    "watch_proven": true
+  }
+}

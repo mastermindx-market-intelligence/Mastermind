@@ -11,12 +11,14 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 from control_plane import codex_worker as cw
+from control_plane import worker_execution_contract as wec
 
 
 _FAKE_CODEX = r'''#!/usr/bin/python3
@@ -241,6 +243,122 @@ def _passing_canary() -> dict:
     }
 
 
+def _subscription_spec(tmp_path: Path, adapter: cw.CodexWorkerAdapter) -> cw.LaunchSpec:
+    workspace, head = _workspace(tmp_path / "canary")
+    run_dir = tmp_path / "canary" / "run"
+    run_dir.mkdir(mode=0o700)
+    input_dir = run_dir / "input"
+    input_dir.mkdir(mode=0o700)
+    schema_path = input_dir / "worker-result.schema.json"
+    schema_path.write_text(json.dumps(_schema()), encoding="utf-8")
+    schema_path.chmod(0o600)
+    return cw.LaunchSpec(
+        run_id="run-1",
+        job_id="job-1",
+        worker_id="codex-01",
+        workspace_path=workspace,
+        run_dir=run_dir,
+        prompt="interactive canary",
+        result_schema_path=schema_path,
+        authorities=("READ",),
+        authority=None,
+        model="reviewed-model",
+        expected_base_sha=head,
+        subscription_canary_claim={
+            "schema": "mastermind.subscription_canary_claim/v1",
+            "execution_mode": "interactive_canary",
+            "run_id": "run-1",
+            "job_id": "job-1",
+            "worker_id": "codex-01",
+            "quota_class": "interactive",
+            "fence_generation": 7,
+            "capacity_generation": 7,
+            "capacity_state": "BUSY",
+            "held_attempt_id": "run-1",
+            "current_attempt_id": "run-1",
+            "binding_id": "reviewed-binding",
+            "profile_id": "reviewed-profile",
+            "adapter_id": "codex-cli",
+            "model": "reviewed-model",
+            "realm_config_sha256": "a" * 64,
+            "realm_generation": 2,
+            "catalog_digest": "b" * 64,
+            "issued_at_ms": 1,
+            "expires_at_ms": 2,
+            "observation_digest": "c" * 64,
+        },
+    )
+
+
+class _RecordingRealmOwner:
+    pass
+
+
+def test_plain_start_refuses_subscription_before_credential_or_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, _ordinary_spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    adapter.subscription_realm_owner = _RecordingRealmOwner()
+    spec = _subscription_spec(tmp_path, adapter)
+    credential_calls: list[object] = []
+    subprocess_calls: list[object] = []
+    monkeypatch.setattr(
+        adapter, "_environment", lambda *_args, **_kwargs: credential_calls.append(1),
+    )
+    def record_subprocess(*_args, **_kwargs):
+        subprocess_calls.append(1)
+        raise _InterruptSubprocess()
+
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", record_subprocess)
+
+    with pytest.raises(cw.LaunchValidationError, match="typed admission seam"):
+        asyncio.run(adapter.start(spec))
+
+    assert credential_calls == []
+    assert subprocess_calls == []
+
+
+def test_canary_seam_reverifies_admission_before_credential_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _RecordingRealmOwner()
+    adapter, _ordinary_spec, _workspace_path, _run_dir = _fixture(tmp_path)
+    object.__setattr__(adapter, "subscription_realm_owner", owner)
+    spec = _subscription_spec(tmp_path, adapter)
+    calls: list[tuple[object, cw.LaunchSpec]] = []
+    observed_order: list[str] = []
+
+    def verify(admission, *, spec):
+        calls.append((admission, spec))
+        observed_order.append("verify")
+
+    def environment(*_args, **_kwargs):
+        observed_order.append("credential")
+        return {}
+
+    def subprocess_exec(*_args, **_kwargs):
+        observed_order.append("subprocess")
+        raise _InterruptSubprocess()
+
+    monkeypatch.setattr(
+        "control_plane.subscription_canary_admission.verify_broker_subscription_canary_admission",
+        verify,
+    )
+    monkeypatch.setattr(adapter, "_environment", environment)
+    monkeypatch.setattr(cw.asyncio, "create_subprocess_exec", subprocess_exec)
+    admission = object()
+
+    with pytest.raises(_InterruptSubprocess):
+        asyncio.run(adapter.start_subscription_canary(spec, admission))
+
+    assert calls == [(admission, spec)]
+    assert observed_order == ["verify", "credential", "subprocess"]
+
+
+class _InterruptSubprocess(BaseException):
+    pass
+
+
 def test_native_binary_attestation_allows_bounded_cold_codesign_startup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -303,7 +421,7 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
 ) -> None:
     workspace = tmp_path.resolve() / "workspace-that-must-not-cross-the-broker"
     workspace.mkdir()
-    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=all")
+    arguments = ("status", "--porcelain=v1", "-z", "--untracked-files=no")
 
     def timed_out(argv, **kwargs):
         raise subprocess.TimeoutExpired(
@@ -321,11 +439,11 @@ def test_git_preflight_timeout_names_only_the_safe_operation(
     error = raised.value
     assert isinstance(error, cw.LaunchValidationError)
     assert error.code == "git_preflight_timeout"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.timeout_seconds == cw._GIT_COMMAND_TIMEOUT_SECONDS == 15.0
     assert str(error) == (
         "Git preflight timed out after 15s: "
-        "status --porcelain=v1 -z --untracked-files=all"
+        "status --porcelain=v1 -z --untracked-files=no"
     )
     assert str(workspace) not in str(error)
     assert "private workspace" not in str(error)
@@ -349,16 +467,16 @@ def test_git_preflight_nonzero_names_only_operation_and_bounded_exit_code(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         )
 
     error = raised.value
     assert error.code == "git_preflight_failed"
-    assert error.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert error.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert error.exit_code == 128
     assert str(error) == (
         "Git preflight failed: status --porcelain=v1 -z "
-        "--untracked-files=all (exit 128)"
+        "--untracked-files=no (exit 128)"
     )
     assert str(workspace) not in str(error)
     assert hostile_stderr.decode().strip() not in str(error)
@@ -480,7 +598,7 @@ def test_installed_git_sees_exact_trust_only_in_command_scope_without_writes(
     assert cw._git_command(workspace, "remote") == b""
     assert cw._git_command(workspace, "rev-parse", "--verify", "HEAD").decode().strip() == head
     assert cw._git_command(
-        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+        workspace, "status", "--porcelain=v1", "-z", "--untracked-files=no"
     ) == b""
     assert cw._git_command(workspace, "ls-files", "--others", "-z") == b""
     assert cw._git_command(workspace, "diff", "--name-only", "-z", "HEAD", "--") == b""
@@ -504,7 +622,7 @@ def test_git_preflight_safe_types_reject_arbitrary_operation_and_exit_code() -> 
             exit_code=128,
         )
     with pytest.raises(ValueError, match="exit code"):
-        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=all", exit_code=999)
+        cw.GitPreflightFailed(operation="status --porcelain=v1 -z --untracked-files=no", exit_code=999)
 
 
 def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
@@ -523,7 +641,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
             "status",
             "--porcelain=v1",
             "-z",
-            "--untracked-files=all",
+            "--untracked-files=no",
         ):
             return subprocess.CompletedProcess(argv, 128, b"", hostile_stderr)
         raise AssertionError(operation)
@@ -533,7 +651,7 @@ def test_git_snapshot_preserves_typed_nonzero_instead_of_collapsing_to_stage(
     with pytest.raises(cw.GitPreflightFailed) as raised:
         cw._git_snapshot(workspace, require_clean=True)
 
-    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=all"
+    assert raised.value.operation == "status --porcelain=v1 -z --untracked-files=no"
     assert raised.value.exit_code == 128
     assert "top-secret" not in str(raised.value)
 
@@ -2390,7 +2508,7 @@ def test_worker_normal_exit_foreign_pipe_holder_fails_boundedly_not_success(
     child_pid, child_pgid, receipt = asyncio.run(exercise())
     try:
         assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
-        assert "forced local retirement" in (receipt.result.error or "")
+        assert "expected one thread.started" in (receipt.result.error or "")
         assert original_killpg(child_pgid, 0) is None
     finally:
         try:
@@ -4091,3 +4209,333 @@ def test_unpublished_cleanup_consumes_done_wait_task_after_signal_failure(
         assert isinstance(wait_task.exception(), RuntimeError)
 
     asyncio.run(exercise())
+
+def test_worker_launch_binds_stdout_and_stderr_to_durable_files(
+    tmp_path: Path,
+) -> None:
+    async def exercise() -> tuple[cw.CollectionReceipt, bool, bool]:
+        adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
+        ref = await adapter.start(spec)
+        state = adapter._runs[spec.run_id]
+        direct_stdout = state.process.stdout is None
+        direct_stderr = state.process.stderr is None
+        return await adapter.collect_result(ref), direct_stdout, direct_stderr
+
+    receipt, direct_stdout, direct_stderr = asyncio.run(exercise())
+    assert direct_stdout is True
+    assert direct_stderr is True
+    assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
+
+
+def test_reattach_replays_terminal_result_without_provider_start(
+    tmp_path: Path,
+) -> None:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    prompt_path = run_dir / "input" / "worker-prompt.txt"
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    logs = run_dir / "logs"
+    output = run_dir / "output"
+    logs.mkdir(mode=0o700)
+    output.mkdir(mode=0o700)
+    result = {
+        "run_id": spec.run_id,
+        "job_id": spec.job_id,
+        "worker_id": spec.worker_id,
+        "status": "COMPLETED",
+        "summary": "recovered durable result",
+        "artifacts": [],
+    }
+    events = (
+        {"type": "thread.started", "thread_id": "thread-recovered"},
+        {"type": "turn.started"},
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": json.dumps(result, sort_keys=True),
+            },
+        },
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 13, "output_tokens": 8},
+        },
+    )
+    stdout = logs / "stdout.jsonl"
+    stderr = logs / "stderr.log"
+    result_path = output / "result.json"
+    stdout.write_text(
+        "".join(json.dumps(event, sort_keys=True) + "\n" for event in events),
+        encoding="utf-8",
+    )
+    stderr.write_bytes(b"")
+    result_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    for path in (stdout, stderr, result_path):
+        path.chmod(0o600)
+    ref = cw.ProcessRef(
+        run_id=spec.run_id,
+        pid=987654,
+        pgid=987654,
+        process_start_identity="absent-start",
+        boot_session_id="boot-recovered",
+        launch_nonce="nonce-recovered",
+        provider_session_id=None,
+        stdout_path=str(stdout),
+        stderr_path=str(stderr),
+        result_path=str(result_path),
+        started_at="2026-09-18T00:00:00+00:00",
+        binary=adapter.binary,
+        base_sha=spec.expected_base_sha or "",
+        session_id=987654,
+        effective_uid=os.geteuid(),
+        effective_gid=os.getegid(),
+        real_uid=os.getuid(),
+        real_gid=os.getgid(),
+    )
+
+    class AbsentInspector:
+        def boot_session_id(self) -> str:
+            return ref.boot_session_id
+
+        def identity(self, _pid: int):
+            raise cw.ProcessIdentityError("fixture process is absent")
+
+        def inspect(self, _pid: int):
+            raise cw.ProcessIdentityError("fixture process is absent")
+
+    adapter.inspector = AbsentInspector()
+    binding = wec.WorkerRecoveryBinding.bind(
+        adapter_id=adapter.adapter_id,
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+    recovered_ref = adapter.reattach(spec, binding)
+    receipt = asyncio.run(adapter.collect_result(recovered_ref))
+    assert recovered_ref == ref
+    assert receipt.result.status is cw.WorkerRunStatus.SUCCEEDED
+    assert receipt.result.provider_session_id == "thread-recovered"
+    assert receipt.result.usage == {"input_tokens": 13, "output_tokens": 8}
+    assert receipt.result.structured_output["summary"] == "recovered durable result"
+
+
+def _live_recovery_fixture(
+    tmp_path: Path,
+    *,
+    argv: tuple[str, ...] = ("/bin/sleep", "60"),
+) -> tuple[cw.CodexWorkerAdapter, cw.LaunchSpec, wec.WorkerRecoveryBinding, subprocess.Popen]:
+    adapter, spec, _workspace_path, run_dir = _fixture(tmp_path)
+    prompt_path = run_dir / "input" / "worker-prompt.txt"
+    prompt_path.write_text(spec.prompt, encoding="utf-8")
+    prompt_path.chmod(0o600)
+    logs = run_dir / "logs"
+    output = run_dir / "output"
+    logs.mkdir(mode=0o700)
+    output.mkdir(mode=0o700)
+    stdout = logs / "stdout.jsonl"
+    stderr = logs / "stderr.log"
+    result = output / "result.json"
+    for path in (stdout, stderr, result):
+        path.write_bytes(b"")
+        path.chmod(0o600)
+    process = subprocess.Popen(argv, start_new_session=True)
+    observed = adapter.inspector.inspect(process.pid)
+    ref = cw.ProcessRef(
+        run_id=spec.run_id,
+        pid=process.pid,
+        pgid=observed.pgid,
+        process_start_identity=observed.start_identity,
+        boot_session_id=adapter.inspector.boot_session_id(),
+        launch_nonce="nonce-live-recovery",
+        provider_session_id=None,
+        stdout_path=str(stdout),
+        stderr_path=str(stderr),
+        result_path=str(result),
+        started_at=cw._utc_now(),
+        binary=adapter.binary,
+        base_sha=spec.expected_base_sha or "",
+        session_id=observed.session_id,
+        effective_uid=observed.effective_uid,
+        effective_gid=observed.effective_gid,
+        real_uid=observed.real_uid,
+        real_gid=observed.real_gid,
+    )
+    binding = wec.WorkerRecoveryBinding.bind(
+        adapter_id=adapter.adapter_id,
+        spec=spec,
+        process_ref=ref,
+        prompt_path=prompt_path,
+    )
+    threading.Thread(target=process.wait, daemon=True).start()
+    return adapter, spec, binding, process
+
+
+def test_recovered_cancel_reports_graceful_exact_absence_without_sigkill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    original_killpg = cw.os.killpg
+    signals: list[int] = []
+
+    def traced_killpg(pgid: int, value: int) -> None:
+        if value != 0:
+            signals.append(value)
+        original_killpg(pgid, value)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    try:
+        time.sleep(0.1)
+        ref = adapter.reattach(spec, binding)
+        receipt = asyncio.run(adapter.cancel(ref, "restart cancellation"))
+        process.wait(timeout=2)
+    finally:
+        monkeypatch.setattr(cw.os, "killpg", original_killpg)
+        if process.poll() is None:
+            original_killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+    assert receipt.signal_sent is True
+    assert receipt.escalated_to_sigkill is False
+    assert receipt.already_exited is False
+    assert signals == [signal.SIGTERM]
+
+
+def test_recovered_cancel_escalates_only_the_verified_residual_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = tmp_path / "residual.ready"
+    child_program = (
+        "import pathlib,signal,sys,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text('ready'); time.sleep(60)"
+    )
+    program = (
+        "import os,subprocess,sys,time; "
+        "subprocess.Popen(['/usr/bin/python3','-c',sys.argv[2],sys.argv[1]]); "
+        "[(time.sleep(0.01)) for _ in range(500) if not os.path.exists(sys.argv[1])]; "
+        "time.sleep(60)"
+    )
+    adapter, spec, binding, process = _live_recovery_fixture(
+        tmp_path,
+        argv=("/usr/bin/python3", "-c", program, str(ready), child_program),
+    )
+    original_killpg = cw.os.killpg
+    signals: list[int] = []
+
+    def traced_killpg(pgid: int, value: int) -> None:
+        if value != 0:
+            signals.append(value)
+        original_killpg(pgid, value)
+
+    monkeypatch.setattr(cw.os, "killpg", traced_killpg)
+    try:
+        for _ in range(200):
+            if ready.exists():
+                break
+            time.sleep(0.01)
+        assert ready.exists()
+        ref = adapter.reattach(spec, binding)
+        receipt = asyncio.run(adapter.cancel(ref, "restart cancellation"))
+        process.wait(timeout=2)
+    finally:
+        monkeypatch.setattr(cw.os, "killpg", original_killpg)
+        try:
+            original_killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        if process.poll() is None:
+            process.wait(timeout=2)
+    assert receipt.signal_sent is True
+    assert receipt.escalated_to_sigkill is True
+    assert receipt.already_exited is False
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_duplicate_reattach_is_idempotent_for_the_same_execution(tmp_path: Path) -> None:
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    try:
+        first = adapter.reattach(spec, binding)
+        second = adapter.reattach(spec, binding)
+        assert first == second == binding.process_ref
+        receipt = asyncio.run(adapter.cancel(first, "fixture cleanup"))
+        assert receipt.signal_sent is True
+    finally:
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait(timeout=2)
+
+
+def test_recovery_reattach_anchors_exact_group_members(tmp_path: Path) -> None:
+    """Recovery remembers an exact group witness before leader loss can occur."""
+    adapter, spec, binding, process = _live_recovery_fixture(tmp_path)
+    try:
+        ref = adapter.reattach(spec, binding)
+        state = adapter._runs[ref.run_id]
+        assert isinstance(state, cw._RecoveredRunState)
+        assert state.group_member_identities[ref.pid] == ref.process_start_identity
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=2)
+
+
+@pytest.mark.parametrize("authority", ("READ", "RESEARCH"))
+@pytest.mark.parametrize("artifact_name", ("artifact.txt", "ignored.tmp"))
+def test_readonly_collection_rejects_declared_untracked_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    authority: str, artifact_name: str,
+) -> None:
+    """An artifact allowlist does not grant WRITE_BRANCH to a read-only run.
+
+    Exercise the actual collector with the existing local fake provider. The
+    fake deliberately ignores the provider sandbox; acceptance must independently
+    reject its write even when the declared artifact and hashes are valid.
+    """
+    monkeypatch.setitem(globals(), "_FAKE_CODEX", _FAKE_CODEX.replace(
+        "artifact.txt", artifact_name,
+    ))
+
+    async def exercise():
+        adapter, spec, workspace, _run_dir = _fixture(
+            tmp_path, prompt="artifact", authority=authority,
+            allowed_artifacts=(artifact_name,),
+        )
+        ref = await adapter.start(spec)
+        receipt = await adapter.collect_result(ref)
+        assert (workspace / artifact_name).read_text() == "bounded artifact\n"
+        assert receipt.result.artifact_manifest
+        return receipt
+
+    receipt = asyncio.run(exercise())
+    assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
+    assert "read-only worker changed the workspace" in (receipt.result.error or "")
+
+
+@pytest.mark.parametrize("relative_path, tracked", (
+    ("README.md", True),
+    ("artifact.txt", False),
+    ("nested/artifact.txt", False),
+    ("ignored.tmp", False),
+))
+def test_split_git_snapshot_rejects_real_tracked_and_untracked_dirt(
+    tmp_path: Path, relative_path: str, tracked: bool,
+) -> None:
+    workspace, _head = _workspace(tmp_path)
+    assert cw._git_snapshot(workspace, require_clean=True).status == b""
+    changed = workspace / relative_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("changed fixture content\n", encoding="utf-8")
+
+    with pytest.raises(cw.LaunchValidationStageError) as raised:
+        cw._git_snapshot(workspace, require_clean=True)
+    assert raised.value.code == "launch_validation_stage"
+    assert raised.value.stage == "git_cleanliness"
+    assert str(raised.value) == "Launch validation failed at stage: git_cleanliness"
+
+    snapshot = cw._git_snapshot(workspace, require_clean=False)
+    assert bool(snapshot.status) is tracked
+    assert relative_path in cw._git_changed_paths(workspace)

@@ -363,12 +363,66 @@ def test_post_install_auth_operations_prefer_installed_binary_over_mutable_sourc
     assert '--binary "$INSTALLED_CODEX_BINARY"' in source[ready_branch:]
 
 
+def test_installed_codex_path_uses_install_receipt_without_recopying_or_rehashing() -> None:
+    source = _source()
+    installed = source.split("# BEGIN installed Codex fast path", 1)[1].split(
+        "# END installed Codex fast path", 1
+    )[0]
+
+    assert "load_codex_attestation_receipt" in installed
+    assert 'CODEX_EXECUTABLE="$INSTALLED_CODEX_BINARY"' in installed
+    owner_binding = source.index('CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"')
+    slot_gid_override = source.index('WORKER_GID="$(resolve_slot_field "worker_gid")"')
+    assert owner_binding < slot_gid_override
+    for required in (
+        'CODEX_ATTESTATION_RECEIPT',
+        'CODEX_ATTESTATION_OWNER_GID',
+        '"$CODEX_VERSION"',
+        '"$CODEX_TEAM_ID"',
+        '"$CODEX_SHA256"',
+    ):
+        assert required in installed
+    for forbidden in (
+        "mktemp",
+        "ditto",
+        "codesign",
+        "shasum",
+        "PINNED_CODEX_BINARY",
+        "run_codex_as_worker --version",
+    ):
+        assert forbidden not in installed
+
+    runner = source.split("run_codex_as_worker() {", 1)[1].split("\n}", 1)[0]
+    assert '"$CODEX_EXECUTABLE" "$@"' in runner
+    cleanup = source.split("cleanup() {", 1)[1].split("\n}", 1)[0]
+    assert "INSTALLED_CODEX_BINARY" not in cleanup
+    assert "CODEX_EXECUTABLE" not in cleanup
+
+
+def test_preinstall_codex_path_retains_full_staging_attestation() -> None:
+    source = _source()
+    staged = source.split("# BEGIN pre-install Codex staging path", 1)[1].split(
+        "# END pre-install Codex staging path", 1
+    )[0]
+
+    for required in (
+        'mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX"',
+        '/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY"',
+        '/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY"',
+        '/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY"',
+        'CODEX_EXECUTABLE="$PINNED_CODEX_BINARY"',
+        'run_codex_as_worker --version',
+    ):
+        assert required in staged
+
+
 def test_metadata_pinning_and_login_status_remain_strict_and_non_disclosing() -> None:
     source = _source()
-    assert 'CODEX_VERSION="0.147.0"' in source
+    assert 'CODEX_VERSION="0.159.2"' in source
     assert 'CODEX_TEAM_ID="2DC432GLL2"' in source
     assert (
-        'CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"'
+        'CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"'
         in source
     )
     assert "/usr/bin/codesign --verify --strict" in source
@@ -448,3 +502,23 @@ def test_runbook_documents_one_canary_gate_and_company_admin_provenance() -> Non
     assert "--workspace-binding-class" in flat
     assert "--credential-expires-at" in flat
     assert runbook.count("provider-inference-canary.sh") <= 1
+
+
+def test_terminal_requalification_shell_forwards_same_digest_and_requires_only_rc5() -> None:
+    branch = _source().split('if [ "$VERIFY_READY" = "true" ]; then', 1)[1].split(
+        'if [ "$ENROLL_SERVICE_ACCOUNT" = "true" ]; then', 1
+    )[0]
+    initialization = branch.split('provider_readiness.py" reuse', 1)[0]
+    assert 'if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then' in initialization
+    assert 'requalification_args=(--requalify-terminal-adverse-sha256 "$REQUALIFY_TERMINAL_ADVERSE_SHA256")' in initialization
+    forwarding = '${requalification_args[@]+"${requalification_args[@]}"}'
+    reuse_to_probe = branch.split('provider_readiness.py" reuse', 1)[1].split("IDENTITY_RESULT=", 1)[0]
+    assert forwarding in reuse_to_probe
+    gate = reuse_to_probe.split('if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then', 1)[1]
+    explicit, normal = gate.split("  else\n", 1)
+    assert '[ "$reuse_status" -eq 5 ]' in explicit and "exit 65" in explicit
+    assert '"$reuse_status" -eq 3' not in explicit and '"$reuse_status" -eq 4' not in explicit
+    assert '[ "$reuse_status" -eq 3 ]' in normal and '[ "$reuse_status" -eq 4 ]' in normal
+    reserve_to_canary = branch.split('provider_readiness.py" reserve', 1)[1].split("CANARY_RESULT=", 1)[0]
+    assert forwarding in reserve_to_canary and "exit 65" in reserve_to_canary
+    assert branch.count(forwarding) == 2

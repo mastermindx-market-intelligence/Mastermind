@@ -270,6 +270,26 @@ def render_plist(
     return encoded
 
 
+def w3c_plist_configured(*, release_sha: str) -> bool:
+    """Read only the public enrollment artifact; never qualify/read credentials.
+
+    Exact owner-rendered bytes and safe metadata prove current configuration,
+    not relay liveness, provider attention or consumption.
+    """
+    try:
+        raw = _read_exact(PLIST_PATH, uid=PLIST_UID, gid=PLIST_GID, mode=0o644)
+        document = plistlib.loads(raw)
+        arguments = document["ProgramArguments"]
+        if not isinstance(arguments, list) or arguments.count("--bot-user-id") != 1:
+            return False
+        bot_user_id = arguments[arguments.index("--bot-user-id") + 1]
+        return raw == render_plist(
+            bot_user_id=bot_user_id, release_sha=release_sha, w3c_enabled=True
+        )
+    except Exception:
+        return False
+
+
 async def qualify_token(
     *,
     token: str,

@@ -239,7 +239,16 @@
     try {
       const raw=JSON.stringify(wire);if(new TextEncoder().encode(raw).length>2000000)return null;
       const w=JSON.parse(raw),v=w.view;
-      if(!exactKeys(w,['schema','selection_ref','mode','view'])||w.schema!=='mastermind.workspace.window_read_candidate.v1'||w.mode!=='observed-turn-window'||w.selection_ref!==ref)return null;
+      const v1=w.schema==='mastermind.workspace.window_read_candidate.v1';
+      const v2=w.schema==='mastermind.workspace.window_read_candidate.v2';
+      if(v1){if(!exactKeys(w,['schema','selection_ref','mode','view']))return null;}
+      else if(v2){
+        if(!exactKeys(w,['schema','selection_ref','mode','view','observation_binding']))return null;
+        const b=w.observation_binding;
+        if(!exactKeys(b,['job_id','attempt_id'])||typeof b.job_id!=='string'||typeof b.attempt_id!=='string'||
+           !/^JOB-[0-9]{1,9}$/.test(b.job_id)||!/^ATT-[0-9a-f]{32}$/.test(b.attempt_id))return null;
+      }else return null;
+      if(w.mode!=='observed-turn-window'||w.selection_ref!==ref)return null;
       if(!exactKeys(v,['schema','source_ref','scope','observed_at','epoch','terminal','coverage','history','acceptance','capabilities','items','gaps'])||
          v.schema!=='mastermind.workspace.visible_window_candidate.v1'||v.source_ref!==ref||v.scope!=='one-managed-turn-window'||
          v.observed_at===null||!safeTime(v.observed_at)||!hash(v.epoch)||typeof v.terminal!=='boolean'||
