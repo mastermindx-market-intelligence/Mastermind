@@ -353,10 +353,15 @@ def test_host_scripts_use_tools_available_at_absolute_macos_paths() -> None:
     assert "/usr/bin/realpath" not in install
     assert 'runtime_target="$(/usr/bin/readlink -f "$runtime_link")"' in install
 
-    for name in ("acceptance.sh", "service-control.sh"):
-        source = (OPS / name).read_text(encoding="utf-8")
-        assert '$(/usr/bin/dirname "$0")' in source
-        assert '$(dirname "$0")' not in source
+    acceptance = (OPS / "acceptance.sh").read_text(encoding="utf-8")
+    assert '$(/usr/bin/dirname "$0")' in acceptance
+    assert '$(dirname "$0")' not in acceptance
+
+    lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
+    assert 'SCRIPT_SOURCE="${BASH_SOURCE[0]}"' in lifecycle
+    assert '$(/usr/bin/dirname "$SCRIPT_SOURCE")' in lifecycle
+    assert '$(/usr/bin/basename "$SCRIPT_SOURCE")' in lifecycle
+    assert '$(/usr/bin/dirname "$0")' not in lifecycle
 
 
 def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None:

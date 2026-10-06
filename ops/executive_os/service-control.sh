@@ -17,7 +17,9 @@ CONTROL_PLIST="/Library/LaunchDaemons/$CONTROL_LABEL.plist"
 WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
 AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"
-SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")" && /bin/pwd)"
+SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
@@ -442,11 +444,14 @@ qualify_gateway_release() {
 qualify_gateway_refresh_preflight() {
   local expected_sha="$1"
   local expected_dir="$MCP_RELEASE_ROOT/$expected_sha/ops/executive_os"
+  local controller="$expected_dir/service-control.sh"
   local helper="$expected_dir/gateway_refresh_preflight.py"
   # The lifecycle controller and deep verifier must be the same installed
-  # generation being qualified. Refuse a checkout/staging copy even when it
-  # points at a valid installed target.
+  # generation being qualified. BASH_SOURCE names the file whose bytes Bash
+  # actually loaded; unlike $0 it cannot be spoofed by a sourcing caller.
   [ "$SCRIPT_DIR" = "$expected_dir" ] || return 1
+  [ "$SCRIPT_PATH" = "$controller" ] || return 1
+  [ -f "$controller" ] && [ ! -L "$controller" ] || return 1
   [ -f "$helper" ] && [ ! -L "$helper" ] || return 1
   "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$helper" \
     --expected-sha "$expected_sha" >/dev/null

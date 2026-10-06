@@ -174,6 +174,7 @@ def _run(
     remove_agent_relay_plist: bool = False,
     extra_args: tuple[str, ...] = (),
     prepare: Callable[[Path], None] | None = None,
+    spoof_argv0: str | None = None,
 ) -> tuple[int, str, str, list[str], str, Path, Path]:
     script, control_plist, worker_plist = _prepare_script(tmp_path)
     if prepare is not None:
@@ -197,8 +198,22 @@ def _run(
         "FAKE_SERVICE_UID": "458",
         "FAKE_SERVICE_GROUP": "_mastermind_executive_mcp",
     }
+    command = ["/bin/bash", str(script), action, *extra_args]
+    if spoof_argv0 is not None:
+        # Execute the disposable checkout body through the source builtin
+        # while supplying a forged installed-controller argv0. $0 follows the
+        # caller; BASH_SOURCE[0] must continue to identify the loaded file.
+        command = [
+            "/bin/bash",
+            "-c",
+            'source "$1" "${@:2}"',
+            spoof_argv0,
+            str(script),
+            action,
+            *extra_args,
+        ]
     completed = subprocess.run(
-        ["/bin/bash", str(script), action, *extra_args],
+        command,
         env=env,
         capture_output=True,
         text=True,
@@ -1207,7 +1222,8 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            extra_args=("--expected-sha", GATEWAY_SHA),
                            missing_config=False, symlink_config=False, native_plutil=False,
                            preflight_exit=0, preflight_exits=None, helper_kind="regular",
-                           controller_from_release=True):
+                           controller_from_release=True,
+                           source_with_spoofed_argv0=False):
     config = {"schema": "mastermind.executive_mcp_install.v1",
               "release_sha": GATEWAY_SHA, "service_uid": 458}
     config.update(config_changes or {})
@@ -1233,13 +1249,24 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
             f'MCP_RELEASE_ROOT="{release_root}"',
         )
         expected_dir = release_root / GATEWAY_SHA / "ops" / "executive_os"
+        controller = expected_dir / "service-control.sh"
         if controller_from_release:
-            source = 'SCRIPT_DIR="$(cd -P "$' + '(/usr/bin/dirname "$0")" && /bin/pwd)"'
-            text = text.replace(source, f'SCRIPT_DIR="{expected_dir}"')
+            source = (
+                'SCRIPT_SOURCE="${BASH_SOURCE[0]}"\n'
+                'SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")" && /bin/pwd)"\n'
+                'SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"'
+            )
+            replacement = (
+                f'SCRIPT_SOURCE="{controller}"\n'
+                f'SCRIPT_DIR="{expected_dir}"\n'
+                f'SCRIPT_PATH="{controller}"'
+            )
+            text = text.replace(source, replacement)
             assert source not in text
         script.write_text(text)
         helper = expected_dir / "gateway_refresh_preflight.py"
         helper.parent.mkdir(parents=True, exist_ok=True)
+        controller.write_text("# disposable installed service controller\n", encoding="utf-8")
         if helper_kind == "regular":
             helper.write_text("# disposable gateway preflight fixture\n", encoding="utf-8")
         elif helper_kind == "symlink":
@@ -1305,7 +1332,19 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
     sys.exit(1)
 ''')
         shim.chmod(0o755)
-    return _run(tmp_path, "restart-gateway", plan, extra_args=extra_args, prepare=prepare)
+    spoof_argv0 = None
+    if source_with_spoofed_argv0:
+        spoof_argv0 = str(
+            release_root / GATEWAY_SHA / "ops" / "executive_os" / "service-control.sh"
+        )
+    return _run(
+        tmp_path,
+        "restart-gateway",
+        plan,
+        extra_args=extra_args,
+        prepare=prepare,
+        spoof_argv0=spoof_argv0,
+    )
 
 
 def _gateway_override_table(*rows):
@@ -1364,6 +1403,19 @@ def test_gateway_generation_mismatch_is_pre_effect_refusal(tmp_path, changes, co
 def test_gateway_refuses_controller_outside_expected_release_before_lifecycle(tmp_path):
     code, _, err, calls, remaining, *_ = _qualified_gateway_run(
         tmp_path, [], controller_from_release=False
+    )
+    assert code == 65
+    assert "gateway deep preflight failed" in err
+    assert calls == []
+    assert remaining == ""
+
+
+def test_gateway_refuses_sourced_checkout_even_with_installed_argv0_spoof(tmp_path):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path,
+        [],
+        controller_from_release=False,
+        source_with_spoofed_argv0=True,
     )
     assert code == 65
     assert "gateway deep preflight failed" in err
