@@ -213,8 +213,10 @@ def validate_optional_mounts(raw):
             from control_plane.coo_principal_host import validate_missions
             validate_missions(raw['coo']['missions'])
             from integrations.executive_mcp.web_ceo import WEB_CEO_V2_PROFILE
-            if raw['coo']['missions'] and raw.get('executive_mcp_profile') != WEB_CEO_V2_PROFILE:
-                raise ValueError('COO mission activation requires the explicit Web-CEO v2 profile')
+            from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
+            if (raw['coo']['missions']
+                    and raw.get('executive_mcp_profile') not in {WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE}):
+                raise ValueError('COO mission activation requires an explicit supported Web-CEO profile')
     if len({p.policy_id for p in policies.values()}) != len(policies):
         raise ValueError('optional policy IDs must be distinct')
 
@@ -430,7 +432,8 @@ def main(argv=None):
     from integrations.mastermind_executive_app.gateway import load_app_policies
     from integrations.executive_mcp.server import (
         build_executive_mcp_app, build_personal_read_mcp_app,
-        build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app, build_web_ceo_v2_with_coo_mcp_app,
+        build_web_ceo_v2_mcp_app, build_web_ceo_v3_mcp_app,
+        build_web_ceo_v2_with_coo_mcp_app, build_web_ceo_v3_with_coo_mcp_app,
         build_web_ceo_sessions_mcp_app,
         build_release_control_mcp_app, build_web_ceo_release_mcp_app,
     )
@@ -481,7 +484,15 @@ def main(argv=None):
             session_client = InstalledSessionBridgeClient(
                 settings.ceo_ingress_socket_path
             )
-            app = build_web_ceo_v3_mcp_app(
+            coo_settings = build_installed_coo_settings(raw, source, args.config, settings)
+            v3_builder = (
+                build_web_ceo_v3_mcp_app if coo_settings is None
+                else build_web_ceo_v3_with_coo_mcp_app
+            )
+            v3_kwargs = {}
+            if coo_settings is not None:
+                v3_kwargs["coo_settings"] = coo_settings
+            app = v3_builder(
                 settings,
                 audit_sink=sink,
                 mdm_reader=mdm_reader,
@@ -492,6 +503,7 @@ def main(argv=None):
                 enable_os_executive_transport=raw.get('os_executive_transport', False),
                 os_executive_resource=validate_os_executive_resource(raw),
                 os_commission_preparer=build_os_commission_client(raw),
+                **v3_kwargs,
                 **mounts,
             )
         elif profile == WEB_CEO_SESSIONS_PROFILE:
