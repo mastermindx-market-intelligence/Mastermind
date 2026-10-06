@@ -545,7 +545,9 @@ class CeoIngressReadGateway:
             "ingress_unavailable",
             "unsupported_ingress_schema",
             "backend_unavailable",
+            "grounding_unavailable",
             "internal_error",
+            "timeout",
         }
     )
 
@@ -567,8 +569,259 @@ class CeoIngressReadGateway:
 
         return SERVER_VERSION
 
+    @staticmethod
+    def _valid_generated_at(value: object) -> bool:
+        from datetime import datetime, timezone
+
+        if type(value) is not str or not value or len(value) > 64:
+            return False
+        try:
+            parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        except ValueError:
+            return False
+        return parsed.tzinfo is not None and parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+    @staticmethod
+    def _valid_bounding_receipts(value: object) -> bool:
+        if not isinstance(value, list):
+            return False
+        for receipt in value:
+            if (
+                type(receipt) is not dict
+                or set(receipt) != {"bounded", "original_bytes", "returned_bytes", "field"}
+                or receipt["bounded"] is not True
+                or type(receipt["original_bytes"]) is not int
+                or type(receipt["returned_bytes"]) is not int
+                or receipt["original_bytes"] <= 0
+                or receipt["returned_bytes"] < 0
+                or receipt["returned_bytes"] > receipt["original_bytes"]
+                or type(receipt["field"]) is not str
+                or not receipt["field"]
+                or len(receipt["field"]) > 512
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _valid_grounding(value: object, *, tool: str) -> bool:
+        if type(value) is not dict:
+            return False
+        if tool in {"executive_state", "executive_inbox"}:
+            if set(value) != {
+                "boot_packet_schema", "macro", "mastermind", "runtime", "runtime_db"
+            }:
+                return False
+            mastermind = value["mastermind"]
+            macro = value["macro"]
+            runtime_db = value["runtime_db"]
+            return (
+                type(mastermind) is dict
+                and set(mastermind) == {"branch", "root", "sha"}
+                and type(mastermind["branch"]) is str
+                and type(mastermind["root"]) is str
+                and type(mastermind["sha"]) is str
+                and len(mastermind["sha"]) == 40
+                and type(macro) is dict
+                and set(macro) == {"root", "sha"}
+                and (macro["root"] is None or type(macro["root"]) is str)
+                and (macro["sha"] is None or (type(macro["sha"]) is str and len(macro["sha"]) == 40))
+                and (value["boot_packet_schema"] is None or type(value["boot_packet_schema"]) is str)
+                and value["runtime"] == "readonly:installed-executive-runtime"
+                and type(runtime_db) is dict
+                and set(runtime_db) == {"path", "present"}
+                and type(runtime_db["path"]) is str
+                and type(runtime_db["present"]) is bool
+            )
+        return (
+            set(value) == {"runtime", "source"}
+            and value["runtime"] == "readonly:installed-executive-runtime"
+            and type(value["source"]) is str
+            and bool(value["source"])
+            and len(value["source"]) <= 256
+        )
+
+    @staticmethod
+    def _valid_state_data(value: object) -> bool:
+        keys = {
+            "mastermind", "macro", "boot_packet_schema", "inbox_schema",
+            "strategic_state", "next_recommended_act", "runtime_db",
+            "runtime_counts", "attention_counts", "handoffs",
+        }
+        if type(value) is not dict or set(value) != keys:
+            return False
+        return (
+            type(value["mastermind"]) is dict
+            and type(value["macro"]) is dict
+            and (value["boot_packet_schema"] is None or type(value["boot_packet_schema"]) is str)
+            and type(value["inbox_schema"]) is str
+            and (value["strategic_state"] is None or type(value["strategic_state"]) is dict)
+            and (value["next_recommended_act"] is None or type(value["next_recommended_act"]) is str)
+            and type(value["runtime_db"]) is dict
+            and (value["runtime_counts"] is None or type(value["runtime_counts"]) is dict)
+            and type(value["attention_counts"]) is dict
+            and type(value["handoffs"]) is list
+        )
+
+    @staticmethod
+    def _valid_inbox_data(value: object) -> bool:
+        from control_plane import executive_inbox
+
+        keys = {
+            "schema", "generated_at", "grounding", "attention",
+            "runtime_counts", "suppressed", "degraded",
+        }
+        return (
+            type(value) is dict
+            and set(value) == keys
+            and value["schema"] == executive_inbox.SCHEMA
+            and CeoIngressReadGateway._valid_generated_at(value["generated_at"])
+            and type(value["grounding"]) is dict
+            and set(value["grounding"]) == {
+                "mastermind", "macro", "boot_packet_schema", "runtime_db"
+            }
+            and type(value["attention"]) is list
+            and (value["runtime_counts"] is None or type(value["runtime_counts"]) is dict)
+            and (value["suppressed"] is None or type(value["suppressed"]) is dict)
+            and type(value["degraded"]) is list
+            and all(type(item) is str for item in value["degraded"])
+        )
+
+    @staticmethod
+    def _valid_job_data(value: object, *, arguments: Mapping[str, Any]) -> bool:
+        if type(value) is not dict or set(value) != {
+            "job", "attempts", "attempt_count", "attempt_limit", "latest_attempt"
+        }:
+            return False
+        job = value["job"]
+        return (
+            type(job) is dict
+            and job.get("job_id") == arguments.get("job_id")
+            and type(value["attempts"]) is list
+            and type(value["attempt_count"]) is int
+            and value["attempt_count"] >= 0
+            and type(value["attempt_limit"]) is int
+            and value["attempt_limit"] >= 1
+            and (value["latest_attempt"] is None or type(value["latest_attempt"]) is dict)
+        )
+
+    @staticmethod
+    def _valid_fabric_data(value: object, *, arguments: Mapping[str, Any]) -> bool:
+        from control_plane import fabric_job_view, fabric_result_projection
+
+        if type(value) is not dict:
+            return False
+        view = arguments.get("view")
+        if view == "roots":
+            return (
+                value.get("schema") == fabric_job_view.ROOT_LIST_SCHEMA_V2
+                and set(value) == fabric_job_view.ROOT_LIST_KEYS
+                and type(value.get("roots")) is list
+                and type(value.get("count")) is int
+                and type(value.get("truncated")) is bool
+            )
+        if view == "root":
+            return (
+                value.get("schema") == fabric_job_view.SCHEMA_V2
+                and set(value) == fabric_job_view.OUTPUT_KEYS
+                and type(value.get("children")) is list
+                and type(value.get("unjoined_job_ids")) is list
+            )
+        if view == "result":
+            keys = {
+                "schema", "selection", "role", "execution_status", "acceptance",
+                "role_result_digest", "generation", "availability",
+                "content_complete", "review", "counts", "content", "omitted",
+            }
+            selection = value.get("selection")
+            return (
+                value.get("schema")
+                == fabric_result_projection.FABRIC_ROLE_RESULT_VIEW_SCHEMA
+                and set(value) == keys
+                and type(selection) is dict
+                and set(selection) == {
+                    "root_job_id", "job_id", "attempt_id", "result_envelope_digest"
+                }
+                and all(
+                    selection.get(key) == arguments.get(key)
+                    for key in (
+                        "root_job_id", "job_id", "attempt_id", "result_envelope_digest"
+                    )
+                )
+                and value.get("availability") in {
+                    "AVAILABLE", "CONTENT_OVER_BUDGET"
+                }
+                and type(value.get("content_complete")) is bool
+                and type(value.get("omitted")) is list
+            )
+        return False
+
+    @staticmethod
+    def _valid_intent_receipt(value: object) -> bool:
+        from control_plane import ceo_intent
+
+        if type(value) is not dict:
+            return False
+        schema = value.get("schema")
+        base_keys = {
+            "schema", "intent_id", "fingerprint", "job_id", "status",
+            "accepted", "duplicate", "dispatched", "authority",
+            "grounding", "created_at_ms",
+        }
+        keys = set(value)
+        if schema == ceo_intent.RECEIPT_SCHEMA:
+            if keys != base_keys:
+                return False
+        elif schema == ceo_intent.RECEIPT_SCHEMA_V2:
+            if keys not in (base_keys, base_keys | {"work_ref"}):
+                return False
+        else:
+            return False
+        authority = value.get("authority")
+        grounding = value.get("grounding")
+        return (
+            type(value.get("intent_id")) is str
+            and type(value.get("fingerprint")) is str
+            and len(value["fingerprint"]) == 64
+            and type(value.get("job_id")) is str
+            and type(value.get("status")) is str
+            and value.get("accepted") is True
+            and type(value.get("duplicate")) is bool
+            and value.get("dispatched") is False
+            and type(value.get("created_at_ms")) is int
+            and type(authority) is dict
+            and set(authority) == {"requested", "policy_sha256", "authority_level"}
+            and type(authority["requested"]) is list
+            and type(authority["policy_sha256"]) is str
+            and len(authority["policy_sha256"]) == 64
+            and type(authority["authority_level"]) is str
+            and type(grounding) is dict
+            and set(grounding) <= {"mastermind_sha", "macro_sha", "boot_packet_schema"}
+            and {"mastermind_sha", "macro_sha"} <= set(grounding)
+            and type(grounding["mastermind_sha"]) is str
+            and len(grounding["mastermind_sha"]) == 40
+            and type(grounding["macro_sha"]) is str
+            and len(grounding["macro_sha"]) == 40
+            and ("work_ref" not in value or type(value["work_ref"]) is str)
+        )
+
+    @classmethod
+    def _valid_success_data(
+        cls, value: object, *, tool: str, arguments: Mapping[str, Any]
+    ) -> bool:
+        if tool == "executive_state":
+            return cls._valid_state_data(value)
+        if tool == "executive_inbox":
+            return cls._valid_inbox_data(value)
+        if tool == "executive_job":
+            return cls._valid_job_data(value, arguments=arguments)
+        if tool == "executive_fabric":
+            return cls._valid_fabric_data(value, arguments=arguments)
+        if tool == "ceo_intent_status":
+            return cls._valid_intent_receipt(value)
+        return False
+
     def _is_canonical_read_result(
-        self, result: object, *, tool: str
+        self, result: object, *, tool: str, arguments: Mapping[str, Any]
     ) -> bool:
         from integrations.executive_mcp.schemas import (
             ERROR_CODES,
@@ -589,16 +842,20 @@ class CeoIngressReadGateway:
             or type(result["ok"]) is not bool
             or result["server_version"] != self._result_server_version()
             or result["mode"] != ServerMode.READONLY.value
-            or not isinstance(result["generated_at"], str)
-            or not isinstance(result["grounding"], dict)
+            or not self._valid_generated_at(result["generated_at"])
+            or not self._valid_grounding(result["grounding"], tool=tool)
             or not isinstance(result["degraded"], list)
             or not all(isinstance(item, str) for item in result["degraded"])
-            or not isinstance(result["bounded"], list)
-            or not all(isinstance(item, dict) for item in result["bounded"])
+            or not self._valid_bounding_receipts(result["bounded"])
         ):
             return False
         if result["ok"]:
-            return result["error"] is None
+            return (
+                result["error"] is None
+                and self._valid_success_data(
+                    result["data"], tool=tool, arguments=arguments
+                )
+            )
         error = result["error"]
         return (
             result["data"] is None
@@ -680,7 +937,9 @@ class CeoIngressReadGateway:
             if (
                 response.transport == TRANSPORT_SENT_OK
                 and response.ok is True
-                and self._is_canonical_read_result(result, tool=name)
+                and self._is_canonical_read_result(
+                    result, tool=name, arguments=validated
+                )
             ):
                 if result["ok"]:
                     return result

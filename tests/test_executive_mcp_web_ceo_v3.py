@@ -65,7 +65,44 @@ class FakeIngressClient:
             tool,
             mode=legacy.ServerMode.READONLY,
             generated_at="2026-09-23T06:00:00Z",
-            data={"preserved": True},
+            data={
+                "mastermind": {
+                    "branch": "HEAD",
+                    "root": "/mastermind",
+                    "sha": "a" * 40,
+                },
+                "macro": {"root": "/macro", "sha": "b" * 40},
+                "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+                "inbox_schema": "mastermind.executive_inbox.v2",
+                "strategic_state": {"schema": "mastermind.strategic_state.v1"},
+                "next_recommended_act": "Review current attention.",
+                "runtime_db": {
+                    "path": "/runtime/executive.sqlite3",
+                    "present": True,
+                },
+                "runtime_counts": {"jobs": {"total": 1}},
+                "attention_counts": {
+                    "total": 0,
+                    "chairman": 0,
+                    "ceo": 0,
+                    "coo": 0,
+                },
+                "handoffs": [],
+            },
+            grounding={
+                "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+                "macro": {"root": "/macro", "sha": "b" * 40},
+                "mastermind": {
+                    "branch": "HEAD",
+                    "root": "/mastermind",
+                    "sha": "a" * 40,
+                },
+                "runtime": "readonly:installed-executive-runtime",
+                "runtime_db": {
+                    "path": "/runtime/executive.sqlite3",
+                    "present": True,
+                },
+            },
         )
         result["server_version"] = v2.WEB_CEO_V2_SERVER_VERSION
         return CeoIngressResponse(
@@ -251,7 +288,8 @@ def test_existing_executive_read_still_uses_ceo_ingress_and_is_v3_stamped():
     )
     out = run(g.call("executive_state", {}))
     assert out["ok"] is True
-    assert out["data"] == {"preserved": True}
+    assert out["data"]["mastermind"]["sha"] == "a" * 40
+    assert out["data"]["runtime_counts"]["jobs"]["total"] == 1
     assert out["server_version"] == "1.4.0"
     assert client.frames[0]["tool"] == "executive_state"
 
