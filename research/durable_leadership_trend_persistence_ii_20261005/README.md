@@ -67,9 +67,8 @@ A dependence/evaluation block is now exactly **60 market trading sessions**, not
 - Confirmation B4–B9: 360 market sessions = 72 formations.
 - Last confirmatory formation: market-session offset 535.
 - Last primary occupancy maturity: offset 555.
-- Last t+60 structural-secondary maturity: offset 595.
-- Five-session occupancy-resolution grace for the last t+60 occupancy endpoint expires: offset 600.
-- Anchor-to-reveal geometry: 601 trading sessions, approximately 2.38 trading years.
+- Last required t+60 maturity: offset 595.
+- Anchor-to-reveal geometry: 596 trading sessions through offset 595, approximately 2.37 trading years.
 
 The source gate must clear before an anchor can exist; there is no valid calendar completion date yet.
 
