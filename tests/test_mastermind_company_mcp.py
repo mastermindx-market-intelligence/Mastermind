@@ -682,7 +682,6 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
         "adapter.py",
         "consultation.py",
         "principal_adapter.py",
-        "principal_runtime_fence.py",
         "principal_schemas.py",
         "schemas.py",
         "server.py",
@@ -706,7 +705,9 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
     }
     assert not (adapter_imports & forbidden_roots)
 
-    host_imports = imports["principal_runtime_fence.py"]
+    host_imports = _imported_modules(
+        root / "integrations" / "mastermind_company_principal_runtime_fence.py"
+    )
     control_plane_imports = {
         module for module in host_imports if module.startswith("control_plane.")
     }

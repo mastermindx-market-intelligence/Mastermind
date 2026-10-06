@@ -12,7 +12,7 @@ from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.mastermind_company_mcp.principal_adapter import (
     PrincipalCommitIntent,
 )
-from integrations.mastermind_company_mcp.principal_runtime_fence import (
+from integrations.mastermind_company_principal_runtime_fence import (
     PRINCIPAL_RUNTIME_AGGREGATE_TYPE,
     PRINCIPAL_RUNTIME_EVENT_TYPE,
     PrincipalCommitObservationState,
@@ -389,8 +389,7 @@ def test_runtime_fence_owner_adds_no_table_listener_or_retry_plane() -> None:
     path = (
         ROOT
         / "integrations"
-        / "mastermind_company_mcp"
-        / "principal_runtime_fence.py"
+        / "mastermind_company_principal_runtime_fence.py"
     )
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
