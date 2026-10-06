@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.model_router import ModelRouter
 
@@ -13,6 +15,10 @@ CANDIDATE_PROFILE = "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1
 def test_sol61_operator_candidate_is_additive_and_exact() -> None:
     registry = ExecutionCapabilityRegistry.load()
     router = ModelRouter.load()
+
+    assert router.policy_version == "2026-08-24.stage4"
+    assert registry.policy_version == "2026-10-05.sol61-project-executive-candidate"
+    assert CANDIDATE_ALIAS not in json.dumps(router.routes, sort_keys=True)
 
     legacy = router.model_aliases[LEGACY_ALIAS]
     candidate = router.model_aliases[CANDIDATE_ALIAS]
