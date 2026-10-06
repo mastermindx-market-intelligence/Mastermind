@@ -5,7 +5,7 @@
 ## Source pins
 
 - Mastermind protected master: `d8c302b8a8a65ab13e2afba98cc73481606ed4d0`
-- Macro main: `0beebb3bd1f246a13396c3bd8f996103a26c3b77`
+- Macro main: `91f274d860e77f245bde31232a617f81d9a5b331`
 
 Mastermind advanced from `877b1e7...` to `d8c302...` during this repair. Its Skillpack `INDEX.md` blob is unchanged; the movement is Mastermind OS work and does not alter this research/source ruling. Macro also advanced after the prior `892157...` and `2daaf9...` pins. The observed intervening Macro changes do not touch the relevant owner/source-readiness records in a way that changes this ruling; no broad census is reopened.
 
