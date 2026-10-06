@@ -301,3 +301,67 @@ Chrome DevTools MCP documentation states that `--autoConnect` requires Chrome
 and user approval; page-ID routing is enabled by default for shared-server
 concurrent sessions. That human consent remains an enrollment gate, not a
 reason to weaken the Mastermind caller/tab/effect owner.
+
+
+## Second-host managed-browser canary — mini1 — 2026-10-06
+
+A second physical Mac now independently proves the managed-profile actuator is
+portable beyond M2. This is **browser-backend proof, not Capacity placement,
+production admission, or logged-in profile enrollment**.
+
+Observed on \`mini1\` through its authorized direct host surface:
+
+- Apple Silicon macOS host; Google Chrome \`154.0.8037.98\`;
+- Node \`26.9.0\`;
+- exact \`chrome-devtools-mcp@1.10.1\`;
+- disposable non-default Chrome user-data directory;
+- ephemeral loopback DevTools port via \`DevToolsActivePort\`;
+- \`--pageIdRouting\`;
+- performance/network/memory/emulation categories disabled;
+- JavaScript evaluation disabled;
+- usage statistics disabled;
+- reviewed screenshot limits retained.
+
+With that exact reviewed configuration, \`tools/list\` reproduced the managed
+backend selected-schema SHA-256:
+
+\`a96d57919b458c0ea5e8dd0abf6e290080e0a7b2afb97b9e37147498debedf9b\`.
+
+The canary then completed a real MCP journey:
+
+1. initialize + \`tools/list\`;
+2. \`list_pages\` → page ID 1;
+3. \`take_snapshot\` → exact button UID \`1_2\` and textbox UID \`1_4\`;
+4. \`fill\` → value \`Mastermind\`;
+5. \`click\` → page state changed to \`clicked\`;
+6. \`wait_for\` + second snapshot observed both changes.
+
+Selected tools were exactly:
+
+\`click, fill, list_pages, navigate_page, press_key, take_screenshot, take_snapshot, type_text, wait_for\`.
+
+No user Chrome profile, website credential, Auth0 flow, OpenAI tunnel, worker
+model, or external website was used. The first portability probe intentionally
+exposed a configuration-dependent schema digest difference; applying the exact
+reviewed backend flags converged to the existing managed-profile digest above.
+Two subsequent canary-harness defects (a stale disposable
+\`DevToolsActivePort\`, then an overly narrow \`list_pages\` text parser) were
+corrected before the final pass. Neither reached a website effect.
+
+The final disposable Chrome/MCP processes were terminal, and the 64 MiB
+temporary canary root on \`mini1\` was removed after evidence capture.
+
+Durable evidence receipt:
+
+\`/Volumes/Mastermind/evidence/browser-fabric-attached-tabs-20261005-c2-001/mini1-devtools-canary-20261006/receipt.json\`
+
+Receipt SHA-256:
+
+\`aabf5d2fddd8c3deba58b429697b31e6246a10e33618d6a02f94149cf3895af9\`
+
+This establishes two physical hosts with real managed-browser actuator proof
+(M2 and mini1). It does **not** establish automatic cross-host selection or
+failover. Browser Capacity must still consume owner-qualified browser-resource
+facts and atomically commit the selected resource; the advisory Studio fleet
+view is not placement authority. An unresolved browser effect remains pinned
+to its original resource.
