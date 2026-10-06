@@ -4,8 +4,12 @@ import ast
 import asyncio
 import os
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 import pytest
+
+import integrations.company_dialogue_principal_host_transport as transport
 
 from integrations.company_dialogue_principal_host_contract import (
     HOST_REQUEST_SCHEMA,
@@ -32,6 +36,23 @@ from integrations.mastermind_company_principal_host import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def portable_transport_peer_capture(monkeypatch):
+    """Exercise transport semantics on CI without weakening production peer law.
+
+    Production capture remains Darwin-only and fail-closed elsewhere; its native
+    and unsupported-platform behavior is covered by test_executive_peer_identity.
+    """
+    if sys.platform == "darwin":
+        return
+    monkeypatch.setattr(
+        transport,
+        "capture_peer_identity",
+        lambda _socket: SimpleNamespace(euid=os.geteuid()),
+    )
+    monkeypatch.setattr(transport, "_current_capture", lambda peer: peer)
 
 
 class FakeGateway:
