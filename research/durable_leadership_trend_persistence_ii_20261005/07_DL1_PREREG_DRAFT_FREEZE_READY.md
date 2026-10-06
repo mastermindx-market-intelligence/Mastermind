@@ -165,11 +165,11 @@ If continuity versus termination cannot be established from the canonical identi
 
 Nominal primary endpoint = market session `t+20`.
 
-If a valid focal close exists on t+20, evaluate occupancy on t+20.
+A valid focal endpoint observation requires both a valid focal close and sufficient same-security canonical lineage/history to compute `RS_126` without splicing a different security. If such an observation exists on t+20, evaluate occupancy on t+20.
 
 If no valid focal close exists on t+20, no terminal event is known, and the security has not been proven to terminate, allow an exact **five-market-session resolution grace**: t+21 through t+25.
 
-Use the **first** later market session d* in that grace window with a valid focal close. Evaluate `RS_126` and `Q75_RS126(d*)` on that same d*. Record status `OCCUPANCY_OBSERVED_DELAYED` and `endpoint_delay_sessions = d*-(t+20)`.
+Use the **first** later market session d* in that grace window with a valid focal endpoint observation under the rule above. Evaluate `RS_126` and `Q75_RS126(d*)` on that same d*. Record status `OCCUPANCY_OBSERVED_DELAYED` and `endpoint_delay_sessions = d*-(t+20)`.
 
 If no valid close exists through t+25 and no terminal event can be established, status is `OUTCOME_PENDING_PRICE`. The row remains in the cohort and **blocks the sole efficacy read** until the source is repaired or a terminal/continuity classification becomes available.
 
@@ -682,10 +682,10 @@ No confirmatory efficacy outcome, confirmatory A−S statistic, confirmatory G-f
 Power may use only:
 
 - the fixed pre-outcome covariate matrices for all accrued B1–B9 rows;
-- formation dates, industry groups, and the frozen abstention/source-status geometry;
+- formation dates, industry groups, and **formation-time** abstention/source-status geometry only;
 - B1–B3 matured `DL1_OCCUPANCY_20` labels;
 - the frozen S/G definitions and estimator;
-- no B4–B9 outcome label or outcome-derived statistic.
+- no B4–B9 outcome label, terminal-event coding, endpoint missingness resolution, post-formation outcome status, or outcome-derived statistic.
 
 B1–B3 labels are development/burn-in inputs. They may be processed mechanically for power and fitting, but no burn-in A−S or G-efficacy statistic is emitted to a researcher.
 
