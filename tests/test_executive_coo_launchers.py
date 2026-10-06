@@ -98,6 +98,7 @@ def test_control_policy_and_grant_projection_are_stdlib_only(tmp_path):
         "from ops.executive_os.coo_principal_host import CooInstalledSource;"
         "from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry;"
         "raw=json.loads(sys.stdin.read());e.validate_document(raw);"
+        "assert 'integrations.mastermind_executive_app.os_commission_client' not in sys.modules;"
         "source=CooInstalledSource(lambda:raw['coo'],lambda:ExecutionCapabilityRegistry.load("
         + repr(str(registry)) + ",source_root=" + repr(root) + "));"
         "source.snapshot('WS:EXECUTIVE-CAPACITY-FABRIC');"

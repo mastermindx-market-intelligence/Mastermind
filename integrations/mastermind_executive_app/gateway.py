@@ -649,14 +649,29 @@ class CeoIngressReadGateway:
         }
         if type(value) is not dict or set(value) != keys:
             return False
+        mastermind = value["mastermind"]
+        macro = value["macro"]
+        runtime_db = value["runtime_db"]
         return (
-            type(value["mastermind"]) is dict
-            and type(value["macro"]) is dict
+            type(mastermind) is dict
+            and set(mastermind) == {"branch", "root", "sha"}
+            and type(mastermind["branch"]) is str
+            and type(mastermind["root"]) is str
+            and type(mastermind["sha"]) is str
+            and len(mastermind["sha"]) == 40
+            and type(macro) is dict
+            and set(macro) == {"root", "sha", "resolved_via"}
+            and (macro["root"] is None or type(macro["root"]) is str)
+            and (macro["sha"] is None or (type(macro["sha"]) is str and len(macro["sha"]) == 40))
+            and (macro["resolved_via"] is None or type(macro["resolved_via"]) is str)
             and (value["boot_packet_schema"] is None or type(value["boot_packet_schema"]) is str)
             and type(value["inbox_schema"]) is str
             and (value["strategic_state"] is None or type(value["strategic_state"]) is dict)
             and (value["next_recommended_act"] is None or type(value["next_recommended_act"]) is str)
-            and type(value["runtime_db"]) is dict
+            and type(runtime_db) is dict
+            and set(runtime_db) == {"path", "present"}
+            and type(runtime_db["path"]) is str
+            and type(runtime_db["present"]) is bool
             and (value["runtime_counts"] is None or type(value["runtime_counts"]) is dict)
             and type(value["attention_counts"]) is dict
             and type(value["handoffs"]) is list
@@ -713,19 +728,43 @@ class CeoIngressReadGateway:
         view = arguments.get("view")
         if view == "roots":
             return (
-                value.get("schema") == fabric_job_view.ROOT_LIST_SCHEMA_V2
+                value.get("schema")
+                in {fabric_job_view.ROOT_LIST_SCHEMA, fabric_job_view.ROOT_LIST_SCHEMA_V2}
                 and set(value) == fabric_job_view.ROOT_LIST_KEYS
                 and type(value.get("roots")) is list
                 and type(value.get("count")) is int
+                and value["count"] == len(value["roots"])
                 and type(value.get("truncated")) is bool
             )
         if view == "root":
-            return (
-                value.get("schema") == fabric_job_view.SCHEMA_V2
-                and set(value) == fabric_job_view.OUTPUT_KEYS
-                and type(value.get("children")) is list
-                and type(value.get("unjoined_job_ids")) is list
-            )
+            schema = value.get("schema")
+            if (
+                schema not in {fabric_job_view.SCHEMA, fabric_job_view.SCHEMA_V2}
+                or set(value) != fabric_job_view.OUTPUT_KEYS
+                or type(value.get("children")) is not list
+                or type(value.get("unjoined_job_ids")) is not list
+            ):
+                return False
+            requested = arguments.get("root_job_id")
+            root = value.get("root")
+            if root is not None and (
+                type(root) is not dict
+                or root.get("job_id") != requested
+                or root.get("root_job_id") != requested
+            ):
+                return False
+            if any(
+                type(child) is not dict or child.get("root_job_id") != requested
+                for child in value["children"]
+            ):
+                return False
+            if schema == fabric_job_view.SCHEMA_V2:
+                runtime = value.get("runtime")
+                acquisition = runtime.get("acquisition") if type(runtime) is dict else None
+                query = acquisition.get("query") if type(acquisition) is dict else None
+                if query != {"kind": "root_detail", "root_job_id": requested}:
+                    return False
+            return True
         if view == "result":
             keys = {
                 "schema", "selection", "role", "execution_status", "acceptance",
@@ -756,7 +795,9 @@ class CeoIngressReadGateway:
         return False
 
     @staticmethod
-    def _valid_intent_receipt(value: object) -> bool:
+    def _valid_intent_receipt(
+        value: object, *, arguments: Mapping[str, Any]
+    ) -> bool:
         from control_plane import ceo_intent
 
         if type(value) is not dict:
@@ -780,6 +821,7 @@ class CeoIngressReadGateway:
         grounding = value.get("grounding")
         return (
             type(value.get("intent_id")) is str
+            and value["intent_id"] == arguments.get("intent_id")
             and type(value.get("fingerprint")) is str
             and len(value["fingerprint"]) == 64
             and type(value.get("job_id")) is str
@@ -817,7 +859,7 @@ class CeoIngressReadGateway:
         if tool == "executive_fabric":
             return cls._valid_fabric_data(value, arguments=arguments)
         if tool == "ceo_intent_status":
-            return cls._valid_intent_receipt(value)
+            return cls._valid_intent_receipt(value, arguments=arguments)
         return False
 
     def _is_canonical_read_result(
@@ -843,7 +885,14 @@ class CeoIngressReadGateway:
             or result["server_version"] != self._result_server_version()
             or result["mode"] != ServerMode.READONLY.value
             or not self._valid_generated_at(result["generated_at"])
-            or not self._valid_grounding(result["grounding"], tool=tool)
+            or (
+                result["ok"]
+                and not self._valid_grounding(result["grounding"], tool=tool)
+            )
+            or (
+                not result["ok"]
+                and result["grounding"] != {}
+            )
             or not isinstance(result["degraded"], list)
             or not all(isinstance(item, str) for item in result["degraded"])
             or not self._valid_bounding_receipts(result["bounded"])

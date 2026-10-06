@@ -8,6 +8,7 @@ import tempfile
 import pytest
 
 from integrations.executive_mcp.schemas import RESULT_SCHEMA
+from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_SERVER_VERSION
 from integrations.mastermind_executive_app.gateway import (
     CeoIngressClient,
     CeoIngressReadGateway,
@@ -50,7 +51,7 @@ INGRESS_SERVER_VERSION = {
 }
 OUTPUT_SERVER_VERSION = {
     **INGRESS_SERVER_VERSION,
-    WebCeoV3CeoIngressReadGateway: "1.4.0",
+    WebCeoV3CeoIngressReadGateway: WEB_CEO_V3_SERVER_VERSION,
 }
 
 
@@ -68,16 +69,16 @@ def canonical_result(
         "server_version": INGRESS_SERVER_VERSION[profile],
         "mode": "readonly",
         "generated_at": "2026-10-04T03:00:00+00:00",
-        "grounding": {
+        "grounding": ({
             "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
             "macro": {"root": "/macro", "sha": "b" * 40},
             "mastermind": {"branch": "HEAD", "root": "/mastermind", "sha": "a" * 40},
             "runtime": "readonly:installed-executive-runtime",
             "runtime_db": {"path": "/runtime/executive.sqlite3", "present": True},
-        },
+        } if ok else {}),
         "data": {
             "mastermind": {"branch": "HEAD", "root": "/mastermind", "sha": "a" * 40},
-            "macro": {"root": "/macro", "sha": "b" * 40},
+            "macro": {"root": "/macro", "sha": "b" * 40, "resolved_via": "flag"},
             "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
             "inbox_schema": "mastermind.executive_inbox.v2",
             "strategic_state": {"schema": "mastermind.strategic_state.v1"},
@@ -194,6 +195,8 @@ def test_missing_socket_does_not_claim_reader_or_execution_ready(profile):
     (lambda value: value.__setitem__("generated_at", "not-a-time"), "malformed-generated-at"),
     (lambda value: value["grounding"].__setitem__("private_detail", SECRET), "private-grounding-field"),
     (lambda value: value["data"].__setitem__("execution_ready", True), "forged-readiness-field"),
+    (lambda value: value["data"]["macro"].__setitem__("execution_ready", True), "nested-macro-readiness"),
+    (lambda value: value["data"]["macro"].__setitem__("private_detail", SECRET), "nested-macro-private"),
     (lambda value: value.__setitem__("data", None), "null-success-data"),
     (
         lambda value: value.__setitem__(
@@ -289,6 +292,107 @@ def test_canonical_inner_error_is_classified_and_redacted(
         socket_read(profile, {"ok": True, "result": copy.deepcopy(wire)})
     )
     assert_diagnostic(observed, code, category)
+
+
+def test_intent_status_receipt_must_match_requested_intent():
+    from control_plane import ceo_intent
+
+    requested = "auto-" + "1" * 32
+    other = "auto-" + "2" * 32
+    gateway = WebCeoV2CeoIngressReadGateway("/unused", object())
+    receipt = {
+        "schema": ceo_intent.RECEIPT_SCHEMA_V2,
+        "intent_id": other,
+        "fingerprint": "a" * 64,
+        "job_id": "JOB-003",
+        "status": "QUEUED",
+        "accepted": True,
+        "duplicate": False,
+        "dispatched": False,
+        "authority": {
+            "requested": ["READ", "RESEARCH"],
+            "policy_sha256": "b" * 64,
+            "authority_level": "A0",
+        },
+        "grounding": {
+            "mastermind_sha": "c" * 40,
+            "macro_sha": "d" * 40,
+            "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+        },
+        "created_at_ms": 1,
+        "work_ref": "WS:EXECUTIVE-CAPACITY-FABRIC",
+    }
+    envelope = {
+        "schema": RESULT_SCHEMA,
+        "tool": "ceo_intent_status",
+        "ok": True,
+        "server_version": "1.2.0",
+        "mode": "readonly",
+        "generated_at": "2026-10-06T06:00:00Z",
+        "grounding": {
+            "runtime": "readonly:installed-executive-runtime",
+            "source": "control_plane.ceo_intent.resolve_intent",
+        },
+        "data": receipt,
+        "degraded": [],
+        "bounded": [],
+        "error": None,
+    }
+    assert gateway._is_canonical_read_result(
+        envelope, tool="ceo_intent_status", arguments={"intent_id": requested}
+    ) is False
+    receipt["intent_id"] = requested
+    assert gateway._is_canonical_read_result(
+        envelope, tool="ceo_intent_status", arguments={"intent_id": requested}
+    ) is True
+
+
+def test_fabric_root_projection_must_match_requested_root():
+    from control_plane import fabric_job_view
+
+    requested = "JOB-003"
+    gateway = WebCeoV2CeoIngressReadGateway("/unused", object())
+    data = {
+        "schema": fabric_job_view.SCHEMA_V2,
+        "generated_at": "2026-10-06T06:00:00Z",
+        "runtime": {
+            "root": None,
+            "db_present": True,
+            "identity": None,
+            "acquisition": {
+                "query": {"kind": "root_detail", "root_job_id": requested}
+            },
+        },
+        "armed": {},
+        "root": {
+            "job_id": requested,
+            "root_job_id": requested,
+        },
+        "children": [{"job_id": "JOB-006", "root_job_id": requested}],
+        "unjoined_job_count": 0,
+        "unjoined_job_ids": [],
+        "degraded": [],
+        "missingness": [],
+        "capability": {},
+    }
+    assert gateway._valid_fabric_data(
+        data, arguments={"view": "root", "root_job_id": requested}
+    ) is True
+
+    data["root"]["job_id"] = "JOB-013"
+    assert gateway._valid_fabric_data(
+        data, arguments={"view": "root", "root_job_id": requested}
+    ) is False
+    data["root"]["job_id"] = requested
+    data["children"][0]["root_job_id"] = "JOB-013"
+    assert gateway._valid_fabric_data(
+        data, arguments={"view": "root", "root_job_id": requested}
+    ) is False
+    data["children"][0]["root_job_id"] = requested
+    data["runtime"]["acquisition"]["query"]["root_job_id"] = "JOB-013"
+    assert gateway._valid_fabric_data(
+        data, arguments={"view": "root", "root_job_id": requested}
+    ) is False
 
 
 class ClassifiedClient:

@@ -237,3 +237,45 @@ test('workspace acquisition honestly allows canonical Git promisor materializati
   assert.equal(acquire.annotations.openWorldHint, true,
     'the underlying Git owner can retrieve missing objects from its fixed canonical origin');
 });
+
+
+function statusReceipt() {
+  const row = rows()[0];
+  return { schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+    repository: 'mastermind', effect: 'NOT_APPLIED', receipt: {
+      source_repository: row.source_repository, workspace_path: path.join(row.workspace_root, 'web', OP),
+      branch: 'sol/web-' + OP, head_sha: HEAD, dirty: false, removed: false,
+    } };
+}
+test('internal inspection qualifies exact existing owner custody without acquiring', async () => {
+  const { gateway, calls } = setup({ owner: async (args) => args[0] === 'repositories' ? discovery() : statusReceipt() });
+  assert.equal((await gateway.inspect({ repository: 'mastermind', operation_id: OP })).status, 'PRESENT');
+  assert.deepEqual(calls.map((c) => c.args[0]), ['repositories', 'status']);
+  assert.equal(api.STUDIO_WORKSPACE_TOOLS.some((t) => /inspect|commission/.test(t.name)), false);
+});
+for (const mutation of [{ removed: true }, { workspace_path: '/foreign' }, { branch: 'master' }, { head_sha: 'HEAD' }]) {
+  test('internal inspection refuses unqualified existing custody: ' + JSON.stringify(mutation), async () => {
+    const response = statusReceipt();
+    Object.assign(response.receipt, mutation);
+    const { gateway, calls } = setup({ owner: async (args) => args[0] === 'repositories' ? discovery() : response });
+    await assert.rejects(gateway.inspect({ repository: 'mastermind', operation_id: OP }));
+    assert.ok(calls.every((c) => c.args[0] !== 'acquire'));
+  });
+}
+test('only exact known owner absence plus absent path permits fresh publication', async () => {
+  const { gateway } = setup({ owner: async (args) => {
+    if (args[0] === 'repositories') return discovery();
+    throw Object.assign(Error('known absence'), { code: 2, stderr: JSON.stringify({
+      schema_version: 'mastermind.workspace_cli/v2', action: 'status', effect: 'NOT_APPLIED',
+      repository: 'mastermind', error: 'workspace is not registered to the source repository',
+    }) });
+  } });
+  assert.equal((await gateway.inspect({ repository: 'mastermind', operation_id: OP })).status, 'ABSENT');
+});
+test('unknown status transport failure never becomes fresh allocation permission', async () => {
+  const { gateway } = setup({ owner: async (args) => {
+    if (args[0] === 'repositories') return discovery();
+    throw Object.assign(Error('lost'), { code: 75, stderr: '' });
+  } });
+  await assert.rejects(gateway.inspect({ repository: 'mastermind', operation_id: OP }));
+});

@@ -547,6 +547,20 @@ class RuntimeSessionReturn:
             raise BridgeError("source_unavailable",
                               "authorized canonical continuation is unavailable") from None
 
+    def resolve_operation_read_ref(self, *, principal, operation_key):
+        """Recover an original caller's reference using immutable provenance only."""
+        try:
+            identity = _principal(principal)
+            if not isinstance(operation_key, str) or _TOKEN.fullmatch(operation_key) is None:
+                raise ValueError("invalid original operation")
+            read_ref = "session-reply-" + _request_key(operation_key)
+            _, value = self._stored_request(read_ref)
+            if value["principal"] != identity or value["operation_key"] != operation_key:
+                raise ValueError("foreign original operation")
+            return value["read_ref"]
+        except Exception:
+            raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable") from None
+
     async def resolve_read(self, *, principal, read_ref):
         try:
             identity = _principal(principal)

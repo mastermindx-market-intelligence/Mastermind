@@ -40,8 +40,10 @@ def test_closed_read_only_tool_contract():
     assert spec.annotations["readOnlyHint"] is True
     assert spec.annotations["destructiveHint"] is False
     assert spec.input_schema == {"type": "object", "properties": {
-        "read_ref": {"type": "string", "minLength": 1, "maxLength": 256}},
-        "required": ["read_ref"], "additionalProperties": False}
+        "read_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "operation_key": {"type": "string", "minLength": 1, "maxLength": 256}},
+        "oneOf": [{"required": ["read_ref"]}, {"required": ["operation_key"]}],
+        "additionalProperties": False}
 
 
 @pytest.mark.parametrize("args", [{}, {"read_ref": ""}, {"read_ref": "x" * 257},

@@ -79,6 +79,8 @@ STAGE_FILES = (
     "output-budget.mjs",
     "git-publish.mjs",
     "workspace-access.mjs",
+    "commission-prepare.mjs",
+    "commission-service.mjs",
     "paper-design.mjs",
     "fleet-status.mjs",
     "private-tunnel-auth.mjs",
@@ -91,7 +93,8 @@ STAGE_FILES = (
 # immediately preceding v0.1.6 install has every current file except the new
 # read-only fleet-status consumer; earlier generations also predate Paper,
 # output paging, and typed Git.
-LEGACY_STAGE_FILES_V5 = tuple(name for name in STAGE_FILES if name != "workspace-access.mjs")
+LEGACY_STAGE_FILES_V6 = tuple(name for name in STAGE_FILES if name not in {"commission-prepare.mjs", "commission-service.mjs"})
+LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != "workspace-access.mjs")
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
@@ -99,6 +102,7 @@ LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != 
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
         frozenset(LEGACY_STAGE_FILES_V3),
@@ -533,6 +537,7 @@ def _build_config(
     user_root: Path,
     *,
     repository_workspaces: bool = False,
+    commission_digest: str | None = None,
 ) -> dict:
     if type(repository_workspaces) is not bool:
         raise ValueError("repository workspace setting must be boolean")
@@ -558,6 +563,11 @@ def _build_config(
         config["repositoryWorkspaces"] = {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
         }
+    if commission_digest is not None:
+        if (not repository_workspaces or host != "127.0.0.1" or port in (8443, RESERVED_FUNNEL_PORT)
+                or type(commission_digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", commission_digest)):
+            raise ValueError("commission publication requires closed private workspace profile")
+        config["commissionPublication"] = {"enabled": True, "configurationDigest": commission_digest}
     fleet_status = _fleet_status_config(user_root)
     if fleet_status is not None:
         config["fleetStatus"] = fleet_status
@@ -903,6 +913,7 @@ def _write_install(
     previous_source: str | None = None,
     dependency_tree_hash: str | None = None,
     repository_workspaces: bool = False,
+    commission_digest: str | None = None,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -927,6 +938,7 @@ def _write_install(
                 roots["state"],
                 user_root,
                 repository_workspaces=repository_workspaces,
+                commission_digest=commission_digest,
             ),
             indent=2,
             sort_keys=True,
@@ -996,6 +1008,57 @@ def _repository_workspace_setting(args, roots: dict, prior: dict | None) -> bool
     return requested or previous
 
 
+OS_COMMISSION_CONFIG = Path("/Library/Application Support/MastermindExecutive/config/os-commission-publication.json")
+
+
+def _commission_setting(args, roots: dict, prior: dict | None) -> str | None:
+    """Preserve only verified opt-in; never accept a caller-selected config path."""
+    requested = getattr(args, "os_commission_config_sha256", None)
+    if requested is not None and (type(requested) is not str or not re.fullmatch(r"[0-9a-f]{64}", requested)):
+        raise SystemExit("invalid commission configuration digest")
+    previous = None
+    if prior is not None:
+        if _sha256_file(roots["config"]) != prior.get("configHash"):
+            raise SystemExit("commission configuration changed during preflight")
+        value = json.loads(roots["config"].read_text(encoding="utf-8")).get("commissionPublication")
+        if value is not None:
+            if (type(value) is not dict or set(value) != {"enabled", "configurationDigest"}
+                    or value["enabled"] is not True or type(value["configurationDigest"]) is not str
+                    or not re.fullmatch(r"[0-9a-f]{64}", value["configurationDigest"])):
+                raise SystemExit("existing commission publication profile is invalid")
+            previous = value["configurationDigest"]
+    digest = requested or previous
+    if digest is None:
+        return None
+    if (os.getuid() != os.geteuid() or not _repository_workspace_setting(args, roots, prior)
+            or args.port == 8443):
+        raise SystemExit("commission publication requires private repository workspace profile")
+    current = OS_COMMISSION_CONFIG
+    first = True
+    while True:
+        info = current.lstat()
+        if (info.st_uid != 0 or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode)
+                or (first and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1))
+                or (not first and not stat.S_ISDIR(info.st_mode))):
+            raise SystemExit("commission configuration is not root sealed")
+        if current == current.parent:
+            break
+        current, first = current.parent, False
+    raw = OS_COMMISSION_CONFIG.read_bytes()
+    if len(raw) > 65536 or hashlib.sha256(raw).hexdigest() != digest:
+        raise SystemExit("commission configuration digest changed")
+    value = json.loads(raw)
+    keys = {"schema", "release_sha", "studio_uid", "studio_account", "studio_port",
+            "policy", "grants", "base_sha", "audit_directory", "auth_helper_sha256", "file_helper_sha256"}
+    if (type(value) is not dict or set(value) != keys
+            or value["schema"] != "mastermind.os_commission_publication.v1"
+            or type(value["studio_uid"]) is not int or value["studio_uid"] != os.getuid()
+            or value["studio_account"] != args.account or type(value["studio_port"]) is not int
+            or value["studio_port"] != args.port):
+        raise SystemExit("commission configuration does not match this installed Studio owner")
+    return digest
+
+
 def cmd_stage(args) -> int:
     account = args.account
     _validate_account_label(account)
@@ -1030,6 +1093,7 @@ def cmd_stage(args) -> int:
         result_key="staged",
         dependency_tree_hash=retained_dependency_hash,
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
+        commission_digest=_commission_setting(args, roots, prior),
     )
 
 def _verify_staged_install(
@@ -1150,6 +1214,7 @@ def cmd_upgrade(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
+        commission_digest=_commission_setting(args, roots, prior),
     )
 
 
@@ -1286,6 +1351,7 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--source", required=True)
         s.add_argument("--node", required=True)
         s.add_argument("--backend", required=True)
+        s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",
                        help="enable the closed installed repository-workspace consumer")
         s.set_defaults(func=globals()[f"cmd_{name}"])

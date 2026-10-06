@@ -189,6 +189,7 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         node=str(node),
         backend=str(backend),
         enable_repository_workspaces=False,
+        os_commission_config_sha256=None,
     )
 
 
@@ -240,7 +241,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
         "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
-    removed = (*removed, "workspace-access.mjs")
+    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs")
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -270,6 +271,8 @@ class TestIdentity(unittest.TestCase):
                 "output-budget.mjs",
                 "git-publish.mjs",
                 "workspace-access.mjs",
+                "commission-prepare.mjs",
+                "commission-service.mjs",
                 "paper-design.mjs",
                 "fleet-status.mjs",
                 "private-tunnel-auth.mjs",

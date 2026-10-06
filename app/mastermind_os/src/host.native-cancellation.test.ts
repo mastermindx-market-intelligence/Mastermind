@@ -23,6 +23,7 @@ const flush = async () => {
 type Read = (client: RawClient, signal: AbortSignal) => Promise<unknown>;
 const reads: [string, Read][] = [
   ["read_programs", (c, signal) => c.readPrograms({ signal })],
+  ["read_work", (c, signal) => c.readWork({ signal })],
   [
     "read_mission",
     (c, signal) =>
@@ -49,7 +50,7 @@ const reads: [string, Read][] = [
 ];
 async function setup(transport: (command: string) => Promise<unknown>) {
   const invoke = vi.fn((command: string) =>
-    command === "auth_status" ? Promise.resolve(signed) : transport(command),
+    command === "auth_status" ? Promise.resolve(signed) : command === "executive_auth_status" ? Promise.resolve({ generation: 0, available: false }) : transport(command),
   );
   let notify = (_payload: unknown) => {};
   const client = await createNativeClient(
@@ -83,7 +84,7 @@ describe("native read cancellation settlement", () => {
       try {
         expect(outcome).toBe("READ_CANCELLED");
         expect(invoke.mock.calls.map((call) => call[0])).toEqual([
-          "auth_status",
+          "executive_auth_status", "auth_status",
           command,
         ]);
       } finally {
@@ -102,7 +103,7 @@ describe("native read cancellation settlement", () => {
       await expect(read(client, controller.signal)).rejects.toThrow(
         "READ_CANCELLED",
       );
-      expect(invoke.mock.calls.map((call) => call[0])).toEqual(["auth_status"]);
+      expect(invoke.mock.calls.map((call) => call[0])).toEqual(["executive_auth_status", "auth_status"]);
     },
   );
 
@@ -162,7 +163,7 @@ describe("native read cancellation settlement", () => {
     }
     await flush();
     expect(completions).toBe(1);
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenCalledTimes(3);
   });
 
   it("does not cancel or replay a sibling read", async () => {
@@ -201,7 +202,7 @@ describe("native read cancellation settlement", () => {
       await b;
       expect(secondState).toBe("RESOLVED");
       expect(invoke.mock.calls.map((call) => call[0])).toEqual([
-        "auth_status",
+        "executive_auth_status", "auth_status",
         "read_programs",
         "read_programs",
       ]);
@@ -322,7 +323,7 @@ describe("native generation cancellation", () => {
         read_state: { state: "CURRENT" },
       });
       expect(invoke.mock.calls.map((call) => call[0])).toEqual([
-        "auth_status",
+        "executive_auth_status", "auth_status",
         "read_mission",
         "read_mission",
       ]);
