@@ -484,6 +484,243 @@ def test_v2_and_v3_fabric_readers_reject_legacy_root_projection():
     ) is True
 
 
+def _canonical_fabric_roots(limit=3):
+    from control_plane import fabric_job_view
+
+    roots = [
+        {
+            "job_id": f"JOB-{index}",
+            "status": "QUEUED",
+            "depth": 0,
+            "parent_job_id": None,
+            "orchestration_role": "aggregation" if index == 3 else None,
+        }
+        for index in range(1, 4)
+    ][:limit]
+    acquisition = fabric_job_view._acquisition_receipt(kind="root_discovery")
+    acquisition["snapshot_digest"] = "a" * 64
+    acquisition["provenance"] = {
+        "state": "PARTIAL",
+        "unjoined_job_ids": [row["job_id"] for row in roots],
+    }
+    acquisition["generation"] = {
+        "schema": "mastermind.runtime_read_observation.v1",
+        "state": "SAME",
+        "source_identity": "runtime-source-1",
+        "before": 2,
+        "after": 2,
+    }
+    return {
+        "schema": fabric_job_view.ROOT_LIST_SCHEMA_V2,
+        "generated_at": "2026-10-06T08:00:00Z",
+        "runtime": {
+            "root": None,
+            "db_present": True,
+            "identity": None,
+            "acquisition": acquisition,
+        },
+        "roots": roots,
+        "count": len(roots),
+        "total": len(roots),
+        "truncated": False,
+        "degraded": [],
+    }
+
+
+def test_v2_fabric_root_list_requires_owner_acquisition_and_row_contract():
+    arguments = {"view": "roots", "limit": 3}
+    canonical = _canonical_fabric_roots()
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments
+    ) is True
+    assert WebCeoV3CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments
+    ) is True
+
+    mutations = []
+
+    missing = copy.deepcopy(canonical)
+    missing["runtime"].pop("acquisition")
+    mutations.append(missing)
+
+    wrong_query = copy.deepcopy(canonical)
+    wrong_query["runtime"]["acquisition"]["query"] = {
+        "kind": "root_detail",
+        "root_job_id": "JOB-001",
+    }
+    mutations.append(wrong_query)
+
+    private_row = copy.deepcopy(canonical)
+    private_row["roots"][0]["execution_ready"] = True
+    mutations.append(private_row)
+
+    over_limit = copy.deepcopy(canonical)
+    over_limit["roots"].append({
+        "job_id": "JOB-004",
+        "status": "QUEUED",
+        "depth": 0,
+        "parent_job_id": None,
+        "orchestration_role": None,
+    })
+    over_limit["count"] = len(over_limit["roots"])
+    over_limit["total"] = len(over_limit["roots"])
+    over_limit["runtime"]["acquisition"]["provenance"]["unjoined_job_ids"].append("JOB-004")
+    mutations.append(over_limit)
+
+    false_truncation = copy.deepcopy(canonical)
+    false_truncation["truncated"] = True
+    mutations.append(false_truncation)
+
+    for value in mutations:
+        assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+            value, arguments=arguments
+        ) is False
+        assert WebCeoV3CeoIngressReadGateway._valid_fabric_data(
+            value, arguments=arguments
+        ) is False
+
+
+def test_legacy_fabric_root_list_remains_v1_only():
+    from control_plane import fabric_job_view
+
+    legacy = {
+        "schema": fabric_job_view.ROOT_LIST_SCHEMA,
+        "generated_at": "2026-10-06T08:00:00Z",
+        "runtime": {"root": None, "db_present": True, "identity": None},
+        "roots": [{
+            "job_id": "JOB-003",
+            "status": "QUEUED",
+            "depth": 0,
+            "parent_job_id": None,
+            "orchestration_role": "aggregation",
+        }],
+        "count": 1,
+        "total": 1,
+        "truncated": False,
+        "degraded": [],
+    }
+    arguments = {"view": "roots", "limit": 3}
+    assert WebCeoCeoIngressReadGateway._valid_fabric_data(
+        legacy, arguments=arguments
+    ) is True
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        legacy, arguments=arguments
+    ) is False
+    assert WebCeoV3CeoIngressReadGateway._valid_fabric_data(
+        legacy, arguments=arguments
+    ) is False
+
+
+def _canonical_inbox_data():
+    counts = copy.deepcopy(canonical_result()["data"]["runtime_counts"])
+    return {
+        "schema": "mastermind.executive_inbox.v2",
+        "generated_at": "2026-10-06T08:00:00Z",
+        "grounding": {
+            "mastermind": {
+                "branch": "HEAD",
+                "root": "/mastermind",
+                "sha": "a" * 40,
+            },
+            "macro": {"root": "/macro", "sha": "b" * 40},
+            "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+            "runtime_db": {
+                "path": "/runtime/executive.sqlite3",
+                "present": True,
+            },
+        },
+        "attention": [{
+            "attention_id": "eia-" + "1" * 12,
+            "target": "coo",
+            "kind": "job_failed",
+            "source": "runtime",
+            "job_id": "JOB-006",
+            "workstream": None,
+            "status": "FAILED",
+            "reason": "JOB-006 is FAILED after 1 of 1 attempt(s)",
+            "evidence": [
+                {"ref": "job:JOB-006", "field": "status", "value": "FAILED"}
+            ],
+            "existing_next_actions": [],
+            "parent_job_id": "JOB-003",
+            "root_job_id": "JOB-003",
+            "depth": 1,
+            "owner_seat": "coo",
+            "escalation_target": "coo",
+            "business_impact": "routine",
+            "review_required": False,
+            "reviews_job_id": None,
+        }],
+        "runtime_counts": counts,
+        "suppressed": {
+            "clean_completed": 0,
+            "queued": 3,
+            "running": 0,
+            "checkpointed": 0,
+            "cancelled": 0,
+        },
+        "degraded": [],
+    }
+
+
+def test_inbox_nested_public_contract_rejects_private_and_readiness_fields():
+    canonical = _canonical_inbox_data()
+    assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(canonical) is True
+
+    mutations = []
+
+    attention = copy.deepcopy(canonical)
+    attention["attention"][0]["execution_ready"] = True
+    mutations.append(attention)
+
+    grounding = copy.deepcopy(canonical)
+    grounding["grounding"]["mastermind"]["private_detail"] = SECRET
+    mutations.append(grounding)
+
+    counts = copy.deepcopy(canonical)
+    counts["runtime_counts"]["private_detail"] = SECRET
+    mutations.append(counts)
+
+    suppressed = copy.deepcopy(canonical)
+    suppressed["suppressed"]["private_detail"] = SECRET
+    mutations.append(suppressed)
+
+    evidence = copy.deepcopy(canonical)
+    evidence["attention"][0]["evidence"][0]["private_detail"] = SECRET
+    mutations.append(evidence)
+
+    for value in mutations:
+        assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(value) is False
+
+
+def test_inbox_accepts_canonical_agent_os_attention_shape():
+    value = _canonical_inbox_data()
+    value["attention"] = [{
+        "attention_id": "eia-" + "2" * 12,
+        "target": "ceo",
+        "kind": "ceo_decision_pending",
+        "source": "agent_os",
+        "job_id": None,
+        "workstream": "WS:EXECUTIVE-CAPACITY-FABRIC",
+        "status": None,
+        "reason": "Choose the next accepted action.",
+        "evidence": [
+            {
+                "ref": "agentos:needs_ceo",
+                "field": "workstream",
+                "value": "WS:EXECUTIVE-CAPACITY-FABRIC",
+            },
+            {
+                "ref": "boot_packet",
+                "field": "schema",
+                "value": "mastermind.ceo_boot_packet.v1",
+            },
+        ],
+        "existing_next_actions": [],
+    }]
+    assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(value) is True
+
+
 def _canonical_receipt(schema, intent_id):
     return {
         "schema": schema,

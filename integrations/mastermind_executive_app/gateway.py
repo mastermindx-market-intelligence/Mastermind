@@ -810,6 +810,135 @@ class CeoIngressReadGateway:
         )
 
     @staticmethod
+    def _valid_inbox_grounding(value: object) -> bool:
+        import re
+        from control_plane import ceo_boot_packet
+
+        if type(value) is not dict or set(value) != {
+            "mastermind", "macro", "boot_packet_schema", "runtime_db"
+        }:
+            return False
+        mastermind = value["mastermind"]
+        macro = value["macro"]
+        runtime_db = value["runtime_db"]
+        return (
+            type(mastermind) is dict
+            and set(mastermind) == {"branch", "root", "sha"}
+            and type(mastermind["branch"]) is str
+            and type(mastermind["root"]) is str
+            and type(mastermind["sha"]) is str
+            and re.fullmatch(r"[0-9a-f]{40}", mastermind["sha"]) is not None
+            and type(macro) is dict
+            and set(macro) == {"root", "sha"}
+            and (macro["root"] is None or type(macro["root"]) is str)
+            and (
+                macro["sha"] is None
+                or (
+                    type(macro["sha"]) is str
+                    and re.fullmatch(r"[0-9a-f]{40}", macro["sha"]) is not None
+                )
+            )
+            and (
+                value["boot_packet_schema"] is None
+                or value["boot_packet_schema"] == ceo_boot_packet.SCHEMA
+            )
+            and type(runtime_db) is dict
+            and set(runtime_db) == {"path", "present"}
+            and type(runtime_db["path"]) is str
+            and type(runtime_db["present"]) is bool
+        )
+
+    @staticmethod
+    def _valid_inbox_attention_item(value: object) -> bool:
+        import re
+        from control_plane import executive_inbox
+        from control_plane.executive_runtime import JobStatus
+
+        base_keys = {
+            "attention_id", "target", "kind", "source", "job_id", "workstream",
+            "status", "reason", "evidence", "existing_next_actions",
+        }
+        runtime_keys = {
+            "parent_job_id", "root_job_id", "depth", "owner_seat",
+            "escalation_target", "business_impact", "review_required",
+            "reviews_job_id",
+        }
+        if type(value) is not dict:
+            return False
+        source = value.get("source")
+        expected_keys = (
+            base_keys | runtime_keys if source == "runtime"
+            else base_keys if source == "agent_os"
+            else None
+        )
+        if expected_keys is None or set(value) != expected_keys:
+            return False
+        evidence = value["evidence"]
+        next_actions = value["existing_next_actions"]
+        if not (
+            type(value["attention_id"]) is str
+            and re.fullmatch(r"eia-[0-9a-f]{12}", value["attention_id"]) is not None
+            and value["target"] in executive_inbox.TARGETS
+            and type(value["kind"]) is str
+            and bool(value["kind"])
+            and (value["job_id"] is None or type(value["job_id"]) is str)
+            and (value["workstream"] is None or type(value["workstream"]) is str)
+            and (value["status"] is None or type(value["status"]) is str)
+            and type(value["reason"]) is str
+            and bool(value["reason"])
+            and type(evidence) is list
+            and all(
+                type(item) is dict
+                and set(item) == {"ref", "field", "value"}
+                and all(type(item[key]) is str for key in ("ref", "field", "value"))
+                for item in evidence
+            )
+            and type(next_actions) is list
+            and all(type(item) is str for item in next_actions)
+        ):
+            return False
+        if source == "agent_os":
+            return (
+                value["target"] == "ceo"
+                and value["kind"] == "ceo_decision_pending"
+                and value["job_id"] is None
+                and value["status"] is None
+                and value["existing_next_actions"] == []
+            )
+        statuses = {member.value for member in JobStatus}
+        return (
+            type(value["job_id"]) is str
+            and bool(value["job_id"])
+            and value["status"] in statuses
+            and (value["parent_job_id"] is None or type(value["parent_job_id"]) is str)
+            and type(value["root_job_id"]) is str
+            and bool(value["root_job_id"])
+            and type(value["depth"]) is int
+            and value["depth"] >= 0
+            and type(value["owner_seat"]) is str
+            and bool(value["owner_seat"])
+            and type(value["escalation_target"]) is str
+            and bool(value["escalation_target"])
+            and type(value["business_impact"]) is str
+            and bool(value["business_impact"])
+            and type(value["review_required"]) is bool
+            and (value["reviews_job_id"] is None or type(value["reviews_job_id"]) is str)
+        )
+
+    @staticmethod
+    def _valid_inbox_suppressed(value: object) -> bool:
+        from control_plane import executive_inbox
+
+        if value is None:
+            return True
+        expected = set(executive_inbox._SUPPRESSION_KEYS)
+        return (
+            type(value) is dict
+            and set(value) == expected
+            and all(type(count) is int and count >= 0 for count in value.values())
+        )
+
+    @staticmethod
     def _valid_inbox_data(value: object) -> bool:
         from control_plane import executive_inbox
 
@@ -822,13 +951,14 @@ class CeoIngressReadGateway:
             and set(value) == keys
             and value["schema"] == executive_inbox.SCHEMA
             and CeoIngressReadGateway._valid_generated_at(value["generated_at"])
-            and type(value["grounding"]) is dict
-            and set(value["grounding"]) == {
-                "mastermind", "macro", "boot_packet_schema", "runtime_db"
-            }
+            and CeoIngressReadGateway._valid_inbox_grounding(value["grounding"])
             and type(value["attention"]) is list
-            and (value["runtime_counts"] is None or type(value["runtime_counts"]) is dict)
-            and (value["suppressed"] is None or type(value["suppressed"]) is dict)
+            and all(
+                CeoIngressReadGateway._valid_inbox_attention_item(item)
+                for item in value["attention"]
+            )
+            and CeoIngressReadGateway._valid_runtime_counts(value["runtime_counts"])
+            and CeoIngressReadGateway._valid_inbox_suppressed(value["suppressed"])
             and type(value["degraded"]) is list
             and all(type(item) is str for item in value["degraded"])
         )
@@ -855,6 +985,140 @@ class CeoIngressReadGateway:
     def _fabric_schema_family(cls) -> str:
         return "none"
 
+    @staticmethod
+    def _valid_fabric_root_row(value: object) -> bool:
+        from control_plane import fabric_job_view
+        from control_plane.executive_runtime import JobStatus
+
+        return (
+            type(value) is dict
+            and set(value) == fabric_job_view.ROOT_ROW_KEYS
+            and type(value["job_id"]) is str
+            and bool(value["job_id"])
+            and value["status"] in {member.value for member in JobStatus}
+            and type(value["depth"]) is int
+            and value["depth"] == 0
+            and value["parent_job_id"] is None
+            and (
+                value["orchestration_role"] is None
+                or (
+                    type(value["orchestration_role"]) is str
+                    and bool(value["orchestration_role"])
+                )
+            )
+        )
+
+    @staticmethod
+    def _valid_fabric_root_list_v2(
+        value: object, *, arguments: Mapping[str, Any]
+    ) -> bool:
+        import re
+        from control_plane import fabric_job_view
+
+        if (
+            type(value) is not dict
+            or value.get("schema") != fabric_job_view.ROOT_LIST_SCHEMA_V2
+            or set(value) != fabric_job_view.ROOT_LIST_KEYS
+            or not CeoIngressReadGateway._valid_generated_at(value.get("generated_at"))
+        ):
+            return False
+        runtime = value.get("runtime")
+        roots = value.get("roots")
+        count = value.get("count")
+        total = value.get("total")
+        truncated = value.get("truncated")
+        degraded = value.get("degraded")
+        limit = arguments.get("limit")
+        if not (
+            type(runtime) is dict
+            and set(runtime) == {"root", "db_present", "identity", "acquisition"}
+            and (runtime["root"] is None or type(runtime["root"]) is str)
+            and type(runtime["db_present"]) is bool
+            and type(roots) is list
+            and all(CeoIngressReadGateway._valid_fabric_root_row(row) for row in roots)
+            and len({row["job_id"] for row in roots}) == len(roots)
+            and type(count) is int
+            and count >= 0
+            and count == len(roots)
+            and (total is None or (type(total) is int and total >= count))
+            and type(truncated) is bool
+            and type(degraded) is list
+            and all(type(item) is str for item in degraded)
+            and type(limit) is int
+            and limit > 0
+            and count <= limit
+        ):
+            return False
+
+        acquisition = runtime["acquisition"]
+        template = fabric_job_view._acquisition_receipt(kind="root_discovery")
+        if type(acquisition) is not dict or set(acquisition) != set(template):
+            return False
+        query = acquisition.get("query")
+        budgets = acquisition.get("budgets")
+        truncation = acquisition.get("truncation")
+        provenance = acquisition.get("provenance")
+        generation = acquisition.get("generation")
+        snapshot_digest = acquisition.get("snapshot_digest")
+        if not (
+            acquisition.get("schema") == template["schema"]
+            and query == {"kind": "root_discovery", "root_job_id": None}
+            and acquisition.get("owner") == "executive_runtime"
+            and budgets == template["budgets"]
+            and (
+                snapshot_digest is None
+                or (
+                    type(snapshot_digest) is str
+                    and re.fullmatch(r"[0-9a-f]{64}", snapshot_digest) is not None
+                )
+            )
+            and type(truncation) is dict
+            and set(truncation) == {"jobs", "attempt_job_ids", "roots", "projection"}
+            and truncation["jobs"] is False
+            and truncation["attempt_job_ids"] == []
+            and type(truncation["roots"]) is bool
+            and type(truncation["projection"]) is bool
+            and type(provenance) is dict
+            and set(provenance) == {"state", "unjoined_job_ids"}
+            and provenance["state"] in {"COMPLETE", "PARTIAL"}
+            and type(provenance["unjoined_job_ids"]) is list
+            and all(type(item) is str and item for item in provenance["unjoined_job_ids"])
+            and provenance["unjoined_job_ids"]
+            == sorted(set(provenance["unjoined_job_ids"]))
+            and fabric_job_view._qualified_generation(generation) is not None
+        ):
+            return False
+
+        projected_ids = {row["job_id"] for row in roots}
+        unjoined_ids = set(provenance["unjoined_job_ids"])
+        if provenance["state"] == "COMPLETE":
+            if unjoined_ids:
+                return False
+        elif not projected_ids <= unjoined_ids:
+            return False
+
+        expected_truncated = bool(truncation["roots"] or truncation["projection"])
+        if truncated is not expected_truncated:
+            return False
+        if snapshot_digest is None:
+            return (
+                count == 0
+                and total is None
+                and not truncation["roots"]
+                and not truncation["projection"]
+            )
+        if truncation["roots"]:
+            if total is not None:
+                return False
+        elif total is None:
+            return False
+        if truncation["projection"]:
+            if count != limit or (total is not None and total <= count):
+                return False
+        elif not truncation["roots"] and total != count:
+            return False
+        return True
+
     @classmethod
     def _valid_fabric_data(
         cls, value: object, *, arguments: Mapping[str, Any]
@@ -866,16 +1130,16 @@ class CeoIngressReadGateway:
         view = arguments.get("view")
         family = cls._fabric_schema_family()
         if view == "roots":
-            expected_schema = (
-                fabric_job_view.ROOT_LIST_SCHEMA
-                if family == "v1"
-                else fabric_job_view.ROOT_LIST_SCHEMA_V2
-                if family == "v2"
-                else None
-            )
+            if family == "v2":
+                return cls._valid_fabric_root_list_v2(
+                    value, arguments=arguments
+                )
+            if family != "v1":
+                return False
+            # Preserve the frozen historical V1 reader exactly; acquisition-
+            # bound row validation is a V2/V3 contract only.
             return (
-                expected_schema is not None
-                and value.get("schema") == expected_schema
+                value.get("schema") == fabric_job_view.ROOT_LIST_SCHEMA
                 and set(value) == fabric_job_view.ROOT_LIST_KEYS
                 and type(value.get("roots")) is list
                 and type(value.get("count")) is int
