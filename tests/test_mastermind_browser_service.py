@@ -100,7 +100,6 @@ def test_facade_requires_existing_owner_and_trusted_caller_resolver():
             "prepare_browser_action",
             {
                 "tab_ref": "x",
-                "operation_key": "op",
                 "action": "evaluate",
                 "args": {"javascript": "fetch()"},
             },
@@ -109,7 +108,6 @@ def test_facade_requires_existing_owner_and_trusted_caller_resolver():
             "prepare_browser_action",
             {
                 "tab_ref": "x",
-                "operation_key": "op",
                 "action": "type",
                 "args": {"element_ref": "ref", "text": "x", "token": "secret"},
             },
@@ -118,7 +116,6 @@ def test_facade_requires_existing_owner_and_trusted_caller_resolver():
             "prepare_browser_action",
             {
                 "tab_ref": "x",
-                "operation_key": "op",
                 "action": "navigate",
                 "args": {"url": "file:///etc/passwd"},
             },
@@ -127,7 +124,6 @@ def test_facade_requires_existing_owner_and_trusted_caller_resolver():
             "prepare_browser_action",
             {
                 "tab_ref": "x",
-                "operation_key": "op",
                 "action": "scroll",
                 "args": {"delta_x": 2001, "delta_y": 0},
             },
@@ -165,7 +161,6 @@ def test_each_call_resolves_current_caller_and_foreign_reference_refuses():
             "prepare_browser_action",
             {
                 "tab_ref": "tab-1",
-                "operation_key": "op-1",
                 "action": "click",
                 "args": {"element_ref": "e-1"},
             },

@@ -45,18 +45,17 @@ _PREPARE = {
     "type": "object",
     "properties": {
         "tab_ref": _text(),
-        "operation_key": _text(128),
         "action": {"enum": ["click", "type", "scroll", "navigate"]},
         "args": {"type": "object"},
     },
-    "required": ["tab_ref", "operation_key", "action", "args"],
+    "required": ["tab_ref", "action", "args"],
     "additionalProperties": False,
     "oneOf": [],
 }
 for branch in _ACTIONS:
     selected = copy.deepcopy(branch)
-    selected["properties"].update({"tab_ref": _text(), "operation_key": _text(128)})
-    selected["required"] += ["tab_ref", "operation_key"]
+    selected["properties"].update({"tab_ref": _text()})
+    selected["required"] += ["tab_ref"]
     _PREPARE["oneOf"].append(selected)
 
 

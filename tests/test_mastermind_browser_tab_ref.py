@@ -245,3 +245,16 @@ def test_boot_and_schema_generations_are_covered_by_the_signature():
         binding(backend_schema_digest="0" * 64),
     )
     assert all(codec().encode(value) != base for value in variants)
+
+def test_expired_tab_ref_can_be_decoded_only_for_original_reconciliation():
+    token = codec().encode(binding())
+    with pytest.raises(BrowserTabRefError, match="TAB_REF_EXPIRED"):
+        codec().decode(token, now_ms=NOW + 60_000)
+    recovered = codec().decode(
+        token,
+        now_ms=NOW + 60_000,
+        require_fresh=False,
+    )
+    assert recovered == binding()
+    with pytest.raises(BrowserTabRefError, match="TIME_WINDOW_INVALID"):
+        codec().decode(token, now_ms=NOW - 1, require_fresh=False)

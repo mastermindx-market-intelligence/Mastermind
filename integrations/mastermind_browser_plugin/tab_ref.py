@@ -224,8 +224,11 @@ class BrowserTabRefCodec:
         token: object,
         *,
         now_ms: int,
+        require_fresh: bool = True,
     ) -> BrowserTabRef:
         _integer(now_ms, "TIME_WINDOW_INVALID")
+        if type(require_fresh) is not bool:
+            _refuse("TAB_REF_INVALID")
         if type(token) is not str or len(token.encode("utf-8")) > MAX_TAB_REF_BYTES * 2:
             _refuse("TAB_REF_INVALID")
         parts = token.split(".")
@@ -266,7 +269,7 @@ class BrowserTabRefCodec:
             _refuse("TAB_REF_INVALID")
         if now_ms < value.issued_at_ms:
             _refuse("TIME_WINDOW_INVALID")
-        if now_ms >= value.expires_at_ms:
+        if require_fresh and now_ms >= value.expires_at_ms:
             _refuse("TAB_REF_EXPIRED")
         return value
 
