@@ -342,7 +342,7 @@ def test_context_is_stable_across_refresh_and_separates_identities(
             assert refreshed_body["principal_scope"] == first_body["principal_scope"]
             assert refreshed_body["verified_expiry"] == first_body["verified_expiry"]
             assert first_body["profile"]["name"] == "web_ceo_v3"
-            assert first_body["profile"] == {"name": "web_ceo_v3", "server_version": "1.4.0"}
+            assert first_body["profile"] == {"name": "web_ceo_v3", "server_version": "1.5.0"}
             different_token = fixture._submit_token(rsa_key, sub="different-subject")
             different = await inner.post(
                 "/os/executive/context", headers=headers(different_token), json={}
@@ -595,7 +595,9 @@ def test_existing_mcp_catalog_and_security_remain_frozen(settings: Any, rsa_key:
             for tool in listed:
                 expected = (
                     [{"type": "oauth2", "scopes": [SUBMIT_SCOPE, READ_SCOPE]}]
-                    if tool["name"] in {"submit_ceo_intent", "session_send", "session_summon"}
+                    if tool["name"] in {
+                        "submit_ceo_intent", "session_send", "session_summon", "reconcile_ceo_request"
+                    }
                     else [{"type": "oauth2", "scopes": [READ_SCOPE]}]
                 )
                 assert tool["securitySchemes"] == expected, tool

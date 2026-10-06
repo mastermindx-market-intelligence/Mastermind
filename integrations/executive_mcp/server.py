@@ -803,6 +803,7 @@ def _build_profile_mcp_app(
     enable_os_executive_transport: bool = False,
     os_executive_resource: str | None = None,
     os_commission_preparer: Any | None = None,
+    reconcile_tool_name: str | None = None,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -852,6 +853,13 @@ def _build_profile_mcp_app(
                 or not set(release_tool_names) <= set(names)):
             raise ValueError("release tool names must match the fixed operation inventory")
     names = tuple(tool.name for tool in profile_tools)
+    if reconcile_tool_name is not None:
+        from integrations.executive_mcp.web_ceo_v3 import RECONCILE_TOOL_NAME
+        if (reconcile_tool_name != RECONCILE_TOOL_NAME
+                or names.count(reconcile_tool_name) != 1
+                or reconcile_tool_name in direct_tool_names + release_tool_names
+                or release_profile):
+            raise ValueError("request reconciliation requires the fixed App route composition")
     if (type(direct_tool_names) is not tuple or type(direct_submit_names) is not tuple
             or any(type(name) is not str for name in direct_tool_names + direct_submit_names)
             or len(direct_tool_names) != len(set(direct_tool_names))
@@ -940,7 +948,8 @@ def _build_profile_mcp_app(
         policy = (
             configured.policies.submit
             if (release_profile or tool.name in release_tool_names
-                or tool.name in direct_submit_names or tool.name == "submit_ceo_intent")
+                or tool.name in direct_submit_names or tool.name == "submit_ceo_intent"
+                or tool.name == reconcile_tool_name)
             else configured.policies.read
         )
         schemes = oauth_security_schemes(policy.required_scopes)
@@ -961,16 +970,29 @@ def _build_profile_mcp_app(
             return unknown_release_result()
         if request_ref is None:
             raise ValueError("CEO recovery requires the original request reference")
-        # The exposed reader accepts an intent id, not an outer request ref.
-        # Reuse the canonical identity owner; never copy its hash derivation.
         intent_id = automated_intent_id(request_ref)
+        if reconcile_tool_name is not None:
+            message = (
+                f"the Executive response is unavailable; call {reconcile_tool_name} "
+                f"with request_ref={request_ref} for this original request, or read "
+                f"ceo_intent_status with intent_id={intent_id} on an older published catalog. "
+                "A not_found response does not authorize resubmission. "
+                "Preserve request_ref and require canonical reconciliation "
+                "before any further submission."
+            )
+        else:
+            # Frozen older profiles expose only the intent-id reader. Reuse
+            # the canonical identity owner; never copy its hash derivation.
+            message = (
+                "the Executive response is unavailable; read ceo_intent_status "
+                f"with intent_id={intent_id} for this original request. "
+                "A not_found response does not authorize resubmission. "
+                "Preserve request_ref and require canonical reconciliation "
+                "before any further submission."
+            )
         response = _outcome_response(AdmissionOutcome(
             status=STATUS_EFFECT_UNKNOWN, request_ref=request_ref, code="effect_unknown",
-            message=("the Executive response is unavailable; read ceo_intent_status "
-                     f"with intent_id={intent_id} for this original request. "
-                     "A not_found response does not authorize resubmission. "
-                     "Preserve request_ref and require canonical reconciliation "
-                     "before any further submission."),
+            message=message,
         ))
         return json.loads(response.body)
 
@@ -996,9 +1018,12 @@ def _build_profile_mcp_app(
         except GatewayError as exc:
             return result(profile_error(name, exc.code, exc.message))
         is_submit = name == "submit_ceo_intent"
+        is_reconcile = name == reconcile_tool_name
         is_release = release_profile or name in release_tool_names
         is_direct = name in direct_tool_names
         request_ref = app_request_ref(validated["operation_key"]) if is_submit else None
+        if is_reconcile:
+            request_ref = validated["request_ref"]
         if is_direct:
             active = submit_authenticators if name in direct_submit_names else read_authenticators
             principal_or_response = await _authenticate(
@@ -1045,14 +1070,15 @@ def _build_profile_mcp_app(
                 transport=httpx.ASGITransport(app=inner_app, raise_app_exceptions=True),
                 base_url="http://127.0.0.1", trust_env=False, follow_redirects=False,
             ) as client:
-                response = await client.post(f"/v1/tools/{name}",
+                response = await client.post(
+                    "/v1/tools/submit_ceo_intent/reconcile" if is_reconcile else f"/v1/tools/{name}",
                     headers={"authorization": request.headers["authorization"]},
-                    json={"arguments": validated})
+                    json=validated if is_reconcile else {"arguments": validated})
             payload = response.json()
             canonical_json(payload)
             challenge = response.headers.get("www-authenticate")
             if response.status_code in (401, 403) and challenge:
-                if is_release:
+                if is_release or is_reconcile:
                     # Only the existing fixed auth refusal may cross this
                     # boundary. Rebuild the challenge; never relay arbitrary
                     # inner diagnostic text or a header carrying private data.
@@ -1064,7 +1090,7 @@ def _build_profile_mcp_app(
                         return result(unknown(request_ref, is_release=is_release))
                     challenge = mcp_auth_error_result(configured.policies.submit,
                         auth_error)["_meta"]["mcp/www_authenticate"][0]
-                if (is_submit or is_release) and payload.get("error", {}).get("code") == "scope_refused":
+                if (is_submit or is_release or is_reconcile) and payload.get("error", {}).get("code") == "scope_refused":
                     # The direct App's challenge intentionally omits requested
                     # scopes. Use its existing A1 helper for the MCP upgrade.
                     challenge = mcp_auth_error_result(configured.policies.submit,
@@ -1076,33 +1102,43 @@ def _build_profile_mcp_app(
                 from integrations.executive_mcp.release_control import valid_release_result
                 if not valid_release_result(payload, name, validated, response.status_code):
                     payload = unknown(request_ref, is_release=is_release)
-            elif is_submit:
+            elif is_submit or is_reconcile:
                 # These closed errors are raised before the App's socket send.
                 preflight_error = (
-                    response.status_code in (400, 403)
+                    is_submit and response.status_code in (400, 403)
                     and isinstance(payload, dict) and payload.get("ok") is False
                     and isinstance(payload.get("error"), dict)
                     and payload["error"].get("code") in {
                         "invalid_input", "authority_refused", "grounding_unavailable", "internal_error",
                     }
                 )
-                if not preflight_error and not _executive_outcome(payload, request_ref, response.status_code):
-                    payload = unknown(request_ref, is_release=is_release)
-                elif payload.get("status") == STATUS_EFFECT_UNKNOWN:
-                    # Same closed outcome, now usable through existing MCP tools.
-                    payload = unknown(request_ref, is_release=False)
+                if not preflight_error:
+                    if not _executive_outcome(payload, request_ref, response.status_code):
+                        payload = unknown(request_ref, is_release=is_release)
+                    elif (
+                        is_reconcile
+                        and payload.get("ok") is True
+                        and payload.get("receipt", {}).get("intent_id")
+                        != automated_intent_id(request_ref)
+                    ):
+                        # A status read may only recover the deterministic intent
+                        # belonging to this exact original request reference.
+                        payload = unknown(request_ref, is_release=False)
+                    elif payload.get("status") == STATUS_EFFECT_UNKNOWN:
+                        # Same closed outcome, now usable through existing MCP tools.
+                        payload = unknown(request_ref, is_release=False)
             elif response.status_code != 200 or not _is_e1_envelope(
                 payload, name, inner_server_version or profile_server_version
             ):
                 payload = profile_error(name, "backend_unavailable", "Executive response is unavailable")
         except Exception:
-            payload = unknown(request_ref, is_release=is_release) if is_submit or is_release else profile_error(
+            payload = unknown(request_ref, is_release=is_release) if is_submit or is_release or is_reconcile else profile_error(
                 name, "backend_unavailable", "Executive response is unavailable")
         reply = result(payload)
         # Bound the actual escaped MCP result, reserving room for the maximum
         # admitted request id and JSON-RPC envelope, not only the inner JSON.
         if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
-            reply = result(unknown(request_ref, is_release=is_release) if is_submit or is_release else profile_error(
+            reply = result(unknown(request_ref, is_release=is_release) if is_submit or is_release or is_reconcile else profile_error(
                 name, "output_too_large", "Executive response exceeds the transport budget"))
         return reply
 
@@ -1437,15 +1473,16 @@ def build_web_ceo_v3_mcp_app(
     os_executive_resource: str | None = None,
     os_commission_preparer: Any | None = None,
 ) -> Any:
-    """Web-CEO v3 composition: v2 owners plus one read-only MDM sensor.
+    """Web-CEO v3 over existing owners plus MDM and request reconciliation.
 
-    ``enable_os_executive_transport`` is the default-off v3 opt-in for the
-    three fixed POST OS Executive routes.  When enabled, it requires the
-    exact installed v3 composition (server 1.4.0/1.5.0, ``OsStaticApp``,
-    ``read_from_ceo_ingress=True``).
+    OS Executive transport is default-off. When enabled it requires the exact
+    installed v3 composition (server 1.4.0/1.5.0, OsStaticApp,
+    read_from_ceo_ingress=True). Request reconciliation remains the existing
+    submit-scope status-read path over the original request_ref.
     """
 
     from integrations.executive_mcp.web_ceo_v3 import (
+        RECONCILE_TOOL_NAME,
         WEB_CEO_V3_SERVER_NAME,
         WEB_CEO_V3_SERVER_VERSION,
         validate_web_ceo_v3_tool_arguments,
@@ -1463,6 +1500,7 @@ def build_web_ceo_v3_mcp_app(
         profile_server_version=WEB_CEO_V3_SERVER_VERSION,
         profile_tools=tuple(build_web_ceo_v3_tools()),
         profile_validator=validate_web_ceo_v3_tool_arguments,
+        reconcile_tool_name=RECONCILE_TOOL_NAME,
         profile_create_app=lambda configured: create_web_ceo_v3_app(
             configured, mdm_reader=mdm_reader
         ),
