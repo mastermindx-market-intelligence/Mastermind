@@ -1,4 +1,19 @@
 {
+  "active_review": {
+    "original_carrier_log": "install-review-carrier.log",
+    "return_outputs": [
+      "INSTALL_REVIEW.md",
+      "review_reproducer.py"
+    ],
+    "role": "reviewer",
+    "run_id": "rs_20261006T235324Z_75724",
+    "scope": [
+      "ops/fabric_launch/install.py",
+      "ops/fabric_launch/cli.py"
+    ],
+    "source_commit": "40a7f3986942c915198071cd8def92c53416f682",
+    "status": "DISPATCHED_AWAITING_RETURN"
+  },
   "affected_source_hashes": {
     "docs/superpowers/plans/2026-10-06-subagent-operating-environment.md": "063ca1ec982899e61c59d004f86469743169e46739eff7df16100380071bfe69",
     "ops/fabric_launch/agentos.py": "b146c008c939ca8276f91eadca4b60b781ec694e64ff02ddaa9908cc6c8f2dfe",
@@ -47,6 +62,19 @@
     "pool_wrapper_sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
     "studio_pinned_consumers": 10
   },
+  "mcp_reply_validation": {
+    "full_log_sha256": "0ae2dd3c8ccfa8e725211f5e4d7df46bc2ca05ee0e5d8ab4e53a6ffb02b5b9a1",
+    "full_suite_passed": 177,
+    "green_targeted_tests": 35,
+    "live_harmless_reads": [
+      "studio.read",
+      "docs.search"
+    ],
+    "live_observation_sha256": "c1a470f7df2e6edb898780f7b4bb377da63e9bf5833e0e78fb4afc8afe848827",
+    "red_rejected_cases_before_fix": 0,
+    "red_unsafe_cases_accepted": 17,
+    "subtests_passed": 59
+  },
   "mission": "Fresh workers receive a bounded task, one role method, attributed context, usable tools and an exact return path.",
   "parent_verification": {
     "log_sha256": "b8ef89a377574ef978743c6d5b8ef04cf23d31d70f07ab687da15689d46050db",
@@ -61,6 +89,16 @@
     "Release retained Craft dependencies through their source owners before protected native CapabilityPackage admission.",
     "Enroll native app credentials through each app owner; Linear auth is unresolved."
   ],
+  "private_bootstrap_plugin": {
+    "creation_and_metadata_verified": true,
+    "discoverability": "PRIVATE",
+    "installation_or_all_account_adoption_claimed": false,
+    "plugin_id": "Plugin_e3508a53bed88191bb0d04ec2405d618",
+    "release_id": "pluginrel_6ac5892d41d8819191c611930ab74319",
+    "scope": "WORKSPACE",
+    "source_commit": "40a7f3986942c915198071cd8def92c53416f682",
+    "version": "0.1.0-candidate.g40a7f3986942"
+  },
   "procedure_pin": "6e82f9af41bf175c87e70f6a852f73b71eca80c8",
   "schema": "mastermind.fabric_launch_evidence.v1",
   "source_dependencies": {

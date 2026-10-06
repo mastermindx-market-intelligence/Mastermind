@@ -16,7 +16,7 @@ import sys
 import urllib.error
 import urllib.request
 
-from ops.fabric_launch.context import OBSERVATION_SCHEMA, digest, text, TOOLS
+from ops.fabric_launch.context import OBSERVATION_SCHEMA, digest, text, TOOLS, parse as parse_json
 
 ENDPOINTS = {
     "openai-docs": "https://developers.openai.com/mcp",
@@ -51,8 +51,14 @@ class ReadOnlyMcpProbe:
         raw = body.decode("utf-8")
         if raw.startswith("event:") or raw.startswith("data:"):
             raw = next(line[6:] for line in raw.splitlines() if line.startswith("data: "))
-        value = json.loads(raw)
-        if not isinstance(value, dict) or value.get("error") is not None or "result" not in value:
+        value = parse_json(raw.encode("utf-8"), MAX_RESPONSE)
+        # A response for another request, malformed JSON-RPC envelope or primitive
+        # result is not evidence that this exact read succeeded. No retry follows.
+        if (value.get("jsonrpc") != "2.0"
+                or type(value.get("id")) is not int
+                or value["id"] != identifier
+                or "error" in value
+                or type(value.get("result")) is not dict):
             raise ValueError("PROBE_PROTOCOL_ERROR")
         return value["result"]
 
