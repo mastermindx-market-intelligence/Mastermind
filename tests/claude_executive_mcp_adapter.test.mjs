@@ -8,6 +8,9 @@ const READ = 'mastermind.executive.read';
 const COO = 'mastermind.executive.coo.act';
 const CEO = 'mastermind.executive.intent.submit';
 const LOCAL = 'http://127.0.0.1:8444/mcp';
+const LOCAL_ORIGIN = 'http://127.0.0.1:8444';
+const CLIENT_CALLBACK = 'http://localhost:8774/callback';
+const ADAPTER_CALLBACK = LOCAL_ORIGIN + '/oauth/callback';
 const RESOURCE = 'https://executive.example.test/mcp';
 const METADATA = '/.well-known/oauth-protected-resource';
 const policy = { resource: RESOURCE, issuer: 'https://issuer.example.test/',
@@ -117,18 +120,140 @@ for (const scopes of [CEO, `${COO} ${READ} ${CEO}`]) {
     assert.equal(f.oauth.length, 0);
   });
 }
-test('role-correct PKCE request retains challenge, state and callback', async t => {
+test('role-correct PKCE request retains challenge and state but binds upstream to adapter callback', async t => {
   const f = await fixture(t);
   const q = new URLSearchParams({ resource: LOCAL, scope: `${READ} ${COO} offline_access`,
-    client_id: 'public-fixture-client', redirect_uri: 'http://localhost:8774/callback',
+    client_id: 'public-fixture-client', redirect_uri: CLIENT_CALLBACK,
     state: 'fixture-state', code_challenge: 'fixture-challenge', code_challenge_method: 'S256' });
   const result = await exchange(f.server, '/authorize?' + q, { method: 'GET', body: '' });
   assert.equal(result.status, 302); const target = new URL(result.headers.location);
   assert.equal(target.origin, 'https://issuer.example.test');
   assert.equal(target.searchParams.get('resource'), RESOURCE);
-  for (const key of ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope'])
+  assert.equal(target.searchParams.get('redirect_uri'), ADAPTER_CALLBACK);
+  for (const key of ['client_id', 'state', 'code_challenge', 'code_challenge_method', 'scope'])
     assert.equal(target.searchParams.get(key), q.get(key));
 });
+test('authorization-server metadata advertises local issuer and RFC 9207 response issuer support', async t => {
+  const f = await fixture(t);
+  const result = await exchange(f.server, '/.well-known/oauth-authorization-server', { method: 'GET', body: '' });
+  assert.equal(result.status, 200);
+  const body = JSON.parse(result.text);
+  assert.equal(body.issuer, LOCAL_ORIGIN);
+  assert.equal(body.authorization_endpoint, LOCAL_ORIGIN + '/authorize');
+  assert.equal(body.token_endpoint, LOCAL_ORIGIN + '/oauth/token');
+  assert.equal(body.authorization_response_iss_parameter_supported, true);
+});
+
+test('adapter callback validates upstream issuer and translates it to the local issuer', async t => {
+  const f = await fixture(t);
+  const q = new URLSearchParams({
+    code: 'fixture-code',
+    state: 'fixture-state',
+    iss: policy.issuer,
+  });
+  const result = await exchange(f.server, '/oauth/callback?' + q, { method: 'GET', body: '' });
+  assert.equal(result.status, 302);
+  const target = new URL(result.headers.location);
+  assert.equal(target.toString().split('?')[0], CLIENT_CALLBACK);
+  assert.equal(target.searchParams.get('code'), 'fixture-code');
+  assert.equal(target.searchParams.get('state'), 'fixture-state');
+  assert.equal(target.searchParams.get('iss'), LOCAL_ORIGIN);
+  assert.equal(f.oauth.length, 0);
+  assert.equal(f.seen.length, 0);
+});
+
+for (const path of [
+  '/oauth/callback?code=fixture-code&state=fixture-state',
+  '/oauth/callback?code=fixture-code&state=fixture-state&iss=' + encodeURIComponent('https://foreign.example.test/'),
+  '/oauth/callback?code=fixture-code&state=fixture-state&iss=' + encodeURIComponent(policy.issuer) + '&iss=' + encodeURIComponent(policy.issuer),
+  '/oauth/callback?code=fixture-code&state=fixture-state&iss=' + encodeURIComponent(policy.issuer) + '&access_token=forbidden',
+]) {
+  test('adapter callback refuses missing foreign duplicate issuer or unreviewed response fields', async t => {
+    const f = await fixture(t);
+    const result = await exchange(f.server, path, { method: 'GET', body: '' });
+    assert.equal(result.status, 400);
+    assert.equal(result.headers.location, undefined);
+    assert.equal(f.oauth.length, 0);
+    assert.equal(f.seen.length, 0);
+  });
+}
+
+test('adapter callback preserves bounded OAuth error fields while translating issuer', async t => {
+  const f = await fixture(t);
+  const q = new URLSearchParams({
+    error: 'access_denied',
+    error_description: 'fixture denied',
+    error_uri: 'https://issuer.example.test/errors/access_denied',
+    state: 'fixture-state',
+    iss: policy.issuer,
+  });
+  const result = await exchange(f.server, '/oauth/callback?' + q, { method: 'GET', body: '' });
+  assert.equal(result.status, 302);
+  const target = new URL(result.headers.location);
+  assert.equal(target.toString().split('?')[0], CLIENT_CALLBACK);
+  assert.equal(target.searchParams.get('error'), 'access_denied');
+  assert.equal(target.searchParams.get('error_description'), 'fixture denied');
+  assert.equal(target.searchParams.get('error_uri'), 'https://issuer.example.test/errors/access_denied');
+  assert.equal(target.searchParams.get('state'), 'fixture-state');
+  assert.equal(target.searchParams.get('iss'), LOCAL_ORIGIN);
+  assert.equal(target.searchParams.has('code'), false);
+});
+
+test('authorization-code token exchange binds redirect_uri to the adapter callback upstream', async t => {
+  const f = await fixture(t);
+  const params = new URLSearchParams({
+    resource: LOCAL,
+    grant_type: 'authorization_code',
+    code: 'fixture-code',
+    redirect_uri: CLIENT_CALLBACK,
+    code_verifier: 'fixture-code-verifier',
+    client_id: 'public-fixture-client',
+  });
+  const result = await exchange(f.server, '/oauth/token', {
+    body: params.toString(),
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(f.oauth.length, 1);
+  const sent = new URLSearchParams(f.oauth[0].options.body);
+  assert.equal(sent.get('resource'), RESOURCE);
+  assert.equal(sent.get('redirect_uri'), ADAPTER_CALLBACK);
+  assert.equal(sent.get('code'), 'fixture-code');
+  assert.equal(sent.get('code_verifier'), 'fixture-code-verifier');
+  assert.equal(sent.get('client_id'), 'public-fixture-client');
+});
+
+test('authorization and token endpoints refuse foreign client callback', async t => {
+  const f = await fixture(t);
+  const authorize = new URLSearchParams({
+    resource: LOCAL,
+    scope: `${READ} ${COO}`,
+    client_id: 'public-fixture-client',
+    redirect_uri: 'http://localhost:9999/callback',
+    state: 'fixture-state',
+    code_challenge: 'fixture-challenge',
+    code_challenge_method: 'S256',
+  });
+  const authResult = await exchange(f.server, '/authorize?' + authorize, { method: 'GET', body: '' });
+  assert.equal(authResult.status, 400);
+  assert.equal(authResult.headers.location, undefined);
+
+  const token = new URLSearchParams({
+    resource: LOCAL,
+    grant_type: 'authorization_code',
+    code: 'fixture-code',
+    redirect_uri: 'http://localhost:9999/callback',
+    code_verifier: 'fixture-code-verifier',
+    client_id: 'public-fixture-client',
+  });
+  const tokenResult = await exchange(f.server, '/oauth/token', {
+    body: token.toString(),
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+  });
+  assert.equal(tokenResult.status, 400);
+  assert.equal(f.oauth.length, 0);
+});
+
 test('challenge metadata is local and a foreign role challenge is not forwarded', async t => {
   const f = await fixture(t, (_req, res) => {
     res.writeHead(401, { 'www-authenticate': `Bearer resource_metadata="${policy.resource_metadata_url}", scope="${CEO}"` });
