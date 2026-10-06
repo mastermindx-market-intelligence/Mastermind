@@ -58,6 +58,15 @@
       "capabilities": ["planning", "judgment", "escalation"],
       "worker_eligible": true
     },
+    "coo.operator.sol61.readonly": {
+      "provider_alias": "codex",
+      "execution_profile_id": "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "cost_class": "small",
+      "capabilities": ["planning", "judgment", "escalation"],
+      "worker_eligible": true
+    },
     "fast.engineering": {
       "provider_alias": "codex",
       "execution_profile_id": "sealed.worker.write.no-extensions.v1",

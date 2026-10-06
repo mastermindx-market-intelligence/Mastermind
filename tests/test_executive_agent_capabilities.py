@@ -136,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-03.company-consultation-edge-p0"
+    assert registry.policy_version == "2026-10-05.sol61-project-executive-candidate"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -707,7 +707,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     assert registry.policy_digest != previous.policy_digest
     registry = previous
     assert registry.policy_digest == (
-        "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
+        "d9add0d01ff64dadad5356a1a73af2d3aeef7b15a23d12627dda3a5ac756f85f"
     )
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"

@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_agent_capabilities/v3",
-  "policy_version": "2026-10-03.company-consultation-edge-p0",
+  "policy_version": "2026-10-05.sol61-project-executive-candidate",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "mcp_servers": {
@@ -171,6 +171,31 @@
       "mcp_servers": [
         "openai-developer-docs-v1"
       ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    },
+    "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1": {
+      "enabled": true,
+      "execution_surface": "codex-app-server",
+      "auth_realm": "dedicated-worker-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "parent_read_only_ceiling",
+      "native_helper": {
+        "mechanism": "codex-multi-agent-v2-inherit-parent",
+        "default_model": "gpt-6.1-sol",
+        "default_reasoning_effort": "xhigh",
+        "inherit_parent_capabilities": true,
+        "hide_spawn_agent_metadata": true,
+        "max_concurrent_helpers": 1,
+        "max_depth": 1,
+        "max_runtime_seconds": 60
+      },
+      "skills": [],
+      "mcp_servers": ["openai-developer-docs-v1"],
       "resources": [],
       "plugins": [],
       "forbidden": []
