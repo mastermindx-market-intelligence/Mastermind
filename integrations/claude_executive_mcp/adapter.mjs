@@ -48,8 +48,12 @@ const LOCAL_RESOURCE = LOCAL_ORIGIN + "/mcp";
 const METADATA_PATH = "/.well-known/oauth-protected-resource";
 const AS_METADATA_PATH = "/.well-known/oauth-authorization-server";
 const LOCAL_METADATA = LOCAL_ORIGIN + METADATA_PATH;
+const CLIENT_CALLBACK = "http://localhost:8774/callback";
+const ADAPTER_CALLBACK_PATH = "/oauth/callback";
+const ADAPTER_CALLBACK = LOCAL_ORIGIN + ADAPTER_CALLBACK_PATH;
 const ALLOWED_PROXY_PATHS = new Set(["/mcp", METADATA_PATH]);
 const MAX_OAUTH_BODY = 128 * 1024;
+const MAX_CALLBACK_VALUE = 8 * 1024;
 
 function cleanHeaders(headers, { upstream = false } = {}) {
   const out = { ...headers };
@@ -109,6 +113,7 @@ async function authMetadata(res) {
   body.issuer = LOCAL_ORIGIN;
   body.authorization_endpoint = LOCAL_ORIGIN + "/authorize";
   body.token_endpoint = LOCAL_ORIGIN + "/oauth/token";
+  body.authorization_response_iss_parameter_supported = true;
   if (body.revocation_endpoint) {
     body.revocation_endpoint = LOCAL_ORIGIN + "/oauth/revoke";
   }
@@ -132,12 +137,68 @@ function translateResource(params) {
   }
 }
 
+function validateClientCallback(params) {
+  const callbacks = params.getAll("redirect_uri");
+  if (callbacks.length > 1 || (callbacks.length === 1 && callbacks[0] !== CLIENT_CALLBACK)) {
+    throw new Error("unexpected_redirect_uri");
+  }
+  return callbacks.length === 1;
+}
+
 function authorizeRedirect(res, parsed) {
   const params = new URLSearchParams(parsed.searchParams);
   translateResource(params);
+  const hasClientCallback = validateClientCallback(params);
   if (!params.has("scope")) params.set("scope", COO_SCOPES.join(" "));
+  if (hasClientCallback) params.set("redirect_uri", ADAPTER_CALLBACK);
   const target = new URL("authorize", AUTH_ISSUER);
   target.search = params.toString();
+  res.writeHead(302, {
+    location: target.toString(),
+    "cache-control": "no-store",
+  });
+  res.end();
+}
+
+function callbackRedirect(res, parsed) {
+  const params = new URLSearchParams(parsed.searchParams);
+  const names = [...new Set(params.keys())];
+  const allowedSuccess = new Set(["code", "state", "iss"]);
+  const allowedError = new Set(["error", "error_description", "error_uri", "state", "iss"]);
+  const isError = params.has("error");
+  const allowed = isError ? allowedError : allowedSuccess;
+
+  if (names.some(name => !allowed.has(name)) ||
+      [...allowed].some(name => params.getAll(name).length > 1) ||
+      params.getAll("iss").length !== 1 ||
+      params.get("iss") !== AUTH_ISSUER ||
+      params.getAll("state").length !== 1 ||
+      !params.get("state") ||
+      (isError ? (params.getAll("error").length !== 1 || !params.get("error") || params.has("code"))
+               : (params.getAll("code").length !== 1 || !params.get("code")))) {
+    throw new Error("invalid_authorization_response");
+  }
+  for (const value of params.values()) {
+    if (Buffer.byteLength(value, "utf8") > MAX_CALLBACK_VALUE) {
+      throw new Error("authorization_response_too_large");
+    }
+  }
+  if (params.has("error_uri")) {
+    const errorUri = secureUrl(params.get("error_uri"));
+    if (errorUri.origin !== new URL(AUTH_ISSUER).origin) {
+      throw new Error("foreign_error_uri");
+    }
+  }
+
+  const outgoing = new URLSearchParams();
+  for (const name of isError
+    ? ["error", "error_description", "error_uri", "state"]
+    : ["code", "state"]) {
+    if (params.has(name)) outgoing.set(name, params.get(name));
+  }
+  outgoing.set("iss", LOCAL_ORIGIN);
+  const target = new URL(CLIENT_CALLBACK);
+  target.search = outgoing.toString();
   res.writeHead(302, {
     location: target.toString(),
     "cache-control": "no-store",
@@ -154,6 +215,15 @@ async function proxyOAuthPost(req, res, endpoint) {
   const raw = await readBody(req);
   const params = new URLSearchParams(raw.toString("utf8"));
   translateResource(params);
+  if (endpoint === "oauth/token" && params.get("grant_type") === "authorization_code") {
+    try {
+      if (!validateClientCallback(params)) throw new Error("missing_redirect_uri");
+    } catch {
+      sendJson(res, 400, { error: "invalid_token_request" });
+      return;
+    }
+    params.set("redirect_uri", ADAPTER_CALLBACK);
+  }
 
   const target = new URL(endpoint, AUTH_ISSUER);
   const upstream = await fetchOAuth(target, {
@@ -272,9 +342,10 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 403, { error: "local_transport_refused" }); return;
     }
     const methods = { "/mcp": "POST", [METADATA_PATH]: "GET", [AS_METADATA_PATH]: "GET",
-      "/authorize": "GET", "/oauth/token": "POST", "/oauth/revoke": "POST" };
+      "/authorize": "GET", [ADAPTER_CALLBACK_PATH]: "GET",
+      "/oauth/token": "POST", "/oauth/revoke": "POST" };
     if (req.url !== parsed.pathname + parsed.search || methods[parsed.pathname] !== req.method ||
-        (parsed.search && parsed.pathname !== "/authorize")) {
+        (parsed.search && !["/authorize", ADAPTER_CALLBACK_PATH].includes(parsed.pathname))) {
       sendJson(res, 404, { error: "not_found" }); return;
     }
     if (ALLOWED_PROXY_PATHS.has(parsed.pathname)) {
@@ -288,6 +359,11 @@ const server = http.createServer(async (req, res) => {
     if (parsed.pathname === "/authorize" && req.method === "GET") {
       try { authorizeRedirect(res, parsed); }
       catch { sendJson(res, 400, { error: "invalid_authorization_request" }); }
+      return;
+    }
+    if (parsed.pathname === ADAPTER_CALLBACK_PATH && req.method === "GET") {
+      try { callbackRedirect(res, parsed); }
+      catch { sendJson(res, 400, { error: "invalid_authorization_response" }); }
       return;
     }
     if (parsed.pathname === "/oauth/token" && req.method === "POST") {
