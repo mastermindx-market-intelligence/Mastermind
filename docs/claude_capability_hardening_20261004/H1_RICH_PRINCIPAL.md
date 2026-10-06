@@ -79,6 +79,27 @@ The eventual rich profile needs independently accepted identities for at least t
    with host composition using the existing Runtime event fence. The ordinary worker Company Dialogue
    server and the existing Company Consultation server are different capabilities and cannot stand in.
 
+The current source now freezes the authority-bearing generations without prematurely inventing
+transport or production grant identities:
+
+- Executive COO server `mastermind-executive-coo` / `1.0.0`, six tools, exact
+  `COO_TOOL_SCHEMA_DIGEST=8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72`.
+  The digest uses the same normalized tool name/input-schema/output-schema/annotations projection as
+  `observed_mcp_tool_schema_digest`; descriptions and output prose are not authority.
+- Principal Company Dialogue server `mastermind-company-dialogue-principal-mcp` / `0.1.0`,
+  four tools, exact
+  `PRINCIPAL_TOOL_SCHEMA_DIGEST=d45c0f8fe2451c726757c42be729e0e49fc5b2637c33efc97dee00168fab7abd`.
+- `RICH_PRINCIPAL_CAPABILITY_GENERATIONS.json` records those two source generations under candidate
+  profile label `principal.claude.coo.rich.v1` with `production_armed=false`. It intentionally
+  leaves `grant_capability_id`, config name, transport, URL/command/args, network policy and final
+  profile digest unresolved. The file is deliberately not a capability-policy schema and the
+  canonical registry loader must reject it.
+
+Focused validation across the candidate manifest, projected native readback, Claude MCP projection,
+H3 plugin and H6 principal schema is **143 passed**. This advances H1 from “schema identity unknown”
+to **exact source generations / transport-and-admission gated**; it does not clear #1196 custody or
+authorize a production registry edit.
+
 Any separate context/source capability used for R0 must also have its own existing owner/grant.
 Counting two methods from one Executive server is still one owner.
 
