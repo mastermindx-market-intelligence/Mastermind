@@ -4,7 +4,7 @@
 
 **Scientific ruling:** `CONTINUE — NARROWED`  
 **Operational state:** `WAIT_FOR_DATA / SOURCE_GATE`  
-**Current protected reconciliation:** Mastermind `d8c302b8a8a65ab13e2afba98cc73481606ed4d0`; Macro `91f274d860e77f245bde31232a617f81d9a5b331`
+**Current protected reconciliation:** Mastermind `a6d40ff648671b03bd4d829d84dd066b58ea8c3f`; Macro `e95e32d4418f12c9670a6a4321498d2c641158fd`
 
 This document closes the experimental degrees of freedom. It does **not** authorize capture or implementation while DL-0's taxonomy source gate is unresolved.
 
@@ -120,6 +120,111 @@ If the primary occupancy gate fails:
 A future hazard-primary experiment requires a new preregistration and new untouched evidence.
 
 Forward return, MAE, recovery, prior-high reclaim, and Leader Radar state-transfer performance are DO_NOT_READ in DL-1.
+
+## 4A. Exhaustive endpoint attrition, delisting, and missing-price law
+
+This section is part of the frozen endpoint definition. A focal row that was valid at formation is **never silently dropped because of what happens later**.
+
+### 4A.1 Formation membership versus endpoint membership
+
+PIT S&P 1500 membership is required **only at formation t**.
+
+After formation, the focal security does **not** have to remain in the S&P 1500 to receive an endpoint label. An ordinary index deletion/rebalance with continued independent public trading is not itself a failure and not a censoring event.
+
+At every endpoint/state observation date d, the comparison threshold is rebuilt from the contemporaneous PIT S&P 1500 universe at d. The focal is compared with that threshold even when it is no longer an index constituent.
+
+### 4A.2 Exact Q4 threshold at an observation date
+
+For market session d, define `Q75_RS126(d)` from distinct canonical issuers that:
+
+- are PIT S&P 1500 constituents effective at d;
+- have one resolved primary U.S. common-equity listing at d;
+- have a valid panel close on d;
+- have enough panel history to compute `RS_126`;
+- have resolved issuer identity.
+
+If the focal is itself a constituent at d, it participates in the threshold population exactly once.
+
+`Q75_RS126(d)` is the empirical 75th percentile using **linear interpolation**; a security is in Q4 iff `RS_126 >= Q75_RS126(d)`.
+
+Threshold validity requires both:
+- at least 80% of distinct PIT S&P 1500 issuers at d have valid `RS_126`; and
+- at least 1,000 distinct issuers contribute.
+
+SPY must have a valid close/history for the same d. If any threshold condition fails, the date is `THRESHOLD_UNRESOLVED`; no focal label is manufactured.
+
+### 4A.3 Security-continuity law
+
+A post-formation symbol/exchange change is followed **only** when the existing identity owner supplies an effective-dated lineage receipt establishing that the successor listing is the **same continuing security**.
+
+A merger/acquisition in which the focal security ceases independent public trading is not spliced into the acquirer. A bankruptcy, liquidation, cancellation, or delisting that terminates the independently traded focal security is likewise terminal.
+
+If continuity versus termination cannot be established from the canonical identity/event evidence, status is `OUTCOME_PENDING_IDENTITY`; no label is imputed.
+
+### 4A.4 Primary occupancy resolution clock
+
+Nominal primary endpoint = market session `t+20`.
+
+If a valid focal close exists on t+20, evaluate occupancy on t+20.
+
+If no valid focal close exists on t+20, no terminal event is known, and the security has not been proven to terminate, allow an exact **five-market-session resolution grace**: t+21 through t+25.
+
+Use the **first** later market session d* in that grace window with a valid focal close. Evaluate `RS_126` and `Q75_RS126(d*)` on that same d*. Record status `OCCUPANCY_OBSERVED_DELAYED` and `endpoint_delay_sessions = d*-(t+20)`.
+
+If no valid close exists through t+25 and no terminal event can be established, status is `OUTCOME_PENDING_PRICE`. The row remains in the cohort and **blocks the sole efficacy read** until the source is repaired or a terminal/continuity classification becomes available.
+
+The same five-session rule applies to `DL1_OCCUPANCY_60` at nominal t+60.
+
+### 4A.5 Exhaustive outcome-status table
+
+Apply rows in this table by precedence from top to bottom.
+
+| Post-formation condition | Primary/60d occupancy | `DL1_FIRST_EXIT_60` | Cohort treatment |
+|---|---|---|---|
+| Same security, valid close on nominal endpoint | Compute Q4 against contemporaneous threshold | First observed Q4 exit; otherwise administrative censor at 60 | retained |
+| Leaves S&P 1500 but continues independent trading | Compute exactly as above; membership exit alone is not failure | Continue state observations against contemporaneous thresholds | retained |
+| Effective-dated symbol/exchange change proven same continuing security | Follow successor security; compute on same canonical lineage | Continue clock without exit | retained |
+| Acquisition/merger terminates focal security | `0` if termination effective on/before resolved endpoint observation; never splice acquirer | event at first U.S. market session on/after official termination effective date, if <=60 | retained; terminal failure |
+| Delisting/bankruptcy/liquidation/cancellation terminates focal security | `0` if termination effective on/before resolved endpoint observation | event at first U.S. market session on/after official termination effective date, if <=60 | retained; terminal failure |
+| Primary listing lost and no same-security successor exists | `0` only when official evidence establishes termination; otherwise pending identity | terminal event if proven; otherwise unresolved | retained |
+| Temporary nonterminal no-print at nominal occupancy endpoint | first valid close within +5 sessions; compare on that actual observation date | missing session is neither exit nor carried-forward state; next valid close resumes observation | retained |
+| Temporary no-print inside first-exit window that later resumes | not applicable unless it includes occupancy endpoint | no event on the no-print session; event can occur on the first later valid close if Q4 is lost | retained |
+| No valid occupancy close through +5 and no proven terminal event | `OUTCOME_PENDING_PRICE`; no 0/1 label | if the 60-session path also ends without a valid resumption, `HAZARD_PENDING_PRICE` | retained; final read blocked |
+| Permanent price unavailability with proven terminal event | `0` under terminal rule | terminal event under terminal rule | retained |
+| Permanent price unavailability with no proven terminal/continuity event | `OUTCOME_PENDING_PRICE` or `OUTCOME_PENDING_IDENTITY` | `HAZARD_PENDING_PRICE` / `HAZARD_PENDING_IDENTITY` | retained; final read blocked |
+| Contemporaneous threshold/benchmark unavailable | `OUTCOME_PENDING_THRESHOLD` | `HAZARD_PENDING_THRESHOLD` if needed before event/censor | retained; final read blocked |
+
+No acquisition premium, last stale mark, zero price, average return, acquirer return, or carry-forward close is used to fabricate a Q4 state.
+
+### 4A.6 First-exit observation law
+
+`DL1_FIRST_EXIT_60` means the first **observable closing-state exit** or proven terminal-security exit within market sessions t+1..t+60.
+
+For each session k:
+
+1. if a proven terminal event for the focal security is effective by that session, record an exit event at that session;
+2. else if the focal has a valid close and the contemporaneous threshold is valid, evaluate Q4 and record the first Q4=0 session as the exit;
+3. else if the security has a nonterminal no-print, record `STATE_NOT_OBSERVED` for that session and do not carry the prior close forward;
+4. else if identity or threshold is unresolved, mark the path pending.
+
+A nonterminal no-print that later resumes does not itself create an exit or censor.
+
+If the path reaches t+60 with valid state observability and no exit, it receives the ordinary administrative censor at 60.
+
+If unresolved price, identity, or threshold status prevents determining the path through t+60, the row is **not** silently censored into the hazard analysis. Its secondary status is pending and the secondary report is `WAIT_FOR_DATA_REPAIR` until resolved.
+
+### 4A.7 Zero post-formation attrition gate
+
+The primary confirmatory analysis requires **100% endpoint-status resolution** for every formation-valid confirmatory row:
+
+- binary occupancy label 0/1 under the table above; and
+- recorded endpoint status/reason.
+
+Any `OUTCOME_PENDING_*` row makes `DL1_FINAL_READ_ELIGIBLE=false`.
+
+Thus no post-formation disappearance can improve the result by disappearing from the denominator.
+
+The structural-secondary hazard report, if ever opened after a primary pass, likewise requires zero `HAZARD_PENDING_*` rows; only ordinary administrative censoring at t+60 is permitted in its analyzed population.
 
 ## 5. Formation clock and eligible universe
 
@@ -566,87 +671,159 @@ This structural secondary cannot rescue a failed primary and does not convert an
 
 ## 23. Exact outcome-blind power simulation
 
-Power may use burn-in endpoint labels and pre-outcome feature/prediction geometry only. It may not use any confirmatory A−S effect, confirmatory feature/outcome correlation, subgroup efficacy, or hazard association.
+The power calculation must estimate the finite-sample behavior of the **actual frozen fitted procedure**. Synthetic oracle probabilities are permitted only to generate synthetic labels; they are never substituted for fitted S/A predictions in calibration or power adjudication.
 
-### 23.1 Burn-in base-rate/dependence calibration
+No confirmatory efficacy outcome, confirmatory A−S statistic, confirmatory G-feature/outcome association, subgroup efficacy, or hazard association may enter this procedure.
 
-B1–B3 contain 36 formation dates.
+### 23.1 Inputs allowed before the sole reveal
+
+Power may use only:
+
+- the fixed pre-outcome covariate matrices for all accrued B1–B9 rows;
+- formation dates, industry groups, and the frozen abstention/source-status geometry;
+- B1–B3 matured `DL1_OCCUPANCY_20` labels;
+- the frozen S/G definitions and estimator;
+- no B4–B9 outcome label or outcome-derived statistic.
+
+B1–B3 labels are development/burn-in inputs. They may be processed mechanically for power and fitting, but no burn-in A−S or G-efficacy statistic is emitted to a researcher.
+
+### 23.2 Baseline generator from S only
+
+Using complete B1–B3 burn-in rows only:
+
+1. fit the frozen ridge-logistic **S** model from §12 once, using the same winsorization/standardization rules;
+2. call its fitted probability for any accrued row `p0_i`;
+3. no G variable enters this baseline-generator fit.
 
 For each burn-in formation date t:
-- `n_t` = matured eligible primary rows;
-- `s_t` = rows with `DL1_OCCUPANCY_20=1`;
-- Jeffreys-smoothed rate `q_t=(s_t+0.5)/(n_t+1)`.
 
-Let pooled burn-in rate:
-`pi = (sum_t s_t + 0.5) / (sum_t n_t + 1)`.
-
-Define:
-`a_t = logit(q_t) - logit(pi)`.
+- `n_t` = number of resolved burn-in rows;
+- `s_t` = number with occupancy20=1;
+- `q_t=(s_t+0.5)/(n_t+1)`;
+- `pbar_t` = mean baseline-generator `p0_i` for rows on t;
+- `a_t = logit(q_t) - logit(pbar_t)`, with q/p clipped to [1e-6,1−1e-6].
 
 Estimate exactly one AR(1):
+
 `phi = clip(sum_{t=2..36}(a_t*a_{t-1}) / sum_{t=1..35}(a_t^2), -0.95, 0.95)`.
 
-Innovation variance = mean squared residual of:
-`a_t - phi*a_{t-1}`
-for t=2..36.
+Innovation variance is the mean squared residual of `a_t - phi*a_{t-1}` for t=2..36.
 
-If denominator is zero, set `phi=0`.
-If innovation variance is zero, use zero date shock.
+If the denominator is zero, set `phi=0`. If innovation variance is zero, use zero date shock.
 
-No alternative dependence model is tried.
+No other dependence model is tried.
 
-### 23.2 Outcome-blind peer score for simulation only
+### 23.3 Frozen power-only peer direction
 
-For every planned confirmatory row, before its outcome is available, create:
+Using **B1–B3 covariates only**, compute one fixed mean/SD (ddof=0) for each of:
 
-`z_i = mean(`
-- standardized `peer_continuity_20`,
-- standardized `breadth_q4_t`,
-- standardized `breadth_change_20`,
-- negative standardized `leader_dependency_hhi60`,
-- standardized `peer_residual_strength60`
-`)`.
+- `peer_continuity_20`;
+- `breadth_q4_t`;
+- `breadth_change_20`;
+- `leader_dependency_hhi60`;
+- `peer_residual_strength60`.
 
-Standardization uses the mechanically available past-only training transform for that block.
+For every accrued row i define:
 
-`z_i` is a **power-simulation device only**. It is not a DL-1 fitted score and never enters A.
+`z_i = mean(z_continuity, z_breadth, z_breadth_change, -z_dependency_hhi, z_peer_residual_strength)`.
 
-### 23.3 Alternative calibration
+`dependency_zero_positive` is not part of z.
 
-Use each row's stored pre-outcome S probability `p_S,i`.
+These burn-in transformations are frozen for the entire power calculation.
 
-Synthetic alternative probability:
+`z_i` is a **data-generating device only**. It is never a fitted DL-1 feature reduction and never replaces the six-field G vector in A.
 
-`p_A,i(beta) = logistic(logit(p_S,i) + beta*z_i + eta_t)`
+### 23.4 Synthetic data-generating law
 
-where `eta_t` follows the burn-in AR(1) law.
+For each simulation replicate, generate one shared formation-date shock process across **all 108 formation dates B1–B9**.
 
-Using seed `2026100602`, solve beta >=0 by deterministic bisection on [0,10] until the Monte Carlo expected A-versus-S log-loss improvement equals exactly 1.00% relative to S within absolute tolerance 1e-5.
+Use a stationary AR(1):
 
-For each bisection evaluation:
-- use exactly 2,000 simulated datasets;
-- reuse common random numbers across beta values;
-- maximum 60 bisection iterations.
+- `eta_0 ~ Normal(0, sigma2/(1-phi^2))` when `|phi|<1`;
+- `eta_t = phi*eta_(t-1) + Normal(0,sigma2)`;
+- if `sigma2=0`, all eta are zero.
 
-If no beta in [0,10] achieves the target, power gate fails.
+For row i on formation date t:
 
-### 23.4 Power estimate
+`p_gen_i(beta) = logistic(logit(p0_i) + beta*z_i + eta_t)`.
 
-With independent seed `2026100603`:
-- generate exactly 20,000 synthetic confirmatory datasets under the calibrated 1% alternative and observed/planned 72-date geometry;
-- for each dataset, generate formation-date AR(1) shocks using the burn-in phi/innovation variance;
-- generate Bernoulli outcomes from `p_A,i(beta)`;
-- calculate synthetic row log-loss difference using stored `p_S,i` versus `p_A,i(beta)`;
-- apply the exact 10,000-replicate circular block bootstrap from §17;
-- record whether one-sided p<0.05.
+Conditional on `p_gen`, draw each row's synthetic binary occupancy independently.
 
-Estimated power = fraction rejected.
+The oracle `p_gen` is used **only to draw labels**. It is never scored against S, never used as A, and never appears in the §17 test statistic.
 
-Requirement: **power >=0.80**.
+### 23.5 Literal `RUN_SYNTHETIC_STUDY` procedure
 
-This defines power for rejecting zero model-value improvement when the true alternative is 1% relative log-loss improvement. The separate observed >=1% materiality gate remains required at final reveal.
+Every simulated dataset is adjudicated by literal refitting.
 
-The power simulation cannot be executed before the taxonomy source gate provides lawful prospective peer geometry.
+For blocks B4, B5, ..., B9 in order:
+
+1. select the synthetic training rows using the exact §14 rule: a row is admissible only when its full 60-market-session post-formation window ends strictly before the first market session of the evaluation block;
+2. recompute the frozen §12 1st/99th winsor limits and mean/SD using those admissible training covariates only;
+3. fit a fresh frozen ridge-logistic **S** model on the synthetic training labels;
+4. fit a fresh frozen ridge-logistic **A** model on the same synthetic training labels;
+5. produce OOS S and A predictions for that evaluation block;
+6. seal the predictions and continue to the next block; later training may use earlier synthetic rows only when §14 makes them admissible.
+
+After B9:
+- concatenate only B4–B9 OOS predictions;
+- compute `d_i = LogLoss_S - LogLoss_A`;
+- compute the same `DeltaLogLoss20` and relative improvement as §§16/18;
+- apply the exact §17 circular moving-block-bootstrap test using the same fixed 10,000 bootstrap block-index draws generated once from seed `2026100601`.
+
+No oracle shortcut is permitted.
+
+If any S or A fit in any block violates the frozen §12 convergence rule, the entire power calculation returns `WAIT_FOR_MODEL_FIT`; failed simulation replicates are not silently discarded.
+
+### 23.6 Calibrate the frozen 1% alternative on the fitted procedure
+
+Define, for candidate beta:
+
+`M(beta) = mean over synthetic datasets of [DeltaLogLoss20 / mean(LogLoss_S)]`
+
+where every value is produced by `RUN_SYNTHETIC_STUDY`, not by oracle probabilities.
+
+Using PRNG seed `2026100602`:
+
+- generate exactly 2,000 full B1–B9 simulation random-number tapes and reuse the same tapes for every beta;
+- bracket beta on [0,10];
+- require `M(0) < 0.01` and `M(10) >= 0.01`; otherwise power eligibility fails;
+- perform deterministic bisection for exactly 40 iterations:
+  - midpoint = (lo+hi)/2;
+  - if `M(midpoint) >=0.01`, set hi=midpoint;
+  - otherwise set lo=midpoint;
+- define `beta_star = hi`;
+- require `|M(beta_star)-0.01| <= 0.0001`; otherwise return `WAIT_FOR_POWER_CALIBRATION`.
+
+Thus the alternative is calibrated to **1.00% expected relative log-loss improvement of the actual finite-sample prequential fitted A over fitted S**, not to an oracle model.
+
+### 23.7 Power estimate under literal refitting
+
+Using independent PRNG seed `2026100603`:
+
+1. generate exactly 20,000 new full B1–B9 synthetic datasets using `beta_star`;
+2. for each dataset run `RUN_SYNTHETIC_STUDY` literally;
+3. record success iff the §17 one-sided p-value is <0.05;
+4. do not substitute the materiality, calibration, stability, or challenger gates into the statistical-power calculation; those remain separate final advancement requirements.
+
+Estimated power:
+
+`POWER = (# simulations with p<0.05) / 20000`.
+
+Requirement: **POWER >=0.80**.
+
+Monte Carlo standard error must be reported as `sqrt(POWER*(1-POWER)/20000)`; it does not change the 0.80 threshold.
+
+### 23.8 Power firewall
+
+The power engine may not:
+
+- read B4–B9 real outcomes;
+- fit A to any real confirmatory outcome;
+- tune beta from real G/outcome associations;
+- alter alpha, block length, sample floors, estimator, feature vector, or 1% effect floor;
+- replace literal refitting with an oracle or analytical shortcut unless a later prereg amendment proves exact mathematical equivalence **before any efficacy read**.
+
+The power calculation cannot run before the taxonomy source gate supplies lawful prospective peer geometry and B1–B3 have matured.
 
 ## 24. Final-read eligibility
 
@@ -658,7 +835,7 @@ The power simulation cannot be executed before the taxonomy source gate provides
 - B1–B3 completed;
 - B4–B9 completed;
 - all 72 confirmatory formation dates accrued;
-- all confirmatory t+60 windows matured through offset 595;
+- all confirmatory t+60 windows matured and the five-session occupancy-resolution grace expired through offset 600;
 - >=12 distinct confirmatory formation months;
 - >=365 calendar days between first and last confirmatory formation date;
 - >=1,000 matured primary rows;
@@ -667,7 +844,10 @@ The power simulation cannot be executed before the taxonomy source gate provides
 - each B4–B9 has >=100 complete rows;
 - S+G coverage >=80%;
 - identity/peer/challenger gates satisfied;
-- exactly zero prior efficacy reveal.
+- exactly zero prior efficacy reveal;
+- zero `OUTCOME_PENDING_*` primary rows;
+- valid contemporaneous Q4 threshold for every resolved occupancy observation date;
+- if the structural secondary is opened, zero `HAZARD_PENDING_*` rows.
 
 Any unmet predicate => `WAIT_FOR_DATA` or the typed source/model/coverage wait state. No threshold lowering.
 
