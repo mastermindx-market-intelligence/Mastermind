@@ -136,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-03.company-consultation-edge-p0"
+    assert registry.policy_version == "2026-10-05.sol61-project-executive-candidate"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
