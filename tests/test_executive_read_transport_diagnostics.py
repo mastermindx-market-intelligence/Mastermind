@@ -726,6 +726,71 @@ def test_inbox_accepts_canonical_bounded_attention_receipts():
     ) is False
 
 
+@pytest.mark.parametrize("target", ["grounding-branch", "evidence-ref"])
+def test_inbox_bounding_rejects_identity_and_reference_replacements(target):
+    result = canonical_result(WebCeoV2CeoIngressReadGateway)
+    result["tool"] = "executive_inbox"
+    data = _canonical_inbox_data()
+    field = (
+        "grounding.mastermind.branch"
+        if target == "grounding-branch"
+        else "attention[0].evidence[0].ref"
+    )
+    replacement = {
+        "bounded": True,
+        "original_bytes": 700,
+        "returned_bytes": 7,
+        "field": field,
+        "preview": "forged!",
+    }
+    if target == "grounding-branch":
+        data["grounding"]["mastermind"]["branch"] = replacement
+    else:
+        data["attention"][0]["evidence"][0]["ref"] = replacement
+    result["data"] = data
+    result["bounded"] = [{
+        "bounded": True,
+        "original_bytes": 700,
+        "returned_bytes": 7,
+        "field": field,
+    }]
+
+    gateway = WebCeoV2CeoIngressReadGateway("/tmp/not-used.sock", CeoIngressClient())
+    assert gateway._is_canonical_read_result(
+        result, tool="executive_inbox", arguments={}
+    ) is False
+
+
+def test_inbox_bounded_preview_cannot_exceed_owner_limit():
+    from integrations.executive_mcp.schemas import BOUND_PREVIEW_CHARS
+
+    result = canonical_result(WebCeoV2CeoIngressReadGateway)
+    result["tool"] = "executive_inbox"
+    data = _canonical_inbox_data()
+    field = "attention[0].reason"
+    preview = "R" * (BOUND_PREVIEW_CHARS + 1)
+    replacement = {
+        "bounded": True,
+        "original_bytes": len(preview) + 100,
+        "returned_bytes": len(preview.encode("utf-8")),
+        "field": field,
+        "preview": preview,
+    }
+    data["attention"][0]["reason"] = replacement
+    result["data"] = data
+    result["bounded"] = [{
+        "bounded": True,
+        "original_bytes": replacement["original_bytes"],
+        "returned_bytes": replacement["returned_bytes"],
+        "field": field,
+    }]
+
+    gateway = WebCeoV2CeoIngressReadGateway("/tmp/not-used.sock", CeoIngressClient())
+    assert gateway._is_canonical_read_result(
+        result, tool="executive_inbox", arguments={}
+    ) is False
+
+
 def test_inbox_accepts_canonical_agent_os_attention_shape():
     value = _canonical_inbox_data()
     value["attention"] = [{

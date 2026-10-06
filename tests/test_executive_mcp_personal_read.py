@@ -102,6 +102,95 @@ def test_personal_read_mcp_uses_only_v1_ceo_ingress_and_has_no_write_route(tmp_p
 
     frames: list[dict[str, Any]] = []
 
+    def canonical_installed_read(tool: str, arguments: dict[str, Any]):
+        from control_plane import ceo_boot_packet, ceo_intent, executive_inbox
+
+        mastermind = {"branch": "HEAD", "root": "/mastermind", "sha": "a" * 40}
+        runtime_db = {"path": "/runtime/executive.sqlite3", "present": True}
+        if tool == "executive_state":
+            data = {
+                "mastermind": dict(mastermind),
+                "macro": {"root": "/macro", "sha": "b" * 40, "resolved_via": "flag"},
+                "boot_packet_schema": ceo_boot_packet.SCHEMA,
+                "inbox_schema": executive_inbox.SCHEMA,
+                "strategic_state": None,
+                "next_recommended_act": None,
+                "runtime_db": dict(runtime_db),
+                "runtime_counts": None,
+                "attention_counts": {"total": 0, "chairman": 0, "ceo": 0, "coo": 0},
+                "handoffs": [],
+            }
+            grounding = {
+                "boot_packet_schema": ceo_boot_packet.SCHEMA,
+                "macro": {"root": "/macro", "sha": "b" * 40},
+                "mastermind": dict(mastermind),
+                "runtime": "readonly:installed-executive-runtime",
+                "runtime_db": dict(runtime_db),
+            }
+        elif tool == "executive_inbox":
+            data = {
+                "schema": executive_inbox.SCHEMA,
+                "generated_at": "2026-09-24T11:45:00Z",
+                "grounding": {
+                    "mastermind": dict(mastermind),
+                    "macro": {"root": "/macro", "sha": "b" * 40},
+                    "boot_packet_schema": ceo_boot_packet.SCHEMA,
+                    "runtime_db": dict(runtime_db),
+                },
+                "attention": [],
+                "runtime_counts": None,
+                "suppressed": None,
+                "degraded": [],
+            }
+            grounding = {
+                "boot_packet_schema": ceo_boot_packet.SCHEMA,
+                "macro": {"root": "/macro", "sha": "b" * 40},
+                "mastermind": dict(mastermind),
+                "runtime": "readonly:installed-executive-runtime",
+                "runtime_db": dict(runtime_db),
+            }
+        elif tool == "executive_job":
+            data = {
+                "job": {"job_id": arguments["job_id"]},
+                "attempts": [],
+                "attempt_count": 0,
+                "attempt_limit": 1,
+                "latest_attempt": None,
+            }
+            grounding = {
+                "runtime": "readonly:installed-executive-runtime",
+                "source": "control_plane.executive_runtime",
+            }
+        elif tool == "ceo_intent_status":
+            data = {
+                "schema": ceo_intent.RECEIPT_SCHEMA,
+                "intent_id": arguments["intent_id"],
+                "fingerprint": "c" * 64,
+                "job_id": "JOB-1",
+                "status": "QUEUED",
+                "accepted": True,
+                "duplicate": False,
+                "dispatched": False,
+                "authority": {
+                    "requested": ["READ"],
+                    "policy_sha256": "d" * 64,
+                    "authority_level": "A0",
+                },
+                "grounding": {
+                    "mastermind_sha": "a" * 40,
+                    "macro_sha": "b" * 40,
+                    "boot_packet_schema": ceo_boot_packet.SCHEMA,
+                },
+                "created_at_ms": 1,
+            }
+            grounding = {
+                "runtime": "readonly:installed-executive-runtime",
+                "source": "control_plane.ceo_intent.resolve_intent",
+            }
+        else:
+            raise AssertionError(f"unexpected Personal Read tool: {tool}")
+        return data, grounding
+
     class FakeClient:
         def __init__(self, *, connect_timeout: float, read_timeout: float) -> None:
             assert connect_timeout == 5.0
@@ -110,11 +199,13 @@ def test_personal_read_mcp_uses_only_v1_ceo_ingress_and_has_no_write_route(tmp_p
         async def send_frame(self, socket_path: Any, frame: dict[str, Any]):
             assert str(socket_path) == "/tmp/personal-ceo-ingress.sock"
             frames.append(dict(frame))
+            data, grounding = canonical_installed_read(frame["tool"], frame["arguments"])
             result = legacy.result_envelope(
                 frame["tool"],
                 mode=legacy.ServerMode.READONLY,
                 generated_at="2026-09-24T11:45:00Z",
-                data={"source": "installed-v1"},
+                data=data,
+                grounding=grounding,
             )
             return gateway_module.CeoIngressResponse(
                 transport=gateway_module.TRANSPORT_SENT_OK,
@@ -206,7 +297,8 @@ def test_personal_read_mcp_uses_only_v1_ceo_ingress_and_has_no_write_route(tmp_p
                     assert envelope["ok"] is True
                     assert envelope["tool"] == name
                     assert envelope["server_version"] == profile.PERSONAL_READ_SERVER_VERSION
-                    assert envelope["data"] == {"source": "installed-v1"}
+                    expected_data, _ = canonical_installed_read(name, arguments)
+                    assert envelope["data"] == expected_data
 
                 assert [frame["tool"] for frame in frames] == list(profile.PERSONAL_READ_TOOL_NAMES)
                 assert all(

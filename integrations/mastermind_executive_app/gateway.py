@@ -614,6 +614,8 @@ class CeoIngressReadGateway:
         consumed: set[str],
         allow_empty: bool = True,
     ) -> bool:
+        from integrations.executive_mcp.schemas import BOUND_PREVIEW_CHARS
+
         if type(value) is str:
             return allow_empty or bool(value)
         if (
@@ -629,6 +631,7 @@ class CeoIngressReadGateway:
             or value["returned_bytes"] < 0
             or value["returned_bytes"] > value["original_bytes"]
             or type(value.get("preview")) is not str
+            or len(value["preview"]) > BOUND_PREVIEW_CHARS
             or (not allow_empty and not value["preview"])
             or len(value["preview"].encode("utf-8")) != value["returned_bytes"]
         ):
@@ -874,31 +877,13 @@ class CeoIngressReadGateway:
         return (
             type(mastermind) is dict
             and set(mastermind) == {"branch", "root", "sha"}
-            and CeoIngressReadGateway._valid_bounded_text(
-                mastermind["branch"],
-                field="grounding.mastermind.branch",
-                receipts=receipts,
-                consumed=consumed,
-            )
-            and CeoIngressReadGateway._valid_bounded_text(
-                mastermind["root"],
-                field="grounding.mastermind.root",
-                receipts=receipts,
-                consumed=consumed,
-            )
+            and type(mastermind["branch"]) is str
+            and type(mastermind["root"]) is str
             and type(mastermind["sha"]) is str
             and re.fullmatch(r"[0-9a-f]{40}", mastermind["sha"]) is not None
             and type(macro) is dict
             and set(macro) == {"root", "sha"}
-            and (
-                macro["root"] is None
-                or CeoIngressReadGateway._valid_bounded_text(
-                    macro["root"],
-                    field="grounding.macro.root",
-                    receipts=receipts,
-                    consumed=consumed,
-                )
-            )
+            and (macro["root"] is None or type(macro["root"]) is str)
             and (
                 macro["sha"] is None
                 or (
@@ -912,12 +897,7 @@ class CeoIngressReadGateway:
             )
             and type(runtime_db) is dict
             and set(runtime_db) == {"path", "present"}
-            and CeoIngressReadGateway._valid_bounded_text(
-                runtime_db["path"],
-                field="grounding.runtime_db.path",
-                receipts=receipts,
-                consumed=consumed,
-            )
+            and type(runtime_db["path"]) is str
             and type(runtime_db["present"]) is bool
         )
 
@@ -974,14 +954,13 @@ class CeoIngressReadGateway:
             and all(
                 type(item) is dict
                 and set(item) == {"ref", "field", "value"}
-                and all(
-                    CeoIngressReadGateway._valid_bounded_text(
-                        item[key],
-                        field=f"attention[{index}].evidence[{evidence_index}].{key}",
-                        receipts=receipts,
-                        consumed=consumed,
-                    )
-                    for key in ("ref", "field", "value")
+                and type(item["ref"]) is str
+                and type(item["field"]) is str
+                and CeoIngressReadGateway._valid_bounded_text(
+                    item["value"],
+                    field=f"attention[{index}].evidence[{evidence_index}].value",
+                    receipts=receipts,
+                    consumed=consumed,
                 )
                 for evidence_index, item in enumerate(evidence)
             )
