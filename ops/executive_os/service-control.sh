@@ -441,7 +441,12 @@ qualify_gateway_release() {
 
 qualify_gateway_refresh_preflight() {
   local expected_sha="$1"
-  local helper="$MCP_RELEASE_ROOT/$expected_sha/ops/executive_os/gateway_refresh_preflight.py"
+  local expected_dir="$MCP_RELEASE_ROOT/$expected_sha/ops/executive_os"
+  local helper="$expected_dir/gateway_refresh_preflight.py"
+  # The lifecycle controller and deep verifier must be the same installed
+  # generation being qualified. Refuse a checkout/staging copy even when it
+  # points at a valid installed target.
+  [ "$SCRIPT_DIR" = "$expected_dir" ] || return 1
   [ -f "$helper" ] && [ ! -L "$helper" ] || return 1
   "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$helper" \
     --expected-sha "$expected_sha" >/dev/null

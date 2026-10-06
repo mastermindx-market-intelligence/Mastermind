@@ -1206,7 +1206,8 @@ GATEWAY_CONFIG_PATH = "/Library/Application Support/MastermindExecutive/config/e
 def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            extra_args=("--expected-sha", GATEWAY_SHA),
                            missing_config=False, symlink_config=False, native_plutil=False,
-                           preflight_exit=0, preflight_exits=None, helper_kind="regular"):
+                           preflight_exit=0, preflight_exits=None, helper_kind="regular",
+                           controller_from_release=True):
     config = {"schema": "mastermind.executive_mcp_install.v1",
               "release_sha": GATEWAY_SHA, "service_uid": 458}
     config.update(config_changes or {})
@@ -1231,11 +1232,13 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
             f'MCP_RELEASE_ROOT="{GATEWAY_RELEASE_ROOT}"',
             f'MCP_RELEASE_ROOT="{release_root}"',
         )
+        expected_dir = release_root / GATEWAY_SHA / "ops" / "executive_os"
+        if controller_from_release:
+            source = 'SCRIPT_DIR="$(cd -P "$' + '(/usr/bin/dirname "$0")" && /bin/pwd)"'
+            text = text.replace(source, f'SCRIPT_DIR="{expected_dir}"')
+            assert source not in text
         script.write_text(text)
-        helper = (
-            release_root / GATEWAY_SHA / "ops" / "executive_os"
-            / "gateway_refresh_preflight.py"
-        )
+        helper = expected_dir / "gateway_refresh_preflight.py"
         helper.parent.mkdir(parents=True, exist_ok=True)
         if helper_kind == "regular":
             helper.write_text("# disposable gateway preflight fixture\n", encoding="utf-8")
@@ -1356,6 +1359,16 @@ def test_gateway_generation_mismatch_is_pre_effect_refusal(tmp_path, changes, co
     assert code == 65
     assert "gateway release qualification failed" in err
     assert calls == []
+
+
+def test_gateway_refuses_controller_outside_expected_release_before_lifecycle(tmp_path):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path, [], controller_from_release=False
+    )
+    assert code == 65
+    assert "gateway deep preflight failed" in err
+    assert calls == []
+    assert remaining == ""
 
 
 @pytest.mark.parametrize("helper_kind", ["missing", "symlink"])
