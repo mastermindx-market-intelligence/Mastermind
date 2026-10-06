@@ -56,11 +56,19 @@ def test_same_process_preserves_ceo_surface_and_separates_coo(rsa_key, tmp_path)
 
 def test_same_process_preserves_web_ceo_v3_and_separates_coo(rsa_key, tmp_path):
     _, token, current, settings = fixture.setup(rsa_key, tmp_path)
+
+    async def unused_mdm(**_kwargs):
+        raise AssertionError("tools/list must not call MDM")
+
+    class Mdm:
+        list_macos_devices = unused_mdm
+        device = unused_mdm
+
     app = server.build_web_ceo_v3_with_coo_mcp_app(
         settings.executive,
         coo_settings=settings,
         audit_sink=fixture.Sink(),
-        mdm_reader=object(),
+        mdm_reader=Mdm(),
         session_target_projector=lambda *_args: [],
         session_reply_handler=lambda *_args: {},
         session_summon_handler=lambda *_args: {},
