@@ -19,6 +19,41 @@ from .ingress import INTERNAL_PATH
 MAX_REQUEST_BYTES = 98_304
 
 
+class _RequestTooLarge(ValueError):
+    pass
+
+
+async def _bounded_request(receive) -> bytes:
+    body = bytearray()
+    while True:
+        event = await receive()
+        if event.get("type") == "http.disconnect":
+            raise RuntimeError("request disconnected")
+        if event.get("type") != "http.request":
+            raise RuntimeError("unexpected ASGI request event")
+        chunk = event.get("body", b"")
+        if not isinstance(chunk, bytes):
+            raise RuntimeError("request body is invalid")
+        if len(body) + len(chunk) > MAX_REQUEST_BYTES:
+            raise _RequestTooLarge
+        body.extend(chunk)
+        if not event.get("more_body", False):
+            return bytes(body)
+
+
+def _replay_body(body: bytes):
+    sent = False
+
+    async def replay():
+        nonlocal sent
+        if not sent:
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    return replay
+
+
 def create_mcp_server(facade: BrowserFacade):
     if not isinstance(facade, BrowserFacade):
         raise TypeError("owner-bound BrowserFacade is required")
@@ -118,7 +153,6 @@ def create_http_app(
         app=create_mcp_server(facade),
         stateless=True,
         json_response=True,
-        max_request_body_size=MAX_REQUEST_BYTES,
         security_settings=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
             allowed_hosts=list(allowed_hosts),
@@ -128,7 +162,35 @@ def create_http_app(
 
     class Endpoint:
         async def __call__(self, scope, receive, send):
-            request = Request(scope, receive)
+            declared = None
+            for key, value in scope.get("headers", ()):
+                if key.lower() == b"content-length":
+                    if declared is not None:
+                        await Response(status_code=400)(scope, receive, send)
+                        return
+                    declared = value
+            if declared is not None:
+                try:
+                    length = int(declared.decode("ascii"))
+                except (UnicodeDecodeError, ValueError):
+                    await Response(status_code=400)(scope, receive, send)
+                    return
+                if length < 0:
+                    await Response(status_code=400)(scope, receive, send)
+                    return
+                if length > MAX_REQUEST_BYTES:
+                    await Response(status_code=413)(scope, receive, send)
+                    return
+            try:
+                body = await _bounded_request(receive)
+            except _RequestTooLarge:
+                await Response(status_code=413)(scope, receive, send)
+                return
+            except RuntimeError:
+                await Response(status_code=400)(scope, receive, send)
+                return
+
+            request = Request(scope, _replay_body(body))
             try:
                 verified = authenticate(request)
                 if inspect.isawaitable(verified):
@@ -139,11 +201,11 @@ def create_http_app(
                 await Response(
                     status_code=401,
                     headers={"WWW-Authenticate": auth_challenge},
-                )(scope, receive, send)
+                )(scope, _replay_body(body), send)
                 return
             token = caller.set(verified)
             try:
-                await manager.handle_request(scope, receive, send)
+                await manager.handle_request(scope, _replay_body(body), send)
             finally:
                 caller.reset(token)
 
