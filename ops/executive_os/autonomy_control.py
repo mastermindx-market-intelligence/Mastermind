@@ -27,6 +27,7 @@ import pwd
 import re
 import secrets
 import selectors
+import signal
 import stat
 import subprocess
 import sys
@@ -517,6 +518,8 @@ class ArmAdmissionHost(Protocol):
 
     def require_services_stopped(self) -> None: ...
 
+    def require_services_already_stopped(self) -> None: ...
+
     def require_service_uids_quiescent(self) -> None: ...
 
     def require_transaction_absent(self) -> None: ...
@@ -672,6 +675,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     arm.add_argument("--workspace-binding-class", action=_StoreOnce, required=True)
     arm.add_argument("--credential-expires-at", action=_StoreOnce, required=True)
+
+    arm_quiesce = sub.add_parser(
+        "arm-quiesce-control-uid",
+        help="Quiesce only the fixed Control service UID before a receipt-gated arm.",
+    )
+    arm_quiesce.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
 
     disarm = sub.add_parser("disarm", help="Converge both arm bits to false.")
     disarm.add_argument(
@@ -2140,6 +2151,29 @@ class ProductionStatusHost:
         return completed.returncode == 0
 
     @staticmethod
+    def _loaded_observe_only(label: str) -> bool:
+        """Return loaded/absent only when launchd proves either state.
+
+        This helper is intentionally narrower than the historical ``_loaded``
+        predicate.  The quiesce-only command must not treat a permission, IPC,
+        or transient launchctl read failure as service absence before signaling
+        the fixed Control UID.
+        """
+        completed = subprocess.run(
+            ["/bin/launchctl", "print", f"system/{label}"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+        if completed.returncode == 0:
+            return True
+        if completed.returncode == 113:
+            return False
+        raise ArmAdmissionError("services_gate_failed")
+
+    @staticmethod
     def _control_ready(expected_sha: str) -> bool:
         release = SYSTEM_ROOT / "releases" / expected_sha
         control_home = RUNTIME_ROOT / "control" / "home"
@@ -2499,6 +2533,92 @@ class ProductionArmHost(ProductionStatusHost):
             loaded = (self._loaded(CONTROL_LABEL), self._loaded(WORKER_LABEL))
         if any(loaded):
             raise ArmAdmissionError("services_not_stopped")
+
+    def require_services_already_stopped(self) -> None:
+        """Observe the fixed Control/worker labels without changing lifecycle state."""
+        try:
+            loaded = (
+                self._loaded_observe_only(CONTROL_LABEL),
+                self._loaded_observe_only(WORKER_LABEL),
+            )
+        except ArmAdmissionError:
+            raise
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ArmAdmissionError("services_gate_failed") from exc
+        if any(loaded):
+            raise ArmAdmissionError("services_not_stopped")
+
+    def quiesce_control_uid_for_arm(self) -> tuple[int, ...]:
+        """Converge only the fixed Control service UID to zero live processes.
+
+        This is a pre-arm cleanup action, not part of the arm admission gate.
+        It never targets the worker UID (whose one attested distnoted may be
+        permitted by require_service_uids_quiescent), and it accepts no
+        caller-selected UID, PID, signal or timeout. The process table is the
+        reconciliation source: every signal target must still be observed under
+        the canonical Control UID, and success requires two consecutive empty
+        observations after the final signal.
+        """
+
+        from control_plane.executive_worker_broker import _ps_pids_for_uid
+
+        try:
+            control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
+        except KeyError as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        if control_uid <= 0:
+            raise ArmAdmissionError("service_uid_process_unknown")
+
+        try:
+            before = _ps_pids_for_uid(control_uid)
+        except Exception as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        if not before:
+            time.sleep(0.1)
+            try:
+                if not _ps_pids_for_uid(control_uid):
+                    return ()
+            except Exception as exc:
+                raise ArmAdmissionError("service_uid_process_unknown") from exc
+
+        signalled: set[int] = set()
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            phase_signalled: set[int] = set()
+            for _ in range(50):
+                try:
+                    live = _ps_pids_for_uid(control_uid)
+                except Exception as exc:
+                    raise ArmAdmissionError("service_uid_process_unknown") from exc
+                if not live:
+                    time.sleep(0.1)
+                    try:
+                        live = _ps_pids_for_uid(control_uid)
+                    except Exception as exc:
+                        raise ArmAdmissionError("service_uid_process_unknown") from exc
+                    if not live:
+                        return tuple(sorted(signalled))
+                for pid in live:
+                    if pid <= 1:
+                        raise ArmAdmissionError("service_uid_process_unknown")
+                    if pid in phase_signalled:
+                        continue
+                    try:
+                        os.kill(pid, signum)
+                    except ProcessLookupError:
+                        continue
+                    except OSError as exc:
+                        raise ArmAdmissionError("service_uid_process_unknown") from exc
+                    phase_signalled.add(pid)
+                    signalled.add(pid)
+                time.sleep(0.1)
+
+        try:
+            remaining = _ps_pids_for_uid(control_uid)
+        except Exception as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        if remaining:
+            raise ArmAdmissionError("service_uid_process_live")
+        return tuple(sorted(signalled))
 
     def require_service_uids_quiescent(self) -> None:
         # Reuse the worker owner's saved/real/effective UID projection and exact
@@ -4632,6 +4752,47 @@ def main(
     if args.command in CEO_SUBMIT_COMMANDS:
         ceo_host = ProductionCeoSubmitHost() if host is None else host
         return _run_ceo_submit_command(ceo_host, args, now=current)
+
+    if args.command == "arm-quiesce-control-uid":
+        arm_host = ProductionArmHost() if host is None else host
+        try:
+            require_root_privilege(arm_host.effective_uid())
+            installed = arm_host.require_exact_install(args.expected_sha)
+            if installed != args.expected_sha:
+                raise ArmAdmissionError("install_gate_failed")
+            arm_host.validate_acceptance(args.expected_sha)
+            configs = arm_host.load_unarmed_configs(args.expected_sha)
+            arm_host.require_runtime_quiescent(configs)
+            arm_host.require_services_already_stopped()
+            arm_host.require_transaction_absent()
+            signalled = arm_host.quiesce_control_uid_for_arm()
+            arm_host.require_service_uids_quiescent()
+            document = operation_document(
+                code="control_uid_quiesced",
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+                replayed=not signalled,
+            )
+            exit_code = 0
+        except ArmAdmissionError as exc:
+            document = operation_document(
+                code=exc.code,
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+            )
+            exit_code = 2
+        except Exception:
+            document = operation_document(
+                code="service_uid_process_unknown",
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+            )
+            exit_code = 2
+        print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+        return exit_code
 
     if args.command in {"dialogue-canary-publish", "dialogue-canary-reconcile"}:
         from ops.executive_os.dialogue_wake_canary_control import run_command

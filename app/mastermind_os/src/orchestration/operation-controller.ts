@@ -28,6 +28,16 @@
  *  3. Persistence, enrollment and operation-key minting live in the host's
  *     port and store implementations, not here.
  *
+ * DURABILITY. The pending-pointer store is durable: `read`, `reserve`, and
+ * `clearIfEqual` are atomic operations whose commitment cannot be claimed
+ * cancelled by a later signal. The controller awaits each of them in turn,
+ * fences after every await, and refuses to publish anything — pointer,
+ * selection, or terminal state — into a controller epoch that no longer owns
+ * the visible UI. Only a full terminal receipt (accepted/refused) followed by
+ * a successful `clearIfEqual` may erase the exact hint; a false or rejected
+ * clear leaves the pointer in place and the UI holds unknown so a later
+ * recover can resolve it.
+ *
  * Privacy: `CommandIntent.payload` is never persisted, never handed to the
  * store, and never surfaced in state. Producer `reason` text and thrown
  * exception text are never forwarded, even when they happen to match a
@@ -76,6 +86,9 @@ export interface EffectReceipt {
   readonly reason?: string;
 }
 
+/** Allow in-memory test stores to return values directly; controllers always await. */
+export type MaybePromise<T> = T | Promise<T>;
+
 // ── Port / store interfaces ───────────────────────────────────────────────────
 
 export interface FiniteCommandPort {
@@ -94,14 +107,53 @@ export interface FiniteCommandPort {
 }
 
 /**
- * A lookup hint only. The host implementation owns real persistence and
- * enrollment; this module never derives a storage backend from it and never
- * hands it a payload.
+ * Durable pending-pointer store. Three atomic operations:
+ *
+ *  - {@link PendingPointerStore.read} returns the current pending pointer for a
+ *    scope, or `null` when none exists. A read failure (host store blocked /
+ *    aborted) is reported by rejecting the returned promise.
+ *
+ *  - {@link PendingPointerStore.reserve} atomically claims the scope for a
+ *    specific pointer. It NEVER overwrites, even when the incoming pointer is
+ *    exactly equal to the existing one: a concurrent begin that races for the
+ *    same scope and pointer loses the reservation and receives the existing
+ *    pointer back, so the loser can join the in-flight observation rather
+ *    than submit a second effect.
+ *
+ *  - {@link PendingPointerStore.clearIfEqual} deletes the hint at the scope
+ *    iff it exactly matches the provided pointer (operationKey, kind,
+ *    targetKey). A `false` return or rejection means the caller's commit is
+ *    unknown and the pointer remains in the store; the controller treats that
+ *    as an explicit non-terminal hold, not a terminal settlement.
+ *
+ * All three operations accept an optional `AbortSignal`. The host store may
+ * abort an uncommitted transaction when the controller invalidates the
+ * visible epoch; a transaction that has already committed durably ignores the
+ * signal, so the controller never claims cancellation of a durable effect.
+ *
+ * The production shape has NO `write` or `clear` alias. Controllers cannot
+ * compose `write` + `clear` to fake atomic durability, and the shape check
+ * in {@link completeOrchestratorCommandBinding} rejects bindings that
+ * expose those aliases.
  */
 export interface PendingPointerStore {
-  read(principalScope: string): OperationPointer | null;
-  write(principalScope: string, pointer: OperationPointer): void;
-  clear(principalScope: string, pointer: OperationPointer): void;
+  read(
+    principalScope: string,
+    signal?: AbortSignal,
+  ): MaybePromise<OperationPointer | null>;
+  reserve(
+    principalScope: string,
+    pointer: OperationPointer,
+    signal?: AbortSignal,
+  ): MaybePromise<
+    | { readonly reserved: true }
+    | { readonly reserved: false; readonly pointer: OperationPointer }
+  >;
+  clearIfEqual(
+    principalScope: string,
+    pointer: OperationPointer,
+    signal?: AbortSignal,
+  ): MaybePromise<boolean>;
 }
 
 // ── Safe reasons ──────────────────────────────────────────────────────────────
@@ -124,6 +176,7 @@ type SafeReason =
   | "KIND_MISMATCH"
   | "TARGET_MISMATCH"
   | "STORE_WRITE_FAILED"
+  | "LOCAL_UNAVAILABLE"
   | "PENDING_POINTER"
   | "CHECKING"
   | "RECOVER_NO_POINTER"
@@ -269,7 +322,7 @@ interface TrackedOperation {
   readonly pointer: OperationPointer;
   /** Scope the hint was written under — never re-derived from live context. */
   readonly scope: string;
-  /** `OwnerContext.generation` captured at start. See dependency (1). */
+  /** `OwnerContext.generation` captured at start. See module doc, dependency (1). */
   readonly generation: string;
   /** Controller-local epoch captured at start. */
   readonly epoch: number;
@@ -278,7 +331,16 @@ interface TrackedOperation {
 
 type StoredRead =
   | { readonly ok: true; readonly pointer: OperationPointer | null }
-  | { readonly ok: false };
+  | { readonly ok: false; readonly reason: "MALFORMED_POINTER" | "LOCAL_UNAVAILABLE" };
+
+type ReserveOutcome =
+  | { readonly ok: true; readonly reserved: true }
+  | { readonly ok: false; readonly reason: "STORE_WRITE_FAILED" }
+  | {
+      readonly ok: true;
+      readonly reserved: false;
+      readonly pointer: OperationPointer;
+    };
 
 export class OperationController {
   private _state: OperationState = {
@@ -288,6 +350,7 @@ export class OperationController {
   };
 
   private _inflight: Promise<OperationState> | null = null;
+  private _activeAbort: AbortController | null = null;
 
   /**
    * Controller-local monotonic counter. Bumped when a new operation starts and
@@ -310,23 +373,31 @@ export class OperationController {
   /**
    * Begin a new operation.
    *
-   * Ordering matters: identity, then intent shape, then the in-flight busy
-   * gate, then the pending hint. A hint already held by the store for this
-   * scope means an operation may already exist whose outcome is unknown, so
-   * no new intent is submitted — the caller must `recover()` to resolve it.
-   *
-   * A begin that arrives while another operation is in flight is refused
-   * locally (`OPERATION_BUSY`) without joining that promise, even when the
-   * intents match. The original operation is left running. This is a
-   * before-effect local refusal, not a backend refusal, and it does not
-   * copy, compare, or store the caller's payload.
+   * Ordering matters:
+   *  1. owner context, identity, intent shape, and the in-flight busy gate are
+   *     all resolved synchronously;
+   *  2. the in-flight slot is then installed BEFORE the first async store read,
+   *     so a reentrant begin is refused locally (`OPERATION_BUSY`) until the
+   *     run releases the slot;
+   *  3. after every await the controller re-fences against the captured scope,
+   *     generation, and epoch; an invalidated or superseded run can publish
+   *     nothing;
+   *  4. `store.read` returning a pointer routes to checking/PENDING_POINTER
+   *     (recover-only), null is the only "empty" sentinel — read unavailable
+   *     or corrupt returns `LOCAL_UNAVAILABLE` or `MALFORMED_POINTER` and
+   *     zeros effects;
+   *  5. `store.reserve` is awaited BEFORE `port.submit`; a reservation
+   *     already held by an exact or different pointer keeps the caller in
+   *     checking/PENDING_POINTER with no second submit;
+   *  6. only the run that holds the reservation may publish or clear — a
+   *     reentrant host callback that arrives after `reserve` resolved cannot
+   *     create a duplicate submission because the run is already executing
+   *     and the in-flight slot is held until the clear attempt resolves.
    */
   async begin(intent: CommandIntent): Promise<OperationState> {
     const ctx = this._port.context();
     if (!ctx) return this._idle("OWNER_ABSENT");
 
-    // Re-type as unknown so a rejected intent can still be inspected for the
-    // most specific reason; the predicate above narrows `intent` to `never`.
     const raw: unknown = intent;
     if (!isValidIntent(raw)) {
       if (!isPlainObject(raw) || !isValidKind(raw.kind)) {
@@ -339,43 +410,82 @@ export class OperationController {
       return this._idle("INVALID_TARGET");
     }
 
+    // Sync in-flight check: the slot may already be held by a prior begin/recover.
     if (this._inflight) return this._busy();
 
     const scope = ctx.principalScope;
-    const stored = this._readStored(scope);
-    if (!stored.ok) return this._idle("MALFORMED_POINTER");
-    if (stored.pointer) {
-      // Never submit over an unresolved operation. recover() resolves it.
-      this._track(stored.pointer, scope, ctx.generation, this._epoch, null);
-      const state: CheckingState = {
-        status: "checking",
-        pointer: stored.pointer,
-        reason: "PENDING_POINTER",
-      };
-      this._state = state;
-      return state;
-    }
+    const generation = ctx.generation;
+    const epoch = ++this._epoch;
+    const abort = new AbortController();
 
-    let pointer: OperationPointer;
-    try {
-      pointer = this._port.prepare(intent);
-    } catch {
-      return this._idle("MALFORMED_POINTER");
-    }
-    if (!isValidPointer(pointer)) return this._idle("MALFORMED_POINTER");
-    if (pointer.kind !== intent.kind) return this._idle("KIND_MISMATCH");
-    if (pointer.targetKey !== intent.targetKey) {
-      return this._idle("TARGET_MISMATCH");
-    }
+    return this._startInflight(async (): Promise<OperationState> => {
+      // 1. Async read. Awaiting here is safe because _inflight was installed
+      //    synchronously by _startInflight before this run started.
+      const read = await this._readStoredAsync(scope, abort.signal);
+      if (this._stale(epoch, scope, generation)) return this._state;
+      if (!read.ok) {
+        return this._idle(read.reason);
+      }
+      if (read.pointer) {
+        // Already a pending pointer in the store: never submit over it.
+        this._track(read.pointer, scope, generation, epoch, abort);
+        const state: CheckingState = {
+          status: "checking",
+          pointer: read.pointer,
+          reason: "PENDING_POINTER",
+        };
+        this._state = state;
+        return state;
+      }
 
-    // Store before submit: the hint exists before any effect can be requested.
-    try {
-      this._store.write(scope, pointer);
-    } catch {
-      return this._idle("STORE_WRITE_FAILED");
-    }
+      // 2. Prepare pointer (sync; effect-free). A throwing prepare is the
+      //    caller's contract failure, not the store's, so we do not abort it.
+      let pointer: OperationPointer;
+      try {
+        pointer = this._port.prepare(intent);
+      } catch {
+        return this._idle("MALFORMED_POINTER");
+      }
+      if (!isValidPointer(pointer)) return this._idle("MALFORMED_POINTER");
+      if (pointer.kind !== intent.kind) return this._idle("KIND_MISMATCH");
+      if (pointer.targetKey !== intent.targetKey) {
+        return this._idle("TARGET_MISMATCH");
+      }
 
-    return this._submit(pointer, intent, scope, ctx.generation);
+      // 3. Fence again — prepare can re-enter host callbacks.
+      if (this._stale(epoch, scope, generation)) return this._state;
+
+      // 4. Durable reserve. Awaiting commit BEFORE submit is the contract.
+      const reserved = await this._reserveAsync(scope, pointer, abort.signal);
+      if (this._stale(epoch, scope, generation)) return this._state;
+      if (!reserved.ok) return this._idle(reserved.reason);
+      if (!reserved.reserved) {
+        // Lost the reservation race to another controller; track what is in
+        // the store and route to checking — never submit.
+        this._track(reserved.pointer, scope, generation, epoch, abort);
+        const state: CheckingState = {
+          status: "checking",
+          pointer: reserved.pointer,
+          reason: "PENDING_POINTER",
+        };
+        this._state = state;
+        return state;
+      }
+
+      // 5. Reservation committed. We own the slot; track and submit.
+      const op = this._track(pointer, scope, generation, epoch, abort);
+      this._state = { status: "submitting", pointer, reason: "SUBMITTING" };
+
+      let receipt: unknown;
+      try {
+        receipt = await this._port.submit(pointer, intent, abort.signal);
+      } catch {
+        if (this._stale(epoch, scope, generation)) return this._state;
+        return await this._applyFailure(op, "TRANSPORT_ERROR");
+      }
+      if (this._stale(epoch, scope, generation)) return this._state;
+      return await this._applyReceipt(receipt, op);
+    }, abort);
   }
 
   /**
@@ -404,32 +514,30 @@ export class OperationController {
     }
 
     const scope = ctx.principalScope;
-    const stored = this._readStored(scope);
-    if (!stored.ok) return this._idle("MALFORMED_POINTER");
-    if (!stored.pointer) return this._idle("RECOVER_NO_POINTER");
-
-    const pointer = stored.pointer;
-    const state: CheckingState = {
-      status: "checking",
-      pointer,
-      reason: "CHECKING",
-    };
-    this._state = state;
-
+    const generation = ctx.generation;
+    const epoch = ++this._epoch;
     const abort = new AbortController();
-    const op = this._track(pointer, scope, ctx.generation, this._epoch, abort);
 
-    const run = async (): Promise<OperationState> => {
+    return this._startInflight(async (): Promise<OperationState> => {
+      const read = await this._readStoredAsync(scope, abort.signal);
+      if (this._stale(epoch, scope, generation)) return this._state;
+      if (!read.ok) return this._idle(read.reason);
+      if (!read.pointer) return this._idle("RECOVER_NO_POINTER");
+
+      const pointer = read.pointer;
+      this._state = { status: "checking", pointer, reason: "CHECKING" };
+      const op = this._track(pointer, scope, generation, epoch, abort);
+
+      let receipt: unknown;
       try {
-        const receipt = await this._port.readOperation(pointer, abort.signal);
-        return this._applyReceipt(receipt, op);
+        receipt = await this._port.readOperation(pointer, abort.signal);
       } catch {
-        return this._applyFailure(op, "RECOVER_FAILED");
-      } finally {
-        this._releaseInflight(op.epoch);
+        if (this._stale(epoch, scope, generation)) return this._state;
+        return await this._applyFailure(op, "RECOVER_FAILED");
       }
-    };
-    return this._startInflight(run);
+      if (this._stale(epoch, scope, generation)) return this._state;
+      return await this._applyReceipt(receipt, op);
+    }, abort);
   }
 
   /**
@@ -441,21 +549,20 @@ export class OperationController {
    *
    * Aborting suppresses rendering only. It does not assert that the underlying
    * operation was cancelled, and it must not erase the pending hint. The
-   * original-scope pointer stays so a later `begin()` cannot submit a second
-   * effect — dropping the in-flight join is safe only because that hint remains.
-   * Only `recover()` via `readOperation` may later clear the exact hint on a
-   * terminal receipt. A sign-out that leaves `context()` null is the same:
-   * the hint stays in its original scope.
+   * store-original signal is cleared by `clearIfEqual` on a terminal receipt.
+   * A sign-out that leaves `context()` null is the same: the hint stays in
+   * its original scope.
    */
   invalidate(): void {
     const tracked = this._tracked;
-    const hadVisibleOperation = this._state.status !== "idle" || tracked !== null;
+    const hadVisibleOperation = this._state.status !== "idle" || tracked !== null || this._inflight !== null;
 
     // Bump epoch before abort so a synchronous rejection cannot publish.
     this._epoch++;
     if (this._inflight) {
-      tracked?.abort?.abort();
-      this._inflight = null;
+      this._activeAbort?.abort();
+      // _inflight stays set until the run settles; clearing here would let a
+      // racing begin submit a second effect into the same scope.
     }
     this._tracked = null;
 
@@ -466,33 +573,9 @@ export class OperationController {
 
   // ── internals ───────────────────────────────────────────────────────────────
 
-  private _submit(
-    pointer: OperationPointer,
-    intent: CommandIntent,
-    scope: string,
-    generation: string,
-  ): Promise<OperationState> {
-    const epoch = ++this._epoch;
-    const abort = new AbortController();
-    const op = this._track(pointer, scope, generation, epoch, abort);
-    this._state = { status: "submitting", pointer, reason: "SUBMITTING" };
-
-    const run = async (): Promise<OperationState> => {
-      try {
-        const receipt = await this._port.submit(pointer, intent, abort.signal);
-        return this._applyReceipt(receipt, op);
-      } catch {
-        return this._applyFailure(op, "TRANSPORT_ERROR");
-      } finally {
-        this._releaseInflight(epoch);
-      }
-    };
-    return this._startInflight(run);
-  }
-
-  /** Register the join before invoking a host that may throw or re-enter. */
   private _startInflight(
     run: () => Promise<OperationState>,
+    abort: AbortController,
   ): Promise<OperationState> {
     let resolve!: (state: OperationState) => void;
     let reject!: (reason: unknown) => void;
@@ -500,11 +583,20 @@ export class OperationController {
       resolve = done;
       reject = failed;
     });
-    // Do not defer the host call: install the join first, then preserve the
-    // original immediate-call semantics. A synchronous failure may release
-    // it, and synchronous invalidation must not be overwritten on return.
+    // Install the slot synchronously so reentrant begin/recover sees it
+    // before the first await inside `run` yields to the event loop.
     this._inflight = inflight;
-    void run().then(resolve, reject);
+    this._activeAbort = abort;
+    void run().then(
+      (state) => {
+        this._releaseInflight(inflight);
+        resolve(state);
+      },
+      (err) => {
+        this._releaseInflight(inflight);
+        reject(err);
+      },
+    );
     return inflight;
   }
 
@@ -520,27 +612,12 @@ export class OperationController {
     return op;
   }
 
-  private _releaseInflight(epoch: number): void {
-    if (this._epoch === epoch) this._inflight = null;
-  }
-
-  /** A receipt arrived for `op`. Decide first whether it may be published. */
-  private _applyReceipt(
-    receipt: unknown,
-    op: TrackedOperation,
-  ): OperationState {
-    const gated = this._gate(op);
-    return gated ?? this._decide(receipt, op);
-  }
-
-  /**
-   * The request failed rather than returning. Same gate as a receipt: a
-   * request aborted by `invalidate()`, or one whose authentication epoch has
-   * moved on, must not publish over whatever the UI is showing now.
-   */
-  private _applyFailure(op: TrackedOperation, reason: SafeReason): OperationState {
-    const gated = this._gate(op);
-    return gated ?? this._retain(op, reason);
+  private _releaseInflight(inflight: Promise<OperationState>): void {
+    // Invalidation fences publication, but the settled run must release its slot.
+    if (this._inflight === inflight) {
+      this._inflight = null;
+      this._activeAbort = null;
+    }
   }
 
   /**
@@ -557,18 +634,25 @@ export class OperationController {
    *    generation bump, or a different principal. The result belongs to a
    *    session the UI is no longer showing. See module doc, dependency (1).
    */
-  private _gate(op: TrackedOperation): OperationState | null {
-    if (this._epoch !== op.epoch) return this._state;
-
+  private _stale(
+    epoch: number,
+    scope: string,
+    generation: string,
+  ): boolean {
+    if (this._epoch !== epoch) return true;
     const ctx = this._port.context();
     if (
       !ctx ||
-      ctx.principalScope !== op.scope ||
-      ctx.generation !== op.generation
+      ctx.principalScope !== scope ||
+      ctx.generation !== generation
     ) {
-      return this._suppressStale(op);
+      this._epoch++;
+      this._activeAbort?.abort();
+      this._tracked = null;
+      this._idle("EPOCH_CHANGED");
+      return true;
     }
-    return null;
+    return false;
   }
 
   /**
@@ -578,20 +662,37 @@ export class OperationController {
    * reported as one: the pointer stays so a later `recover()` can still
    * resolve it under the new epoch.
    */
-  private _suppressStale(op: TrackedOperation): OperationState {
-    return this._retain(op, "EPOCH_CHANGED");
+  private _applyFailure(
+    op: TrackedOperation,
+    reason: SafeReason,
+  ): Promise<OperationState> {
+    if (this._stale(op.epoch, op.scope, op.generation)) return Promise.resolve(this._state);
+    return Promise.resolve(this._retain(op, reason));
   }
 
-  private _decide(receipt: unknown, op: TrackedOperation): OperationState {
-    if (!isValidReceipt(receipt)) return this._retain(op, "MALFORMED_RECEIPT");
+  /**
+   * A receipt arrived for `op`. Decide first whether it may be published.
+   * Returns a promise so the caller can await the atomic `clearIfEqual`
+   * before publishing a terminal state.
+   */
+  private _applyReceipt(
+    receipt: unknown,
+    op: TrackedOperation,
+  ): Promise<OperationState> {
+    if (this._stale(op.epoch, op.scope, op.generation)) return Promise.resolve(this._state);
+    if (!isValidReceipt(receipt)) {
+      return Promise.resolve(this._retain(op, "MALFORMED_RECEIPT"));
+    }
 
     // The receipt must describe exactly the operation this controller issued.
     if (receipt.operationKey !== op.pointer.operationKey) {
-      return this._retain(op, "RECEIPT_MISMATCH");
+      return Promise.resolve(this._retain(op, "RECEIPT_MISMATCH"));
     }
-    if (receipt.kind !== op.pointer.kind) return this._retain(op, "KIND_MISMATCH");
+    if (receipt.kind !== op.pointer.kind) {
+      return Promise.resolve(this._retain(op, "KIND_MISMATCH"));
+    }
     if (receipt.targetKey !== op.pointer.targetKey) {
-      return this._retain(op, "TARGET_MISMATCH");
+      return Promise.resolve(this._retain(op, "TARGET_MISMATCH"));
     }
 
     // Only an accepted launch receipt may carry a selection. A message or a
@@ -601,10 +702,10 @@ export class OperationController {
     // terminal state.
     if (receipt.missionSelection !== undefined) {
       if (receipt.kind !== "launch" || receipt.disposition !== "accepted") {
-        return this._retain(op, "SELECTION_NOT_ALLOWED");
+        return Promise.resolve(this._retain(op, "SELECTION_NOT_ALLOWED"));
       }
       const decoded = normalizeSelection(receipt.missionSelection);
-      if (!decoded) return this._retain(op, "SELECTION_INVALID");
+      if (!decoded) return Promise.resolve(this._retain(op, "SELECTION_INVALID"));
       return this._clearAccepted(op, "ACCEPTED", decoded);
     }
 
@@ -615,7 +716,7 @@ export class OperationController {
     // cannot be decoded here. That is never a refusal — hold the exact
     // pointer so a later recover() can re-read the operation.
     if (receipt.kind === "launch" && receipt.disposition === "accepted") {
-      return this._retain(op, "SELECTION_INVALID");
+      return Promise.resolve(this._retain(op, "SELECTION_INVALID"));
     }
 
     switch (receipt.disposition) {
@@ -625,17 +726,22 @@ export class OperationController {
         return this._clearRefused(op, "REFUSED");
       default:
         // Explicit unknown: the outcome is not known, so the pointer stays.
-        return this._retain(op, "UNKNOWN_RECEIPT");
+        return Promise.resolve(this._retain(op, "UNKNOWN_RECEIPT"));
     }
   }
 
-  /** Terminal accept: publish and clear exactly this operation's hint. */
-  private _clearAccepted(
+  /** Terminal accept: clear exactly this operation's hint, then publish. */
+  private async _clearAccepted(
     op: TrackedOperation,
     reason: SafeReason,
     selection?: MissionSelection,
-  ): OperationState {
-    this._clearHint(op);
+  ): Promise<OperationState> {
+    const cleared = await this._clearHint(op);
+    if (this._stale(op.epoch, op.scope, op.generation)) return this._state;
+    if (!cleared) {
+      // compareclear false / rejected: hold unknown, pointer remains.
+      return this._retain(op, "UNKNOWN_RECEIPT");
+    }
     const state: AcceptedState = {
       status: "accepted",
       pointer: null,
@@ -647,9 +753,16 @@ export class OperationController {
     return state;
   }
 
-  /** Terminal refuse: publish and clear exactly this operation's hint. */
-  private _clearRefused(op: TrackedOperation, reason: SafeReason): OperationState {
-    this._clearHint(op);
+  /** Terminal refuse: clear exactly this operation's hint, then publish. */
+  private async _clearRefused(
+    op: TrackedOperation,
+    reason: SafeReason,
+  ): Promise<OperationState> {
+    const cleared = await this._clearHint(op);
+    if (this._stale(op.epoch, op.scope, op.generation)) return this._state;
+    if (!cleared) {
+      return this._retain(op, "UNKNOWN_RECEIPT");
+    }
     const state: RefusedState = { status: "refused", pointer: null, reason };
     this._state = state;
     this._tracked = null;
@@ -664,25 +777,61 @@ export class OperationController {
     return state;
   }
 
-  private _clearHint(op: TrackedOperation): void {
+  /**
+   * Atomic compareclear. A `false` return or rejection means the caller's
+   * commit is unknown and the pointer remains in the store; the caller must
+   * NOT publish a terminal state. Awaiting the store's commit before deciding
+   * is what makes the in-flight slot stay joined through the clear attempt.
+   */
+  private async _clearHint(op: TrackedOperation): Promise<boolean> {
+    if (this._stale(op.epoch, op.scope, op.generation)) return false;
     try {
-      this._store.clear(op.scope, op.pointer);
+      return (await this._store.clearIfEqual(
+        op.scope,
+        op.pointer,
+        op.abort?.signal ?? undefined,
+      )) === true;
     } catch {
-      // Best effort; the hint may survive and be cleared by a later recover().
+      return false;
     }
   }
 
-  private _readStored(scope: string): StoredRead {
+  private async _readStoredAsync(
+    scope: string,
+    signal?: AbortSignal,
+  ): Promise<StoredRead> {
     let stored: unknown;
     try {
-      stored = this._store.read(scope);
+      stored = await this._store.read(scope, signal);
     } catch {
-      return { ok: false };
+      // read unavailable / blocked / aborted / failed
+      return { ok: false, reason: "LOCAL_UNAVAILABLE" };
     }
     if (stored === null) return { ok: true, pointer: null };
     return isValidPointer(stored)
       ? { ok: true, pointer: stored }
-      : { ok: false };
+      : { ok: false, reason: "MALFORMED_POINTER" };
+  }
+
+  private async _reserveAsync(
+    scope: string,
+    pointer: OperationPointer,
+    signal?: AbortSignal,
+  ): Promise<ReserveOutcome> {
+    let result: unknown;
+    try {
+      result = await this._store.reserve(scope, pointer, signal);
+    } catch {
+      return { ok: false, reason: "STORE_WRITE_FAILED" };
+    }
+    if (isPlainObject(result)) {
+      const keys = Object.keys(result);
+      if (result.reserved === true && keys.length === 1) return { ok: true, reserved: true };
+      if (result.reserved === false && keys.length === 2 && isValidPointer(result.pointer)) {
+        return { ok: true, reserved: false, pointer: result.pointer };
+      }
+    }
+    return { ok: false, reason: "STORE_WRITE_FAILED" };
   }
 
   private _idle(reason: SafeReason): OperationState {

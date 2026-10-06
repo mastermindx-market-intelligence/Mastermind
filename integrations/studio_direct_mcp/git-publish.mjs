@@ -9,6 +9,10 @@ const execFileDefault = promisify(execFileCallback);
 
 const OPERATION_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const COMMISSION_PATH = 'research/executive_commissions/COMMISSION.md';
+const COMMISSION_COMMIT_MESSAGE = 'chore: prepare Executive commission';
+const MAX_COMMISSION_BYTES = 512 * 1024;
 const BRANCH_RE = /^sol\/web-[A-Za-z0-9._-]+$/;
 const ALLOWED_LANE = 'web';
 const MAX_STDIO_BYTES = 1024 * 1024;
@@ -211,6 +215,13 @@ function validateOperationId(value) {
   return value;
 }
 
+function validateExpectedContentSha256(value) {
+  if (typeof value !== 'string' || !SHA256_RE.test(value)) {
+    throw new TypeError('expected_content_sha256 is invalid');
+  }
+  return value;
+}
+
 function validateExpectedHead(value) {
   if (typeof value !== 'string' || !SHA_RE.test(value)) {
     throw new TypeError('expected_head_sha is invalid');
@@ -277,12 +288,12 @@ export function createGitPublisher(config, dependencies = {}) {
   const realpath = dependencies.realpath ?? realpathDefault;
   const remove = dependencies.rm ?? rm;
 
-  async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {} } = {}) {
+  async function run(file, args, { cwd, timeoutMs = cfg.commandTimeoutMs, envExtra = {}, encoding = 'utf8' } = {}) {
     return execFile(file, args, {
       cwd,
       timeout: timeoutMs,
       maxBuffer: MAX_STDIO_BYTES,
-      encoding: 'utf8',
+      encoding,
       env: {
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
         HOME: process.env.HOME ?? '',
@@ -436,6 +447,43 @@ export function createGitPublisher(config, dependencies = {}) {
       clean: String(statusOut ?? '') === '',
       remoteUrl,
       ref,
+    };
+  }
+
+
+  async function committedCommissionDigest(workspacePath, revision) {
+    const {stdout: entryOut} = await git(workspacePath, ['ls-tree', revision, '--', COMMISSION_PATH]);
+    const entry = String(entryOut ?? '').trim();
+    const match = entry.match(/^100644 blob ([0-9a-f]{40})\tresearch\/executive_commissions\/COMMISSION\.md$/);
+    if (!match) return null;
+    const blob = match[1];
+    const {stdout: sizeOut} = await git(workspacePath, ['cat-file', '-s', blob]);
+    const size = Number(oneLine(sizeOut, 'commission blob size'));
+    if (!Number.isSafeInteger(size) || size < 0 || size > MAX_COMMISSION_BYTES) return null;
+    const {stdout: blobBytes} = await run(cfg.gitBinary, ['cat-file', 'blob', blob], {
+      cwd: workspacePath, encoding: 'buffer',
+    });
+    if (!Buffer.isBuffer(blobBytes) || blobBytes.length !== size) throw new Error('commission blob read is invalid');
+    return createHash('sha256').update(blobBytes).digest('hex');
+  }
+
+  // Internal-only, read-only reconciliation record. It is deliberately absent
+  // from STUDIO_GIT_PUBLISH_TOOLS and does not disclose document bytes or paths.
+  async function commissionStatus(args) {
+    if (!args || typeof args !== 'object' || Array.isArray(args) ||
+        Object.keys(args).some((key) => key !== 'operation_id')) {
+      throw new TypeError('internal commission status arguments are invalid');
+    }
+    const observed = await workspace(args.operation_id);
+    const contentSha256 = await committedCommissionDigest(observed.workspacePath, observed.localHead);
+    return {
+      schema: 'mastermind.studio_git_commission_status.v1',
+      operation_id: observed.operationId,
+      branch: observed.branch,
+      local_head_sha: observed.localHead,
+      remote_head_sha: observed.remoteHead,
+      clean: observed.clean,
+      ...(contentSha256 === null ? {} : {commission_content_sha256: contentSha256}),
     };
   }
 
@@ -593,6 +641,134 @@ export function createGitPublisher(config, dependencies = {}) {
     }
   }
 
+
+  // Internal-only fixed-path primitive for the commissioned preparation endpoint.
+  // It is deliberately absent from STUDIO_GIT_PUBLISH_TOOLS and accepts no path,
+  // branch, remote, repository, or command selector.
+  async function commitCommission(args) {
+    if (!args || typeof args !== 'object' || Array.isArray(args) ||
+        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'expected_content_sha256'].includes(key))) {
+      throw new TypeError('internal commission commit arguments are invalid');
+    }
+    const operationId = validateOperationId(args.operation_id);
+    const expectedHead = validateExpectedHead(args.expected_head_sha);
+    const expectedContentSha256 = validateExpectedContentSha256(args.expected_content_sha256);
+    const message = COMMISSION_COMMIT_MESSAGE;
+    const before = await workspace(operationId, { observeRemote: false });
+    if (before.localHead !== expectedHead) {
+      return {
+        schema: 'mastermind.studio_git_commit_result.v1',
+        status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'EXPECTED_HEAD_MISMATCH',
+        operation_id: operationId, branch: before.branch,
+        expected_head_sha: expectedHead, local_head_sha: before.localHead,
+      };
+    }
+
+    const {stdout: statusOut} = await git(before.workspacePath,
+      ['status', '--porcelain=v1', '--untracked-files=all']);
+    const statusLines = String(statusOut ?? '').split(/\r?\n/).filter(Boolean);
+    if (statusLines.length !== 1 || statusLines[0].slice(3) !== COMMISSION_PATH) {
+      return {
+        schema: 'mastermind.studio_git_commit_result.v1',
+        status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'FOREIGN_WORKTREE_CHANGES',
+        operation_id: operationId, branch: before.branch, local_head_sha: expectedHead,
+      };
+    }
+
+    const scratch = await mkdtemp(path.join(tmpdir(), 'studio-git-commission-'));
+    const indexPath = path.join(scratch, 'index');
+    let refUpdateAttempted = false;
+    let commitHead = null;
+    let ref = null;
+    try {
+      await gitWithIndex(before.workspacePath, ['read-tree', expectedHead], indexPath);
+      await gitWithIndex(before.workspacePath, ['add', '--', COMMISSION_PATH], indexPath);
+      const {stdout: treeOut} = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
+      const tree = oneLine(treeOut, 'commission candidate tree');
+      if (!SHA_RE.test(tree)) throw new Error('commission candidate tree is invalid');
+      ref = commitActionRef(operationId, before.branch, expectedHead, tree, message);
+
+      const {stdout: pathsOut} = await git(before.workspacePath,
+        ['diff-tree', '--no-commit-id', '--name-only', '-r', expectedHead, tree]);
+      if (String(pathsOut ?? '').trim() !== COMMISSION_PATH) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'COMMISSION_PATHSET_MISMATCH',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
+      const actualContentSha256 = await committedCommissionDigest(before.workspacePath, tree);
+      if (actualContentSha256 === null) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'COMMISSION_ENTRY_NOT_REGULAR_BLOB',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
+      if (actualContentSha256 !== expectedContentSha256) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED', code: 'COMMISSION_CONTENT_SHA256_MISMATCH',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
+
+      const {stdout: commitOut} = await gitWithIndex(before.workspacePath,
+        ['commit-tree', tree, '-p', expectedHead, '-m', message], indexPath);
+      commitHead = oneLine(commitOut, 'commission commit HEAD');
+      if (!SHA_RE.test(commitHead)) throw new Error('commission commit HEAD is invalid');
+
+      refUpdateAttempted = true;
+      try {
+        await git(before.workspacePath, ['update-ref', before.ref, commitHead, expectedHead]);
+      } catch {
+        try {
+          if ((await workspace(operationId, {observeRemote: false})).localHead === commitHead) {
+            return finishCommissionApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
+          }
+        } catch { /* retain uncertainty */ }
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'UNKNOWN', effect_state: 'EFFECT_UNKNOWN', code: 'LOCAL_REF_UPDATE_UNCERTAIN',
+          action_ref: ref, operation_id: operationId, branch: before.branch,
+          previous_head_sha: expectedHead, commit_head_sha: commitHead,
+        };
+      }
+      return finishCommissionApplied('APPLIED');
+
+      async function finishCommissionApplied(successCode) {
+        let indexSynced = true;
+        try { await git(before.workspacePath, ['read-tree', commitHead]); } catch { indexSynced = false; }
+        let observed = null;
+        try { observed = await workspace(operationId, {observeRemote: false}); } catch { /* known applied */ }
+        if (!observed) {
+          return {
+            schema: 'mastermind.studio_git_commit_result.v1',
+            status: 'PARTIAL', effect_state: 'APPLIED',
+            code: indexSynced ? 'APPLIED_READBACK_FAILED' : 'APPLIED_INDEX_SYNC_AND_READBACK_FAILED',
+            action_ref: ref, operation_id: operationId, branch: before.branch,
+            previous_head_sha: expectedHead, commit_head_sha: commitHead, index_synced: indexSynced,
+          };
+        }
+        const current = observed.localHead === commitHead;
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: current && indexSynced ? 'OK' : 'PARTIAL', effect_state: 'APPLIED',
+          code: current && indexSynced ? successCode : (current ? 'APPLIED_INDEX_SYNC_FAILED' : 'APPLIED_BUT_SUPERSEDED'),
+          action_ref: ref, operation_id: observed.operationId, branch: observed.branch,
+          previous_head_sha: expectedHead, commit_head_sha: commitHead,
+          local_head_sha: observed.localHead, clean: observed.clean, index_synced: indexSynced,
+        };
+      }
+    } finally {
+      try { await remove(scratch, {recursive: true, force: true}); }
+      catch (error) { if (!refUpdateAttempted) throw error; }
+    }
+  }
+
   async function push(args) {
     if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some((key) => !['operation_id', 'expected_head_sha'].includes(key))) {
       throw new TypeError('studio_git_push_current_branch arguments are invalid');
@@ -705,7 +881,7 @@ export function createGitPublisher(config, dependencies = {}) {
     };
   }
 
-  return Object.freeze({ status, commit, push });
+  return Object.freeze({ status, commit, push, commitCommission, commissionStatus });
 }
 
 export function toolResult(value, isError = false) {

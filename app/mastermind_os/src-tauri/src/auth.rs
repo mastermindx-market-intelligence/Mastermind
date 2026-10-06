@@ -19,24 +19,42 @@ const ORIGIN: &str = "https://mcp.mastermind-x.com";
 const TRANSACTION_TTL: Duration = Duration::from_secs(300);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RESPONSE: usize = 2_000_000;
+const EXECUTIVE_SCOPE: &str = "mastermind.executive.read mastermind.executive.intent.submit";
+const EXECUTIVE_REQUEST_CAP: usize = 65_536;
+const EXECUTIVE_RESPONSE_CAP: usize = 262_144;
+const MAX_SAFE_GENERATION: u64 = (1_u64 << 53) - 1;
+
+fn executive_resource(value: &str) -> Option<String> {
+    let url = Url::parse(value).ok()?;
+    if url.scheme() != "https" || url.host_str().is_none() || !url.username().is_empty()
+        || url.password().is_some() || url.query().is_some() || url.fragment().is_some()
+        || url.as_str() != value { return None; }
+    Some(value.to_owned())
+}
+#[derive(Clone, Copy, Serialize)]
+pub struct ExecutiveAuthStatus { generation: u64, available: bool }
+
 type Result<T> = std::result::Result<T, String>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Resource {
     Acquisition,
     Content,
+    Executive,
 }
 impl Resource {
     fn audience(self) -> &'static str {
         match self {
             Self::Acquisition => "https://mcp.mastermind-x.com/workspace/read",
             Self::Content => "https://mcp.mastermind-x.com/workspace/window/current",
+            Self::Executive => option_env!("MM_EXECUTIVE_RESOURCE").unwrap_or(""),
         }
     }
     fn scope(self) -> &'static str {
         match self {
             Self::Acquisition => "mastermind.workspace.read",
             Self::Content => "mastermind.workspace.content.read",
+            Self::Executive => EXECUTIVE_SCOPE,
         }
     }
 }
@@ -61,6 +79,9 @@ struct Pending {
 }
 struct Inner {
     client_id: Option<String>,
+    executive_resource: Option<String>,
+    executive_generation: u64,
+    executive: Option<Token>,
     generation: u64,
     pending: Option<Pending>,
     exchanging: bool,
@@ -70,11 +91,17 @@ struct Inner {
 }
 impl Inner {
     fn new(client: Option<&str>) -> Self {
+        Self::with_executive_resource(client, option_env!("MM_EXECUTIVE_RESOURCE"))
+    }
+    fn with_executive_resource(client: Option<&str>, resource: Option<&str>) -> Self {
         let client_id = client
             .filter(|value| crate::native_client::validate_native_client_id(value).is_ok())
             .map(str::to_owned);
         Self {
             client_id,
+            executive_resource: resource.and_then(executive_resource),
+            executive_generation: 0,
+            executive: None,
             generation: 0,
             pending: None,
             exchanging: false,
@@ -87,6 +114,7 @@ impl Inner {
         match resource {
             Resource::Acquisition => self.acquisition.as_ref(),
             Resource::Content => self.content.as_ref(),
+            Resource::Executive => self.executive.as_ref().filter(|_| self.executive_resource.is_some()),
         }
         .filter(|t| t.expires > Instant::now())
     }
@@ -114,8 +142,34 @@ impl Inner {
             content,
         }
     }
+    // Overflow permanently disables this optional capability; generations never wrap/reuse.
+    fn advance_executive(&mut self) -> bool {
+        match self.executive_generation.checked_add(1).filter(|n| *n <= MAX_SAFE_GENERATION) {
+            Some(next) => { self.executive_generation = next; true }
+            None => { self.executive = None; self.executive_resource = None; false }
+        }
+    }
+    fn clear_executive(&mut self) {
+        self.executive = None;
+        self.advance_executive();
+    }
+    fn expire_executive(&mut self) {
+        if self.executive.as_ref().is_some_and(|t| t.expires <= Instant::now()) {
+            self.clear_executive();
+        }
+    }
+    fn executive_status(&mut self) -> ExecutiveAuthStatus {
+        self.expire_executive();
+        ExecutiveAuthStatus { generation: self.executive_generation,
+            available: self.token(Resource::Executive).is_some() }
+    }
+    fn fail_transaction(&mut self, resource: Resource, reason: &'static str) {
+        if resource == Resource::Executive { self.clear_executive(); }
+        else { self.reason = Some(reason); }
+    }
     fn invalidate(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self.clear_executive();
         self.pending = None;
         self.exchanging = false;
         self.acquisition = None;
@@ -123,13 +177,20 @@ impl Inner {
         self.reason = None;
     }
     fn transaction(&mut self, resource: Resource) -> Result<String> {
+        if resource == Resource::Executive {
+            if self.executive_resource.is_none() { return Err("EXECUTIVE_UNCONFIGURED".into()); }
+            self.clear_executive();
+            if self.executive_resource.is_none() { return Err("EXECUTIVE_UNCONFIGURED".into()); }
+        }
         let client = self
             .client_id
             .as_deref()
             .ok_or("NATIVE_CLIENT_ID_MISSING")?;
         let state = random_secret();
         let verifier = random_secret();
-        let url = authorization_url(client, resource, &state, &verifier);
+        let url = if resource == Resource::Executive {
+            authorization_url_for_audience(client, resource, self.executive_resource.as_deref().ok_or("EXECUTIVE_UNCONFIGURED")?, &state, &verifier)
+        } else { authorization_url(client, resource, &state, &verifier) };
         self.pending = Some(Pending {
             state,
             verifier,
@@ -148,11 +209,11 @@ impl Inner {
         }
         let pending = self.pending.take().ok_or("AUTH_CALLBACK_UNEXPECTED")?;
         if pending.expires <= Instant::now() || pending.generation != self.generation {
-            self.reason = Some("AUTH_TRANSACTION_EXPIRED");
+            self.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
             return Err("AUTH_TRANSACTION_EXPIRED".into());
         }
         if error {
-            self.reason = Some("AUTHORIZATION_REFUSED");
+            self.fail_transaction(pending.resource, "AUTHORIZATION_REFUSED");
             return Err("AUTHORIZATION_REFUSED".into());
         }
         self.exchanging = true;
@@ -181,13 +242,19 @@ impl Inner {
                 self.reason = None;
                 self.transaction(Resource::Content).ok()
             }
-            Ok(token) => {
+            Ok(token) if resource == Resource::Content => {
                 self.content = Some(token);
                 self.reason = None;
+                if self.executive_resource.is_some() { self.transaction(Resource::Executive).ok() } else { None }
+            }
+            Ok(token) => {
+                if self.executive_resource.is_some() && self.advance_executive() {
+                    self.executive = Some(token);
+                }
                 None
             }
             Err(_) => {
-                self.reason = Some("TOKEN_EXCHANGE_FAILED");
+                self.fail_transaction(resource, "TOKEN_EXCHANGE_FAILED");
                 None
             }
         }
@@ -223,12 +290,15 @@ fn random_secret() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 fn authorization_url(client: &str, resource: Resource, state: &str, verifier: &str) -> String {
+    authorization_url_for_audience(client, resource, resource.audience(), state, verifier)
+}
+fn authorization_url_for_audience(client: &str, resource: Resource, audience: &str, state: &str, verifier: &str) -> String {
     let mut url = Url::parse(&format!("{ISSUER}authorize")).expect("fixed issuer");
     url.query_pairs_mut().extend_pairs([
         ("response_type", "code"),
         ("client_id", client),
         ("redirect_uri", CALLBACK),
-        ("audience", resource.audience()),
+        ("audience", audience),
         ("scope", resource.scope()),
         ("state", state),
         ("code_challenge_method", "S256"),
@@ -279,8 +349,10 @@ fn parse_callback(raw: &str) -> Result<(String, Option<String>, bool)> {
     Ok((state, code, error))
 }
 fn emit(app: &AppHandle) {
-    if let Ok(inner) = app.state::<NativeAuth>().lock() {
+    if let Ok(mut inner) = app.state::<NativeAuth>().lock() {
+        let executive = inner.executive_status();
         let _ = app.emit("mastermind-auth-state", inner.status());
+        let _ = app.emit("mastermind-executive-auth-state", executive);
     }
 }
 fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()> {
@@ -292,8 +364,8 @@ fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()>
             return Err("AUTHENTICATION_CHANGED".into());
         }
         if app.opener().open_url(url, None::<&str>).is_err() {
-            inner.pending = None;
-            inner.reason = Some("AUTH_BROWSER_UNAVAILABLE");
+            let resource = inner.pending.take().ok_or("AUTHENTICATION_CHANGED")?.resource;
+            inner.fail_transaction(resource, "AUTH_BROWSER_UNAVAILABLE");
             drop(inner);
             emit(app);
             return Err("AUTH_BROWSER_UNAVAILABLE".into());
@@ -310,8 +382,9 @@ fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()>
                     .as_ref()
                     .is_some_and(|p| p.expires <= Instant::now())
             {
-                inner.pending = None;
-                inner.reason = Some("AUTH_TRANSACTION_EXPIRED");
+                if let Some(pending) = inner.pending.take() {
+                    inner.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
+                }
             }
         }
         emit(&app);
@@ -391,6 +464,14 @@ async fn read_json_body(mut response: reqwest::Response, cap: usize) -> Result<V
 }
 fn parse_token(value: Value, resource: Resource) -> Result<Token> {
     let object = value.as_object().ok_or("TOKEN_RESPONSE_INVALID")?;
+    if resource == Resource::Executive {
+        let scopes = object.get("scope").and_then(Value::as_str).ok_or("TOKEN_RESPONSE_INVALID")?;
+        let mut scopes: Vec<_> = scopes.split_whitespace().collect();
+        scopes.sort_unstable();
+        if scopes != ["mastermind.executive.intent.submit", "mastermind.executive.read"] {
+            return Err("TOKEN_RESPONSE_INVALID".into());
+        }
+    }
     let token = object
         .get("access_token")
         .and_then(Value::as_str)
@@ -400,9 +481,9 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
         .get("token_type")
         .and_then(Value::as_str)
         .is_some_and(|s| s.eq_ignore_ascii_case("Bearer"))
-        || object
+        || (resource != Resource::Executive && object
             .get("scope")
-            .is_some_and(|s| s.as_str() != Some(resource.scope()))
+            .is_some_and(|s| s.as_str() != Some(resource.scope())))
     {
         return Err("TOKEN_RESPONSE_INVALID".into());
     }
@@ -805,6 +886,104 @@ pub async fn read_current_window(app: AppHandle) -> Result<Value> {
     read_current_window_document(app).await
 }
 
+fn executive_guard(inner: &mut Inner, generation: u64, token_expires: Instant) -> Result<()> {
+    inner.expire_executive();
+    if inner.executive_generation == generation &&
+        inner.token(Resource::Executive).is_some_and(|t| t.expires == token_expires) {
+        Ok(())
+    } else { Err("EXECUTIVE_AUTH_CHANGED".into()) }
+}
+fn executive_body(body: &Value) -> Result<Vec<u8>> {
+    let serialized = serde_json::to_vec(body).map_err(|_| "REQUEST_INVALID".to_owned())?;
+    if serialized.len() > EXECUTIVE_REQUEST_CAP {
+        return Err("REQUEST_BOUND".into());
+    }
+    Ok(serialized)
+}
+async fn executive_post(app: AppHandle, path: &'static str, body: Value) -> Result<Value> {
+    let serialized = executive_body(&body)?;
+    let state = app.state::<NativeAuth>();
+    let (token, token_expires, generation) = {
+        let inner = state.lock()?;
+        let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
+        (
+            token.value.clone(),
+            token.expires,
+            inner.executive_generation,
+        )
+    };
+    let url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID".to_owned())?;
+    if url.origin().ascii_serialization() != ORIGIN {
+        return Err("REQUEST_INVALID".into());
+    }
+    let response = state
+        .http
+        .post(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(serialized)
+        .send()
+        .await
+        .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
+    { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+    let status = response.status();
+    let result = if status.is_success() {
+        read_json_body(response, EXECUTIVE_RESPONSE_CAP).await
+    } else {
+        Err(match status.as_u16() {
+            401 => "EXECUTIVE_AUTH_REQUIRED",
+            403 => "EXECUTIVE_ACCESS_REFUSED",
+            _ => "EXECUTIVE_TRANSPORT_UNAVAILABLE",
+        }
+        .into())
+    };
+    {
+        let mut inner = state.lock()?;
+        executive_guard(&mut inner, generation, token_expires)?;
+    }
+    result
+}
+#[tauri::command]
+pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>) -> Result<ExecutiveAuthStatus> {
+    Ok(state.lock()?.executive_status())
+}
+#[tauri::command]
+pub async fn executive_context(app: AppHandle) -> Result<Value> {
+    let result = executive_post(app.clone(), "/os/executive/context", serde_json::json!({})).await;
+    if result.is_err() {
+        emit(&app);
+    }
+    result
+}
+#[tauri::command]
+pub async fn executive_submit(app: AppHandle, arguments: Value) -> Result<Value> {
+    let result = executive_post(
+        app.clone(),
+        "/os/executive/submit",
+        serde_json::json!({ "arguments": arguments }),
+    )
+    .await;
+    if result.is_err() {
+        emit(&app);
+    }
+    result
+}
+#[tauri::command]
+pub async fn executive_status(app: AppHandle, intent_id: String) -> Result<Value> {
+    let result = executive_post(
+        app.clone(),
+        "/os/executive/status",
+        serde_json::json!({ "arguments": { "intent_id": intent_id } }),
+    )
+    .await;
+    if result.is_err() {
+        emit(&app);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1050,6 +1229,150 @@ mod tests {
         }
         let mut extra = valid; extra["url"] = "https://other.example".into();
         assert!(serde_json::from_value::<ResultSelection>(extra).is_err());
+    }
+
+    fn executive_inner() -> Inner {
+        Inner::with_executive_resource(Some("public-client"), Some("https://fixture.invalid/executive"))
+    }
+    fn complete_resource(i: &mut Inner, resource: Resource) -> Option<String> {
+        let pending = i.pending.as_ref().unwrap();
+        assert_eq!(pending.resource, resource);
+        let raw = callback_url(&pending.state);
+        let (p, _, _) = i.consume(&raw).unwrap();
+        i.finish_exchange(p.generation, p.resource, Ok(token("fixture-private-token")))
+    }
+    fn at_executive_pending() -> Inner {
+        let mut i = executive_inner();
+        i.transaction(Resource::Acquisition).unwrap();
+        complete_resource(&mut i, Resource::Acquisition).unwrap();
+        complete_resource(&mut i, Resource::Content).unwrap();
+        i
+    }
+    #[test]
+    fn executive_is_third_distinct_pkce_in_the_existing_chain() {
+        let mut i = executive_inner();
+        let mut url = Some(i.transaction(Resource::Acquisition).unwrap());
+        let mut states = std::collections::BTreeSet::new();
+        let mut verifiers = std::collections::BTreeSet::new();
+        for resource in [Resource::Acquisition, Resource::Content, Resource::Executive] {
+            let parsed = Url::parse(url.as_ref().unwrap()).unwrap();
+            let pairs: std::collections::BTreeMap<_, _> = parsed.query_pairs().into_owned().collect();
+            let pending = i.pending.as_ref().unwrap();
+            assert!(states.insert(pending.state.clone()));
+            assert!(verifiers.insert(pending.verifier.clone()));
+            assert_eq!(pairs["client_id"], "public-client");
+            assert_eq!(pairs["redirect_uri"], CALLBACK);
+            assert_eq!(pairs["scope"], resource.scope());
+            assert_eq!(pairs["code_challenge_method"], "S256");
+            assert_eq!(pairs["code_challenge"], URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes())));
+            assert_eq!(pairs["audience"], if resource == Resource::Executive {
+                "https://fixture.invalid/executive"
+            } else { resource.audience() });
+            url = complete_resource(&mut i, resource);
+        }
+        assert!(url.is_none());
+        assert!(i.token(Resource::Acquisition).is_some());
+        assert!(i.token(Resource::Content).is_some());
+        assert!(i.executive_status().available);
+        assert_eq!(i.status().status, "signed_in");
+    }
+    #[test]
+    fn executive_denial_and_exchange_failure_preserve_workspace_tokens() {
+        for denied in [true, false] {
+            let mut i = at_executive_pending();
+            let generation = i.executive_generation;
+            let state = i.pending.as_ref().unwrap().state.clone();
+            if denied {
+                assert!(i.consume(&format!("{CALLBACK}?state={state}&error=access_denied")).is_err());
+            } else {
+                let (p, _, _) = i.consume(&callback_url(&state)).unwrap();
+                assert!(i.finish_exchange(p.generation, p.resource, Err("fixture".into())).is_none());
+            }
+            assert!(i.token(Resource::Acquisition).is_some());
+            assert!(i.token(Resource::Content).is_some());
+            assert_eq!(i.status().status, "signed_in");
+            assert!(i.reason.is_none());
+            assert!(!i.executive_status().available);
+            assert!(i.executive_generation > generation);
+        }
+    }
+    #[test]
+    fn signout_fences_pending_and_delayed_executive_exchange() {
+        for exchanging in [false, true] {
+            let mut i = at_executive_pending();
+            let state = i.pending.as_ref().unwrap().state.clone();
+            let old = i.executive_generation;
+            let consumed = if exchanging { Some(i.consume(&callback_url(&state)).unwrap().0) } else { None };
+            i.invalidate();
+            assert!(i.executive_generation > old);
+            if let Some(p) = consumed {
+                assert!(i.finish_exchange(p.generation, p.resource, Ok(token("late"))).is_none());
+            } else { assert!(i.consume(&callback_url(&state)).is_err()); }
+            assert!(!i.executive_status().available);
+            assert_eq!(i.status().status, "signed_out");
+        }
+    }
+    #[test]
+    fn executive_expiry_and_reinstall_fence_old_results_without_changing_workspace_generation() {
+        let mut i = at_executive_pending();
+        complete_resource(&mut i, Resource::Executive);
+        let first_generation = i.executive_generation;
+        let first_expiry = i.executive.as_ref().unwrap().expires;
+        let workspace_generation = i.generation;
+        assert!(executive_guard(&mut i, first_generation, first_expiry).is_ok());
+        i.transaction(Resource::Executive).unwrap();
+        complete_resource(&mut i, Resource::Executive);
+        assert!(executive_guard(&mut i, first_generation, first_expiry).is_err());
+        let generation = i.executive_generation;
+        i.executive.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+        let expiry = i.executive.as_ref().unwrap().expires;
+        assert!(executive_guard(&mut i, generation, expiry).is_err());
+        assert!(i.executive_generation > generation);
+        assert_eq!(i.generation, workspace_generation);
+        assert!(i.token(Resource::Acquisition).is_some());
+        assert!(i.token(Resource::Content).is_some());
+        assert!(!i.executive_status().available);
+    }
+    #[test]
+    fn executive_generation_overflow_permanently_disables_without_reuse() {
+        let mut i = executive_inner();
+        i.executive_generation = MAX_SAFE_GENERATION;
+        i.executive = Some(token("old"));
+        i.invalidate();
+        assert_eq!(i.executive_generation, MAX_SAFE_GENERATION);
+        assert!(!i.executive_status().available);
+        assert!(i.transaction(Resource::Executive).is_err());
+        i.invalidate();
+        assert_eq!(i.executive_generation, MAX_SAFE_GENERATION);
+    }
+    #[test]
+    fn executive_resource_defaults_off_and_rejects_noncanonical_or_credential_urls() {
+        for resource in [None, Some(""), Some("http://fixture.invalid/x"),
+            Some("https://u:p@fixture.invalid/x"), Some("https://fixture.invalid/x?q=1"),
+            Some("https://fixture.invalid/x#x"), Some(" https://fixture.invalid/x"),
+            Some("https://fixture.invalid")] {
+            let mut i = Inner::with_executive_resource(Some("public-client"), resource);
+            assert!(!i.executive_status().available);
+            assert!(i.transaction(Resource::Executive).is_err());
+            assert!(i.transaction(Resource::Acquisition).is_ok());
+        }
+    }
+    #[test]
+    fn executive_scope_is_an_exact_set_and_never_accepts_duplicates() {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read"] {
+            assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
+                "expires_in":60, "scope":scope}), Resource::Executive).is_ok());
+        }
+        for scope in [Value::Null, Value::String("mastermind.executive.read".into()),
+            Value::String(format!("{EXECUTIVE_SCOPE} extra")), Value::String(format!("{EXECUTIVE_SCOPE} mastermind.executive.read"))] {
+            assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
+                "expires_in":60, "scope":scope}), Resource::Executive).is_err());
+        }
+    }
+    #[test]
+    fn executive_request_cap_counts_actual_encoded_bytes() {
+        assert!(executive_body(&serde_json::json!({"arguments":{"goal":"x".repeat(65_000)}})).is_ok());
+        assert!(executive_body(&serde_json::json!({"arguments":{"goal":"é".repeat(33_000)}})).is_err());
     }
 
 }

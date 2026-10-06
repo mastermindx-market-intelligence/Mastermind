@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { lstat } from 'node:fs/promises';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createGitPublisher, resolveGitPublishConfig, STUDIO_GIT_PUBLISH_TOOLS } from './git-publish.mjs';
@@ -164,9 +165,44 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
       return { ...identity, status: 'PARTIAL', effect_state: 'EFFECT_UNKNOWN', code: 'WORKSPACE_ACQUISITION_UNQUALIFIED' };
     }
   }
+  // Internal commission composition only; no additional public tool.
+  async function inspect(args) {
+    closed(args, ['repository', 'operation_id']);
+    selectAlias(args.repository);
+    if (typeof args.operation_id !== 'string' || !OPERATION.test(args.operation_id)) throw new Error('WORKSPACE_ARGUMENTS_INVALID');
+    const row = await selected(args.repository);
+    const workspacePath = path.join(row.workspace_root, 'web', args.operation_id.toLowerCase());
+    let value;
+    try {
+      value = await owner(['status', '--repository', args.repository, '--operation-id', args.operation_id, '--lane', 'web']);
+    } catch (error) {
+      if (error?.code !== 2) throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+      const refused = parse(error.stderr);
+      if (refused.schema_version !== 'mastermind.workspace_cli/v2' || refused.action !== 'status' ||
+          refused.effect !== 'NOT_APPLIED' || refused.repository !== args.repository ||
+          refused.error !== 'workspace is not registered to the source repository') throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+      try { await lstat(workspacePath); }
+      catch (missing) {
+        if (missing.code === 'ENOENT') return { status: 'ABSENT', operation_id: args.operation_id, repository: args.repository };
+        throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+      }
+      // An unregistered directory is foreign custody, never absence.
+      throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+    }
+    const receipt = value?.receipt;
+    if (value?.schema_version !== 'mastermind.workspace_cli/v2' || value.action !== 'status' ||
+        value.effect !== 'NOT_APPLIED' || value.repository !== args.repository || !object(receipt) ||
+        receipt.source_repository !== row.source_repository || receipt.workspace_path !== workspacePath ||
+        receipt.branch !== 'sol/web-' + args.operation_id.toLowerCase() ||
+        typeof receipt.head_sha !== 'string' || !SHA.test(receipt.head_sha) ||
+        typeof receipt.dirty !== 'boolean' || receipt.removed !== false) throw new Error('WORKSPACE_INSPECTION_UNKNOWN');
+    return { status: 'PRESENT', operation_id: args.operation_id, repository: args.repository, receipt };
+  }
   async function publication(method, args) {
-    const keys = method === 'status' ? ['operation_id', 'repository'] : method === 'commit'
-      ? ['operation_id', 'repository', 'expected_head_sha', 'message'] : ['operation_id', 'repository', 'expected_head_sha'];
+    const keys = ['status', 'commissionStatus'].includes(method) ? ['operation_id', 'repository'] : method === 'commit'
+      ? ['operation_id', 'repository', 'expected_head_sha', 'message'] : method === 'commitCommission'
+        ? ['operation_id', 'repository', 'expected_head_sha', 'expected_content_sha256']
+        : ['operation_id', 'repository', 'expected_head_sha'];
     closed(args, keys);
     if (args.repository === undefined) return legacy[method](args);
     selectAlias(args.repository);
@@ -179,6 +215,8 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
     const result = await publisher[method](original);
     return { ...result, schema: result.schema.replace(/\.v1$/, '.v2'), repository };
   }
-  return Object.freeze({ repositories, acquire,
+  return Object.freeze({ repositories, acquire, inspect,
+    commitCommission: (args) => publication('commitCommission', args),
+    commissionStatus: (args) => publication('commissionStatus', args),
     status: (args) => publication('status', args), commit: (args) => publication('commit', args), push: (args) => publication('push', args) });
 }
