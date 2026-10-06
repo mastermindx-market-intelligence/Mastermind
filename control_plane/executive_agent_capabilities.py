@@ -932,8 +932,17 @@ class ExecutionCapabilityProfile:
                     "features.multi_agent_v2=false",
                 }
             ]
+            # The OHF parent and its bounded native helper are one sealed
+            # model/effort profile. App Server attests the parent model from
+            # config/read before thread/start, so pin both parent settings at
+            # process scope instead of relying on the provider-home defaults.
             values.extend(
                 (
+                    f"model={_toml_string(helper.default_model)}",
+                    (
+                        "model_reasoning_effort="
+                        f"{_toml_string(helper.default_reasoning_effort)}"
+                    ),
                     "features.multi_agent=false",
                     (
                         "features.multi_agent_v2={enabled=true,"

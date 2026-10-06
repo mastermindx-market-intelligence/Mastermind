@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
 from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
 from control_plane.executive_runtime import AttemptLease
@@ -21,7 +19,12 @@ def test_sol61_operator_candidate_is_additive_and_exact() -> None:
 
     assert router.policy_version == "2026-08-24.stage4"
     assert registry.policy_version == "2026-10-05.sol61-project-executive-candidate"
-    assert CANDIDATE_ALIAS not in json.dumps(router.routes, sort_keys=True)
+    assert all(
+        CANDIDATE_ALIAS not in tier.model_aliases
+        for route in router.routes.values()
+        for risk in ("routine", "elevated")
+        for tier in route[risk]
+    )
 
     legacy = router.model_aliases[LEGACY_ALIAS]
     candidate = router.model_aliases[CANDIDATE_ALIAS]
@@ -60,6 +63,14 @@ def test_sol61_operator_candidate_is_additive_and_exact() -> None:
 
     assert legacy_profile.native_helper is not None
     assert legacy_profile.native_helper.default_model == "gpt-5.6-sol"
+
+    candidate_overrides = profile.app_server_config_overrides()
+    legacy_overrides = legacy_profile.app_server_config_overrides()
+    assert 'model="gpt-6.1-sol"' in candidate_overrides
+    assert 'model_reasoning_effort="xhigh"' in candidate_overrides
+    assert 'model="gpt-5.6-sol"' in legacy_overrides
+    assert 'model_reasoning_effort="xhigh"' in legacy_overrides
+    assert candidate_overrides.count('model="gpt-6.1-sol"') == 1
 
 
 def test_sol61_candidate_does_not_replace_current_coo_default() -> None:
