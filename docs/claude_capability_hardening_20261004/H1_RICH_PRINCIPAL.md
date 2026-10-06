@@ -100,6 +100,30 @@ H3 plugin and H6 principal schema is **143 passed**. This advances H1 from “sc
 to **exact source generations / transport-and-admission gated**; it does not clear #1196 custody or
 authorize a production registry edit.
 
+### Exact registry changes still required
+
+The current canonical registry cannot represent either candidate grant without an explicit reviewed
+owner change:
+
+- streamable-HTTP grants pass through the registry's HTTPS-only URL validator. The accepted #955
+  Claude Executive edge is the exact loopback resource `http://127.0.0.1:8444/mcp`, so H1 must
+  either add a **capability-specific exact-loopback HTTP qualification** for the Executive COO grant
+  or replace that transport with another independently accepted carrier. Do not weaken the general
+  HTTPS rule or accept arbitrary localhost ports.
+- stdio grants are currently closed to reviewed command/argument tuples for Browser B1 and Company
+  Consultation only. H6 now has a separate source-built principal stdio edge at
+  `ops/executive_os/company_dialogue_principal_edge.py`, but the registry must add a new reviewed
+  capability ID/config name/command bootstrap for that edge rather than borrowing the ordinary
+  Company Consultation grant.
+- the principal edge deliberately reuses the existing immutable Company MCP Python runtime while
+  retaining a distinct root-owned config/source digest. This removes the need for a second Python
+  provisioner; it does **not** remove the need for a distinct MCP grant identity and installed
+  Executive-side listener.
+
+These are H1 admission changes in the existing registry owner. #1196 currently owns overlapping
+capability-registry paths, so this programme must not publish a competing production-policy edit
+until that source custody is reconciled.
+
 Any separate context/source capability used for R0 must also have its own existing owner/grant.
 Counting two methods from one Executive server is still one owner.
 

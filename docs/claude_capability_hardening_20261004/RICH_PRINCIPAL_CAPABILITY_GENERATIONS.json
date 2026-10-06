@@ -29,19 +29,19 @@
       "server_identity": "mastermind-company-dialogue-principal-mcp",
       "server_version": "0.1.0",
       "tool_schema_digest": "d45c0f8fe2451c726757c42be729e0e49fc5b2637c33efc97dee00168fab7abd",
-      "transport_owner": "integrations/company_dialogue_principal_host_transport.py",
-      "transport_state": "UNIX_EDGE_SOURCE_BUILT_SERVICE_BINDING_INSTALL_OPEN"
+      "transport_owner": "ops/executive_os/company_dialogue_principal_edge.py",
+      "transport_state": "STDIO_EDGE_SOURCE_BUILT_LISTENER_CONFIG_AND_REGISTRY_OPEN"
     }
   ],
   "execution_surface": "claude-agent-sdk",
+  "production_armed": false,
   "profile_id": "principal.claude.coo.rich.v1",
   "profile_state": "CANDIDATE_ONLY_TRANSPORT_GATED",
-  "production_armed": false,
   "schema": "mastermind.claude_rich_principal_capability_generations.v1",
   "unresolved": [
-    "reviewed MCP grant capability_id/config_name/transport projection for Executive COO",
-    "reviewed installed launcher/transport projection for principal Company Dialogue",
-    "exact native network policy required by the accepted transports",
+    "reviewed MCP grant capability_id/config_name plus exact loopback HTTP qualification for Executive COO",
+    "reviewed MCP grant capability_id/config_name plus root-installed config/listener for principal Company Dialogue",
+    "exact native network policy required by the accepted Executive COO loopback transport",
     "production capability-registry admission and profile_digest",
     "same-session native tool-schema and installed resource attestation"
   ]

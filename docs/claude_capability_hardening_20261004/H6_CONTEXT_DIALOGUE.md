@@ -247,16 +247,17 @@ requires a real complete principal → counterpart → return → continuation �
 same Executive/Agent OS mission identity, no Chairman message shuttling and no duplicate
 wake/job/session effects. A worker-only reporting loop or successful Slack post is insufficient.
 
-Current source candidate: **H6-A + H6-B1 + H6-B2-A + B2-B + B3-A**. The pure
+Current source candidate: **H6-A + H6-B1 + H6-B2-A + B2-B + B3-A + B3-B**. The pure
 principal/child resolver, neutral principal actor ceiling, principal-only four-tool schema,
 exact-send gateway, one-edge replay identity, typed pre-COMMIT contract, existing-Runtime-backed
-single-COMMIT owner/reconciler, source-only host composition and peer-authenticated Unix transport
-are built and source-tested. They remain `BUILT_NOT_PROVEN / PRODUCTION_INERT`: the transport is
-not yet composed into the installed Executive service listener, the principal server has no admitted
+single-COMMIT owner/reconciler, source-only host composition, peer-authenticated Unix transport and
+shared-runtime principal stdio edge are built and source-tested. They remain
+`BUILT_NOT_PROVEN / PRODUCTION_INERT`: the Executive-side Unix listener/config is not installed,
+the principal server has no admitted
 capability-profile grant, and no native principal can be claimed from these files.
 
-Held for **H6-B3-B / acceptance**: compose the tested Unix host into the existing Executive service,
-qualify/install the sealed stdio edge and exact Company/Wake applicability; bind the resulting
+Held for **H6-B3-C / acceptance**: compose the tested Unix host into the existing Executive service,
+publish/install the sealed principal-edge config and exact Company/Wake applicability; bind the resulting
 principal server/tool-schema digest into the H1 native profile; expose only its read-only
 reconciliation operation after qualification; prove installation and native selection; then run the real reciprocal
 principal → child → return → CONTINUE → return → STOP cycle and verify zero duplicate
