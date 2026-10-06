@@ -1,11 +1,25 @@
 # 06 — DL-0 Qualification and Owner / Collision Reconciliation
 
-**Outcome-blind qualification only. No DL-1 efficacy outcome was read.**
+**FREEZE-AUTHORITATIVE FOR DL-0. Outcome-blind only. No DL-1 efficacy outcome was read.**
 
 ## Source pins
 
 - Mastermind protected master: `877b1e7f275da0b6d3558d2667778b32d628bf67`
-- Macro main: `892157418ec6b8664d3a0d4ead12011826fc82b4`
+- Macro main: `0beebb3bd1f246a13396c3bd8f996103a26c3b77`
+
+Macro advanced after the prior `892157...` and `2daaf9...` pins. The observed intervening changes do not touch the relevant owner/source-readiness records in a way that changes this ruling; no broad census is reopened.
+
+## Final DL-0 ruling
+
+**Scientific direction:** `CONTINUE — NARROWED`  
+**Operational route status:** **`WAIT_FOR_DATA / SOURCE_GATE`**
+
+Neither fresh-evidence route is operationally admitted today:
+
+- `EX_US_PIT_CONFIRMATION` — rejected because no entitled historical PIT industry-group/dead-name substrate has been proven.
+- `PROSPECTIVE_US_POST_FREEZE` — scientifically viable in principle but **blocked** because no exact contemporaneous GICS industry-group source has an accepted experiment-specific source receipt covering effective/correction semantics and the required five-rights basis.
+
+No capture clock may start until that source gate clears.
 
 ## Owner / collision reconciliation
 
@@ -13,154 +27,184 @@
 |---|---|---|
 | Canonical per-name product lifecycle | Macro Leader Radar, `engine/leader_lifecycle.py` | Never redefine `LEADERSHIP`; DL-1 state is research-only |
 | Winner maturation / top anatomy | `WS:TOP-ANATOMY` | Do not read frozen OOT early; no duplicate maturation system |
-| Challenge resilience | PSS-CR1 | Separate prospective experiment; no outcome or label borrowing |
+| Challenge resilience | PSS-CR1 | Separate prospective experiment; no outcome/label borrowing |
 | Relief/crowding hazard | PSS-RH1 / PSS-CD1 | Separate one-read prospective families; no interim reads |
 | Flow/absorption follow-on | PSS-AF1 | Separate prospective family |
-| Cross-family nonlinear ranking | `WS:PROPHET-CONDITIONAL-FUSION` | DL-1 additive only; interaction/refinement reserved to DL-2/new evidence |
+| Cross-family nonlinear ranking | `WS:PROPHET-CONDITIONAL-FUSION` | No DL-1 interactions; DL-2/new evidence only |
 | Peer identity/continuity | Prophet Leadership Evidence / group-flow | Consume identity-qualified ex-self semantics; no new peer engine |
 | Theme identity/state | GMI Theme Graph | No duplicate ThemeState/taxonomy |
-| Time semantics | Temporal Grain | Fixed research horizons only |
+| Time semantics | Temporal Grain | Fixed horizons only |
 | Outcome/look accounting | Evaluation / TrialLedger | One registered reveal; no duplicate ledger |
 | Rank/portfolio authority | Prophet / existing portfolio owners | DLTP-II has none |
 
 ### Leader Radar crosswalk
 
-Macro's canonical product lifecycle defines `STATE_LEADERSHIP = "LEADERSHIP"` inside a multi-stage state machine with top-decile RS persistence, hysteresis, precedence, and other lifecycle evidence.
+Macro's product lifecycle defines `STATE_LEADERSHIP = "LEADERSHIP"` inside its own multi-stage state machine with top-decile RS persistence, hysteresis, precedence, and other lifecycle evidence.
 
-DL-1 defines **`DL1_RS126_Q4`** only as:
+DL-1's `DL1_RS126_Q4` is only a research cohort state:
 
-> a security whose 126-session market-relative return ranks at or above the 75th percentile of its eligible formation-date country cross-section.
+> a security whose 126-session SPY-relative split-adjusted-close return ranks at or above the 75th percentile of the eligible formation-date U.S. cross-section.
 
 No equivalence is claimed.
 
-| DL-1 research state | Leader Radar product state | Law |
+| DL-1 research object | Leader Radar product state | Law |
 |---|---|---|
-| `DL1_RS126_Q4=1` | any lifecycle state | Research cohort membership only |
-| `DL1_OCCUPANCY_20=1` | any lifecycle state | Research endpoint only |
-| `DL1_FIRST_EXIT_60` | any lifecycle transition | Research time-to-event only |
-| later product transfer | `LEADERSHIP` or other | Requires separate study and owner acceptance |
+| `DL1_RS126_Q4=1` | any lifecycle state | research cohort only |
+| `DL1_OCCUPANCY_20=1` | any lifecycle state | research endpoint only |
+| `DL1_FIRST_EXIT_60` | any lifecycle transition | research time-to-event only |
+| later product transfer | `LEADERSHIP` or other | requires separate study and owner acceptance |
 
 ### PSS collision fence
 
-PSS-CR1 is already a frozen prospective **challenge-resilient leadership** study: it waits for a first adverse same-sector challenge after RH1, requires ≥15 peers, and labels a resilient leader using a challenge-time top-quartile relative-return condition plus a 0.50-ATR peer-median margin. Its primary outcomes are MAE63/tail10 under a one-read law.
+PSS-CR1 already owns challenge-resilient leadership after a future RH1 challenge and uses its own ≥15-peer rule, challenge-time top-quartile condition, +0.50-ATR relative floor, 63-session outcomes, and one-read law. DL-1 does not consume PSS-CR1 rows, labels, thresholds, outcomes, or ledgers.
 
-DL-1 is not that study. It forms on a generic 126-session RS research state, uses industry-group peers, and asks additive predictive value for occupancy / first-exit. PSS-CR1 rows, labels, thresholds, outcomes, and prospective ledgers are excluded from DL-1.
+PSS-CD1 already owns the prospective peer-correlation / dispersion crowding-hazard construction. DL-1 therefore introduces no peer PC1/correlation/dispersion feature.
 
-PSS-CD1 already owns a specific prospective correlation/dispersion crowding-hazard construction. DL-1 therefore does not introduce peer PC1/correlation/dispersion features.
+PSS-RH1 and PSS-AF1 remain separately frozen. Their prospective outcomes are DO_NOT_READ here.
 
 ### Macro PR #8495 / Conditional Fusion fence
 
-PR #8495 is a research-only NVDA rerating/persistence audit. It explicitly names Conditional Fusion C3/C4/C5 as the owner for nonlinear/context-dependent/multi-head extensions and reports insufficient registered fitted-model fold depth under that program's current law.
+Macro PR #8495 is research-only NVDA rerating/persistence work and explicitly routes nonlinear/context-dependent/multi-head extensions to Conditional Fusion.
 
-DL-1 therefore tests **additive incremental peer information only**. No stock×group interaction is fitted, selected, screened, or interpreted on DL-1 confirmation data. Any interaction hypothesis belongs to DL-2 and requires a new untouched evidence set.
+DL-1 is additive-only. No stock×group interaction is fitted, screened, selected, or interpreted on DL-1 evidence. Any interaction belongs to DL-2 under a new preregistration and new untouched evidence.
 
----
+## Source qualification matrix
 
-# DL-0 source qualification matrix
+| Candidate/source | PIT / effective-date status | Five-rights evidence | Industry-group suitability | Final DL-0 ruling |
+|---|---|---|---|---|
+| S&P / Capital IQ / GICS-history family | no exact admitted historical feed identified | no current five-rights experiment receipt | candidate only | **REJECTED / UNKNOWN** |
+| FactSet / Revere | research/vendor candidate only | no five-rights entitlement record | candidate only | **REJECTED / UNKNOWN** |
+| LSEG / Refinitiv | candidate/integration alternative only | no five-rights entitlement record | candidate only | **REJECTED / UNKNOWN** |
+| CRSP / Compustat | paid-source candidate only | no committed contract/receipt for this use | not demonstrated | **REJECTED / UNKNOWN** |
+| EquityDesk-derived GICS fields | contemporaneous fields exist technically; no historical interval contract | acquisition mechanics recorded; processing/storage/model use/redistribution unresolved | industry-group field exists | **INADMISSIBLE** |
+| Massive enterprise family | broad reference/history/model/redistribution rights recorded | broad five-rights posture strong, feed-specific conditions still govern | no exact admitted GICS-industry-group feed/capture contract identified | **NOT ADMITTED AS TAXONOMY SOURCE** |
+| Current sector/SIC-derived maps | current/derived context only | mixed/house context | sector only, not industry group | **NOT SUFFICIENT** |
+| Prospective U.S. capture | scientifically valid if contemporaneous | **missing exact taxonomy-source receipt** | could support DL-1 after gate | **BLOCKED** |
 
-The question is whether a legally usable, effective-dated, issuer-safe historical taxonomy substrate exists **today** for a fresh ex-U.S. confirmation route.
+## Five-rights source law
 
-| Candidate/source | Effective-date semantics | Rights/entitlement evidence | Dead-name / issuer identity | Industry-group coverage | DL-0 ruling |
-|---|---|---|---|---|---|
-| S&P / GICS-history or Capital IQ family | Candidate concept only in current records; no exact historical feed identified | No five-rights entitlement record found in current D03/source-readiness evidence | Not demonstrated | Not demonstrated | **FAIL / UNKNOWN** |
-| FactSet / Revere | Public/research mentions only | D03: no five-rights entitlement record | Not demonstrated | Candidate only | **FAIL / UNKNOWN** |
-| LSEG / Refinitiv family | Integration alternative / candidate mention only | D03: no five-rights entitlement record | Not demonstrated | Candidate only | **FAIL / UNKNOWN** |
-| CRSP / Compustat | Paid-source candidates only | No committed provider contract / rights record | Not demonstrated for requested taxonomy | Not demonstrated | **FAIL / UNKNOWN** |
-| Massive enterprise family | Enterprise rights recorded for broad reference/historical/model use | Broad rights are recorded | Exact historical issuer/dead-name feed for this use not identified | Exact GICS industry-group feed not identified | **FAIL FOR THIS ROUTE** |
-| Current S&P 1500 GICS sector constituents | Current/observed sector classification | Existing house/provider path | Historical/delisted coverage incomplete | Sector only, not industry group | **NOT SUFFICIENT** |
-| SIC→GICS-style sector map | Derived current/context mapping | House-derived | Historical profile coverage partial | Sector only; not GICS industry group | **NOT SUFFICIENT** |
-| Security master / aliases | Effective dates mainly key inception/current-correction; only sparse dated aliases | Source rights do not prove historical taxonomy | D03 finds inadequate general historical identity/failure coverage | No historical industry-group history | **NOT SUFFICIENT** |
-| Prospective post-freeze US capture | Effective date = observed formation-date capture after freeze | Uses only admitted source paths; exact capture source must be recorded in prereg manifest | Can fail closed on unresolved issuer identity | Can capture industry group contemporaneously | **PASS CONDITIONALLY** |
+Before prospective DL-1 capture may begin, one immutable source-admission receipt must identify:
 
-## Five-rights rule
+1. exact dataset/feed and version;
+2. exact GICS industry-group field;
+3. acquisition right;
+4. processing right;
+5. storage/retention right;
+6. research/model-use right;
+7. redistribution right or explicit research-only no-redistribution boundary;
+8. source observation/publication clock;
+9. classification effective-date semantics;
+10. correction/restatement semantics;
+11. capture timestamp;
+12. canonical issuer key;
+13. raw record/payload digest or equivalent immutable receipt.
 
-For any taxonomy source, DL-0 requires explicit evidence for:
+Repository presence is not entitlement. Public vendor marketing is not entitlement. A broad vendor license does not prove an unidentified feed.
 
-1. acquisition;
-2. processing;
-3. storage;
-4. model/research use;
-5. redistribution if later product exposure is contemplated.
-
-Public vendor pages prove candidate availability only. They do not prove Mastermind entitlement.
-
-## Effective-date and correction law
-
-A taxonomy row is admissible only if the source supplies or the prospective capture records the classification effective at the formation close. A later correction may replace a row only when its semantics explicitly say it corrects the historical effective interval. “Latest classification” never backfills history.
+A later correction may alter a previously captured classification only when the source explicitly represents it as a correction to that historical effective interval. Current classification is never projected backward.
 
 ## Identity law
 
-- Canonical issuer identity is required before peer formation.
-- Alternate listings / share classes of the focal issuer are not independent peers.
-- Unresolved identity => focal row abstains; it is not assigned a best-effort peer.
-- A dead/delisted security remains eligible when it satisfied formation rules at t; future delisting knowledge is never a formation feature.
+- Existing issuer-identity owner is authoritative.
+- Alternate listings/share classes of the focal issuer are never independent peers.
+- Unresolved focal identity => abstain.
+- Unresolved peer identity => peer excluded; if remaining peer count falls below the frozen floor, focal row abstains.
+- Future delisting knowledge is never a formation feature.
+- A security valid at formation remains part of the outcome process under the existing universe/delisting contract.
 
-## Calendar / FX law
+## Route/calendar/FX law
 
-Selected route is U.S.-only, so:
+If and only if the source gate later clears, DL-1's route is `PROSPECTIVE_US_POST_FREEZE`:
 
-- formation dates use the U.S. primary trading calendar;
-- all horizons count U.S. trading sessions;
-- security returns use their primary USD listing price basis;
-- no FX conversion is needed for the primary DL-1 cohort;
-- ADRs are admitted only if issuer identity is resolved and the listing satisfies the frozen investability rule; duplicate issuer listings are collapsed by issuer.
+- U.S. primary trading calendar only;
+- all horizons in U.S. market trading sessions;
+- U.S. primary listings only;
+- no FX conversion in the primary cohort;
+- ADR/multiple-listing inclusion only through canonical issuer identity and one-primary-listing law.
 
-This avoids inventing country-calendar/FX harmonization before it is needed.
+The route does not become selected operationally until the taxonomy source receipt exists.
 
-## Peer-count qualification
+## Peer-count gate
 
-The primary industry-group peer-count floor is frozen at **15 independent issuers excluding the focal issuer**. This matches the estate's existing conservative ex-self peer minimum used in PSS group work and is fixed before DL-1 outcome access.
+Primary industry-group floor: **15 independent issuers excluding the focal issuer**.
 
-For prospective DL-0 accrual, every formation snapshot must record the distribution of valid ex-self peer counts by industry group. Rows with <15 valid peers abstain.
+For every prospective formation snapshot after gate-clear, record the valid ex-self peer-count distribution by industry group. Rows with <15 valid peers abstain.
+
+## Corrected time geometry
+
+Formation cadence remains every fifth U.S. market trading session.
+
+A dependence/evaluation block is **60 consecutive U.S. market trading sessions**. With weekly-equivalent formation cadence, each complete block contains exactly 12 formation dates.
+
+| Phase | Market sessions | Formation dates |
+|---|---:|---:|
+| B1–B3 burn-in | 180 | 36 |
+| B4–B9 confirmation | 360 | 72 |
+| total formation accrual | 540 | 108 |
+
+Offsets from a future gate-cleared anchor:
+- first formation: 0;
+- last burn-in formation: 175;
+- first confirmatory formation: 180;
+- last confirmatory formation: 535;
+- last primary occupancy20 maturity: 555;
+- last first-exit60/occupancy60 maturity: 595.
+
+Conservative one-reveal geometry is therefore **596 trading sessions from anchor through offset 595**, approximately **2.37 trading years** at 252 sessions/year.
+
+This is not a shortened evidence requirement. It corrects the accidental unit mismatch that had treated 60 formation observations as a 60-session dependence block.
+
+No exact calendar date exists while the source gate is unresolved.
 
 ## Power qualification
 
-**No efficacy effect was estimated.** DL-0 may use only endpoint base-rate / missingness / dependence information that is outcome-blind with respect to the new peer-feature effect.
+No peer-feature efficacy effect has been estimated or read.
 
-The actual DL-1 preregistration requires:
+The final preregistration freezes an outcome-blind power simulation using only:
+- eligible-row counts;
+- primary occupancy base rate;
+- missingness/abstention rates;
+- formation-date dependence;
+- stored pre-outcome S predictions;
+- pre-outcome group-feature geometry.
 
-- one-sided familywise alpha 0.05 for the single primary A−S test;
-- ≥80% power for the frozen minimum model-value effect;
-- moving-block dependence with a block length of 60 formation sessions;
-- prospective sample-size / information floor frozen before the sole efficacy read.
+It may not use observed A−S differences, feature/outcome correlations, subgroup efficacy, or hazard associations.
 
-Because the chosen route begins only after freeze and current records do not yet contain the required prospective industry-group peer-count/event-rate panel, **≥80% power is not yet proven**. This does not authorize lowering the ruler. The sole read remains blocked until the registered information floor is reached.
+The exact algorithm is specified in `07_DL1_PREREG_DRAFT_FREEZE_READY.md`.
 
-## DL-0 decision
+Because the taxonomy gate has not cleared, a lawful prospective peer panel does not yet exist; therefore ≥80% power is **not currently demonstrable**. This is a source-gate block, not permission to weaken the ruler.
 
-### EX_US_PIT_CONFIRMATION — REJECTED TODAY
+## Final route verdict
 
-Reason: no current record proves an exact entitled historical PIT industry-group source with five-rights coverage, effective-date/correction semantics, dead-name coverage, and issuer identity adequate for the requested ex-U.S. confirmation.
+### `EX_US_PIT_CONFIRMATION`
+**REJECTED TODAY.**
 
-### PROSPECTIVE_US_POST_FREEZE — SELECTED
+### `PROSPECTIVE_US_POST_FREEZE`
+**BLOCKED PENDING SOURCE ADMISSION.**
 
-This is the only scientifically honest current route.
+### Overall
+**`WAIT_FOR_DATA / SOURCE_GATE`**
 
-Selection is irrevocable for DL-1 once the actual preregistration freezes. No later switch to ex-U.S. history is allowed because prospective results disappoint.
+After gate-clear, `PROSPECTIVE_US_POST_FREEZE` is the only allowed DL-1 route. It may not be switched after outcome access because results disappoint.
 
-If the prospective capture cannot achieve the frozen peer-count, coverage, and ≥80% power floors, return **WAIT_FOR_DATA**.
+## DO_NOT_READ / DO_NOT_REDO
 
----
-
-# DO_NOT_READ / DO_NOT_REDO
-
-## DO_NOT_READ
-
-- any new DL-1 occupancy, first-exit, return, MAE, or recovery outcome;
+### DO_NOT_READ
+- any DL-1 occupancy, first-exit, return, MAE, recovery, subgroup, or feature-outcome efficacy;
 - any PSS-CR1/RH1/CD1/AF1 interim outcome;
-- Top Anatomy OOT before its own final_verdict_eligible receipt;
-- any fresh route efficacy statistic before the DL-1 preregistration is frozen and its information floor clears.
+- Top Anatomy OOT before its own eligibility receipt;
+- any route efficacy statistic before source admission, preregistration freeze, and final-read eligibility.
 
-## DO_NOT_REDO
-
-- B2 focal-stock path-shape constructions;
-- eleven-sector C1 or a C2 read;
-- 2022-07-06 through 2026-06-02 as confirmatory evidence;
+### DO_NOT_REDO
+- B2 focal-stock path-shape family;
+- eleven-sector C1 or any C2 read;
+- 2022-07-06 through 2026-06-02 as fresh confirmation;
 - current taxonomy projected backward;
 - Leader Radar lifecycle / `LEADERSHIP`;
-- Prophet/group-flow peer identity engine;
+- Prophet/group-flow peer engine;
 - ThemeState;
 - timeframe selection;
 - outcome/look ledger;
 - Conditional Fusion ranker;
-- PSS prospective hazard/challenge studies.
+- PSS prospective hazard/challenge studies;
+- interaction discovery on DL-1 evidence.
