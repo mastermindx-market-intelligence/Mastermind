@@ -22,6 +22,7 @@ const TYPE = String.raw`function(value){
 }`;
 const SCROLL = 'function(dx,dy){ if (!this.defaultView) throw new Error("TARGET_UNAVAILABLE"); this.defaultView.scrollBy(dx,dy); return true; }';
 const MAX_NODES = 150, MAX_REFS = 2048, MAX_IMAGE_CHARS = 48_000;
+const MAX_NAME_CHARS = 1 << 9, MAX_VIEWPORT_HEIGHT = 3 << 8;
 const value = item => typeof item?.value === 'string' ? item.value : '';
 
 export class ChromePort {
@@ -78,10 +79,10 @@ export class ChromePort {
       const role = value(node.role), name = value(node.name);
       if (!name && !ACTIONABLE.has(role)) continue;
       if (role === 'InlineTextBox' || role === 'none') continue;
-      const output = { role: role.slice(0, 64), name: name.slice(0, 512) };
+      const output = { role: role.slice(0, 64), name: name.slice(0, MAX_NAME_CHARS) };
       const disabled = node.properties?.some(p => p.name === 'disabled' && p.value?.value === true);
       if (disabled) output.disabled = true;
-      if (ACTIONABLE.has(role) && !disabled && name.length <= 512 && Number.isSafeInteger(node.backendDOMNodeId)) {
+      if (ACTIONABLE.has(role) && !disabled && name.length <= MAX_NAME_CHARS && Number.isSafeInteger(node.backendDOMNodeId)) {
         while (this.#refs.size >= MAX_REFS) this.#refs.delete(this.#refs.keys().next().value);
         const elementRef = this.nonce();
         this.#refs.set(elementRef, { tab_id: request.tab_id, consent_id: request.consent_id, document_revision: request.document_revision,
@@ -102,7 +103,7 @@ export class ChromePort {
     const metrics = await this.#send(request.tab_id, 'Page.getLayoutMetrics');
     const viewport = metrics.cssVisualViewport ?? metrics.visualViewport;
     if (!viewport || !Number.isFinite(viewport.clientWidth) || !Number.isFinite(viewport.clientHeight) || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) refuse('TARGET_UNAVAILABLE');
-    const width = Math.min(viewport.clientWidth, 1024), height = Math.min(viewport.clientHeight, 768);
+    const width = Math.min(viewport.clientWidth, 1024), height = Math.min(viewport.clientHeight, MAX_VIEWPORT_HEIGHT);
     const image = await this.#send(request.tab_id, 'Page.captureScreenshot', { format: 'jpeg', quality: 35, captureBeyondViewport: false,
       clip: { x: viewport.pageX ?? 0, y: viewport.pageY ?? 0, width, height, scale: 0.7 } });
     if (typeof image.data !== 'string' || image.data.length > MAX_IMAGE_CHARS) refuse('OUTPUT_TOO_LARGE');

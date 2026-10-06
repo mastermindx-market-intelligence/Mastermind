@@ -201,7 +201,15 @@ def materialize_native_host(
 
     if not manifest_dir.exists():
         try:
-            manifest_dir.mkdir(mode=0o755)
+            manifest_dir.mkdir(
+                mode=(
+                    stat.S_IRWXU
+                    | stat.S_IRGRP
+                    | stat.S_IXGRP
+                    | stat.S_IROTH
+                    | stat.S_IXOTH
+                )
+            )
         except OSError as exc:
             raise BrowserNativeHostMaterializeError("native manifest directory creation failed") from exc
         _owned_directory(manifest_dir, expected_owner_uid, "native manifest directory")
