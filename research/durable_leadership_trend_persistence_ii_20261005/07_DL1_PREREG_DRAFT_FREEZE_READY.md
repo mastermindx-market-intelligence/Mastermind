@@ -4,7 +4,7 @@
 
 **Scientific ruling:** `CONTINUE — NARROWED`  
 **Operational state:** `WAIT_FOR_DATA / SOURCE_GATE`  
-**Current protected reconciliation:** Mastermind `a6d40ff648671b03bd4d829d84dd066b58ea8c3f`; Macro `eae8baa8d3d4db35d5c9ac4f8e292143cf620854`
+**Current protected reconciliation:** Mastermind `a6d40ff648671b03bd4d829d84dd066b58ea8c3f`; Macro `cab92332ea939ca148257e16c117768db5523634`
 
 This document closes the experimental degrees of freedom. It does **not** authorize capture or implementation while DL-0's taxonomy source gate is unresolved.
 
