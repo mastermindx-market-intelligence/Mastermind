@@ -4,7 +4,7 @@
 
 **Current source pins**
 - Mastermind protected `master`: `a6d40ff648671b03bd4d829d84dd066b58ea8c3f`
-- Macro `main`: `e95e32d4418f12c9670a6a4321498d2c641158fd`
+- Macro `main`: `eae8baa8d3d4db35d5c9ac4f8e292143cf620854`
 
 The protected Skillpack at `a6d40ff...` retains schema `mastermind.sol_skillpack.v1`, version `1.0.1`. The current Mastermind movement is unrelated Executive/harness work. A bounded current-Macro recheck found no collision in the relevant Leader Radar, Top Anatomy, PSS-CR1, Conditional Fusion, or D03/source-rights owner surfaces; no broad census was reopened.
 
