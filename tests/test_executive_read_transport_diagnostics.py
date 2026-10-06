@@ -1111,6 +1111,17 @@ def _canonical_receipt(schema, intent_id):
     }
 
 
+def test_intent_status_refuses_noncanonical_job_status():
+    from control_plane import ceo_intent
+
+    intent_id = "auto-" + "9" * 32
+    receipt = _canonical_receipt(ceo_intent.RECEIPT_SCHEMA_V2, intent_id)
+    receipt["status"] = "EXECUTION_READY"
+    assert WebCeoV2CeoIngressReadGateway._valid_intent_receipt(
+        receipt, arguments={"intent_id": intent_id}
+    ) is False
+
+
 def test_intent_status_accepts_service_and_principal_receipt_families():
     from control_plane import ceo_intent
     from control_plane.coo_principal_request import principal_intent_id

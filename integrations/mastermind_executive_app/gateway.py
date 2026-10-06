@@ -1749,6 +1749,7 @@ class CeoIngressReadGateway:
     ) -> bool:
         import re
         from control_plane import ceo_intent
+        from control_plane.executive_runtime import JobStatus
 
         if type(value) is not dict:
             return False
@@ -1780,7 +1781,7 @@ class CeoIngressReadGateway:
             and re.fullmatch(r"[0-9a-f]{64}", value["fingerprint"]) is not None
             and type(value.get("job_id")) is str
             and re.fullmatch(r"JOB-[0-9]{1,9}", value["job_id"]) is not None
-            and type(value.get("status")) is str
+            and value.get("status") in {member.value for member in JobStatus}
             and value.get("accepted") is True
             and type(value.get("duplicate")) is bool
             and value.get("dispatched") is False
