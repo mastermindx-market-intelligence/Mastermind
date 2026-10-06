@@ -116,6 +116,25 @@ def qualify_gateway_refresh(expected_sha: str) -> dict[str, str]:
             _refuse()
         installed._recheck_release(release, budget)
         installed._recheck_network_closure(closure, budget)
+
+        # Close the final TOCTOU window left by the expensive release/network
+        # rechecks.  Match the incumbent installed-peer owner: the launchd
+        # generation and the complete config leaf+ancestor identity must still
+        # be exactly the generation qualified before any lifecycle effect.
+        final_plist = installed._verify_role_plist(
+            topology, budget, expected_release=expected_sha
+        )
+        if final_plist != plist:
+            _refuse()
+        final_digest, final_identity, final_ancestors = _read_config(
+            topology, budget, expected_sha
+        )
+        if (
+            final_digest != config_digest
+            or final_identity != config_identity
+            or final_ancestors != config_ancestors
+        ):
+            _refuse()
     except GatewayRefreshPreflightError:
         raise
     except Exception:

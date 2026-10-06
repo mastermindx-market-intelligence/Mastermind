@@ -204,7 +204,89 @@ def test_qualifier_composes_existing_release_and_runtime_owners(monkeypatch):
         ("plist", SHA), ("config", SHA), ("release", SHA),
         ("closure", None), ("plist", SHA), ("config", SHA),
         ("release-recheck", None), ("closure-recheck", None),
+        ("plist", SHA), ("config", SHA),
     ]
+
+
+def test_qualifier_refuses_config_drift_after_final_closure_rechecks(monkeypatch):
+    topology = SimpleNamespace(
+        config_path="/fixed/config",
+        config_mode=0o644,
+        config_gid=0,
+    )
+    plist = SimpleNamespace(release=SHA, digest="stable")
+    reads = iter((
+        ("e" * 64, ("leaf",), ("ancestors",)),
+        ("e" * 64, ("leaf",), ("ancestors",)),
+        ("f" * 64, ("leaf-new",), ("ancestors-new",)),
+    ))
+    monkeypatch.setattr(preflight.installed, "_role_topology", lambda role: topology)
+    monkeypatch.setattr(preflight.installed, "_Budget", lambda seconds: object())
+    monkeypatch.setattr(preflight.installed, "_SERVICE_BUDGET_SECONDS", 25.0)
+    monkeypatch.setattr(
+        preflight.installed, "_verify_role_plist", lambda *args, **kwargs: plist
+    )
+    monkeypatch.setattr(preflight, "_read_config", lambda *args: next(reads))
+    monkeypatch.setattr(
+        preflight.installed,
+        "_verify_release",
+        lambda *args: SimpleNamespace(manifest_digest="c" * 64),
+    )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_verify_network_closure",
+        lambda *args: SimpleNamespace(aggregate="d" * 64),
+    )
+    monkeypatch.setattr(preflight.installed, "_recheck_release", lambda *args: None)
+    monkeypatch.setattr(
+        preflight.installed, "_recheck_network_closure", lambda *args: None
+    )
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight.qualify_gateway_refresh(SHA)
+
+
+def test_qualifier_refuses_plist_drift_after_final_closure_rechecks(monkeypatch):
+    topology = SimpleNamespace(
+        config_path="/fixed/config",
+        config_mode=0o644,
+        config_gid=0,
+    )
+    plists = iter((
+        SimpleNamespace(release=SHA, digest="stable"),
+        SimpleNamespace(release=SHA, digest="stable"),
+        SimpleNamespace(release=SHA, digest="changed"),
+    ))
+    monkeypatch.setattr(preflight.installed, "_role_topology", lambda role: topology)
+    monkeypatch.setattr(preflight.installed, "_Budget", lambda seconds: object())
+    monkeypatch.setattr(preflight.installed, "_SERVICE_BUDGET_SECONDS", 25.0)
+    monkeypatch.setattr(
+        preflight.installed,
+        "_verify_role_plist",
+        lambda *args, **kwargs: next(plists),
+    )
+    monkeypatch.setattr(
+        preflight,
+        "_read_config",
+        lambda *args: ("e" * 64, ("leaf",), ("ancestors",)),
+    )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_verify_release",
+        lambda *args: SimpleNamespace(manifest_digest="c" * 64),
+    )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_verify_network_closure",
+        lambda *args: SimpleNamespace(aggregate="d" * 64),
+    )
+    monkeypatch.setattr(preflight.installed, "_recheck_release", lambda *args: None)
+    monkeypatch.setattr(
+        preflight.installed, "_recheck_network_closure", lambda *args: None
+    )
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight.qualify_gateway_refresh(SHA)
 
 
 def test_qualifier_refuses_drift_detected_by_incumbent_owner(monkeypatch):
