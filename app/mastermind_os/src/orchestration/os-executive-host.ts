@@ -32,7 +32,8 @@ export function decodeExecutiveContext(value: unknown, nowMs: number): VerifiedC
       typeof value.verified_expiry !== "number" || !Number.isSafeInteger(value.verified_expiry) ||
       value.verified_expiry <= nowMs / 1000 || !Number.isSafeInteger(value.verified_expiry * 1000) ||
       !object(value.profile) || !exact(value.profile, ["name", "server_version"]) ||
-      value.profile.name !== "web_ceo_v3" || value.profile.server_version !== "1.4.0") return null;
+      value.profile.name !== "web_ceo_v3" ||
+      (value.profile.server_version !== "1.4.0" && value.profile.server_version !== "1.5.0")) return null;
   return { principalScope: value.principal_scope, expiresAt: value.verified_expiry * 1000 };
 }
 

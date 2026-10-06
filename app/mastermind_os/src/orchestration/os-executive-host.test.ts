@@ -3,9 +3,9 @@ import { createOsExecutiveHost, decodeExecutiveContext, type OsExecutiveTranspor
 import type { PendingPointerStore } from "./operation-controller";
 
 const scopeA = "a".repeat(64), scopeB = "b".repeat(64);
-const dto = (scope = scopeA, expiry = 2000) => ({
+const dto = (scope = scopeA, expiry = 2000, version = "1.4.0") => ({
   schema: "mastermind.os.executive.owner_context.v1", principal_scope: scope,
-  verified_expiry: expiry, profile: { name: "web_ceo_v3", server_version: "1.4.0" },
+  verified_expiry: expiry, profile: { name: "web_ceo_v3", server_version: version },
 });
 const config = { workstream: "WS:TEST-ONLY", priority: 0,
   projects: [{ ref: "executive-infrastructure", label: "Fixture" }],
@@ -36,12 +36,27 @@ const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
 
 describe("verified Executive host", () => {
   it("accepts only the exact current authenticated context DTO", () => {
-    expect(decodeExecutiveContext(dto(), 1_000_000)?.principalScope).toBe(scopeA);
+    for (const version of ["1.4.0", "1.5.0"])
+      expect(decodeExecutiveContext(dto(scopeA, 2000, version), 1_000_000)?.principalScope).toBe(scopeA);
     for (const invalid of [null, { ...dto(), token: "secret" }, { ...dto(), principal_scope: "subject" },
       { ...dto(), verified_expiry: 1000 }, { ...dto(), verified_expiry: NaN },
-      { ...dto(), profile: { name: "web_ceo_v3", server_version: "1.3.1" } },
+      ...["1.2.0", "1.3.1", "1.6.0", "2.0.0"].map((version) => dto(scopeA, 2000, version)),
       { ...dto(), profile: { ...dto().profile, scopes: [] } }])
       expect(decodeExecutiveContext(invalid, 1_000_000)).toBeNull();
+  });
+  it("qualifies V3 1.5 context and invalidates it across an auth generation change", async () => {
+    const f = fixture();
+    vi.mocked(f.transport.context).mockResolvedValue(dto(scopeA, 2000, "1.5.0"));
+    const h = mount(f); await h.ready;
+    expect(h.binding.port.context()?.principalScope).toBe(scopeA);
+    expect(h.binding.makeLaunchIntent({ goal: "Read fixture", projectRef: "executive-infrastructure", profileRef: "research_only" })).not.toBeNull();
+    f.change(false);
+    expect(h.binding.port.context()).toBeNull();
+    expect(h.binding.makeLaunchIntent({ goal: "Read fixture", projectRef: "executive-infrastructure", profileRef: "research_only" })).toBeNull();
+    f.change(true); await tick();
+    expect(h.binding.port.context()?.principalScope).toBe(scopeA);
+    expect(f.transport.submit).not.toHaveBeenCalled();
+    expect(f.transport.status).not.toHaveBeenCalled();
   });
   it("mounts an unavailable binding then qualifies after the existing auth owner signs in", async () => {
     const f = fixture(); f.change(false); const h = mount(f); await h.ready;

@@ -721,10 +721,10 @@ describe("T5 readOperation", () => {
     );
   });
 
-  it("accepts the source-qualified V3 E1 version and rejects unqualified versions", async () => {
+  it.each(["1.4.0", "1.5.0"])("accepts the source-qualified V3 E1 version %s", async (version) => {
     const key = expectedResearchPayload().operation_key;
     const acceptedV3 = await readWith(
-      e1Envelope("ceo_intent_status", true, acceptedData(key), null, "1.4.0"),
+      e1Envelope("ceo_intent_status", true, acceptedData(key), null, version),
     );
     expect(acceptedV3.receipt).toMatchObject({
       disposition: "accepted",
@@ -732,8 +732,12 @@ describe("T5 readOperation", () => {
       missionSelection: { workRef: WORKSTREAM, rootJobId: JOB_ID },
     });
 
+  });
+
+  it.each(["1.3.1", "1.6.0", "2.0.0"])("rejects unqualified E1 version %s", async (version) => {
+    const key = expectedResearchPayload().operation_key;
     const unsupported = await readWith(
-      e1Envelope("ceo_intent_status", true, acceptedData(key), null, "1.3.1"),
+      e1Envelope("ceo_intent_status", true, acceptedData(key), null, version),
     );
     expect(unsupported.receipt).toMatchObject({
       disposition: "unknown",

@@ -32,7 +32,7 @@ const RECEIPT_SCHEMAS = new Set([
   "mastermind.ceo_intent_receipt.v2",
 ]);
 // Closed, source-qualified V2/V3 E1 contracts; other versions remain unknown.
-const E1_SERVER_VERSIONS = new Set(["1.2.0", "1.4.0"]);
+const E1_SERVER_VERSIONS = new Set(["1.2.0", "1.4.0", "1.5.0"]);
 const E1_ENVELOPE_KEYS = [
   "schema", "tool", "ok", "server_version", "mode", "generated_at",
   "grounding", "data", "degraded", "bounded", "error",

@@ -812,7 +812,7 @@ def _build_profile_mcp_app(
     No installed configuration, public listener, or fixture write is implied.
 
     The OS Executive transport is opt-in via ``enable_os_executive_transport``;
-    when enabled it requires the exact installed v3 composition (server 1.4.0,
+    when enabled it requires the exact installed v3 composition (server 1.4.0/1.5.0,
     ``OsStaticApp``, ``read_from_ceo_ingress=True``) and exposes exactly three
     POST routes around the existing :class:`BoundedE1App`.
     """
@@ -910,7 +910,7 @@ def _build_profile_mcp_app(
 
         if (
             profile_server_name != "mastermind-executive"
-            or profile_server_version != "1.4.0"
+            or profile_server_version not in ("1.4.0", "1.5.0")
             or os_app is None
             or type(os_app) is not OsStaticApp
             or not getattr(configured, "read_from_ceo_ingress", False)
@@ -1441,7 +1441,7 @@ def build_web_ceo_v3_mcp_app(
 
     ``enable_os_executive_transport`` is the default-off v3 opt-in for the
     three fixed POST OS Executive routes.  When enabled, it requires the
-    exact installed v3 composition (server 1.4.0, ``OsStaticApp``,
+    exact installed v3 composition (server 1.4.0/1.5.0, ``OsStaticApp``,
     ``read_from_ceo_ingress=True``).
     """
 
