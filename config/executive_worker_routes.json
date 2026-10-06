@@ -1,6 +1,6 @@
 {
   "schema_version": "mastermind.executive_worker_routes/v2",
-  "policy_version": "2026-08-24.stage4",
+  "policy_version": "2026-10-05.sol61-project-executive-candidate",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {
@@ -37,7 +37,13 @@
       "model": "gpt-5.6-sol",
       "effort": "xhigh",
       "cost_class": "small",
-      "capabilities": ["code", "planning", "research", "review", "tests"],
+      "capabilities": [
+        "code",
+        "planning",
+        "research",
+        "review",
+        "tests"
+      ],
       "worker_eligible": true
     },
     "frontier.orchestrator": {
@@ -46,7 +52,11 @@
       "model": "gpt-5.6-sol",
       "effort": "xhigh",
       "cost_class": "frontier",
-      "capabilities": ["planning", "judgment", "escalation"],
+      "capabilities": [
+        "planning",
+        "judgment",
+        "escalation"
+      ],
       "worker_eligible": false
     },
     "coo.operator.readonly": {
@@ -55,7 +65,11 @@
       "model": "gpt-5.6-sol",
       "effort": "xhigh",
       "cost_class": "small",
-      "capabilities": ["planning", "judgment", "escalation"],
+      "capabilities": [
+        "planning",
+        "judgment",
+        "escalation"
+      ],
       "worker_eligible": true
     },
     "fast.engineering": {
@@ -64,7 +78,10 @@
       "model": "gpt-5.6-luna",
       "effort": "high",
       "cost_class": "small",
-      "capabilities": ["code", "tests"],
+      "capabilities": [
+        "code",
+        "tests"
+      ],
       "worker_eligible": true
     },
     "standard.engineering": {
@@ -73,7 +90,10 @@
       "model": "gpt-5.6-terra",
       "effort": "high",
       "cost_class": "default",
-      "capabilities": ["code", "tests"],
+      "capabilities": [
+        "code",
+        "tests"
+      ],
       "worker_eligible": true
     },
     "fast.research": {
@@ -82,7 +102,9 @@
       "model": "gpt-5.6-luna",
       "effort": "medium",
       "cost_class": "small",
-      "capabilities": ["research"],
+      "capabilities": [
+        "research"
+      ],
       "worker_eligible": true
     },
     "standard.research": {
@@ -91,7 +113,9 @@
       "model": "gpt-5.6-terra",
       "effort": "high",
       "cost_class": "default",
-      "capabilities": ["research"],
+      "capabilities": [
+        "research"
+      ],
       "worker_eligible": true
     },
     "standard.review": {
@@ -100,83 +124,135 @@
       "model": "gpt-5.6-terra",
       "effort": "high",
       "cost_class": "default",
-      "capabilities": ["code", "research", "review", "tests"],
+      "capabilities": [
+        "code",
+        "research",
+        "review",
+        "tests"
+      ],
+      "worker_eligible": true
+    },
+    "coo.operator.sol61.readonly": {
+      "provider_alias": "codex",
+      "execution_profile_id": "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1",
+      "model": "gpt-6.1-sol",
+      "effort": "xhigh",
+      "cost_class": "small",
+      "capabilities": [
+        "planning",
+        "judgment",
+        "escalation"
+      ],
       "worker_eligible": true
     }
   },
   "routes": {
     "implementation": {
-      "required_capabilities": ["code"],
+      "required_capabilities": [
+        "code"
+      ],
       "routine": [
         {
           "tier_id": "implementation.routine.primary",
-          "model_aliases": ["fast.engineering", "standard.engineering"]
+          "model_aliases": [
+            "fast.engineering",
+            "standard.engineering"
+          ]
         }
       ],
       "elevated": [
         {
           "tier_id": "implementation.elevated.primary",
-          "model_aliases": ["standard.engineering"]
+          "model_aliases": [
+            "standard.engineering"
+          ]
         }
       ]
     },
     "mechanical": {
-      "required_capabilities": ["code"],
+      "required_capabilities": [
+        "code"
+      ],
       "routine": [
         {
           "tier_id": "mechanical.routine.primary",
-          "model_aliases": ["fast.engineering", "standard.engineering"]
+          "model_aliases": [
+            "fast.engineering",
+            "standard.engineering"
+          ]
         }
       ],
       "elevated": [
         {
           "tier_id": "mechanical.elevated.primary",
-          "model_aliases": ["standard.engineering"]
+          "model_aliases": [
+            "standard.engineering"
+          ]
         }
       ]
     },
     "tests": {
-      "required_capabilities": ["tests"],
+      "required_capabilities": [
+        "tests"
+      ],
       "routine": [
         {
           "tier_id": "tests.routine.primary",
-          "model_aliases": ["fast.engineering", "standard.engineering"]
+          "model_aliases": [
+            "fast.engineering",
+            "standard.engineering"
+          ]
         }
       ],
       "elevated": [
         {
           "tier_id": "tests.elevated.primary",
-          "model_aliases": ["standard.engineering"]
+          "model_aliases": [
+            "standard.engineering"
+          ]
         }
       ]
     },
     "research": {
-      "required_capabilities": ["research"],
+      "required_capabilities": [
+        "research"
+      ],
       "routine": [
         {
           "tier_id": "research.routine.primary",
-          "model_aliases": ["fast.research", "standard.research"]
+          "model_aliases": [
+            "fast.research",
+            "standard.research"
+          ]
         }
       ],
       "elevated": [
         {
           "tier_id": "research.elevated.primary",
-          "model_aliases": ["standard.research"]
+          "model_aliases": [
+            "standard.research"
+          ]
         }
       ]
     },
     "review": {
-      "required_capabilities": ["review"],
+      "required_capabilities": [
+        "review"
+      ],
       "routine": [
         {
           "tier_id": "review.routine.primary",
-          "model_aliases": ["standard.review"]
+          "model_aliases": [
+            "standard.review"
+          ]
         }
       ],
       "elevated": [
         {
           "tier_id": "review.elevated.primary",
-          "model_aliases": ["standard.review"]
+          "model_aliases": [
+            "standard.review"
+          ]
         }
       ]
     }
