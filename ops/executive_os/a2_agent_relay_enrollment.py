@@ -1,11 +1,13 @@
 """Native, production-disarmed enrollment for the private A2 Agent Relay.
 
-The ceremony qualifies one stdin-only Slack bot token, installs the exact
-release-bound token/config/launchd files, and stops.  It never provisions an
-app or principal and never loads, enables, or starts the service.  The Relay
-runs only as the host-prepared dedicated ``_mastermind_agent_relay`` owner;
-``_mastermind_exec`` remains the single filesystem-reachable, peer-credential-
-checked client. Slack prose conveys no host authority.
+The ceremony either qualifies one stdin-only Slack bot token or, for the
+reviewed shared-Executive-Relay migration, reuses the already-enrolled C1 token
+entirely inside the native host. It then installs the exact release-bound
+A2 token/config/launchd files and stops. It never provisions an app or principal
+and never loads, enables, or starts the service. The Relay keeps the existing
+host-prepared dedicated service-owner boundary, and the existing Executive peer
+remains the single filesystem-reachable, peer-credential-checked client. Slack
+prose conveys no host authority.
 """
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, TextIO
+from typing import BinaryIO, Callable, TextIO
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -63,7 +65,11 @@ PYTHON_BINARY = Path(
 )
 SLACK_WORKSPACE_ID = "T0BRD2AQXQV"
 SLACK_CHANNEL_ID = "C0BSBM78V1N"
-REQUIRED_SCOPES = ("channels:history", "chat:write")
+DEDICATED_A2_SCOPES = ("channels:history", "chat:write")
+SHARED_A2_SCOPES = c1_enrollment.c1_runtime.SHARED_EXECUTIVE_RELAY_SCOPES
+ALLOWED_A2_SCOPE_SETS = (DEDICATED_A2_SCOPES, SHARED_A2_SCOPES)
+# Compatibility alias for the original dedicated-app ceremony.
+REQUIRED_SCOPES = DEDICATED_A2_SCOPES
 ALLOWED_PEER_UIDS = (EXEC_UID,)
 ALLOWED_SOL_USER_IDS = ("U0BRETDUAS2", "U0BSB73JWNL")
 ALLOWED_PARENT_USER_IDS = ("U0BRETDUAS2",)
@@ -131,7 +137,7 @@ class _BoundCreatedFile:
 def build_parser() -> argparse.ArgumentParser:
     parser = _OpaqueParser(description="Enroll the private A2 Agent Relay")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("enroll", "verify"):
+    for name in ("enroll", "enroll-shared", "verify"):
         child = commands.add_parser(name)
         child.add_argument("--expected-bot-user-id", required=True)
         child.add_argument("--enable-w3c", action="store_true")
@@ -158,14 +164,17 @@ def build_config_document(
     *,
     bot_user_id: str,
     release_sha: str,
+    scopes: tuple[str, ...] = REQUIRED_SCOPES,
     w3c_enabled: bool = False,
 ) -> dict[str, object]:
+    if scopes not in ALLOWED_A2_SCOPE_SETS:
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
     try:
         metadata_verifier.validate_expectation(
             metadata_verifier.MetadataExpectation(
                 team_id=SLACK_WORKSPACE_ID,
                 bot_user_id=bot_user_id,
-                scopes=REQUIRED_SCOPES,
+                scopes=scopes,
             )
         )
     except Exception:
@@ -180,7 +189,7 @@ def build_config_document(
         "slack_workspace_id": SLACK_WORKSPACE_ID,
         "slack_channel_id": SLACK_CHANNEL_ID,
         "slack_bot_user_id": bot_user_id,
-        "slack_scopes": list(REQUIRED_SCOPES),
+        "slack_scopes": list(scopes),
         "slack_token_file": os.fspath(TOKEN_PATH),
         "relay_socket_path": os.fspath(SOCKET_PATH),
         "relay_user": RELAY_USER,
@@ -294,16 +303,19 @@ async def qualify_token(
     *,
     token: str,
     bot_user_id: str,
+    scopes: tuple[str, ...] = REQUIRED_SCOPES,
     identity_transport: metadata_verifier.SlackAuthTestTransport | None = None,
     history_transport: SlackHttpTransport | None = None,
 ) -> dict[str, object]:
+    if scopes not in ALLOWED_A2_SCOPE_SETS:
+        raise A2EnrollmentError("A2_ENROLLMENT_IDENTITY_REFUSED")
     try:
         identity = metadata_verifier.verify_metadata(
             token=token,
             expectation=metadata_verifier.MetadataExpectation(
                 team_id=SLACK_WORKSPACE_ID,
                 bot_user_id=bot_user_id,
-                scopes=REQUIRED_SCOPES,
+                scopes=scopes,
             ),
             transport=identity_transport
             or metadata_verifier.UrllibSlackAuthTestTransport(),
@@ -325,7 +337,7 @@ async def qualify_token(
         "bot_id": identity["bot_id"],
         "bot_user_id": identity["bot_user_id"],
         "channel_id": SLACK_CHANNEL_ID,
-        "scopes": list(REQUIRED_SCOPES),
+        "scopes": list(scopes),
         "workspace_id": identity["team_id"],
     }
 
@@ -860,6 +872,7 @@ def _validate_existing(
     *,
     bot_user_id: str,
     release_sha: str,
+    scopes: tuple[str, ...] = REQUIRED_SCOPES,
     expected_token: bytes | None = None,
     w3c_enabled: bool = False,
 ) -> None:
@@ -867,6 +880,7 @@ def _validate_existing(
         build_config_document(
             bot_user_id=bot_user_id,
             release_sha=release_sha,
+            scopes=scopes,
             w3c_enabled=w3c_enabled,
         )
     )
@@ -901,10 +915,55 @@ def _validate_existing(
         raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
 
 
-async def _enroll(
+def _existing_enrollment_scopes(binding: _BoundDirectory) -> tuple[str, ...]:
+    """Read only the exact stored A2 scope mode; refuse every other widening."""
+
+    try:
+        raw = _read_bound_exact(
+            binding,
+            CONFIG_PATH.name,
+            uid=RELAY_UID,
+            gid=RELAY_GID,
+            mode=0o400,
+        )
+        document = json.loads(raw.decode("utf-8"))
+        values = document.get("slack_scopes") if isinstance(document, dict) else None
+        if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+            raise ValueError("invalid A2 scopes")
+        scopes = tuple(values)
+        if scopes not in ALLOWED_A2_SCOPE_SETS:
+            raise ValueError("unapproved A2 scopes")
+        return scopes
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
+
+
+def _existing_c1_shared_token(*, bot_user_id: str) -> str:
+    """Read the already-enrolled Executive Relay credential on the native host.
+
+    The token never crosses argv/stdout/model-visible state. The C1 config must
+    already bind the same bot identity; A2 then independently proves the shared
+    three-scope credential plus #agent-dispatch access before writing anything.
+    """
+
+    try:
+        config = c1_enrollment.c1_runtime.load_config(
+            c1_enrollment.c1_runtime.CONFIG_PATH,
+            expected_group_gid=c1_enrollment.RELAY_GID,
+        )
+        if config.slack_bot_user_id != bot_user_id:
+            raise ValueError("shared relay bot mismatch")
+        return c1_enrollment._existing_token()  # noqa: SLF001
+    except Exception:
+        raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED") from None
+
+
+async def _enroll_with_token_source(
     *,
     bot_user_id: str,
-    stdin: BinaryIO,
+    token_source: Callable[[], str],
+    action: str,
+    scopes: tuple[str, ...],
     w3c_enabled: bool = False,
 ) -> dict[str, object]:
     release_sha = _assert_host_prepared()
@@ -918,8 +977,8 @@ async def _enroll(
             or _path_present(PLIST_PATH)
         ):
             raise A2EnrollmentError("A2_ENROLLMENT_COLLISION")
-        token = read_token_from_stdin(stdin)
-        qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
+        token = token_source()
+        qualification = await qualify_token(token=token, bot_user_id=bot_user_id, scopes=scopes)
         _assert_bound_config_current(binding)
         bound_created.append(
             _write_new_bound_private_file(
@@ -939,6 +998,7 @@ async def _enroll(
                     build_config_document(
                         bot_user_id=bot_user_id,
                         release_sha=release_sha,
+                        scopes=scopes,
                         w3c_enabled=w3c_enabled,
                     )
                 ),
@@ -964,6 +1024,7 @@ async def _enroll(
             binding,
             bot_user_id=bot_user_id,
             release_sha=release_sha,
+            scopes=scopes,
             expected_token=(token + "\n").encode("ascii"),
             w3c_enabled=w3c_enabled,
         )
@@ -985,7 +1046,36 @@ async def _enroll(
         raise
     finally:
         os.close(binding.descriptor)
-    return {**qualification, "action": "enrolled", "release_sha": release_sha}
+    return {**qualification, "action": action, "release_sha": release_sha}
+
+
+async def _enroll(
+    *,
+    bot_user_id: str,
+    stdin: BinaryIO,
+    w3c_enabled: bool = False,
+) -> dict[str, object]:
+    return await _enroll_with_token_source(
+        bot_user_id=bot_user_id,
+        token_source=lambda: read_token_from_stdin(stdin),
+        action="enrolled",
+        scopes=DEDICATED_A2_SCOPES,
+        w3c_enabled=w3c_enabled,
+    )
+
+
+async def _enroll_shared(
+    *,
+    bot_user_id: str,
+    w3c_enabled: bool = False,
+) -> dict[str, object]:
+    return await _enroll_with_token_source(
+        bot_user_id=bot_user_id,
+        token_source=lambda: _existing_c1_shared_token(bot_user_id=bot_user_id),
+        action="enrolled-shared",
+        scopes=SHARED_A2_SCOPES,
+        w3c_enabled=w3c_enabled,
+    )
 
 
 async def _verify(*, bot_user_id: str, w3c_enabled: bool = False) -> dict[str, object]:
@@ -998,14 +1088,20 @@ async def _verify(*, bot_user_id: str, w3c_enabled: bool = False) -> dict[str, o
             or not _path_present(PLIST_PATH)
         ):
             raise A2EnrollmentError("A2_ENROLLMENT_EXISTING_REFUSED")
+        scopes = _existing_enrollment_scopes(binding)
         _validate_existing(
             binding,
             bot_user_id=bot_user_id,
             release_sha=release_sha,
+            scopes=scopes,
             w3c_enabled=w3c_enabled,
         )
         token = _existing_token(binding)
-        qualification = await qualify_token(token=token, bot_user_id=bot_user_id)
+        qualification = await qualify_token(
+            token=token,
+            bot_user_id=bot_user_id,
+            scopes=scopes,
+        )
         _assert_disarmed()
         _assert_bound_config_current(binding)
         return {**qualification, "action": "verified", "release_sha": release_sha}
@@ -1055,9 +1151,12 @@ def _run_invocation(
             }
             if args.enable_w3c:
                 enroll_kwargs["w3c_enabled"] = True
-            receipt = asyncio.run(
-                _enroll(**enroll_kwargs)
-            )
+            receipt = asyncio.run(_enroll(**enroll_kwargs))
+        elif args.command == "enroll-shared":
+            shared_kwargs = {"bot_user_id": args.expected_bot_user_id}
+            if args.enable_w3c:
+                shared_kwargs["w3c_enabled"] = True
+            receipt = asyncio.run(_enroll_shared(**shared_kwargs))
         elif args.command == "verify":
             verify_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
