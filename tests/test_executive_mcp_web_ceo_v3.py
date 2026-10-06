@@ -291,7 +291,9 @@ def test_service_owned_session_credential_resolves_without_secret_repr(
         )
     )
     path.chmod(0o600)
-    # Model the service-owned group explicitly; macOS temp roots can inherit wheel.
+    # Some macOS temp roots inherit group wheel even when the test process runs
+    # as staff. Model the service-owned contract explicitly instead of relying
+    # on filesystem inheritance so the positive case is portable.
     os.chown(path, -1, os.getegid())
     monkeypatch.setattr(credential_file, "_validate_parent", lambda _path: None)
     monkeypatch.setattr(
