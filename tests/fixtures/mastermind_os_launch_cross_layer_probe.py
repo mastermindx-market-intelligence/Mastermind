@@ -178,6 +178,9 @@ def main():
               "consumer_ref": args.consumer_ref, "consumer_source": manifest,
               "consumer_patch": patch_evidence, "cases": results,
               "passed": passed, "failed": len(results) - passed,
+              "positive_version_controls_passed": sum(
+                  len(case.get("positive_version_controls", ())) for case in results
+              ),
               "negative_controls_passed": sum(len(case["negative_controls"]) for case in results)}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")

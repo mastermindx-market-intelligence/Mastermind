@@ -85,9 +85,38 @@ if (final.status === "accepted") {
 assert.equal(calls.filter(call => call.name === "submit_ceo_intent").length, 1);
 
 const guardResults = [];
+const positiveVersionControls = [];
 if (statusEnvelope && final.status === "accepted") {
+  {
+    const altered = structuredClone(statusEnvelope);
+    altered.server_version = "1.5.0";
+    let reads = 0;
+    const positiveClient = { async callTool(tool, args) {
+      assert.equal(tool, "ceo_intent_status", "positive version control cannot submit");
+      assert.deepEqual(args, calls.find(call => call.name === tool).args);
+      reads += 1;
+      return altered;
+    } };
+    const pending = pointerStore(originalPointer);
+    const positivePort = new ExecutiveLaunchCommandPort(
+      { ...config, workstream: "WS:CHANGED-UI" }, positiveClient, () => ctx);
+    const positiveController = new OperationController(positivePort, pending.store);
+    const blocked = await positiveController.begin(positivePort.makeLaunchIntent(form));
+    assert.equal(blocked.reason, "PENDING_POINTER");
+    assert.equal(reads, 0);
+    const result = await positiveController.recover();
+    assert.equal(result.status, "accepted", "qualified 1.5.0 recovery must remain accepted");
+    assert.equal(result.missionSelection.workRef, config.workstream);
+    assert.equal(pending.hints.size, 0);
+    assert.equal(reads, 1);
+    positiveVersionControls.push({
+      name: "qualified-version:1.5.0",
+      status: result.status,
+      pending_pointer_cleared: true,
+    });
+  }
   const mutations = [
-    ...["1.3.0", "1.3.1", "1.5.0", "2.0.0", null, 1.4, {}].map(version => [
+    ...["1.3.0", "1.3.1", "1.6.0", "2.0.0", null, 1.4, {}].map(version => [
       "unsupported-version:" + JSON.stringify(version),
       value => { value.server_version = version; },
     ]),
@@ -130,6 +159,7 @@ process.stdout.write(JSON.stringify({
   submit_calls: 1, status_calls: calls.filter(call => call.name === "ceo_intent_status").length,
   pending_hints: hints.size,
   compatibility_passed: final.status === "accepted",
+  positive_version_controls: positiveVersionControls,
   negative_controls: guardResults,
 }) + "\n");
 input.close();
