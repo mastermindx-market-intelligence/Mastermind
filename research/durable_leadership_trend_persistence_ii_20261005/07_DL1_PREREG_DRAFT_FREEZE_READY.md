@@ -121,111 +121,6 @@ A future hazard-primary experiment requires a new preregistration and new untouc
 
 Forward return, MAE, recovery, prior-high reclaim, and Leader Radar state-transfer performance are DO_NOT_READ in DL-1.
 
-## 4A. Exhaustive endpoint attrition, delisting, and missing-price law
-
-This section is part of the frozen endpoint definition. A focal row that was valid at formation is **never silently dropped because of what happens later**.
-
-### 4A.1 Formation membership versus endpoint membership
-
-PIT S&P 1500 membership is required **only at formation t**.
-
-After formation, the focal security does **not** have to remain in the S&P 1500 to receive an endpoint label. An ordinary index deletion/rebalance with continued independent public trading is not itself a failure and not a censoring event.
-
-At every endpoint/state observation date d, the comparison threshold is rebuilt from the contemporaneous PIT S&P 1500 universe at d. The focal is compared with that threshold even when it is no longer an index constituent.
-
-### 4A.2 Exact Q4 threshold at an observation date
-
-For market session d, define `Q75_RS126(d)` from distinct canonical issuers that:
-
-- are PIT S&P 1500 constituents effective at d;
-- have one resolved primary U.S. common-equity listing at d;
-- have a valid panel close on d;
-- have enough panel history to compute `RS_126`;
-- have resolved issuer identity.
-
-If the focal is itself a constituent at d, it participates in the threshold population exactly once.
-
-`Q75_RS126(d)` is the empirical 75th percentile using **linear interpolation**; a security is in Q4 iff `RS_126 >= Q75_RS126(d)`.
-
-Threshold validity requires both:
-- at least 80% of distinct PIT S&P 1500 issuers at d have valid `RS_126`; and
-- at least 1,000 distinct issuers contribute.
-
-SPY must have a valid close/history for the same d. If any threshold condition fails, the date is `THRESHOLD_UNRESOLVED`; no focal label is manufactured.
-
-### 4A.3 Security-continuity law
-
-A post-formation symbol/exchange change is followed **only** when the existing identity owner supplies an effective-dated lineage receipt establishing that the successor listing is the **same continuing security**.
-
-A merger/acquisition in which the focal security ceases independent public trading is not spliced into the acquirer. A bankruptcy, liquidation, cancellation, or delisting that terminates the independently traded focal security is likewise terminal.
-
-If continuity versus termination cannot be established from the canonical identity/event evidence, status is `OUTCOME_PENDING_IDENTITY`; no label is imputed.
-
-### 4A.4 Primary occupancy resolution clock
-
-Nominal primary endpoint = market session `t+20`.
-
-A valid focal endpoint observation requires both a valid focal close and sufficient same-security canonical lineage/history to compute `RS_126` without splicing a different security. If such an observation exists on t+20, evaluate occupancy on t+20.
-
-If no valid focal close exists on t+20, no terminal event is known, and the security has not been proven to terminate, allow an exact **five-market-session resolution grace**: t+21 through t+25.
-
-Use the **first** later market session d* in that grace window with a valid focal endpoint observation under the rule above. Evaluate `RS_126` and `Q75_RS126(d*)` on that same d*. Record status `OCCUPANCY_OBSERVED_DELAYED` and `endpoint_delay_sessions = d*-(t+20)`.
-
-If no valid close exists through t+25 and no terminal event can be established, status is `OUTCOME_PENDING_PRICE`. The row remains in the cohort and **blocks the sole efficacy read** until the source is repaired or a terminal/continuity classification becomes available.
-
-The same five-session rule applies to `DL1_OCCUPANCY_60` at nominal t+60.
-
-### 4A.5 Exhaustive outcome-status table
-
-Apply rows in this table by precedence from top to bottom.
-
-| Post-formation condition | Primary/60d occupancy | `DL1_FIRST_EXIT_60` | Cohort treatment |
-|---|---|---|---|
-| Same security, valid close on nominal endpoint | Compute Q4 against contemporaneous threshold | First observed Q4 exit; otherwise administrative censor at 60 | retained |
-| Leaves S&P 1500 but continues independent trading | Compute exactly as above; membership exit alone is not failure | Continue state observations against contemporaneous thresholds | retained |
-| Effective-dated symbol/exchange change proven same continuing security | Follow successor security; compute on same canonical lineage | Continue clock without exit | retained |
-| Acquisition/merger terminates focal security | `0` if termination effective on/before resolved endpoint observation; never splice acquirer | event at first U.S. market session on/after official termination effective date, if <=60 | retained; terminal failure |
-| Delisting/bankruptcy/liquidation/cancellation terminates focal security | `0` if termination effective on/before resolved endpoint observation | event at first U.S. market session on/after official termination effective date, if <=60 | retained; terminal failure |
-| Primary listing lost and no same-security successor exists | `0` only when official evidence establishes termination; otherwise pending identity | terminal event if proven; otherwise unresolved | retained |
-| Temporary nonterminal no-print at nominal occupancy endpoint | first valid close within +5 sessions; compare on that actual observation date | missing session is neither exit nor carried-forward state; next valid close resumes observation | retained |
-| Temporary no-print inside first-exit window that later resumes | not applicable unless it includes occupancy endpoint | no event on the no-print session; event can occur on the first later valid close if Q4 is lost | retained |
-| No valid occupancy close through +5 and no proven terminal event | `OUTCOME_PENDING_PRICE`; no 0/1 label | if the 60-session path also ends without a valid resumption, `HAZARD_PENDING_PRICE` | retained; final read blocked |
-| Permanent price unavailability with proven terminal event | `0` under terminal rule | terminal event under terminal rule | retained |
-| Permanent price unavailability with no proven terminal/continuity event | `OUTCOME_PENDING_PRICE` or `OUTCOME_PENDING_IDENTITY` | `HAZARD_PENDING_PRICE` / `HAZARD_PENDING_IDENTITY` | retained; final read blocked |
-| Contemporaneous threshold/benchmark unavailable | `OUTCOME_PENDING_THRESHOLD` | `HAZARD_PENDING_THRESHOLD` if needed before event/censor | retained; final read blocked |
-
-No acquisition premium, last stale mark, zero price, average return, acquirer return, or carry-forward close is used to fabricate a Q4 state.
-
-### 4A.6 First-exit observation law
-
-`DL1_FIRST_EXIT_60` means the first **observable closing-state exit** or proven terminal-security exit within market sessions t+1..t+60.
-
-For each session k:
-
-1. if a proven terminal event for the focal security is effective by that session, record an exit event at that session;
-2. else if the focal has a valid close and the contemporaneous threshold is valid, evaluate Q4 and record the first Q4=0 session as the exit;
-3. else if the security has a nonterminal no-print, record `STATE_NOT_OBSERVED` for that session and do not carry the prior close forward;
-4. else if identity or threshold is unresolved, mark the path pending.
-
-A nonterminal no-print that later resumes does not itself create an exit or censor.
-
-If the path reaches t+60 with valid state observability and no exit, it receives the ordinary administrative censor at 60.
-
-If unresolved price, identity, or threshold status prevents determining the path through t+60, the row is **not** silently censored into the hazard analysis. Its secondary status is pending and the secondary report is `WAIT_FOR_DATA_REPAIR` until resolved.
-
-### 4A.7 Zero post-formation attrition gate
-
-The primary confirmatory analysis requires **100% endpoint-status resolution** for every formation-valid confirmatory row:
-
-- binary occupancy label 0/1 under the table above; and
-- recorded endpoint status/reason.
-
-Any `OUTCOME_PENDING_*` row makes `DL1_FINAL_READ_ELIGIBLE=false`.
-
-Thus no post-formation disappearance can improve the result by disappearing from the denominator.
-
-The structural-secondary hazard report, if ever opened after a primary pass, likewise requires zero `HAZARD_PENDING_*` rows; only ordinary administrative censoring at t+60 is permitted in its analyzed population.
-
 ## 4A. Exhaustive endpoint attrition / delisting law
 
 Post-formation status is part of the endpoint definition. **No future-state row is silently dropped.** Formation-time abstentions in §8 are the only statistical abstentions permitted. After a row forms, every future state maps deterministically to a label/event or to a typed unresolved status that blocks the relevant read.
@@ -552,9 +447,7 @@ Last primary t+20 maturity = offset 555.
 
 Last t+60 structural-secondary maturity = offset 595.
 
-The frozen five-market-session resolution grace for the last `DL1_OCCUPANCY_60` endpoint expires at offset 600.
-
-Conservative one-reveal horizon = **601 market trading sessions from offset 0 through 600**, approximately 2.38 trading years.
+Conservative one-reveal horizon = **596 market trading sessions from offset 0 through 595**, approximately 2.37 trading years.
 
 No anchor exists while the source gate is unresolved.
 
@@ -923,7 +816,7 @@ No analogous shortcut is permitted for fitting S or A.
 - B1–B3 completed;
 - B4–B9 completed;
 - all 72 confirmatory formation dates accrued;
-- all confirmatory t+60 windows matured and the five-session occupancy-resolution grace expired through offset 600;
+- all confirmatory t+60 windows matured through offset 595;
 - >=12 distinct confirmatory formation months;
 - >=365 calendar days between first and last confirmatory formation date;
 - >=1,000 matured primary rows;
