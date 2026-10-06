@@ -42,23 +42,38 @@ PROFILES = (
     WebCeoV3CeoIngressReadGateway,
 )
 
+INGRESS_SERVER_VERSION = {
+    CeoIngressReadGateway: "1.0.0",
+    WebCeoCeoIngressReadGateway: "1.1.0",
+    WebCeoV2CeoIngressReadGateway: "1.2.0",
+    WebCeoV3CeoIngressReadGateway: "1.2.0",
+}
+OUTPUT_SERVER_VERSION = {
+    **INGRESS_SERVER_VERSION,
+    WebCeoV3CeoIngressReadGateway: "1.4.0",
+}
 
-def canonical_result(*, ok=True):
-    result = {
+
+def canonical_result(
+    profile=CeoIngressReadGateway,
+    *,
+    ok=True,
+    code="not_found",
+    message="No matching runtime record",
+):
+    return {
         "schema": RESULT_SCHEMA,
         "tool": "executive_state",
         "ok": ok,
-        "server_version": "1.4.0",
+        "server_version": INGRESS_SERVER_VERSION[profile],
         "mode": "readonly",
         "generated_at": "2026-10-04T03:00:00+00:00",
         "grounding": {"mastermind_sha": "a" * 40},
         "data": {"runtime_counts": {"jobs": 2}} if ok else None,
         "degraded": [],
         "bounded": [],
+        "error": None if ok else {"code": code, "message": message},
     }
-    if not ok:
-        result["error"] = {"code": "not_found", "message": "No matching runtime record"}
-    return result
 
 
 async def socket_read(profile, wire):
@@ -150,26 +165,99 @@ def test_missing_socket_does_not_claim_reader_or_execution_ready(profile):
 
 
 @pytest.mark.parametrize("profile", PROFILES)
-@pytest.mark.parametrize(("field", "value"), [
-    ("schema", "wrong-schema"),
-    ("tool", "executive_job"),
-    ("ok", 1),
-    ("ok", None),
+@pytest.mark.parametrize(("mutate", "case"), [
+    (lambda value: value.__setitem__("schema", "wrong-schema"), "wrong-schema"),
+    (lambda value: value.__setitem__("tool", "executive_job"), "wrong-tool"),
+    (lambda value: value.__setitem__("ok", 1), "non-bool-ok"),
+    (lambda value: value.__setitem__("ok", None), "null-ok"),
+    (lambda value: value.__setitem__("private_detail", SECRET), "extra-private-field"),
+    (lambda value: value.__setitem__("mode", "write"), "wrong-mode"),
+    (lambda value: value.__setitem__("server_version", "9.9.9"), "wrong-version"),
+    (lambda value: value.__setitem__("generated_at", 1), "bad-generated-at"),
+    (lambda value: value.__setitem__("grounding", []), "bad-grounding"),
+    (lambda value: value.__setitem__("degraded", [1]), "bad-degraded"),
+    (lambda value: value.__setitem__("bounded", ["not-a-receipt"]), "bad-bounded"),
+    (
+        lambda value: value.__setitem__(
+            "error", {"code": "not_found", "message": SECRET}
+        ),
+        "success-with-error",
+    ),
 ])
-def test_untrusted_success_envelope_is_not_a_success_or_permission_refusal(profile, field, value):
-    result = canonical_result()
-    result[field] = value
-    result["private_detail"] = SECRET
+def test_untrusted_success_envelope_is_not_a_success_or_permission_refusal(
+    profile, mutate, case
+):
+    result = canonical_result(profile)
+    mutate(result)
     observed = asyncio.run(socket_read(profile, {"ok": True, "result": result}))
     assert_diagnostic(observed, "backend_unavailable", "invalid response")
 
 
 @pytest.mark.parametrize("profile", PROFILES)
-@pytest.mark.parametrize("ok", [True, False])
-def test_valid_canonical_read_result_is_preserved(profile, ok):
-    expected = canonical_result(ok=ok)
-    observed = asyncio.run(socket_read(profile, {"ok": True, "result": copy.deepcopy(expected)}))
+@pytest.mark.parametrize(("mutate", "case"), [
+    (
+        lambda value: value.__setitem__(
+            "data", {"runtime_counts": {"jobs": 99}, "private_detail": SECRET}
+        ),
+        "failure-with-data",
+    ),
+    (
+        lambda value: value["error"].__setitem__("private_detail", SECRET),
+        "failure-extra-error-field",
+    ),
+    (
+        lambda value: value["error"].__setitem__("code", "future-error-code"),
+        "unknown-error-code",
+    ),
+    (
+        lambda value: value["error"].__setitem__("message", {"private": SECRET}),
+        "non-string-error-message",
+    ),
+    (lambda value: value.__setitem__("error", None), "missing-error-shape"),
+])
+def test_malformed_inner_error_envelope_is_refused_without_leak(
+    profile, mutate, case
+):
+    result = canonical_result(
+        profile, ok=False, code="authority_refused", message=SECRET
+    )
+    mutate(result)
+    observed = asyncio.run(socket_read(profile, {"ok": True, "result": result}))
+    assert_diagnostic(observed, "backend_unavailable", "invalid response")
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_valid_canonical_read_success_is_preserved(profile):
+    wire = canonical_result(profile)
+    expected = copy.deepcopy(wire)
+    expected["server_version"] = OUTPUT_SERVER_VERSION[profile]
+    observed = asyncio.run(
+        socket_read(profile, {"ok": True, "result": copy.deepcopy(wire)})
+    )
     assert observed == expected
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+@pytest.mark.parametrize(
+    ("upstream_code", "code", "category"),
+    [
+        ("authority_refused", "backend_refused", "permission was refused"),
+        ("not_found", "backend_refused", "request was refused"),
+        ("invalid_input", "backend_refused", "request was refused"),
+        ("backend_unavailable", "backend_unavailable", "unavailable in the installed backend"),
+        ("internal_error", "backend_unavailable", "unavailable in the installed backend"),
+    ],
+)
+def test_canonical_inner_error_is_classified_and_redacted(
+    profile, upstream_code, code, category
+):
+    wire = canonical_result(
+        profile, ok=False, code=upstream_code, message=SECRET
+    )
+    observed = asyncio.run(
+        socket_read(profile, {"ok": True, "result": copy.deepcopy(wire)})
+    )
+    assert_diagnostic(observed, code, category)
 
 
 class ClassifiedClient:

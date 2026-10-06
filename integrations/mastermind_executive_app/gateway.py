@@ -523,6 +523,31 @@ class CeoIngressReadGateway:
 
     _READ_TOOL_NAMES = READ_TOOL_NAMES
     _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA
+    _RESULT_FIELDS = frozenset(
+        {
+            "schema",
+            "tool",
+            "ok",
+            "server_version",
+            "mode",
+            "generated_at",
+            "grounding",
+            "data",
+            "degraded",
+            "bounded",
+            "error",
+        }
+    )
+    _UNAVAILABLE_UPSTREAM_CODES = frozenset(
+        {
+            "peer_credentials_unavailable",
+            "peer_denied",
+            "ingress_unavailable",
+            "unsupported_ingress_schema",
+            "backend_unavailable",
+            "internal_error",
+        }
+    )
 
     def __init__(self, socket_path: Path | str, client: CeoIngressClient) -> None:
         self._socket_path = socket_path
@@ -536,6 +561,78 @@ class CeoIngressReadGateway:
     async def aclose(self) -> None:
         # Each request owns and closes its socket. No local state to drain.
         return None
+
+    def _result_server_version(self) -> str:
+        from integrations.executive_mcp.schemas import SERVER_VERSION
+
+        return SERVER_VERSION
+
+    def _is_canonical_read_result(
+        self, result: object, *, tool: str
+    ) -> bool:
+        from integrations.executive_mcp.schemas import (
+            ERROR_CODES,
+            RESULT_SCHEMA,
+            ServerMode,
+            canonical_json,
+        )
+
+        if not isinstance(result, dict) or set(result) != self._RESULT_FIELDS:
+            return False
+        try:
+            canonical_json(result)
+        except (TypeError, ValueError):
+            return False
+        if (
+            result["schema"] != RESULT_SCHEMA
+            or result["tool"] != tool
+            or type(result["ok"]) is not bool
+            or result["server_version"] != self._result_server_version()
+            or result["mode"] != ServerMode.READONLY.value
+            or not isinstance(result["generated_at"], str)
+            or not isinstance(result["grounding"], dict)
+            or not isinstance(result["degraded"], list)
+            or not all(isinstance(item, str) for item in result["degraded"])
+            or not isinstance(result["bounded"], list)
+            or not all(isinstance(item, dict) for item in result["bounded"])
+        ):
+            return False
+        if result["ok"]:
+            return result["error"] is None
+        error = result["error"]
+        return (
+            result["data"] is None
+            and isinstance(error, dict)
+            and set(error).issubset({"code", "message", "intent_id"})
+            and {"code", "message"}.issubset(error)
+            and isinstance(error["code"], str)
+            and error["code"] in ERROR_CODES
+            and isinstance(error["message"], str)
+            and (
+                "intent_id" not in error
+                or isinstance(error["intent_id"], str)
+            )
+        )
+
+    @classmethod
+    def _classified_upstream_failure(
+        cls, upstream_code: str
+    ) -> tuple[str, str]:
+        code = "backend_unavailable"
+        if upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
+            message = "Executive reader is unavailable in the installed backend."
+        else:
+            code = "backend_refused"
+            if upstream_code == "authority_refused":
+                message = (
+                    "Executive reader permission was refused by the installed backend."
+                )
+            else:
+                message = "Executive reader request was refused by the installed backend."
+        return code, (
+            message + " Read-only describes this read operation; submission and "
+            "execution readiness were not observed."
+        )
 
     @staticmethod
     def _read_failure(response: CeoIngressResponse) -> tuple[str, str]:
@@ -558,26 +655,9 @@ class CeoIngressReadGateway:
             and isinstance(response.error.get("code"), str)
             and response.error["code"] in ceo_ingress.ERROR_CODES
         ):
-            upstream_code = response.error["code"]
-            if upstream_code in {
-                "peer_credentials_unavailable",
-                "peer_denied",
-                "ingress_unavailable",
-                "unsupported_ingress_schema",
-                "backend_unavailable",
-                "internal_error",
-            }:
-                # These describe the installed host-to-host read boundary, not
-                # the caller's Executive authority.  A peer/schema mismatch can
-                # surface as peer_denied before the read provider is reached,
-                # so presenting it as a user permission refusal would be false.
-                message = "Executive reader is unavailable in the installed backend."
-            else:
-                code = "backend_refused"
-                if upstream_code == "authority_refused":
-                    message = "Executive reader permission was refused by the installed backend."
-                else:
-                    message = "Executive reader request was refused by the installed backend."
+            return CeoIngressReadGateway._classified_upstream_failure(
+                response.error["code"]
+            )
         return code, (
             message + " Read-only describes this read operation; submission and "
             "execution readiness were not observed."
@@ -586,7 +666,7 @@ class CeoIngressReadGateway:
     async def call(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         from datetime import datetime, timezone
         from integrations.executive_mcp.schemas import (
-            GatewayError, RESULT_SCHEMA, ServerMode, error_envelope,
+            GatewayError, ServerMode, error_envelope,
         )
         try:
             if name not in self._READ_TOOL_NAMES:
@@ -597,10 +677,16 @@ class CeoIngressReadGateway:
                 "tool": name, "arguments": validated,
             })
             result = response.result
-            if (response.transport == TRANSPORT_SENT_OK and response.ok is True
-                    and isinstance(result, dict) and result.get("schema") == RESULT_SCHEMA
-                    and result.get("tool") == name and type(result.get("ok")) is bool):
-                return result
+            if (
+                response.transport == TRANSPORT_SENT_OK
+                and response.ok is True
+                and self._is_canonical_read_result(result, tool=name)
+            ):
+                if result["ok"]:
+                    return result
+                raise GatewayError(
+                    *self._classified_upstream_failure(result["error"]["code"])
+                )
             raise GatewayError(*self._read_failure(response))
         except GatewayError as exc:
             return error_envelope(
@@ -612,6 +698,11 @@ class CeoIngressReadGateway:
 
 class WebCeoCeoIngressReadGateway(CeoIngressReadGateway):
     """Versioned Web-CEO installed reader; legacy v1 remains unchanged."""
+
+    def _result_server_version(self) -> str:
+        from integrations.executive_mcp.web_ceo import WEB_CEO_SERVER_VERSION
+
+        return WEB_CEO_SERVER_VERSION
 
     _READ_TOOL_NAMES = (
         "executive_state",
@@ -634,6 +725,11 @@ class WebCeoV2CeoIngressReadGateway(WebCeoCeoIngressReadGateway):
     """Static Web-CEO v2 installed reader (App-read v3); earlier readers frozen."""
 
     _READ_SCHEMA = ceo_ingress.APP_READ_SCHEMA_V3
+
+    def _result_server_version(self) -> str:
+        from integrations.executive_mcp.web_ceo import WEB_CEO_V2_SERVER_VERSION
+
+        return WEB_CEO_V2_SERVER_VERSION
 
     def _validate_arguments(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         from integrations.executive_mcp.web_ceo import (
