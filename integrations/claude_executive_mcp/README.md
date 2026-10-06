@@ -13,6 +13,7 @@ Runtime contract:
 - installed Executive policy source: `/Library/Application Support/MastermindExecutive/config/executive-mcp.json`
 - Claude MCP URL: `http://127.0.0.1:8444/mcp`
 - Claude OAuth callback for this vertical: `http://localhost:8774/callback`
+- adapter-owned upstream OAuth callback: `http://127.0.0.1:8444/oauth/callback`
 - future authentication shape: distinct public/native Auth0 client, PKCE S256, no client secret
 
 ## Authority boundary
@@ -34,8 +35,10 @@ See `docs/runbooks/claude-executive-mcp-client.md` for the current gated enrollm
 
 ## Source-only COO route repair
 
-The local endpoint now has exactly one upstream tool target: `/mcp/coo` on the existing8443 listener. No missing-route fallback to the CEO profile exists. The adapter refuses missing or divergent COO policy, confines its protected-resource scopes, rejects foreign-role authorization requests/challenges and preserves uncertainty on a lost response. Literal path/method, local Host/Origin and duplicate-Authorization checks precede forwarding.
+The local endpoint now has exactly one upstream tool target: `/mcp/coo` on the existing 8443 listener. No missing-route fallback to the CEO profile exists. The adapter refuses missing or divergent COO policy, confines its protected-resource scopes, rejects foreign-role authorization requests/challenges and preserves uncertainty on a lost response. Literal path/method, local Host/Origin and duplicate-Authorization checks precede forwarding.
 
-`createAdapter(installed, dependencies)` is an in-process construction seam for isolated transport tests. It does not read the live installation or open a listener when imported. Only the executable entry reads the fixed existing configuration and listens on127.0.0.1:8444. No wire or environment option chooses another upstream; tests inject local fixtures without real issuer traffic, installed services or credentials.
+The OAuth facade is issuer-preserving rather than validation-bypassing. Claude still registers the fixed native callback `http://localhost:8774/callback`, while the adapter rewrites only the upstream authorization-code `redirect_uri` to its loopback callback `http://127.0.0.1:8444/oauth/callback`. The adapter requires exactly one upstream RFC 9207 `iss` equal to the configured canonical issuer on both success and error responses, refuses missing/foreign/duplicate issuer or unreviewed response fields, then redirects to Claude's fixed callback with the local facade issuer. Authorization-code token exchange applies the same upstream adapter callback. PKCE verifier/challenge, state, client ID, resource and role-correct scopes remain otherwise unchanged. No issuer is stripped and no client-side validation is disabled.
 
-The executable contract lives in `tests/claude_executive_mcp_adapter.test.mjs` and runs through the repository's pytest discovery using `tests/test_claude_executive_mcp_adapter_runtime.py`. Real Claude OAuth, issuer-response interoperability, source acceptance and the reviewed managed-session capability profile remain separate gates. Keep ENROLLMENT HELD until those applicable gates pass.
+`createAdapter(installed, dependencies)` is an in-process construction seam for isolated transport tests. It does not read the live installation or open a listener when imported. Only the executable entry reads the fixed existing configuration and listens on 127.0.0.1:8444. No wire or environment option chooses another upstream; tests inject local fixtures without real issuer traffic, installed services or credentials.
+
+The executable contract lives in `tests/claude_executive_mcp_adapter.test.mjs` and runs through the repository's pytest discovery using `tests/test_claude_executive_mcp_adapter_runtime.py`. The repaired source now proves issuer-consistent callback translation under isolated transport fixtures. Real Claude/IdP authentication, source acceptance, installation and the reviewed managed-session capability profile remain separate gates. Keep ENROLLMENT HELD until those applicable gates pass.
