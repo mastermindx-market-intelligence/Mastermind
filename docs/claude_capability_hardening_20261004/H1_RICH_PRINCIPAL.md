@@ -57,8 +57,10 @@ The current protected implementation makes the H1 admission gap concrete:
 - The checked-in capability registry currently has no rich Claude-principal profile. Its MCP registry
   contains existing Company Consultation, OpenAI docs and Browser grants, but **no admitted Executive
   COO MCP grant and no admitted principal Company Dialogue MCP grant**.
-- H3 now has a source package for the six-tool Executive COO backend, but native authenticated
-  transport is still held by #955's issuer-consistency review blocker.
+- H3 now has a source package for the six-tool Executive COO backend. #955's prior
+  issuer-consistency defect is source-repaired at `e17a56b3454c2528239322a1d1b667d427a7a7f0`
+  and is back with its original reviewer; installed/native authentication remains unproven until
+  that repair is accepted and the real Claude/IdP ceremony passes.
 - H6 now has a distinct principal Company Dialogue tool generation plus Runtime COMMIT fencing and
   source-only host composition; that generation is still deliberately absent from capability policy.
 

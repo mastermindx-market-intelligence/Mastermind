@@ -231,9 +231,11 @@ pairs, 18 deferred and 18 unsupported, with production/native/catalog attestatio
 The design verifier remains `PASS_WITH_EXPLICIT_HOLDS`; its 80 acceptance scenarios are still
 `NOT_RUN`.
 
-#1191 is now merged after independent approval and exact-head CI. #1041 remains a separate active
-Draft owner for the deeper COO hierarchy/domain/CooCycle mechanics and must be reconciled rather than
-duplicated. #955 remains held on its OAuth issuer-consistency defect. H7's exact detailed-file write
-hold remains unchanged.
+#1191 is merged after independent approval and exact-head CI. #1041 closed unmerged; the
+Claude-hardening branch now carries the bounded H4 principal-root replacement stack and keeps the
+live ingress seam separate from #1147. #955's prior OAuth issuer-consistency defect is source-repaired
+at `e17a56b3454c2528239322a1d1b667d427a7a7f0`, but independent re-approval, installation and the
+real native Claude/IdP authentication canary remain open. H7's exact detailed-file write hold remains
+unchanged.
 
 **PROJECT_COMPLETE: false. H6-A: BUILT_NOT_PROVEN. H6-B/NATIVE_ACCEPTANCE: not proven.**

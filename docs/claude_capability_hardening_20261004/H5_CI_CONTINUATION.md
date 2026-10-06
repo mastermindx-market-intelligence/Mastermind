@@ -119,6 +119,27 @@ owner. The injected wait function controls Class-E/Class-T cadence; the reasonin
 unchanged samples. Tests cover duplicate registration, stale compare-delete, token reuse, terminal and
 UNKNOWN returns, identity drift, cadence failure, bounded exhaustion and guaranteed cleanup.
 
+## H5-B2-B1.5 current source slice — waiter to Wake composition
+
+`control_plane/github_ci_candidate_continuation.py` now composes B2-B1 with B2-A without
+introducing another owner. It accepts the exact same injected `sample()` and `wait()` owners plus
+one existing `CandidateCIWakeBinding`.
+
+The output is closed:
+
+- quiescent bounded exhaustion returns the waiter result and **no** Wake obligation;
+- a material/terminal waiter result must contain one validated B1 decision and is projected into
+  exactly one existing Wake obligation;
+- invalid Wake binding after a material return refuses without leaking the process-local waiter;
+- candidate identity drift refuses before any Wake is created.
+
+This coordinator performs no GitHub read, timer, persistence, route delivery, model invocation,
+Runtime mutation, rerun, merge or deploy. It is therefore only the deterministic composition seam
+between the already-owned sampler/wait path and Wake Fabric.
+
+Focused H5 source validation across classifier, material filter, waiter, Wake projection,
+continuation composition and existing Wake Fabric is **137 passed** on the current branch.
+
 ## H5-B2-B2 remaining host/source composition
 
 The remaining H5 process work is narrower. One accepted host composition must:
