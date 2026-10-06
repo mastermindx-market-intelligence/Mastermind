@@ -54,6 +54,42 @@ def test_same_process_preserves_ceo_surface_and_separates_coo(rsa_key, tmp_path)
     asyncio.run(exercise())
 
 
+def test_same_process_preserves_web_ceo_v3_and_separates_coo(rsa_key, tmp_path):
+    _, token, current, settings = fixture.setup(rsa_key, tmp_path)
+    app = server.build_web_ceo_v3_with_coo_mcp_app(
+        settings.executive,
+        coo_settings=settings,
+        audit_sink=fixture.Sink(),
+        mdm_reader=object(),
+        session_target_projector=lambda *_args: [],
+        session_reply_handler=lambda *_args: {},
+        session_summon_handler=lambda *_args: {},
+    )
+
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://127.0.0.1",
+            ) as client:
+                coo = await rpc(client, token, "/mcp/coo")
+                assert coo.status_code == 200, coo.text
+                assert tuple(tool["name"] for tool in coo.json()["result"]["tools"]) == COO_TOOL_NAMES
+
+                reader = fixture.fixture._read_token(rsa_key)
+                ceo = await rpc(client, reader, "/mcp")
+                assert ceo.status_code == 200, ceo.text
+                ceo_names = {tool["name"] for tool in ceo.json()["result"]["tools"]}
+                assert "executive_mdm" in ceo_names
+                assert "reconcile_ceo_request" in ceo_names
+                assert "submit_ceo_intent" in ceo_names
+
+                assert (await rpc(client, reader, "/mcp/coo")).status_code in (401, 403)
+                assert (await rpc(client, token, "/mcp")).status_code in (401, 403)
+
+    asyncio.run(exercise())
+
+
 def test_signed_mcp_request_reaches_real_socket_and_one_durable_job(rsa_key, tmp_path):
     import dataclasses
     import tempfile
