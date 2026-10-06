@@ -14,8 +14,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from integrations.mastermind_company_mcp.schemas import ToolSpec
-from integrations.slack_agent_dialogue.contract import (
+from common.agent_dialogue_contract import (
     DialogueContractError,
     MAX_BOUNDED_TEXT_CHARS,
     MAX_EVIDENCE_REFS,
@@ -24,6 +23,7 @@ from integrations.slack_agent_dialogue.contract import (
     validate_body,
     validate_evidence_ref,
 )
+from integrations.mastermind_company_mcp.schemas import ToolSpec
 
 PRINCIPAL_SERVER_NAME = "mastermind-company-dialogue-principal"
 PRINCIPAL_SERVER_IDENTITY = "mastermind-company-dialogue-principal-mcp"
