@@ -19,7 +19,6 @@ RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
 AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"
 SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$0")" && /bin/pwd)"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
-GATEWAY_PREFLIGHT="$SCRIPT_DIR/gateway_refresh_preflight.py"
 
 usage() {
   /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
@@ -441,8 +440,11 @@ qualify_gateway_release() {
 }
 
 qualify_gateway_refresh_preflight() {
-  "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$GATEWAY_PREFLIGHT" \
-    --expected-sha "$1" >/dev/null
+  local expected_sha="$1"
+  local helper="$MCP_RELEASE_ROOT/$expected_sha/ops/executive_os/gateway_refresh_preflight.py"
+  [ -f "$helper" ] && [ ! -L "$helper" ] || return 1
+  "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$helper" \
+    --expected-sha "$expected_sha" >/dev/null
 }
 
 

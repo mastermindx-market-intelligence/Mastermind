@@ -204,7 +204,7 @@ def test_qualifier_composes_existing_release_and_runtime_owners(monkeypatch):
         ("plist", SHA), ("config", SHA), ("release", SHA),
         ("closure", None), ("plist", SHA), ("config", SHA),
         ("release-recheck", None), ("closure-recheck", None),
-        ("plist", SHA), ("config", SHA),
+        ("plist", SHA), ("config", SHA), ("plist", SHA),
     ]
 
 
@@ -270,6 +270,53 @@ def test_qualifier_refuses_plist_drift_after_final_closure_rechecks(monkeypatch)
         "_read_config",
         lambda *args: ("e" * 64, ("leaf",), ("ancestors",)),
     )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_verify_release",
+        lambda *args: SimpleNamespace(manifest_digest="c" * 64),
+    )
+    monkeypatch.setattr(
+        preflight.installed,
+        "_verify_network_closure",
+        lambda *args: SimpleNamespace(aggregate="d" * 64),
+    )
+    monkeypatch.setattr(preflight.installed, "_recheck_release", lambda *args: None)
+    monkeypatch.setattr(
+        preflight.installed, "_recheck_network_closure", lambda *args: None
+    )
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight.qualify_gateway_refresh(SHA)
+
+
+def test_qualifier_refuses_plist_drift_during_final_config_read(monkeypatch):
+    topology = SimpleNamespace(
+        config_path="/fixed/config",
+        config_mode=0o644,
+        config_gid=0,
+    )
+    stable = SimpleNamespace(release=SHA, digest="stable")
+    changed = SimpleNamespace(release=SHA, digest="changed")
+    state = {"plist_changed": False, "config_reads": 0}
+
+    monkeypatch.setattr(preflight.installed, "_role_topology", lambda role: topology)
+    monkeypatch.setattr(preflight.installed, "_Budget", lambda seconds: object())
+    monkeypatch.setattr(preflight.installed, "_SERVICE_BUDGET_SECONDS", 25.0)
+
+    def role_plist(*args, **kwargs):
+        return changed if state["plist_changed"] else stable
+
+    def read_config(*args):
+        state["config_reads"] += 1
+        if state["config_reads"] == 3:
+            # Model a publication replacing only the plist while the final
+            # semantic config observation is in flight. The final config
+            # remains stable, so only the post-config plist join can catch it.
+            state["plist_changed"] = True
+        return ("e" * 64, ("leaf",), ("ancestors",))
+
+    monkeypatch.setattr(preflight.installed, "_verify_role_plist", role_plist)
+    monkeypatch.setattr(preflight, "_read_config", read_config)
     monkeypatch.setattr(
         preflight.installed,
         "_verify_release",

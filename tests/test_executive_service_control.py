@@ -62,6 +62,13 @@ exec /usr/bin/plutil "$@"
 '''
 
 GATEWAY_PREFLIGHT_PYTHON_SHIM = r'''#!/bin/bash
+[ "$#" -eq 6 ] || exit 97
+[ "$1" = "-I" ] && [ "$2" = "-S" ] && [ "$3" = "-B" ] || exit 97
+[ "$5" = "--expected-sha" ] || exit 97
+case "$4" in
+  */releases/"$6"/ops/executive_os/gateway_refresh_preflight.py) ;;
+  *) exit 97 ;;
+esac
 exit "${FAKE_GATEWAY_PREFLIGHT_EXIT:-0}"
 '''
 
@@ -1199,11 +1206,12 @@ GATEWAY_CONFIG_PATH = "/Library/Application Support/MastermindExecutive/config/e
 def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            extra_args=("--expected-sha", GATEWAY_SHA),
                            missing_config=False, symlink_config=False, native_plutil=False,
-                           preflight_exit=0, preflight_exits=None):
+                           preflight_exit=0, preflight_exits=None, helper_kind="regular"):
     config = {"schema": "mastermind.executive_mcp_install.v1",
               "release_sha": GATEWAY_SHA, "service_uid": 458}
     config.update(config_changes or {})
-    release = f"{GATEWAY_RELEASE_ROOT}/{GATEWAY_SHA}"
+    release_root = tmp_path / "releases"
+    release = str(release_root / GATEWAY_SHA)
     config_path = tmp_path / "executive-mcp.json"
     document = {
         "Label": MCP_LABEL,
@@ -1219,7 +1227,24 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
     document.update(changes or {})
     def prepare(script):
         text = script.read_text().replace(GATEWAY_CONFIG_PATH, str(config_path))
+        text = text.replace(
+            f'MCP_RELEASE_ROOT="{GATEWAY_RELEASE_ROOT}"',
+            f'MCP_RELEASE_ROOT="{release_root}"',
+        )
         script.write_text(text)
+        helper = (
+            release_root / GATEWAY_SHA / "ops" / "executive_os"
+            / "gateway_refresh_preflight.py"
+        )
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        if helper_kind == "regular":
+            helper.write_text("# disposable gateway preflight fixture\n", encoding="utf-8")
+        elif helper_kind == "symlink":
+            target = release_root / "decoy-gateway-preflight.py"
+            target.write_text("# outside expected helper coordinate\n", encoding="utf-8")
+            helper.symlink_to(target)
+        elif helper_kind != "missing":
+            raise AssertionError(f"unsupported helper_kind: {helper_kind}")
         preflight = tmp_path / "native-shims" / "gateway-preflight-python"
         if preflight_exits is None:
             preflight.write_text(
@@ -1331,6 +1356,19 @@ def test_gateway_generation_mismatch_is_pre_effect_refusal(tmp_path, changes, co
     assert code == 65
     assert "gateway release qualification failed" in err
     assert calls == []
+
+
+@pytest.mark.parametrize("helper_kind", ["missing", "symlink"])
+def test_gateway_refuses_untrusted_release_preflight_helper_before_lifecycle(
+    tmp_path, helper_kind
+):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path, [], helper_kind=helper_kind
+    )
+    assert code == 65
+    assert "gateway deep preflight failed" in err
+    assert calls == []
+    assert remaining == ""
 
 
 def test_gateway_deep_preflight_refusal_never_stops_service(tmp_path):

@@ -135,6 +135,15 @@ def qualify_gateway_refresh(expected_sha: str) -> dict[str, str]:
             or final_ancestors != config_ancestors
         ):
             _refuse()
+        # The final config read itself is non-atomic with the launchd plist.
+        # Join the plist once more *after* that semantic read so publication
+        # cannot replace the launch generation during config validation and
+        # still receive a pre-effect PASS.
+        final_plist_after_config = installed._verify_role_plist(
+            topology, budget, expected_release=expected_sha
+        )
+        if final_plist_after_config != plist:
+            _refuse()
     except GatewayRefreshPreflightError:
         raise
     except Exception:
