@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+from control_plane.executive_runtime import AttemptLease
 from control_plane.model_router import ModelRouter
+from test_executive_operator_supervisor import _PromptSource, _seed_dispatchable_operator_planner
 
 
 LEGACY_ALIAS = "coo.operator.readonly"
@@ -64,3 +67,30 @@ def test_sol61_candidate_does_not_replace_current_coo_default() -> None:
 
     assert router.model_aliases[LEGACY_ALIAS].model == "gpt-5.6-sol"
     assert router.model_aliases[CANDIDATE_ALIAS].model == "gpt-6.1-sol"
+
+def test_sol61_candidate_reaches_supervisor_as_exact_claimed_model(tmp_path) -> None:
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path, operator_alias=CANDIDATE_ALIAS
+    )
+    dispatch = runtime.attempts.dispatch_cycle_job(
+        planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        lease_owner="sol61-candidate-test",
+    )
+    assert dispatch.lease_token is not None
+    lease = AttemptLease(dispatch.attempt, dispatch.lease_token)
+    supervisor = ExecutiveOperatorSupervisor(
+        runtime,
+        claimed_adapter_factory=lambda *args, **kwargs: None,
+        prompt_source=_PromptSource(),
+    )
+
+    requested = supervisor._requested_profile(planner, lease)
+
+    assert requested.requested_model == "gpt-6.1-sol"
+    assert requested.harness_kind == "codex-app-server"
+    assert requested.sandbox_policy == "read-only"
+    assert requested.approval_policy == "never"
+    assert requested.network_policy == "disabled"
+    assert requested.write_capable is False
+
