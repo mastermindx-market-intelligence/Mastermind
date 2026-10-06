@@ -504,7 +504,9 @@ class _PromptSource:
         return "Read the exact Job and produce the bounded plan."
 
 
-def _seed_dispatchable_operator_planner(tmp_path: Path):
+def _seed_dispatchable_operator_planner(
+    tmp_path: Path, *, operator_alias: str = "coo.operator.readonly"
+):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
     workspace.mkdir(parents=True)
@@ -539,7 +541,7 @@ def _seed_dispatchable_operator_planner(tmp_path: Path):
     runtime = Runtime.at(tmp_path / "runtime")
     router = ModelRouter.load()
     sealed = router.model_aliases["coo.sealed"]
-    operator = router.model_aliases["coo.operator.readonly"]
+    operator = router.model_aliases[operator_alias]
     binding = {
         "eligible_quota_classes": ["codex-coo", "codex-coo-default"],
         "provider": sealed.provider_alias,
