@@ -41,11 +41,16 @@ class Owner:
         return {"action_ref": f"{caller}:prepared"}
 
     async def run_browser_action(self, caller, args):
-        if args["action_ref"] != f"{caller}:prepared":
+        if (
+            args.get("tab_ref") != "tab-1"
+            or args["action_ref"] != f"{caller}:prepared"
+        ):
             raise load(FACADE_MODULE).OwnerRefused("FOREIGN_REFERENCE")
         return {"effect": "APPLIED", "status": "completed"}
 
     async def reconcile_browser_action(self, caller, args):
+        if args.get("tab_ref") != "tab-1":
+            raise load(FACADE_MODULE).OwnerRefused("FOREIGN_REFERENCE")
         return {"effect": "EFFECT_UNKNOWN", "status": "pending"}
 
 
@@ -65,6 +70,8 @@ def test_closed_catalog_is_exact_and_defensive():
     assert rows[4]["annotations"]["readOnlyHint"] is True
     assert rows[5]["annotations"]["readOnlyHint"] is False
     assert rows[6]["annotations"]["readOnlyHint"] is True
+    assert rows[5]["inputSchema"]["required"] == ["tab_ref", "action_ref"]
+    assert rows[6]["inputSchema"]["required"] == ["tab_ref", "action_ref"]
     assert len(m.SCHEMA_DIGEST) == 64
     rows[0]["name"] = "shell"
     assert m.catalog()[0]["name"] == "browser_fleet"
@@ -125,8 +132,8 @@ def test_facade_requires_existing_owner_and_trusted_caller_resolver():
                 "args": {"delta_x": 2001, "delta_y": 0},
             },
         ),
-        ("run_browser_action", {"action_ref": "x", "force": True}),
-        ("reconcile_browser_action", {"action_ref": ""}),
+        ("run_browser_action", {"tab_ref": "tab-1", "action_ref": "x", "force": True}),
+        ("reconcile_browser_action", {"action_ref": "x"}),
         ("shell", {}),
         ("browser_fleet", None),
     ],
@@ -167,13 +174,15 @@ def test_each_call_resolves_current_caller_and_foreign_reference_refuses():
         assert prepared["data"]["action_ref"] == "alice:prepared"
         caller.set("bob")
         foreign = await facade.call(
-            "run_browser_action", {"action_ref": "alice:prepared"}
+            "run_browser_action",
+            {"tab_ref": "tab-1", "action_ref": "alice:prepared"},
         )
         assert foreign["code"] == "FOREIGN_REFERENCE"
         assert foreign["effect"] == "NOT_APPLIED"
         caller.set("alice")
         own = await facade.call(
-            "run_browser_action", {"action_ref": "alice:prepared"}
+            "run_browser_action",
+            {"tab_ref": "tab-1", "action_ref": "alice:prepared"},
         )
         assert own["data"]["effect"] == "APPLIED"
 
@@ -209,13 +218,19 @@ def test_uncertain_mutation_is_not_retried_or_downgraded():
     owner = Broken()
     facade = m.BrowserFacade(owner=owner, caller_resolver=lambda: "alice")
     result = asyncio.run(
-        facade.call("run_browser_action", {"action_ref": "alice:prepared"})
+        facade.call(
+            "run_browser_action",
+            {"tab_ref": "tab-1", "action_ref": "alice:prepared"},
+        )
     )
     assert result["effect"] == "EFFECT_UNKNOWN"
     assert result["retry_allowed"] is False
     assert owner.calls == 1
     result = asyncio.run(
-        facade.call("reconcile_browser_action", {"action_ref": "alice:prepared"})
+        facade.call(
+            "reconcile_browser_action",
+            {"tab_ref": "tab-1", "action_ref": "alice:prepared"},
+        )
     )
     assert result["effect"] == "EFFECT_UNKNOWN"
     assert owner.calls == 1
@@ -235,7 +250,10 @@ def test_mutating_owner_result_requires_effect_and_read_cannot_smuggle_effect():
     facade = m.BrowserFacade(owner=Invalid(), caller_resolver=lambda: "alice")
     assert asyncio.run(facade.call("browser_fleet", {}))["code"] == "OWNER_RESULT_INVALID"
     run = asyncio.run(
-        facade.call("run_browser_action", {"action_ref": "alice:prepared"})
+        facade.call(
+            "run_browser_action",
+            {"tab_ref": "tab-1", "action_ref": "alice:prepared"},
+        )
     )
     assert run["code"] == "OWNER_RESULT_INVALID"
     assert run["effect"] == "EFFECT_UNKNOWN"

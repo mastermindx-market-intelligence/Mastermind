@@ -108,13 +108,13 @@ _TOOLS = [
     _tool(
         "run_browser_action",
         "Commit one prepared action through its original owner. Unknown effects are never retried.",
-        _object({"action_ref": _text()}),
+        _object({"tab_ref": _text(), "action_ref": _text()}),
         read_only=False,
     ),
     _tool(
         "reconcile_browser_action",
         "Read the original action outcome from its owner; never re-dispatches it.",
-        _object({"action_ref": _text()}),
+        _object({"tab_ref": _text(), "action_ref": _text()}),
         read_only=True,
     ),
 ]
