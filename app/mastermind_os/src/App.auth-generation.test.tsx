@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { navigateCompanyOperation } from "./test-operational-navigation";
 import { controlRoomFixture } from "./test-fixtures";
 import { bindMissionHost, createNativeClient, type AuthState, type RawClient } from "./host";
 import programsFixture from "./fixtures/programs-available-workspace-service.json";
@@ -108,7 +109,8 @@ describe("native auth generation reaches the actual workspace", () => {
     const e = await nativeFixture();
     window.MastermindMissionHost = e.host;
     render(<App />);
-    await userEvent.setup().click(screen.getByRole("button", { name: route }));
+    if (route === "Programs") await navigateCompanyOperation(userEvent.setup(), "Programs");
+    else await userEvent.setup().click(screen.getByRole("button", { name: route }));
     await waitFor(() => expect(document.body.textContent).toContain(privateText));
     const reads = e.invoke.mock.calls.filter(([name]) => name === "read_programs").length;
     e.hold();
@@ -122,7 +124,7 @@ describe("native auth generation reaches the actual workspace", () => {
     const e = await nativeFixture();
     window.MastermindMissionHost = e.host;
     render(<App />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Work" }));
+    await navigateCompanyOperation(userEvent.setup(), "Work");
     await waitFor(() => expect(document.body.textContent).toContain("JOB-2"));
     e.hold();
     try {
@@ -137,7 +139,7 @@ describe("native auth generation reaches the actual workspace", () => {
     const e = await nativeFixture();
     window.MastermindMissionHost = e.host;
     render(<App />);
-    await userEvent.setup().click(screen.getByRole("button", { name: "Programs" }));
+    await navigateCompanyOperation(userEvent.setup(), "Programs");
     await waitFor(() => expect(document.body.textContent).toContain("Previous scope program"));
     e.hold();
     let oldOutcome = "PENDING";
