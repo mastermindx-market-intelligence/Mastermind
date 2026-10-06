@@ -175,6 +175,8 @@ def _run(
     extra_args: tuple[str, ...] = (),
     prepare: Callable[[Path], None] | None = None,
     spoof_argv0: str | None = None,
+    shadow_cd: bool = False,
+    cwd: Path | None = None,
 ) -> tuple[int, str, str, list[str], str, Path, Path]:
     script, control_plist, worker_plist = _prepare_script(tmp_path)
     if prepare is not None:
@@ -203,10 +205,11 @@ def _run(
         # Execute the disposable checkout body through the source builtin
         # while supplying a forged installed-controller argv0. $0 follows the
         # caller; BASH_SOURCE[0] must continue to identify the loaded file.
+        prelude = "cd() { return 0; }; " if shadow_cd else ""
         command = [
             "/bin/bash",
             "-c",
-            'source "$1" "${@:2}"',
+            prelude + 'source "$1" "${@:2}"',
             spoof_argv0,
             str(script),
             action,
@@ -218,6 +221,7 @@ def _run(
         capture_output=True,
         text=True,
         check=False,
+        cwd=str(cwd) if cwd is not None else None,
     )
     log_lines = log_path.read_text(encoding="utf-8").splitlines()
     remaining_plan = plan_path.read_text(encoding="utf-8")
@@ -1223,7 +1227,8 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                            missing_config=False, symlink_config=False, native_plutil=False,
                            preflight_exit=0, preflight_exits=None, helper_kind="regular",
                            controller_from_release=True,
-                           source_with_spoofed_argv0=False):
+                           source_with_spoofed_argv0=False,
+                           source_with_shadowed_cd=False):
     config = {"schema": "mastermind.executive_mcp_install.v1",
               "release_sha": GATEWAY_SHA, "service_uid": 458}
     config.update(config_changes or {})
@@ -1253,7 +1258,7 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
         if controller_from_release:
             source = (
                 'SCRIPT_SOURCE="${BASH_SOURCE[0]}"\n'
-                'SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")" && /bin/pwd)"\n'
+                'SCRIPT_DIR="$(builtin cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")" && /bin/pwd)"\n'
                 'SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"'
             )
             replacement = (
@@ -1333,10 +1338,9 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
 ''')
         shim.chmod(0o755)
     spoof_argv0 = None
-    if source_with_spoofed_argv0:
-        spoof_argv0 = str(
-            release_root / GATEWAY_SHA / "ops" / "executive_os" / "service-control.sh"
-        )
+    expected_controller_dir = release_root / GATEWAY_SHA / "ops" / "executive_os"
+    if source_with_spoofed_argv0 or source_with_shadowed_cd:
+        spoof_argv0 = str(expected_controller_dir / "service-control.sh")
     return _run(
         tmp_path,
         "restart-gateway",
@@ -1344,6 +1348,8 @@ except (OSError,ValueError,KeyError,IndexError,AssertionError,plistlib.InvalidFi
         extra_args=extra_args,
         prepare=prepare,
         spoof_argv0=spoof_argv0,
+        shadow_cd=source_with_shadowed_cd,
+        cwd=expected_controller_dir if source_with_shadowed_cd else None,
     )
 
 
@@ -1416,6 +1422,20 @@ def test_gateway_refuses_sourced_checkout_even_with_installed_argv0_spoof(tmp_pa
         [],
         controller_from_release=False,
         source_with_spoofed_argv0=True,
+    )
+    assert code == 65
+    assert "gateway deep preflight failed" in err
+    assert calls == []
+    assert remaining == ""
+
+def test_gateway_refuses_sourced_checkout_with_shadowed_cd_and_installed_argv0(
+    tmp_path,
+):
+    code, _, err, calls, remaining, *_ = _qualified_gateway_run(
+        tmp_path,
+        [],
+        controller_from_release=False,
+        source_with_shadowed_cd=True,
     )
     assert code == 65
     assert "gateway deep preflight failed" in err

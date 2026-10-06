@@ -359,7 +359,7 @@ def test_host_scripts_use_tools_available_at_absolute_macos_paths() -> None:
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
     assert 'SCRIPT_SOURCE="${BASH_SOURCE[0]}"' in lifecycle
-    assert '$(/usr/bin/dirname "$SCRIPT_SOURCE")' in lifecycle
+    assert 'builtin cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")"' in lifecycle
     assert '$(/usr/bin/basename "$SCRIPT_SOURCE")' in lifecycle
     assert '$(/usr/bin/dirname "$0")' not in lifecycle
 

@@ -18,7 +18,7 @@ WORKER_PLIST="/Library/LaunchDaemons/$WORKER_LABEL.plist"
 RELAY_PLIST="/Library/LaunchDaemons/$RELAY_LABEL.plist"
 AGENT_RELAY_PLIST="/Library/LaunchDaemons/$AGENT_RELAY_LABEL.plist"
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
-SCRIPT_DIR="$(cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")" && /bin/pwd)"
+SCRIPT_DIR="$(builtin cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")" && /bin/pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
