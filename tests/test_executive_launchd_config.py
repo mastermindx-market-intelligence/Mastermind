@@ -328,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
+    assert "{start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -353,10 +353,15 @@ def test_host_scripts_use_tools_available_at_absolute_macos_paths() -> None:
     assert "/usr/bin/realpath" not in install
     assert 'runtime_target="$(/usr/bin/readlink -f "$runtime_link")"' in install
 
-    for name in ("acceptance.sh", "service-control.sh"):
-        source = (OPS / name).read_text(encoding="utf-8")
-        assert '$(/usr/bin/dirname "$0")' in source
-        assert '$(dirname "$0")' not in source
+    acceptance = (OPS / "acceptance.sh").read_text(encoding="utf-8")
+    assert '$(/usr/bin/dirname "$0")' in acceptance
+    assert '$(dirname "$0")' not in acceptance
+
+    lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
+    assert 'SCRIPT_SOURCE="${BASH_SOURCE[0]}"' in lifecycle
+    assert 'builtin cd -P "$(/usr/bin/dirname "$SCRIPT_SOURCE")"' in lifecycle
+    assert '$(/usr/bin/basename "$SCRIPT_SOURCE")' in lifecycle
+    assert '$(/usr/bin/dirname "$0")' not in lifecycle
 
 
 def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None:
