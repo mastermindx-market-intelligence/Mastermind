@@ -98,6 +98,39 @@ current host execution/profile/source/proof/placement binding from existing owne
 the H4-A envelope to #1041's existing root/domain constructor atomically. It must preserve the same
 request/intent identity and reject cross-kind or semantic drift rather than creating another root.
 
+### Current authority-owner finding
+
+The installed COO application already has the correct final-guard shape:
+
+- it authenticates through the existing role-correct COO resource policy;
+- it obtains one trusted `AuthorityFact` from the installed `authority_provider`;
+- it derives `PrincipalAdmissionContext` from that exact authority generation;
+- it obtains current Mission Workspace facts and applies the existing `NewEffectGate`;
+- only after those checks does it build/send a modifying ingress frame.
+
+The remaining authorization gap is explicit: current `AuthorityFact` carries mission, proof,
+capability/source/economic digests and source/lease conflict state, but **does not carry a semantic
+principal-action ceiling**. The general `NewEffectGate.OPEN` means "a new effect is currently
+permitted"; it does not mean every future COO action kind is authorized.
+
+H4-B must therefore extend the **existing authority generation/provider contract** with a versioned,
+closed principal-action grant that can distinguish today's bounded intent from
+`governed_orchestration`. Do not infer permission from an opaque capability/source digest, from
+the presence of a tool, or from `NewEffectGate.OPEN`. Old authority generations must continue to
+authorize only their existing action set and fail closed for orchestration.
+
+The exact field/schema spelling is reserved to the incumbent authority owner, but acceptance requires:
+
+1. the action set participates in the authority generation identity/digest;
+2. `governed_orchestration` is absent by default from old/current bounded-only generations;
+3. the installed COO app re-reads the same current authority generation at the modifying boundary;
+4. changed action grants under the same logical request cannot reuse an old authorization receipt;
+5. status/reconciliation of an already-created root does not require permission to create a new root;
+6. the new action grant does not encode provider/account/host/tree/worker selectors.
+
+This keeps the permission decision in the same canonical authority source and avoids a second H4
+policy plane.
+
 **H4-C** later exposes only that accepted operation/status through the COO MCP/package after H1
 native profile/schema qualification. No raw CooCycle method, worker selector or provider/account
 selector becomes model-visible.

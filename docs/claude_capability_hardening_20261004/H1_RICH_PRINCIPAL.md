@@ -42,6 +42,73 @@ comparisons. Roll out only the exact selected rich profile; other provider surfa
 This is one coordinated compatibility unit. A PR that removes only the registry refusal fails
 review even if a hand-constructed profile makes a fixture run.
 
+## Current-base rich-generation contract
+
+The current protected implementation makes the H1 admission gap concrete:
+
+- `ExecutionCapabilityProfile.claude_sdk_config_projection()` accepts only the first restricted
+  `claude-agent-sdk` generation: read-only sandbox, network disabled, native helpers disabled and
+  **zero skills / skill grants / MCP grants / plugins / resources**.
+- `ClaudeReadbackPolicyObserver` proves that same generation only. It requires native tools
+  `Read/Glob/Grep` (+ provider StructuredOutput readback), empty skill/plugin/MCP catalogs and the
+  exact restricted sandbox/permission provenance.
+- `ExecutiveOperatorSupervisor` currently admits only
+  `operator.claude.readonly.v1` for the Claude Agent SDK path, with empty MCP/resource/skill grants.
+- The checked-in capability registry currently has no rich Claude-principal profile. Its MCP registry
+  contains existing Company Consultation, OpenAI docs and Browser grants, but **no admitted Executive
+  COO MCP grant and no admitted principal Company Dialogue MCP grant**.
+- H3 now has a source package for the six-tool Executive COO backend, but native authenticated
+  transport is still held by #955's issuer-consistency review blocker.
+- H6 now has a distinct principal Company Dialogue tool generation plus Runtime COMMIT fencing and
+  source-only host composition; that generation is still deliberately absent from capability policy.
+
+Therefore H1 must add a **new generation**. It must not relax the predicates on
+`operator.claude.readonly.v1`, retrofit MCP onto sealed Claude worker profiles, or reinterpret the
+existing restricted readback as proof of rich capability.
+
+### Required grant generations before the profile can be enabled
+
+The eventual rich profile needs independently accepted identities for at least these two families:
+
+1. **Executive COO MCP** — the exact H3 six-tool role route and OAuth/resource policy proven through
+   the #955 transport owner. The CEO submit route/scope is never a substitute.
+2. **Principal Company Dialogue MCP** — the exact H6
+   `PRINCIPAL_SERVER_IDENTITY / PRINCIPAL_SERVER_VERSION / PRINCIPAL_TOOL_SCHEMA_DIGEST` generation,
+   with host composition using the existing Runtime event fence. The ordinary worker Company Dialogue
+   server and the existing Company Consultation server are different capabilities and cannot stand in.
+
+Any separate context/source capability used for R0 must also have its own existing owner/grant.
+Counting two methods from one Executive server is still one owner.
+
+### Qualification sequence
+
+Implement and review the rich generation in this order:
+
+1. add the exact MCP grant descriptors while leaving the new principal profile disabled;
+2. extend the Claude SDK projection with a profile-specific reviewed configuration branch rather than
+   widening the first-profile predicate;
+3. add a separate rich native readback observer that compares the full exact MCP server/schema catalog
+   and refuses extra ambient MCP/skills/plugins/hooks;
+4. add a separate supervisor admission predicate for the exact new profile/digests;
+5. prove profile/package/grant drift negatives while the profile remains disabled;
+6. only after source review install/observe the exact generation and run harmless native reads;
+7. add R1 modifying admission only after #955/H3 authentication + role policy are independently
+   accepted; add H6 modifying dialogue only after its installed host/profile generation is accepted.
+
+### Transport/network decision
+
+Do not silently broaden native network policy merely because H3's current transport uses localhost HTTP.
+
+Preferred order:
+
+1. reuse an accepted stdio/Unix/local installed wrapper for the same canonical backend when it can
+   preserve OAuth/role/resource semantics without a second auth plane; otherwise
+2. separately qualify the exact loopback endpoint(s) required by the accepted Executive transport and
+   prove the native sandbox cannot reach arbitrary local or external network targets.
+
+The selected network rule becomes part of the rich profile digest/readback contract. A generic
+`network enabled` or inherited user MCP registration is not acceptable H1 evidence.
+
 ## Capability increments
 
 Use explicit new reviewed generations, not live feature toggles authored by the model.
