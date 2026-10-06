@@ -378,11 +378,16 @@ class ExecutiveOperatorSupervisor:
         )
         docs_profile_ok = (
             profile.profile_id
-            == "operator.appserver.readonly.docs-mcp.native-helper.v1"
+            in {
+                "operator.appserver.readonly.docs-mcp.native-helper.v1",
+                "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1",
+            }
             and profile.execution_surface == "codex-app-server"
             and profile.network_policy == "disabled"
             and profile.native_helper_policy.value == "PARENT_READ_ONLY_CEILING"
             and profile.native_helper is not None
+            and profile.native_helper.default_model == str(quota.model)
+            and profile.native_helper.default_reasoning_effort == str(quota.effort)
             and profile.mcp_servers == ("openai-developer-docs-v1",)
             and not profile.resource_grants
         )
