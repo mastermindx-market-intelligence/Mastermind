@@ -47,6 +47,16 @@ No currently admitted source closes the required contemporaneous GICS industry-g
 
 Therefore neither `EX_US_PIT_CONFIRMATION` nor `PROSPECTIVE_US_POST_FREEZE` may start today. The package is **WAIT_FOR_DATA / SOURCE_GATE** until one immutable source-admission receipt names the exact taxonomy feed, effective/correction semantics, issuer key, publication/observation clock, and five rights.
 
+## Final endpoint attrition law
+
+Post-formation S&P 1500 removal never silently drops a formed focal row. Endpoint Q4 thresholds come from the contemporaneous PIT S&P 1500 rank universe, while the formed security is followed through provenance-backed same-security lineage even after index removal.
+
+Proven acquisition/merger termination, delisting/security termination, uncontinued primary-listing loss, or confirmed security-specific halt is a deterministic state exit. Pure ticker/exchange migration with proven continuity is followed. Administrative price gaps are never imputed, censored, or dropped: they remain typed pending/unresolved and block the relevant read until resolved. Primary endpoint resolution must be 100%.
+
+## Power procedure ruling
+
+The power simulation now literally refits the same frozen ridge-logistic S and A models inside every synthetic dataset under the same past-only block/embargo mechanics. The 1% alternative is calibrated on the **fitted prequential A−S procedure**, not oracle synthetic probabilities. The only computational shortcut allowed is an algebraically identical formation-date aggregation of the already-fitted bootstrap statistic; model fitting itself may not be shortcut.
+
 ## Corrected accrual geometry
 
 Formation remains every fifth U.S. market trading session.
