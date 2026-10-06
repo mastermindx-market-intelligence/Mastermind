@@ -84,6 +84,7 @@ test('routing config is exact tailnet-only and bounded', () => {
     'https://example.com/mcp',
     'https://user:pass@mini4.example-tailnet.ts.net/mcp',
     'https://mini4.example-tailnet.ts.net/mcp?x=1',
+    'https://mini4.example-tailnet.ts.net:443/mcp',
     'https://mini4.example-tailnet.ts.net:8443/mcp',
   ]) {
     assert.throws(

@@ -32,6 +32,7 @@ const HOST_TITLES = Object.freeze({
   ubuntu0: 'Ubuntu 0 — Worker',
   ubuntu1: 'Ubuntu 1 — Compute Worker',
   ubuntu2: 'Ubuntu 2 — Compute Worker',
+  ubuntu3: 'Ubuntu 3 — Compute Worker',
   pc: 'Windows/WSL PC — CI + Local Models',
 });
 const SCHEDULER_SHADOW_HOST_REFS = new Set(['bm1', 'bmb']);

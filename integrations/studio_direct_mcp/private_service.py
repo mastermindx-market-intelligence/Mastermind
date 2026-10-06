@@ -92,6 +92,7 @@ STAGE_FILES = (
     "gateway.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
+    "workspace-access.mjs",
     "paper-design.mjs",
     "fleet-status.mjs",
     "fleet-routing.mjs",
@@ -102,12 +103,25 @@ STAGE_FILES = (
     "package-lock.json",
 )
 
-# Historical installs are admitted only through exact known file sets. The
-# immediately preceding generation lacks only the fleet-routing module; the
-# next older generation lacks the tailnet fabric adapter as well. Earlier
-# generations also predate fleet status, Paper, output paging, and typed Git.
-LEGACY_STAGE_FILES_V6 = tuple(name for name in STAGE_FILES if name != "fleet-routing.mjs")
-LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != TAILNET_GATEWAY_NAME)
+# Historical installs are admitted only through exact known file sets.
+# This merge has two immediate predecessor lines:
+#   * the universal-fabric branch lacked workspace-access.mjs;
+#   * protected master lacked fleet-routing.mjs and tailnet-gateway.mjs.
+# Preserve both exact generations, then the older linear history.
+LEGACY_STAGE_FILES_V8 = tuple(name for name in STAGE_FILES if name != "workspace-access.mjs")
+LEGACY_STAGE_FILES_V8_PRE_FLEET_STATUS = tuple(
+    name for name in LEGACY_STAGE_FILES_V8 if name != "fleet-status.mjs"
+)
+LEGACY_STAGE_FILES_V7 = tuple(
+    name for name in STAGE_FILES
+    if name not in ("fleet-routing.mjs", TAILNET_GATEWAY_NAME)
+)
+LEGACY_STAGE_FILES_V6 = tuple(
+    name for name in LEGACY_STAGE_FILES_V8 if name != "fleet-routing.mjs"
+)
+LEGACY_STAGE_FILES_V5 = tuple(
+    name for name in LEGACY_STAGE_FILES_V6 if name != TAILNET_GATEWAY_NAME
+)
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
 LEGACY_STAGE_FILES_V3 = tuple(name for name in LEGACY_STAGE_FILES_V4 if name != "paper-design.mjs")
 LEGACY_STAGE_FILES_V2 = tuple(name for name in LEGACY_STAGE_FILES_V3 if name != "output-budget.mjs")
@@ -115,6 +129,9 @@ LEGACY_STAGE_FILES_V1 = tuple(name for name in LEGACY_STAGE_FILES_V2 if name != 
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V8),
+        frozenset(LEGACY_STAGE_FILES_V8_PRE_FLEET_STATUS),
+        frozenset(LEGACY_STAGE_FILES_V7),
         frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
         frozenset(LEGACY_STAGE_FILES_V4),
@@ -622,7 +639,7 @@ def _validate_fleet_routes(
             or not isinstance(hostname, str)
             or not hostname.endswith(".ts.net")
             or len(hostname) <= len(".ts.net")
-            or port not in (None, 443)
+            or port is not None
             or parsed.username is not None
             or parsed.password is not None
             or parsed.path != "/mcp"
@@ -688,7 +705,10 @@ def _build_config(
     *,
     public_url: str | None = None,
     fleet_routes: tuple[tuple[str, str], ...] = (),
+    repository_workspaces: bool = False,
 ) -> dict:
+    if type(repository_workspaces) is not bool:
+        raise ValueError("repository workspace setting must be boolean")
     # Ordinary private seats omit publicUrl; reserved fabric routes bind one
     # exact tailnet HTTPS origin while the gateway itself remains loopback-only.
     config = {
@@ -719,6 +739,10 @@ def _build_config(
     fleet_routing = _fleet_routing_config(fleet_routes)
     if fleet_routing is not None:
         config["fleetRouting"] = fleet_routing
+    if repository_workspaces:
+        config["repositoryWorkspaces"] = {
+            "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
+        }
     fleet_status = _fleet_status_config(user_root)
     if fleet_status is not None:
         config["fleetStatus"] = fleet_status
@@ -1079,6 +1103,7 @@ def _write_install(
     dependency_tree_hash: str | None = None,
     public_url: str | None = None,
     fleet_routes: tuple[tuple[str, str], ...] = (),
+    repository_workspaces: bool = False,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -1104,6 +1129,7 @@ def _write_install(
                 user_root,
                 public_url=public_url,
                 fleet_routes=fleet_routes,
+                repository_workspaces=repository_workspaces,
             ),
             indent=2,
             sort_keys=True,
@@ -1151,6 +1177,26 @@ def _write_install(
     print(json.dumps(result))
     return 0
 
+
+
+
+def _repository_workspace_setting(args, roots: dict, prior: dict | None) -> bool:
+    """Preserve the manifest-verified setting; only explicit opt-in can enable it."""
+    requested = getattr(args, "enable_repository_workspaces", False)
+    if type(requested) is not bool:
+        raise SystemExit("invalid repository workspace setting")
+    previous = False
+    if prior is not None:
+        config_path = roots["config"]
+        if _sha256_file(config_path) != prior.get("configHash"):
+            raise SystemExit("repository workspace config changed during preflight")
+        value = json.loads(config_path.read_text(encoding="utf-8")).get("repositoryWorkspaces")
+        if value is not None:
+            if (type(value) is not dict or value.get("enabled") is not True
+                    or value != {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}):
+                raise SystemExit("existing repository workspace setting is not the installed closed profile")
+            previous = True
+    return requested or previous
 
 
 def cmd_stage(args) -> int:
@@ -1212,6 +1258,7 @@ def cmd_stage(args) -> int:
         dependency_tree_hash=retained_dependency_hash,
         public_url=public_url,
         fleet_routes=fleet_routes,
+        repository_workspaces=_repository_workspace_setting(args, roots, prior),
     )
 
 def _verify_staged_install(
@@ -1369,6 +1416,7 @@ def cmd_upgrade(args) -> int:
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
         public_url=public_url,
         fleet_routes=fleet_routes,
+        repository_workspaces=_repository_workspace_setting(args, roots, prior),
     )
 
 
@@ -1513,6 +1561,8 @@ def build_parser() -> argparse.ArgumentParser:
             metavar="HOST_REF=HTTPS_TS_NET_MCP_URL",
         )
         routes.add_argument("--clear-fleet-routes", action="store_true")
+        s.add_argument("--enable-repository-workspaces", action="store_true",
+                       help="enable the closed installed repository-workspace consumer")
         s.set_defaults(func=globals()[f"cmd_{name}"])
 
     for name in ("seal-runtime", "start", "status", "stop"):

@@ -86,12 +86,12 @@ function parseRouteUrl(raw) {
   } catch {
     throw new TypeError('fleet route url must be an exact https tailnet MCP URL');
   }
-  const port = url.port ? Number(url.port) : null;
+  const authority = raw.match(/^https:\/\/([^/?#]+)/)?.[1] ?? '';
   if (
     url.protocol !== 'https:' ||
     !url.hostname.endsWith('.ts.net') ||
     url.hostname.length <= '.ts.net'.length ||
-    (port !== null && port !== 443) ||
+    authority.includes(':') ||
     url.pathname !== '/mcp' ||
     url.username ||
     url.password ||

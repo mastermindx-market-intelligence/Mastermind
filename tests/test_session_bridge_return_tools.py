@@ -150,7 +150,7 @@ short_socket_root = host_fixture.short_socket_root
 settings = host_fixture.settings
 
 
-def app_with_reader(settings):
+def app_with_reader(settings, profile="v2"):
     canonical = Resolver()
     calls = []
     class InstalledGrantFixture:
@@ -165,6 +165,21 @@ def app_with_reader(settings):
         socket_path=Path("/private/tmp/reply-tools-proof.sock"),
         service_call=canonical.service, clock=settings.clock)
     t = api().NativeReplyReadTool(read)
+    if profile in {"v3", "sessions"}:
+        from types import SimpleNamespace
+        installed = dataclasses.replace(settings, read_from_ceo_ingress=True)
+        owners, projector = host_fixture.Owners(), host_fixture.Projector()
+        kwargs = dict(audit_sink=host_fixture.Sink(), session_target_projector=projector,
+            session_reply_handler=owners.reply, session_summon_handler=owners.summon,
+            session_reply_read_tool=t)
+        if profile == "v3":
+            async def unused(**kwargs):
+                raise AssertionError("reply read must not call MDM")
+            app = transport.build_web_ceo_v3_mcp_app(installed,
+                mdm_reader=SimpleNamespace(list_macos_devices=unused, device=unused), **kwargs)
+        else:
+            app = transport.build_web_ceo_sessions_mcp_app(installed, **kwargs)
+        return app, canonical, calls
     config = t.extend_host_configuration({"settings": settings, "audit_sink": host_fixture.Sink(),
         "profile_server_name": web_ceo.WEB_CEO_V2_SERVER_NAME,
         "profile_server_version": web_ceo.WEB_CEO_V2_SERVER_VERSION,
@@ -348,4 +363,40 @@ def test_mcp_missing_scope_or_ambiguous_authorization_never_calls_reader(setting
                     "method": "tools/call", "params": {"name": NAME, "arguments": {"read_ref": READ_REF}}})
                 assert response.status_code in {401, 403}, response.text
         assert not calls and not r.service.calls
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("profile", ["v3", "sessions"])
+@pytest.mark.parametrize("auth", ["original-read", "submit-only", "foreign", "expired"])
+def test_installed_profiles_keep_native_reply_read_bound_to_original_parent(settings, rsa_key, profile, auth):
+    from integrations.executive_mcp import web_ceo_v3
+    app, owner, calls = app_with_reader(settings, profile)
+    async def run():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                listed = await host_fixture.rpc(client, auth_fixture._read_token(rsa_key), "tools/list")
+                tools = listed.json()["result"]["tools"]
+                old = (web_ceo_v3.web_ceo_v3_tool_names() if profile == "v3"
+                       else tuple(item.name for item in transport.build_web_ceo_sessions_tools()))
+                assert tuple(tool["name"] for tool in tools) == old + (NAME,)
+                assert tools[-1]["annotations"]["readOnlyHint"] is True
+                assert tools[-1]["annotations"]["destructiveHint"] is False
+                if auth == "submit-only":
+                    token = auth_fixture._token(rsa_key, scope=auth_fixture.SUBMIT_SCOPE)
+                else:
+                    changes = {"sub": "foreign-subject"} if auth == "foreign" else (
+                        {"exp": auth_fixture.NOW - 1} if auth == "expired" else {})
+                    token = auth_fixture._read_token(rsa_key, **changes)
+                response = await host_fixture.rpc(client, token, "tools/call",
+                    {"name": NAME, "arguments": {"read_ref": READ_REF}})
+                if auth == "original-read":
+                    payload = json.loads(response.json()["result"]["content"][0]["text"])
+                    assert payload["ok"] and payload["data"]["parent_consumed"] is False
+                else:
+                    assert response.status_code in {401, 403}
+        if auth == "original-read":
+            assert len(calls) == 2
+            assert [call["operation"] for call in owner.service.calls] == ["read_thread"]
+        else:
+            assert calls == [] and owner.service.calls == []
     asyncio.run(run())

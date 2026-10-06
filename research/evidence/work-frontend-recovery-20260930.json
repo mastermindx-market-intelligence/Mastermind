@@ -1,0 +1,36 @@
+{
+  "schema": "mastermind.work_frontend_recovery_evidence.v1",
+  "operation": "mastermind-os-work-frontend-convergence-20260928-sol-001",
+  "source_base": "17ed169f071af69205cf7a074db32a7cd148c4c0",
+  "procedure_pin": "58c011ef288d4233e7adec31c46c57ba85d5da46",
+  "inherited_diff_sha256": "3ab57ac8fa920aaf2f67f7f4baaf174eb00143506ee978f61cba82512b95fbb9",
+  "controller_patch_sha256": "d2d3a00c2ae79a741f7e7dabc3295b9b5929baba89cfcc711465c4933a5b076a",
+  "baseline": {
+    "passed": 551,
+    "failed": 1,
+    "skipped": 1
+  },
+  "red_work_regressions": {
+    "passed": 33,
+    "failed": 26
+  },
+  "repaired_full_frontend": {
+    "passed": 597,
+    "failed": 0,
+    "skipped": 1
+  },
+  "typecheck": "PASS",
+  "web_build": "PASS",
+  "native_assets": "PASS",
+  "diff_check": "PASS",
+  "native_rust": "NOT_YET_RUN",
+  "installed_acceptance": false,
+  "postimages": {
+    "app/mastermind_os/src/App.test.tsx": "b6434de1596023fb773d955ac45e076d12f58b2460af5b1eb66f259605521459",
+    "app/mastermind_os/src/orchestration/operation-controller.ts": "f6c7c9ce4cc4db25ac7b1dbef325408b2b8336751fa7b8dfc25f1a14a6b625ed",
+    "app/mastermind_os/src/orchestration/operation-controller-recovery.test.ts": "f446034403de5708a046d9eb1882ac7ef53bba5807383c4cf16d90a1f63555ba",
+    "app/mastermind_os/src/work.test.ts": "3594c7f05c1f2fbb5b56323e1f551fda505805fbc7ee5e836c54b0c06dfbff94",
+    "app/mastermind_os/src/work.ts": "2d8e0ea68daa94a39301f082da52f7847520a4f9ca1d43d86aed3cc3d1b0437a"
+  },
+  "evidence_root": "/Volumes/Mastermind/evidence/mastermind-os-work-frontend-convergence-20260928-sol-001/recovery-20260930"
+}

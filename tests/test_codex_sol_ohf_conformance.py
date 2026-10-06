@@ -136,7 +136,7 @@ class _RuntimePort:
 
 
 class _CodexAdapter:
-    interface_version = "mastermind.operator_harness/v1"
+    interface_version = "mastermind.operator_harness/v2"
 
     def __init__(self, requested: RequestedExecutionProfile) -> None:
         self.requested = requested
