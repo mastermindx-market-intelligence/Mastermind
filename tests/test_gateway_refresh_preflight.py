@@ -37,6 +37,31 @@ def test_semantic_config_accepts_complete_web_ceo_v3_document():
     assert preflight._semantic_config(value, SHA) == value
 
 
+def test_semantic_config_refuses_primary_resource_in_additional_resources():
+    primary = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_" + "1" * 32
+    )
+    value = _config()
+    value["policies"]["read"]["resource"] = primary
+    value["policies"]["submit"]["resource"] = primary
+    value["executive_additional_resources"] = [primary]
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight._semantic_config(value, SHA)
+
+
+def test_semantic_config_accepts_distinct_valid_additional_resource():
+    additional = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_" + "2" * 32
+    )
+    value = _config()
+    value["executive_additional_resources"] = [additional]
+
+    assert preflight._semantic_config(value, SHA) == value
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

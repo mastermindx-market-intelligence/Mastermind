@@ -48,6 +48,8 @@ def _semantic_config(document: object, expected_sha: str) -> dict:
             _refuse()
         policies = load_app_policies(value["policies"])
         resources = validate_additional_resources(value)
+        if policies.read.resource in resources:
+            _refuse()
         for resource in resources:
             validate_resource_policy(
                 dataclasses.replace(policies.read, resource=resource)
