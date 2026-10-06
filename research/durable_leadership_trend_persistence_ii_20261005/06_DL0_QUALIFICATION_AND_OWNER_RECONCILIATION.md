@@ -150,7 +150,7 @@ Offsets from a future gate-cleared anchor:
 - last primary occupancy20 maturity: 555;
 - last first-exit60/occupancy60 maturity: 595.
 
-The last structural-secondary t+60 window matures at offset 595. The frozen five-session resolution grace for the last t+60 occupancy endpoint expires at offset 600. Conservative one-reveal geometry is therefore **601 trading sessions from anchor through offset 600**, approximately **2.38 trading years** at 252 sessions/year.
+The last required t+60 maturity is offset 595. Conservative one-reveal geometry is therefore **596 trading sessions from anchor through offset 595**, approximately **2.37 trading years** at 252 sessions/year.
 
 This is not a shortened evidence requirement. It corrects the accidental unit mismatch that had treated 60 formation observations as a 60-session dependence block.
 
