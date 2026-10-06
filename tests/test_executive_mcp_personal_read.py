@@ -150,8 +150,18 @@ def test_personal_read_mcp_uses_only_v1_ceo_ingress_and_has_no_write_route(tmp_p
                 "runtime_db": dict(runtime_db),
             }
         elif tool == "executive_job":
+            import dataclasses
+            from control_plane.executive_runtime import Job
+
+            job = {field.name: None for field in dataclasses.fields(Job)}
+            job.update(
+                job_id=arguments["job_id"],
+                status="QUEUED",
+                attempt_count=0,
+                attempt_limit=1,
+            )
             data = {
-                "job": {"job_id": arguments["job_id"]},
+                "job": job,
                 "attempts": [],
                 "attempt_count": 0,
                 "attempt_limit": 1,

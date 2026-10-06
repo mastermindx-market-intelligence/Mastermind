@@ -1070,20 +1070,60 @@ class CeoIngressReadGateway:
 
     @staticmethod
     def _valid_job_data(value: object, *, arguments: Mapping[str, Any]) -> bool:
+        import dataclasses
+        from control_plane.executive_runtime import (
+            Attempt, AttemptStatus, Job, JobStatus,
+        )
+
         if type(value) is not dict or set(value) != {
             "job", "attempts", "attempt_count", "attempt_limit", "latest_attempt"
         }:
             return False
         job = value["job"]
-        return (
+        attempts = value["attempts"]
+        job_keys = {field.name for field in dataclasses.fields(Job)}
+        attempt_keys = {field.name for field in dataclasses.fields(Attempt)}
+        requested = arguments.get("job_id")
+        if not (
             type(job) is dict
-            and job.get("job_id") == arguments.get("job_id")
-            and type(value["attempts"]) is list
+            and set(job) == job_keys
+            and job.get("job_id") == requested
+            and job.get("status") in {member.value for member in JobStatus}
+            and type(job.get("attempt_count")) is int
+            and job["attempt_count"] >= 0
+            and type(job.get("attempt_limit")) is int
+            and job["attempt_limit"] >= 1
+            and type(attempts) is list
             and type(value["attempt_count"]) is int
-            and value["attempt_count"] >= 0
+            and value["attempt_count"] == len(attempts) == job["attempt_count"]
             and type(value["attempt_limit"]) is int
-            and value["attempt_limit"] >= 1
-            and (value["latest_attempt"] is None or type(value["latest_attempt"]) is dict)
+            and value["attempt_limit"] == job["attempt_limit"]
+        ):
+            return False
+        for index, attempt in enumerate(attempts, start=1):
+            if not (
+                type(attempt) is dict
+                and set(attempt) == attempt_keys
+                and attempt.get("job_id") == requested
+                and type(attempt.get("attempt_id")) is str
+                and bool(attempt["attempt_id"])
+                and type(attempt.get("attempt_number")) is int
+                and attempt["attempt_number"] == index
+                and attempt.get("status") in {
+                    member.value for member in AttemptStatus
+                }
+            ):
+                return False
+        latest = value["latest_attempt"]
+        if not attempts:
+            return latest is None
+        return (
+            type(latest) is dict
+            and set(latest) == attempt_keys
+            and latest.get("attempt_id") == attempts[-1].get("attempt_id")
+            and latest.get("job_id") == requested
+            and latest.get("attempt_number") == attempts[-1].get("attempt_number")
+            and latest.get("status") in {member.value for member in AttemptStatus}
         )
 
     @classmethod
@@ -1228,11 +1268,392 @@ class CeoIngressReadGateway:
             return False
         return True
 
+    @staticmethod
+    def _valid_fabric_attempt_card(value: object) -> bool:
+        from control_plane import fabric_job_view
+        from control_plane.executive_runtime import AttemptStatus
+
+        return (
+            type(value) is dict
+            and set(value) == fabric_job_view.ATTEMPT_CARD_KEYS
+            and type(value["attempt_id"]) is str
+            and bool(value["attempt_id"])
+            and type(value["attempt_number"]) is int
+            and value["attempt_number"] >= 1
+            and value["status"] in {member.value for member in AttemptStatus}
+            and (value["started_at"] is None or type(value["started_at"]) is str)
+            and (value["finished_at"] is None or type(value["finished_at"]) is str)
+            and (value["exit_code"] is None or type(value["exit_code"]) is int)
+            and type(value["has_result"]) is bool
+            and (
+                value["error"] is None
+                or (
+                    type(value["error"]) is str
+                    and len(value["error"]) <= fabric_job_view._MAX_DETAIL_CHARS
+                    and "\n" not in value["error"]
+                    and "\r" not in value["error"]
+                )
+            )
+        )
+
+    @staticmethod
+    def _valid_fabric_job_card_v2(
+        value: object,
+        *,
+        requested_root: str,
+        root_card: bool,
+    ) -> bool:
+        from control_plane import fabric_job_view
+        from control_plane.executive_runtime import JobStatus
+
+        if type(value) is not dict or set(value) != fabric_job_view.JOB_CARD_KEYS_V2:
+            return False
+        attempts = value["attempts"]
+        latest = value["latest_attempt"]
+        review = value["review"]
+        repair = value["repair"]
+        result = value["result"]
+        acceptance = value["acceptance"]
+        if not (
+            type(value["job_id"]) is str
+            and bool(value["job_id"])
+            and value["status"] in {member.value for member in JobStatus}
+            and value["root_job_id"] == requested_root
+            and type(value["depth"]) is int
+            and value["depth"] >= 0
+            and (
+                value["orchestration_role"] is None
+                or type(value["orchestration_role"]) is str
+            )
+            and (value["plan_step_id"] is None or type(value["plan_step_id"]) is str)
+            and type(value["attempt_count"]) is int
+            and value["attempt_count"] >= 0
+            and type(value["attempt_limit"]) is int
+            and value["attempt_limit"] >= 1
+            and (
+                value["current_attempt_id"] is None
+                or type(value["current_attempt_id"]) is str
+            )
+            and type(attempts) is list
+            and all(
+                CeoIngressReadGateway._valid_fabric_attempt_card(item)
+                for item in attempts
+            )
+            and (
+                latest is None
+                or CeoIngressReadGateway._valid_fabric_attempt_card(latest)
+            )
+            and type(review) is dict
+            and set(review) == {"required", "reviews_job_id", "verdict"}
+            and type(review["required"]) is bool
+            and (
+                review["reviews_job_id"] is None
+                or type(review["reviews_job_id"]) is str
+            )
+            and review["verdict"] in {"approve", "reject", "NOT_YET"}
+            and type(repair) is dict
+            and set(repair) == {"repair_round", "supersedes_job_id"}
+            and (
+                repair["repair_round"] is None
+                or (
+                    type(repair["repair_round"]) is int
+                    and repair["repair_round"] >= 0
+                )
+            )
+            and (
+                repair["supersedes_job_id"] is None
+                or type(repair["supersedes_job_id"]) is str
+            )
+            and type(result) is dict
+            and set(result) == {
+                "state", "summary", "artifacts", "errors", "next_actions"
+            }
+            and type(acceptance) is dict
+            and set(acceptance) == fabric_job_view.ACCEPTANCE_KEYS
+            and acceptance == fabric_job_view._acceptance_v2()[0]
+        ):
+            return False
+        if root_card:
+            if not (
+                value["job_id"] == requested_root
+                and value["parent_job_id"] is None
+                and value["depth"] == 0
+            ):
+                return False
+        elif not (
+            value["job_id"] != requested_root
+            and type(value["parent_job_id"]) is str
+            and value["depth"] >= 1
+        ):
+            return False
+        if not attempts:
+            return latest is None
+        return (
+            type(latest) is dict
+            and latest.get("attempt_id") == attempts[-1].get("attempt_id")
+            and latest.get("attempt_number") == attempts[-1].get("attempt_number")
+        )
+
+    @staticmethod
+    def _valid_fabric_root_detail_acquisition(
+        value: object, *, requested_root: str
+    ) -> bool:
+        import re
+        from control_plane import fabric_job_view
+
+        template = fabric_job_view._acquisition_receipt(
+            kind="root_detail", root_job_id=requested_root
+        )
+        if type(value) is not dict or set(value) != set(template):
+            return False
+        truncation = value.get("truncation")
+        provenance = value.get("provenance")
+        snapshot_digest = value.get("snapshot_digest")
+        return (
+            value.get("schema") == template["schema"]
+            and value.get("query")
+            == {"kind": "root_detail", "root_job_id": requested_root}
+            and value.get("owner") == "executive_runtime"
+            and value.get("budgets") == template["budgets"]
+            and (
+                snapshot_digest is None
+                or (
+                    type(snapshot_digest) is str
+                    and re.fullmatch(r"[0-9a-f]{64}", snapshot_digest) is not None
+                )
+            )
+            and type(truncation) is dict
+            and set(truncation)
+            == {"jobs", "attempt_job_ids", "roots", "projection"}
+            and type(truncation["jobs"]) is bool
+            and type(truncation["attempt_job_ids"]) is list
+            and all(
+                type(item) is str and bool(item)
+                for item in truncation["attempt_job_ids"]
+            )
+            and truncation["attempt_job_ids"]
+            == sorted(set(truncation["attempt_job_ids"]))
+            and truncation["roots"] is False
+            and truncation["projection"] is False
+            and type(provenance) is dict
+            and set(provenance) == {"state", "unjoined_job_ids"}
+            and provenance["state"] in {"COMPLETE", "PARTIAL"}
+            and type(provenance["unjoined_job_ids"]) is list
+            and all(
+                type(item) is str and bool(item)
+                for item in provenance["unjoined_job_ids"]
+            )
+            and provenance["unjoined_job_ids"]
+            == sorted(set(provenance["unjoined_job_ids"]))
+            and fabric_job_view._qualified_generation(value.get("generation"))
+            is not None
+        )
+
+    @staticmethod
+    def _valid_fabric_result_v2(
+        value: object, *, arguments: Mapping[str, Any]
+    ) -> bool:
+        import re
+        from control_plane import (
+            executive_orchestration_result as result_owner,
+            fabric_result_projection,
+        )
+        from control_plane.executive_runtime import RUNTIME_READ_OBSERVATION_SCHEMA
+
+        keys = {
+            "schema", "selection", "role", "execution_status", "acceptance",
+            "role_result_digest", "generation", "availability",
+            "content_complete", "review", "counts", "content", "omitted",
+        }
+        if (
+            type(value) is not dict
+            or set(value) != keys
+            or value.get("schema")
+            != fabric_result_projection.FABRIC_ROLE_RESULT_VIEW_SCHEMA
+        ):
+            return False
+
+        digest_re = re.compile(r"[0-9a-f]{64}")
+        source_re = re.compile(r"[0-9a-f]{32}")
+        selection = value.get("selection")
+        if not (
+            type(selection) is dict
+            and set(selection)
+            == {"root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
+            and all(
+                type(selection.get(key)) is str and bool(selection.get(key))
+                for key in ("root_job_id", "job_id", "attempt_id")
+            )
+            and digest_re.fullmatch(selection.get("result_envelope_digest", ""))
+            is not None
+            and all(
+                selection.get(key) == arguments.get(key)
+                for key in (
+                    "root_job_id", "job_id", "attempt_id",
+                    "result_envelope_digest",
+                )
+            )
+        ):
+            return False
+
+        role = value.get("role")
+        if (
+            role not in result_owner.ROLES
+            or value.get("execution_status") != "COMPLETED"
+            or value.get("acceptance") != "NOT_PROJECTED"
+            or type(value.get("role_result_digest")) is not str
+            or digest_re.fullmatch(value["role_result_digest"]) is None
+        ):
+            return False
+
+        generation = value.get("generation")
+        if not (
+            type(generation) is dict
+            and set(generation) == fabric_result_projection._GENERATION_KEYS
+            and generation.get("schema") == RUNTIME_READ_OBSERVATION_SCHEMA
+            and generation.get("state") == "SAME"
+            and type(generation.get("source_identity")) is str
+            and source_re.fullmatch(generation["source_identity"]) is not None
+            and type(generation.get("before")) is int
+            and generation["before"] >= 0
+            and type(generation.get("after")) is int
+            and generation["after"] == generation["before"]
+        ):
+            return False
+
+        availability = value.get("availability")
+        content = value.get("content")
+        omitted = value.get("omitted")
+        if availability == "AVAILABLE":
+            if not (
+                value.get("content_complete") is True
+                and omitted == []
+                and type(content) is dict
+                and set(content) == {"role_result", "summary", "next_actions"}
+                and type(content["role_result"]) is dict
+                and type(content["summary"]) is str
+                and type(content["next_actions"]) is list
+                and all(type(item) is str for item in content["next_actions"])
+            ):
+                return False
+            role_result = content["role_result"]
+            try:
+                if role == "plan":
+                    validated_role_result = result_owner._validate_plan(
+                        role_result,
+                        outer={
+                            "expected_root_job_id": selection["root_job_id"],
+                            "run_id": selection["attempt_id"],
+                        },
+                    )
+                elif role == "work":
+                    validated_role_result = result_owner._validate_work(
+                        role_result, repair=False
+                    )
+                elif role == "repair":
+                    validated_role_result = result_owner._validate_work(
+                        role_result, repair=True
+                    )
+                elif role == "review":
+                    validated_role_result = result_owner._validate_review(
+                        role_result, outer_errors=[]
+                    )
+                else:
+                    validated_role_result = result_owner._validate_aggregation(
+                        role_result, outer_job_id=selection["job_id"]
+                    )
+            except (KeyError, TypeError, ValueError, result_owner.OrchestrationResultError):
+                return False
+            if (
+                validated_role_result != role_result
+                or result_owner.canonical_digest(role_result)
+                != value["role_result_digest"]
+            ):
+                return False
+        elif availability == "CONTENT_OVER_BUDGET":
+            if not (
+                value.get("content_complete") is False
+                and content is None
+                and omitted == ["role_result", "summary", "next_actions"]
+            ):
+                return False
+            role_result = None
+        else:
+            return False
+
+        review = value.get("review")
+        if role == "review":
+            if not (
+                type(review) is dict
+                and set(review)
+                == {
+                    "verdict", "reviewed_job_id", "reviewed_attempt_id",
+                    "reviewed_result_digest", "latest_revision_currentness",
+                }
+                and review["verdict"] in {"approve", "reject"}
+                and type(review["reviewed_job_id"]) is str
+                and bool(review["reviewed_job_id"])
+                and type(review["reviewed_attempt_id"]) is str
+                and bool(review["reviewed_attempt_id"])
+                and type(review["reviewed_result_digest"]) is str
+                and digest_re.fullmatch(review["reviewed_result_digest"]) is not None
+                and review["latest_revision_currentness"] == "UNPROVEN"
+            ):
+                return False
+            if role_result is not None and (
+                review["verdict"] != role_result.get("verdict")
+                or review["reviewed_job_id"] != role_result.get("reviewed_job_id")
+                or review["reviewed_attempt_id"]
+                != role_result.get("reviewed_attempt_id")
+                or review["reviewed_result_digest"]
+                != role_result.get("reviewed_result_digest")
+            ):
+                return False
+        elif review is not None:
+            return False
+
+        counts = value.get("counts")
+        if not (
+            type(counts) is dict
+            and set(counts) == {"findings", "next_actions"}
+            and type(counts["next_actions"]) is int
+            and counts["next_actions"] >= 0
+        ):
+            return False
+        if role_result is not None and (
+            counts["next_actions"] != len(content["next_actions"])
+        ):
+            return False
+
+        findings = counts["findings"]
+        if role == "review":
+            if not (
+                type(findings) is dict
+                and set(findings) == {"total", "blocking", "warning", "info"}
+                and all(
+                    type(findings[key]) is int and findings[key] >= 0
+                    for key in ("total", "blocking", "warning", "info")
+                )
+                and findings["total"]
+                == findings["blocking"] + findings["warning"] + findings["info"]
+            ):
+                return False
+            if role_result is not None:
+                expected = {"total": 0, "blocking": 0, "warning": 0, "info": 0}
+                for finding in role_result["findings"]:
+                    expected["total"] += 1
+                    expected[finding["severity"]] += 1
+                if findings != expected:
+                    return False
+        elif findings is not None:
+            return False
+        return True
+
     @classmethod
     def _valid_fabric_data(
         cls, value: object, *, arguments: Mapping[str, Any]
     ) -> bool:
-        from control_plane import fabric_job_view, fabric_result_projection
+        from control_plane import fabric_job_view
 
         if type(value) is not dict:
             return False
@@ -1274,52 +1695,51 @@ class CeoIngressReadGateway:
                 return False
             requested = arguments.get("root_job_id")
             root = value.get("root")
-            if root is not None and (
-                type(root) is not dict
-                or root.get("job_id") != requested
-                or root.get("root_job_id") != requested
+            if family == "v1":
+                if root is not None and (
+                    type(root) is not dict
+                    or root.get("job_id") != requested
+                    or root.get("root_job_id") != requested
+                ):
+                    return False
+                return not any(
+                    type(child) is not dict
+                    or child.get("root_job_id") != requested
+                    for child in value["children"]
+                )
+
+            runtime = value.get("runtime")
+            acquisition = (
+                runtime.get("acquisition") if type(runtime) is dict else None
+            )
+            if not (
+                type(runtime) is dict
+                and set(runtime)
+                == {"root", "db_present", "identity", "acquisition"}
+                and runtime["root"] is None
+                and runtime["db_present"] is True
+                and runtime["identity"] is None
+                and cls._valid_fabric_root_detail_acquisition(
+                    acquisition, requested_root=requested
+                )
+            ):
+                return False
+            if root is not None and not cls._valid_fabric_job_card_v2(
+                root, requested_root=requested, root_card=True
             ):
                 return False
             if any(
-                type(child) is not dict or child.get("root_job_id") != requested
+                not cls._valid_fabric_job_card_v2(
+                    child, requested_root=requested, root_card=False
+                )
                 for child in value["children"]
             ):
                 return False
-            if family == "v2":
-                runtime = value.get("runtime")
-                acquisition = runtime.get("acquisition") if type(runtime) is dict else None
-                query = acquisition.get("query") if type(acquisition) is dict else None
-                if query != {"kind": "root_detail", "root_job_id": requested}:
-                    return False
             return True
         if view == "result":
-            if family != "v2":
-                return False
-            keys = {
-                "schema", "selection", "role", "execution_status", "acceptance",
-                "role_result_digest", "generation", "availability",
-                "content_complete", "review", "counts", "content", "omitted",
-            }
-            selection = value.get("selection")
             return (
-                value.get("schema")
-                == fabric_result_projection.FABRIC_ROLE_RESULT_VIEW_SCHEMA
-                and set(value) == keys
-                and type(selection) is dict
-                and set(selection) == {
-                    "root_job_id", "job_id", "attempt_id", "result_envelope_digest"
-                }
-                and all(
-                    selection.get(key) == arguments.get(key)
-                    for key in (
-                        "root_job_id", "job_id", "attempt_id", "result_envelope_digest"
-                    )
-                )
-                and value.get("availability") in {
-                    "AVAILABLE", "CONTENT_OVER_BUDGET"
-                }
-                and type(value.get("content_complete")) is bool
-                and type(value.get("omitted")) is list
+                family == "v2"
+                and cls._valid_fabric_result_v2(value, arguments=arguments)
             )
         return False
 

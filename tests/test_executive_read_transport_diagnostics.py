@@ -400,29 +400,15 @@ def test_fabric_root_projection_must_match_requested_root():
 
     requested = "JOB-003"
     gateway = WebCeoV2CeoIngressReadGateway("/unused", object())
-    data = {
-        "schema": fabric_job_view.SCHEMA_V2,
-        "generated_at": "2026-10-06T06:00:00Z",
-        "runtime": {
-            "root": None,
-            "db_present": True,
-            "identity": None,
-            "acquisition": {
-                "query": {"kind": "root_detail", "root_job_id": requested}
-            },
-        },
-        "armed": {},
-        "root": {
-            "job_id": requested,
-            "root_job_id": requested,
-        },
-        "children": [{"job_id": "JOB-006", "root_job_id": requested}],
-        "unjoined_job_count": 0,
-        "unjoined_job_ids": [],
-        "degraded": [],
-        "missingness": [],
-        "capability": {},
-    }
+    data = _canonical_fabric_root_detail(requested)
+    child = copy.deepcopy(data["root"])
+    child.update(
+        job_id="JOB-006",
+        parent_job_id=requested,
+        depth=1,
+        orchestration_role="plan",
+    )
+    data["children"] = [child]
     assert gateway._valid_fabric_data(
         data, arguments={"view": "root", "root_job_id": requested}
     ) is True
@@ -471,11 +457,7 @@ def test_v2_and_v3_fabric_readers_reject_legacy_root_projection():
         legacy, arguments=arguments
     ) is False
 
-    current = copy.deepcopy(legacy)
-    current["schema"] = fabric_job_view.SCHEMA_V2
-    current["runtime"]["acquisition"] = {
-        "query": {"kind": "root_detail", "root_job_id": requested}
-    }
+    current = _canonical_fabric_root_detail(requested)
     assert WebCeoCeoIngressReadGateway._valid_fabric_data(
         current, arguments=arguments
     ) is False
@@ -817,6 +799,292 @@ def test_inbox_accepts_canonical_agent_os_attention_shape():
         "existing_next_actions": [],
     }]
     assert WebCeoV2CeoIngressReadGateway._valid_inbox_data(value, bounded=[]) is True
+
+
+def _canonical_executive_job_data(job_id="JOB-003", *, with_attempt=False):
+    import dataclasses
+    from control_plane.executive_runtime import Attempt, Job
+
+    job = {field.name: None for field in dataclasses.fields(Job)}
+    job.update(
+        job_id=job_id,
+        status="QUEUED",
+        attempt_count=1 if with_attempt else 0,
+        attempt_limit=1,
+    )
+    attempts = []
+    if with_attempt:
+        attempt = {field.name: None for field in dataclasses.fields(Attempt)}
+        attempt.update(
+            attempt_id="ATT-" + "1" * 32,
+            job_id=job_id,
+            attempt_number=1,
+            status="CLAIMED",
+        )
+        attempts.append(attempt)
+    return {
+        "job": job,
+        "attempts": attempts,
+        "attempt_count": len(attempts),
+        "attempt_limit": 1,
+        "latest_attempt": copy.deepcopy(attempts[-1]) if attempts else None,
+    }
+
+
+def test_executive_job_closes_job_and_attempt_rows_and_relationships():
+    requested = "JOB-003"
+    arguments = {"job_id": requested}
+    canonical = _canonical_executive_job_data(requested, with_attempt=True)
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        canonical, arguments=arguments
+    ) is True
+
+    job_private = copy.deepcopy(canonical)
+    job_private["job"]["execution_ready"] = True
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        job_private, arguments=arguments
+    ) is False
+
+    attempt_private = copy.deepcopy(canonical)
+    attempt_private["attempts"][0]["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        attempt_private, arguments=arguments
+    ) is False
+
+    wrong_count = copy.deepcopy(canonical)
+    wrong_count["attempt_count"] = 0
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        wrong_count, arguments=arguments
+    ) is False
+
+    wrong_latest = copy.deepcopy(canonical)
+    wrong_latest["latest_attempt"]["attempt_id"] = "ATT-" + "2" * 32
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        wrong_latest, arguments=arguments
+    ) is False
+
+
+def _canonical_fabric_root_detail(root_job_id="JOB-003"):
+    from types import SimpleNamespace
+    from control_plane import fabric_job_view
+
+    root_job = SimpleNamespace(
+        job_id=root_job_id,
+        status="QUEUED",
+        parent_job_id=None,
+        root_job_id=root_job_id,
+        depth=0,
+        orchestration_role="aggregation",
+        plan_step_id=None,
+        attempt_count=0,
+        attempt_limit=1,
+        current_attempt_id=None,
+        repair_round=None,
+        supersedes_job_id=None,
+        review_required=False,
+        reviews_job_id=None,
+        result=None,
+        checkpoint=None,
+    )
+    root, _ = fabric_job_view._job_card(
+        root_job, (), {}, contract_version=2
+    )
+    snapshot = SimpleNamespace(
+        snapshot_digest="a" * 64,
+        jobs_truncated=False,
+        attempts_truncated_job_ids=(),
+        truncated=False,
+    )
+    acquisition = fabric_job_view._acquisition_receipt(
+        kind="root_detail",
+        root_job_id=root_job_id,
+        snapshot=snapshot,
+        unjoined=(),
+    )
+    acquisition["generation"] = {
+        "schema": "mastermind.runtime_read_observation.v1",
+        "state": "SAME",
+        "source_identity": "runtime-source-1",
+        "before": 2,
+        "after": 2,
+    }
+    return {
+        "schema": fabric_job_view.SCHEMA_V2,
+        "generated_at": "2026-10-06T09:00:00Z",
+        "runtime": {
+            "root": None,
+            "db_present": True,
+            "identity": None,
+            "acquisition": acquisition,
+        },
+        "armed": {},
+        "root": root,
+        "children": [],
+        "unjoined_job_count": 0,
+        "unjoined_job_ids": [],
+        "degraded": [],
+        "missingness": [],
+        "capability": {},
+    }
+
+
+def test_v2_fabric_root_detail_closes_runtime_acquisition_and_job_cards():
+    requested = "JOB-003"
+    arguments = {"view": "root", "root_job_id": requested}
+    canonical = _canonical_fabric_root_detail(requested)
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments
+    ) is True
+    assert WebCeoV3CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments
+    ) is True
+
+    runtime_private = copy.deepcopy(canonical)
+    runtime_private["runtime"]["execution_ready"] = True
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        runtime_private, arguments=arguments
+    ) is False
+
+    acquisition_private = copy.deepcopy(canonical)
+    acquisition_private["runtime"]["acquisition"]["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        acquisition_private, arguments=arguments
+    ) is False
+
+    root_private = copy.deepcopy(canonical)
+    root_private["root"]["execution_ready"] = True
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        root_private, arguments=arguments
+    ) is False
+
+    attempt_private = copy.deepcopy(canonical)
+    attempt_private["root"]["attempts"] = [{
+        "attempt_id": "ATT-" + "1" * 32,
+        "attempt_number": 1,
+        "status": "CLAIMED",
+        "started_at": None,
+        "finished_at": None,
+        "exit_code": None,
+        "has_result": False,
+        "error": None,
+        "private_detail": SECRET,
+    }]
+    attempt_private["root"]["latest_attempt"] = copy.deepcopy(
+        attempt_private["root"]["attempts"][0]
+    )
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        attempt_private, arguments=arguments
+    ) is False
+
+
+def _canonical_fabric_result(root_job_id="JOB-003"):
+    from control_plane import (
+        executive_orchestration_result as result_owner,
+        fabric_result_projection,
+    )
+
+    job_id = "JOB-004"
+    attempt_id = "ATT-" + "1" * 32
+    envelope_digest = "b" * 64
+    role_result = {
+        "schema_version": "mastermind.work_result/v1",
+        "root_job_id": root_job_id,
+        "plan_attempt_id": "ATT-" + "2" * 32,
+        "plan_digest": "c" * 64,
+        "plan_step_id": "step-1",
+        "repair_round": 0,
+        "artifacts": [],
+        "evidence_digests": [],
+    }
+    result = {
+        "schema": fabric_result_projection.FABRIC_ROLE_RESULT_VIEW_SCHEMA,
+        "selection": {
+            "root_job_id": root_job_id,
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "result_envelope_digest": envelope_digest,
+        },
+        "role": "work",
+        "execution_status": "COMPLETED",
+        "acceptance": "NOT_PROJECTED",
+        "role_result_digest": result_owner.canonical_digest(role_result),
+        "generation": {
+            "schema": "mastermind.runtime_read_observation.v1",
+            "state": "SAME",
+            "source_identity": "d" * 32,
+            "before": 2,
+            "after": 2,
+        },
+        "availability": "AVAILABLE",
+        "content_complete": True,
+        "review": None,
+        "counts": {"findings": None, "next_actions": 0},
+        "content": {
+            "role_result": role_result,
+            "summary": "completed",
+            "next_actions": [],
+        },
+        "omitted": [],
+    }
+    arguments = {
+        "view": "result",
+        "root_job_id": root_job_id,
+        "job_id": job_id,
+        "attempt_id": attempt_id,
+        "result_envelope_digest": envelope_digest,
+    }
+    return result, arguments
+
+
+def test_v2_fabric_result_closes_projection_and_content_contracts():
+    canonical, arguments = _canonical_fabric_result()
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments
+    ) is True
+    assert WebCeoV3CeoIngressReadGateway._valid_fabric_data(
+        canonical, arguments=arguments
+    ) is True
+
+    private_projection = copy.deepcopy(canonical)
+    private_projection["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        private_projection, arguments=arguments
+    ) is False
+
+    private_role_result = copy.deepcopy(canonical)
+    private_role_result["content"]["role_result"]["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        private_role_result, arguments=arguments
+    ) is False
+
+    private_generation = copy.deepcopy(canonical)
+    private_generation["generation"]["private_detail"] = SECRET
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        private_generation, arguments=arguments
+    ) is False
+
+    wrong_digest = copy.deepcopy(canonical)
+    wrong_digest["role_result_digest"] = "e" * 64
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        wrong_digest, arguments=arguments
+    ) is False
+
+    over_budget = copy.deepcopy(canonical)
+    over_budget.update(
+        availability="CONTENT_OVER_BUDGET",
+        content_complete=False,
+        content=None,
+        omitted=["role_result", "summary", "next_actions"],
+    )
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        over_budget, arguments=arguments
+    ) is True
+
+    forged_omission = copy.deepcopy(over_budget)
+    forged_omission["omitted"].append("private_detail")
+    assert WebCeoV2CeoIngressReadGateway._valid_fabric_data(
+        forged_omission, arguments=arguments
+    ) is False
 
 
 def _canonical_receipt(schema, intent_id):
