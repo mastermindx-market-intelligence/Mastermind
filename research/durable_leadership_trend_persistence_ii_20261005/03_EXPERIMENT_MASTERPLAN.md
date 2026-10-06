@@ -180,11 +180,11 @@ Can group state distinguish:
 
 ### Required fresh evidence
 
-A new untouched country block or future-time block. DL-1 confirmation observations cannot adjudicate DL-2.
+A new untouched future-time block or separately admitted fresh universe. DL-1 confirmation observations cannot be used to select, fit, screen, or adjudicate DL-2 interactions.
 
 ### Primary gate
 
-The additive / interaction model must improve selection beyond both S and G, and the hazard model must remain calibrated.
+DL-2 alone owns stock×group interaction/refinement. It must use a newly frozen interaction family and new untouched evidence; no interaction may be discovered on DL-1 confirmation data. The DL-2 interaction model must improve selection beyond both the accepted DL-1 additive model and the group-only comparator, with calibrated hazard/occupancy behavior.
 
 ### Kill interpretation
 
