@@ -397,7 +397,15 @@ asyncio.run(serve_stdio(BrowserFacade(owner=Owner(), caller_resolver=lambda: "na
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "PYTHONPATH": str(root), "PYTHONUNBUFFERED": "1"},
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                part
+                for part in (str(root), os.environ.get("PYTHONPATH", ""))
+                if part
+            ),
+            "PYTHONUNBUFFERED": "1",
+        },
         bufsize=0,
     )
 
