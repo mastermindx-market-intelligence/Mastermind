@@ -4,10 +4,10 @@
 
 ## Source pins
 
-- Mastermind protected master: `d8c302b8a8a65ab13e2afba98cc73481606ed4d0`
-- Macro main: `91f274d860e77f245bde31232a617f81d9a5b331`
+- Mastermind protected master: `a6d40ff648671b03bd4d829d84dd066b58ea8c3f`
+- Macro main: `e95e32d4418f12c9670a6a4321498d2c641158fd`
 
-Mastermind advanced from `877b1e7...` to `d8c302...` during this repair. Its Skillpack `INDEX.md` blob is unchanged; the movement is Mastermind OS work and does not alter this research/source ruling. Macro also advanced after the prior `892157...` and `2daaf9...` pins. The observed intervening Macro changes do not touch the relevant owner/source-readiness records in a way that changes this ruling; no broad census is reopened.
+Current protected Mastermind is `a6d40ff...`; its Skillpack remains schema `mastermind.sol_skillpack.v1`, version `1.0.1`. Macro is `e95e32d...`. A bounded current-source recheck—not a new census—confirmed the relevant current blobs remain collision-free for this repair: `engine/leader_lifecycle.py` blob `80bb0fed...`, PSS-CR1 blob `5f25dcfc...`, plus current Top Anatomy, Conditional Fusion, D03 ruling and Prophet-US source-rights records. The intervening repository movement does not alter the two reviewed defects or the existing source gate.
 
 ## Final DL-0 ruling
 
@@ -150,7 +150,7 @@ Offsets from a future gate-cleared anchor:
 - last primary occupancy20 maturity: 555;
 - last first-exit60/occupancy60 maturity: 595.
 
-Conservative one-reveal geometry is therefore **596 trading sessions from anchor through offset 595**, approximately **2.37 trading years** at 252 sessions/year.
+The last structural-secondary t+60 window matures at offset 595. The frozen five-session resolution grace for the last t+60 occupancy endpoint expires at offset 600. Conservative one-reveal geometry is therefore **601 trading sessions from anchor through offset 600**, approximately **2.38 trading years** at 252 sessions/year.
 
 This is not a shortened evidence requirement. It corrects the accidental unit mismatch that had treated 60 formation observations as a 60-session dependence block.
 
